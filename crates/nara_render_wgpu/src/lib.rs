@@ -6,13 +6,19 @@ mod sprite;
 mod surface;
 
 use crate::sprite::{
-    WgpuSpriteDrawStats, WgpuSpritePipeline, create_sprite_batch_buffers, create_sprite_pipeline,
-    draw_sprite_batch_buffers, sprite_batch_draw_stats,
+    WgpuSpriteBatchBuffer, WgpuSpriteDrawStats, WgpuSpritePipeline, WgpuSpriteTextureCache,
+    create_sprite_batch_buffers, create_sprite_pipeline, draw_sprite_batch_buffers,
+    sprite_batch_draw_stats,
 };
 use crate::surface::{WgpuSurfaceState, configure_surface, create_surface, surface_extent};
 use nara_app::{App, CoreStage, Plugin, PluginError};
+use nara_asset::Assets;
 use nara_ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
-use nara_render::{Color, Extent2d, ExtractedViews, FrameStats, RenderFrame, begin_render_frame};
+use nara_image::{ImageAsset, PreparedImageResource};
+use nara_render::{
+    Color, Extent2d, ExtractedViews, FrameStats, PreparedRenderResources, RenderFrame,
+    begin_render_frame,
+};
 use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteRenderPlugin};
 use nara_window::{
     PrimaryWindowId, Window, WindowId,
@@ -43,7 +49,7 @@ impl Plugin for WgpuRenderPlugin {
 
     fn cleanup(&self, app: &mut App) {
         if let Some(mut backend) = app.world_mut().get_resource_mut::<WgpuRenderBackend>() {
-            backend.clear_surfaces();
+            backend.clear_gpu_resources();
         }
     }
 }
@@ -66,6 +72,7 @@ pub struct WgpuRenderBackend {
     queue: Option<wgpu::Queue>,
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
     sprite_pipelines: Vec<WgpuSpritePipeline>,
+    sprite_textures: WgpuSpriteTextureCache,
     last_error: Option<String>,
 }
 
@@ -79,6 +86,7 @@ impl Default for WgpuRenderBackend {
             queue: None,
             surfaces: BTreeMap::new(),
             sprite_pipelines: Vec::new(),
+            sprite_textures: WgpuSpriteTextureCache::default(),
             last_error: None,
         }
     }
@@ -104,12 +112,25 @@ impl WgpuRenderBackend {
         self.surfaces.clear();
     }
 
+    pub fn clear_gpu_resources(&mut self) {
+        self.clear_surfaces();
+        self.sprite_pipelines.clear();
+        self.sprite_textures.clear();
+    }
+
+    #[must_use]
+    pub fn sprite_texture_count(&self) -> usize {
+        self.sprite_textures.image_count()
+    }
+
     fn render_clear_passes(
         &mut self,
         handles: &BackendWindowHandles,
         windows: &Query<&Window>,
         views: &ExtractedViews,
         sprite_batches: &SpriteBatches,
+        images: Option<&Assets<ImageAsset>>,
+        prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
         primary_window_id: Option<WindowId>,
         frame: &mut RenderFrame,
         stats: &mut FrameStats,
@@ -123,6 +144,7 @@ impl WgpuRenderBackend {
         }
 
         self.ensure_device()?;
+        self.sprite_textures.prune_unused(sprite_batches.as_slice());
 
         let mut submitted_any = false;
         for (view_index, view) in views.as_slice().iter().enumerate() {
@@ -139,9 +161,14 @@ impl WgpuRenderBackend {
 
             let color = view.clear_color;
             let view_batches = sprite_batches.for_view(view_index).collect::<Vec<_>>();
-            if let Some(draw_stats) =
-                self.render_window_clear_pass(window, provider, color, &view_batches)?
-            {
+            if let Some(draw_stats) = self.render_window_clear_pass(
+                window,
+                provider,
+                color,
+                &view_batches,
+                images,
+                prepared_images,
+            )? {
                 stats.draw_calls = stats.draw_calls.saturating_add(draw_stats.draw_calls);
                 stats.sprites = stats.sprites.saturating_add(draw_stats.sprites);
                 submitted_any = true;
@@ -191,6 +218,8 @@ impl WgpuRenderBackend {
         provider: &RawWindowHandleProvider,
         clear_color: Color,
         sprite_batches: &[&SpriteBatch],
+        images: Option<&Assets<ImageAsset>>,
+        prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
     ) -> Result<Option<WgpuSpriteDrawStats>, WgpuRenderError> {
         let Some(size) = surface_extent(
             window.resolution.physical_width,
@@ -221,6 +250,22 @@ impl WgpuRenderBackend {
             .as_ref()
             .ok_or(WgpuRenderError::BackendNotReady)?
             .clone();
+        let sprite_buffers = if let Some(sprite_pipeline) = &sprite_pipeline {
+            create_sprite_batch_buffers(
+                &device,
+                &queue,
+                sprite_batches,
+                &sprite_pipeline.texture_bind_group_layout,
+                &mut self.sprite_textures,
+                images,
+                prepared_images,
+            )
+            .map_err(|error| WgpuRenderError::SpriteTexture {
+                message: error.to_string(),
+            })?
+        } else {
+            Vec::new()
+        };
         let surface_state =
             self.surfaces
                 .get_mut(&window.id)
@@ -237,8 +282,8 @@ impl WgpuRenderBackend {
                     surface_state,
                     texture,
                     clear_color,
-                    sprite_pipeline.as_ref(),
-                    sprite_batches,
+                    sprite_pipeline.as_ref().map(|pipeline| &pipeline.pipeline),
+                    &sprite_buffers,
                 )?;
                 Ok(Some(sprite_batch_draw_stats(sprite_batches)))
             }
@@ -361,11 +406,10 @@ impl WgpuRenderBackend {
     fn sprite_pipeline(
         &self,
         format: wgpu::TextureFormat,
-    ) -> Result<&wgpu::RenderPipeline, WgpuRenderError> {
+    ) -> Result<&WgpuSpritePipeline, WgpuRenderError> {
         self.sprite_pipelines
             .iter()
             .find(|pipeline| pipeline.format == format)
-            .map(|pipeline| &pipeline.pipeline)
             .ok_or_else(|| WgpuRenderError::SpritePipelineMissing {
                 format: format!("{format:?}"),
             })
@@ -400,6 +444,8 @@ pub enum WgpuRenderError {
     SurfaceValidation { window_id: WindowId },
     #[error("wgpu sprite pipeline is missing for format {format}")]
     SpritePipelineMissing { format: String },
+    #[error("wgpu sprite texture error: {message}")]
+    SpriteTexture { message: String },
 }
 
 pub fn render_clear_passes(
@@ -408,6 +454,8 @@ pub fn render_clear_passes(
     windows: Query<&Window>,
     views: Res<ExtractedViews>,
     sprite_batches: Res<SpriteBatches>,
+    images: Option<Res<Assets<ImageAsset>>>,
+    prepared_images: Option<Res<PreparedRenderResources<PreparedImageResource>>>,
     primary_window_id: Option<Res<PrimaryWindowId>>,
     mut frame: ResMut<RenderFrame>,
     mut stats: ResMut<FrameStats>,
@@ -418,6 +466,8 @@ pub fn render_clear_passes(
         &windows,
         &views,
         &sprite_batches,
+        images.as_deref(),
+        prepared_images.as_deref(),
         primary_window_id,
         &mut frame,
         &mut stats,
@@ -444,7 +494,7 @@ fn render_acquired_texture(
     surface_texture: wgpu::SurfaceTexture,
     clear_color: Color,
     sprite_pipeline: Option<&wgpu::RenderPipeline>,
-    sprite_batches: &[&SpriteBatch],
+    sprite_buffers: &[WgpuSpriteBatchBuffer],
 ) -> Result<(), WgpuRenderError> {
     let config = surface_state
         .config
@@ -459,11 +509,6 @@ fn render_acquired_texture(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("nara_wgpu_clear_encoder"),
     });
-    let sprite_buffers = if sprite_pipeline.is_some() {
-        create_sprite_batch_buffers(device, sprite_batches)
-    } else {
-        Vec::new()
-    };
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("nara_wgpu_surface_pass"),
@@ -482,7 +527,7 @@ fn render_acquired_texture(
             multiview_mask: None,
         });
         if let Some(sprite_pipeline) = sprite_pipeline {
-            draw_sprite_batch_buffers(&mut pass, sprite_pipeline, &sprite_buffers);
+            draw_sprite_batch_buffers(&mut pass, sprite_pipeline, sprite_buffers);
         }
     }
 
@@ -501,6 +546,7 @@ mod tests {
 
         assert_eq!(backend.state(), WgpuBackendState::Uninitialized);
         assert_eq!(backend.surface_count(), 0);
+        assert_eq!(backend.sprite_texture_count(), 0);
         assert_eq!(backend.last_error(), None);
     }
 
