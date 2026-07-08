@@ -41,25 +41,39 @@ flowchart TD
 
 ## Patch Model
 
-Conceptually:
+Implemented Rust types:
 
 ```text
-PatchTransaction
-  id
-  label
-  operations: Vec<ScenePatchOp>
+ScenePatchDocument
+  operations: Vec<ScenePatchOperation>
 
-ScenePatchOp
-  AddEntity { parent?, components }
+ScenePatchOperation
+  AddEntity { entity }
   RemoveEntity { entity }
-  AddComponent { entity, component_type, value }
-  RemoveComponent { entity, component_type }
-  SetField { entity, component_type, field_path, value }
-  Reparent { entity, new_parent, index? }
-  SetAssetRef { entity, component_type, field_path, asset_ref }
+  AddComponent { entity, component, value }
+  RemoveComponent { entity, component }
+  ReplaceComponent { entity, component, value }
+  SetField { entity, component, path, value }
+  RemoveField { entity, component, path }
+  Reparent { entity, parent }
+  SetAssetRefField { entity, component, path, asset_ref }
 ```
 
-The exact Rust types can evolve, but this semantic shape should guide implementation.
+Patch operations serialize as `op + args` so JSON and RON roundtrip with the same semantic shape.
+Payloads use `ComponentValue`, stable `ComponentTypeId`, and structured `ComponentFieldPath`.
+
+Implementation notes as of 2026-07-08:
+
+- Patch apply is document-first and atomic: operations are applied to a scratch `SceneDocument`,
+  validated, canonicalized, then committed only if the full transaction succeeds.
+- Patch diagnostics include operation index plus entity/component/field context when available.
+- Successful patch apply returns an inverse `ScenePatchDocument` for transaction-level undo.
+- `RemoveEntity` removes the subtree and inverse data restores it parent-first.
+- `RemoveField` is only allowed for optional fields or fields with registered defaults.
+- Prefab overrides reuse `ScenePatchDocument`; overrides are applied relative to source prefab IDs
+  before prefab expansion namespaces them.
+- Live `WorldCommand` synchronization remains a later consumer. Spawning still preflights expanded
+  documents before mutating the ECS `World`.
 
 ## Undo / Redo
 
@@ -110,24 +124,22 @@ Undo/redo should be transaction-based:
 | Metric | Target | Measurement |
 |---|---:|---|
 | Safe editing | Editor changes do not require private World access | Code review |
-| Undo support | Multi-operation transaction can undo atomically | Future test |
-| AI compatibility | AI can emit a patch and receive diagnostics | Future integration test |
-| Stable paths | Patch paths use `SceneEntityId` and `ComponentTypeId` | Schema review |
-| Validation | Invalid field edits fail before apply | Future test |
+| Undo support | Multi-operation transaction can undo atomically | `scene_patch_transactions` inverse tests |
+| AI compatibility | AI can emit JSON/RON patches and receive diagnostics | `scene_patch_roundtrip` example and patch diagnostics |
+| Stable paths | Patch paths use `SceneEntityId`, `ComponentTypeId`, and `ComponentFieldPath` | Schema and patch tests |
+| Validation | Invalid field edits fail before apply | patch and prefab override no-mutation tests |
 
 ## Risks and Mitigations
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| Patch model becomes too complex | Medium | Medium | Start with whole-component and simple field patches |
-| Field paths break on schema migration | High | Medium | Run migrations before patch apply and version patch payloads if needed |
+| Patch model becomes too complex | Medium | Medium | Keep operations document-level and schema-aware; defer list splice and live-world sync |
+| Field paths break on schema migration | High | Medium | Run component migrations during scene/prefab preflight and version patch payloads if needed |
 | Undo data is too large | Medium | Medium | Use inverse patches where cheap, snapshots for complex operations |
 | Runtime command and scene patch diverge | Medium | Medium | Keep explicit conversion paths and tests |
 
-## Follow-Up Questions
+## Remaining Follow-Up Questions
 
-- What typed value representation should patch payloads use?
-- Should patches be JSON-compatible from day one?
 - How are patches versioned across component schema migrations?
 - How does hot reload merge external file changes with editor undo history?
 - What is the minimum patch op set for the first inspector?

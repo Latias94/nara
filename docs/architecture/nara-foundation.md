@@ -73,7 +73,7 @@ flowchart TD
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Bevy-reflect-backed component metadata, asset-aware scene preflight, schema export, and migrations |
 | `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records | Import cache records, hot reload, dependency graph |
-| `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `SceneEntityId`, scene spawn/export | Asset-aware validation, scene/prefab patching, nested prefab source resolution, hot reload validation |
+| `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `ScenePatchDocument`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, field-level prefab overrides, nested prefab expansion, hot reload validation |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
 | `nara_sprite` | `Sprite`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` texture binding | Sprite authoring component data; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into textured quads now and chunked cached render data later |
@@ -160,10 +160,17 @@ sequenceDiagram
 | Tooling leaks into runtime | Medium | Medium | Keep `nara_tooling` as a client of snapshots/registries, not a dependency of core ECS |
 | Scene serialization stores runtime entity IDs | High | Low | Implemented `SceneEntityId`, `SceneEntitySource`, and instantiate-time remapping; keep runtime `Parent`/`Children` out of persistent documents |
 
+## Implemented Authoring Foundations
+
+- `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains.
+- `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
+- Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
+- `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
+- JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
+
 ## Next Implementation Slices
 
-1. Add scene patch transactions, field-level prefab overrides, and nested prefab source resolution on top of `SceneDocument`.
-2. Add component schema export and migration chains for older scene files.
-3. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
-4. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
-5. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot`, `ComponentRegistry`, and scene diagnostics.
+1. Connect document patch transactions to live editor/runtime world synchronization and an undo stack UI.
+2. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
+3. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
+4. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot`, `ComponentRegistry`, scene diagnostics, and patch reports.

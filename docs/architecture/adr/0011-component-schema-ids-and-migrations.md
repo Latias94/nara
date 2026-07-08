@@ -53,16 +53,31 @@ flowchart TD
 
 **Cons**: Requires registry discipline.
 
-**Decision**: Chosen conceptually; exact ID syntax remains open.
+**Decision**: Chosen. Built-in component IDs use reverse-domain-style strings such as
+`nara.transform.Transform2d`, `nara.sprite.Sprite`, and `nara.tilemap.Tilemap`.
+
+## Implementation Notes
+
+As of 2026-07-08:
+
+- `ComponentTypeId` is the persistent component identity and serializes as a transparent string.
+- `ComponentSchemaVersion` is stored with each `SceneComponentRecord`.
+- `ComponentRegistry::schema_catalog()` exports a deterministic `ComponentSchemaCatalog`.
+- Component owners register explicit `ComponentFieldSchema` metadata beside their codecs.
+- Field paths use structured `ComponentFieldPath` / `ComponentFieldPathSegment` values rather than
+  ad hoc dotted strings. Display strings are diagnostic/UI conveniences only.
+- `ComponentRegistry::register_component_migration` composes one-step `ComponentValue` migrations
+  before scene/prefab preflight rejects older schema versions.
+- `rust_type_path` remains useful metadata for debugging, but it is not the stable file identity.
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
 | Stable IDs | Scene files do not depend on Rust module paths | Schema review |
-| Versioning | Component schemas include version | Future test |
-| Migration | Old component data can migrate before instantiation | Future test |
-| Runtime opt-out | Non-serialized runtime components are allowed | API review |
+| Versioning | Component schemas include version | Registry schema catalog tests |
+| Migration | Old component data can migrate before instantiation | `nara_reflect` and `nara_scene` migration tests |
+| Runtime opt-out | Non-serialized runtime components are allowed | `ComponentSchema.serializable` and codec registration boundary |
 
 ## Risks and Mitigations
 
@@ -71,4 +86,3 @@ flowchart TD
 | IDs collide | High | Low | Use reverse-domain or crate-qualified namespace plus validation |
 | Migrations are forgotten | Medium | High | Validate schema version changes in tests/tooling |
 | AI schema diverges from runtime schema | High | Medium | Generate AI schema from `ComponentRegistry` |
-

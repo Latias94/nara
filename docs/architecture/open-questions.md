@@ -51,9 +51,8 @@ Accepted direction: Bevy-reflect-backed `ComponentRegistry` with stable schema I
 Still open:
 
 1. What derive should a data-facing component need?
-2. How are component migrations represented?
-3. Does the registry emit JSON Schema, a custom compact schema, or both?
-4. Which components are inspectable but not serializable?
+2. Does the registry eventually emit JSON Schema in addition to the current compact schema catalog?
+3. Which components are inspectable but not serializable?
 
 Resolved in the scene/prefab serialization foundation:
 
@@ -62,6 +61,10 @@ Resolved in the scene/prefab serialization foundation:
   components that contain handles to derive direct serde or Bevy Reflect.
 - Built-in scene, transform, render, sprite, and tilemap codecs use stable reverse-domain
   `ComponentTypeId` strings such as `nara.transform.Transform2d`.
+- `ComponentSchemaCatalog` is the current compact schema export format.
+- Component migrations are registered as one-step `ComponentValue` transforms and composed by
+  `ComponentRegistry` before scene/prefab preflight.
+- Field paths are structured `ComponentFieldPath` values with `Field` and `Index` segments.
 
 ## Scene and Prefab Semantics
 
@@ -69,9 +72,9 @@ Accepted direction: scene and prefab files are dimension-neutral ECS data docume
 
 Follow-up details still to settle:
 
-1. How are field-level prefab overrides represented on top of `ComponentValue`?
-2. How are nested prefab source assets resolved, cached, and diagnosed?
-3. How do scene patch transactions integrate with runtime `SceneEntitySource` provenance?
+1. How do scene patch transactions integrate with live runtime `SceneEntitySource` provenance and
+   world synchronization?
+2. How does hot reload cache and invalidate asset-backed prefab sources once async IO exists?
 
 Resolved in the scene/prefab serialization foundation:
 
@@ -79,10 +82,18 @@ Resolved in the scene/prefab serialization foundation:
   `SceneDocument` / `PrefabDocument`.
 - Stable scene entity IDs are validated path-like strings stored as `SceneEntityId`, not runtime
   `Entity` values.
-- The first prefab semantics support direct `PrefabDocument` instantiation and top-level
-  whole-component override tests; nested source resolution is deferred.
 - Scene loading preflights IDs, parent graph, component registrations, component versions, payloads,
   and asset refs before mutating the target world.
+- `ScenePatchDocument` is the first editor/AI authoring mutation format. It serializes as `op +
+  args`, validates atomically on a scratch document, and returns inverse patches.
+- Prefab overrides are field-level patch transactions relative to source prefab IDs. They apply
+  before expanded IDs are namespaced.
+- Nested prefab expansion uses `PrefabSourceResolver`. The first adapter is
+  `InMemoryPrefabSourceResolver`; missing sources, source cycles, and excessive depth emit
+  diagnostics before spawn.
+- Expanded prefab IDs use the deterministic `anchor/source_entity` rule. Repeated prefab instances
+  get collision-free source namespaces.
+- The old whole-component prefab override API was removed before 1.0.
 
 ## Asset Identity
 
@@ -193,11 +204,10 @@ Editor/AI authoring changes use validated patch transactions with undo/redo supp
 
 Follow-up details still to settle:
 
-1. What is the first editor-facing command/patch format?
-2. Does debug UI use egui first or dear-imgui-rs first?
-3. What is the minimum `WorldSnapshot` needed for inspector work?
-4. What minimum runtime UI is required before editor dogfooding?
-5. What typed value representation should patch payloads use?
+1. Does debug UI use egui first or dear-imgui-rs first?
+2. What is the minimum `WorldSnapshot` needed for inspector work?
+3. What minimum runtime UI is required before editor dogfooding?
+4. What live `WorldCommand` bridge is needed to apply accepted document patches during Play Mode?
 
 ## Backend and Domain Extension Seams
 

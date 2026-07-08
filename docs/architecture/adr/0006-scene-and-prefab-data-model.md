@@ -59,10 +59,20 @@ SceneEntityRecord
 
 PrefabInstance
   source: AssetRef<PrefabDocument>
-  overrides: Vec<ComponentOverride>
+  overrides: ScenePatchDocument
 ```
 
 The exact serialized syntax can evolve, but these semantic fields should remain.
+
+Implementation notes as of 2026-07-08:
+
+- `SceneEntityId` is a validated path-like stable ID.
+- `SceneComponentRecord` stores `ComponentSchemaVersion` plus `ComponentValue`.
+- `PrefabInstance.overrides` is a `ScenePatchDocument`, not a whole-component override map.
+- Nested prefab expansion uses `PrefabSourceResolver`; the first adapter is
+  `InMemoryPrefabSourceResolver`.
+- A prefab instance remains as an anchor entity. Expanded source entities are namespaced as
+  `anchor/source_entity`, and source roots are parented to the anchor.
 
 ## Alternatives Considered
 
@@ -104,16 +114,16 @@ The exact serialized syntax can evolve, but these semantic fields should remain.
 |---|---:|---|
 | Runtime ID isolation | No scene/prefab file stores `bevy_ecs::Entity` | Schema/code review |
 | Dimension neutrality | Same document model supports 2D sprite scene and future 3D mesh scene | Design test |
-| AI validation | Invalid component fields are caught before spawning | Future loader tests |
-| Prefab mapping | Instantiation returns `SceneEntityId -> Entity` map | Future unit test |
-| Format flexibility | JSON and RON serialize the same semantic document | Future roundtrip test |
+| AI validation | Invalid component fields are caught before spawning | Scene/prefab preflight and patch tests |
+| Prefab mapping | Instantiation returns `SceneEntityId -> Entity` map | Scene spawn tests |
+| Format flexibility | JSON and RON serialize the same semantic document | Scene/prefab and patch roundtrip examples |
 
 ## Risks and Mitigations
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Component type IDs become unstable | High | Medium | Define stable nara component type IDs through `ComponentRegistry` |
-| Prefab overrides become complex | Medium | High | Start with whole-component overrides, add field-level patching later |
+| Prefab overrides become complex | Medium | High | Use `ScenePatchDocument` for field-level overrides and share validation with scene editing |
 | JSON/RON divergence | Medium | Medium | Keep one semantic model and format adapters |
 | Scene validation slows iteration | Medium | Low | Provide fast diagnostics and partial validation for tooling |
 | AI emits structurally valid but bad scenes | Medium | High | Add schema constraints, defaults, and semantic validation passes |
@@ -121,9 +131,8 @@ The exact serialized syntax can evolve, but these semantic fields should remain.
 ## Follow-Up Questions
 
 - Should `SceneEntityId` be a compact integer, UUID, or path-like stable ID?
-- Are prefab overrides whole-component first, or field-level from day one?
-- How are component migrations represented in scene documents?
-- Should scene documents contain an asset reference table or inline asset paths per component?
+- Should scene documents eventually contain an asset reference table, or keep inline `AssetRef`
+  values per component?
 - Which format is the default for hand-authored files: RON or JSON?
 
 ## Citations
