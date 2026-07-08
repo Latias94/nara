@@ -5,11 +5,17 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+use nara_app::{App, CoreStage, Plugin};
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetPath, ImportArtifactPathError, ImportArtifactRecord,
-    ImportError, ImportRequest, ImportedAssetType, Importer, ImporterDescriptor,
-    ImporterDescriptorError, ImporterId, ImporterSelectionError, ImporterVersion, SourceExtension,
-    SourceHash, StableAssetId,
+    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetStates, Assets, ImportArtifactDigest,
+    ImportArtifactPathError, ImportArtifactRecord, ImportError, ImportRequest, ImportedAssetType,
+    Importer, ImporterDescriptor, ImporterDescriptorError, ImporterId, ImporterSelectionError,
+    ImporterVersion, LoadState, SourceExtension, SourceHash, StableAssetId,
+};
+use nara_ecs::{Res, ResMut, Resource};
+use nara_render::{
+    PreparedRenderResources, RenderPrepareApplyResult, RenderPrepareInvalidationReason,
+    RenderPrepareInvalidations, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -351,13 +357,185 @@ impl Display for ImageImportError {
 
 impl Error for ImageImportError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedImageResource {
+    extent: ImageExtent,
+    format: ImageFormat,
+    color_space: ImageColorSpace,
+    sampler: ImageSamplerDescriptor,
+    source_hash: SourceHash,
+    artifact_hash: ImportArtifactDigest,
+    pixel_len: usize,
+}
+
+impl PreparedImageResource {
+    #[must_use]
+    pub fn from_image(image: &ImageAsset) -> Self {
+        Self {
+            extent: image.extent(),
+            format: image.format(),
+            color_space: image.color_space(),
+            sampler: image.sampler(),
+            source_hash: image.source().source_hash(),
+            artifact_hash: image.source().artifact().key().digest(),
+            pixel_len: image.pixels().len(),
+        }
+    }
+
+    #[must_use]
+    pub const fn extent(&self) -> ImageExtent {
+        self.extent
+    }
+
+    #[must_use]
+    pub const fn format(&self) -> ImageFormat {
+        self.format
+    }
+
+    #[must_use]
+    pub const fn color_space(&self) -> ImageColorSpace {
+        self.color_space
+    }
+
+    #[must_use]
+    pub const fn sampler(&self) -> ImageSamplerDescriptor {
+        self.sampler
+    }
+
+    #[must_use]
+    pub const fn source_hash(&self) -> SourceHash {
+        self.source_hash
+    }
+
+    #[must_use]
+    pub const fn artifact_hash(&self) -> ImportArtifactDigest {
+        self.artifact_hash
+    }
+
+    #[must_use]
+    pub const fn pixel_len(&self) -> usize {
+        self.pixel_len
+    }
+}
+
+#[derive(Debug, Default, Resource)]
+pub struct ImagePrepareStats {
+    pub prepared: u32,
+    pub skipped_missing_state: u32,
+    pub skipped_not_loaded: u32,
+    pub stale_results: u32,
+}
+
+#[derive(Debug, Default)]
+pub struct ImagePreparePlugin;
+
+impl Plugin for ImagePreparePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PreparedRenderResources<PreparedImageResource>>();
+        app.init_resource::<ImagePrepareStats>();
+        app.add_systems(CoreStage::Prepare, prepare_images);
+    }
+}
+
+pub fn prepare_images(
+    images: Res<Assets<ImageAsset>>,
+    states: Res<AssetStates>,
+    mut prepared_images: ResMut<PreparedRenderResources<PreparedImageResource>>,
+    mut invalidations: ResMut<RenderPrepareInvalidations>,
+    mut stats: ResMut<ImagePrepareStats>,
+) {
+    *stats = ImagePrepareStats::default();
+
+    for (handle, image) in images.iter() {
+        let Some(state) = states.state(handle.id()) else {
+            stats.skipped_missing_state += 1;
+            continue;
+        };
+        if state.load_state() != &LoadState::Loaded {
+            stats.skipped_not_loaded += 1;
+            continue;
+        }
+
+        let key = image_resource_key(handle);
+        let snapshot =
+            RenderResourceSnapshot::new(key, state.version(), image_descriptor_hash(image));
+
+        prepared_images.invalidate_if_snapshot_changed(
+            snapshot,
+            &mut invalidations,
+            RenderPrepareInvalidationReason::DescriptorChanged,
+        );
+
+        if !prepared_images.needs_prepare(snapshot) {
+            continue;
+        }
+
+        match prepared_images.insert_ready(snapshot, PreparedImageResource::from_image(image)) {
+            RenderPrepareApplyResult::Applied => stats.prepared += 1,
+            RenderPrepareApplyResult::DiscardedStale { .. } => stats.stale_results += 1,
+        }
+    }
+}
+
+#[must_use]
+pub fn image_resource_key(handle: nara_asset::Handle<ImageAsset>) -> RenderResourceKey {
+    RenderResourceKey::for_asset(handle, RenderResourceKind::IMAGE_2D)
+}
+
+#[must_use]
+pub fn image_descriptor_hash(image: &ImageAsset) -> ImportArtifactDigest {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&image.source().artifact().key().digest().as_bytes());
+    bytes.extend_from_slice(&image.source().source_hash().as_bytes());
+    bytes.extend_from_slice(&image.extent().width.to_le_bytes());
+    bytes.extend_from_slice(&image.extent().height.to_le_bytes());
+    bytes.push(image_format_tag(image.format()));
+    bytes.push(image_color_space_tag(image.color_space()));
+    bytes.push(filter_mode_tag(image.sampler().min_filter));
+    bytes.push(filter_mode_tag(image.sampler().mag_filter));
+    bytes.push(filter_mode_tag(image.sampler().mipmap_filter));
+    bytes.push(address_mode_tag(image.sampler().address_mode_u));
+    bytes.push(address_mode_tag(image.sampler().address_mode_v));
+    bytes.extend_from_slice(&(image.pixels().len() as u64).to_le_bytes());
+    ImportArtifactDigest::from_bytes(bytes)
+}
+
+fn image_format_tag(format: ImageFormat) -> u8 {
+    match format {
+        ImageFormat::Rgba8 => 1,
+    }
+}
+
+fn image_color_space_tag(color_space: ImageColorSpace) -> u8 {
+    match color_space {
+        ImageColorSpace::Srgb => 1,
+        ImageColorSpace::Linear => 2,
+    }
+}
+
+fn filter_mode_tag(filter_mode: ImageFilterMode) -> u8 {
+    match filter_mode {
+        ImageFilterMode::Nearest => 1,
+        ImageFilterMode::Linear => 2,
+    }
+}
+
+fn address_mode_tag(address_mode: ImageAddressMode) -> u8 {
+    match address_mode {
+        ImageAddressMode::ClampToEdge => 1,
+        ImageAddressMode::Repeat => 2,
+        ImageAddressMode::MirrorRepeat => 3,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use image::ImageEncoder;
+    use nara_app::App;
     use nara_asset::{
-        AssetRecord, AssetServer, AssetSourceKind, Assets, ImportDependencyDigest, ImportProfile,
-        ImportSettingsHash, ImporterRegistry,
+        AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets,
+        ImportDependencyDigest, ImportProfile, ImportSettingsHash, ImporterRegistry,
     };
 
     fn stable_id() -> StableAssetId {
@@ -469,5 +647,64 @@ mod tests {
         let stored = images.get(handle).unwrap();
         assert_eq!(stored.extent(), ImageExtent::new(1, 1));
         assert_eq!(server.stable_id(handle.id()), Some(stable_id()));
+    }
+
+    #[test]
+    fn prepare_system_writes_backend_neutral_image_resource() {
+        let record = image_record("textures/player.png");
+        let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
+        let imported = ImageImporter::default()
+            .import_image(request(&record, &bytes))
+            .unwrap();
+        let mut server = AssetServer::new();
+        let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+        let mut images = Assets::<ImageAsset>::default();
+        let mut states = AssetStates::default();
+        let mut asset_events = AssetEvents::default();
+        images
+            .commit_loaded(
+                handle,
+                imported.into_image(),
+                &mut states,
+                &mut asset_events,
+                None,
+                None,
+            )
+            .unwrap();
+        let mut app = App::new();
+        app.add_plugin(nara_render::RenderPlugin).unwrap();
+        app.add_plugin(ImagePreparePlugin).unwrap();
+        app.world_mut().insert_resource(images);
+        app.world_mut().insert_resource(states);
+
+        app.update();
+
+        let prepared = app
+            .world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>();
+        let resource = prepared.get_ready(image_resource_key(handle)).unwrap();
+        assert_eq!(resource.extent(), ImageExtent::new(1, 1));
+        assert_eq!(resource.pixel_len(), 4);
+        assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    }
+
+    #[test]
+    fn descriptor_hash_changes_when_sampler_changes() {
+        let record = image_record("textures/player.png");
+        let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
+        let image = ImageImporter::default()
+            .import_image(request(&record, &bytes))
+            .unwrap()
+            .into_image();
+        let mut changed = image.clone();
+        changed.sampler = ImageSamplerDescriptor {
+            min_filter: ImageFilterMode::Nearest,
+            ..changed.sampler()
+        };
+
+        assert_ne!(
+            image_descriptor_hash(&image),
+            image_descriptor_hash(&changed)
+        );
     }
 }

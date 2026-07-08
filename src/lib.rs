@@ -45,6 +45,8 @@ impl Plugin for MinimalPlugins {
             .expect("TilemapPlugin should be unique");
         app.add_plugin(nara_render::RenderPlugin)
             .expect("RenderPlugin should be unique");
+        app.add_plugin(nara_image::ImagePreparePlugin)
+            .expect("ImagePreparePlugin should be unique");
         app.add_plugin(nara_sprite_render::SpriteRenderPlugin)
             .expect("SpriteRenderPlugin should be unique");
     }
@@ -74,8 +76,9 @@ pub mod prelude {
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
     pub use nara_image::{
         ImageAddressMode, ImageAsset, ImageColorSpace, ImageExtent, ImageFilterMode, ImageFormat,
-        ImageImportError, ImageImportedAsset, ImageImporter, ImageSamplerDescriptor,
-        ImageSourceMetadata,
+        ImageImportError, ImageImportedAsset, ImageImporter, ImagePreparePlugin, ImagePrepareStats,
+        ImageSamplerDescriptor, ImageSourceMetadata, PreparedImageResource, image_descriptor_hash,
+        image_resource_key, prepare_images,
     };
     pub use nara_input::{ButtonInput, InputPlugin, InputState, KeyCode, MouseButton};
     pub use nara_reflect::{
@@ -84,9 +87,12 @@ pub mod prelude {
         ComponentValue, ComponentValueError, PreparedComponent,
     };
     pub use nara_render::{
-        Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats, RenderBackend,
-        RenderError, RenderFrame, RenderFrameState, RenderImage2d, RenderPhaseLabel, RenderPlugin,
-        RenderTarget, ViewportRect,
+        Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats,
+        PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
+        RenderBackend, RenderError, RenderFrame, RenderFrameState, RenderImage2d, RenderPhaseLabel,
+        RenderPlugin, RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
+        RenderPrepareInvalidationReason, RenderPrepareInvalidations, RenderPrepareStatus,
+        RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, RenderTarget, ViewportRect,
     };
     #[cfg(feature = "wgpu")]
     pub use nara_render_wgpu::{

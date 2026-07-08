@@ -1,5 +1,7 @@
 //! Renderer-facing data and backend seam.
 
+mod prepare;
+
 use nara_app::{App, CoreStage, Plugin};
 use nara_asset::Handle;
 pub use nara_core::Color;
@@ -11,6 +13,13 @@ use nara_reflect::{
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
 use thiserror::Error;
+
+pub use prepare::{
+    PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
+    RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
+    RenderPrepareInvalidationReason, RenderPrepareInvalidations, RenderPrepareStatus,
+    RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -273,6 +282,7 @@ impl Plugin for RenderPlugin {
         app.init_resource::<ExtractedViews>();
         app.init_resource::<RenderFrame>();
         app.init_resource::<FrameStats>();
+        app.init_resource::<RenderPrepareInvalidations>();
         app.add_systems(CoreStage::Extract, extract_views);
         app.add_systems(CoreStage::Render, begin_render_frame);
     }
