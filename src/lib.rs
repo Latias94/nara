@@ -13,6 +13,8 @@ pub use nara_scene as scene;
 pub use nara_tooling as tooling;
 pub use nara_transform as transform;
 pub use nara_window as window;
+#[cfg(feature = "winit")]
+pub use nara_winit as winit;
 
 use nara_app::{App, Plugin};
 
@@ -62,4 +64,6 @@ pub mod prelude {
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowEvent, WindowEvents, WindowId,
         WindowMode, WindowPlugin, WindowResolution, apply_window_event, push_window_event,
     };
+    #[cfg(feature = "winit")]
+    pub use nara_winit::{WinitControlFlow, WinitPlugin, WinitRunner};
 }

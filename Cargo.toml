@@ -22,6 +22,7 @@ members = [
     "crates/nara_tooling",
     "crates/nara_transform",
     "crates/nara_window",
+    "crates/nara_winit",
 ]
 
 [workspace.package]
@@ -44,6 +45,7 @@ nara_scene = { path = "crates/nara_scene" }
 nara_tooling = { path = "crates/nara_tooling" }
 nara_transform = { path = "crates/nara_transform" }
 nara_window = { path = "crates/nara_window" }
+nara_winit = { path = "crates/nara_winit" }
 
 bevy_ecs = "0.19"
 bevy_reflect = { version = "0.19", features = ["glam"] }
@@ -52,6 +54,7 @@ raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
+winit = "=0.30.12"
 
 [dependencies]
 nara_app.workspace = true
@@ -67,6 +70,7 @@ nara_scene.workspace = true
 nara_tooling.workspace = true
 nara_transform.workspace = true
 nara_window.workspace = true
+nara_winit = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -79,3 +83,4 @@ serde = [
     "nara_scene/serde",
     "nara_window/serde",
 ]
+winit = ["dep:nara_winit"]
