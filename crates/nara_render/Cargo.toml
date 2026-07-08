@@ -11,9 +11,10 @@ nara_app.workspace = true
 nara_asset.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
+nara_window.workspace = true
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde", "nara_core/serde"]
+serde = ["dep:serde", "nara_asset/serde", "nara_core/serde", "nara_window/serde"]

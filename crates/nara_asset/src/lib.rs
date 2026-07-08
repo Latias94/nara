@@ -72,6 +72,26 @@ impl<T> Handle<T> {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<T> serde::Serialize for Handle<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.id.serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, T> serde::Deserialize<'de> for Handle<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::new(AssetId::deserialize(deserializer)?))
+    }
+}
+
 impl<T> Copy for Handle<T> {}
 
 impl<T> Clone for Handle<T> {

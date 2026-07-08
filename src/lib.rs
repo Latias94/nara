@@ -51,8 +51,9 @@ pub mod prelude {
         ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
     };
     pub use nara_render::{
-        Camera2d, ClearColor, Extent2d, FrameStats, RenderBackend, RenderError, RenderPlugin,
-        Sprite, Texture2d,
+        Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats, RenderBackend,
+        RenderError, RenderFrame, RenderFrameState, RenderPhaseLabel, RenderPlugin, RenderTarget,
+        Sprite, Texture2d, ViewportRect,
     };
     pub use nara_scene::{
         Children, HierarchyPlugin, Name, Parent, Scene, SceneAsset, SceneNode, Visibility,

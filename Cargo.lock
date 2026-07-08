@@ -1034,6 +1034,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_window",
  "serde",
  "thiserror 2.0.18",
 ]
