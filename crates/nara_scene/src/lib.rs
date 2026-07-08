@@ -1,7 +1,18 @@
-//! Scene data components and serializable scene asset shells.
+//! Scene runtime hierarchy components and persistent scene document data.
+
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt::{self, Display, Formatter},
+};
 
 use nara_app::{App, CoreStage, Plugin};
+use nara_asset::AssetRef;
+use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Bundle, Component, Entity, World};
+use nara_reflect::{
+    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, PreparedComponent,
+};
 pub use nara_transform::Transform2d;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Component)]
@@ -53,30 +64,585 @@ pub enum Visibility {
     Hidden,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SceneEntityId(String);
+
+impl SceneEntityId {
+    pub fn new(id: impl Into<String>) -> Result<Self, SceneEntityIdError> {
+        let id = id.into();
+        validate_scene_entity_id(&id)?;
+        Ok(Self(id))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SceneDocument {
+    pub format_version: u32,
+    pub entities: Vec<SceneEntityRecord>,
+}
+
+impl SceneDocument {
+    pub const CURRENT_FORMAT_VERSION: u32 = 1;
+
+    #[must_use]
+    pub fn new(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
+        let mut entities = entities.into_iter().collect::<Vec<_>>();
+        entities.sort_by(|left, right| left.id.cmp(&right.id));
+        Self {
+            format_version: Self::CURRENT_FORMAT_VERSION,
+            entities,
+        }
+    }
+
+    #[must_use]
+    pub fn validate(&self, registry: &ComponentRegistry) -> DiagnosticReport {
+        preflight_scene(self, registry).diagnostics
+    }
+}
+
+impl Default for SceneDocument {
+    fn default() -> Self {
+        Self {
+            format_version: Self::CURRENT_FORMAT_VERSION,
+            entities: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SceneEntityRecord {
+    pub id: SceneEntityId,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub parent: Option<SceneEntityId>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub prefab: Option<PrefabInstance>,
+}
+
+impl SceneEntityRecord {
+    #[must_use]
+    pub fn new(id: SceneEntityId) -> Self {
+        Self {
+            id,
+            parent: None,
+            components: BTreeMap::new(),
+            prefab: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_parent(mut self, parent: SceneEntityId) -> Self {
+        self.parent = Some(parent);
+        self
+    }
+
+    #[must_use]
+    pub fn with_component(
+        mut self,
+        component_type: ComponentTypeId,
+        component: SceneComponentRecord,
+    ) -> Self {
+        self.components.insert(component_type, component);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SceneComponentRecord {
+    pub version: ComponentSchemaVersion,
+    pub value: ComponentValue,
+}
+
+impl SceneComponentRecord {
+    #[must_use]
+    pub fn new(version: ComponentSchemaVersion, value: ComponentValue) -> Self {
+        Self { version, value }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PrefabDocument {
+    pub format_version: u32,
+    pub entities: Vec<SceneEntityRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PrefabInstance {
+    pub source: AssetRef,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub overrides: BTreeMap<ComponentTypeId, SceneComponentRecord>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SceneInstanceId(u64);
+
+impl SceneInstanceId {
+    #[must_use]
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Component)]
+pub struct SceneEntitySource {
+    pub instance_id: SceneInstanceId,
+    pub entity_id: SceneEntityId,
+}
+
+impl SceneEntitySource {
+    #[must_use]
+    pub fn export_id(&self) -> SceneEntityId {
+        if self.instance_id.raw() == 1 {
+            return self.entity_id.clone();
+        }
+
+        SceneEntityId::new(format!(
+            "instance_{}/{}",
+            self.instance_id.raw(),
+            self.entity_id.as_str()
+        ))
+        .expect("scene entity source should produce valid export ids")
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SceneEntityMap {
+    entities: BTreeMap<SceneEntityId, Entity>,
+}
+
+impl SceneEntityMap {
+    pub fn insert(&mut self, scene_id: SceneEntityId, entity: Entity) -> Option<Entity> {
+        self.entities.insert(scene_id, entity)
+    }
+
+    #[must_use]
+    pub fn get(&self, scene_id: &SceneEntityId) -> Option<Entity> {
+        self.entities.get(scene_id).copied()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entities.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&SceneEntityId, Entity)> + '_ {
+        self.entities
+            .iter()
+            .map(|(scene_id, entity)| (scene_id, *entity))
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SceneSpawnReport {
+    pub entity_map: SceneEntityMap,
+    pub diagnostics: DiagnosticReport,
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct SceneExportReport {
+    pub document: SceneDocument,
+    pub diagnostics: DiagnosticReport,
+}
+
+#[derive(Debug, Default)]
+pub struct SceneSpawner {
+    next_instance_id: u64,
+}
+
+impl SceneSpawner {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            next_instance_id: 1,
+        }
+    }
+
+    pub fn spawn(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+    ) -> SceneSpawnReport {
+        let preflight = preflight_scene(document, registry);
+        if preflight.diagnostics.has_errors() {
+            return SceneSpawnReport {
+                entity_map: SceneEntityMap::default(),
+                diagnostics: preflight.diagnostics,
+            };
+        }
+
+        let instance_id = SceneInstanceId::from_raw(self.next_instance_id);
+        self.next_instance_id = self.next_instance_id.saturating_add(1).max(1);
+
+        let mut entity_map = SceneEntityMap::default();
+        for entity in &preflight.entities {
+            let runtime_entity = world.spawn_empty().id();
+            world.entity_mut(runtime_entity).insert(SceneEntitySource {
+                instance_id,
+                entity_id: entity.id.clone(),
+            });
+            entity_map.insert(entity.id.clone(), runtime_entity);
+        }
+
+        let mut diagnostics = preflight.diagnostics;
+        for entity in preflight.entities {
+            let Some(runtime_entity) = entity_map.get(&entity.id) else {
+                diagnostics.push(
+                    Diagnostic::error("scene.internal-missing-entity", "missing spawned entity")
+                        .with_entity_id(entity.id.as_str()),
+                );
+                continue;
+            };
+
+            for component in entity.components {
+                if let Err(error) = component.apply(world, runtime_entity) {
+                    diagnostics.push(
+                        Diagnostic::error("scene.component-apply-failed", error.to_string())
+                            .with_entity_id(entity.id.as_str()),
+                    );
+                }
+            }
+
+            if let Some(parent_id) = entity.parent {
+                if let Some(parent_entity) = entity_map.get(&parent_id) {
+                    world
+                        .entity_mut(runtime_entity)
+                        .insert(Parent(parent_entity));
+                }
+            }
+        }
+
+        sync_children(world);
+
+        SceneSpawnReport {
+            entity_map,
+            diagnostics,
+        }
+    }
+}
+
+#[must_use]
+pub fn spawn_scene(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    document: &SceneDocument,
+) -> SceneSpawnReport {
+    SceneSpawner::new().spawn(world, registry, document)
+}
+
+#[must_use]
+pub fn export_scene(world: &World, registry: &ComponentRegistry) -> SceneExportReport {
+    let mut diagnostics = DiagnosticReport::default();
+    let mut entities = world
+        .iter_entities()
+        .map(|entity_ref| entity_ref.id())
+        .collect::<Vec<_>>();
+    entities.sort_by_key(|entity| entity.index());
+
+    let mut id_by_entity = BTreeMap::<Entity, SceneEntityId>::new();
+    for (ordinal, entity) in entities.iter().copied().enumerate() {
+        let scene_id = world
+            .get::<SceneEntitySource>(entity)
+            .map(SceneEntitySource::export_id)
+            .unwrap_or_else(|| {
+                SceneEntityId::new(format!("entity_{}", ordinal + 1))
+                    .expect("generated export ids should be valid")
+            });
+        id_by_entity.insert(entity, scene_id);
+    }
+
+    let mut records = Vec::new();
+    for entity in entities {
+        let id = id_by_entity
+            .get(&entity)
+            .expect("entity id should be assigned before export")
+            .clone();
+        let parent = world
+            .get::<Parent>(entity)
+            .and_then(|parent| id_by_entity.get(&parent.0).cloned());
+
+        if world.get::<Parent>(entity).is_some() && parent.is_none() {
+            diagnostics.push(
+                Diagnostic::warning(
+                    "scene.export-parent-skipped",
+                    "parent entity is not exported with this scene",
+                )
+                .with_entity_id(id.as_str()),
+            );
+        }
+
+        let mut components = BTreeMap::new();
+        for schema in registry.schemas().filter(|schema| schema.serializable) {
+            let Some(encoded) = registry.encode_component(&schema.id, world, entity) else {
+                continue;
+            };
+            match encoded {
+                Ok(Some(value)) => {
+                    components.insert(
+                        schema.id.clone(),
+                        SceneComponentRecord::new(schema.version, value),
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => diagnostics.push(
+                    Diagnostic::warning("scene.export-component-failed", error.to_string())
+                        .with_entity_id(id.as_str())
+                        .with_component_id(schema.id.as_str()),
+                ),
+            }
+        }
+
+        if components.is_empty() && world.get::<SceneEntitySource>(entity).is_none() {
+            continue;
+        }
+
+        records.push(SceneEntityRecord {
+            id,
+            parent,
+            components,
+            prefab: None,
+        });
+    }
+
+    SceneExportReport {
+        document: SceneDocument::new(records),
+        diagnostics,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct SceneEntity {
-    pub stable_id: u64,
-    pub component_types: Vec<String>,
+pub enum SceneEntityIdError {
+    Empty,
+    LeadingSlash,
+    TrailingSlash,
+    EmptySegment,
+    CurrentDirectorySegment,
+    ParentDirectorySegment,
+    InvalidCharacter(char),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct SceneAsset {
-    pub entities: Vec<SceneEntity>,
+impl Display for SceneEntityIdError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("scene entity id is empty"),
+            Self::LeadingSlash => formatter.write_str("scene entity id must not start with '/'"),
+            Self::TrailingSlash => formatter.write_str("scene entity id must not end with '/'"),
+            Self::EmptySegment => formatter.write_str("scene entity id has an empty segment"),
+            Self::CurrentDirectorySegment => {
+                formatter.write_str("scene entity id must not contain '.' segments")
+            }
+            Self::ParentDirectorySegment => {
+                formatter.write_str("scene entity id must not contain '..' segments")
+            }
+            Self::InvalidCharacter(character) => {
+                write!(
+                    formatter,
+                    "scene entity id contains invalid character '{character}'"
+                )
+            }
+        }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Scene {
-    pub roots: Vec<SceneNode>,
+impl Error for SceneEntityIdError {}
+
+struct PreparedScene {
+    entities: Vec<PreparedSceneEntity>,
+    diagnostics: DiagnosticReport,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct SceneNode {
-    pub name: Option<String>,
-    pub children: Vec<SceneNode>,
+struct PreparedSceneEntity {
+    id: SceneEntityId,
+    parent: Option<SceneEntityId>,
+    components: Vec<PreparedComponent>,
+}
+
+fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> PreparedScene {
+    let mut diagnostics = DiagnosticReport::default();
+    let mut seen = BTreeSet::<SceneEntityId>::new();
+    let mut ids = BTreeSet::<SceneEntityId>::new();
+
+    for entity in &document.entities {
+        if !seen.insert(entity.id.clone()) {
+            diagnostics.push(
+                Diagnostic::error("scene.duplicate-entity-id", "duplicate scene entity id")
+                    .with_entity_id(entity.id.as_str()),
+            );
+        }
+        ids.insert(entity.id.clone());
+    }
+
+    for entity in &document.entities {
+        if let Some(parent) = &entity.parent {
+            if !ids.contains(parent) {
+                diagnostics.push(
+                    Diagnostic::error("scene.missing-parent", "parent entity id does not exist")
+                        .with_entity_id(entity.id.as_str()),
+                );
+            }
+        }
+    }
+
+    detect_parent_cycles(document, &mut diagnostics);
+
+    let mut prepared_entities = Vec::new();
+    for entity in sorted_entities(document) {
+        let mut prepared_components = Vec::new();
+        for (component_id, component) in &entity.components {
+            let Some(schema) = registry.schema(component_id) else {
+                diagnostics.push(
+                    Diagnostic::error(
+                        "scene.unknown-component",
+                        "component type is not registered",
+                    )
+                    .with_entity_id(entity.id.as_str())
+                    .with_component_id(component_id.as_str()),
+                );
+                continue;
+            };
+            if !schema.serializable {
+                diagnostics.push(
+                    Diagnostic::error(
+                        "scene.component-not-serializable",
+                        "component is registered but not scene-serializable",
+                    )
+                    .with_entity_id(entity.id.as_str())
+                    .with_component_id(component_id.as_str()),
+                );
+                continue;
+            }
+            if component.version != schema.version {
+                diagnostics.push(
+                    Diagnostic::error(
+                        "scene.unsupported-component-version",
+                        "component schema version is unsupported",
+                    )
+                    .with_entity_id(entity.id.as_str())
+                    .with_component_id(component_id.as_str()),
+                );
+                continue;
+            }
+
+            match registry.preflight_component(component_id, &component.value) {
+                Some(Ok(prepared)) => prepared_components.push(prepared),
+                Some(Err(error)) => diagnostics.push(
+                    Diagnostic::error("scene.invalid-component-payload", error.to_string())
+                        .with_entity_id(entity.id.as_str())
+                        .with_component_id(component_id.as_str()),
+                ),
+                None => diagnostics.push(
+                    Diagnostic::error(
+                        "scene.missing-component-codec",
+                        "component has no scene codec",
+                    )
+                    .with_entity_id(entity.id.as_str())
+                    .with_component_id(component_id.as_str()),
+                ),
+            }
+        }
+
+        prepared_entities.push(PreparedSceneEntity {
+            id: entity.id.clone(),
+            parent: entity.parent.clone(),
+            components: prepared_components,
+        });
+    }
+
+    PreparedScene {
+        entities: prepared_entities,
+        diagnostics,
+    }
+}
+
+fn sorted_entities(document: &SceneDocument) -> Vec<&SceneEntityRecord> {
+    let mut entities = document.entities.iter().collect::<Vec<_>>();
+    entities.sort_by(|left, right| left.id.cmp(&right.id));
+    entities
+}
+
+fn detect_parent_cycles(document: &SceneDocument, diagnostics: &mut DiagnosticReport) {
+    let parents = document
+        .entities
+        .iter()
+        .map(|entity| (entity.id.clone(), entity.parent.clone()))
+        .collect::<BTreeMap<_, _>>();
+
+    for entity in &document.entities {
+        let mut visiting = BTreeSet::new();
+        let mut current = Some(entity.id.clone());
+        while let Some(id) = current {
+            if !visiting.insert(id.clone()) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        "scene.parent-cycle",
+                        "scene hierarchy contains a parent cycle",
+                    )
+                    .with_entity_id(entity.id.as_str()),
+                );
+                break;
+            }
+            current = parents.get(&id).and_then(Clone::clone);
+        }
+    }
+}
+
+fn validate_scene_entity_id(id: &str) -> Result<(), SceneEntityIdError> {
+    if id.is_empty() {
+        return Err(SceneEntityIdError::Empty);
+    }
+    if id.starts_with('/') {
+        return Err(SceneEntityIdError::LeadingSlash);
+    }
+    if id.ends_with('/') {
+        return Err(SceneEntityIdError::TrailingSlash);
+    }
+
+    for segment in id.split('/') {
+        match segment {
+            "" => return Err(SceneEntityIdError::EmptySegment),
+            "." => return Err(SceneEntityIdError::CurrentDirectorySegment),
+            ".." => return Err(SceneEntityIdError::ParentDirectorySegment),
+            _ => {}
+        }
+    }
+
+    for character in id.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | '/') {
+            continue;
+        }
+        return Err(SceneEntityIdError::InvalidCharacter(character));
+    }
+
+    Ok(())
 }
 
 pub fn spawn_child<B: Bundle>(world: &mut World, parent: Entity, bundle: B) -> Entity {
@@ -127,6 +693,16 @@ impl Plugin for HierarchyPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_reflect::bevy_reflect;
+    use nara_reflect::{
+        ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, Reflect,
+    };
+
+    #[derive(Clone, Debug, PartialEq, Component, Reflect)]
+    struct TestPosition {
+        x: i32,
+    }
 
     #[test]
     fn syncs_parent_child_links() {
@@ -139,5 +715,213 @@ mod tests {
         let parent_ref = world.get_entity(parent).unwrap();
         let children = parent_ref.get::<Children>().unwrap();
         assert_eq!(children.as_slice(), &[child]);
+    }
+
+    #[test]
+    fn validates_scene_entity_id_shape() {
+        assert_eq!(SceneEntityId::new(""), Err(SceneEntityIdError::Empty));
+        assert_eq!(
+            SceneEntityId::new("/player"),
+            Err(SceneEntityIdError::LeadingSlash)
+        );
+        assert_eq!(
+            SceneEntityId::new("root//player"),
+            Err(SceneEntityIdError::EmptySegment)
+        );
+        assert_eq!(
+            SceneEntityId::new("root/../player"),
+            Err(SceneEntityIdError::ParentDirectorySegment)
+        );
+        assert!(SceneEntityId::new("root/player-1").is_ok());
+    }
+
+    #[test]
+    fn validation_reports_duplicate_missing_parent_cycle_and_unknown_component() {
+        let registry = test_registry();
+        let id = scene_id("player");
+        let missing_parent = scene_id("missing");
+        let cycle_a = scene_id("cycle_a");
+        let cycle_b = scene_id("cycle_b");
+        let unknown_component = ComponentTypeId::new("nara.test.Unknown");
+        let document = SceneDocument {
+            format_version: SceneDocument::CURRENT_FORMAT_VERSION,
+            entities: vec![
+                SceneEntityRecord::new(id.clone()),
+                SceneEntityRecord::new(id),
+                SceneEntityRecord::new(scene_id("orphan")).with_parent(missing_parent),
+                SceneEntityRecord::new(cycle_a.clone()).with_parent(cycle_b.clone()),
+                SceneEntityRecord::new(cycle_b).with_parent(cycle_a),
+                SceneEntityRecord::new(scene_id("unknown")).with_component(
+                    unknown_component,
+                    SceneComponentRecord::new(ComponentSchemaVersion(1), ComponentValue::Null),
+                ),
+            ],
+        };
+
+        let report = document.validate(&registry);
+        let codes = report
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(codes.contains(&"scene.duplicate-entity-id"));
+        assert!(codes.contains(&"scene.missing-parent"));
+        assert!(codes.contains(&"scene.parent-cycle"));
+        assert!(codes.contains(&"scene.unknown-component"));
+        assert!(report.has_errors());
+    }
+
+    #[test]
+    fn invalid_component_payload_does_not_mutate_world() {
+        let registry = test_registry();
+        let document = SceneDocument::new([SceneEntityRecord::new(scene_id("bad"))
+            .with_component(
+                position_type_id(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion(1),
+                    ComponentValue::map([(
+                        "x",
+                        ComponentValue::String("not a number".to_string()),
+                    )]),
+                ),
+            )]);
+        let mut world = World::new();
+        let before = world.iter_entities().count();
+
+        let report = spawn_scene(&mut world, &registry, &document);
+
+        assert!(report.diagnostics.has_errors());
+        assert_eq!(world.iter_entities().count(), before);
+        assert!(report.entity_map.is_empty());
+    }
+
+    #[test]
+    fn spawns_hierarchy_records_source_and_exports_stable_document() {
+        let registry = test_registry();
+        let parent_id = scene_id("parent");
+        let child_id = scene_id("parent/child");
+        let document = SceneDocument::new([
+            SceneEntityRecord::new(parent_id.clone())
+                .with_component(position_type_id(), position_record(1)),
+            SceneEntityRecord::new(child_id.clone())
+                .with_parent(parent_id.clone())
+                .with_component(position_type_id(), position_record(2)),
+        ]);
+        let mut world = World::new();
+        let mut spawner = SceneSpawner::new();
+
+        let report = spawner.spawn(&mut world, &registry, &document);
+
+        assert!(!report.diagnostics.has_errors());
+        assert_eq!(report.entity_map.len(), 2);
+        let parent = report.entity_map.get(&parent_id).unwrap();
+        let child = report.entity_map.get(&child_id).unwrap();
+        assert_eq!(
+            world
+                .get::<Children>(parent)
+                .unwrap()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![child]
+        );
+        assert_eq!(
+            world.get::<SceneEntitySource>(child).unwrap().entity_id,
+            child_id
+        );
+
+        let export = export_scene(&world, &registry);
+
+        assert!(!export.diagnostics.has_errors());
+        assert_eq!(export.document.entities.len(), 2);
+        assert_eq!(
+            export
+                .document
+                .entities
+                .iter()
+                .map(|entity| entity.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["parent", "parent/child"]
+        );
+        assert_eq!(
+            export.document.entities[1]
+                .parent
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "parent"
+        );
+    }
+
+    #[test]
+    fn repeated_prefab_spawns_export_with_instance_namespaces() {
+        let registry = test_registry();
+        let id = scene_id("enemy");
+        let document = SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(7))]);
+        let mut world = World::new();
+        let mut spawner = SceneSpawner::new();
+
+        assert!(
+            !spawner
+                .spawn(&mut world, &registry, &document)
+                .diagnostics
+                .has_errors()
+        );
+        assert!(
+            !spawner
+                .spawn(&mut world, &registry, &document)
+                .diagnostics
+                .has_errors()
+        );
+
+        let export = export_scene(&world, &registry);
+        let ids = export
+            .document
+            .entities
+            .iter()
+            .map(|entity| entity.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["enemy", "instance_2/enemy"]);
+    }
+
+    fn test_registry() -> ComponentRegistry {
+        let mut registry = ComponentRegistry::new();
+        registry
+            .register_serializable_component::<TestPosition, _, _>(
+                position_type_id(),
+                ComponentSchemaVersion(1),
+                |value| {
+                    let x = value
+                        .get("x")
+                        .and_then(ComponentValue::as_i64)
+                        .ok_or_else(|| ComponentCodecError::invalid_field("x", "i64"))?;
+                    Ok(TestPosition { x: x as i32 })
+                },
+                |position| {
+                    Ok(ComponentValue::map([(
+                        "x",
+                        ComponentValue::I64(i64::from(position.x)),
+                    )]))
+                },
+            )
+            .unwrap();
+        registry
+    }
+
+    fn scene_id(id: &str) -> SceneEntityId {
+        SceneEntityId::new(id).unwrap()
+    }
+
+    fn position_type_id() -> ComponentTypeId {
+        ComponentTypeId::new("nara.test.Position")
+    }
+
+    fn position_record(x: i32) -> SceneComponentRecord {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion(1),
+            ComponentValue::map([("x", ComponentValue::I64(i64::from(x)))]),
+        )
     }
 }

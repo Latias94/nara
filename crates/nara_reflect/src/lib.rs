@@ -412,6 +412,10 @@ impl ComponentRegistry {
         self.schemas.get(id)
     }
 
+    pub fn schemas(&self) -> impl Iterator<Item = &ComponentSchema> {
+        self.schemas.values()
+    }
+
     #[must_use]
     pub fn schema_for_type<T: 'static>(&self) -> Option<&ComponentSchema> {
         self.rust_type_ids

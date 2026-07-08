@@ -1296,8 +1296,11 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "nara_app",
+ "nara_asset",
  "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
+ "nara_reflect",
  "nara_transform",
  "serde",
 ]
