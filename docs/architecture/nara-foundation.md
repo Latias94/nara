@@ -53,7 +53,7 @@ flowchart TD
     App --> SpriteRender[nara_sprite_render: 2D extract + queue + batch]
     App --> Window[nara_window: normalized window data]
     Window --> WinitAdapter[nara_winit adapter]
-    App --> Tooling[nara_tooling: snapshots + inspector seam]
+    App --> Tooling[nara_tooling: snapshots + UI-agnostic inspector model]
     Render --> SpriteRender
     Sprite --> SpriteRender
     Tilemap --> SpriteRender
@@ -83,7 +83,7 @@ flowchart TD
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Gameplay APIs and renderer backend internals |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, and colored quad submission from `SpriteBatches` |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
-| `nara_tooling` | `WorldSnapshot`, `ToolingPlugin` | egui/dear-imgui inspectors and editor integration |
+| `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneInspectorModel`, `SceneInspectorCommand`, `ToolingPlugin` | UI-agnostic inspector/query/command models consumed by egui, dear-imgui, future nara UI, and AI agents |
 
 ## Runtime Flow
 
@@ -148,7 +148,7 @@ sequenceDiagram
 | Foundation compile cost | No heavy graphics/window deps in default facade | Dependency tree review |
 | User-facing startup API | A minimal app can call `App::new().update()` and examples can use `Commands`/`Query` systems | Example and smoke test |
 | Backend isolation | Gameplay and render-domain crates do not import `wgpu` directly | `rg "wgpu::" crates src Cargo.toml` |
-| Tooling readiness | Runtime can produce a `WorldSnapshot` without editor deps | Unit or smoke test |
+| Tooling readiness | Runtime can produce `WorldSnapshot` and scene inspector models without editor UI deps | Unit or smoke test |
 
 ## Risks and Mitigations
 
@@ -165,13 +165,14 @@ sequenceDiagram
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
+- `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then applies field/reparent commands as scene patches.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
 ## Next Implementation Slices
 
-1. Add an editor/debug UI adapter that consumes `SceneAuthoringSession`, `WorldSnapshot`, `ComponentRegistry`, scene diagnostics, and patch reports.
+1. Add the first debug UI adapter that renders `SceneInspectorModel` and submits `SceneInspectorCommand`.
 2. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
 3. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
 4. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.

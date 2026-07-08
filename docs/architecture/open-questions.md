@@ -72,9 +72,7 @@ Accepted direction: scene and prefab files are dimension-neutral ECS data docume
 
 Follow-up details still to settle:
 
-1. How do scene patch transactions integrate with live runtime `SceneEntitySource` provenance and
-   world synchronization?
-2. How does hot reload cache and invalidate asset-backed prefab sources once async IO exists?
+1. How does hot reload cache and invalidate asset-backed prefab sources once async IO exists?
 
 Resolved in the scene/prefab serialization foundation:
 
@@ -86,6 +84,9 @@ Resolved in the scene/prefab serialization foundation:
   and asset refs before mutating the target world.
 - `ScenePatchDocument` is the first editor/AI authoring mutation format. It serializes as `op +
   args`, validates atomically on a scratch document, and returns inverse patches.
+- `SceneAuthoringSession` integrates patch transactions with live `World` projection through
+  document-as-truth apply, undo/redo inverse stacks, dirty tracking, and rebuild-style sync that
+  preserves unrelated runtime entities.
 - Prefab overrides are field-level patch transactions relative to source prefab IDs. They apply
   before expanded IDs are namespaced.
 - Nested prefab expansion uses `PrefabSourceResolver`. The first adapter is
@@ -205,12 +206,15 @@ live sync boundary is `SceneAuthoringSession`, which projects a document into a 
 `World` slice by rebuild. See ADR
 [0026-editor-command-patch-and-undo-model.md](adr/0026-editor-command-patch-and-undo-model.md).
 
+The first UI-agnostic inspector model is `SceneInspectorState` in `nara_tooling`. It consumes
+`SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then emits
+`SceneInspectorCommand` values that apply scene patches.
+
 Follow-up details still to settle:
 
 1. Does debug UI use egui first or dear-imgui-rs first?
-2. What is the minimum `WorldSnapshot` needed for inspector work?
-3. What minimum runtime UI is required before editor dogfooding?
-4. Which accepted patch operations need specialized incremental `WorldCommand` paths before
+2. What minimum runtime UI is required before editor dogfooding?
+3. Which accepted patch operations need specialized incremental `WorldCommand` paths before
    rebuild-style projection is too expensive?
 
 ## Backend and Domain Extension Seams

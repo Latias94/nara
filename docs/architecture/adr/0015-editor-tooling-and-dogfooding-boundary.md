@@ -20,6 +20,18 @@ Dogfooding policy:
 - The editor UI toolkit can be phased. Early editor/debug UI may use egui or dear-imgui-rs for productivity. A future nara UI system can gradually take over when mature enough.
 - Runtime crates must not depend on editor crates.
 - Editor mutations should go through explicit commands/patches and validation, not direct private storage access.
+- UI adapters should render UI-agnostic tooling models and submit tooling commands. They should not
+  own scene mutation semantics.
+
+Implementation notes as of 2026-07-08:
+
+- `nara_tooling::SceneInspectorState` is the first UI-agnostic inspector controller.
+- `SceneInspectorModel` combines authoring entity rows, selected component schema fields,
+  `ComponentSchemaCatalog`, `WorldSnapshot`, undo/redo status, live dirty state, and diagnostics.
+- `SceneInspectorCommand` converts selected field/reparent edits into `ScenePatchDocument`
+  transactions applied through `SceneAuthoringSession`.
+- egui, dear-imgui-rs, or future nara UI adapters should render these models rather than owning
+  separate inspector state machines.
 
 ```mermaid
 flowchart TD
@@ -65,7 +77,7 @@ flowchart TD
 |---|---:|---|
 | Dependency direction | Runtime crates do not depend on editor crates | Dependency review |
 | Runtime dogfooding | Editor uses real scene/asset/diagnostic APIs | Code review |
-| Safe mutation | Editor changes flow through commands/patches with validation | Future tests |
+| Safe mutation | Editor changes flow through commands/patches with validation | `scene_inspector` and `scene_authoring_session` tests |
 | UI flexibility | egui/imgui can be replaced or supplemented later | Architecture review |
 | Viewport fidelity | Editor view uses same render backend path as runtime where practical | Future integration test |
 
@@ -76,4 +88,3 @@ flowchart TD
 | Editor becomes a separate engine | High | Medium | Force editor to use runtime APIs and diagnostics |
 | UI dogfooding slows core runtime | Medium | Medium | Phase UI dogfooding; start with egui/imgui if needed |
 | Editor needs private access | High | Medium | Add explicit inspection/patch interfaces instead of breaking encapsulation |
-

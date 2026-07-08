@@ -15,6 +15,7 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_scene` owns persistent `SceneDocument` / `PrefabDocument`, stable `SceneEntityId`, validation, and world spawn/export. Scene/prefab documents must not store runtime `Entity`, runtime `AssetId`, or backend handles.
 - Scene/prefab authoring edits should use `ScenePatchDocument` transactions. Patch operations serialize as `op + args`, validate against schema-aware `ComponentFieldPath`, and return inverse patches for undo.
 - `SceneAuthoringSession` is the first authoring/live sync boundary. It treats `SceneDocument` as truth, stores undo/redo as inverse patches, and rebuilds its managed live `World` projection instead of mutating arbitrary ECS storage directly.
+- `nara_tooling` owns UI-agnostic editor/debug models such as `WorldSnapshot` and `SceneInspectorState`. UI adapters should render tooling models and send tooling commands instead of inventing editor-only mutation paths.
 - Prefab overrides are `ScenePatchDocument` values applied relative to source prefab IDs before expansion. Do not reintroduce whole-component prefab override maps.
 - Nested prefab source resolution goes through `PrefabSourceResolver`; expanded prefab IDs use the `anchor/source_entity` namespace rule.
 - `nara_scene` must keep scene/prefab spawn two-phase: preflight first, then mutate the target `World`. Asset-aware spawn uses a scratch `AssetServer` and only writes it back after the full preflight succeeds.

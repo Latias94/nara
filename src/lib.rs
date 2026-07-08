@@ -126,7 +126,12 @@ pub mod prelude {
         DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileAtlasLayout, TileAtlasRegion,
         TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
     };
-    pub use nara_tooling::{ToolingPlugin, WorldSnapshot};
+    pub use nara_tooling::{
+        SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
+        SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
+        SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, ToolingPlugin,
+        WorldSnapshot,
+    };
     pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
     pub use nara_window::{
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowEvent, WindowEvents, WindowId,
