@@ -8,7 +8,8 @@ pub use nara_core::Color;
 use nara_core::Vec2;
 use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource, World};
 use nara_reflect::{
-    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
@@ -289,9 +290,10 @@ impl Plugin for RenderPlugin {
 }
 
 pub fn register_render_components(registry: &mut ComponentRegistry) {
+    let component_id = ComponentTypeId::new("nara.render.Camera2d");
     registry
         .register_serializable_component::<Camera2d, _, _>(
-            ComponentTypeId::new("nara.render.Camera2d"),
+            component_id.clone(),
             ComponentSchemaVersion(1),
             |value| {
                 Ok(Camera2d {
@@ -329,7 +331,37 @@ pub fn register_render_components(registry: &mut ComponentRegistry) {
                 ]))
             },
         )
+        .and_then(|registry| registry.register_component_fields(&component_id, camera_fields()))
         .expect("nara.render.Camera2d component registration should be unique");
+}
+
+fn camera_fields() -> [ComponentFieldSchema; 5] {
+    [
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["target"]),
+            ComponentValueKind::String,
+            ComponentValue::String("primary_window".to_string()),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["viewport"]),
+            ComponentValueKind::Map,
+            ComponentValue::Null,
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["clear_color"]),
+            ComponentValueKind::Map,
+            ComponentValue::Null,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["viewport_height"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["order"]),
+            ComponentValueKind::I64,
+            ComponentValue::I64(0),
+        ),
+    ]
 }
 
 fn read_render_target(value: Option<&ComponentValue>) -> Result<RenderTarget, ComponentCodecError> {
@@ -605,5 +637,30 @@ mod tests {
 
         frame.mark_submitted();
         assert_eq!(frame.state, RenderFrameState::Submitted);
+    }
+
+    #[test]
+    fn camera_schema_exposes_authoring_fields() {
+        let mut registry = ComponentRegistry::new();
+        register_render_components(&mut registry);
+
+        let schema = registry
+            .schema(&ComponentTypeId::new("nara.render.Camera2d"))
+            .unwrap();
+
+        assert_eq!(
+            schema
+                .fields
+                .iter()
+                .map(|field| (field.path.to_string(), field.value_kind, field.required))
+                .collect::<Vec<_>>(),
+            vec![
+                ("clear_color".to_string(), ComponentValueKind::Map, false),
+                ("order".to_string(), ComponentValueKind::I64, false),
+                ("target".to_string(), ComponentValueKind::String, false),
+                ("viewport".to_string(), ComponentValueKind::Map, false),
+                ("viewport_height".to_string(), ComponentValueKind::F64, true),
+            ]
+        );
     }
 }

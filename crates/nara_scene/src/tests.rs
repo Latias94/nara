@@ -9,7 +9,7 @@ use nara_ecs::{Component, World};
 use nara_reflect::bevy_reflect;
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, PreparedComponent, Reflect,
+    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent, Reflect,
 };
 #[derive(Clone, Debug, PartialEq, Component, Reflect)]
 struct TestPosition {
@@ -429,6 +429,36 @@ fn scene_entity_id_deserialization_validates_shape() {
     .unwrap_err();
 
     assert!(error.to_string().contains(".."));
+}
+
+#[test]
+fn scene_component_schemas_expose_scalar_fields() {
+    let mut registry = ComponentRegistry::new();
+    register_scene_components(&mut registry);
+
+    let name_schema = registry
+        .schema(&ComponentTypeId::new("nara.scene.Name"))
+        .unwrap();
+    let visibility_schema = registry
+        .schema(&ComponentTypeId::new("nara.scene.Visibility"))
+        .unwrap();
+
+    assert_eq!(
+        name_schema
+            .fields
+            .iter()
+            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .collect::<Vec<_>>(),
+        vec![("<root>".to_string(), ComponentValueKind::String, true)]
+    );
+    assert_eq!(
+        visibility_schema
+            .fields
+            .iter()
+            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .collect::<Vec<_>>(),
+        vec![("<root>".to_string(), ComponentValueKind::String, true)]
+    );
 }
 
 fn test_registry() -> ComponentRegistry {

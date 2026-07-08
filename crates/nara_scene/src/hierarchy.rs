@@ -1,8 +1,9 @@
 use nara_app::{App, CoreStage, Plugin};
 use nara_ecs::{Bundle, Component, Entity, World};
 use nara_reflect::{
-    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, Reflect, bevy_reflect,
+    ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, Reflect,
+    bevy_reflect,
 };
 
 pub use nara_transform::Transform2d;
@@ -104,9 +105,10 @@ impl Plugin for HierarchyPlugin {
 }
 
 pub fn register_scene_components(registry: &mut ComponentRegistry) {
+    let name_id = ComponentTypeId::new("nara.scene.Name");
     registry
         .register_serializable_component::<Name, _, _>(
-            ComponentTypeId::new("nara.scene.Name"),
+            name_id.clone(),
             ComponentSchemaVersion(1),
             |value| {
                 Ok(Name::new(value.as_str().ok_or_else(|| {
@@ -115,11 +117,21 @@ pub fn register_scene_components(registry: &mut ComponentRegistry) {
             },
             |name| Ok(ComponentValue::String(name.as_str().to_string())),
         )
+        .and_then(|registry| {
+            registry.register_component_fields(
+                &name_id,
+                [ComponentFieldSchema::required(
+                    ComponentFieldPath::empty(),
+                    ComponentValueKind::String,
+                )],
+            )
+        })
         .expect("nara.scene.Name component registration should be unique");
 
+    let visibility_id = ComponentTypeId::new("nara.scene.Visibility");
     registry
         .register_serializable_component::<Visibility, _, _>(
-            ComponentTypeId::new("nara.scene.Visibility"),
+            visibility_id.clone(),
             ComponentSchemaVersion(1),
             |value| match value.as_str() {
                 Some("visible") => Ok(Visibility::Visible),
@@ -136,5 +148,14 @@ pub fn register_scene_components(registry: &mut ComponentRegistry) {
                 }))
             },
         )
+        .and_then(|registry| {
+            registry.register_component_fields(
+                &visibility_id,
+                [ComponentFieldSchema::required(
+                    ComponentFieldPath::empty(),
+                    ComponentValueKind::String,
+                )],
+            )
+        })
         .expect("nara.scene.Visibility component registration should be unique");
 }

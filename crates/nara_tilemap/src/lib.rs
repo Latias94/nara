@@ -8,8 +8,9 @@ use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
 use nara_image::ImageAsset;
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, PreparedComponent,
+    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
+    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PreparedComponent,
 };
 
 pub const DEFAULT_TILE_SIZE: Vec2 = Vec2::new(16.0, 16.0);
@@ -392,9 +393,10 @@ impl Plugin for TilemapPlugin {
 }
 
 pub fn register_tilemap_components(registry: &mut ComponentRegistry) {
+    let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
     registry
         .register_component_codec_with_context::<Tilemap, _, _>(
-            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            component_id.clone(),
             ComponentSchemaVersion(1),
             |value, context| {
                 let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
@@ -452,7 +454,41 @@ pub fn register_tilemap_components(registry: &mut ComponentRegistry) {
                 ])))
             },
         )
+        .and_then(|registry| registry.register_component_fields(&component_id, tilemap_fields()))
         .expect("nara.tilemap.Tilemap component registration should be unique");
+}
+
+fn tilemap_fields() -> [ComponentFieldSchema; 6] {
+    [
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["tile_size", "x"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["tile_size", "y"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["layer"]),
+            ComponentValueKind::I64,
+            ComponentValue::I64(0),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["sort_key"]),
+            ComponentValueKind::I64,
+            ComponentValue::I64(0),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["tileset"]),
+            ComponentValueKind::AssetRef,
+            ComponentValue::Null,
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["cells"]),
+            ComponentValueKind::List,
+            ComponentValue::List(Vec::new()),
+        ),
+    ]
 }
 
 enum PreparedTileset {
@@ -969,6 +1005,32 @@ mod tests {
             Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "tileset.value"
         ));
         assert!(!context.asset_server_touched());
+    }
+
+    #[test]
+    fn tilemap_schema_exposes_authoring_fields() {
+        let mut registry = ComponentRegistry::new();
+        register_tilemap_components(&mut registry);
+
+        let schema = registry
+            .schema(&ComponentTypeId::new("nara.tilemap.Tilemap"))
+            .unwrap();
+
+        assert_eq!(
+            schema
+                .fields
+                .iter()
+                .map(|field| (field.path.to_string(), field.value_kind, field.required))
+                .collect::<Vec<_>>(),
+            vec![
+                ("cells".to_string(), ComponentValueKind::List, false),
+                ("layer".to_string(), ComponentValueKind::I64, false),
+                ("sort_key".to_string(), ComponentValueKind::I64, false),
+                ("tile_size.x".to_string(), ComponentValueKind::F64, true),
+                ("tile_size.y".to_string(), ComponentValueKind::F64, true),
+                ("tileset".to_string(), ComponentValueKind::AssetRef, false),
+            ]
+        );
     }
 
     fn tilemap_value(tileset: AssetRef) -> ComponentValue {

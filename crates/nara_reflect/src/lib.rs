@@ -42,13 +42,84 @@ impl Default for ComponentSchemaVersion {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ComponentSchema {
     pub id: ComponentTypeId,
     pub version: ComponentSchemaVersion,
     pub rust_type_path: String,
     pub serializable: bool,
+    pub fields: Vec<ComponentFieldSchema>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ComponentSchemaCatalog {
+    pub components: Vec<ComponentSchema>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ComponentFieldSchema {
+    pub path: ComponentFieldPath,
+    pub value_kind: ComponentValueKind,
+    pub required: bool,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub default_value: Option<ComponentValue>,
+}
+
+impl ComponentFieldSchema {
+    #[must_use]
+    pub fn required(path: ComponentFieldPath, value_kind: ComponentValueKind) -> Self {
+        Self {
+            path,
+            value_kind,
+            required: true,
+            default_value: None,
+        }
+    }
+
+    #[must_use]
+    pub fn optional(path: ComponentFieldPath, value_kind: ComponentValueKind) -> Self {
+        Self {
+            path,
+            value_kind,
+            required: false,
+            default_value: None,
+        }
+    }
+
+    #[must_use]
+    pub fn optional_with_default(
+        path: ComponentFieldPath,
+        value_kind: ComponentValueKind,
+        default_value: ComponentValue,
+    ) -> Self {
+        Self {
+            path,
+            value_kind,
+            required: false,
+            default_value: Some(default_value),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum ComponentValueKind {
+    Null,
+    Bool,
+    I64,
+    U64,
+    F64,
+    String,
+    List,
+    Map,
+    AssetRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -227,6 +298,20 @@ impl ComponentValue {
     pub fn field(&self, field: &str) -> Result<&ComponentValue, ComponentCodecError> {
         self.get(field)
             .ok_or_else(|| ComponentCodecError::missing_field(field))
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> ComponentValueKind {
+        match self {
+            Self::Null => ComponentValueKind::Null,
+            Self::Bool(_) => ComponentValueKind::Bool,
+            Self::I64(_) => ComponentValueKind::I64,
+            Self::U64(_) => ComponentValueKind::U64,
+            Self::F64(_) => ComponentValueKind::F64,
+            Self::String(_) => ComponentValueKind::String,
+            Self::List(_) => ComponentValueKind::List,
+            Self::Map(_) => ComponentValueKind::Map,
+        }
     }
 
     pub fn get_path(
@@ -608,6 +693,11 @@ fn component_path_with(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentRegistryError {
     DuplicateComponentId(ComponentTypeId),
+    UnknownComponentId(ComponentTypeId),
+    DuplicateComponentFieldPath {
+        component_id: ComponentTypeId,
+        path: ComponentFieldPath,
+    },
 }
 
 impl Display for ComponentRegistryError {
@@ -618,6 +708,21 @@ impl Display for ComponentRegistryError {
                     formatter,
                     "component id '{}' is already registered",
                     id.as_str()
+                )
+            }
+            Self::UnknownComponentId(id) => {
+                write!(
+                    formatter,
+                    "component id '{}' is not registered",
+                    id.as_str()
+                )
+            }
+            Self::DuplicateComponentFieldPath { component_id, path } => {
+                write!(
+                    formatter,
+                    "component id '{}' registered duplicate schema field path '{}'",
+                    component_id.as_str(),
+                    path
                 )
             }
         }
@@ -1067,6 +1172,26 @@ impl ComponentRegistry {
     }
 
     #[must_use]
+    pub fn schema_catalog(&self) -> ComponentSchemaCatalog {
+        ComponentSchemaCatalog {
+            components: self.schemas.values().cloned().collect(),
+        }
+    }
+
+    pub fn register_component_fields(
+        &mut self,
+        id: &ComponentTypeId,
+        fields: impl IntoIterator<Item = ComponentFieldSchema>,
+    ) -> Result<&mut Self, ComponentRegistryError> {
+        let fields = canonical_component_fields(id, fields)?;
+        let Some(schema) = self.schemas.get_mut(id) else {
+            return Err(ComponentRegistryError::UnknownComponentId(id.clone()));
+        };
+        schema.fields = fields;
+        Ok(self)
+    }
+
+    #[must_use]
     pub fn schema_for_type<T: 'static>(&self) -> Option<&ComponentSchema> {
         self.rust_type_ids
             .get(&TypeId::of::<T>())
@@ -1143,6 +1268,7 @@ impl ComponentRegistry {
             version,
             rust_type_path: std::any::type_name::<T>().to_string(),
             serializable,
+            fields: Vec::new(),
         };
         self.rust_type_ids.insert(TypeId::of::<T>(), id.clone());
         self.schemas.insert(id, schema);
@@ -1150,12 +1276,30 @@ impl ComponentRegistry {
     }
 }
 
+fn canonical_component_fields(
+    component_id: &ComponentTypeId,
+    fields: impl IntoIterator<Item = ComponentFieldSchema>,
+) -> Result<Vec<ComponentFieldSchema>, ComponentRegistryError> {
+    let mut fields = fields.into_iter().collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.path.cmp(&right.path));
+    for pair in fields.windows(2) {
+        if pair[0].path == pair[1].path {
+            return Err(ComponentRegistryError::DuplicateComponentFieldPath {
+                component_id: component_id.clone(),
+                path: pair[0].path.clone(),
+            });
+        }
+    }
+    Ok(fields)
+}
+
 pub mod prelude {
     pub use crate::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
-        ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment, ComponentFloat,
-        ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValue, ComponentValueError, PreparedComponent,
+        ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
+        ComponentFieldSchema, ComponentFloat, ComponentRegistry, ComponentRegistryError,
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, ComponentValueError, ComponentValueKind, PreparedComponent,
     };
     pub use bevy_reflect::prelude::*;
 }
@@ -1169,6 +1313,12 @@ mod tests {
     struct Position {
         x: f32,
         y: f32,
+    }
+
+    #[derive(Clone, Component, Reflect)]
+    struct Velocity {
+        dx: f32,
+        dy: f32,
     }
 
     #[test]
@@ -1204,6 +1354,54 @@ mod tests {
             result,
             Err(ComponentRegistryError::DuplicateComponentId(duplicate)) if duplicate == id
         ));
+    }
+
+    #[test]
+    fn exports_schema_catalog_in_deterministic_order() {
+        let mut registry = ComponentRegistry::new();
+        let position_id = ComponentTypeId::new("nara.test.Position");
+        let velocity_id = ComponentTypeId::new("nara.test.Velocity");
+
+        registry
+            .register_component::<Position>(position_id.clone(), ComponentSchemaVersion(1))
+            .unwrap()
+            .register_component::<Velocity>(velocity_id.clone(), ComponentSchemaVersion(1))
+            .unwrap()
+            .register_component_fields(
+                &position_id,
+                [
+                    ComponentFieldSchema::required(
+                        ComponentFieldPath::from_fields(["y"]),
+                        ComponentValueKind::F64,
+                    ),
+                    ComponentFieldSchema::required(
+                        ComponentFieldPath::from_fields(["x"]),
+                        ComponentValueKind::F64,
+                    ),
+                ],
+            )
+            .unwrap();
+
+        let catalog = registry.schema_catalog();
+
+        assert_eq!(
+            catalog
+                .components
+                .iter()
+                .map(|schema| schema.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["nara.test.Position", "nara.test.Velocity"]
+        );
+        assert_eq!(
+            registry
+                .schema(&position_id)
+                .unwrap()
+                .fields
+                .iter()
+                .map(|field| field.path.to_string())
+                .collect::<Vec<_>>(),
+            vec!["x", "y"]
+        );
     }
 
     #[test]

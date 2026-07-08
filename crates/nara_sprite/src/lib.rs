@@ -6,8 +6,9 @@ use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
 use nara_image::ImageAsset;
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, PreparedComponent,
+    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
+    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PreparedComponent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -149,9 +150,10 @@ impl Plugin for SpritePlugin {
 }
 
 pub fn register_sprite_components(registry: &mut ComponentRegistry) {
+    let component_id = ComponentTypeId::new("nara.sprite.Sprite");
     registry
         .register_component_codec_with_context::<Sprite, _, _>(
-            ComponentTypeId::new("nara.sprite.Sprite"),
+            component_id.clone(),
             ComponentSchemaVersion(1),
             |value, context| {
                 let size = read_vec2(value.field("size")?, "size")?;
@@ -219,7 +221,57 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
                 Ok(Some(ComponentValue::map(fields)))
             },
         )
+        .and_then(|registry| registry.register_component_fields(&component_id, sprite_fields()))
         .expect("nara.sprite.Sprite component registration should be unique");
+}
+
+fn sprite_fields() -> [ComponentFieldSchema; 10] {
+    [
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["size", "x"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["size", "y"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["color", "r"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["color", "g"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["color", "b"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["color", "a"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["layer"]),
+            ComponentValueKind::I64,
+            ComponentValue::I64(0),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["sort_key"]),
+            ComponentValueKind::I64,
+            ComponentValue::I64(0),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["texture"]),
+            ComponentValueKind::AssetRef,
+            ComponentValue::Null,
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["texture_region"]),
+            ComponentValueKind::Map,
+            ComponentValue::Null,
+        ),
+    ]
 }
 
 enum PreparedTexture {
@@ -621,6 +673,36 @@ mod tests {
             Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "texture.value"
         ));
         assert!(!context.asset_server_touched());
+    }
+
+    #[test]
+    fn sprite_schema_exposes_authoring_fields() {
+        let mut registry = ComponentRegistry::new();
+        register_sprite_components(&mut registry);
+
+        let schema = registry
+            .schema(&ComponentTypeId::new("nara.sprite.Sprite"))
+            .unwrap();
+
+        assert_eq!(
+            schema
+                .fields
+                .iter()
+                .map(|field| (field.path.to_string(), field.value_kind, field.required))
+                .collect::<Vec<_>>(),
+            vec![
+                ("color.a".to_string(), ComponentValueKind::F64, true),
+                ("color.b".to_string(), ComponentValueKind::F64, true),
+                ("color.g".to_string(), ComponentValueKind::F64, true),
+                ("color.r".to_string(), ComponentValueKind::F64, true),
+                ("layer".to_string(), ComponentValueKind::I64, false),
+                ("size.x".to_string(), ComponentValueKind::F64, true),
+                ("size.y".to_string(), ComponentValueKind::F64, true),
+                ("sort_key".to_string(), ComponentValueKind::I64, false),
+                ("texture".to_string(), ComponentValueKind::AssetRef, false),
+                ("texture_region".to_string(), ComponentValueKind::Map, false),
+            ]
+        );
     }
 
     fn sprite_value(texture: AssetRef) -> ComponentValue {

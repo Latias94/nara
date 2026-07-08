@@ -83,9 +83,10 @@ pub mod prelude {
     pub use nara_input::{ButtonInput, InputPlugin, InputState, KeyCode, MouseButton};
     pub use nara_reflect::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
-        ComponentFloat, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueError,
-        PreparedComponent,
+        ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
+        ComponentFieldSchema, ComponentFloat, ComponentRegistry, ComponentRegistryError,
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, ComponentValueError, ComponentValueKind, PreparedComponent,
     };
     pub use nara_render::{
         Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats,

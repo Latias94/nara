@@ -4,7 +4,8 @@ use nara_app::{App, Plugin};
 use nara_core::{Mat3, Vec2};
 use nara_ecs::Component;
 use nara_reflect::{
-    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Component)]
@@ -60,9 +61,10 @@ impl Plugin for TransformPlugin {
 }
 
 pub fn register_transform_components(registry: &mut ComponentRegistry) {
+    let component_id = ComponentTypeId::new("nara.transform.Transform2d");
     registry
         .register_serializable_component::<Transform2d, _, _>(
-            ComponentTypeId::new("nara.transform.Transform2d"),
+            component_id.clone(),
             ComponentSchemaVersion(1),
             |value| {
                 Ok(Transform2d {
@@ -82,7 +84,33 @@ pub fn register_transform_components(registry: &mut ComponentRegistry) {
                 ]))
             },
         )
+        .and_then(|registry| registry.register_component_fields(&component_id, transform_fields()))
         .expect("nara.transform.Transform2d component registration should be unique");
+}
+
+fn transform_fields() -> [ComponentFieldSchema; 5] {
+    [
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["translation", "x"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["translation", "y"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["rotation"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["scale", "x"]),
+            ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::required(
+            ComponentFieldPath::from_fields(["scale", "y"]),
+            ComponentValueKind::F64,
+        ),
+    ]
 }
 
 fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
@@ -111,4 +139,34 @@ fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
 
 pub mod prelude {
     pub use crate::{GlobalTransform2d, Transform2d, TransformPlugin};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transform_schema_exposes_authoring_fields() {
+        let mut registry = ComponentRegistry::new();
+        register_transform_components(&mut registry);
+
+        let schema = registry
+            .schema(&ComponentTypeId::new("nara.transform.Transform2d"))
+            .unwrap();
+
+        assert_eq!(
+            schema
+                .fields
+                .iter()
+                .map(|field| (field.path.to_string(), field.value_kind, field.required))
+                .collect::<Vec<_>>(),
+            vec![
+                ("rotation".to_string(), ComponentValueKind::F64, true),
+                ("scale.x".to_string(), ComponentValueKind::F64, true),
+                ("scale.y".to_string(), ComponentValueKind::F64, true),
+                ("translation.x".to_string(), ComponentValueKind::F64, true),
+                ("translation.y".to_string(), ComponentValueKind::F64, true),
+            ]
+        );
+    }
 }
