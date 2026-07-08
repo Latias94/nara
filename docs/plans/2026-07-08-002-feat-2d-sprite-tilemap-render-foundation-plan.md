@@ -89,7 +89,7 @@ If the next implementation keeps extending `nara_render` as a mixed authoring/re
 - KTD2. Keep `Camera2d` in `nara_render` for this slice because views and render targets already live there. Revisit a future `nara_camera` crate only when `Camera3d` or editor cameras create real pressure.
 - KTD3. Replace `nara_render::Texture2d` with two concepts: `nara_sprite::Texture2d` for sprite authoring assets, and a backend-neutral render-target image type in `nara_render` for `RenderTarget::Image`.
 - KTD4. Add app-level render stages for `Prepare`, `Queue`, `Sort`, and `Cleanup` instead of hiding those steps as ordered systems inside `CoreStage::Render`. ADR 0017 wants phases to be real concepts before a graph exists.
-- KTD5. `nara_sprite_render` prepares logical colored quad vertices per extracted view. The wgpu backend packs those vertices into GPU buffers and owns all pipeline, shader, and buffer details.
+- KTD5. `nara_sprite_render` prepares logical colored quad instances per extracted view. The wgpu backend owns the static quad shader, packs those instances into GPU buffers, and issues instanced draws.
 - KTD6. The first renderer supports colored quads only. `Sprite` may carry optional texture data, but textured sprites are extracted and tracked as unsupported-for-draw until the asset/texture-upload slice lands.
 - KTD7. Tilemaps lower into the same quad queue as sprites for the first slice. Public tilemap data includes chunk addressing and dirty revisions now, but chunked mesh caching and atlas batching are deferred until there is real texture/atlas pressure.
 - KTD8. Sorting is deterministic and backend-neutral: view order first, then phase/layer/sort key, then stable entity-derived tie-breaker. This keeps AI-generated scenes reproducible and makes batching tests meaningful.
@@ -118,7 +118,7 @@ Extract: rebuild ExtractedViews and ExtractedSprites from authoring ECS data
 Prepare: reserved for future GPU resource preparation and texture upload
 Queue: create per-view 2D render items from extracted sprites and lowered tilemap cells
 Sort: order render items deterministically by view, phase, layer, sort key, and entity
-Render: build backend-neutral batches; wgpu clears and draws colored quad batches
+Render: build backend-neutral instance batches; wgpu clears and draws colored quad instances
 Cleanup: clear frame-local temporary state that should not survive into gameplay data
 ```
 
@@ -223,10 +223,10 @@ docs/
 - **Requirements:** R5, R6, R8, R10
 - **Dependencies:** U1, U2, U3
 - **Files:** Modify root `Cargo.toml`; create `crates/nara_sprite_render/Cargo.toml`; create `crates/nara_sprite_render/src/lib.rs`; modify `src/lib.rs`; modify `crates/nara_render/src/lib.rs` if view data needs 2D camera projection fields.
-- **Approach:** Add `ExtractedSprite`, `ExtractedSprites`, `QueuedSpriteItem`, `QueuedSpriteItems`, `SpriteBatch`, and `SpriteBatches`. Extract colored sprites and tilemap cells from ECS, lower tilemap cells to quad-sized items, queue items per extracted view, sort deterministically, and batch adjacent compatible colored quads.
+- **Approach:** Add `ExtractedSprite`, `ExtractedSprites`, `QueuedSpriteItem`, `QueuedSpriteItems`, `SpriteInstance`, `SpriteBatch`, and `SpriteBatches`. Extract colored sprites and tilemap cells from ECS, lower tilemap cells to quad-sized items, queue items per extracted view, sort deterministically, and batch adjacent compatible colored quad instances.
 - **Execution note:** Implement behavior with focused tests before wiring the wgpu backend to consume the batches.
 - **Patterns to follow:** Bevy `bevy_sprite_render/src/render/mod.rs` for extract/queue/batch separation; ADR 0017 phase readiness rules; current `ExtractedViews` resource pattern in `crates/nara_render/src/lib.rs`.
-- **Test scenarios:** Extraction clears stale sprites every frame; sprites without `Transform2d` use identity transform; tilemap cells lower to world positions using tile size and tile coordinates; queueing skips unsupported textured sprites while recording count in stats or resource metadata; sorting is stable for equal layer/sort keys; compatible colored quads form one batch and layer/sort changes split batches; generated vertices fit the camera's viewport aspect and `Camera2d::viewport_height`.
+- **Test scenarios:** Extraction clears stale sprites every frame; sprites without `Transform2d` use identity transform; tilemap cells lower to world positions using tile size and tile coordinates; queueing skips unsupported textured sprites while recording count in stats or resource metadata; sorting is stable for equal layer/sort keys; compatible colored quads form one batch and layer/sort changes split batches; generated instances fit the camera's viewport aspect and `Camera2d::viewport_height`; dirty tile chunks can be cleared after extraction without losing authored cells.
 - **Verification:** Sprite-render crate tests pass and no `wgpu` dependency appears in `nara_sprite_render`.
 
 ### U5. Teach the wgpu backend to draw colored 2D batches
@@ -235,10 +235,10 @@ docs/
 - **Requirements:** R7, R8, R9
 - **Dependencies:** U4
 - **Files:** Modify `crates/nara_render_wgpu/Cargo.toml`; modify `crates/nara_render_wgpu/src/lib.rs`; add `crates/nara_render_wgpu/src/sprite.wgsl`; add focused tests in `crates/nara_render_wgpu/src/lib.rs` or split test modules if the file becomes too large.
-- **Approach:** Create a static colored quad pipeline per surface format, pack `nara_sprite_render` logical vertices into a GPU vertex buffer, and draw each batch after clearing the target. Keep pipeline, shader, buffer, and bind-group details private to the backend. Continue skipping frames for zero-size/occluded/timeout surface states.
+- **Approach:** Create a static colored quad pipeline per surface format, pack `nara_sprite_render` logical instances into a GPU instance buffer, and draw each batch after clearing the target. The vertex shader should derive quad corners from `vertex_index` and per-instance center, half-size, transform/projection-ready coordinates, and color. Keep pipeline, shader, buffer, and bind-group details private to the backend. Continue skipping frames for zero-size/occluded/timeout surface states.
 - **Execution note:** Unit-test packing, layout, and draw-policy logic without requiring a GPU surface; use compile checks for real wgpu API compatibility.
 - **Patterns to follow:** Existing clear-pass surface lifecycle in `crates/nara_render_wgpu/src/lib.rs`; wgpu `hello_triangle` pipeline setup in `repo-ref/wgpu/examples/features/src/hello_triangle/mod.rs`.
-- **Test scenarios:** Vertex packing preserves position and color order; empty batches produce no sprite draw calls but still clear submitted targets; multiple batches produce multiple draw calls; missing batches do not panic; surface loss/reconfigure policy from the previous slice still passes; the backend does not query `Sprite` or `Tilemap` components.
+- **Test scenarios:** Instance packing preserves center, half-size, and color order; empty batches produce no sprite draw calls but still clear submitted targets; multiple batches produce multiple draw calls; missing batches do not panic; surface loss/reconfigure policy from the previous slice still passes; the backend does not query `Sprite` or `Tilemap` components.
 - **Verification:** Wgpu crate tests pass; backend feature compile checks pass; boundary searches still isolate `wgpu`.
 
 ### U6. Wire examples, docs, memory, and verification
@@ -282,7 +282,7 @@ docs/
 - `nara_render` no longer owns sprite/tilemap authoring data and remains backend-neutral.
 - The app lifecycle exposes explicit render pipeline stages beyond `Extract` and `Render`.
 - `MinimalPlugins` installs 2D authoring and backend-neutral sprite render plugins while staying backend-free.
-- The wgpu backend draws colored sprite/tilemap quad batches and keeps all `wgpu` usage inside `nara_render_wgpu`.
+- The wgpu backend draws colored sprite/tilemap quad instance batches and keeps all `wgpu` usage inside `nara_render_wgpu`.
 - Default-feature examples and optional backend examples compile through the root facade.
 - Boundary searches for `winit`, `wgpu`, and render-authoring split pass.
 - Architecture docs and engineering memory record the implemented split and intentional deferrals.
@@ -293,7 +293,7 @@ docs/
 ## Deferred to Follow-Up Work
 
 - Texture upload, image assets, samplers, atlases, sprite materials, and bind-group specialization.
-- Chunked tilemap rendering, dirty-region tracking, and atlas-aware tile batching.
+- Chunked GPU tilemap meshes, dirty-region GPU uploads, and atlas-aware tile batching.
 - Visibility/culling, render layers, debug gizmos, and runtime UI composition.
 - A full RenderGraph after a second concrete pass/resource use case appears.
 - Future `Camera3d`, mesh, material, depth, and 3D render phases.
