@@ -46,14 +46,132 @@ pub struct Handle<T> {
 pub struct AssetPath(String);
 
 impl AssetPath {
-    #[must_use]
-    pub fn new(path: impl Into<String>) -> Self {
-        Self(path.into())
+    pub fn new(path: impl Into<String>) -> Result<Self, AssetPathError> {
+        let path = path.into();
+        validate_asset_path(&path)?;
+        Ok(Self(path))
     }
 
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetPathError {
+    Empty,
+    Absolute,
+    ContainsBackslash,
+    ContainsDrivePrefix,
+    ContainsCurrentDirectory,
+    ContainsParentDirectory,
+    ContainsEmptySegment,
+}
+
+impl Display for AssetPathError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("asset path is empty"),
+            Self::Absolute => formatter.write_str("asset path must be project-relative"),
+            Self::ContainsBackslash => formatter.write_str("asset path must use '/' separators"),
+            Self::ContainsDrivePrefix => {
+                formatter.write_str("asset path must not contain a drive prefix")
+            }
+            Self::ContainsCurrentDirectory => {
+                formatter.write_str("asset path must not contain '.' segments")
+            }
+            Self::ContainsParentDirectory => {
+                formatter.write_str("asset path must not contain '..' segments")
+            }
+            Self::ContainsEmptySegment => {
+                formatter.write_str("asset path must not contain empty segments")
+            }
+        }
+    }
+}
+
+impl Error for AssetPathError {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(tag = "kind", content = "value", rename_all = "snake_case")
+)]
+pub enum AssetRef {
+    Path(AssetPath),
+    StableId(String),
+}
+
+impl AssetRef {
+    pub fn path(path: impl Into<String>) -> Result<Self, AssetPathError> {
+        Ok(Self::Path(AssetPath::new(path)?))
+    }
+
+    #[must_use]
+    pub fn stable_id(id: impl Into<String>) -> Self {
+        Self::StableId(id.into())
+    }
+
+    #[must_use]
+    pub fn as_path(&self) -> Option<&AssetPath> {
+        match self {
+            Self::Path(path) => Some(path),
+            Self::StableId(_) => None,
+        }
+    }
+
+    pub fn resolve<T>(&self, asset_server: &mut AssetServer) -> Result<Handle<T>, AssetRefError> {
+        match self {
+            Self::Path(path) => asset_server.reserve::<T>(path.as_str()).map_err(Into::into),
+            Self::StableId(id) => Err(AssetRefError::UnsupportedStableId(id.clone())),
+        }
+    }
+
+    pub fn from_handle<T>(
+        asset_server: &AssetServer,
+        handle: Handle<T>,
+    ) -> Result<Self, AssetRefError> {
+        let path = asset_server
+            .path(handle.id())
+            .ok_or_else(|| AssetRefError::UnknownHandle(handle.id()))?;
+        Self::path(path).map_err(Into::into)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetRefError {
+    InvalidPath(AssetPathError),
+    UnsupportedStableId(String),
+    UnknownHandle(AssetId),
+    Asset(AssetError),
+}
+
+impl Display for AssetRefError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidPath(error) => write!(formatter, "invalid asset path: {error}"),
+            Self::UnsupportedStableId(id) => {
+                write!(formatter, "stable asset id '{id}' is not supported yet")
+            }
+            Self::UnknownHandle(id) => write!(formatter, "asset handle {:?} has no known path", id),
+            Self::Asset(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl Error for AssetRefError {}
+
+impl From<AssetPathError> for AssetRefError {
+    fn from(error: AssetPathError) -> Self {
+        Self::InvalidPath(error)
+    }
+}
+
+impl From<AssetError> for AssetRefError {
+    fn from(error: AssetError) -> Self {
+        Self::Asset(error)
     }
 }
 
@@ -69,26 +187,6 @@ impl<T> Handle<T> {
     #[must_use]
     pub const fn id(self) -> AssetId {
         self.id
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<T> serde::Serialize for Handle<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.id.serialize(serializer)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de, T> serde::Deserialize<'de> for Handle<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Self::new(AssetId::deserialize(deserializer)?))
     }
 }
 
@@ -126,12 +224,14 @@ impl<T> Hash for Handle<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetError {
     IdSpaceExhausted,
+    InvalidPath(AssetPathError),
 }
 
 impl Display for AssetError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::IdSpaceExhausted => formatter.write_str("asset id space exhausted"),
+            Self::InvalidPath(error) => write!(formatter, "invalid asset path: {error}"),
         }
     }
 }
@@ -162,7 +262,8 @@ impl AssetServer {
     }
 
     pub fn reserve<T>(&mut self, path: impl Into<String>) -> Result<Handle<T>, AssetError> {
-        let path = path.into();
+        let path = AssetPath::new(path.into()).map_err(AssetError::InvalidPath)?;
+        let path = path.as_str().to_string();
         if let Some(id) = self.paths.get(&path).copied() {
             return Ok(Handle::new(id));
         }
@@ -182,6 +283,32 @@ impl AssetServer {
     pub fn path(&self, id: AssetId) -> Option<&str> {
         self.reverse_paths.get(&id).map(String::as_str)
     }
+}
+
+fn validate_asset_path(path: &str) -> Result<(), AssetPathError> {
+    if path.is_empty() {
+        return Err(AssetPathError::Empty);
+    }
+    if path.starts_with('/') {
+        return Err(AssetPathError::Absolute);
+    }
+    if path.contains('\\') {
+        return Err(AssetPathError::ContainsBackslash);
+    }
+    if path.contains(':') {
+        return Err(AssetPathError::ContainsDrivePrefix);
+    }
+
+    for segment in path.split('/') {
+        match segment {
+            "" => return Err(AssetPathError::ContainsEmptySegment),
+            "." => return Err(AssetPathError::ContainsCurrentDirectory),
+            ".." => return Err(AssetPathError::ContainsParentDirectory),
+            _ => {}
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Resource)]
@@ -253,6 +380,52 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(server.path(first.id()), Some("player.png"));
+    }
+
+    #[test]
+    fn rejects_non_logical_asset_paths() {
+        assert_eq!(AssetPath::new(""), Err(AssetPathError::Empty));
+        assert_eq!(
+            AssetPath::new("/absolute.png"),
+            Err(AssetPathError::Absolute)
+        );
+        assert_eq!(
+            AssetPath::new("textures\\player.png"),
+            Err(AssetPathError::ContainsBackslash)
+        );
+        assert_eq!(
+            AssetPath::new("textures/../player.png"),
+            Err(AssetPathError::ContainsParentDirectory)
+        );
+        assert_eq!(
+            AssetPath::new("textures//player.png"),
+            Err(AssetPathError::ContainsEmptySegment)
+        );
+    }
+
+    #[test]
+    fn resolves_and_exports_asset_refs_by_path() {
+        let mut server = AssetServer::new();
+        let asset_ref = AssetRef::path("textures/player.png").unwrap();
+
+        let handle = asset_ref.resolve::<String>(&mut server).unwrap();
+
+        assert_eq!(server.path(handle.id()), Some("textures/player.png"));
+        assert_eq!(
+            AssetRef::from_handle(&server, handle).unwrap(),
+            AssetRef::path("textures/player.png").unwrap()
+        );
+    }
+
+    #[test]
+    fn stable_asset_ids_are_reserved_for_later() {
+        let mut server = AssetServer::new();
+        let asset_ref = AssetRef::stable_id("asset-123");
+
+        assert_eq!(
+            asset_ref.resolve::<String>(&mut server),
+            Err(AssetRefError::UnsupportedStableId("asset-123".to_string()))
+        );
     }
 
     #[test]

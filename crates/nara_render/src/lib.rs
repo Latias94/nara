@@ -50,7 +50,6 @@ pub struct RenderImage2d {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RenderTarget {
     PrimaryWindow,
     Window(WindowId),
@@ -144,7 +143,6 @@ impl RenderPhaseLabel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Camera2d {
     pub target: RenderTarget,
     pub viewport: Option<ViewportRect>,

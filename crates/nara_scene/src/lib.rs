@@ -21,11 +21,9 @@ impl Name {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Component)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Parent(pub Entity);
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Component)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Children(pub Vec<Entity>);
 
 impl Children {

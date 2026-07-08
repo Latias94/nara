@@ -52,7 +52,10 @@ pub mod prelude {
     pub use nara_app::{
         App, AppExit, AppRunError, CoreStage, FixedTime, Plugin, PluginError, StartupStage, Time,
     };
-    pub use nara_asset::{Asset, AssetId, AssetPath, AssetServer, Assets, Handle};
+    pub use nara_asset::{
+        Asset, AssetId, AssetPath, AssetPathError, AssetRef, AssetRefError, AssetServer, Assets,
+        Handle,
+    };
     pub use nara_audio::{AudioClip, AudioCommand, AudioSink};
     pub use nara_core::{Color, Vec2, Vec3};
     pub use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, DiagnosticSeverity};

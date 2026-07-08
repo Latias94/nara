@@ -32,6 +32,16 @@ pub struct Diagnostic {
     pub code: DiagnosticCode,
     pub severity: DiagnosticSeverity,
     pub message: String,
+    pub context: DiagnosticContext,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DiagnosticContext {
+    pub entity_id: Option<String>,
+    pub component_id: Option<String>,
+    pub field_path: Option<String>,
+    pub asset_ref: Option<String>,
 }
 
 impl Diagnostic {
@@ -45,6 +55,7 @@ impl Diagnostic {
             code: DiagnosticCode::new(code),
             severity,
             message: message.into(),
+            context: DiagnosticContext::default(),
         }
     }
 
@@ -61,6 +72,30 @@ impl Diagnostic {
     #[must_use]
     pub fn info(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self::new(code, DiagnosticSeverity::Info, message)
+    }
+
+    #[must_use]
+    pub fn with_entity_id(mut self, entity_id: impl Into<String>) -> Self {
+        self.context.entity_id = Some(entity_id.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_component_id(mut self, component_id: impl Into<String>) -> Self {
+        self.context.component_id = Some(component_id.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_field_path(mut self, field_path: impl Into<String>) -> Self {
+        self.context.field_path = Some(field_path.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_asset_ref(mut self, asset_ref: impl Into<String>) -> Self {
+        self.context.asset_ref = Some(asset_ref.into());
+        self
     }
 }
 
@@ -105,7 +140,9 @@ impl DiagnosticReport {
 }
 
 pub mod prelude {
-    pub use crate::{Diagnostic, DiagnosticCode, DiagnosticReport, DiagnosticSeverity};
+    pub use crate::{
+        Diagnostic, DiagnosticCode, DiagnosticContext, DiagnosticReport, DiagnosticSeverity,
+    };
 }
 
 #[cfg(test)]
@@ -125,5 +162,28 @@ mod tests {
 
         assert!(report.has_errors());
         assert_eq!(report.diagnostics().len(), 2);
+    }
+
+    #[test]
+    fn diagnostic_context_identifies_scene_problem_location() {
+        let diagnostic = Diagnostic::error("scene.invalid-field", "invalid field")
+            .with_entity_id("player")
+            .with_component_id("nara.transform.Transform2d")
+            .with_field_path("translation.x")
+            .with_asset_ref("textures/player.png");
+
+        assert_eq!(diagnostic.context.entity_id.as_deref(), Some("player"));
+        assert_eq!(
+            diagnostic.context.component_id.as_deref(),
+            Some("nara.transform.Transform2d")
+        );
+        assert_eq!(
+            diagnostic.context.field_path.as_deref(),
+            Some("translation.x")
+        );
+        assert_eq!(
+            diagnostic.context.asset_ref.as_deref(),
+            Some("textures/player.png")
+        );
     }
 }

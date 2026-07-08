@@ -142,21 +142,13 @@ pub struct DirtyTileChunk {
 }
 
 #[derive(Debug, Clone, PartialEq, Component)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Tilemap {
-    #[cfg_attr(feature = "serde", serde(default))]
     pub tileset: Option<Handle<TileSet>>,
-    #[cfg_attr(feature = "serde", serde(default = "default_tile_size"))]
     pub tile_size: Vec2,
-    #[cfg_attr(feature = "serde", serde(default))]
     pub layer: TileLayer,
-    #[cfg_attr(feature = "serde", serde(default))]
     pub sort_key: i32,
-    #[cfg_attr(feature = "serde", serde(default, with = "serde_tile_cells"))]
     cells: BTreeMap<TileCoord, TileCell>,
-    #[cfg_attr(feature = "serde", serde(default, with = "serde_dirty_chunks"))]
     dirty_chunks: BTreeMap<TileChunkCoord, u64>,
-    #[cfg_attr(feature = "serde", serde(default = "default_next_dirty_revision"))]
     next_dirty_revision: u64,
 }
 
@@ -251,16 +243,6 @@ impl Default for Tilemap {
     }
 }
 
-#[cfg(feature = "serde")]
-fn default_tile_size() -> Vec2 {
-    DEFAULT_TILE_SIZE
-}
-
-#[cfg(feature = "serde")]
-fn default_next_dirty_revision() -> u64 {
-    1
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TilemapPlugin;
 
@@ -273,88 +255,6 @@ pub mod prelude {
         DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileCell, TileChunkCoord, TileCoord,
         TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
     };
-}
-
-#[cfg(feature = "serde")]
-mod serde_tile_cells {
-    use std::collections::BTreeMap;
-
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    use crate::{TileCell, TileCoord};
-
-    #[derive(Serialize, Deserialize)]
-    struct TileCellEntry {
-        coord: TileCoord,
-        cell: TileCell,
-    }
-
-    pub fn serialize<S>(
-        cells: &BTreeMap<TileCoord, TileCell>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.collect_seq(cells.iter().map(|(coord, cell)| TileCellEntry {
-            coord: *coord,
-            cell: *cell,
-        }))
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<TileCoord, TileCell>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let entries = Vec::<TileCellEntry>::deserialize(deserializer)?;
-        Ok(entries
-            .into_iter()
-            .map(|entry| (entry.coord, entry.cell))
-            .collect())
-    }
-}
-
-#[cfg(feature = "serde")]
-mod serde_dirty_chunks {
-    use std::collections::BTreeMap;
-
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    use crate::TileChunkCoord;
-
-    #[derive(Serialize, Deserialize)]
-    struct DirtyChunkEntry {
-        coord: TileChunkCoord,
-        revision: u64,
-    }
-
-    pub fn serialize<S>(
-        dirty_chunks: &BTreeMap<TileChunkCoord, u64>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.collect_seq(
-            dirty_chunks
-                .iter()
-                .map(|(coord, revision)| DirtyChunkEntry {
-                    coord: *coord,
-                    revision: *revision,
-                }),
-        )
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<TileChunkCoord, u64>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let entries = Vec::<DirtyChunkEntry>::deserialize(deserializer)?;
-        Ok(entries
-            .into_iter()
-            .map(|entry| (entry.coord, entry.revision))
-            .collect())
-    }
 }
 
 #[cfg(test)]

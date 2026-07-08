@@ -92,7 +92,9 @@ default = []
 serde = [
     "nara_asset/serde",
     "nara_core/serde",
+    "nara_diagnostic/serde",
     "nara_ecs/serde",
+    "nara_reflect/serde",
     "nara_transform/serde",
     "nara_render/serde",
     "nara_scene/serde",

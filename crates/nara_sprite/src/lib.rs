@@ -45,7 +45,6 @@ impl Default for SpriteAnchor {
 }
 
 #[derive(Debug, Clone, PartialEq, Component)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sprite {
     pub texture: Option<Handle<Texture2d>>,
     pub texture_region: Option<TextureRegion>,
