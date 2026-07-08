@@ -27,10 +27,35 @@ pub(crate) fn preflight_scene(
     preflight_scene_with_context(document, registry, &mut context)
 }
 
+pub(crate) fn preflight_authoring_scene(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+) -> PreparedScene {
+    let mut context = ComponentDecodeContext::new();
+    preflight_authoring_scene_with_context(document, registry, &mut context)
+}
+
 pub(crate) fn preflight_scene_with_context(
     document: &SceneDocument,
     registry: &ComponentRegistry,
     context: &mut ComponentDecodeContext<'_>,
+) -> PreparedScene {
+    preflight_scene_with_context_options(document, registry, context, false)
+}
+
+pub(crate) fn preflight_authoring_scene_with_context(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    context: &mut ComponentDecodeContext<'_>,
+) -> PreparedScene {
+    preflight_scene_with_context_options(document, registry, context, true)
+}
+
+fn preflight_scene_with_context_options(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    context: &mut ComponentDecodeContext<'_>,
+    allow_prefab_instances: bool,
 ) -> PreparedScene {
     let mut diagnostics = DiagnosticReport::default();
     let mut seen = BTreeSet::<SceneEntityId>::new();
@@ -79,11 +104,13 @@ pub(crate) fn preflight_scene_with_context(
                 );
             }
         }
-        if let Some(prefab) = &entity.prefab {
+        if let Some(prefab) = &entity.prefab
+            && !allow_prefab_instances
+        {
             diagnostics.push(
                 Diagnostic::error(
                     "scene.prefab-instance-unsupported",
-                    "external prefab source resolution is not implemented in this slice; instantiate PrefabDocument directly",
+                    "prefab instances must be expanded with a PrefabSourceResolver before scene spawn",
                 )
                 .with_entity_id(entity.id.as_str())
                 .with_field_path("prefab.source")

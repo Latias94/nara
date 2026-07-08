@@ -147,6 +147,240 @@ fn unsupported_prefab_instance_prevents_world_mutation() {
 }
 
 #[test]
+fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/enemy.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))
+            .with_component(position_type_id(), position_record(3))]),
+    );
+    let document = SceneDocument::new([prefab_anchor("enemy", source)]);
+    let mut world = World::new();
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+    let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    assert_eq!(
+        expanded
+            .entities
+            .iter()
+            .map(|entity| entity.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["enemy", "enemy/visual"]
+    );
+    assert_eq!(
+        expanded.entities[1]
+            .parent
+            .as_ref()
+            .map(SceneEntityId::as_str),
+        Some("enemy")
+    );
+    assert!(!report.diagnostics.has_errors());
+    assert_eq!(report.entity_map.len(), 2);
+    let visual = report.entity_map.get(&scene_id("enemy/visual")).unwrap();
+    assert_eq!(world.get::<TestPosition>(visual).unwrap().x, 3);
+}
+
+#[test]
+fn prefab_instance_override_patch_applies_before_namespacing() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/enemy.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))
+            .with_component(position_type_id(), position_record(3))]),
+    );
+    let overrides = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: scene_id("visual"),
+        component: position_type_id(),
+        path: ComponentFieldPath::from_fields(["x"]),
+        value: ComponentValue::I64(11),
+    }]);
+    let document = SceneDocument::new([prefab_anchor_with_overrides("enemy", source, overrides)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    let visual = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "enemy/visual")
+        .unwrap();
+    assert_eq!(
+        visual
+            .components
+            .get(&position_type_id())
+            .unwrap()
+            .value
+            .field_i64("x")
+            .unwrap(),
+        11
+    );
+}
+
+#[test]
+fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
+    let registry = test_registry();
+    let enemy_source = AssetRef::path("prefabs/enemy.ron").unwrap();
+    let weapon_source = AssetRef::path("prefabs/weapon.ron").unwrap();
+    let muzzle_source = AssetRef::path("prefabs/muzzle.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(
+            enemy_source.clone(),
+            PrefabDocument::new([prefab_anchor("weapon", weapon_source.clone())]),
+        )
+        .with_prefab(
+            weapon_source,
+            PrefabDocument::new([prefab_anchor("muzzle", muzzle_source.clone())]),
+        )
+        .with_prefab(
+            muzzle_source,
+            PrefabDocument::new([SceneEntityRecord::new(scene_id("flash"))
+                .with_component(position_type_id(), position_record(8))]),
+        );
+    let document = SceneDocument::new([prefab_anchor("enemy", enemy_source)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    assert_eq!(
+        expanded
+            .entities
+            .iter()
+            .map(|entity| entity.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "enemy",
+            "enemy/weapon",
+            "enemy/weapon/muzzle",
+            "enemy/weapon/muzzle/flash"
+        ]
+    );
+}
+
+#[test]
+fn repeated_prefab_instances_expand_without_id_collisions() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/enemy.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))]),
+    );
+    let document = SceneDocument::new([
+        prefab_anchor("left", source.clone()),
+        prefab_anchor("right", source),
+    ]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    assert_eq!(
+        expanded
+            .entities
+            .iter()
+            .map(|entity| entity.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["left", "left/visual", "right", "right/visual"]
+    );
+}
+
+#[test]
+fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/missing.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new();
+    let document = SceneDocument::new([prefab_anchor("enemy", source)]);
+    let mut world = World::new();
+    let before = world.iter_entities().count();
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+    let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
+
+    assert!(expansion.document.is_none());
+    assert!(
+        expansion
+            .diagnostics
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic.code.as_str() == "scene.prefab-source-missing"
+                    && diagnostic.context.entity_id.as_deref() == Some("enemy")
+                    && diagnostic.context.asset_ref.as_deref() == Some("prefabs/missing.ron")
+            })
+    );
+    assert!(report.diagnostics.has_errors());
+    assert_eq!(world.iter_entities().count(), before);
+    assert!(report.entity_map.is_empty());
+}
+
+#[test]
+fn prefab_source_cycle_reports_chain_without_expanded_document() {
+    let registry = test_registry();
+    let a = AssetRef::path("prefabs/a.ron").unwrap();
+    let b = AssetRef::path("prefabs/b.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(a.clone(), PrefabDocument::new([prefab_anchor("b", b)]))
+        .with_prefab(
+            AssetRef::path("prefabs/b.ron").unwrap(),
+            PrefabDocument::new([prefab_anchor("a", a.clone())]),
+        );
+    let document = SceneDocument::new([prefab_anchor("root", a)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(expansion.document.is_none());
+    assert!(
+        expansion
+            .diagnostics
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic.code.as_str() == "scene.prefab-cycle"
+                    && diagnostic.context.asset_ref.as_deref() == Some("prefabs/a.ron")
+                    && diagnostic
+                        .message
+                        .contains("prefabs/a.ron -> prefabs/b.ron -> prefabs/a.ron")
+            })
+    );
+}
+
+#[test]
+fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
+    let registry = test_registry();
+    let enemy_source = AssetRef::path("prefabs/enemy.ron").unwrap();
+    let weapon_source = AssetRef::path("prefabs/weapon.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        enemy_source.clone(),
+        PrefabDocument::new([prefab_anchor("weapon", weapon_source)]),
+    );
+    let document = SceneDocument::new([prefab_anchor("enemy", enemy_source)]);
+
+    let expansion = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions { max_depth: 1 },
+    );
+
+    assert!(expansion.document.is_none());
+    assert!(
+        expansion
+            .diagnostics
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic.code.as_str() == "scene.prefab-depth-exceeded"
+                    && diagnostic.context.entity_id.as_deref() == Some("weapon")
+            })
+    );
+}
+
+#[test]
 fn invalid_component_payload_does_not_mutate_world() {
     let registry = test_registry();
     let document = SceneDocument::new([SceneEntityRecord::new(scene_id("bad")).with_component(
@@ -792,6 +1026,23 @@ fn stable_id(id: &str) -> StableAssetId {
 
 fn scene_id(id: &str) -> SceneEntityId {
     SceneEntityId::new(id).unwrap()
+}
+
+fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
+    prefab_anchor_with_overrides(id, source, ScenePatchDocument::default())
+}
+
+fn prefab_anchor_with_overrides(
+    id: &str,
+    source: AssetRef,
+    overrides: ScenePatchDocument,
+) -> SceneEntityRecord {
+    SceneEntityRecord {
+        id: scene_id(id),
+        parent: None,
+        components: BTreeMap::new(),
+        prefab: Some(PrefabInstance { source, overrides }),
+    }
 }
 
 fn asset_link_type_id() -> ComponentTypeId {

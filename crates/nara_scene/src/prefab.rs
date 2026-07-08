@@ -1,8 +1,8 @@
 use nara_asset::{AssetRef, ProjectAssetDatabase};
-use nara_diagnostic::DiagnosticReport;
+use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::ComponentRegistry;
 
-use crate::{SceneDocument, SceneEntityRecord, ScenePatchDocument};
+use crate::{SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument};
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -76,6 +76,26 @@ impl PrefabDocument {
         self.instantiate()
             .validate_with_asset_database(registry, database)
     }
+
+    #[must_use]
+    pub fn expand_prefabs<R: PrefabSourceResolver + ?Sized>(
+        &self,
+        registry: &ComponentRegistry,
+        resolver: &R,
+    ) -> PrefabExpansionReport {
+        self.instantiate().expand_prefabs(registry, resolver)
+    }
+
+    #[must_use]
+    pub fn expand_prefabs_with_asset_database<R: PrefabSourceResolver + ?Sized>(
+        &self,
+        registry: &ComponentRegistry,
+        resolver: &R,
+        database: &ProjectAssetDatabase,
+    ) -> PrefabExpansionReport {
+        self.instantiate()
+            .expand_prefabs_with_asset_database(registry, resolver, database)
+    }
 }
 
 impl Default for PrefabDocument {
@@ -121,4 +141,314 @@ pub struct PrefabInstance {
     pub source: AssetRef,
     #[cfg_attr(feature = "serde", serde(default))]
     pub overrides: ScenePatchDocument,
+}
+
+pub trait PrefabSourceResolver {
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument>;
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct InMemoryPrefabSourceResolver {
+    sources: Vec<(AssetRef, PrefabDocument)>,
+}
+
+impl InMemoryPrefabSourceResolver {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn with_prefab(mut self, source: AssetRef, prefab: PrefabDocument) -> Self {
+        self.insert(source, prefab);
+        self
+    }
+
+    pub fn insert(&mut self, source: AssetRef, prefab: PrefabDocument) -> Option<PrefabDocument> {
+        if let Some((_, existing)) = self
+            .sources
+            .iter_mut()
+            .find(|(candidate, _)| candidate == &source)
+        {
+            return Some(std::mem::replace(existing, prefab));
+        }
+
+        self.sources.push((source, prefab));
+        None
+    }
+}
+
+impl PrefabSourceResolver for InMemoryPrefabSourceResolver {
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
+        self.sources
+            .iter()
+            .find(|(candidate, _)| candidate == source)
+            .map(|(_, prefab)| prefab)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrefabExpansionOptions {
+    pub max_depth: usize,
+}
+
+impl Default for PrefabExpansionOptions {
+    fn default() -> Self {
+        Self { max_depth: 32 }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct PrefabExpansionReport {
+    pub document: Option<SceneDocument>,
+    pub diagnostics: DiagnosticReport,
+}
+
+impl SceneDocument {
+    #[must_use]
+    pub fn expand_prefabs<R: PrefabSourceResolver + ?Sized>(
+        &self,
+        registry: &ComponentRegistry,
+        resolver: &R,
+    ) -> PrefabExpansionReport {
+        self.expand_prefabs_with_options(registry, resolver, PrefabExpansionOptions::default())
+    }
+
+    #[must_use]
+    pub fn expand_prefabs_with_asset_database<R: PrefabSourceResolver + ?Sized>(
+        &self,
+        registry: &ComponentRegistry,
+        resolver: &R,
+        database: &ProjectAssetDatabase,
+    ) -> PrefabExpansionReport {
+        self.expand_prefabs_with_options_and_asset_database(
+            registry,
+            resolver,
+            PrefabExpansionOptions::default(),
+            database,
+        )
+    }
+
+    #[must_use]
+    pub fn expand_prefabs_with_options<R: PrefabSourceResolver + ?Sized>(
+        &self,
+        registry: &ComponentRegistry,
+        resolver: &R,
+        options: PrefabExpansionOptions,
+    ) -> PrefabExpansionReport {
+        let mut context = PrefabExpansionContext::new(registry, resolver, options, None);
+        context.expand_scene_document(self)
+    }
+
+    #[must_use]
+    pub fn expand_prefabs_with_options_and_asset_database<R: PrefabSourceResolver + ?Sized>(
+        &self,
+        registry: &ComponentRegistry,
+        resolver: &R,
+        options: PrefabExpansionOptions,
+        database: &ProjectAssetDatabase,
+    ) -> PrefabExpansionReport {
+        let mut context = PrefabExpansionContext::new(registry, resolver, options, Some(database));
+        context.expand_scene_document(self)
+    }
+}
+
+struct PrefabExpansionContext<'a, R: PrefabSourceResolver + ?Sized> {
+    registry: &'a ComponentRegistry,
+    resolver: &'a R,
+    options: PrefabExpansionOptions,
+    database: Option<&'a ProjectAssetDatabase>,
+    stack: Vec<AssetRef>,
+    diagnostics: DiagnosticReport,
+}
+
+impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
+    fn new(
+        registry: &'a ComponentRegistry,
+        resolver: &'a R,
+        options: PrefabExpansionOptions,
+        database: Option<&'a ProjectAssetDatabase>,
+    ) -> Self {
+        Self {
+            registry,
+            resolver,
+            options,
+            database,
+            stack: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        }
+    }
+
+    fn expand_scene_document(&mut self, document: &SceneDocument) -> PrefabExpansionReport {
+        let mut expanded = SceneDocument {
+            format_version: document.format_version,
+            entities: Vec::new(),
+        };
+        self.expand_entities(&document.entities, &mut expanded.entities);
+        expanded.canonicalize();
+
+        if !self.diagnostics.has_errors() {
+            let validation = self.validate_document(&expanded);
+            self.diagnostics.extend(validation);
+        }
+
+        if self.diagnostics.has_errors() {
+            return PrefabExpansionReport {
+                document: None,
+                diagnostics: std::mem::take(&mut self.diagnostics),
+            };
+        }
+
+        PrefabExpansionReport {
+            document: Some(expanded),
+            diagnostics: std::mem::take(&mut self.diagnostics),
+        }
+    }
+
+    fn expand_entities(
+        &mut self,
+        entities: &[SceneEntityRecord],
+        output: &mut Vec<SceneEntityRecord>,
+    ) {
+        for entity in entities {
+            self.expand_entity(entity, output);
+        }
+    }
+
+    fn expand_entity(&mut self, entity: &SceneEntityRecord, output: &mut Vec<SceneEntityRecord>) {
+        let mut anchor = entity.clone();
+        let prefab_instance = anchor.prefab.take();
+        output.push(anchor);
+
+        if let Some(instance) = prefab_instance {
+            self.expand_prefab_instance(&entity.id, &instance, output);
+        }
+    }
+
+    fn expand_prefab_instance(
+        &mut self,
+        anchor_id: &SceneEntityId,
+        instance: &PrefabInstance,
+        output: &mut Vec<SceneEntityRecord>,
+    ) {
+        if self.stack.len() >= self.options.max_depth {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "scene.prefab-depth-exceeded",
+                    format!(
+                        "prefab expansion exceeded max depth {}",
+                        self.options.max_depth
+                    ),
+                )
+                .with_entity_id(anchor_id.as_str())
+                .with_field_path("prefab.source")
+                .with_asset_ref(instance.source.to_string()),
+            );
+            return;
+        }
+
+        if self.stack.contains(&instance.source) {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "scene.prefab-cycle",
+                    prefab_cycle_message(&self.stack, &instance.source),
+                )
+                .with_entity_id(anchor_id.as_str())
+                .with_field_path("prefab.source")
+                .with_asset_ref(instance.source.to_string()),
+            );
+            return;
+        }
+
+        let Some(prefab) = self.resolver.resolve_prefab(&instance.source) else {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "scene.prefab-source-missing",
+                    "prefab source resolver could not find the requested source",
+                )
+                .with_entity_id(anchor_id.as_str())
+                .with_field_path("prefab.source")
+                .with_asset_ref(instance.source.to_string()),
+            );
+            return;
+        };
+
+        self.stack.push(instance.source.clone());
+
+        let mut source_document = prefab.instantiate();
+        let patch_report = match self.database {
+            Some(database) => instance.overrides.apply_to_scene_with_asset_database(
+                &mut source_document,
+                self.registry,
+                database,
+            ),
+            None => instance
+                .overrides
+                .apply_to_scene(&mut source_document, self.registry),
+        };
+
+        if !patch_report.applied {
+            self.diagnostics.extend(patch_report.diagnostics);
+            self.stack.pop();
+            return;
+        }
+
+        let diagnostics_before = self.diagnostics.diagnostics().len();
+        let mut expanded_source = SceneDocument {
+            format_version: source_document.format_version,
+            entities: Vec::new(),
+        };
+        self.expand_entities(&source_document.entities, &mut expanded_source.entities);
+        expanded_source.canonicalize();
+
+        if self.diagnostics.diagnostics().len() == diagnostics_before {
+            let validation = self.validate_document(&expanded_source);
+            self.diagnostics.extend(validation);
+        }
+
+        if self.diagnostics.diagnostics().len() == diagnostics_before {
+            for entity in namespace_prefab_entities(anchor_id, expanded_source.entities) {
+                output.push(entity);
+            }
+        }
+
+        self.stack.pop();
+    }
+
+    fn validate_document(&self, document: &SceneDocument) -> DiagnosticReport {
+        match self.database {
+            Some(database) => document.validate_with_asset_database(self.registry, database),
+            None => document.validate(self.registry),
+        }
+    }
+}
+
+fn namespace_prefab_entities(
+    anchor_id: &SceneEntityId,
+    entities: Vec<SceneEntityRecord>,
+) -> Vec<SceneEntityRecord> {
+    entities
+        .into_iter()
+        .map(|mut entity| {
+            let local_id = entity.id.clone();
+            entity.id = namespace_scene_entity_id(anchor_id, &local_id);
+            entity.parent = Some(match entity.parent {
+                Some(parent) => namespace_scene_entity_id(anchor_id, &parent),
+                None => anchor_id.clone(),
+            });
+            entity.prefab = None;
+            entity
+        })
+        .collect()
+}
+
+fn namespace_scene_entity_id(anchor_id: &SceneEntityId, local_id: &SceneEntityId) -> SceneEntityId {
+    SceneEntityId::new(format!("{}/{}", anchor_id.as_str(), local_id.as_str()))
+        .expect("namespacing two valid scene entity ids should produce a valid scene entity id")
+}
+
+fn prefab_cycle_message(stack: &[AssetRef], source: &AssetRef) -> String {
+    let mut chain = stack.iter().map(ToString::to_string).collect::<Vec<_>>();
+    chain.push(source.to_string());
+    format!("prefab source cycle detected: {}", chain.join(" -> "))
 }

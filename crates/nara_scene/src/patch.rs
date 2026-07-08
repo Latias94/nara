@@ -37,7 +37,7 @@ impl ScenePatchDocument {
         registry: &ComponentRegistry,
     ) -> ScenePatchReport {
         self.apply_to_scene_with_validator(document, registry, |document, registry| {
-            document.validate(registry)
+            document.validate_authoring(registry)
         })
     }
 
@@ -48,7 +48,7 @@ impl ScenePatchDocument {
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
         self.apply_to_scene_with_validator(document, registry, |document, registry| {
-            document.validate_with_asset_database(registry, database)
+            document.validate_authoring_with_asset_database(registry, database)
         })
     }
 

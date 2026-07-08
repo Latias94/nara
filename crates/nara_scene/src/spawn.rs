@@ -6,7 +6,8 @@ use nara_ecs::{Component, Entity, World};
 use nara_reflect::{ComponentDecodeContext, ComponentRegistry};
 
 use crate::{
-    PrefabDocument, SceneDocument, SceneEntityId, ScenePatchDocument,
+    PrefabDocument, PrefabExpansionReport, PrefabSourceResolver, SceneDocument, SceneEntityId,
+    ScenePatchDocument,
     hierarchy::{Parent, sync_children},
     validation::preflight_scene_with_context,
 };
@@ -119,6 +120,29 @@ impl SceneSpawner {
         self.spawn_with_asset_context(world, registry, document, Some(database))
     }
 
+    pub fn spawn_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        resolver: &R,
+    ) -> SceneSpawnReport {
+        let expansion = document.expand_prefabs(registry, resolver);
+        self.spawn_prefab_expansion(world, registry, expansion, None)
+    }
+
+    pub fn spawn_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        resolver: &R,
+        database: &ProjectAssetDatabase,
+    ) -> SceneSpawnReport {
+        let expansion = document.expand_prefabs_with_asset_database(registry, resolver, database);
+        self.spawn_prefab_expansion(world, registry, expansion, Some(database))
+    }
+
     fn spawn_with_asset_context(
         &mut self,
         world: &mut World,
@@ -196,6 +220,33 @@ impl SceneSpawner {
             entity_map,
             diagnostics,
         }
+    }
+
+    fn spawn_prefab_expansion(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        expansion: PrefabExpansionReport,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> SceneSpawnReport {
+        let mut diagnostics = expansion.diagnostics;
+        if diagnostics.has_errors() {
+            return SceneSpawnReport {
+                entity_map: SceneEntityMap::default(),
+                diagnostics,
+            };
+        }
+
+        let document = expansion
+            .document
+            .expect("successful prefab expansion should include document");
+        let mut report = match database {
+            Some(database) => self.spawn_with_asset_database(world, registry, &document, database),
+            None => self.spawn(world, registry, &document),
+        };
+        diagnostics.extend(report.diagnostics);
+        report.diagnostics = diagnostics;
+        report
     }
 
     pub fn spawn_prefab(
@@ -293,6 +344,29 @@ pub fn spawn_scene_with_asset_database(
     database: &ProjectAssetDatabase,
 ) -> SceneSpawnReport {
     SceneSpawner::new().spawn_with_asset_database(world, registry, document, database)
+}
+
+#[must_use]
+pub fn spawn_scene_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    document: &SceneDocument,
+    resolver: &R,
+) -> SceneSpawnReport {
+    SceneSpawner::new().spawn_with_prefab_resolver(world, registry, document, resolver)
+}
+
+#[must_use]
+pub fn spawn_scene_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    document: &SceneDocument,
+    resolver: &R,
+    database: &ProjectAssetDatabase,
+) -> SceneSpawnReport {
+    SceneSpawner::new().spawn_with_prefab_resolver_and_asset_database(
+        world, registry, document, resolver, database,
+    )
 }
 
 #[must_use]

@@ -22,9 +22,13 @@ pub use hierarchy::{
     spawn_child, sync_children,
 };
 pub use patch::{ScenePatchDocument, ScenePatchOperation, ScenePatchReport};
-pub use prefab::{PrefabDocument, PrefabInstance, PrefabInstantiationReport};
+pub use prefab::{
+    InMemoryPrefabSourceResolver, PrefabDocument, PrefabExpansionOptions, PrefabExpansionReport,
+    PrefabInstance, PrefabInstantiationReport, PrefabSourceResolver,
+};
 pub use spawn::{
     SceneEntityMap, SceneEntitySource, SceneInstanceId, SceneSpawnReport, SceneSpawner,
     spawn_prefab, spawn_prefab_with_asset_database, spawn_prefab_with_patch,
     spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
+    spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
 };

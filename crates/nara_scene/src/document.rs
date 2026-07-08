@@ -14,7 +14,10 @@ use nara_reflect::{
 
 use crate::{
     PrefabInstance,
-    validation::{preflight_scene, preflight_scene_with_context},
+    validation::{
+        preflight_authoring_scene, preflight_authoring_scene_with_context, preflight_scene,
+        preflight_scene_with_context,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
@@ -91,6 +94,19 @@ impl SceneDocument {
     ) -> DiagnosticReport {
         let mut context = ComponentDecodeContext::new().with_project_asset_database(database);
         preflight_scene_with_context(self, registry, &mut context).diagnostics
+    }
+
+    pub(crate) fn validate_authoring(&self, registry: &ComponentRegistry) -> DiagnosticReport {
+        preflight_authoring_scene(self, registry).diagnostics
+    }
+
+    pub(crate) fn validate_authoring_with_asset_database(
+        &self,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> DiagnosticReport {
+        let mut context = ComponentDecodeContext::new().with_project_asset_database(database);
+        preflight_authoring_scene_with_context(self, registry, &mut context).diagnostics
     }
 }
 
