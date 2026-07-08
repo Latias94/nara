@@ -87,12 +87,13 @@ Resolved in the scene/prefab serialization foundation:
 ## Asset Identity
 
 Accepted direction: typed handles with UUID-ready asset identity. See ADR [0007-asset-identity-and-import-pipeline.md](adr/0007-asset-identity-and-import-pipeline.md).
+The next concrete implementation direction connects asset import to render resource preparation; see ADR [0033-asset-import-and-render-resource-preparation-seam.md](adr/0033-asset-import-and-render-resource-preparation-seam.md).
 
 Follow-up details still to settle:
 
-1. Where do `.meta` files live, if any?
-2. Are imported artifacts content-addressed?
-3. Does Phase 1 expose async asset states now or only reserve them in types?
+1. What exact `.meta` schema fields are required in the first slice?
+2. Should `AssetServer` expose `LoadState` immediately, or should load state live in a separate project asset database resource first?
+3. Which import profile fields belong in artifact cache keys for desktop-only Phase 1?
 
 Resolved in the scene/prefab serialization foundation:
 
@@ -102,6 +103,16 @@ Resolved in the scene/prefab serialization foundation:
 - `Handle<T>` no longer serializes as runtime `AssetId`; persistent scene data uses `AssetRef`.
 - Stable asset IDs remain reserved for the `.meta`/import database slice and report unsupported
   diagnostics when encountered in this foundation.
+
+Resolved by ADR 0033:
+
+- Source asset `.meta` files live beside source assets first, for example
+  `assets/textures/player.png.meta`.
+- Generated imported artifacts live under `.nara/import-cache/` and are not hand-authored source
+  data.
+- Import artifact identity is content-addressed by stable asset ID, source content hash, importer
+  ID/version, import settings hash, and target/import profile when relevant.
+- Backend GPU objects are not imported artifacts; they live in backend resource caches.
 
 ## Runtime Concurrency
 
@@ -129,6 +140,7 @@ Follow-up details still to settle:
 
 Accepted direction: split render domain, backend, sprite, tilemap, and sprite-render responsibilities. See ADR [0012-render-crate-boundaries.md](adr/0012-render-crate-boundaries.md). Render graph policy is phase-based first and graph-ready later; see ADR [0017-render-graph-policy.md](adr/0017-render-graph-policy.md).
 The next implementation slice uses main-world explicit extraction data and backend handle providers rather than a separate render world; see ADR [0032-render-backend-integration-boundary.md](adr/0032-render-backend-integration-boundary.md).
+Texture upload and material/resource growth should use the asset import + render resource preparation seam; see ADR [0033-asset-import-and-render-resource-preparation-seam.md](adr/0033-asset-import-and-render-resource-preparation-seam.md).
 
 Follow-up details still to settle:
 
@@ -147,8 +159,15 @@ Still open:
 1. What abstraction generalizes `SpriteBatches` once runtime UI, gizmos, text, or 3D submit their
    own phase items?
 2. What concrete second pass/resource use case should trigger full `RenderGraph` implementation?
-3. How will texture upload, atlases, bind groups, and material specialization attach to the current
-   sprite/tilemap authoring data?
+3. What is the first backend-neutral texture descriptor type: image asset, texture asset, or material
+   input?
+
+Resolved by ADR 0033:
+
+- Texture upload, atlases, materials, UI images, and future 3D assets attach through asset import,
+  backend-neutral render resource preparation, and backend-owned GPU resource caches.
+- `nara_render_wgpu` owns textures, samplers, bind groups, buffers, and pipeline cache details.
+- Gameplay/domain crates store typed handles or backend-neutral descriptors, not backend handles.
 
 ## Platform and Runner
 

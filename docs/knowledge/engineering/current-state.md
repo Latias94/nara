@@ -12,7 +12,7 @@ status: "active"
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
 - Snapshot timestamp: 2026-07-08T09:19:21Z
 - Last verified: Scene/prefab serialization foundation passed fmt, workspace checks with and without serde, examples check, winit/wgpu backend example checks, `scene_prefab_roundtrip`, serde ID/path regression tests, `cargo nextest run --workspace` with 77 tests, backend boundary searches, and runtime serialization leak searches.
-- Next action: After the feature branch is merged to local `main`, continue with texture upload/image import, scene patch transactions, component schema export/migrations, or asset `.meta` identity.
+- Next action: Plan the asset import and render resource preparation seam from ADR 0033 before direct texture upload, runtime UI rendering, material expansion, or 3D mesh work.
 
 # Active Registrations
 
@@ -41,7 +41,8 @@ status: "active"
   - `nara_scene` owns `SceneDocument`, `PrefabDocument`, stable `SceneEntityId`, validation, spawn/export, and `SceneEntitySource` provenance.
   - Built-in scene, transform, render, sprite, and tilemap codecs register through their owning crate plugins.
 - Pending follow-ups:
-  - Texture upload, atlas batching, `.meta` asset identity/import cache, scene patch transactions, field-level prefab overrides, nested prefab source resolution, component schema export, and migration chains remain follow-up work.
+  - Asset import/render resource preparation is the next recommended slice: `.meta` identity, importer registry, imported artifact cache records, image/texture import, render prepare state, wgpu texture/sampler cache, and sprite/tilemap texture usage.
+  - Scene patch transactions, field-level prefab overrides, nested prefab source resolution, component schema export, and migration chains remain follow-up work after or alongside the asset/render seam.
 - Blocked:
   - None.
 
@@ -49,3 +50,5 @@ status: "active"
 
 - [Scene/prefab serialization progress](progress/2026-07-08T084957Z-scene-prefab-serialization-foundation.md)
 - [Scene/prefab serialization final verification](verification/2026-07-08T091921Z-scene-prefab-serialization-foundation-final.md)
+- [Next architecture priority](decisions/2026-07-08T093608Z-next-priority-asset-import-render-resource-seam.md)
+- [ADR 0033](../../architecture/adr/0033-asset-import-and-render-resource-preparation-seam.md)
