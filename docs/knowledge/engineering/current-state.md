@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-08T06:05:00Z
+timestamp: 2026-07-08T08:25:00Z
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-08T06:05:00Z
-- Last verified: 2D render foundation final gates passed: fmt, workspace check, examples check, backend example checks, `cargo nextest run --workspace` with 58 tests, headless smoke runs, backend boundary searches, default backend-free dependency tree, authoring split search, and engineering memory validation.
-- Next action: Commit the 2D render foundation tail, then merge `feat/2d-render-foundation` back to local `main`.
+- Snapshot timestamp: 2026-07-08T08:25:00Z
+- Last verified: 2D render foundation and module-split tail passed fmt, workspace check, examples check, backend example checks, `cargo nextest run --workspace` with 58 tests, headless smoke runs, backend boundary searches, default backend-free dependency tree, authoring split search, and engineering memory validation.
+- Next action: Continue from local `main` with the next planned runtime slice.
 
 # Active Registrations
 
@@ -34,8 +34,8 @@ status: "active"
   - `nara_render` now exposes graph-ready render-domain data: `RenderTarget`, `ViewportRect`, `ExtractedView`, `ExtractedViews`, `RenderPhaseLabel`, and `RenderFrame`.
   - `nara_render_wgpu` owns all `wgpu` imports and a clear-pass backend skeleton with surface status policy tests.
   - `nara_sprite` owns sprite authoring data, while `nara_tilemap` owns tilemap authoring data with dirty chunk revisions.
-  - `nara_sprite_render` lowers sprite/tilemap authoring data into backend-neutral colored quad batches.
-  - `nara_render_wgpu` now draws colored quad batches from `SpriteBatches` through a private wgpu pipeline.
+  - `nara_sprite_render` lowers sprite/tilemap authoring data into backend-neutral colored quad batches through split `types`, `extract`, and `queue` modules.
+  - `nara_render_wgpu` now draws colored quad batches from `SpriteBatches` through split surface lifecycle and sprite pipeline modules.
 - Pending follow-ups:
   - Texture upload, atlas batching, built-in component reflection registration, and scene/prefab serialization remain design-to-implementation follow-up work.
 - Blocked:

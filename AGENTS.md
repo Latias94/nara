@@ -12,6 +12,7 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_winit` owns all `winit` imports and desktop event-loop integration.
 - `nara_render_wgpu` owns all `wgpu` imports and GPU surface/device lifecycle.
 - `nara_sprite_render` owns backend-neutral 2D extraction, queueing, sorting, and batching. GPU backends should consume `SpriteBatches`, not gameplay `Sprite` or `Tilemap` components.
+- Keep render modules split by responsibility: `nara_sprite_render::{types,extract,queue}` and `nara_render_wgpu::{surface,sprite}` should stay narrow instead of growing monolithic backend or render-bridge files.
 - The root `nara` facade must keep `winit` and `wgpu` optional; default features stay backend-free.
 - `repo-ref/` contains reference source trees. Treat it as read-only reference material and keep it out of git.
 

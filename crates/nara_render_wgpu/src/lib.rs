@@ -3,22 +3,30 @@
 use std::collections::BTreeMap;
 
 mod sprite;
+mod surface;
 
 use crate::sprite::{
     WgpuSpriteDrawStats, WgpuSpritePipeline, create_sprite_batch_buffers, create_sprite_pipeline,
     draw_sprite_batch_buffers, sprite_batch_draw_stats,
 };
+use crate::surface::{WgpuSurfaceState, configure_surface, create_surface, surface_extent};
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
-use nara_render::{
-    Color, Extent2d, ExtractedViews, FrameStats, RenderFrame, RenderTarget, begin_render_frame,
-};
+use nara_render::{Color, Extent2d, ExtractedViews, FrameStats, RenderFrame, begin_render_frame};
 use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteRenderPlugin};
 use nara_window::{
-    PresentMode, PrimaryWindowId, Window, WindowId,
+    PrimaryWindowId, Window, WindowId,
     backend::{BackendWindowHandles, RawWindowHandleProvider},
 };
 use thiserror::Error;
+
+pub use crate::surface::{
+    SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, choose_present_mode,
+    clear_color_to_wgpu, map_present_mode, surface_acquire_policy, surface_resize_action,
+};
+
+#[cfg(test)]
+use nara_window::PresentMode;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuRenderPlugin;
@@ -118,7 +126,8 @@ impl WgpuRenderBackend {
 
         let mut submitted_any = false;
         for (view_index, view) in views.as_slice().iter().enumerate() {
-            let Some(window_id) = target_window_id(view.target, primary_window_id) else {
+            let Some(window_id) = crate::surface::target_window_id(view.target, primary_window_id)
+            else {
                 continue;
             };
             let Some(window) = windows.iter().find(|window| window.id == window_id) else {
@@ -193,7 +202,15 @@ impl WgpuRenderBackend {
         self.ensure_surface(window, provider, size)?;
 
         let view_format = self.surface_view_format(window.id)?;
-        self.ensure_sprite_pipeline(view_format)?;
+        let has_sprite_work = sprite_batches
+            .iter()
+            .any(|batch| !batch.instances.is_empty());
+        let sprite_pipeline = if has_sprite_work {
+            self.ensure_sprite_pipeline(view_format)?;
+            Some(self.sprite_pipeline(view_format)?.clone())
+        } else {
+            None
+        };
         let device = self
             .device
             .as_ref()
@@ -204,7 +221,6 @@ impl WgpuRenderBackend {
             .as_ref()
             .ok_or(WgpuRenderError::BackendNotReady)?
             .clone();
-        let sprite_pipeline = self.sprite_pipeline(view_format)?.clone();
         let surface_state =
             self.surfaces
                 .get_mut(&window.id)
@@ -221,7 +237,7 @@ impl WgpuRenderBackend {
                     surface_state,
                     texture,
                     clear_color,
-                    &sprite_pipeline,
+                    sprite_pipeline.as_ref(),
                     sprite_batches,
                 )?;
                 Ok(Some(sprite_batch_draw_stats(sprite_batches)))
@@ -286,7 +302,8 @@ impl WgpuRenderBackend {
                 window_id: window.id,
             })?;
 
-        if surface_resize_action(surface.size, size) == SurfaceResizeAction::Reconfigure(size)
+        if crate::surface::surface_resize_action(surface.size, size)
+            == SurfaceResizeAction::Reconfigure(size)
             || surface.dirty
         {
             configure_surface(
@@ -360,14 +377,6 @@ impl WgpuRenderBackend {
     }
 }
 
-#[derive(Debug)]
-struct WgpuSurfaceState {
-    surface: wgpu::Surface<'static>,
-    config: Option<wgpu::SurfaceConfiguration>,
-    size: Extent2d,
-    dirty: bool,
-}
-
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum WgpuRenderError {
     #[error("wgpu backend is not ready")]
@@ -391,33 +400,6 @@ pub enum WgpuRenderError {
     SurfaceValidation { window_id: WindowId },
     #[error("wgpu sprite pipeline is missing for format {format}")]
     SpritePipelineMissing { format: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceResizeAction {
-    SkipZeroSized,
-    Unchanged,
-    Reconfigure(Extent2d),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceTextureStatus {
-    Success,
-    Suboptimal,
-    Timeout,
-    Occluded,
-    Outdated,
-    Lost,
-    Validation,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceAcquireAction {
-    Render,
-    Reconfigure,
-    SkipFrame,
-    RecreateSurface,
-    Error,
 }
 
 pub fn render_clear_passes(
@@ -447,137 +429,11 @@ pub fn render_clear_passes(
     }
 }
 
-#[must_use]
-pub fn surface_resize_action(current: Extent2d, next: Extent2d) -> SurfaceResizeAction {
-    if next.is_empty() {
-        SurfaceResizeAction::SkipZeroSized
-    } else if current == next {
-        SurfaceResizeAction::Unchanged
-    } else {
-        SurfaceResizeAction::Reconfigure(next)
-    }
-}
-
-#[must_use]
-pub fn surface_acquire_policy(status: SurfaceTextureStatus) -> SurfaceAcquireAction {
-    match status {
-        SurfaceTextureStatus::Success => SurfaceAcquireAction::Render,
-        SurfaceTextureStatus::Suboptimal | SurfaceTextureStatus::Outdated => {
-            SurfaceAcquireAction::Reconfigure
-        }
-        SurfaceTextureStatus::Timeout | SurfaceTextureStatus::Occluded => {
-            SurfaceAcquireAction::SkipFrame
-        }
-        SurfaceTextureStatus::Lost => SurfaceAcquireAction::RecreateSurface,
-        SurfaceTextureStatus::Validation => SurfaceAcquireAction::Error,
-    }
-}
-
-#[must_use]
-pub fn map_present_mode(mode: PresentMode) -> wgpu::PresentMode {
-    match mode {
-        PresentMode::AutoVsync => wgpu::PresentMode::AutoVsync,
-        PresentMode::AutoNoVsync => wgpu::PresentMode::AutoNoVsync,
-        PresentMode::Fifo => wgpu::PresentMode::Fifo,
-        PresentMode::Immediate => wgpu::PresentMode::Immediate,
-        PresentMode::Mailbox => wgpu::PresentMode::Mailbox,
-    }
-}
-
-#[must_use]
-pub fn choose_present_mode(
-    requested: PresentMode,
-    supported: &[wgpu::PresentMode],
-) -> wgpu::PresentMode {
-    let requested = map_present_mode(requested);
-    if matches!(
-        requested,
-        wgpu::PresentMode::AutoVsync | wgpu::PresentMode::AutoNoVsync
-    ) || supported.contains(&requested)
-    {
-        return requested;
-    }
-
-    if supported.contains(&wgpu::PresentMode::Fifo) {
-        wgpu::PresentMode::Fifo
-    } else {
-        supported
-            .first()
-            .copied()
-            .unwrap_or(wgpu::PresentMode::AutoVsync)
-    }
-}
-
-#[must_use]
-pub fn clear_color_to_wgpu(color: Color) -> wgpu::Color {
-    wgpu::Color {
-        r: color.r as f64,
-        g: color.g as f64,
-        b: color.b as f64,
-        a: color.a as f64,
-    }
-}
-
 fn add_plugin_or_ignore_duplicate(app: &mut App, plugin: impl Plugin) {
     match app.add_plugin(plugin) {
         Ok(_) | Err(PluginError::Duplicate { .. }) => {}
         Err(error) => panic!("failed to install wgpu prerequisite plugin: {error}"),
     }
-}
-
-fn target_window_id(target: RenderTarget, primary_window_id: Option<WindowId>) -> Option<WindowId> {
-    target.window_id(primary_window_id)
-}
-
-fn surface_extent(width: u32, height: u32) -> Option<Extent2d> {
-    Extent2d::new(width, height)
-}
-
-fn create_surface(
-    instance: &wgpu::Instance,
-    provider: &RawWindowHandleProvider,
-    window_id: WindowId,
-) -> Result<wgpu::Surface<'static>, WgpuRenderError> {
-    // SAFETY: `provider` stores a strong guard for the platform window object.
-    // `WgpuRenderPlugin::cleanup` drops surfaces before app/world teardown drops
-    // the backend handle providers.
-    unsafe {
-        instance
-            .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(provider.display_handle()),
-                raw_window_handle: provider.window_handle(),
-            })
-            .map_err(|error| WgpuRenderError::SurfaceCreation {
-                window_id,
-                message: error.to_string(),
-            })
-    }
-}
-
-fn configure_surface(
-    surface_state: &mut WgpuSurfaceState,
-    adapter: &wgpu::Adapter,
-    device: &wgpu::Device,
-    window_id: WindowId,
-    present_mode: PresentMode,
-    size: Extent2d,
-) -> Result<(), WgpuRenderError> {
-    let capabilities = surface_state.surface.get_capabilities(adapter);
-    let Some(mut config) =
-        surface_state
-            .surface
-            .get_default_config(adapter, size.width, size.height)
-    else {
-        return Err(WgpuRenderError::SurfaceUnsupported { window_id });
-    };
-
-    config.present_mode = choose_present_mode(present_mode, &capabilities.present_modes);
-    config.view_formats = vec![config.format.add_srgb_suffix()];
-    surface_state.surface.configure(device, &config);
-    surface_state.size = size;
-    surface_state.config = Some(config);
-    surface_state.dirty = false;
-    Ok(())
 }
 
 fn render_acquired_texture(
@@ -587,7 +443,7 @@ fn render_acquired_texture(
     surface_state: &WgpuSurfaceState,
     surface_texture: wgpu::SurfaceTexture,
     clear_color: Color,
-    sprite_pipeline: &wgpu::RenderPipeline,
+    sprite_pipeline: Option<&wgpu::RenderPipeline>,
     sprite_batches: &[&SpriteBatch],
 ) -> Result<(), WgpuRenderError> {
     let config = surface_state
@@ -603,7 +459,11 @@ fn render_acquired_texture(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("nara_wgpu_clear_encoder"),
     });
-    let sprite_buffers = create_sprite_batch_buffers(device, sprite_batches);
+    let sprite_buffers = if sprite_pipeline.is_some() {
+        create_sprite_batch_buffers(device, sprite_batches)
+    } else {
+        Vec::new()
+    };
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("nara_wgpu_surface_pass"),
@@ -621,7 +481,9 @@ fn render_acquired_texture(
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        draw_sprite_batch_buffers(&mut pass, sprite_pipeline, &sprite_buffers);
+        if let Some(sprite_pipeline) = sprite_pipeline {
+            draw_sprite_batch_buffers(&mut pass, sprite_pipeline, &sprite_buffers);
+        }
     }
 
     queue.submit([encoder.finish()]);
