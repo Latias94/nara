@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-08T12:52:16Z
+timestamp: 2026-07-08T13:35:00Z
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-08T12:52:16Z
+- Snapshot timestamp: 2026-07-08T13:35:00Z
 - Last verified: Asset import/render resource seam review hardening passed fmt, workspace checks with and without serde, examples check, `scene_prefab_roundtrip`, default-feature `asset_import_texture`, `winit,wgpu` backend examples, `cargo nextest run --workspace` with 136 tests, default facade dependency-tree review, backend boundary searches, and engineering memory validation.
-- Next action: Plan the next high-leverage foundation slice: scene patch transactions and field-level prefab overrides, component schema export/migration chains, or async task-pool-backed import/reload work.
+- Next action: Execute `docs/plans/2026-07-08-005-feat-scene-patch-prefab-schema-foundation-plan.md` to build scene patch transactions, field-level prefab overrides, component schema export, migrations, and prefab source resolution.
 
 # Active Registrations
 
@@ -47,6 +47,7 @@ status: "active"
   - `nara_render_wgpu` now samples prepared image resources through backend-private texture, view, sampler, bind-group, and pipeline caches.
   - Scene/prefab spawn now supports asset-aware preflight through `ProjectAssetDatabase` and scratch `AssetServer` state before mutating the target world.
   - Review hardening now enforces one-to-one runtime asset identity binding, source-kind aware sprite/tileset preflight, path-ref database validation, prepared image removal cleanup, invalid atlas tile skips, and split wgpu sprite texture responsibilities.
+  - Created the next implementation-ready plan for scene patch transactions, patch-based prefab overrides, component schema export, migrations, and nested prefab source resolution.
 - Pending follow-ups:
   - Scene patch transactions, field-level prefab overrides, nested prefab source resolution, component schema export, and migration chains remain follow-up work.
   - Engine-owned IO/task-pool execution, file watching, async import jobs, and reload scheduling remain deferred behind the current synchronous import/reload-ready contracts.
@@ -66,3 +67,5 @@ status: "active"
 - [Asset/render seam final memory event](logs/2026-07/2026-07-08T120928Z-verification-u9-asset-render-resource-seam-final-examples-docs-boundary.md)
 - [Asset/render seam review hardening verification](verification/2026-07-08T125216Z-asset-render-resource-seam-review-hardening.md)
 - [Asset/render seam review hardening memory event](logs/2026-07/2026-07-08T125216Z-review-hardening-asset-render-resource-seam.md)
+- [Scene patch prefab schema foundation plan](../../plans/2026-07-08-005-feat-scene-patch-prefab-schema-foundation-plan.md)
+- [Scene patch prefab schema planning memory event](logs/2026-07/2026-07-08T133500Z-planning-scene-patch-prefab-schema-foundation.md)
