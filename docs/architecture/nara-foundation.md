@@ -20,7 +20,7 @@ nara needs a Rust-native engine foundation that supports code-first game authori
 - No visual editor in Phase 1.
 - No Godot-style object inheritance, node callbacks, or string-path runtime glue.
 - No full Bevy-compatible API surface. nara should borrow the shape, not the size.
-- No immediate wgpu/winit dependency in the foundation skeleton; the render seam exists before the backend implementation.
+- No backend leakage into gameplay-facing crates. `winit` and `wgpu` may exist in adapter crates, but default headless authoring should not depend on them.
 
 ## Reference Findings
 
@@ -48,6 +48,8 @@ flowchart TD
     App --> Input[nara_input]
     App --> Audio[nara_audio]
     App --> Render[nara_render: render data + backend seam]
+    App --> Window[nara_window: normalized window data]
+    Window --> WinitAdapter[future nara_winit adapter]
     App --> Tooling[nara_tooling: snapshots + inspector seam]
     Render --> WgpuAdapter[future nara_render_wgpu adapter]
     Tooling --> DebugUi[future egui / dear-imgui adapters]
@@ -68,6 +70,9 @@ flowchart TD
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneAsset` | Scene/prefab instantiate mapping and stable IDs |
 | `nara_render` | `Sprite`, `Camera2d`, `RenderBackend` | wgpu surface/device/render-pass lifecycle, batching |
 | `nara_input` | `InputState`, `KeyCode` | winit event normalization and action maps |
+| `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
+| `nara_winit` | `WinitPlugin`, desktop runner adapter | Gameplay APIs and renderer backend internals |
+| `nara_render_wgpu` | `WgpuRenderPlugin`, wgpu backend state | Gameplay authoring data and non-wgpu backends |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
 | `nara_tooling` | `WorldSnapshot`, `ToolingPlugin` | egui/dear-imgui inspectors and editor integration |
 
@@ -124,7 +129,7 @@ sequenceDiagram
 |---|---:|---|
 | Clean workspace check | `cargo check --workspace` passes | Local and CI |
 | Test baseline | `cargo nextest run --workspace` passes | Local and CI |
-| Foundation compile cost | No heavy graphics/window deps in foundation | Dependency tree review |
+| Foundation compile cost | No heavy graphics/window deps in default facade | Dependency tree review |
 | User-facing startup API | A minimal app can call `App::new().update()` and examples can use `Commands`/`Query` systems | Example and smoke test |
 | Backend isolation | Gameplay crates do not import `wgpu` directly | `rg "wgpu::" crates/nara_* src` |
 | Tooling readiness | Runtime can produce a `WorldSnapshot` without editor deps | Unit or smoke test |
@@ -141,8 +146,8 @@ sequenceDiagram
 
 ## Next Implementation Slices
 
-1. Add a `nara_window` or `nara_platform` crate using winit and a runner adapter.
-2. Add `nara_render_wgpu` with surface lifecycle, clear pass, sprite pipeline, and frame stats.
-3. Expand component metadata registration for built-in scene/render/transform components.
-4. Add scene/prefab stable entity IDs and serialization/validation diagnostics.
+1. Implement the platform/window/render backend foundation plan in `docs/plans/2026-07-08-001-platform-window-render-backend-foundation-plan.md`.
+2. Expand component metadata registration for built-in scene/render/transform components.
+3. Add scene/prefab stable entity IDs and serialization/validation diagnostics.
+4. Add sprite batching/tilemap rendering on top of the render target/view/phase seam.
 5. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot` and component registry data.

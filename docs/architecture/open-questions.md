@@ -104,23 +104,23 @@ Follow-up details still to settle:
 ## Render Crate Boundaries
 
 Accepted direction: split render domain, backend, sprite, tilemap, and sprite-render responsibilities. See ADR [0012-render-crate-boundaries.md](adr/0012-render-crate-boundaries.md). Render graph policy is phase-based first and graph-ready later; see ADR [0017-render-graph-policy.md](adr/0017-render-graph-policy.md).
+The next implementation slice uses main-world explicit extraction data and backend handle providers rather than a separate render world; see ADR [0032-render-backend-integration-boundary.md](adr/0032-render-backend-integration-boundary.md).
 
 Follow-up details still to settle:
 
 1. Which crates are created immediately versus temporarily collapsed?
-2. What trait or data shape represents queued render items?
-3. Where do render phase labels live?
-4. What concrete second use case should trigger full `RenderGraph` implementation?
+2. What trait or data shape represents queued render items once sprite/tilemap rendering starts?
+3. What concrete second use case should trigger full `RenderGraph` implementation?
 
 ## Platform and Runner
 
 Accepted direction: `nara_app` owns runner traits, `nara_window` owns normalized window data, and `nara_winit` is the adapter. See ADR [0013-platform-window-and-runner-boundaries.md](adr/0013-platform-window-and-runner-boundaries.md).
+The next implementation slice uses a fallible owned-app runner, backend-only raw handle providers, and optional facade features for `winit`/`wgpu`; see ADR [0032-render-backend-integration-boundary.md](adr/0032-render-backend-integration-boundary.md).
 
 Follow-up details still to settle:
 
-1. What is the first concrete runner interface?
-2. How does fixed timestep interact with winit redraw requests?
-3. How much raw platform event access should advanced users get?
+1. How does fixed timestep interact with winit redraw requests and control-flow mode?
+2. How much raw platform event access should advanced users get?
 
 ## Editor and Tooling
 
@@ -183,13 +183,13 @@ Follow-up details still to settle:
 ## Event, Command, Determinism, and Replay
 
 Accepted direction: ECS-native messages/events and deferred commands, plus deterministic-friendly fixed-step simulation. See ADR [0023-event-message-and-command-model.md](adr/0023-event-message-and-command-model.md) and ADR [0024-determinism-fixed-update-and-replay-policy.md](adr/0024-determinism-fixed-update-and-replay-policy.md).
+The next implementation slice sets the first fixed timestep default to 1/60 second with bounded catch-up, exposed through `FixedTime` and testable `run_once(Duration)`.
 
 Follow-up details still to settle:
 
 1. What exact event retention policy should nara use?
 2. Do fixed-update and frame-update events use separate channels?
-3. What fixed timestep accumulator behavior should nara use?
-4. What data is required for a future replay capture?
+3. What data is required for a future replay capture?
 
 ## Runtime UI
 
