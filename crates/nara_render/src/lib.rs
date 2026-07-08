@@ -3,7 +3,6 @@
 use nara_app::{App, CoreStage, Plugin};
 use nara_asset::Handle;
 pub use nara_core::Color;
-use nara_core::Vec2;
 use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource, World};
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
 use thiserror::Error;
@@ -43,7 +42,7 @@ impl Default for ClearColor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Texture2d {
+pub struct RenderImage2d {
     pub width: u32,
     pub height: u32,
 }
@@ -53,7 +52,7 @@ pub struct Texture2d {
 pub enum RenderTarget {
     PrimaryWindow,
     Window(WindowId),
-    Image(Handle<Texture2d>),
+    Image(Handle<RenderImage2d>),
 }
 
 impl Default for RenderTarget {
@@ -139,36 +138,6 @@ impl RenderPhaseLabel {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Component)]
-pub struct Sprite {
-    pub texture: Option<Handle<Texture2d>>,
-    pub color: Color,
-    pub size: Vec2,
-    pub sort_key: i32,
-}
-
-impl Sprite {
-    #[must_use]
-    pub fn from_color(size: Vec2, color: Color) -> Self {
-        Self {
-            texture: None,
-            color,
-            size,
-            sort_key: 0,
-        }
-    }
-
-    #[must_use]
-    pub fn from_texture(texture: Handle<Texture2d>, size: Vec2) -> Self {
-        Self {
-            texture: Some(texture),
-            color: Color::WHITE,
-            size,
-            sort_key: 0,
-        }
     }
 }
 
@@ -357,14 +326,6 @@ mod tests {
     use nara_app::App;
     use nara_asset::AssetId;
     use nara_window::WindowPlugin;
-
-    #[test]
-    fn creates_color_sprite() {
-        let sprite = Sprite::from_color(Vec2::new(16.0, 16.0), Color::WHITE);
-
-        assert_eq!(sprite.texture, None);
-        assert_eq!(sprite.size, Vec2::new(16.0, 16.0));
-    }
 
     #[test]
     fn default_camera_targets_primary_window() {

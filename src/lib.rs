@@ -12,6 +12,7 @@ pub use nara_render as render;
 #[cfg(feature = "wgpu")]
 pub use nara_render_wgpu as render_wgpu;
 pub use nara_scene as scene;
+pub use nara_sprite as sprite;
 pub use nara_tooling as tooling;
 pub use nara_transform as transform;
 pub use nara_window as window;
@@ -33,6 +34,8 @@ impl Plugin for MinimalPlugins {
             .expect("HierarchyPlugin should be unique");
         app.add_plugin(nara_input::InputPlugin)
             .expect("InputPlugin should be unique");
+        app.add_plugin(nara_sprite::SpritePlugin)
+            .expect("SpritePlugin should be unique");
         app.add_plugin(nara_render::RenderPlugin)
             .expect("RenderPlugin should be unique");
     }
@@ -54,8 +57,8 @@ pub mod prelude {
     };
     pub use nara_render::{
         Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats, RenderBackend,
-        RenderError, RenderFrame, RenderFrameState, RenderPhaseLabel, RenderPlugin, RenderTarget,
-        Sprite, Texture2d, ViewportRect,
+        RenderError, RenderFrame, RenderFrameState, RenderImage2d, RenderPhaseLabel, RenderPlugin,
+        RenderTarget, ViewportRect,
     };
     #[cfg(feature = "wgpu")]
     pub use nara_render_wgpu::{
@@ -66,6 +69,7 @@ pub mod prelude {
         Children, HierarchyPlugin, Name, Parent, Scene, SceneAsset, SceneNode, Visibility,
         spawn_child, sync_children,
     };
+    pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, Texture2d, TextureRegion};
     pub use nara_tooling::{ToolingPlugin, WorldSnapshot};
     pub use nara_transform::{GlobalTransform2d, Transform2d};
     pub use nara_window::{

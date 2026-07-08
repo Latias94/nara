@@ -1179,6 +1179,7 @@ dependencies = [
  "nara_render",
  "nara_render_wgpu",
  "nara_scene",
+ "nara_sprite",
  "nara_tooling",
  "nara_transform",
  "nara_window",
@@ -1292,6 +1293,18 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_transform",
+ "serde",
+]
+
+[[package]]
+name = "nara_sprite"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_app",
+ "nara_asset",
+ "nara_core",
+ "nara_ecs",
  "serde",
 ]
 

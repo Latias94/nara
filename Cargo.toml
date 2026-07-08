@@ -20,6 +20,7 @@ members = [
     "crates/nara_render",
     "crates/nara_render_wgpu",
     "crates/nara_scene",
+    "crates/nara_sprite",
     "crates/nara_tooling",
     "crates/nara_transform",
     "crates/nara_window",
@@ -44,6 +45,7 @@ nara_reflect = { path = "crates/nara_reflect" }
 nara_render = { path = "crates/nara_render" }
 nara_render_wgpu = { path = "crates/nara_render_wgpu" }
 nara_scene = { path = "crates/nara_scene" }
+nara_sprite = { path = "crates/nara_sprite" }
 nara_tooling = { path = "crates/nara_tooling" }
 nara_transform = { path = "crates/nara_transform" }
 nara_window = { path = "crates/nara_window" }
@@ -72,6 +74,7 @@ nara_reflect.workspace = true
 nara_render.workspace = true
 nara_render_wgpu = { workspace = true, optional = true }
 nara_scene.workspace = true
+nara_sprite.workspace = true
 nara_tooling.workspace = true
 nara_transform.workspace = true
 nara_window.workspace = true
@@ -86,6 +89,7 @@ serde = [
     "nara_transform/serde",
     "nara_render/serde",
     "nara_scene/serde",
+    "nara_sprite/serde",
     "nara_window/serde",
 ]
 winit = ["dep:nara_winit"]
