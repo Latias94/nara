@@ -16,7 +16,7 @@ status: "active"
 
 # Active Registrations
 
-- Add active `registry/` links here during integration.
+- [2D sprite tilemap render foundation](registry/2026-07-08T063946Z-active-2d-sprite-tilemap-render-foundation.md)
 
 # Integrated Summary
 
