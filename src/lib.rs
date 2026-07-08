@@ -13,6 +13,7 @@ pub use nara_render as render;
 pub use nara_render_wgpu as render_wgpu;
 pub use nara_scene as scene;
 pub use nara_sprite as sprite;
+pub use nara_sprite_render as sprite_render;
 pub use nara_tilemap as tilemap;
 pub use nara_tooling as tooling;
 pub use nara_transform as transform;
@@ -41,6 +42,8 @@ impl Plugin for MinimalPlugins {
             .expect("TilemapPlugin should be unique");
         app.add_plugin(nara_render::RenderPlugin)
             .expect("RenderPlugin should be unique");
+        app.add_plugin(nara_sprite_render::SpriteRenderPlugin)
+            .expect("SpriteRenderPlugin should be unique");
     }
 }
 
@@ -73,6 +76,11 @@ pub mod prelude {
         spawn_child, sync_children,
     };
     pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, Texture2d, TextureRegion};
+    pub use nara_sprite_render::{
+        ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem,
+        QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderPlugin,
+        SpriteRenderStats,
+    };
     pub use nara_tilemap::{
         DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileCell, TileChunkCoord, TileCoord,
         TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,

@@ -3,7 +3,9 @@
 use nara_app::{App, CoreStage, Plugin};
 use nara_asset::Handle;
 pub use nara_core::Color;
+use nara_core::Vec2;
 use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource, World};
+use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
 use thiserror::Error;
 
@@ -168,6 +170,8 @@ pub struct ExtractedView {
     pub camera_entity: Entity,
     pub target: RenderTarget,
     pub viewport: ViewportRect,
+    pub world_position: Vec2,
+    pub viewport_height: f32,
     pub order: i32,
     pub clear_color: Color,
 }
@@ -277,14 +281,14 @@ pub fn extract_views(
     clear_color: Res<ClearColor>,
     primary_window_id: Option<Res<PrimaryWindowId>>,
     windows: Query<&Window>,
-    cameras: Query<(Entity, &Camera2d)>,
+    cameras: Query<(Entity, &Camera2d, Option<&Transform2d>)>,
 ) {
     frame.begin_extract();
     extracted_views.clear();
 
     let primary_window_id = primary_window_id.map(|resource| resource.0);
 
-    for (camera_entity, camera) in cameras.iter() {
+    for (camera_entity, camera, transform) in cameras.iter() {
         let Some(viewport) = camera
             .viewport
             .or_else(|| viewport_for_target(camera.target, primary_window_id, &windows))
@@ -296,6 +300,8 @@ pub fn extract_views(
             camera_entity,
             target: camera.target,
             viewport,
+            world_position: transform.map_or(Vec2::ZERO, |transform| transform.translation),
+            viewport_height: camera.viewport_height,
             order: camera.order,
             clear_color: camera.clear_color.unwrap_or(clear_color.0),
         });
@@ -333,6 +339,7 @@ mod tests {
 
         assert_eq!(camera.target, RenderTarget::PrimaryWindow);
         assert_eq!(camera.viewport, None);
+        assert_eq!(camera.viewport_height, 720.0);
         assert_eq!(camera.order, 0);
     }
 
@@ -361,6 +368,8 @@ mod tests {
         let views = app.world().resource::<ExtractedViews>();
         assert_eq!(views.len(), 1);
         assert_eq!(views.as_slice()[0].target, RenderTarget::PrimaryWindow);
+        assert_eq!(views.as_slice()[0].world_position, Vec2::ZERO);
+        assert_eq!(views.as_slice()[0].viewport_height, 720.0);
         assert_eq!(
             views.as_slice()[0].viewport,
             ViewportRect::new(0, 0, 1280, 720).unwrap()
@@ -400,6 +409,8 @@ mod tests {
                 camera_entity: Entity::PLACEHOLDER,
                 target: RenderTarget::PrimaryWindow,
                 viewport: ViewportRect::new(0, 0, 1, 1).unwrap(),
+                world_position: Vec2::ZERO,
+                viewport_height: 1.0,
                 order: 0,
                 clear_color: Color::WHITE,
             });
