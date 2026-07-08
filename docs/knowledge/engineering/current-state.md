@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-08T09:19:21Z
+timestamp: 2026-07-08T12:09:28Z
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-08T09:19:21Z
-- Last verified: Scene/prefab serialization foundation passed fmt, workspace checks with and without serde, examples check, winit/wgpu backend example checks, `scene_prefab_roundtrip`, serde ID/path regression tests, `cargo nextest run --workspace` with 77 tests, backend boundary searches, and runtime serialization leak searches.
-- Next action: Plan the asset import and render resource preparation seam from ADR 0033 before direct texture upload, runtime UI rendering, material expansion, or 3D mesh work.
+- Snapshot timestamp: 2026-07-08T12:09:28Z
+- Last verified: Asset import/render resource seam passed fmt, workspace checks with and without serde, examples check, `scene_prefab_roundtrip`, default-feature `asset_import_texture`, `winit,wgpu` backend examples, `cargo nextest run --workspace` with 126 tests, dependency tree review, backend boundary searches, runtime serialization leak searches, and engineering memory validation.
+- Next action: Plan the next high-leverage foundation slice: scene patch transactions and field-level prefab overrides, component schema export/migration chains, or async task-pool-backed import/reload work.
 
 # Active Registrations
 
@@ -40,9 +40,17 @@ status: "active"
   - `nara_reflect` owns `ComponentValue` and preflight/apply component codecs.
   - `nara_scene` owns `SceneDocument`, `PrefabDocument`, stable `SceneEntityId`, validation, spawn/export, and `SceneEntitySource` provenance.
   - Built-in scene, transform, render, sprite, and tilemap codecs register through their owning crate plugins.
+  - `nara_asset` now owns stable asset IDs, `.meta` records, project asset database validation, importer descriptors, artifact cache records under `.nara/import-cache/`, asset versions, reload state, dependency edges, and typed runtime handle allocation.
+  - `nara_image` now owns backend-neutral PNG image import, image metadata, sampler intent, prepared image resource snapshots, and render prepare systems.
+  - `nara_sprite` and `nara_tilemap` now author reusable `Handle<ImageAsset>` texture references and serialize semantic `AssetRef::Path` or `AssetRef::StableId` values through codec context.
+  - `nara_sprite_render` now queues colored and textured sprite/tilemap batches with explicit render resource keys and UVs.
+  - `nara_render_wgpu` now samples prepared image resources through backend-private texture, view, sampler, bind-group, and pipeline caches.
+  - Scene/prefab spawn now supports asset-aware preflight through `ProjectAssetDatabase` and scratch `AssetServer` state before mutating the target world.
 - Pending follow-ups:
-  - Asset import/render resource preparation is the next recommended slice: `.meta` identity, importer registry, imported artifact cache records, image/texture import, render prepare state, wgpu texture/sampler cache, and sprite/tilemap texture usage.
-  - Scene patch transactions, field-level prefab overrides, nested prefab source resolution, component schema export, and migration chains remain follow-up work after or alongside the asset/render seam.
+  - Scene patch transactions, field-level prefab overrides, nested prefab source resolution, component schema export, and migration chains remain follow-up work.
+  - Engine-owned IO/task-pool execution, file watching, async import jobs, and reload scheduling remain deferred behind the current synchronous import/reload-ready contracts.
+  - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset` and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
+  - Material/sampler authoring, texture atlases, compression profiles, mip generation, and 3D mesh import remain future extensions of the asset/import/render prepare seam.
 - Blocked:
   - None.
 
@@ -52,3 +60,5 @@ status: "active"
 - [Scene/prefab serialization final verification](verification/2026-07-08T091921Z-scene-prefab-serialization-foundation-final.md)
 - [Next architecture priority](decisions/2026-07-08T093608Z-next-priority-asset-import-render-resource-seam.md)
 - [ADR 0033](../../architecture/adr/0033-asset-import-and-render-resource-preparation-seam.md)
+- [Asset/render seam final verification](verification/2026-07-08T120928Z-asset-render-resource-seam-final.md)
+- [Asset/render seam final memory event](logs/2026-07/2026-07-08T120928Z-verification-u9-asset-render-resource-seam-final-examples-docs-boundary.md)

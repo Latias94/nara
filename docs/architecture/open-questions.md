@@ -95,14 +95,16 @@ Follow-up details still to settle:
 2. Should `AssetServer` expose `LoadState` immediately, or should load state live in a separate project asset database resource first?
 3. Which import profile fields belong in artifact cache keys for desktop-only Phase 1?
 
-Resolved in the scene/prefab serialization foundation:
+Resolved in the scene/prefab serialization and asset/render seam foundations:
 
-- `AssetRef::Path` is the first successful serialized shape. Paths are project-asset-root-relative
-  logical paths using `/`, rejecting empty, absolute, drive-prefixed, backslash, `.` and `..`
-  traversal forms.
+- `AssetRef::Path` and `AssetRef::StableId` are both semantic persistent reference shapes. Paths
+  remain useful for hand-authored files; stable IDs resolve through `ProjectAssetDatabase`.
+- Asset paths are project-asset-root-relative logical paths using `/`, rejecting empty, absolute,
+  drive-prefixed, backslash, `.` and `..` traversal forms.
 - `Handle<T>` no longer serializes as runtime `AssetId`; persistent scene data uses `AssetRef`.
-- Stable asset IDs remain reserved for the `.meta`/import database slice and report unsupported
-  diagnostics when encountered in this foundation.
+- Scene/prefab spawn keeps asset resolution two-phase: component codecs use `ComponentDecodeContext`,
+  unknown stable IDs report entity/component/field/asset diagnostics, and failed preflight does not
+  allocate scene entities or commit scratch `AssetServer` state.
 
 Resolved by ADR 0033:
 
@@ -151,21 +153,23 @@ Implemented in the 2D render foundation slice:
 - The first queued render shape is concrete data, not a trait: `ExtractedSprites`,
   `QueuedSpriteItems`, and `SpriteBatches`. Backends consume batches rather than gameplay
   authoring components.
-- `nara_render_wgpu` draws colored quad instance batches and remains the only crate that imports
-  `wgpu`.
+- `nara_render_wgpu` draws colored and textured quad instance batches and remains the only crate
+  that imports `wgpu`.
 
 Still open:
 
 1. What abstraction generalizes `SpriteBatches` once runtime UI, gizmos, text, or 3D submit their
    own phase items?
 2. What concrete second pass/resource use case should trigger full `RenderGraph` implementation?
-3. What is the first backend-neutral texture descriptor type: image asset, texture asset, or material
-   input?
+3. What material input shape should sit above image textures once sprites need sampler/material
+   overrides?
 
 Resolved by ADR 0033:
 
 - Texture upload, atlases, materials, UI images, and future 3D assets attach through asset import,
   backend-neutral render resource preparation, and backend-owned GPU resource caches.
+- The first backend-neutral texture resource is `ImageAsset` prepared into
+  `PreparedImageResource`; sprites and tilemaps carry typed handles and UVs.
 - `nara_render_wgpu` owns textures, samplers, bind groups, buffers, and pipeline cache details.
 - Gameplay/domain crates store typed handles or backend-neutral descriptors, not backend handles.
 

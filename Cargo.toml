@@ -95,6 +95,9 @@ nara_transform.workspace = true
 nara_window.workspace = true
 nara_winit = { workspace = true, optional = true }
 
+[dev-dependencies]
+image.workspace = true
+
 [features]
 default = []
 serde = [
@@ -123,6 +126,10 @@ required-features = ["winit", "wgpu"]
 name = "windowed_sprites"
 path = "examples/windowed_sprites.rs"
 required-features = ["winit", "wgpu"]
+
+[[example]]
+name = "asset_import_texture"
+path = "examples/asset_import_texture.rs"
 
 [[example]]
 name = "scene_prefab_roundtrip"

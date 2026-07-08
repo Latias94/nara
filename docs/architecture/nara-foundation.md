@@ -162,8 +162,8 @@ sequenceDiagram
 
 ## Next Implementation Slices
 
-1. Finish asset/render resource seam documentation and verification, then commit the stable asset preflight slice.
-2. Add scene patch transactions, field-level prefab overrides, and nested prefab source resolution on top of `SceneDocument`.
-3. Add component schema export and migration chains for older scene files.
-4. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot`, `ComponentRegistry`, and scene diagnostics.
-5. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
+1. Add scene patch transactions, field-level prefab overrides, and nested prefab source resolution on top of `SceneDocument`.
+2. Add component schema export and migration chains for older scene files.
+3. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
+4. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
+5. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot`, `ComponentRegistry`, and scene diagnostics.

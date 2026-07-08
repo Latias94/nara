@@ -21,8 +21,7 @@ scenes/
 prefabs/
 scripts/
 .nara/
-  import/
-  cache/
+  import-cache/
 ```
 
 Rules:
@@ -30,7 +29,7 @@ Rules:
 - `nara.toml` is the project manifest.
 - `assets/` holds source assets.
 - `scenes/` and `prefabs/` hold data documents.
-- `.nara/import` and `.nara/cache` hold generated/imported artifacts and should not be hand-authored.
+- `.nara/import-cache/` holds generated import artifacts and records and should not be hand-authored.
 - AI-generated projects should be able to produce this layout without editor involvement.
 - The layout is conventional, not a hard requirement for embedded/library use.
 
@@ -74,6 +73,5 @@ Rules:
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Layout becomes too rigid | Medium | Medium | Treat as convention with configurable roots |
-| Cache checked into source accidentally | Low | Medium | Add `.nara/cache` and `.nara/import` guidance to gitignore/templates |
+| Cache checked into source accidentally | Low | Medium | Add `.nara/import-cache/` guidance to gitignore/templates |
 | Manifest grows too large | Medium | Medium | Keep manifest project-level; scene/asset data stays in files |
-
