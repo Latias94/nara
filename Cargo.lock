@@ -1303,6 +1303,8 @@ dependencies = [
  "nara_transform",
  "nara_window",
  "nara_winit",
+ "ron",
+ "serde_json",
 ]
 
 [[package]]

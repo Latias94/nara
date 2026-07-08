@@ -18,6 +18,7 @@ use nara_ecs::{Component, Entity, Resource, World};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct ComponentTypeId(String);
 
 impl ComponentTypeId {
@@ -34,6 +35,7 @@ impl ComponentTypeId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct ComponentSchemaVersion(pub u32);
 
 impl Default for ComponentSchemaVersion {
@@ -194,11 +196,6 @@ impl Display for ComponentFieldPath {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(tag = "kind", content = "value", rename_all = "snake_case")
-)]
 pub enum ComponentFieldPathSegment {
     Field(String),
     Index(u32),
@@ -213,6 +210,65 @@ impl ComponentFieldPathSegment {
     #[must_use]
     pub const fn index(index: u32) -> Self {
         Self::Index(index)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ComponentFieldPathSegment {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("ComponentFieldPathSegment", 2)?;
+        match self {
+            Self::Field(field) => {
+                state.serialize_field("kind", "field")?;
+                state.serialize_field("value", field)?;
+            }
+            Self::Index(index) => {
+                state.serialize_field("kind", "index")?;
+                state.serialize_field("value", index)?;
+            }
+        }
+        state.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ComponentFieldPathSegment {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            kind: String,
+            value: SegmentValue,
+        }
+
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum SegmentValue {
+            Field(String),
+            Index(u32),
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        match (wire.kind.as_str(), wire.value) {
+            ("field", SegmentValue::Field(field)) => Ok(Self::Field(field)),
+            ("index", SegmentValue::Index(index)) => Ok(Self::Index(index)),
+            ("field", _) => Err(serde::de::Error::custom(
+                "component field path segment 'field' value must be a string",
+            )),
+            ("index", _) => Err(serde::de::Error::custom(
+                "component field path segment 'index' value must be an integer",
+            )),
+            (kind, _) => Err(serde::de::Error::custom(format!(
+                "unknown component field path segment kind '{kind}'"
+            ))),
+        }
     }
 }
 

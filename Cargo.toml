@@ -98,6 +98,8 @@ nara_winit = { workspace = true, optional = true }
 [dev-dependencies]
 bevy_ecs.workspace = true
 image.workspace = true
+ron.workspace = true
+serde_json.workspace = true
 
 [features]
 default = []
@@ -135,4 +137,19 @@ path = "examples/asset_import_texture.rs"
 [[example]]
 name = "scene_prefab_roundtrip"
 path = "examples/scene_prefab_roundtrip.rs"
+required-features = ["serde"]
+
+[[example]]
+name = "scene_patch_roundtrip"
+path = "examples/scene_patch_roundtrip.rs"
+required-features = ["serde"]
+
+[[example]]
+name = "component_schema_export"
+path = "examples/component_schema_export.rs"
+required-features = ["serde"]
+
+[[example]]
+name = "prefab_patch_override"
+path = "examples/prefab_patch_override.rs"
 required-features = ["serde"]

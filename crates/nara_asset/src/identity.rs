@@ -190,11 +190,6 @@ impl Display for AssetPathError {
 impl Error for AssetPathError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(tag = "kind", content = "value", rename_all = "snake_case")
-)]
 pub enum AssetRef {
     Path(AssetPath),
     StableId(StableAssetId),
@@ -222,6 +217,52 @@ impl AssetRef {
         match self {
             Self::Path(_) => None,
             Self::StableId(id) => Some(*id),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for AssetRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("AssetRef", 2)?;
+        match self {
+            Self::Path(path) => {
+                state.serialize_field("kind", "path")?;
+                state.serialize_field("value", path.as_str())?;
+            }
+            Self::StableId(id) => {
+                state.serialize_field("kind", "stable_id")?;
+                state.serialize_field("value", &id.to_string())?;
+            }
+        }
+        state.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for AssetRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Wire {
+            kind: String,
+            value: String,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        match wire.kind.as_str() {
+            "path" => Self::path(wire.value).map_err(serde::de::Error::custom),
+            "stable_id" => Self::stable_id(&wire.value).map_err(serde::de::Error::custom),
+            kind => Err(serde::de::Error::custom(format!(
+                "unknown asset reference kind '{kind}'"
+            ))),
         }
     }
 }

@@ -113,7 +113,10 @@ impl ScenePatchDocument {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(tag = "op", rename_all = "snake_case"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(tag = "op", content = "args", rename_all = "snake_case")
+)]
 pub enum ScenePatchOperation {
     AddEntity {
         entity: SceneEntityRecord,
