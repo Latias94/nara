@@ -18,6 +18,7 @@ members = [
     "crates/nara_input",
     "crates/nara_reflect",
     "crates/nara_render",
+    "crates/nara_render_wgpu",
     "crates/nara_scene",
     "crates/nara_tooling",
     "crates/nara_transform",
@@ -41,6 +42,7 @@ nara_ecs = { path = "crates/nara_ecs" }
 nara_input = { path = "crates/nara_input" }
 nara_reflect = { path = "crates/nara_reflect" }
 nara_render = { path = "crates/nara_render" }
+nara_render_wgpu = { path = "crates/nara_render_wgpu" }
 nara_scene = { path = "crates/nara_scene" }
 nara_tooling = { path = "crates/nara_tooling" }
 nara_transform = { path = "crates/nara_transform" }
@@ -55,6 +57,8 @@ serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
 winit = "=0.30.12"
+pollster = "0.4"
+wgpu = "=30.0.0"
 
 [dependencies]
 nara_app.workspace = true
@@ -66,6 +70,7 @@ nara_ecs.workspace = true
 nara_input.workspace = true
 nara_reflect.workspace = true
 nara_render.workspace = true
+nara_render_wgpu = { workspace = true, optional = true }
 nara_scene.workspace = true
 nara_tooling.workspace = true
 nara_transform.workspace = true
@@ -84,3 +89,4 @@ serde = [
     "nara_window/serde",
 ]
 winit = ["dep:nara_winit"]
+wgpu = ["dep:nara_render_wgpu"]

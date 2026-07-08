@@ -9,6 +9,8 @@ pub use nara_ecs as ecs;
 pub use nara_input as input;
 pub use nara_reflect as reflect;
 pub use nara_render as render;
+#[cfg(feature = "wgpu")]
+pub use nara_render_wgpu as render_wgpu;
 pub use nara_scene as scene;
 pub use nara_tooling as tooling;
 pub use nara_transform as transform;
@@ -54,6 +56,11 @@ pub mod prelude {
         Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats, RenderBackend,
         RenderError, RenderFrame, RenderFrameState, RenderPhaseLabel, RenderPlugin, RenderTarget,
         Sprite, Texture2d, ViewportRect,
+    };
+    #[cfg(feature = "wgpu")]
+    pub use nara_render_wgpu::{
+        SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, WgpuBackendState,
+        WgpuRenderBackend, WgpuRenderError, WgpuRenderPlugin,
     };
     pub use nara_scene::{
         Children, HierarchyPlugin, Name, Parent, Scene, SceneAsset, SceneNode, Visibility,
