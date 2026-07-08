@@ -40,19 +40,27 @@ pub enum CoreStage {
     Update,
     PostUpdate,
     Extract,
+    Prepare,
+    Queue,
+    Sort,
     Render,
+    Cleanup,
     Last,
 }
 
 impl CoreStage {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 12] = [
         Self::First,
         Self::PreUpdate,
         Self::FixedUpdate,
         Self::Update,
         Self::PostUpdate,
         Self::Extract,
+        Self::Prepare,
+        Self::Queue,
+        Self::Sort,
         Self::Render,
+        Self::Cleanup,
         Self::Last,
     ];
 }
@@ -459,6 +467,34 @@ mod tests {
         order.0.push("update");
     }
 
+    fn push_extract(mut order: ResMut<Order>) {
+        order.0.push("extract");
+    }
+
+    fn push_prepare(mut order: ResMut<Order>) {
+        order.0.push("prepare");
+    }
+
+    fn push_queue(mut order: ResMut<Order>) {
+        order.0.push("queue");
+    }
+
+    fn push_sort(mut order: ResMut<Order>) {
+        order.0.push("sort");
+    }
+
+    fn push_render(mut order: ResMut<Order>) {
+        order.0.push("render");
+    }
+
+    fn push_cleanup(mut order: ResMut<Order>) {
+        order.0.push("cleanup");
+    }
+
+    fn push_last(mut order: ResMut<Order>) {
+        order.0.push("last");
+    }
+
     #[test]
     fn update_runs_startup_once_and_update_every_frame() {
         let mut app = App::new();
@@ -537,6 +573,28 @@ mod tests {
         assert_eq!(
             app.world().resource::<Order>().0,
             ["first", "pre_update", "fixed_update", "update"]
+        );
+    }
+
+    #[test]
+    fn render_pipeline_stages_run_in_order() {
+        let mut app = App::new();
+        app.insert_resource(Order::default())
+            .add_systems(CoreStage::Extract, push_extract)
+            .add_systems(CoreStage::Prepare, push_prepare)
+            .add_systems(CoreStage::Queue, push_queue)
+            .add_systems(CoreStage::Sort, push_sort)
+            .add_systems(CoreStage::Render, push_render)
+            .add_systems(CoreStage::Cleanup, push_cleanup)
+            .add_systems(CoreStage::Last, push_last);
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(
+            app.world().resource::<Order>().0,
+            [
+                "extract", "prepare", "queue", "sort", "render", "cleanup", "last"
+            ]
         );
     }
 
