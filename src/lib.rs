@@ -62,7 +62,9 @@ pub mod prelude {
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
     pub use nara_input::{ButtonInput, InputPlugin, InputState, KeyCode, MouseButton};
     pub use nara_reflect::{
-        ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+        ComponentCodec, ComponentCodecError, ComponentFloat, ComponentRegistry,
+        ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, ComponentValueError, PreparedComponent,
     };
     pub use nara_render::{
         Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats, RenderBackend,
