@@ -14,7 +14,9 @@ nara_diagnostic.workspace = true
 nara_ecs.workspace = true
 nara_reflect.workspace = true
 nara_transform.workspace = true
+ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -26,4 +28,6 @@ serde = [
     "nara_ecs/serde",
     "nara_reflect/serde",
     "nara_transform/serde",
+    "dep:ron",
+    "dep:serde_json",
 ]

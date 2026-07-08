@@ -5,6 +5,9 @@ use nara_asset::Handle;
 pub use nara_core::Color;
 use nara_core::Vec2;
 use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource, World};
+use nara_reflect::{
+    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+};
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
 use thiserror::Error;
@@ -264,6 +267,8 @@ pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<ComponentRegistry>();
+        register_render_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
         app.init_resource::<ClearColor>();
         app.init_resource::<ExtractedViews>();
         app.init_resource::<RenderFrame>();
@@ -271,6 +276,161 @@ impl Plugin for RenderPlugin {
         app.add_systems(CoreStage::Extract, extract_views);
         app.add_systems(CoreStage::Render, begin_render_frame);
     }
+}
+
+pub fn register_render_components(registry: &mut ComponentRegistry) {
+    registry
+        .register_serializable_component::<Camera2d, _, _>(
+            ComponentTypeId::new("nara.render.Camera2d"),
+            ComponentSchemaVersion(1),
+            |value| {
+                Ok(Camera2d {
+                    target: read_render_target(value.get("target"))?,
+                    viewport: read_optional_viewport(value.get("viewport"))?,
+                    clear_color: read_optional_color(value.get("clear_color"))?,
+                    viewport_height: value.field_f64("viewport_height")? as f32,
+                    order: optional_i64(value, "order")?.unwrap_or(0) as i32,
+                })
+            },
+            |camera| {
+                Ok(ComponentValue::map([
+                    ("target", render_target_value(camera.target)?),
+                    (
+                        "viewport",
+                        camera
+                            .viewport
+                            .map(viewport_value)
+                            .transpose()?
+                            .unwrap_or(ComponentValue::Null),
+                    ),
+                    (
+                        "clear_color",
+                        camera
+                            .clear_color
+                            .map(color_value)
+                            .transpose()?
+                            .unwrap_or(ComponentValue::Null),
+                    ),
+                    (
+                        "viewport_height",
+                        ComponentValue::f64(f64::from(camera.viewport_height))?,
+                    ),
+                    ("order", ComponentValue::I64(i64::from(camera.order))),
+                ]))
+            },
+        )
+        .expect("nara.render.Camera2d component registration should be unique");
+}
+
+fn read_render_target(value: Option<&ComponentValue>) -> Result<RenderTarget, ComponentCodecError> {
+    match value.and_then(ComponentValue::as_str) {
+        None | Some("primary_window") => Ok(RenderTarget::PrimaryWindow),
+        Some(_) => Err(ComponentCodecError::invalid_field(
+            "target",
+            "'primary_window'",
+        )),
+    }
+}
+
+fn render_target_value(target: RenderTarget) -> Result<ComponentValue, ComponentCodecError> {
+    match target {
+        RenderTarget::PrimaryWindow => Ok(ComponentValue::String("primary_window".to_string())),
+        RenderTarget::Window(_) | RenderTarget::Image(_) => Err(ComponentCodecError::Message(
+            "only primary window camera targets are scene-serializable in this slice".to_string(),
+        )),
+    }
+}
+
+fn read_optional_viewport(
+    value: Option<&ComponentValue>,
+) -> Result<Option<ViewportRect>, ComponentCodecError> {
+    match value {
+        None | Some(ComponentValue::Null) => Ok(None),
+        Some(value) => Ok(Some(
+            ViewportRect::new(
+                value.field_u64("physical_x")? as u32,
+                value.field_u64("physical_y")? as u32,
+                value.field_u64("physical_width")? as u32,
+                value.field_u64("physical_height")? as u32,
+            )
+            .ok_or_else(|| ComponentCodecError::invalid_field("viewport", "non-empty viewport"))?,
+        )),
+    }
+}
+
+fn viewport_value(value: ViewportRect) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        (
+            "physical_x",
+            ComponentValue::U64(u64::from(value.physical_x)),
+        ),
+        (
+            "physical_y",
+            ComponentValue::U64(u64::from(value.physical_y)),
+        ),
+        (
+            "physical_width",
+            ComponentValue::U64(u64::from(value.physical_width)),
+        ),
+        (
+            "physical_height",
+            ComponentValue::U64(u64::from(value.physical_height)),
+        ),
+    ]))
+}
+
+fn read_optional_color(
+    value: Option<&ComponentValue>,
+) -> Result<Option<Color>, ComponentCodecError> {
+    match value {
+        None | Some(ComponentValue::Null) => Ok(None),
+        Some(value) => read_color(value, "clear_color").map(Some),
+    }
+}
+
+fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
+    Ok(Color::rgba(
+        value.field("r").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.r"), "finite float")
+            })
+        })? as f32,
+        value.field("g").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.g"), "finite float")
+            })
+        })? as f32,
+        value.field("b").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.b"), "finite float")
+            })
+        })? as f32,
+        value.field("a").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.a"), "finite float")
+            })
+        })? as f32,
+    ))
+}
+
+fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("r", ComponentValue::f64(f64::from(value.r))?),
+        ("g", ComponentValue::f64(f64::from(value.g))?),
+        ("b", ComponentValue::f64(f64::from(value.b))?),
+        ("a", ComponentValue::f64(f64::from(value.a))?),
+    ]))
+}
+
+fn optional_i64(value: &ComponentValue, field: &str) -> Result<Option<i64>, ComponentCodecError> {
+    value
+        .get(field)
+        .map(|value| {
+            value
+                .as_i64()
+                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i64"))
+        })
+        .transpose()
 }
 
 pub fn extract_views(

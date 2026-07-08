@@ -1,9 +1,13 @@
 //! Sprite authoring data for 2D scenes.
 
 use nara_app::{App, Plugin};
-use nara_asset::Handle;
+use nara_asset::{AssetRef, AssetServer, Handle};
 use nara_core::{Color, Vec2};
-use nara_ecs::Component;
+use nara_ecs::{Component, World};
+use nara_reflect::{
+    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, PreparedComponent,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -99,7 +103,189 @@ impl Sprite {
 pub struct SpritePlugin;
 
 impl Plugin for SpritePlugin {
-    fn build(&self, _app: &mut App) {}
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ComponentRegistry>();
+        register_sprite_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
+    }
+}
+
+pub fn register_sprite_components(registry: &mut ComponentRegistry) {
+    registry
+        .register_component_codec::<Sprite, _, _>(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            ComponentSchemaVersion(1),
+            |value| {
+                let size = read_vec2(value.field("size")?, "size")?;
+                let color = read_color(value.field("color")?, "color")?;
+                let texture_ref = read_optional_asset_ref(value.get("texture"))?;
+                let layer = optional_i64(value, "layer")?.unwrap_or(0) as i32;
+                let sort_key = optional_i64(value, "sort_key")?.unwrap_or(0) as i32;
+
+                Ok(PreparedComponent::new(move |world, entity| {
+                    let texture = resolve_optional_texture(world, texture_ref.as_ref())?;
+                    let sprite = Sprite {
+                        texture,
+                        texture_region: None,
+                        color,
+                        size,
+                        anchor: SpriteAnchor::CENTER,
+                        layer,
+                        sort_key,
+                    };
+                    let mut entity_mut = world
+                        .get_entity_mut(entity)
+                        .map_err(|_| ComponentCodecError::EntityMissing)?;
+                    entity_mut.insert(sprite);
+                    Ok(())
+                }))
+            },
+            |world, entity| {
+                let Some(sprite) = world.get::<Sprite>(entity) else {
+                    return Ok(None);
+                };
+                let texture = match sprite.texture {
+                    Some(handle) => Some(asset_ref_value(
+                        &AssetRef::from_handle(
+                            world.get_resource::<AssetServer>().ok_or_else(|| {
+                                ComponentCodecError::Message(
+                                    "AssetServer resource is missing".to_string(),
+                                )
+                            })?,
+                            handle,
+                        )
+                        .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
+                    )?),
+                    None => None,
+                };
+
+                let mut fields = vec![
+                    ("size", vec2_value(sprite.size)?),
+                    ("color", color_value(sprite.color)?),
+                    ("layer", ComponentValue::I64(i64::from(sprite.layer))),
+                    ("sort_key", ComponentValue::I64(i64::from(sprite.sort_key))),
+                ];
+                fields.push(("texture", texture.unwrap_or(ComponentValue::Null)));
+                Ok(Some(ComponentValue::map(fields)))
+            },
+        )
+        .expect("nara.sprite.Sprite component registration should be unique");
+}
+
+fn resolve_optional_texture(
+    world: &mut World,
+    texture_ref: Option<&AssetRef>,
+) -> Result<Option<Handle<Texture2d>>, ComponentCodecError> {
+    let Some(texture_ref) = texture_ref else {
+        return Ok(None);
+    };
+    if world.get_resource::<AssetServer>().is_none() {
+        world.insert_resource(AssetServer::new());
+    }
+    texture_ref
+        .resolve::<Texture2d>(&mut world.resource_mut::<AssetServer>())
+        .map(Some)
+        .map_err(|error| ComponentCodecError::Message(error.to_string()))
+}
+
+fn optional_i64(value: &ComponentValue, field: &str) -> Result<Option<i64>, ComponentCodecError> {
+    value
+        .get(field)
+        .map(|value| {
+            value
+                .as_i64()
+                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i64"))
+        })
+        .transpose()
+}
+
+fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
+    Ok(Vec2::new(
+        value.field("x").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.x"), "finite float")
+            })
+        })? as f32,
+        value.field("y").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.y"), "finite float")
+            })
+        })? as f32,
+    ))
+}
+
+fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("x", ComponentValue::f64(f64::from(value.x))?),
+        ("y", ComponentValue::f64(f64::from(value.y))?),
+    ]))
+}
+
+fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
+    Ok(Color::rgba(
+        value.field("r").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.r"), "finite float")
+            })
+        })? as f32,
+        value.field("g").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.g"), "finite float")
+            })
+        })? as f32,
+        value.field("b").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.b"), "finite float")
+            })
+        })? as f32,
+        value.field("a").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.a"), "finite float")
+            })
+        })? as f32,
+    ))
+}
+
+fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("r", ComponentValue::f64(f64::from(value.r))?),
+        ("g", ComponentValue::f64(f64::from(value.g))?),
+        ("b", ComponentValue::f64(f64::from(value.b))?),
+        ("a", ComponentValue::f64(f64::from(value.a))?),
+    ]))
+}
+
+fn read_optional_asset_ref(
+    value: Option<&ComponentValue>,
+) -> Result<Option<AssetRef>, ComponentCodecError> {
+    match value {
+        None | Some(ComponentValue::Null) => Ok(None),
+        Some(value) => read_asset_ref(value).map(Some),
+    }
+}
+
+fn read_asset_ref(value: &ComponentValue) -> Result<AssetRef, ComponentCodecError> {
+    match value.field_str("kind")? {
+        "path" => AssetRef::path(value.field_str("value")?)
+            .map_err(|error| ComponentCodecError::Message(error.to_string())),
+        "stable_id" => Ok(AssetRef::stable_id(value.field_str("value")?)),
+        _ => Err(ComponentCodecError::invalid_field(
+            "kind",
+            "'path' or 'stable_id'",
+        )),
+    }
+}
+
+fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCodecError> {
+    match asset_ref {
+        AssetRef::Path(path) => Ok(ComponentValue::map([
+            ("kind", ComponentValue::String("path".to_string())),
+            ("value", ComponentValue::String(path.as_str().to_string())),
+        ])),
+        AssetRef::StableId(id) => Ok(ComponentValue::map([
+            ("kind", ComponentValue::String("stable_id".to_string())),
+            ("value", ComponentValue::String(id.clone())),
+        ])),
+    }
 }
 
 pub mod prelude {

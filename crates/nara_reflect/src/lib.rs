@@ -126,6 +126,49 @@ impl ComponentValue {
         }
     }
 
+    pub fn field(&self, field: &str) -> Result<&ComponentValue, ComponentCodecError> {
+        self.get(field)
+            .ok_or_else(|| ComponentCodecError::missing_field(field))
+    }
+
+    #[must_use]
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Self::Bool(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn field_bool(&self, field: &str) -> Result<bool, ComponentCodecError> {
+        self.field(field)?
+            .as_bool()
+            .ok_or_else(|| ComponentCodecError::invalid_field(field, "bool"))
+    }
+
+    pub fn field_i64(&self, field: &str) -> Result<i64, ComponentCodecError> {
+        self.field(field)?
+            .as_i64()
+            .ok_or_else(|| ComponentCodecError::invalid_field(field, "i64"))
+    }
+
+    pub fn field_u64(&self, field: &str) -> Result<u64, ComponentCodecError> {
+        self.field(field)?
+            .as_u64()
+            .ok_or_else(|| ComponentCodecError::invalid_field(field, "u64"))
+    }
+
+    pub fn field_f64(&self, field: &str) -> Result<f64, ComponentCodecError> {
+        self.field(field)?
+            .as_f64()
+            .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite float"))
+    }
+
+    pub fn field_str(&self, field: &str) -> Result<&str, ComponentCodecError> {
+        self.field(field)?
+            .as_str()
+            .ok_or_else(|| ComponentCodecError::invalid_field(field, "string"))
+    }
+
     #[must_use]
     pub fn as_i64(&self) -> Option<i64> {
         match self {
@@ -350,6 +393,7 @@ impl ComponentRegistry {
     where
         T: Component + Reflect + GetTypeRegistration,
     {
+        self.type_registry.register::<T>();
         self.register_component_schema::<T>(id, version, false)?;
         Ok(self)
     }
@@ -362,7 +406,7 @@ impl ComponentRegistry {
         encode: Encode,
     ) -> Result<&mut Self, ComponentRegistryError>
     where
-        T: Component + Reflect + GetTypeRegistration,
+        T: Component,
         Decode: Fn(&ComponentValue) -> Result<T, ComponentCodecError> + Send + Sync + 'static,
         Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
     {
@@ -391,7 +435,7 @@ impl ComponentRegistry {
         encode: Encode,
     ) -> Result<&mut Self, ComponentRegistryError>
     where
-        T: Component + Reflect + GetTypeRegistration,
+        T: Component,
         Preflight: Fn(&ComponentValue) -> Result<PreparedComponent, ComponentCodecError>
             + Send
             + Sync
@@ -461,13 +505,12 @@ impl ComponentRegistry {
         serializable: bool,
     ) -> Result<(), ComponentRegistryError>
     where
-        T: Component + Reflect + GetTypeRegistration,
+        T: Component,
     {
         if self.schemas.contains_key(&id) {
             return Err(ComponentRegistryError::DuplicateComponentId(id));
         }
 
-        self.type_registry.register::<T>();
         let schema = ComponentSchema {
             id: id.clone(),
             version,

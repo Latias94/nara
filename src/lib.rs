@@ -34,6 +34,8 @@ impl Plugin for MinimalPlugins {
     fn build(&self, app: &mut App) {
         app.add_plugin(nara_scene::HierarchyPlugin)
             .expect("HierarchyPlugin should be unique");
+        app.add_plugin(nara_transform::TransformPlugin)
+            .expect("TransformPlugin should be unique");
         app.add_plugin(nara_input::InputPlugin)
             .expect("InputPlugin should be unique");
         app.add_plugin(nara_sprite::SpritePlugin)
@@ -79,8 +81,9 @@ pub mod prelude {
     pub use nara_scene::{
         Children, HierarchyPlugin, Name, Parent, PrefabDocument, PrefabInstance,
         SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError, SceneEntityMap,
-        SceneEntityRecord, SceneEntitySource, SceneExportReport, SceneInstanceId, SceneSpawnReport,
-        SceneSpawner, Visibility, export_scene, spawn_child, spawn_scene, sync_children,
+        SceneEntityRecord, SceneEntitySource, SceneExportReport, SceneFormatError, SceneInstanceId,
+        SceneSpawnReport, SceneSpawner, Visibility, export_scene, spawn_child, spawn_scene,
+        sync_children,
     };
     pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, Texture2d, TextureRegion};
     pub use nara_sprite_render::{
@@ -93,7 +96,7 @@ pub mod prelude {
         TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
     };
     pub use nara_tooling::{ToolingPlugin, WorldSnapshot};
-    pub use nara_transform::{GlobalTransform2d, Transform2d};
+    pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
     pub use nara_window::{
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowEvent, WindowEvents, WindowId,
         WindowMode, WindowPlugin, WindowResolution, apply_window_event, push_window_event,

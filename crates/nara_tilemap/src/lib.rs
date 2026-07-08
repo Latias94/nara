@@ -3,9 +3,13 @@
 use std::collections::BTreeMap;
 
 use nara_app::{App, Plugin};
-use nara_asset::Handle;
+use nara_asset::{AssetRef, AssetServer, Handle};
 use nara_core::{Color, Vec2};
-use nara_ecs::Component;
+use nara_ecs::{Component, World};
+use nara_reflect::{
+    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, PreparedComponent,
+};
 
 pub const DEFAULT_TILE_SIZE: Vec2 = Vec2::new(16.0, 16.0);
 pub const DEFAULT_CHUNK_SIZE: i32 = 32;
@@ -247,7 +251,237 @@ impl Default for Tilemap {
 pub struct TilemapPlugin;
 
 impl Plugin for TilemapPlugin {
-    fn build(&self, _app: &mut App) {}
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ComponentRegistry>();
+        register_tilemap_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
+    }
+}
+
+pub fn register_tilemap_components(registry: &mut ComponentRegistry) {
+    registry
+        .register_component_codec::<Tilemap, _, _>(
+            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            ComponentSchemaVersion(1),
+            |value| {
+                let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
+                let layer = optional_i64(value, "layer")?.unwrap_or(0) as i32;
+                let sort_key = optional_i64(value, "sort_key")?.unwrap_or(0) as i32;
+                let tileset_ref = read_optional_asset_ref(value.get("tileset"))?;
+                let cells = read_cells(value.get("cells"))?;
+
+                Ok(PreparedComponent::new(move |world, entity| {
+                    let tileset = resolve_optional_tileset(world, tileset_ref.as_ref())?;
+                    let mut tilemap = Tilemap::new(tile_size)
+                        .with_layer(layer)
+                        .with_sort_key(sort_key);
+                    if let Some(tileset) = tileset {
+                        tilemap = tilemap.with_tileset(tileset);
+                    }
+                    for (coord, cell) in cells {
+                        tilemap.set_cell(coord, cell);
+                    }
+
+                    let mut entity_mut = world
+                        .get_entity_mut(entity)
+                        .map_err(|_| ComponentCodecError::EntityMissing)?;
+                    entity_mut.insert(tilemap);
+                    Ok(())
+                }))
+            },
+            |world, entity| {
+                let Some(tilemap) = world.get::<Tilemap>(entity) else {
+                    return Ok(None);
+                };
+                let tileset = match tilemap.tileset {
+                    Some(handle) => Some(asset_ref_value(
+                        &AssetRef::from_handle(
+                            world.get_resource::<AssetServer>().ok_or_else(|| {
+                                ComponentCodecError::Message(
+                                    "AssetServer resource is missing".to_string(),
+                                )
+                            })?,
+                            handle,
+                        )
+                        .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
+                    )?),
+                    None => None,
+                };
+
+                Ok(Some(ComponentValue::map([
+                    ("tile_size", vec2_value(tilemap.tile_size)?),
+                    ("layer", ComponentValue::I64(i64::from(tilemap.layer.index))),
+                    ("sort_key", ComponentValue::I64(i64::from(tilemap.sort_key))),
+                    ("tileset", tileset.unwrap_or(ComponentValue::Null)),
+                    ("cells", cells_value(tilemap)?),
+                ])))
+            },
+        )
+        .expect("nara.tilemap.Tilemap component registration should be unique");
+}
+
+fn resolve_optional_tileset(
+    world: &mut World,
+    tileset_ref: Option<&AssetRef>,
+) -> Result<Option<Handle<TileSet>>, ComponentCodecError> {
+    let Some(tileset_ref) = tileset_ref else {
+        return Ok(None);
+    };
+    if world.get_resource::<AssetServer>().is_none() {
+        world.insert_resource(AssetServer::new());
+    }
+    tileset_ref
+        .resolve::<TileSet>(&mut world.resource_mut::<AssetServer>())
+        .map(Some)
+        .map_err(|error| ComponentCodecError::Message(error.to_string()))
+}
+
+fn optional_i64(value: &ComponentValue, field: &str) -> Result<Option<i64>, ComponentCodecError> {
+    value
+        .get(field)
+        .map(|value| {
+            value
+                .as_i64()
+                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i64"))
+        })
+        .transpose()
+}
+
+fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
+    Ok(Vec2::new(
+        value.field("x").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.x"), "finite float")
+            })
+        })? as f32,
+        value.field("y").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.y"), "finite float")
+            })
+        })? as f32,
+    ))
+}
+
+fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("x", ComponentValue::f64(f64::from(value.x))?),
+        ("y", ComponentValue::f64(f64::from(value.y))?),
+    ]))
+}
+
+fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
+    Ok(Color::rgba(
+        value.field("r").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.r"), "finite float")
+            })
+        })? as f32,
+        value.field("g").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.g"), "finite float")
+            })
+        })? as f32,
+        value.field("b").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.b"), "finite float")
+            })
+        })? as f32,
+        value.field("a").and_then(|value| {
+            value.as_f64().ok_or_else(|| {
+                ComponentCodecError::invalid_field(format!("{field}.a"), "finite float")
+            })
+        })? as f32,
+    ))
+}
+
+fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("r", ComponentValue::f64(f64::from(value.r))?),
+        ("g", ComponentValue::f64(f64::from(value.g))?),
+        ("b", ComponentValue::f64(f64::from(value.b))?),
+        ("a", ComponentValue::f64(f64::from(value.a))?),
+    ]))
+}
+
+fn read_cells(
+    value: Option<&ComponentValue>,
+) -> Result<Vec<(TileCoord, TileCell)>, ComponentCodecError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let ComponentValue::List(entries) = value else {
+        return Err(ComponentCodecError::invalid_field("cells", "list"));
+    };
+    entries
+        .iter()
+        .map(|entry| {
+            let coord = entry.field("coord")?;
+            let cell = entry.field("cell")?;
+            Ok((
+                TileCoord::new(coord.field_i64("x")? as i32, coord.field_i64("y")? as i32),
+                TileCell::new(TileIndex::new(cell.field_u64("tile")? as u32))
+                    .with_color(read_color(cell.field("color")?, "cell.color")?),
+            ))
+        })
+        .collect()
+}
+
+fn cells_value(tilemap: &Tilemap) -> Result<ComponentValue, ComponentCodecError> {
+    let cells = tilemap
+        .cells()
+        .map(|(coord, cell)| {
+            Ok(ComponentValue::map([
+                (
+                    "coord",
+                    ComponentValue::map([
+                        ("x", ComponentValue::I64(i64::from(coord.x))),
+                        ("y", ComponentValue::I64(i64::from(coord.y))),
+                    ]),
+                ),
+                (
+                    "cell",
+                    ComponentValue::map([
+                        ("tile", ComponentValue::U64(u64::from(cell.tile.raw()))),
+                        ("color", color_value(cell.color)?),
+                    ]),
+                ),
+            ]))
+        })
+        .collect::<Result<Vec<_>, ComponentCodecError>>()?;
+    Ok(ComponentValue::List(cells))
+}
+
+fn read_optional_asset_ref(
+    value: Option<&ComponentValue>,
+) -> Result<Option<AssetRef>, ComponentCodecError> {
+    match value {
+        None | Some(ComponentValue::Null) => Ok(None),
+        Some(value) => read_asset_ref(value).map(Some),
+    }
+}
+
+fn read_asset_ref(value: &ComponentValue) -> Result<AssetRef, ComponentCodecError> {
+    match value.field_str("kind")? {
+        "path" => AssetRef::path(value.field_str("value")?)
+            .map_err(|error| ComponentCodecError::Message(error.to_string())),
+        "stable_id" => Ok(AssetRef::stable_id(value.field_str("value")?)),
+        _ => Err(ComponentCodecError::invalid_field(
+            "kind",
+            "'path' or 'stable_id'",
+        )),
+    }
+}
+
+fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCodecError> {
+    match asset_ref {
+        AssetRef::Path(path) => Ok(ComponentValue::map([
+            ("kind", ComponentValue::String("path".to_string())),
+            ("value", ComponentValue::String(path.as_str().to_string())),
+        ])),
+        AssetRef::StableId(id) => Ok(ComponentValue::map([
+            ("kind", ComponentValue::String("stable_id".to_string())),
+            ("value", ComponentValue::String(id.clone())),
+        ])),
+    }
 }
 
 pub mod prelude {

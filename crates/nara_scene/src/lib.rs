@@ -11,11 +11,12 @@ use nara_asset::AssetRef;
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Bundle, Component, Entity, World};
 use nara_reflect::{
-    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, PreparedComponent,
+    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, PreparedComponent, Reflect, bevy_reflect,
 };
 pub use nara_transform::Transform2d;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Component)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Component, Reflect)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Name(pub String);
 
@@ -56,7 +57,7 @@ impl Children {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Component)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Component, Reflect)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Visibility {
     #[default]
@@ -101,9 +102,41 @@ impl SceneDocument {
         }
     }
 
+    pub fn canonicalize(&mut self) {
+        self.entities.sort_by(|left, right| left.id.cmp(&right.id));
+    }
+
     #[must_use]
     pub fn validate(&self, registry: &ComponentRegistry) -> DiagnosticReport {
         preflight_scene(self, registry).diagnostics
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn to_json_string(&self) -> Result<String, SceneFormatError> {
+        serde_json::to_string_pretty(self)
+            .map_err(|error| SceneFormatError::Json(error.to_string()))
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn from_json_str(input: &str) -> Result<Self, SceneFormatError> {
+        let mut document = serde_json::from_str::<Self>(input)
+            .map_err(|error| SceneFormatError::Json(error.to_string()))?;
+        document.canonicalize();
+        Ok(document)
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn to_ron_string(&self) -> Result<String, SceneFormatError> {
+        ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())
+            .map_err(|error| SceneFormatError::Ron(error.to_string()))
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn from_ron_str(input: &str) -> Result<Self, SceneFormatError> {
+        let mut document = ron::from_str::<Self>(input)
+            .map_err(|error| SceneFormatError::Ron(error.to_string()))?;
+        document.canonicalize();
+        Ok(document)
     }
 }
 
@@ -181,6 +214,52 @@ impl SceneComponentRecord {
 pub struct PrefabDocument {
     pub format_version: u32,
     pub entities: Vec<SceneEntityRecord>,
+}
+
+impl PrefabDocument {
+    pub const CURRENT_FORMAT_VERSION: u32 = 1;
+
+    #[must_use]
+    pub fn new(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
+        let mut entities = entities.into_iter().collect::<Vec<_>>();
+        entities.sort_by(|left, right| left.id.cmp(&right.id));
+        Self {
+            format_version: Self::CURRENT_FORMAT_VERSION,
+            entities,
+        }
+    }
+
+    pub fn canonicalize(&mut self) {
+        self.entities.sort_by(|left, right| left.id.cmp(&right.id));
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn to_json_string(&self) -> Result<String, SceneFormatError> {
+        serde_json::to_string_pretty(self)
+            .map_err(|error| SceneFormatError::Json(error.to_string()))
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn from_json_str(input: &str) -> Result<Self, SceneFormatError> {
+        let mut document = serde_json::from_str::<Self>(input)
+            .map_err(|error| SceneFormatError::Json(error.to_string()))?;
+        document.canonicalize();
+        Ok(document)
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn to_ron_string(&self) -> Result<String, SceneFormatError> {
+        ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())
+            .map_err(|error| SceneFormatError::Ron(error.to_string()))
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn from_ron_str(input: &str) -> Result<Self, SceneFormatError> {
+        let mut document = ron::from_str::<Self>(input)
+            .map_err(|error| SceneFormatError::Ron(error.to_string()))?;
+        document.canonicalize();
+        Ok(document)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -475,6 +554,23 @@ impl Display for SceneEntityIdError {
 
 impl Error for SceneEntityIdError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SceneFormatError {
+    Json(String),
+    Ron(String),
+}
+
+impl Display for SceneFormatError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json(error) => write!(formatter, "JSON scene format error: {error}"),
+            Self::Ron(error) => write!(formatter, "RON scene format error: {error}"),
+        }
+    }
+}
+
+impl Error for SceneFormatError {}
+
 struct PreparedScene {
     entities: Vec<PreparedSceneEntity>,
     diagnostics: DiagnosticReport,
@@ -554,11 +650,16 @@ fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> Pr
 
             match registry.preflight_component(component_id, &component.value) {
                 Some(Ok(prepared)) => prepared_components.push(prepared),
-                Some(Err(error)) => diagnostics.push(
-                    Diagnostic::error("scene.invalid-component-payload", error.to_string())
-                        .with_entity_id(entity.id.as_str())
-                        .with_component_id(component_id.as_str()),
-                ),
+                Some(Err(error)) => {
+                    let mut diagnostic =
+                        Diagnostic::error("scene.invalid-component-payload", error.to_string())
+                            .with_entity_id(entity.id.as_str())
+                            .with_component_id(component_id.as_str());
+                    if let Some(field_path) = codec_error_field_path(&error) {
+                        diagnostic = diagnostic.with_field_path(field_path);
+                    }
+                    diagnostics.push(diagnostic);
+                }
                 None => diagnostics.push(
                     Diagnostic::error(
                         "scene.missing-component-codec",
@@ -580,6 +681,14 @@ fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> Pr
     PreparedScene {
         entities: prepared_entities,
         diagnostics,
+    }
+}
+
+fn codec_error_field_path(error: &ComponentCodecError) -> Option<&str> {
+    match error {
+        ComponentCodecError::MissingField { field }
+        | ComponentCodecError::InvalidField { field, .. } => Some(field.as_str()),
+        ComponentCodecError::EntityMissing | ComponentCodecError::Message(_) => None,
     }
 }
 
@@ -686,8 +795,46 @@ pub struct HierarchyPlugin;
 
 impl Plugin for HierarchyPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<ComponentRegistry>();
+        register_scene_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
         app.add_systems(CoreStage::PostUpdate, sync_children);
     }
+}
+
+pub fn register_scene_components(registry: &mut ComponentRegistry) {
+    registry
+        .register_serializable_component::<Name, _, _>(
+            ComponentTypeId::new("nara.scene.Name"),
+            ComponentSchemaVersion(1),
+            |value| {
+                Ok(Name::new(value.as_str().ok_or_else(|| {
+                    ComponentCodecError::invalid_field("Name", "string")
+                })?))
+            },
+            |name| Ok(ComponentValue::String(name.as_str().to_string())),
+        )
+        .expect("nara.scene.Name component registration should be unique");
+
+    registry
+        .register_serializable_component::<Visibility, _, _>(
+            ComponentTypeId::new("nara.scene.Visibility"),
+            ComponentSchemaVersion(1),
+            |value| match value.as_str() {
+                Some("visible") => Ok(Visibility::Visible),
+                Some("hidden") => Ok(Visibility::Hidden),
+                _ => Err(ComponentCodecError::invalid_field(
+                    "Visibility",
+                    "'visible' or 'hidden'",
+                )),
+            },
+            |visibility| {
+                Ok(ComponentValue::String(match visibility {
+                    Visibility::Visible => "visible".to_string(),
+                    Visibility::Hidden => "hidden".to_string(),
+                }))
+            },
+        )
+        .expect("nara.scene.Visibility component registration should be unique");
 }
 
 #[cfg(test)]
