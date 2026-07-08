@@ -38,6 +38,13 @@ pub use state::{
 };
 pub use storage::{Asset, Assets, Handle};
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum AssetRefExportPolicy {
+    #[default]
+    Path,
+    StableIdWhenKnown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetRefError {
     InvalidPath(AssetPathError),
@@ -105,6 +112,20 @@ impl AssetRef {
         asset_server: &AssetServer,
         handle: Handle<T>,
     ) -> Result<Self, AssetRefError> {
+        Self::from_handle_with_policy(asset_server, handle, AssetRefExportPolicy::Path)
+    }
+
+    pub fn from_handle_with_policy<T>(
+        asset_server: &AssetServer,
+        handle: Handle<T>,
+        policy: AssetRefExportPolicy,
+    ) -> Result<Self, AssetRefError> {
+        if policy == AssetRefExportPolicy::StableIdWhenKnown
+            && let Some(stable_id) = asset_server.stable_id(handle.id())
+        {
+            return Ok(Self::StableId(stable_id));
+        }
+
         let path = asset_server
             .path(handle.id())
             .ok_or_else(|| AssetRefError::UnknownHandle(handle.id()))?;

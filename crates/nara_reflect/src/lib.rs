@@ -10,6 +10,9 @@ use std::{
 pub use bevy_reflect;
 pub use bevy_reflect::prelude::*;
 use bevy_reflect::{GetTypeRegistration, TypeRegistry};
+use nara_asset::{
+    AssetRef, AssetRefError, AssetRefExportPolicy, AssetServer, Handle, ProjectAssetDatabase,
+};
 use nara_ecs::{Component, Entity, Resource, World};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -320,6 +323,93 @@ impl From<ComponentValueError> for ComponentCodecError {
     }
 }
 
+#[derive(Default)]
+pub struct ComponentDecodeContext<'a> {
+    asset_server: Option<&'a mut AssetServer>,
+    project_asset_database: Option<&'a ProjectAssetDatabase>,
+    asset_server_touched: bool,
+}
+
+impl<'a> ComponentDecodeContext<'a> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn with_asset_server(asset_server: &'a mut AssetServer) -> Self {
+        Self {
+            asset_server: Some(asset_server),
+            project_asset_database: None,
+            asset_server_touched: false,
+        }
+    }
+
+    #[must_use]
+    pub fn with_project_asset_database(mut self, database: &'a ProjectAssetDatabase) -> Self {
+        self.project_asset_database = Some(database);
+        self
+    }
+
+    #[must_use]
+    pub const fn project_asset_database(&self) -> Option<&ProjectAssetDatabase> {
+        self.project_asset_database
+    }
+
+    #[must_use]
+    pub const fn asset_server_touched(&self) -> bool {
+        self.asset_server_touched
+    }
+
+    pub fn resolve_asset_ref<T>(
+        &mut self,
+        asset_ref: &AssetRef,
+    ) -> Option<Result<Handle<T>, AssetRefError>> {
+        let database = self.project_asset_database;
+        let asset_server = self.asset_server.as_deref_mut()?;
+        self.asset_server_touched = true;
+        Some(match database {
+            Some(database) => asset_ref.resolve_with_database(asset_server, database),
+            None => asset_ref.resolve(asset_server),
+        })
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ComponentEncodeContext<'a> {
+    asset_ref_export_policy: AssetRefExportPolicy,
+    project_asset_database: Option<&'a ProjectAssetDatabase>,
+}
+
+impl<'a> ComponentEncodeContext<'a> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub const fn asset_ref_export_policy(&self) -> AssetRefExportPolicy {
+        self.asset_ref_export_policy
+    }
+
+    #[must_use]
+    pub const fn with_asset_ref_export_policy(mut self, policy: AssetRefExportPolicy) -> Self {
+        self.asset_ref_export_policy = policy;
+        self
+    }
+
+    #[must_use]
+    pub fn with_project_asset_database(mut self, database: &'a ProjectAssetDatabase) -> Self {
+        self.project_asset_database = Some(database);
+        self
+    }
+
+    #[must_use]
+    pub const fn project_asset_database(&self) -> Option<&ProjectAssetDatabase> {
+        self.project_asset_database
+    }
+}
+
 type ApplyComponentFn =
     dyn FnOnce(&mut World, Entity) -> Result<(), ComponentCodecError> + Send + 'static;
 
@@ -355,12 +445,31 @@ impl PreparedComponent {
 }
 
 pub trait ComponentCodec: Send + Sync {
-    fn preflight(&self, value: &ComponentValue) -> Result<PreparedComponent, ComponentCodecError>;
+    fn preflight(&self, value: &ComponentValue) -> Result<PreparedComponent, ComponentCodecError> {
+        let mut context = ComponentDecodeContext::new();
+        self.preflight_with_context(value, &mut context)
+    }
+
+    fn preflight_with_context(
+        &self,
+        value: &ComponentValue,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<PreparedComponent, ComponentCodecError>;
 
     fn encode(
         &self,
         world: &World,
         entity: Entity,
+    ) -> Result<Option<ComponentValue>, ComponentCodecError> {
+        let context = ComponentEncodeContext::new();
+        self.encode_with_context(world, entity, &context)
+    }
+
+    fn encode_with_context(
+        &self,
+        world: &World,
+        entity: Entity,
+        context: &ComponentEncodeContext<'_>,
     ) -> Result<Option<ComponentValue>, ComponentCodecError>;
 }
 
@@ -371,25 +480,37 @@ struct FnComponentCodec<Preflight, Encode> {
 
 impl<Preflight, Encode> ComponentCodec for FnComponentCodec<Preflight, Encode>
 where
-    Preflight: Fn(&ComponentValue) -> Result<PreparedComponent, ComponentCodecError>
+    Encode: for<'a> Fn(
+            &World,
+            Entity,
+            &ComponentEncodeContext<'a>,
+        ) -> Result<Option<ComponentValue>, ComponentCodecError>
         + Send
         + Sync
         + 'static,
-    Encode: Fn(&World, Entity) -> Result<Option<ComponentValue>, ComponentCodecError>
+    Preflight: for<'a> Fn(
+            &ComponentValue,
+            &mut ComponentDecodeContext<'a>,
+        ) -> Result<PreparedComponent, ComponentCodecError>
         + Send
         + Sync
         + 'static,
 {
-    fn preflight(&self, value: &ComponentValue) -> Result<PreparedComponent, ComponentCodecError> {
-        (self.preflight)(value)
+    fn preflight_with_context(
+        &self,
+        value: &ComponentValue,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Result<PreparedComponent, ComponentCodecError> {
+        (self.preflight)(value, context)
     }
 
-    fn encode(
+    fn encode_with_context(
         &self,
         world: &World,
         entity: Entity,
+        context: &ComponentEncodeContext<'_>,
     ) -> Result<Option<ComponentValue>, ComponentCodecError> {
-        (self.encode)(world, entity)
+        (self.encode)(world, entity, context)
     }
 }
 
@@ -445,11 +566,11 @@ impl ComponentRegistry {
     {
         self.register_component_schema::<T>(id.clone(), version, true)?;
         let codec = FnComponentCodec {
-            preflight: move |value: &ComponentValue| {
+            preflight: move |value: &ComponentValue, _context: &mut ComponentDecodeContext<'_>| {
                 let component = decode(value)?;
                 Ok(PreparedComponent::insert(component))
             },
-            encode: move |world: &World, entity: Entity| {
+            encode: move |world: &World, entity: Entity, _context: &ComponentEncodeContext<'_>| {
                 let Some(component) = world.get::<T>(entity) else {
                     return Ok(None);
                 };
@@ -474,6 +595,39 @@ impl ComponentRegistry {
             + Sync
             + 'static,
         Encode: Fn(&World, Entity) -> Result<Option<ComponentValue>, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.register_component_codec_with_context::<T, _, _>(
+            id,
+            version,
+            move |value, _context| preflight(value),
+            move |world, entity, _context| encode(world, entity),
+        )
+    }
+
+    pub fn register_component_codec_with_context<T, Preflight, Encode>(
+        &mut self,
+        id: ComponentTypeId,
+        version: ComponentSchemaVersion,
+        preflight: Preflight,
+        encode: Encode,
+    ) -> Result<&mut Self, ComponentRegistryError>
+    where
+        T: Component,
+        Preflight: for<'a> Fn(
+                &ComponentValue,
+                &mut ComponentDecodeContext<'a>,
+            ) -> Result<PreparedComponent, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+        Encode: for<'a> Fn(
+                &World,
+                Entity,
+                &ComponentEncodeContext<'a>,
+            ) -> Result<Option<ComponentValue>, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -522,6 +676,16 @@ impl ComponentRegistry {
         self.codec(id).map(|codec| codec.preflight(value))
     }
 
+    pub fn preflight_component_with_context(
+        &self,
+        id: &ComponentTypeId,
+        value: &ComponentValue,
+        context: &mut ComponentDecodeContext<'_>,
+    ) -> Option<Result<PreparedComponent, ComponentCodecError>> {
+        self.codec(id)
+            .map(|codec| codec.preflight_with_context(value, context))
+    }
+
     pub fn encode_component(
         &self,
         id: &ComponentTypeId,
@@ -529,6 +693,17 @@ impl ComponentRegistry {
         entity: Entity,
     ) -> Option<Result<Option<ComponentValue>, ComponentCodecError>> {
         self.codec(id).map(|codec| codec.encode(world, entity))
+    }
+
+    pub fn encode_component_with_context(
+        &self,
+        id: &ComponentTypeId,
+        world: &World,
+        entity: Entity,
+        context: &ComponentEncodeContext<'_>,
+    ) -> Option<Result<Option<ComponentValue>, ComponentCodecError>> {
+        self.codec(id)
+            .map(|codec| codec.encode_with_context(world, entity, context))
     }
 
     fn register_component_schema<T>(
@@ -558,9 +733,10 @@ impl ComponentRegistry {
 
 pub mod prelude {
     pub use crate::{
-        ComponentCodec, ComponentCodecError, ComponentFloat, ComponentRegistry,
-        ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, ComponentValueError, PreparedComponent,
+        ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
+        ComponentFloat, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueError,
+        PreparedComponent,
     };
     pub use bevy_reflect::prelude::*;
 }

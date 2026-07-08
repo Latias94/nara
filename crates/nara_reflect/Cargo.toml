@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 bevy_ecs.workspace = true
 bevy_reflect.workspace = true
+nara_asset.workspace = true
 nara_ecs.workspace = true
 serde = { workspace = true, optional = true }
 

@@ -70,10 +70,10 @@ flowchart TD
 | `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
-| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs | Bevy-reflect-backed component metadata, schema export, and migrations |
+| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Bevy-reflect-backed component metadata, asset-aware scene preflight, schema export, and migrations |
 | `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents |
-| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath` | Loaders, import cache, hot reload, dependency graph |
-| `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `SceneEntityId`, scene spawn/export | Scene/prefab patching, nested prefab source resolution, hot reload validation |
+| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records | Import cache records, hot reload, dependency graph |
+| `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `SceneEntityId`, scene spawn/export | Asset-aware validation, scene/prefab patching, nested prefab source resolution, hot reload validation |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
 | `nara_sprite` | `Sprite`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` texture binding | Sprite authoring component data; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into textured quads now and chunked cached render data later |
@@ -107,8 +107,10 @@ sequenceDiagram
         Wgpu->>SpriteRender: read SpriteBatches
         Wgpu-->>App: FrameStats
     end
-    Game->>Asset: reserve/load typed Handle<T>
-    Game->>Scene: validate SceneDocument, spawn into World, export deterministic document
+    Game->>Asset: build ProjectAssetDatabase / reserve typed Handle<T>
+    Game->>Scene: validate SceneDocument with asset context
+    Scene->>Asset: preflight AssetRef path/stable_id through scratch AssetServer
+    Game->>Scene: spawn into World after successful preflight, export deterministic document
 ```
 
 ## Alternatives Considered
@@ -160,8 +162,8 @@ sequenceDiagram
 
 ## Next Implementation Slices
 
-1. Add texture upload, atlas-aware sprite batching, and image asset import on top of the colored-quad path.
+1. Finish asset/render resource seam documentation and verification, then commit the stable asset preflight slice.
 2. Add scene patch transactions, field-level prefab overrides, and nested prefab source resolution on top of `SceneDocument`.
 3. Add component schema export and migration chains for older scene files.
 4. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot`, `ComponentRegistry`, and scene diagnostics.
-5. Add `.meta` asset identity, importer cache, and hot reload for `AssetRef` beyond path-backed references.
+5. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.

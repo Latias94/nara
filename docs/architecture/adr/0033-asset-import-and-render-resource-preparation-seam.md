@@ -100,15 +100,28 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 
 ## Consequences
 
-- `AssetRef::StableId` becomes a real resolution path once `.meta` and the project asset database
-  exist; `AssetRef::Path` remains useful for hand-authored and AI-generated files.
+- `AssetRef::StableId` is a real resolution path through `.meta` and `ProjectAssetDatabase`;
+  `AssetRef::Path` remains useful for hand-authored and AI-generated files.
 - Texture upload should not be implemented as a sprite-only feature. It should be the first consumer
   of the generic import/prepare/cache path.
 - Render backends need resource-cache invalidation tests, not only draw-path tests.
-- Scene and prefab validation can check unresolved asset IDs before world mutation.
+- Scene and prefab validation can check unresolved asset IDs before world mutation. Spawning uses a
+  scratch `AssetServer` during component preflight and writes it back to the target `World` only when
+  the full scene/prefab preflight succeeds.
 - Editor asset browsers and future hot reload can reuse the same importer/dependency graph data.
 - The next plan should be allowed to add meaningful code and crate structure; avoiding the seam now
   would create more expensive pre-1.0 rewrites.
+
+## Implementation Notes
+
+- Component codecs that decode persistent data should use `ComponentDecodeContext` when they need
+  to resolve `AssetRef` values. This keeps asset validation inside the component owner while letting
+  `nara_scene` preserve two-phase validation and spawn.
+- Component codecs that encode persistent data can use `ComponentEncodeContext` and
+  `AssetRefExportPolicy` to choose path output or stable-ID output without serializing runtime
+  `AssetId` values.
+- Sprite and tilemap authoring components store typed handles to `ImageAsset`/`TileSet`; backend
+  texture objects remain private to `nara_render_wgpu`.
 
 ## Success Metrics
 

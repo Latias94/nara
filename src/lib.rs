@@ -60,12 +60,12 @@ pub mod prelude {
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, Asset, AssetDatabaseError, AssetDependencyGraph,
         AssetError, AssetEvent, AssetEventKind, AssetEvents, AssetId, AssetMeta, AssetPath,
-        AssetPathError, AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind,
-        AssetState, AssetStateError, AssetStates, AssetVersion, Assets, DigestParseError, Handle,
-        ImportArtifactDigest, ImportArtifactKey, ImportArtifactPath, ImportArtifactPathError,
-        ImportArtifactRecord, ImportDependency, ImportDependencyDigest, ImportDependencyRole,
-        ImportError, ImportLabelError, ImportLabelKind, ImportProfile, ImportRequest,
-        ImportSettingsHash, ImportedAssetType, Importer, ImporterDescriptor,
+        AssetPathError, AssetRecord, AssetRef, AssetRefError, AssetRefExportPolicy, AssetServer,
+        AssetSourceKind, AssetState, AssetStateError, AssetStates, AssetVersion, Assets,
+        DigestParseError, Handle, ImportArtifactDigest, ImportArtifactKey, ImportArtifactPath,
+        ImportArtifactPathError, ImportArtifactRecord, ImportDependency, ImportDependencyDigest,
+        ImportDependencyRole, ImportError, ImportLabelError, ImportLabelKind, ImportProfile,
+        ImportRequest, ImportSettingsHash, ImportedAssetType, Importer, ImporterDescriptor,
         ImporterDescriptorError, ImporterId, ImporterRegistry, ImporterRegistryError,
         ImporterSelectionError, ImporterVersion, LoadState, MissingMetaPolicy,
         ProjectAssetDatabase, SourceExtension, SourceHash, StableAssetId, StableAssetIdError,
@@ -82,9 +82,10 @@ pub mod prelude {
     };
     pub use nara_input::{ButtonInput, InputPlugin, InputState, KeyCode, MouseButton};
     pub use nara_reflect::{
-        ComponentCodec, ComponentCodecError, ComponentFloat, ComponentRegistry,
-        ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, ComponentValueError, PreparedComponent,
+        ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
+        ComponentFloat, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueError,
+        PreparedComponent,
     };
     pub use nara_render::{
         Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats,
@@ -102,9 +103,12 @@ pub mod prelude {
     pub use nara_scene::{
         Children, HierarchyPlugin, Name, Parent, PrefabComponentOverrides, PrefabDocument,
         PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError,
-        SceneEntityMap, SceneEntityRecord, SceneEntitySource, SceneExportReport, SceneFormatError,
-        SceneInstanceId, SceneSpawnReport, SceneSpawner, Visibility, export_scene, spawn_child,
-        spawn_prefab, spawn_prefab_with_overrides, spawn_scene, sync_children,
+        SceneEntityMap, SceneEntityRecord, SceneEntitySource, SceneExportOptions,
+        SceneExportReport, SceneFormatError, SceneInstanceId, SceneSpawnReport, SceneSpawner,
+        Visibility, export_scene, export_scene_with_options, spawn_child, spawn_prefab,
+        spawn_prefab_with_asset_database, spawn_prefab_with_overrides,
+        spawn_prefab_with_overrides_and_asset_database, spawn_scene,
+        spawn_scene_with_asset_database, sync_children,
     };
     pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, TextureRegion};
     pub use nara_sprite_render::{

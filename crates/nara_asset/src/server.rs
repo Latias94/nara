@@ -61,7 +61,7 @@ impl Display for AssetError {
 
 impl Error for AssetError {}
 
-#[derive(Debug, Resource)]
+#[derive(Debug, Clone, Resource)]
 pub struct AssetServer {
     next_id: u64,
     paths: HashMap<AssetPath, AssetId>,

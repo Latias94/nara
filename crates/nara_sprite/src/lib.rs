@@ -1,13 +1,13 @@
 //! Sprite authoring data for 2D scenes.
 
 use nara_app::{App, Plugin};
-use nara_asset::{AssetRef, AssetServer, Handle};
+use nara_asset::{AssetRef, AssetRefError, AssetServer, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
 use nara_image::ImageAsset;
 use nara_reflect::{
-    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, PreparedComponent,
+    ComponentCodecError, ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, PreparedComponent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -150,20 +150,21 @@ impl Plugin for SpritePlugin {
 
 pub fn register_sprite_components(registry: &mut ComponentRegistry) {
     registry
-        .register_component_codec::<Sprite, _, _>(
+        .register_component_codec_with_context::<Sprite, _, _>(
             ComponentTypeId::new("nara.sprite.Sprite"),
             ComponentSchemaVersion(1),
-            |value| {
+            |value, context| {
                 let size = read_vec2(value.field("size")?, "size")?;
                 let color = read_color(value.field("color")?, "color")?;
                 let texture_ref = read_optional_asset_ref(value.get("texture"), "texture")?;
+                let texture = prepare_optional_texture(context, texture_ref)?;
                 let texture_region =
                     read_optional_texture_region(value.get("texture_region"), "texture_region")?;
                 let layer = optional_i32(value, "layer")?.unwrap_or(0);
                 let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
 
                 Ok(PreparedComponent::new(move |world, entity| {
-                    let texture = resolve_optional_texture(world, texture_ref.as_ref())?;
+                    let texture = resolve_prepared_texture(world, texture)?;
                     let sprite = Sprite {
                         texture,
                         texture_region,
@@ -180,19 +181,20 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
                     Ok(())
                 }))
             },
-            |world, entity| {
+            |world, entity, context| {
                 let Some(sprite) = world.get::<Sprite>(entity) else {
                     return Ok(None);
                 };
                 let texture = match sprite.texture {
                     Some(handle) => Some(asset_ref_value(
-                        &AssetRef::from_handle(
+                        &AssetRef::from_handle_with_policy(
                             world.get_resource::<AssetServer>().ok_or_else(|| {
                                 ComponentCodecError::Message(
                                     "AssetServer resource is missing".to_string(),
                                 )
                             })?,
                             handle,
+                            context.asset_ref_export_policy(),
                         )
                         .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
                     )?),
@@ -220,6 +222,61 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
         .expect("nara.sprite.Sprite component registration should be unique");
 }
 
+enum PreparedTexture {
+    Resolved(Handle<ImageAsset>),
+    Deferred(AssetRef),
+}
+
+fn prepare_optional_texture(
+    context: &mut ComponentDecodeContext<'_>,
+    texture_ref: Option<AssetRef>,
+) -> Result<Option<PreparedTexture>, ComponentCodecError> {
+    let Some(texture_ref) = texture_ref else {
+        return Ok(None);
+    };
+    prepare_texture_handle(context, "texture.value", texture_ref).map(Some)
+}
+
+fn prepare_texture_handle(
+    context: &mut ComponentDecodeContext<'_>,
+    field: &str,
+    asset_ref: AssetRef,
+) -> Result<PreparedTexture, ComponentCodecError> {
+    if let Some(result) = context.resolve_asset_ref::<ImageAsset>(&asset_ref) {
+        return result
+            .map(PreparedTexture::Resolved)
+            .map_err(|error| invalid_asset_ref(field, &asset_ref, error));
+    }
+
+    if let Some(stable_id) = asset_ref.as_stable_id() {
+        let Some(database) = context.project_asset_database() else {
+            return Err(invalid_asset_ref(
+                field,
+                &asset_ref,
+                AssetRefError::MissingProjectDatabase(stable_id),
+            ));
+        };
+        database.resolve_ref(&asset_ref).map_err(|error| {
+            ComponentCodecError::invalid_asset_ref(field, asset_ref.to_string(), error.to_string())
+        })?;
+    }
+
+    Ok(PreparedTexture::Deferred(asset_ref))
+}
+
+fn resolve_prepared_texture(
+    world: &mut World,
+    texture: Option<PreparedTexture>,
+) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
+    match texture {
+        None => Ok(None),
+        Some(PreparedTexture::Resolved(handle)) => Ok(Some(handle)),
+        Some(PreparedTexture::Deferred(texture_ref)) => {
+            resolve_optional_texture(world, Some(&texture_ref))
+        }
+    }
+}
+
 fn resolve_optional_texture(
     world: &mut World,
     texture_ref: Option<&AssetRef>,
@@ -233,7 +290,15 @@ fn resolve_optional_texture(
     texture_ref
         .resolve::<ImageAsset>(&mut world.resource_mut::<AssetServer>())
         .map(Some)
-        .map_err(|error| ComponentCodecError::Message(error.to_string()))
+        .map_err(|error| invalid_asset_ref("texture.value", texture_ref, error))
+}
+
+fn invalid_asset_ref(
+    field: &str,
+    asset_ref: &AssetRef,
+    error: AssetRefError,
+) -> ComponentCodecError {
+    ComponentCodecError::invalid_asset_ref(field, asset_ref.to_string(), error.to_string())
 }
 
 fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, ComponentCodecError> {
@@ -338,11 +403,13 @@ fn read_asset_ref(value: &ComponentValue, field: &str) -> Result<AssetRef, Compo
                 error.to_string(),
             )
         }),
-        "stable_id" => Err(ComponentCodecError::invalid_asset_ref(
-            format!("{field}.value"),
-            value.field_str("value").unwrap_or_default(),
-            "stable asset ids are reserved for the asset meta database slice",
-        )),
+        "stable_id" => AssetRef::stable_id(value.field_str("value")?).map_err(|error| {
+            ComponentCodecError::invalid_asset_ref(
+                format!("{field}.value"),
+                value.field_str("value").unwrap_or_default(),
+                error.to_string(),
+            )
+        }),
         _ => Err(ComponentCodecError::invalid_field(
             format!("{field}.kind"),
             "'path' or 'stable_id'",
@@ -370,7 +437,10 @@ pub mod prelude {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_asset::AssetId;
+    use nara_asset::{
+        AssetId, AssetPath, AssetRecord, AssetSourceKind, ProjectAssetDatabase, StableAssetId,
+    };
+    use nara_reflect::ComponentDecodeContext;
 
     #[test]
     fn creates_color_sprite_with_default_authoring_state() {
@@ -422,5 +492,99 @@ mod tests {
 
         assert_eq!(sprite.layer, 3);
         assert_eq!(sprite.sort_key, -4);
+    }
+
+    #[test]
+    fn sprite_codec_resolves_stable_texture_refs_during_preflight() {
+        let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let database = test_database(stable_id, "textures/player.png");
+        let mut asset_server = AssetServer::new();
+        let prepared = {
+            let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
+                .with_project_asset_database(&database);
+            let mut registry = ComponentRegistry::new();
+            register_sprite_components(&mut registry);
+
+            let prepared = registry
+                .preflight_component_with_context(
+                    &sprite_type_id(),
+                    &sprite_value(AssetRef::StableId(stable_id)),
+                    &mut context,
+                )
+                .unwrap()
+                .unwrap();
+            assert!(context.asset_server_touched());
+            prepared
+        };
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+
+        prepared.apply(&mut world, entity).unwrap();
+
+        let sprite = world.get::<Sprite>(entity).unwrap();
+        let texture = sprite.texture.unwrap();
+        assert_eq!(asset_server.path(texture.id()), Some("textures/player.png"));
+        assert_eq!(asset_server.stable_id(texture.id()), Some(stable_id));
+    }
+
+    #[test]
+    fn sprite_codec_rejects_unknown_stable_texture_refs_before_apply() {
+        let known_stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let unknown_stable_id = stable_id("b73f0f16-09e8-4265-b090-b689b41c197e");
+        let database = test_database(known_stable_id, "textures/player.png");
+        let mut asset_server = AssetServer::new();
+        let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
+            .with_project_asset_database(&database);
+        let mut registry = ComponentRegistry::new();
+        register_sprite_components(&mut registry);
+
+        let result = registry
+            .preflight_component_with_context(
+                &sprite_type_id(),
+                &sprite_value(AssetRef::StableId(unknown_stable_id)),
+                &mut context,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            result,
+            Err(ComponentCodecError::InvalidAssetRef {
+                field,
+                asset_ref,
+                ..
+            }) if field == "texture.value"
+                && asset_ref == format!("stable_id:{unknown_stable_id}")
+        ));
+        assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
+    }
+
+    fn sprite_value(texture: AssetRef) -> ComponentValue {
+        ComponentValue::map([
+            ("size", vec2_value(Vec2::new(32.0, 32.0)).unwrap()),
+            ("color", color_value(Color::WHITE).unwrap()),
+            ("layer", ComponentValue::I64(0)),
+            ("sort_key", ComponentValue::I64(0)),
+            ("texture", asset_ref_value(&texture).unwrap()),
+        ])
+    }
+
+    fn sprite_type_id() -> ComponentTypeId {
+        ComponentTypeId::new("nara.sprite.Sprite")
+    }
+
+    fn test_database(stable_id: StableAssetId, path: &str) -> ProjectAssetDatabase {
+        let mut database = ProjectAssetDatabase::default();
+        database
+            .insert(AssetRecord::new(
+                stable_id,
+                AssetPath::new(path).unwrap(),
+                AssetSourceKind::Image,
+            ))
+            .unwrap();
+        database
+    }
+
+    fn stable_id(id: &str) -> StableAssetId {
+        StableAssetId::parse_str(id).unwrap()
     }
 }

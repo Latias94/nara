@@ -1385,6 +1385,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "bevy_reflect",
+ "nara_asset",
  "nara_ecs",
  "serde",
 ]

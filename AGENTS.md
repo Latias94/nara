@@ -13,8 +13,9 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_render_wgpu` owns all `wgpu` imports and GPU surface/device lifecycle.
 - `nara_sprite_render` owns backend-neutral 2D extraction, queueing, sorting, and batching. GPU backends should consume `SpriteBatches`, not gameplay `Sprite` or `Tilemap` components.
 - `nara_scene` owns persistent `SceneDocument` / `PrefabDocument`, stable `SceneEntityId`, validation, and world spawn/export. Scene/prefab documents must not store runtime `Entity`, runtime `AssetId`, or backend handles.
-- `nara_reflect` owns `ComponentValue` and component preflight/apply codecs. Domain crates register their own built-in component codecs through their plugins.
-- `nara_asset` persistent references use `AssetRef::Path`; `Handle<T>` is runtime-only and must not serialize as project data.
+- `nara_scene` must keep scene/prefab spawn two-phase: preflight first, then mutate the target `World`. Asset-aware spawn uses a scratch `AssetServer` and only writes it back after the full preflight succeeds.
+- `nara_reflect` owns `ComponentValue`, component preflight/apply codecs, `ComponentDecodeContext`, and `ComponentEncodeContext`. Domain crates register their own built-in component codecs through their plugins.
+- `nara_asset` persistent references use semantic `AssetRef::Path` or `AssetRef::StableId`; `Handle<T>` and `AssetId` are runtime-only and must not serialize as project data.
 - `nara_asset` owns source asset identity, `.meta` records, importer registry metadata, imported artifact records, dependency graph data, load states, and reload events. It must not own GPU resources or depend on render backend crates.
 - Texture upload, atlases, materials, UI images, and future 3D assets must flow through the asset import + render resource preparation seam in ADR 0033 instead of direct path-to-wgpu shortcuts.
 - `nara_render_wgpu` owns backend GPU resource caches. Gameplay/domain crates store typed handles or backend-neutral descriptors, never `wgpu` handles.

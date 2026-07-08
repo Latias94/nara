@@ -7,12 +7,13 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, Plugin};
-use nara_asset::AssetRef;
+use nara_asset::{AssetRef, AssetRefExportPolicy, AssetServer, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Bundle, Component, Entity, World};
 use nara_reflect::{
-    ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, PreparedComponent, Reflect, bevy_reflect,
+    ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext, ComponentRegistry,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, PreparedComponent, Reflect,
+    bevy_reflect,
 };
 pub use nara_transform::Transform2d;
 
@@ -129,6 +130,16 @@ impl SceneDocument {
     #[must_use]
     pub fn validate(&self, registry: &ComponentRegistry) -> DiagnosticReport {
         preflight_scene(self, registry).diagnostics
+    }
+
+    #[must_use]
+    pub fn validate_with_asset_database(
+        &self,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> DiagnosticReport {
+        let mut context = ComponentDecodeContext::new().with_project_asset_database(database);
+        preflight_scene_with_context(self, registry, &mut context).diagnostics
     }
 
     #[cfg(feature = "serde")]
@@ -289,6 +300,16 @@ impl PrefabDocument {
         self.instantiate().validate(registry)
     }
 
+    #[must_use]
+    pub fn validate_with_asset_database(
+        &self,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> DiagnosticReport {
+        self.instantiate()
+            .validate_with_asset_database(registry, database)
+    }
+
     #[cfg(feature = "serde")]
     pub fn to_json_string(&self) -> Result<String, SceneFormatError> {
         serde_json::to_string_pretty(self)
@@ -417,6 +438,11 @@ pub struct SceneExportReport {
     pub diagnostics: DiagnosticReport,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SceneExportOptions {
+    pub asset_ref_export_policy: AssetRefExportPolicy,
+}
+
 #[derive(Debug, Default)]
 pub struct SceneSpawner {
     next_instance_id: u64,
@@ -436,12 +462,47 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         document: &SceneDocument,
     ) -> SceneSpawnReport {
-        let preflight = preflight_scene(document, registry);
+        self.spawn_with_asset_context(world, registry, document, None)
+    }
+
+    pub fn spawn_with_asset_database(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        database: &ProjectAssetDatabase,
+    ) -> SceneSpawnReport {
+        self.spawn_with_asset_context(world, registry, document, Some(database))
+    }
+
+    fn spawn_with_asset_context(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> SceneSpawnReport {
+        let mut asset_server = world
+            .get_resource::<AssetServer>()
+            .cloned()
+            .unwrap_or_default();
+        let (preflight, asset_server_touched) = {
+            let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server);
+            if let Some(database) = database {
+                context = context.with_project_asset_database(database);
+            }
+            let preflight = preflight_scene_with_context(document, registry, &mut context);
+            (preflight, context.asset_server_touched())
+        };
         if preflight.diagnostics.has_errors() {
             return SceneSpawnReport {
                 entity_map: SceneEntityMap::default(),
                 diagnostics: preflight.diagnostics,
             };
+        }
+
+        if asset_server_touched {
+            world.insert_resource(asset_server);
         }
 
         let instance_id = SceneInstanceId::from_raw(self.next_instance_id);
@@ -502,6 +563,22 @@ impl SceneSpawner {
         self.spawn_prefab_with_overrides(world, registry, prefab, &PrefabComponentOverrides::new())
     }
 
+    pub fn spawn_prefab_with_asset_database(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        prefab: &PrefabDocument,
+        database: &ProjectAssetDatabase,
+    ) -> SceneSpawnReport {
+        self.spawn_prefab_with_overrides_and_asset_database(
+            world,
+            registry,
+            prefab,
+            &PrefabComponentOverrides::new(),
+            database,
+        )
+    }
+
     pub fn spawn_prefab_with_overrides(
         &mut self,
         world: &mut World,
@@ -526,6 +603,33 @@ impl SceneSpawner {
         report.diagnostics = diagnostics;
         report
     }
+
+    pub fn spawn_prefab_with_overrides_and_asset_database(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        prefab: &PrefabDocument,
+        overrides: &PrefabComponentOverrides,
+        database: &ProjectAssetDatabase,
+    ) -> SceneSpawnReport {
+        let mut diagnostics = validate_prefab_overrides(prefab, overrides);
+        if diagnostics.has_errors() {
+            return SceneSpawnReport {
+                entity_map: SceneEntityMap::default(),
+                diagnostics,
+            };
+        }
+
+        let mut report = self.spawn_with_asset_database(
+            world,
+            registry,
+            &prefab.instantiate_with_overrides(overrides),
+            database,
+        );
+        diagnostics.extend(report.diagnostics);
+        report.diagnostics = diagnostics;
+        report
+    }
 }
 
 #[must_use]
@@ -538,12 +642,32 @@ pub fn spawn_scene(
 }
 
 #[must_use]
+pub fn spawn_scene_with_asset_database(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    document: &SceneDocument,
+    database: &ProjectAssetDatabase,
+) -> SceneSpawnReport {
+    SceneSpawner::new().spawn_with_asset_database(world, registry, document, database)
+}
+
+#[must_use]
 pub fn spawn_prefab(
     world: &mut World,
     registry: &ComponentRegistry,
     prefab: &PrefabDocument,
 ) -> SceneSpawnReport {
     SceneSpawner::new().spawn_prefab(world, registry, prefab)
+}
+
+#[must_use]
+pub fn spawn_prefab_with_asset_database(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    prefab: &PrefabDocument,
+    database: &ProjectAssetDatabase,
+) -> SceneSpawnReport {
+    SceneSpawner::new().spawn_prefab_with_asset_database(world, registry, prefab, database)
 }
 
 #[must_use]
@@ -557,8 +681,32 @@ pub fn spawn_prefab_with_overrides(
 }
 
 #[must_use]
+pub fn spawn_prefab_with_overrides_and_asset_database(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    prefab: &PrefabDocument,
+    overrides: &PrefabComponentOverrides,
+    database: &ProjectAssetDatabase,
+) -> SceneSpawnReport {
+    SceneSpawner::new().spawn_prefab_with_overrides_and_asset_database(
+        world, registry, prefab, overrides, database,
+    )
+}
+
+#[must_use]
 pub fn export_scene(world: &World, registry: &ComponentRegistry) -> SceneExportReport {
+    export_scene_with_options(world, registry, SceneExportOptions::default())
+}
+
+#[must_use]
+pub fn export_scene_with_options(
+    world: &World,
+    registry: &ComponentRegistry,
+    options: SceneExportOptions,
+) -> SceneExportReport {
     let mut diagnostics = DiagnosticReport::default();
+    let encode_context =
+        ComponentEncodeContext::new().with_asset_ref_export_policy(options.asset_ref_export_policy);
     let mut entities = world
         .iter_entities()
         .map(|entity_ref| entity_ref.id())
@@ -599,7 +747,9 @@ pub fn export_scene(world: &World, registry: &ComponentRegistry) -> SceneExportR
 
         let mut components = BTreeMap::new();
         for schema in registry.schemas().filter(|schema| schema.serializable) {
-            let Some(encoded) = registry.encode_component(&schema.id, world, entity) else {
+            let Some(encoded) =
+                registry.encode_component_with_context(&schema.id, world, entity, &encode_context)
+            else {
                 continue;
             };
             match encoded {
@@ -720,6 +870,15 @@ struct PreparedSceneEntity {
 }
 
 fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> PreparedScene {
+    let mut context = ComponentDecodeContext::new();
+    preflight_scene_with_context(document, registry, &mut context)
+}
+
+fn preflight_scene_with_context(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    context: &mut ComponentDecodeContext<'_>,
+) -> PreparedScene {
     let mut diagnostics = DiagnosticReport::default();
     let mut seen = BTreeSet::<SceneEntityId>::new();
     let mut ids = BTreeSet::<SceneEntityId>::new();
@@ -820,7 +979,8 @@ fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> Pr
                 continue;
             }
 
-            match registry.preflight_component(component_id, &component.value) {
+            match registry.preflight_component_with_context(component_id, &component.value, context)
+            {
                 Some(Ok(prepared)) => prepared_components.push(prepared),
                 Some(Err(error)) => {
                     let mut diagnostic =
@@ -1050,16 +1210,27 @@ pub fn register_scene_components(registry: &mut ComponentRegistry) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_asset::{
+        AssetId, AssetPath, AssetRecord, AssetRefError, AssetSourceKind, Handle, StableAssetId,
+    };
     use nara_reflect::bevy_reflect;
     use nara_reflect::{
-        ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, Reflect,
+        ComponentCodecError, ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue, PreparedComponent, Reflect,
     };
 
     #[derive(Clone, Debug, PartialEq, Component, Reflect)]
     struct TestPosition {
         x: i32,
     }
+
+    #[derive(Clone, Debug, PartialEq, Component)]
+    struct TestAssetLink {
+        handle: Handle<TestAsset>,
+    }
+
+    #[derive(Debug)]
+    struct TestAsset;
 
     #[test]
     fn syncs_parent_child_links() {
@@ -1204,6 +1375,98 @@ mod tests {
         assert!(report.diagnostics.has_errors());
         assert_eq!(world.iter_entities().count(), before);
         assert!(report.entity_map.is_empty());
+    }
+
+    #[test]
+    fn path_asset_ref_resolves_before_scene_spawn_without_database() {
+        let registry = test_asset_registry();
+        let id = scene_id("player");
+        let document = SceneDocument::new([SceneEntityRecord::new(id.clone()).with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::path("textures/player.png").unwrap()),
+        )]);
+        let mut world = World::new();
+
+        let report = spawn_scene(&mut world, &registry, &document);
+
+        assert!(!report.diagnostics.has_errors());
+        let entity = report.entity_map.get(&id).unwrap();
+        let link = world.get::<TestAssetLink>(entity).unwrap();
+        let asset_server = world.resource::<AssetServer>();
+        assert_eq!(
+            asset_server.path(link.handle.id()),
+            Some("textures/player.png")
+        );
+    }
+
+    #[test]
+    fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
+        let registry = test_asset_registry();
+        let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let database = test_database(stable_id, "textures/player.png");
+        let id = scene_id("player");
+        let document = SceneDocument::new([SceneEntityRecord::new(id.clone()).with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::StableId(stable_id)),
+        )]);
+        let mut world = World::new();
+        let mut spawner = SceneSpawner::new();
+
+        let validation = document.validate_with_asset_database(&registry, &database);
+        let report = spawner.spawn_with_asset_database(&mut world, &registry, &document, &database);
+
+        assert!(!validation.has_errors());
+        assert!(!report.diagnostics.has_errors());
+        let entity = report.entity_map.get(&id).unwrap();
+        let link = world.get::<TestAssetLink>(entity).unwrap();
+        let asset_server = world.resource::<AssetServer>();
+        assert_eq!(
+            asset_server.path(link.handle.id()),
+            Some("textures/player.png")
+        );
+        assert_eq!(asset_server.stable_id(link.handle.id()), Some(stable_id));
+    }
+
+    #[test]
+    fn unknown_stable_asset_ref_does_not_mutate_world_or_asset_server() {
+        let registry = test_asset_registry();
+        let known_stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let unknown_stable_id = stable_id("b73f0f16-09e8-4265-b090-b689b41c197e");
+        let database = test_database(known_stable_id, "textures/player.png");
+        let id = scene_id("player");
+        let document = SceneDocument::new([SceneEntityRecord::new(id).with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::StableId(unknown_stable_id)),
+        )]);
+        let expected_component_id = asset_link_type_id();
+        let mut existing_asset_server = AssetServer::new();
+        let existing_handle = existing_asset_server
+            .reserve::<TestAsset>("textures/existing.png")
+            .unwrap();
+        let mut world = World::new();
+        world.insert_resource(existing_asset_server);
+        let before_entities = world.iter_entities().count();
+
+        let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+        let expected_asset_ref = format!("stable_id:{unknown_stable_id}");
+
+        assert!(report.diagnostics.has_errors());
+        assert!(report.entity_map.is_empty());
+        assert_eq!(world.iter_entities().count(), before_entities);
+        let asset_server = world.resource::<AssetServer>();
+        assert_eq!(
+            asset_server.path(existing_handle.id()),
+            Some("textures/existing.png")
+        );
+        assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
+        assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code.as_str() == "scene.invalid-component-payload"
+                && diagnostic.context.entity_id.as_deref() == Some("player")
+                && diagnostic.context.component_id.as_deref()
+                    == Some(expected_component_id.as_str())
+                && diagnostic.context.field_path.as_deref() == Some("asset.value")
+                && diagnostic.context.asset_ref.as_deref() == Some(expected_asset_ref.as_str())
+        }));
     }
 
     #[test]
@@ -1407,8 +1670,162 @@ mod tests {
         registry
     }
 
+    fn test_asset_registry() -> ComponentRegistry {
+        let mut registry = ComponentRegistry::new();
+        registry
+            .register_component_codec_with_context::<TestAssetLink, _, _>(
+                asset_link_type_id(),
+                ComponentSchemaVersion(1),
+                |value, context| {
+                    let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
+                    let prepared = prepare_test_asset_handle(context, "asset.value", asset_ref)?;
+                    Ok(PreparedComponent::new(move |world, entity| {
+                        let handle = match prepared {
+                            PreparedTestAsset::Resolved(handle) => handle,
+                            PreparedTestAsset::Deferred(asset_ref) => {
+                                if world.get_resource::<AssetServer>().is_none() {
+                                    world.insert_resource(AssetServer::new());
+                                }
+                                asset_ref
+                                    .resolve::<TestAsset>(&mut world.resource_mut::<AssetServer>())
+                                    .map_err(|error| {
+                                        ComponentCodecError::invalid_asset_ref(
+                                            "asset.value",
+                                            asset_ref.to_string(),
+                                            error.to_string(),
+                                        )
+                                    })?
+                            }
+                        };
+                        let mut entity_mut = world
+                            .get_entity_mut(entity)
+                            .map_err(|_| ComponentCodecError::EntityMissing)?;
+                        entity_mut.insert(TestAssetLink { handle });
+                        Ok(())
+                    }))
+                },
+                |world, entity, _context| {
+                    let Some(link) = world.get::<TestAssetLink>(entity) else {
+                        return Ok(None);
+                    };
+                    Ok(Some(ComponentValue::map([(
+                        "handle",
+                        ComponentValue::U64(link.handle.id().raw()),
+                    )])))
+                },
+            )
+            .unwrap();
+        registry
+    }
+
+    enum PreparedTestAsset {
+        Resolved(Handle<TestAsset>),
+        Deferred(AssetRef),
+    }
+
+    fn prepare_test_asset_handle(
+        context: &mut ComponentDecodeContext<'_>,
+        field: &str,
+        asset_ref: AssetRef,
+    ) -> Result<PreparedTestAsset, ComponentCodecError> {
+        if let Some(result) = context.resolve_asset_ref::<TestAsset>(&asset_ref) {
+            return result.map(PreparedTestAsset::Resolved).map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    field,
+                    asset_ref.to_string(),
+                    error.to_string(),
+                )
+            });
+        }
+
+        if let Some(stable_id) = asset_ref.as_stable_id() {
+            let Some(database) = context.project_asset_database() else {
+                return Err(ComponentCodecError::invalid_asset_ref(
+                    field,
+                    asset_ref.to_string(),
+                    AssetRefError::MissingProjectDatabase(stable_id).to_string(),
+                ));
+            };
+            database.resolve_ref(&asset_ref).map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    field,
+                    asset_ref.to_string(),
+                    error.to_string(),
+                )
+            })?;
+        }
+
+        Ok(PreparedTestAsset::Deferred(asset_ref))
+    }
+
+    fn read_asset_ref(
+        value: &ComponentValue,
+        field: &str,
+    ) -> Result<AssetRef, ComponentCodecError> {
+        match value.field_str("kind")? {
+            "path" => AssetRef::path(value.field_str("value")?).map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    format!("{field}.value"),
+                    value.field_str("value").unwrap_or_default(),
+                    error.to_string(),
+                )
+            }),
+            "stable_id" => AssetRef::stable_id(value.field_str("value")?).map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    format!("{field}.value"),
+                    value.field_str("value").unwrap_or_default(),
+                    error.to_string(),
+                )
+            }),
+            _ => Err(ComponentCodecError::invalid_field(
+                format!("{field}.kind"),
+                "'path' or 'stable_id'",
+            )),
+        }
+    }
+
+    fn asset_link_record(asset_ref: AssetRef) -> SceneComponentRecord {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion(1),
+            ComponentValue::map([("asset", asset_ref_value(&asset_ref))]),
+        )
+    }
+
+    fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
+        match asset_ref {
+            AssetRef::Path(path) => ComponentValue::map([
+                ("kind", ComponentValue::String("path".to_string())),
+                ("value", ComponentValue::String(path.as_str().to_string())),
+            ]),
+            AssetRef::StableId(id) => ComponentValue::map([
+                ("kind", ComponentValue::String("stable_id".to_string())),
+                ("value", ComponentValue::String(id.to_string())),
+            ]),
+        }
+    }
+
+    fn test_database(stable_id: StableAssetId, path: &str) -> ProjectAssetDatabase {
+        let mut database = ProjectAssetDatabase::default();
+        database
+            .insert(AssetRecord::new(
+                stable_id,
+                AssetPath::new(path).unwrap(),
+                AssetSourceKind::Image,
+            ))
+            .unwrap();
+        database
+    }
+
+    fn stable_id(id: &str) -> StableAssetId {
+        StableAssetId::parse_str(id).unwrap()
+    }
+
     fn scene_id(id: &str) -> SceneEntityId {
         SceneEntityId::new(id).unwrap()
+    }
+
+    fn asset_link_type_id() -> ComponentTypeId {
+        ComponentTypeId::new("nara.test.AssetLink")
     }
 
     fn position_type_id() -> ComponentTypeId {

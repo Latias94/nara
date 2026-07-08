@@ -4,6 +4,9 @@ use nara::{
     transform::register_transform_components,
 };
 
+const PLAYER_TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
+const TILESET_TEXTURE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
+
 fn main() {
     let mut registry = ComponentRegistry::new();
     register_scene_components(&mut registry);
@@ -13,6 +16,7 @@ fn main() {
     register_tilemap_components(&mut registry);
 
     let scene = sample_scene();
+    let asset_database = sample_asset_database();
     let json = scene.to_json_string().unwrap();
     let ron = scene.to_ron_string().unwrap();
 
@@ -45,7 +49,7 @@ fn main() {
             ]),
         ),
     );
-    let invalid_report = invalid.validate(&registry);
+    let invalid_report = invalid.validate_with_asset_database(&registry, &asset_database);
     let diagnostic = invalid_report
         .diagnostics()
         .iter()
@@ -62,19 +66,35 @@ fn main() {
     );
 
     let mut world = World::new();
-    world.insert_resource(AssetServer::new());
     let mut spawner = SceneSpawner::new();
-    let spawn_report = spawner.spawn(&mut world, &registry, &from_json);
+    let spawn_report =
+        spawner.spawn_with_asset_database(&mut world, &registry, &from_json, &asset_database);
     assert!(!spawn_report.diagnostics.has_errors());
     assert_eq!(spawn_report.entity_map.len(), 3);
 
     let export = export_scene(&world, &registry);
     assert!(!export.diagnostics.has_errors());
     let canonical_json = export.document.to_json_string().unwrap();
+    assert!(canonical_json.contains("\"path\""));
+    assert!(!canonical_json.contains("AssetId"));
     assert_eq!(
         SceneDocument::from_json_str(&canonical_json).unwrap(),
         export.document
     );
+
+    let stable_export = export_scene_with_options(
+        &world,
+        &registry,
+        SceneExportOptions {
+            asset_ref_export_policy: AssetRefExportPolicy::StableIdWhenKnown,
+        },
+    );
+    assert!(!stable_export.diagnostics.has_errors());
+    let stable_json = stable_export.document.to_json_string().unwrap();
+    assert!(stable_json.contains("\"stable_id\""));
+    assert!(stable_json.contains(PLAYER_TEXTURE_ID));
+    assert!(stable_json.contains(TILESET_TEXTURE_ID));
+    assert!(!stable_json.contains("AssetId"));
 }
 
 fn sample_scene() -> SceneDocument {
@@ -146,7 +166,7 @@ fn sprite_value() -> ComponentValue {
         ("color", color_value(0.2, 0.7, 1.0, 1.0)),
         ("layer", ComponentValue::I64(1)),
         ("sort_key", ComponentValue::I64(0)),
-        ("texture", asset_ref_value("textures/player.png")),
+        ("texture", asset_ref_value("stable_id", PLAYER_TEXTURE_ID)),
     ])
 }
 
@@ -155,7 +175,7 @@ fn tilemap_value() -> ComponentValue {
         ("tile_size", vec2_value(16.0, 16.0)),
         ("layer", ComponentValue::I64(0)),
         ("sort_key", ComponentValue::I64(0)),
-        ("tileset", asset_ref_value("textures/tiles.png")),
+        ("tileset", asset_ref_value("stable_id", TILESET_TEXTURE_ID)),
         (
             "cells",
             ComponentValue::List(vec![ComponentValue::map([
@@ -194,11 +214,30 @@ fn color_value(r: f64, g: f64, b: f64, a: f64) -> ComponentValue {
     ])
 }
 
-fn asset_ref_value(path: &str) -> ComponentValue {
+fn asset_ref_value(kind: &str, value: &str) -> ComponentValue {
     ComponentValue::map([
-        ("kind", ComponentValue::String("path".to_string())),
-        ("value", ComponentValue::String(path.to_string())),
+        ("kind", ComponentValue::String(kind.to_string())),
+        ("value", ComponentValue::String(value.to_string())),
     ])
+}
+
+fn sample_asset_database() -> ProjectAssetDatabase {
+    let mut database = ProjectAssetDatabase::default();
+    database
+        .insert(AssetRecord::new(
+            StableAssetId::parse_str(PLAYER_TEXTURE_ID).unwrap(),
+            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourceKind::Image,
+        ))
+        .unwrap();
+    database
+        .insert(AssetRecord::new(
+            StableAssetId::parse_str(TILESET_TEXTURE_ID).unwrap(),
+            AssetPath::new("textures/tiles.png").unwrap(),
+            AssetSourceKind::Image,
+        ))
+        .unwrap();
+    database
 }
 
 fn scene_id(id: &str) -> SceneEntityId {
