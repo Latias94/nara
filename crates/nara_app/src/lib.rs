@@ -3,6 +3,7 @@
 use std::{
     any::type_name,
     collections::{BTreeMap, HashSet},
+    time::Duration,
 };
 
 use nara_ecs::{
@@ -33,7 +34,9 @@ impl StartupStage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ScheduleLabel)]
 pub enum CoreStage {
+    First,
     PreUpdate,
+    FixedUpdate,
     Update,
     PostUpdate,
     Extract,
@@ -42,8 +45,10 @@ pub enum CoreStage {
 }
 
 impl CoreStage {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
+        Self::First,
         Self::PreUpdate,
+        Self::FixedUpdate,
         Self::Update,
         Self::PostUpdate,
         Self::Extract,
@@ -87,10 +92,141 @@ pub enum PluginError {
     AddedAfterFinish { name: &'static str },
 }
 
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum AppRunError {
+    #[error(transparent)]
+    Plugin(#[from] PluginError),
+    #[error("app runner failed: {message}")]
+    Runner { message: String },
+}
+
+impl AppRunError {
+    #[must_use]
+    pub fn runner(message: impl Into<String>) -> Self {
+        Self::Runner {
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum AppExit {
+    #[default]
+    Success,
+    Requested,
+}
+
+pub type RunnerFn = Box<dyn FnOnce(App) -> Result<AppExit, AppRunError>>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Resource)]
+pub struct Time {
+    pub delta_seconds: f32,
+    pub elapsed_seconds: f64,
+    pub frame: u64,
+}
+
+impl Default for Time {
+    fn default() -> Self {
+        Self {
+            delta_seconds: 0.0,
+            elapsed_seconds: 0.0,
+            frame: 0,
+        }
+    }
+}
+
+impl Time {
+    pub fn advance(&mut self, delta: Duration) {
+        self.delta_seconds = delta.as_secs_f32();
+        self.elapsed_seconds += delta.as_secs_f64();
+        self.frame += 1;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
+pub struct FixedTime {
+    timestep: Duration,
+    max_steps_per_frame: u32,
+    accumulated: Duration,
+    overstep: Duration,
+    steps_this_frame: u32,
+}
+
+impl Default for FixedTime {
+    fn default() -> Self {
+        Self {
+            timestep: Self::DEFAULT_TIMESTEP,
+            max_steps_per_frame: Self::DEFAULT_MAX_STEPS_PER_FRAME,
+            accumulated: Duration::ZERO,
+            overstep: Duration::ZERO,
+            steps_this_frame: 0,
+        }
+    }
+}
+
+impl FixedTime {
+    pub const DEFAULT_TIMESTEP: Duration = Duration::from_nanos(16_666_667);
+    pub const DEFAULT_MAX_STEPS_PER_FRAME: u32 = 5;
+
+    #[must_use]
+    pub fn new(timestep: Duration) -> Self {
+        Self {
+            timestep,
+            ..Self::default()
+        }
+    }
+
+    #[must_use]
+    pub fn with_max_steps_per_frame(mut self, max_steps_per_frame: u32) -> Self {
+        self.max_steps_per_frame = max_steps_per_frame;
+        self
+    }
+
+    #[must_use]
+    pub fn timestep(&self) -> Duration {
+        self.timestep
+    }
+
+    #[must_use]
+    pub fn max_steps_per_frame(&self) -> u32 {
+        self.max_steps_per_frame
+    }
+
+    #[must_use]
+    pub fn accumulated(&self) -> Duration {
+        self.accumulated
+    }
+
+    #[must_use]
+    pub fn overstep(&self) -> Duration {
+        self.overstep
+    }
+
+    #[must_use]
+    pub fn steps_this_frame(&self) -> u32 {
+        self.steps_this_frame
+    }
+
+    fn begin_frame(&mut self, delta: Duration) -> u32 {
+        self.accumulated = self.accumulated.checked_add(delta).unwrap_or(Duration::MAX);
+
+        let mut steps = 0;
+        while self.accumulated >= self.timestep && steps < self.max_steps_per_frame {
+            self.accumulated -= self.timestep;
+            steps += 1;
+        }
+
+        self.steps_this_frame = steps;
+        self.overstep = self.accumulated;
+        steps
+    }
+}
+
 pub struct App {
     world: World,
     startup_schedules: BTreeMap<StartupStage, Schedule>,
     schedules: BTreeMap<CoreStage, Schedule>,
+    runner: Option<RunnerFn>,
     plugins: Vec<Box<dyn Plugin>>,
     plugin_names: HashSet<&'static str>,
     plugins_finished: bool,
@@ -116,6 +252,10 @@ impl Drop for App {
 impl App {
     #[must_use]
     pub fn new() -> Self {
+        let mut world = World::new();
+        world.insert_resource(Time::default());
+        world.insert_resource(FixedTime::default());
+
         let startup_schedules = StartupStage::ALL
             .into_iter()
             .map(|stage| (stage, Schedule::new(stage)))
@@ -126,9 +266,10 @@ impl App {
             .collect();
 
         Self {
-            world: World::new(),
+            world,
             startup_schedules,
             schedules,
+            runner: Some(Box::new(default_runner)),
             plugins: Vec::new(),
             plugin_names: HashSet::new(),
             plugins_finished: false,
@@ -177,6 +318,14 @@ impl App {
         self
     }
 
+    pub fn set_runner(
+        &mut self,
+        runner: impl FnOnce(App) -> Result<AppExit, AppRunError> + 'static,
+    ) -> &mut Self {
+        self.runner = Some(Box::new(runner));
+        self
+    }
+
     pub fn add_plugin(&mut self, plugin: impl Plugin) -> Result<&mut Self, PluginError> {
         let name = plugin.name();
         if self.plugins_finished {
@@ -206,7 +355,16 @@ impl App {
         Ok(self)
     }
 
-    pub fn try_update(&mut self) -> Result<(), PluginError> {
+    pub fn run(mut self) -> Result<AppExit, AppRunError> {
+        self.finish_plugins()?;
+        let runner = self
+            .runner
+            .take()
+            .unwrap_or_else(|| Box::new(default_runner));
+        runner(self)
+    }
+
+    pub fn run_once(&mut self, delta: Duration) -> Result<(), AppRunError> {
         self.finish_plugins()?;
 
         if !self.started {
@@ -218,18 +376,31 @@ impl App {
             self.started = true;
         }
 
+        self.world.resource_mut::<Time>().advance(delta);
+        let fixed_steps = self.world.resource_mut::<FixedTime>().begin_frame(delta);
+
         for stage in CoreStage::ALL {
             if let Some(schedule) = self.schedules.get_mut(&stage) {
-                schedule.run(&mut self.world);
+                if stage == CoreStage::FixedUpdate {
+                    for _ in 0..fixed_steps {
+                        schedule.run(&mut self.world);
+                    }
+                } else {
+                    schedule.run(&mut self.world);
+                }
             }
         }
 
         Ok(())
     }
 
+    pub fn try_update(&mut self) -> Result<(), AppRunError> {
+        self.run_once(Duration::ZERO)
+    }
+
     pub fn update(&mut self) {
         self.try_update()
-            .expect("app update failed while finishing plugins");
+            .expect("app update failed while running one frame");
     }
 
     fn startup_schedule_mut(&mut self, stage: StartupStage) -> &mut Schedule {
@@ -245,6 +416,11 @@ impl App {
     }
 }
 
+fn default_runner(mut app: App) -> Result<AppExit, AppRunError> {
+    app.run_once(Duration::ZERO)?;
+    Ok(AppExit::Success)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,12 +432,31 @@ mod tests {
     #[derive(Debug, Component)]
     struct Spawned;
 
+    #[derive(Debug, Default, Resource)]
+    struct Order(Vec<&'static str>);
+
     fn spawn_entity(mut commands: Commands) {
         commands.spawn(Spawned);
     }
 
     fn count_frame(mut frames: ResMut<Frames>) {
         frames.0 += 1;
+    }
+
+    fn push_first(mut order: ResMut<Order>) {
+        order.0.push("first");
+    }
+
+    fn push_pre_update(mut order: ResMut<Order>) {
+        order.0.push("pre_update");
+    }
+
+    fn push_fixed_update(mut order: ResMut<Order>) {
+        order.0.push("fixed_update");
+    }
+
+    fn push_update(mut order: ResMut<Order>) {
+        order.0.push("update");
     }
 
     #[test]
@@ -282,5 +477,88 @@ mod tests {
 
         assert_eq!(spawned_count, 3);
         assert_eq!(app.world().resource::<Frames>().0, 2);
+    }
+
+    #[test]
+    fn run_once_advances_time_and_runs_fixed_update_when_due() {
+        let mut app = App::new();
+        app.insert_resource(Frames::default())
+            .add_systems(CoreStage::FixedUpdate, count_frame);
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        let time = app.world().resource::<Time>();
+        assert_eq!(time.frame, 1);
+        assert_eq!(
+            time.delta_seconds,
+            FixedTime::DEFAULT_TIMESTEP.as_secs_f32()
+        );
+        assert_eq!(app.world().resource::<Frames>().0, 1);
+        assert_eq!(app.world().resource::<FixedTime>().steps_this_frame(), 1);
+    }
+
+    #[test]
+    fn fixed_update_does_not_run_until_accumulator_is_due() {
+        let mut app = App::new();
+        app.insert_resource(Frames::default())
+            .add_systems(CoreStage::FixedUpdate, count_frame);
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP / 2).unwrap();
+
+        assert_eq!(app.world().resource::<Frames>().0, 0);
+        assert_eq!(app.world().resource::<FixedTime>().steps_this_frame(), 0);
+    }
+
+    #[test]
+    fn fixed_update_limits_catch_up_ticks() {
+        let mut app = App::new();
+        app.insert_resource(Frames::default())
+            .insert_resource(FixedTime::default().with_max_steps_per_frame(2))
+            .add_systems(CoreStage::FixedUpdate, count_frame);
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP * 5).unwrap();
+
+        assert_eq!(app.world().resource::<Frames>().0, 2);
+        assert_eq!(app.world().resource::<FixedTime>().steps_this_frame(), 2);
+        assert!(app.world().resource::<FixedTime>().accumulated() >= FixedTime::DEFAULT_TIMESTEP);
+    }
+
+    #[test]
+    fn first_pre_fixed_and_update_run_in_order() {
+        let mut app = App::new();
+        app.insert_resource(Order::default())
+            .add_systems(CoreStage::First, push_first)
+            .add_systems(CoreStage::PreUpdate, push_pre_update)
+            .add_systems(CoreStage::FixedUpdate, push_fixed_update)
+            .add_systems(CoreStage::Update, push_update);
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        assert_eq!(
+            app.world().resource::<Order>().0,
+            ["first", "pre_update", "fixed_update", "update"]
+        );
+    }
+
+    #[test]
+    fn run_consumes_app_with_custom_runner() {
+        let mut app = App::new();
+        app.set_runner(|mut app| {
+            app.run_once(Duration::ZERO)?;
+            Ok(AppExit::Requested)
+        });
+
+        assert_eq!(app.run().unwrap(), AppExit::Requested);
+    }
+
+    #[test]
+    fn runner_failure_is_reported_without_panic() {
+        let mut app = App::new();
+        app.set_runner(|_app| Err(AppRunError::runner("window creation failed")));
+
+        assert_eq!(
+            app.run().unwrap_err(),
+            AppRunError::runner("window creation failed")
+        );
     }
 }

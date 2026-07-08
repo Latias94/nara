@@ -60,8 +60,8 @@ flowchart TD
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
 | `nara` | Facade and prelude | Re-export only; no backend logic |
-| `nara_app` | `App`, `Plugin`, `StartupStage`, `CoreStage` | Plugin ordering, lifecycle, runner policy |
-| `nara_core` | `Color`, `Time`, math re-exports | Core primitives that do not need ECS derives |
+| `nara_app` | `App`, `Plugin`, `StartupStage`, `CoreStage`, `Time`, `FixedTime` | Plugin ordering, lifecycle, runner policy, frame/fixed-step time resources |
+| `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions | Bevy-reflect-backed component metadata and migrations |
