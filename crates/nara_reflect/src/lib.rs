@@ -51,6 +51,100 @@ pub struct ComponentSchema {
     pub serializable: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct ComponentFieldPath {
+    segments: Vec<ComponentFieldPathSegment>,
+}
+
+impl ComponentFieldPath {
+    #[must_use]
+    pub fn new(segments: impl IntoIterator<Item = ComponentFieldPathSegment>) -> Self {
+        Self {
+            segments: segments.into_iter().collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn from_fields(fields: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self::new(fields.into_iter().map(ComponentFieldPathSegment::field))
+    }
+
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
+    #[must_use]
+    pub fn segments(&self) -> &[ComponentFieldPathSegment] {
+        &self.segments
+    }
+
+    #[must_use]
+    pub fn into_segments(self) -> Vec<ComponentFieldPathSegment> {
+        self.segments
+    }
+}
+
+impl FromIterator<ComponentFieldPathSegment> for ComponentFieldPath {
+    fn from_iter<T: IntoIterator<Item = ComponentFieldPathSegment>>(iter: T) -> Self {
+        Self::new(iter)
+    }
+}
+
+impl Display for ComponentFieldPath {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        if self.segments.is_empty() {
+            return formatter.write_str("<root>");
+        }
+
+        for (index, segment) in self.segments.iter().enumerate() {
+            match segment {
+                ComponentFieldPathSegment::Field(field) => {
+                    if index > 0 {
+                        formatter.write_str(".")?;
+                    }
+                    formatter.write_str(field)?;
+                }
+                ComponentFieldPathSegment::Index(list_index) => {
+                    write!(formatter, "[{list_index}]")?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(tag = "kind", content = "value", rename_all = "snake_case")
+)]
+pub enum ComponentFieldPathSegment {
+    Field(String),
+    Index(u32),
+}
+
+impl ComponentFieldPathSegment {
+    #[must_use]
+    pub fn field(field: impl Into<String>) -> Self {
+        Self::Field(field.into())
+    }
+
+    #[must_use]
+    pub const fn index(index: u32) -> Self {
+        Self::Index(index)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ComponentFloat(f64);
 
@@ -133,6 +227,237 @@ impl ComponentValue {
     pub fn field(&self, field: &str) -> Result<&ComponentValue, ComponentCodecError> {
         self.get(field)
             .ok_or_else(|| ComponentCodecError::missing_field(field))
+    }
+
+    pub fn get_path(
+        &self,
+        path: &ComponentFieldPath,
+    ) -> Result<&ComponentValue, ComponentFieldPathError> {
+        let mut current = self;
+        let mut visited = Vec::new();
+
+        for segment in path.segments() {
+            match segment {
+                ComponentFieldPathSegment::Field(field) => {
+                    let child_path = component_path_with(&visited, segment);
+                    let ComponentValue::Map(fields) = current else {
+                        return Err(ComponentFieldPathError::ExpectedMap {
+                            path: ComponentFieldPath::new(visited.iter().cloned()),
+                        });
+                    };
+                    current =
+                        fields
+                            .get(field)
+                            .ok_or_else(|| ComponentFieldPathError::MissingField {
+                                path: child_path,
+                                field: field.clone(),
+                            })?;
+                }
+                ComponentFieldPathSegment::Index(index) => {
+                    let child_path = component_path_with(&visited, segment);
+                    let ComponentValue::List(items) = current else {
+                        return Err(ComponentFieldPathError::ExpectedList {
+                            path: ComponentFieldPath::new(visited.iter().cloned()),
+                        });
+                    };
+                    let requested_index = *index;
+                    let item_index = usize::try_from(requested_index).unwrap_or(usize::MAX);
+                    current = items.get(item_index).ok_or_else(|| {
+                        ComponentFieldPathError::IndexOutOfBounds {
+                            path: child_path,
+                            index: requested_index,
+                            len: items.len(),
+                        }
+                    })?;
+                }
+            }
+            visited.push(segment.clone());
+        }
+
+        Ok(current)
+    }
+
+    pub fn get_path_mut(
+        &mut self,
+        path: &ComponentFieldPath,
+    ) -> Result<&mut ComponentValue, ComponentFieldPathError> {
+        self.get_path_mut_segments(path.segments())
+    }
+
+    pub fn set_path(
+        &mut self,
+        path: &ComponentFieldPath,
+        value: ComponentValue,
+    ) -> Result<Option<ComponentValue>, ComponentFieldPathError> {
+        let (last, parent_segments) = path
+            .segments()
+            .split_last()
+            .ok_or(ComponentFieldPathError::EmptyPath)?;
+        let parent = self.get_path_mut_segments(parent_segments)?;
+        let parent_path = ComponentFieldPath::new(parent_segments.iter().cloned());
+
+        match last {
+            ComponentFieldPathSegment::Field(field) => {
+                let ComponentValue::Map(fields) = parent else {
+                    return Err(ComponentFieldPathError::ExpectedMap { path: parent_path });
+                };
+                Ok(fields.insert(field.clone(), value))
+            }
+            ComponentFieldPathSegment::Index(index) => {
+                let ComponentValue::List(items) = parent else {
+                    return Err(ComponentFieldPathError::ExpectedList { path: parent_path });
+                };
+                let target_path = component_path_with(parent_segments, last);
+                let requested_index = *index;
+                let item_index = usize::try_from(requested_index).unwrap_or(usize::MAX);
+                if item_index >= items.len() {
+                    return Err(ComponentFieldPathError::IndexOutOfBounds {
+                        path: target_path,
+                        index: requested_index,
+                        len: items.len(),
+                    });
+                }
+                Ok(Some(std::mem::replace(&mut items[item_index], value)))
+            }
+        }
+    }
+
+    pub fn replace_path(
+        &mut self,
+        path: &ComponentFieldPath,
+        value: ComponentValue,
+    ) -> Result<ComponentValue, ComponentFieldPathError> {
+        let (last, parent_segments) = path
+            .segments()
+            .split_last()
+            .ok_or(ComponentFieldPathError::EmptyPath)?;
+        let parent = self.get_path_mut_segments(parent_segments)?;
+        let parent_path = ComponentFieldPath::new(parent_segments.iter().cloned());
+
+        match last {
+            ComponentFieldPathSegment::Field(field) => {
+                let target_path = component_path_with(parent_segments, last);
+                let ComponentValue::Map(fields) = parent else {
+                    return Err(ComponentFieldPathError::ExpectedMap { path: parent_path });
+                };
+                if !fields.contains_key(field) {
+                    return Err(ComponentFieldPathError::MissingField {
+                        path: target_path,
+                        field: field.clone(),
+                    });
+                }
+                Ok(fields
+                    .insert(field.clone(), value)
+                    .expect("field presence checked before replacement"))
+            }
+            ComponentFieldPathSegment::Index(index) => {
+                let ComponentValue::List(items) = parent else {
+                    return Err(ComponentFieldPathError::ExpectedList { path: parent_path });
+                };
+                let target_path = component_path_with(parent_segments, last);
+                let requested_index = *index;
+                let item_index = usize::try_from(requested_index).unwrap_or(usize::MAX);
+                if item_index >= items.len() {
+                    return Err(ComponentFieldPathError::IndexOutOfBounds {
+                        path: target_path,
+                        index: requested_index,
+                        len: items.len(),
+                    });
+                }
+                Ok(std::mem::replace(&mut items[item_index], value))
+            }
+        }
+    }
+
+    pub fn remove_path(
+        &mut self,
+        path: &ComponentFieldPath,
+    ) -> Result<ComponentValue, ComponentFieldPathError> {
+        let (last, parent_segments) = path
+            .segments()
+            .split_last()
+            .ok_or(ComponentFieldPathError::EmptyPath)?;
+        let parent = self.get_path_mut_segments(parent_segments)?;
+        let parent_path = ComponentFieldPath::new(parent_segments.iter().cloned());
+
+        match last {
+            ComponentFieldPathSegment::Field(field) => {
+                let target_path = component_path_with(parent_segments, last);
+                let ComponentValue::Map(fields) = parent else {
+                    return Err(ComponentFieldPathError::ExpectedMap { path: parent_path });
+                };
+                fields
+                    .remove(field)
+                    .ok_or(ComponentFieldPathError::MissingField {
+                        path: target_path,
+                        field: field.clone(),
+                    })
+            }
+            ComponentFieldPathSegment::Index(index) => {
+                let ComponentValue::List(items) = parent else {
+                    return Err(ComponentFieldPathError::ExpectedList { path: parent_path });
+                };
+                let target_path = component_path_with(parent_segments, last);
+                let requested_index = *index;
+                let item_index = usize::try_from(requested_index).unwrap_or(usize::MAX);
+                if item_index >= items.len() {
+                    return Err(ComponentFieldPathError::IndexOutOfBounds {
+                        path: target_path,
+                        index: requested_index,
+                        len: items.len(),
+                    });
+                }
+                Ok(items.remove(item_index))
+            }
+        }
+    }
+
+    fn get_path_mut_segments(
+        &mut self,
+        segments: &[ComponentFieldPathSegment],
+    ) -> Result<&mut ComponentValue, ComponentFieldPathError> {
+        let mut current = self;
+        let mut visited = Vec::new();
+
+        for segment in segments {
+            match segment {
+                ComponentFieldPathSegment::Field(field) => {
+                    let child_path = component_path_with(&visited, segment);
+                    let ComponentValue::Map(fields) = current else {
+                        return Err(ComponentFieldPathError::ExpectedMap {
+                            path: ComponentFieldPath::new(visited.iter().cloned()),
+                        });
+                    };
+                    current = fields.get_mut(field).ok_or_else(|| {
+                        ComponentFieldPathError::MissingField {
+                            path: child_path,
+                            field: field.clone(),
+                        }
+                    })?;
+                }
+                ComponentFieldPathSegment::Index(index) => {
+                    let child_path = component_path_with(&visited, segment);
+                    let ComponentValue::List(items) = current else {
+                        return Err(ComponentFieldPathError::ExpectedList {
+                            path: ComponentFieldPath::new(visited.iter().cloned()),
+                        });
+                    };
+                    let requested_index = *index;
+                    let item_index = usize::try_from(requested_index).unwrap_or(usize::MAX);
+                    if item_index >= items.len() {
+                        return Err(ComponentFieldPathError::IndexOutOfBounds {
+                            path: child_path,
+                            index: requested_index,
+                            len: items.len(),
+                        });
+                    }
+                    current = &mut items[item_index];
+                }
+            }
+            visited.push(segment.clone());
+        }
+
+        Ok(current)
     }
 
     #[must_use]
@@ -220,6 +545,65 @@ impl Display for ComponentValueError {
 }
 
 impl Error for ComponentValueError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentFieldPathError {
+    EmptyPath,
+    ExpectedMap {
+        path: ComponentFieldPath,
+    },
+    ExpectedList {
+        path: ComponentFieldPath,
+    },
+    MissingField {
+        path: ComponentFieldPath,
+        field: String,
+    },
+    IndexOutOfBounds {
+        path: ComponentFieldPath,
+        index: u32,
+        len: usize,
+    },
+}
+
+impl Display for ComponentFieldPathError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyPath => formatter.write_str("component field path is empty"),
+            Self::ExpectedMap { path } => {
+                write!(formatter, "expected map at component field path '{path}'")
+            }
+            Self::ExpectedList { path } => {
+                write!(formatter, "expected list at component field path '{path}'")
+            }
+            Self::MissingField { path, field } => {
+                write!(
+                    formatter,
+                    "missing component field '{field}' at path '{path}'"
+                )
+            }
+            Self::IndexOutOfBounds { path, index, len } => {
+                write!(
+                    formatter,
+                    "component field path '{path}' index {index} is out of bounds for list length {len}"
+                )
+            }
+        }
+    }
+}
+
+impl Error for ComponentFieldPathError {}
+
+fn component_path_with(
+    prefix: &[ComponentFieldPathSegment],
+    segment: &ComponentFieldPathSegment,
+) -> ComponentFieldPath {
+    prefix
+        .iter()
+        .cloned()
+        .chain(std::iter::once(segment.clone()))
+        .collect()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentRegistryError {
@@ -769,9 +1153,9 @@ impl ComponentRegistry {
 pub mod prelude {
     pub use crate::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
-        ComponentFloat, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueError,
-        PreparedComponent,
+        ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment, ComponentFloat,
+        ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue, ComponentValueError, PreparedComponent,
     };
     pub use bevy_reflect::prelude::*;
 }
@@ -828,6 +1212,124 @@ mod tests {
             ComponentValue::f64(f64::NAN),
             Err(ComponentValueError::NonFiniteFloat)
         );
+    }
+
+    #[test]
+    fn component_field_path_display_keeps_structured_segments() {
+        let path = ComponentFieldPath::new([
+            ComponentFieldPathSegment::field("sprite"),
+            ComponentFieldPathSegment::field("color"),
+            ComponentFieldPathSegment::field("r"),
+            ComponentFieldPathSegment::index(0),
+        ]);
+
+        assert_eq!(path.to_string(), "sprite.color.r[0]");
+        assert_eq!(
+            path.segments(),
+            &[
+                ComponentFieldPathSegment::Field("sprite".to_string()),
+                ComponentFieldPathSegment::Field("color".to_string()),
+                ComponentFieldPathSegment::Field("r".to_string()),
+                ComponentFieldPathSegment::Index(0),
+            ]
+        );
+    }
+
+    #[test]
+    fn component_value_sets_nested_map_field() {
+        let mut value = ComponentValue::map([(
+            "sprite",
+            ComponentValue::map([(
+                "color",
+                ComponentValue::map([("r", ComponentValue::I64(1))]),
+            )]),
+        )]);
+        let path = ComponentFieldPath::from_fields(["sprite", "color", "r"]);
+
+        let previous = value.set_path(&path, ComponentValue::I64(9)).unwrap();
+
+        assert_eq!(previous, Some(ComponentValue::I64(1)));
+        assert_eq!(value.get_path(&path).unwrap().as_i64(), Some(9));
+    }
+
+    #[test]
+    fn component_value_reports_missing_field_with_path_context() {
+        let value = ComponentValue::map([("sprite", ComponentValue::Map(BTreeMap::new()))]);
+        let path = ComponentFieldPath::from_fields(["sprite", "color", "r"]);
+
+        let error = value.get_path(&path).unwrap_err();
+
+        assert_eq!(
+            error,
+            ComponentFieldPathError::MissingField {
+                path: ComponentFieldPath::from_fields(["sprite", "color"]),
+                field: "color".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn component_value_reports_wrong_container_kind() {
+        let value = ComponentValue::map([("sprite", ComponentValue::Bool(true))]);
+        let path = ComponentFieldPath::from_fields(["sprite", "color"]);
+
+        let error = value.get_path(&path).unwrap_err();
+
+        assert_eq!(
+            error,
+            ComponentFieldPathError::ExpectedMap {
+                path: ComponentFieldPath::from_fields(["sprite"]),
+            }
+        );
+    }
+
+    #[test]
+    fn component_value_gets_list_indices_and_reports_bounds() {
+        let value = ComponentValue::map([(
+            "cells",
+            ComponentValue::List(vec![ComponentValue::map([(
+                "tile",
+                ComponentValue::U64(7),
+            )])]),
+        )]);
+        let valid_path = ComponentFieldPath::new([
+            ComponentFieldPathSegment::field("cells"),
+            ComponentFieldPathSegment::index(0),
+            ComponentFieldPathSegment::field("tile"),
+        ]);
+        let invalid_path = ComponentFieldPath::new([
+            ComponentFieldPathSegment::field("cells"),
+            ComponentFieldPathSegment::index(1),
+        ]);
+
+        assert_eq!(value.get_path(&valid_path).unwrap().as_u64(), Some(7));
+        assert_eq!(
+            value.get_path(&invalid_path).unwrap_err(),
+            ComponentFieldPathError::IndexOutOfBounds {
+                path: invalid_path,
+                index: 1,
+                len: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn invalid_component_value_path_does_not_mutate_original() {
+        let mut value = ComponentValue::map([("sprite", ComponentValue::Bool(true))]);
+        let original = value.clone();
+        let path = ComponentFieldPath::from_fields(["sprite", "color"]);
+
+        let error = value
+            .set_path(&path, ComponentValue::String("red".to_string()))
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            ComponentFieldPathError::ExpectedMap {
+                path: ComponentFieldPath::from_fields(["sprite"]),
+            }
+        );
+        assert_eq!(value, original);
     }
 
     #[test]
