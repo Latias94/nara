@@ -1282,6 +1282,7 @@ dependencies = [
 name = "nara"
 version = "0.1.0"
 dependencies = [
+ "bevy_ecs",
  "image",
  "nara_app",
  "nara_asset",

@@ -96,6 +96,7 @@ nara_window.workspace = true
 nara_winit = { workspace = true, optional = true }
 
 [dev-dependencies]
+bevy_ecs.workspace = true
 image.workspace = true
 
 [features]

@@ -4,6 +4,7 @@ mod document;
 mod export;
 mod format;
 mod hierarchy;
+mod patch;
 mod prefab;
 mod spawn;
 mod validation;
@@ -20,6 +21,7 @@ pub use hierarchy::{
     Children, HierarchyPlugin, Name, Parent, Transform2d, Visibility, register_scene_components,
     spawn_child, sync_children,
 };
+pub use patch::{ScenePatchDocument, ScenePatchOperation, ScenePatchReport};
 pub use prefab::{PrefabComponentOverrides, PrefabDocument, PrefabInstance};
 pub use spawn::{
     SceneEntityMap, SceneEntitySource, SceneInstanceId, SceneSpawnReport, SceneSpawner,

@@ -38,6 +38,7 @@ pub struct Diagnostic {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DiagnosticContext {
+    pub operation_index: Option<usize>,
     pub entity_id: Option<String>,
     pub component_id: Option<String>,
     pub field_path: Option<String>,
@@ -72,6 +73,12 @@ impl Diagnostic {
     #[must_use]
     pub fn info(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self::new(code, DiagnosticSeverity::Info, message)
+    }
+
+    #[must_use]
+    pub fn with_operation_index(mut self, operation_index: usize) -> Self {
+        self.context.operation_index = Some(operation_index);
+        self
     }
 
     #[must_use]
@@ -133,6 +140,11 @@ impl DiagnosticReport {
     }
 
     #[must_use]
+    pub fn into_diagnostics(self) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.diagnostics.is_empty()
     }
@@ -173,11 +185,13 @@ mod tests {
     #[test]
     fn diagnostic_context_identifies_scene_problem_location() {
         let diagnostic = Diagnostic::error("scene.invalid-field", "invalid field")
+            .with_operation_index(3)
             .with_entity_id("player")
             .with_component_id("nara.transform.Transform2d")
             .with_field_path("translation.x")
             .with_asset_ref("textures/player.png");
 
+        assert_eq!(diagnostic.context.operation_index, Some(3));
         assert_eq!(diagnostic.context.entity_id.as_deref(), Some("player"));
         assert_eq!(
             diagnostic.context.component_id.as_deref(),
