@@ -166,6 +166,74 @@ fn invalid_component_payload_does_not_mutate_world() {
 }
 
 #[test]
+fn component_migration_runs_before_scene_preflight_without_mutating_document() {
+    let registry = migrated_position_registry();
+    let id = scene_id("player");
+    let document = SceneDocument::new([SceneEntityRecord::new(id.clone()).with_component(
+        position_type_id(),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion(1),
+            ComponentValue::map([("x", ComponentValue::I64(8))]),
+        ),
+    )]);
+    let mut world = World::new();
+
+    let validation = document.validate(&registry);
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(!validation.has_errors());
+    assert!(!report.diagnostics.has_errors());
+    let entity = report.entity_map.get(&id).unwrap();
+    assert_eq!(world.get::<TestPosition>(entity).unwrap().x, 8);
+    let source_component = document.entities[0]
+        .components
+        .get(&position_type_id())
+        .unwrap();
+    assert_eq!(source_component.version, ComponentSchemaVersion(1));
+    assert!(source_component.value.get("x").is_some());
+    assert!(source_component.value.get("x2").is_none());
+}
+
+#[test]
+fn missing_component_migration_reports_unsupported_version() {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_serializable_component::<TestPosition, _, _>(
+            position_type_id(),
+            ComponentSchemaVersion(2),
+            |value| {
+                let x = value.field_i64("x2")?;
+                Ok(TestPosition {
+                    x: i32::try_from(x)
+                        .map_err(|_| ComponentCodecError::invalid_field("x2", "i32"))?,
+                })
+            },
+            |position| {
+                Ok(ComponentValue::map([(
+                    "x2",
+                    ComponentValue::I64(i64::from(position.x)),
+                )]))
+            },
+        )
+        .unwrap();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("bad")).with_component(
+        position_type_id(),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion(1),
+            ComponentValue::map([("x", ComponentValue::I64(8))]),
+        ),
+    )]);
+
+    let report = document.validate(&registry);
+
+    assert!(report.has_errors());
+    assert!(report.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code.as_str() == "scene.unsupported-component-version"
+            && diagnostic.context.component_id.as_deref() == Some(position_type_id().as_str())
+    }));
+}
+
+#[test]
 fn path_asset_ref_resolves_before_scene_spawn_without_database() {
     let registry = test_asset_registry();
     let id = scene_id("player");
@@ -482,6 +550,46 @@ fn test_registry() -> ComponentRegistry {
                     "x",
                     ComponentValue::I64(i64::from(position.x)),
                 )]))
+            },
+        )
+        .unwrap();
+    registry
+}
+
+fn migrated_position_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_serializable_component::<TestPosition, _, _>(
+            position_type_id(),
+            ComponentSchemaVersion(2),
+            |value| {
+                let x = value.field_i64("x2")?;
+                Ok(TestPosition {
+                    x: i32::try_from(x)
+                        .map_err(|_| ComponentCodecError::invalid_field("x2", "i32"))?,
+                })
+            },
+            |position| {
+                Ok(ComponentValue::map([(
+                    "x2",
+                    ComponentValue::I64(i64::from(position.x)),
+                )]))
+            },
+        )
+        .unwrap()
+        .register_component_migration(
+            &position_type_id(),
+            ComponentSchemaVersion(1),
+            ComponentSchemaVersion(2),
+            |value| {
+                let ComponentValue::Map(mut fields) = value else {
+                    return Err(ComponentCodecError::invalid_field("<root>", "map"));
+                };
+                let x = fields
+                    .remove("x")
+                    .ok_or_else(|| ComponentCodecError::missing_field("x"))?;
+                fields.insert("x2".to_string(), x);
+                Ok(ComponentValue::Map(fields))
             },
         )
         .unwrap();

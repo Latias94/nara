@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentRegistry, PreparedComponent,
+    ComponentCodecError, ComponentDecodeContext, ComponentMigrationError, ComponentRegistry,
+    PreparedComponent,
 };
 
 use crate::{
@@ -122,19 +123,35 @@ pub(crate) fn preflight_scene_with_context(
                 );
                 continue;
             }
-            if component.version != schema.version {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "scene.unsupported-component-version",
-                        "component schema version is unsupported",
-                    )
-                    .with_entity_id(entity.id.as_str())
-                    .with_component_id(component_id.as_str()),
-                );
+            let migrated = match registry.migrate_component_value(
+                component_id,
+                component.version,
+                &component.value,
+            ) {
+                Ok(migrated) => migrated,
+                Err(error) => {
+                    diagnostics.push(component_migration_diagnostic(
+                        entity.id.as_str(),
+                        component_id.as_str(),
+                        &error,
+                    ));
+                    continue;
+                }
+            };
+            if migrated.version != schema.version {
+                diagnostics.push(component_migration_diagnostic(
+                    entity.id.as_str(),
+                    component_id.as_str(),
+                    &ComponentMigrationError::UnsupportedVersion {
+                        component_id: component_id.clone(),
+                        from_version: migrated.version,
+                        target_version: schema.version,
+                    },
+                ));
                 continue;
             }
 
-            match registry.preflight_component_with_context(component_id, &component.value, context)
+            match registry.preflight_component_with_context(component_id, &migrated.value, context)
             {
                 Some(Ok(prepared)) => prepared_components.push(prepared),
                 Some(Err(error)) => {
@@ -171,6 +188,35 @@ pub(crate) fn preflight_scene_with_context(
     PreparedScene {
         entities: prepared_entities,
         diagnostics,
+    }
+}
+
+fn component_migration_diagnostic(
+    entity_id: &str,
+    component_id: &str,
+    error: &ComponentMigrationError,
+) -> Diagnostic {
+    match error {
+        ComponentMigrationError::MigrationFailed { error, .. } => {
+            let mut diagnostic =
+                Diagnostic::error("scene.component-migration-failed", error.to_string())
+                    .with_entity_id(entity_id)
+                    .with_component_id(component_id);
+            if let Some(field_path) = codec_error_field_path(error) {
+                diagnostic = diagnostic.with_field_path(field_path);
+            }
+            if let Some(asset_ref) = codec_error_asset_ref(error) {
+                diagnostic = diagnostic.with_asset_ref(asset_ref);
+            }
+            diagnostic
+        }
+        ComponentMigrationError::UnknownComponentId { .. }
+        | ComponentMigrationError::UnsupportedVersion { .. }
+        | ComponentMigrationError::MissingMigration { .. } => {
+            Diagnostic::error("scene.unsupported-component-version", error.to_string())
+                .with_entity_id(entity_id)
+                .with_component_id(component_id)
+        }
     }
 }
 

@@ -84,9 +84,10 @@ pub mod prelude {
     pub use nara_reflect::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
-        ComponentFieldSchema, ComponentFloat, ComponentRegistry, ComponentRegistryError,
-        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, ComponentValueError, ComponentValueKind, PreparedComponent,
+        ComponentFieldSchema, ComponentFloat, ComponentMigrationError, ComponentRegistry,
+        ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue, ComponentValueError, ComponentValueKind,
+        MigratedComponentValue, PreparedComponent,
     };
     pub use nara_render::{
         Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats,

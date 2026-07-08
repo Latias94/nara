@@ -2,7 +2,7 @@
 
 use std::{
     any::TypeId,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     error::Error,
     fmt::{self, Display, Formatter},
 };
@@ -698,6 +698,15 @@ pub enum ComponentRegistryError {
         component_id: ComponentTypeId,
         path: ComponentFieldPath,
     },
+    DuplicateComponentMigration {
+        component_id: ComponentTypeId,
+        from_version: ComponentSchemaVersion,
+    },
+    InvalidComponentMigration {
+        component_id: ComponentTypeId,
+        from_version: ComponentSchemaVersion,
+        to_version: ComponentSchemaVersion,
+    },
 }
 
 impl Display for ComponentRegistryError {
@@ -725,11 +734,112 @@ impl Display for ComponentRegistryError {
                     path
                 )
             }
+            Self::DuplicateComponentMigration {
+                component_id,
+                from_version,
+            } => {
+                write!(
+                    formatter,
+                    "component id '{}' already has a migration from version {}",
+                    component_id.as_str(),
+                    from_version.0
+                )
+            }
+            Self::InvalidComponentMigration {
+                component_id,
+                from_version,
+                to_version,
+            } => {
+                write!(
+                    formatter,
+                    "component id '{}' has invalid migration version range {} -> {}",
+                    component_id.as_str(),
+                    from_version.0,
+                    to_version.0
+                )
+            }
         }
     }
 }
 
 impl Error for ComponentRegistryError {}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MigratedComponentValue {
+    pub version: ComponentSchemaVersion,
+    pub value: ComponentValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentMigrationError {
+    UnknownComponentId {
+        component_id: ComponentTypeId,
+    },
+    UnsupportedVersion {
+        component_id: ComponentTypeId,
+        from_version: ComponentSchemaVersion,
+        target_version: ComponentSchemaVersion,
+    },
+    MissingMigration {
+        component_id: ComponentTypeId,
+        from_version: ComponentSchemaVersion,
+        target_version: ComponentSchemaVersion,
+    },
+    MigrationFailed {
+        component_id: ComponentTypeId,
+        from_version: ComponentSchemaVersion,
+        to_version: ComponentSchemaVersion,
+        error: ComponentCodecError,
+    },
+}
+
+impl Display for ComponentMigrationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownComponentId { component_id } => write!(
+                formatter,
+                "component id '{}' is not registered",
+                component_id.as_str()
+            ),
+            Self::UnsupportedVersion {
+                component_id,
+                from_version,
+                target_version,
+            } => write!(
+                formatter,
+                "component id '{}' version {} cannot migrate to current version {}",
+                component_id.as_str(),
+                from_version.0,
+                target_version.0
+            ),
+            Self::MissingMigration {
+                component_id,
+                from_version,
+                target_version,
+            } => write!(
+                formatter,
+                "component id '{}' is missing a migration from version {} toward current version {}",
+                component_id.as_str(),
+                from_version.0,
+                target_version.0
+            ),
+            Self::MigrationFailed {
+                component_id,
+                from_version,
+                to_version,
+                error,
+            } => write!(
+                formatter,
+                "component id '{}' migration {} -> {} failed: {error}",
+                component_id.as_str(),
+                from_version.0,
+                to_version.0
+            ),
+        }
+    }
+}
+
+impl Error for ComponentMigrationError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentCodecError {
@@ -936,6 +1046,13 @@ impl<'a> ComponentEncodeContext<'a> {
 
 type ApplyComponentFn =
     dyn FnOnce(&mut World, Entity) -> Result<(), ComponentCodecError> + Send + 'static;
+type ComponentMigrationFn =
+    dyn Fn(ComponentValue) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static;
+
+struct ComponentMigration {
+    to_version: ComponentSchemaVersion,
+    migrate: Box<ComponentMigrationFn>,
+}
 
 pub struct PreparedComponent {
     apply: Box<ApplyComponentFn>,
@@ -1044,6 +1161,7 @@ pub struct ComponentRegistry {
     schemas: BTreeMap<ComponentTypeId, ComponentSchema>,
     rust_type_ids: HashMap<TypeId, ComponentTypeId>,
     codecs: BTreeMap<ComponentTypeId, Box<dyn ComponentCodec>>,
+    migrations: BTreeMap<(ComponentTypeId, ComponentSchemaVersion), ComponentMigration>,
 }
 
 impl Default for ComponentRegistry {
@@ -1060,6 +1178,7 @@ impl ComponentRegistry {
             schemas: BTreeMap::new(),
             rust_type_ids: HashMap::new(),
             codecs: BTreeMap::new(),
+            migrations: BTreeMap::new(),
         }
     }
 
@@ -1191,6 +1310,117 @@ impl ComponentRegistry {
         Ok(self)
     }
 
+    pub fn register_component_migration<Migrate>(
+        &mut self,
+        id: &ComponentTypeId,
+        from_version: ComponentSchemaVersion,
+        to_version: ComponentSchemaVersion,
+        migrate: Migrate,
+    ) -> Result<&mut Self, ComponentRegistryError>
+    where
+        Migrate: Fn(ComponentValue) -> Result<ComponentValue, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        if !self.schemas.contains_key(id) {
+            return Err(ComponentRegistryError::UnknownComponentId(id.clone()));
+        }
+        if to_version <= from_version {
+            return Err(ComponentRegistryError::InvalidComponentMigration {
+                component_id: id.clone(),
+                from_version,
+                to_version,
+            });
+        }
+
+        let key = (id.clone(), from_version);
+        if self.migrations.contains_key(&key) {
+            return Err(ComponentRegistryError::DuplicateComponentMigration {
+                component_id: id.clone(),
+                from_version,
+            });
+        }
+
+        self.migrations.insert(
+            key,
+            ComponentMigration {
+                to_version,
+                migrate: Box::new(migrate),
+            },
+        );
+        Ok(self)
+    }
+
+    pub fn migrate_component_value(
+        &self,
+        id: &ComponentTypeId,
+        version: ComponentSchemaVersion,
+        value: &ComponentValue,
+    ) -> Result<MigratedComponentValue, ComponentMigrationError> {
+        let Some(schema) = self.schema(id) else {
+            return Err(ComponentMigrationError::UnknownComponentId {
+                component_id: id.clone(),
+            });
+        };
+        if version == schema.version {
+            return Ok(MigratedComponentValue {
+                version,
+                value: value.clone(),
+            });
+        }
+        if version > schema.version {
+            return Err(ComponentMigrationError::UnsupportedVersion {
+                component_id: id.clone(),
+                from_version: version,
+                target_version: schema.version,
+            });
+        }
+
+        let mut current_version = version;
+        let mut current_value = value.clone();
+        let mut seen_versions = BTreeSet::from([current_version]);
+        while current_version != schema.version {
+            let Some(migration) = self.migrations.get(&(id.clone(), current_version)) else {
+                return Err(ComponentMigrationError::MissingMigration {
+                    component_id: id.clone(),
+                    from_version: current_version,
+                    target_version: schema.version,
+                });
+            };
+            if migration.to_version <= current_version || migration.to_version > schema.version {
+                return Err(ComponentMigrationError::UnsupportedVersion {
+                    component_id: id.clone(),
+                    from_version: current_version,
+                    target_version: schema.version,
+                });
+            }
+
+            let from_version = current_version;
+            current_value = (migration.migrate)(current_value).map_err(|error| {
+                ComponentMigrationError::MigrationFailed {
+                    component_id: id.clone(),
+                    from_version,
+                    to_version: migration.to_version,
+                    error,
+                }
+            })?;
+            current_version = migration.to_version;
+            if !seen_versions.insert(current_version) {
+                return Err(ComponentMigrationError::UnsupportedVersion {
+                    component_id: id.clone(),
+                    from_version: current_version,
+                    target_version: schema.version,
+                });
+            }
+        }
+
+        Ok(MigratedComponentValue {
+            version: current_version,
+            value: current_value,
+        })
+    }
+
     #[must_use]
     pub fn schema_for_type<T: 'static>(&self) -> Option<&ComponentSchema> {
         self.rust_type_ids
@@ -1297,9 +1527,10 @@ pub mod prelude {
     pub use crate::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
-        ComponentFieldSchema, ComponentFloat, ComponentRegistry, ComponentRegistryError,
-        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, ComponentValueError, ComponentValueKind, PreparedComponent,
+        ComponentFieldSchema, ComponentFloat, ComponentMigrationError, ComponentRegistry,
+        ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue, ComponentValueError, ComponentValueKind,
+        MigratedComponentValue, PreparedComponent,
     };
     pub use bevy_reflect::prelude::*;
 }
@@ -1402,6 +1633,84 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["x", "y"]
         );
+    }
+
+    #[test]
+    fn migrates_component_values_to_current_schema_version() {
+        let mut registry = ComponentRegistry::new();
+        let id = ComponentTypeId::new("nara.test.Position");
+        registry
+            .register_component::<Position>(id.clone(), ComponentSchemaVersion(3))
+            .unwrap()
+            .register_component_migration(
+                &id,
+                ComponentSchemaVersion(1),
+                ComponentSchemaVersion(2),
+                |value| {
+                    let ComponentValue::Map(mut fields) = value else {
+                        return Err(ComponentCodecError::invalid_field("<root>", "map"));
+                    };
+                    let x = fields
+                        .remove("x")
+                        .ok_or_else(|| ComponentCodecError::missing_field("x"))?;
+                    fields.insert("x2".to_string(), x);
+                    Ok(ComponentValue::Map(fields))
+                },
+            )
+            .unwrap()
+            .register_component_migration(
+                &id,
+                ComponentSchemaVersion(2),
+                ComponentSchemaVersion(3),
+                |value| {
+                    let ComponentValue::Map(mut fields) = value else {
+                        return Err(ComponentCodecError::invalid_field("<root>", "map"));
+                    };
+                    let x = fields
+                        .remove("x2")
+                        .ok_or_else(|| ComponentCodecError::missing_field("x2"))?;
+                    fields.insert("x3".to_string(), x);
+                    Ok(ComponentValue::Map(fields))
+                },
+            )
+            .unwrap();
+
+        let migrated = registry
+            .migrate_component_value(
+                &id,
+                ComponentSchemaVersion(1),
+                &ComponentValue::map([("x", ComponentValue::I64(5))]),
+            )
+            .unwrap();
+
+        assert_eq!(migrated.version, ComponentSchemaVersion(3));
+        assert_eq!(migrated.value.field_i64("x3").unwrap(), 5);
+    }
+
+    #[test]
+    fn reports_missing_component_migration_chain() {
+        let mut registry = ComponentRegistry::new();
+        let id = ComponentTypeId::new("nara.test.Position");
+        registry
+            .register_component::<Position>(id.clone(), ComponentSchemaVersion(2))
+            .unwrap();
+
+        let error = registry
+            .migrate_component_value(
+                &id,
+                ComponentSchemaVersion(1),
+                &ComponentValue::Map(BTreeMap::new()),
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ComponentMigrationError::MissingMigration {
+                from_version: ComponentSchemaVersion(1),
+                target_version: ComponentSchemaVersion(2),
+                ..
+            }
+        ));
     }
 
     #[test]
