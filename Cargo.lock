@@ -1267,6 +1267,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_transform",
  "nara_window",
  "serde",
  "thiserror 2.0.18",
@@ -1277,9 +1278,12 @@ name = "nara_render_wgpu"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "bytemuck",
  "nara_app",
+ "nara_core",
  "nara_ecs",
  "nara_render",
+ "nara_sprite_render",
  "nara_window",
  "pollster",
  "thiserror 2.0.18",

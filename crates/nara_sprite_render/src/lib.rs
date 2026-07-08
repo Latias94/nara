@@ -5,8 +5,8 @@ use std::cmp::Ordering;
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
-use nara_ecs::{Entity, Query, Res, ResMut, Resource};
-use nara_render::{ExtractedView, ExtractedViews, RenderPlugin};
+use nara_ecs::{Entity, Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_render::{ExtractedView, ExtractedViews, RenderPhaseLabel, RenderPlugin, RenderTarget};
 use nara_sprite::{Sprite, Texture2d};
 use nara_tilemap::{TileCoord, TileIndex, Tilemap};
 use nara_transform::Transform2d;
@@ -20,14 +20,23 @@ pub enum ExtractedSpriteKind {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExtractedSprite {
     pub entity: Entity,
-    pub source_order: u32,
+    pub source_order: u64,
     pub kind: ExtractedSpriteKind,
     pub texture: Option<Handle<Texture2d>>,
     pub world_center: Vec2,
-    pub world_size: Vec2,
+    pub world_x_axis: Vec2,
+    pub world_y_axis: Vec2,
     pub color: Color,
+    pub phase: RenderPhaseLabel,
     pub layer: i32,
     pub sort_key: i32,
+}
+
+impl ExtractedSprite {
+    #[must_use]
+    pub fn is_textured(self) -> bool {
+        self.texture.is_some()
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Resource)]
@@ -63,18 +72,38 @@ impl ExtractedSprites {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpriteInstance {
     pub center: Vec2,
-    pub half_size: Vec2,
+    pub x_axis: Vec2,
+    pub y_axis: Vec2,
     pub color: Color,
+}
+
+impl SpriteInstance {
+    #[must_use]
+    pub const fn axis_aligned(center: Vec2, half_size: Vec2, color: Color) -> Self {
+        Self {
+            center,
+            x_axis: Vec2::new(half_size.x, 0.0),
+            y_axis: Vec2::new(0.0, half_size.y),
+            color,
+        }
+    }
+
+    #[must_use]
+    pub fn half_size(self) -> Vec2 {
+        Vec2::new(self.x_axis.length(), self.y_axis.length())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QueuedSpriteItem {
     pub view_index: usize,
     pub view_order: i32,
+    pub target: RenderTarget,
+    pub phase: RenderPhaseLabel,
     pub layer: i32,
     pub sort_key: i32,
-    pub entity_index: u32,
-    pub source_order: u32,
+    pub entity_bits: u64,
+    pub source_order: u64,
     pub instance: SpriteInstance,
 }
 
@@ -121,6 +150,8 @@ impl QueuedSpriteItems {
 pub struct SpriteBatch {
     pub view_index: usize,
     pub view_order: i32,
+    pub target: RenderTarget,
+    pub phase: RenderPhaseLabel,
     pub layer: i32,
     pub sort_key: i32,
     pub instances: Vec<SpriteInstance>,
@@ -145,6 +176,12 @@ impl SpriteBatches {
         &self.batches
     }
 
+    pub fn for_view(&self, view_index: usize) -> impl Iterator<Item = &SpriteBatch> {
+        self.batches
+            .iter()
+            .filter(move |batch| batch.view_index == view_index)
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.batches.len()
@@ -153,6 +190,11 @@ impl SpriteBatches {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.batches.is_empty()
+    }
+
+    #[must_use]
+    pub fn total_instances(&self) -> usize {
+        self.batches.iter().map(|batch| batch.instances.len()).sum()
     }
 }
 
@@ -175,7 +217,10 @@ impl Plugin for SpriteRenderPlugin {
         app.init_resource::<QueuedSpriteItems>();
         app.init_resource::<SpriteBatches>();
         app.init_resource::<SpriteRenderStats>();
-        app.add_systems(CoreStage::Extract, extract_sprites);
+        app.add_systems(
+            CoreStage::Extract,
+            extract_sprites.after(nara_render::extract_views),
+        );
         app.add_systems(CoreStage::Queue, queue_sprites);
         app.add_systems(CoreStage::Sort, sort_and_batch_sprites);
     }
@@ -191,51 +236,23 @@ pub fn extract_sprites(
     *stats = SpriteRenderStats::default();
 
     for (entity, sprite, transform) in sprites.iter() {
-        let transform = transform.copied().unwrap_or_default();
-        let world_size = sprite.size * transform.scale.abs();
-        let world_center = transform.translation - sprite.anchor.normalized * world_size;
         let source_order = next_source_order(&extracted);
-
-        extracted.push(ExtractedSprite {
-            entity,
-            source_order,
-            kind: ExtractedSpriteKind::Sprite,
-            texture: sprite.texture,
-            world_center,
-            world_size,
-            color: sprite.color,
-            layer: sprite.layer,
-            sort_key: sprite.sort_key,
-        });
+        extracted.push(extract_sprite(entity, sprite, transform, source_order));
         stats.extracted_sprites = stats.extracted_sprites.saturating_add(1);
     }
 
     for (entity, tilemap, transform) in tilemaps.iter() {
-        let transform = transform.copied().unwrap_or_default();
-        let world_size = tilemap.tile_size * transform.scale.abs();
-
         for (coord, cell) in tilemap.cells() {
-            let local_center = Vec2::new(
-                (coord.x as f32 + 0.5) * tilemap.tile_size.x,
-                (coord.y as f32 + 0.5) * tilemap.tile_size.y,
-            );
-            let world_center = transform.translation + local_center * transform.scale;
             let source_order = next_source_order(&extracted);
-
-            extracted.push(ExtractedSprite {
+            extracted.push(extract_tile_cell(
                 entity,
+                tilemap,
+                transform,
+                coord,
+                cell.tile,
+                cell.color,
                 source_order,
-                kind: ExtractedSpriteKind::TilemapCell {
-                    coord,
-                    tile: cell.tile,
-                },
-                texture: None,
-                world_center,
-                world_size,
-                color: cell.color,
-                layer: tilemap.layer.index,
-                sort_key: tilemap.sort_key,
-            });
+            ));
             stats.extracted_tile_cells = stats.extracted_tile_cells.saturating_add(1);
         }
     }
@@ -246,44 +263,34 @@ pub fn queue_sprites(
     mut stats: ResMut<SpriteRenderStats>,
     views: Res<ExtractedViews>,
     extracted: Res<ExtractedSprites>,
-    camera_transforms: Query<&Transform2d>,
 ) {
     queued.clear();
     stats.unsupported_textured_sprites = saturating_u32(
         extracted
             .as_slice()
             .iter()
-            .filter(|sprite| sprite.texture.is_some())
+            .filter(|sprite| sprite.is_textured())
             .count(),
     );
 
     for (view_index, view) in views.as_slice().iter().enumerate() {
-        let camera_transform = camera_transforms
-            .get(view.camera_entity)
-            .copied()
-            .unwrap_or_default();
-
         for sprite in extracted
             .as_slice()
             .iter()
-            .filter(|sprite| sprite.texture.is_none())
+            .filter(|sprite| !sprite.is_textured())
         {
-            let Some(instance) = world_to_clip_instance(
-                view,
-                camera_transform,
-                sprite.world_center,
-                sprite.world_size,
-                sprite.color,
-            ) else {
+            let Some(instance) = project_sprite_to_view(view, sprite) else {
                 continue;
             };
 
             queued.push(QueuedSpriteItem {
                 view_index,
                 view_order: view.order,
+                target: view.target,
+                phase: sprite.phase,
                 layer: sprite.layer,
                 sort_key: sprite.sort_key,
-                entity_index: sprite.entity.index_u32(),
+                entity_bits: sprite.entity.to_bits(),
                 source_order: sprite.source_order,
                 instance,
             });
@@ -305,34 +312,117 @@ pub fn sort_and_batch_sprites(
 }
 
 #[must_use]
+pub fn extract_sprite(
+    entity: Entity,
+    sprite: &Sprite,
+    transform: Option<&Transform2d>,
+    source_order: u64,
+) -> ExtractedSprite {
+    let transform = transform.copied().unwrap_or_default();
+    let matrix = transform.matrix();
+    let local_center = -sprite.anchor.normalized * sprite.size;
+    let local_x_axis = Vec2::new(sprite.size.x * 0.5, 0.0);
+    let local_y_axis = Vec2::new(0.0, sprite.size.y * 0.5);
+
+    ExtractedSprite {
+        entity,
+        source_order,
+        kind: ExtractedSpriteKind::Sprite,
+        texture: sprite.texture,
+        world_center: matrix.transform_point2(local_center),
+        world_x_axis: matrix.transform_vector2(local_x_axis),
+        world_y_axis: matrix.transform_vector2(local_y_axis),
+        color: sprite.color,
+        phase: RenderPhaseLabel::TRANSPARENT_2D,
+        layer: sprite.layer,
+        sort_key: sprite.sort_key,
+    }
+}
+
+#[must_use]
+pub fn extract_tile_cell(
+    entity: Entity,
+    tilemap: &Tilemap,
+    transform: Option<&Transform2d>,
+    coord: TileCoord,
+    tile: TileIndex,
+    color: Color,
+    source_order: u64,
+) -> ExtractedSprite {
+    let transform = transform.copied().unwrap_or_default();
+    let matrix = transform.matrix();
+    let tile_size = tilemap.tile_size;
+    let local_center = Vec2::new(
+        (coord.x as f32 + 0.5) * tile_size.x,
+        (coord.y as f32 + 0.5) * tile_size.y,
+    );
+    let local_x_axis = Vec2::new(tile_size.x * 0.5, 0.0);
+    let local_y_axis = Vec2::new(0.0, tile_size.y * 0.5);
+
+    ExtractedSprite {
+        entity,
+        source_order,
+        kind: ExtractedSpriteKind::TilemapCell { coord, tile },
+        texture: None,
+        world_center: matrix.transform_point2(local_center),
+        world_x_axis: matrix.transform_vector2(local_x_axis),
+        world_y_axis: matrix.transform_vector2(local_y_axis),
+        color,
+        phase: RenderPhaseLabel::TILEMAP_2D,
+        layer: tilemap.layer.index,
+        sort_key: tilemap.sort_key,
+    }
+}
+
+#[must_use]
+pub fn project_sprite_to_view(
+    view: &ExtractedView,
+    sprite: &ExtractedSprite,
+) -> Option<SpriteInstance> {
+    world_to_clip_instance(
+        view,
+        sprite.world_center,
+        sprite.world_x_axis,
+        sprite.world_y_axis,
+        sprite.color,
+    )
+}
+
+#[must_use]
 pub fn world_to_clip_instance(
     view: &ExtractedView,
-    camera_transform: Transform2d,
     world_center: Vec2,
-    world_size: Vec2,
+    world_x_axis: Vec2,
+    world_y_axis: Vec2,
     color: Color,
 ) -> Option<SpriteInstance> {
-    if view.viewport_height <= 0.0 || !view.viewport_height.is_finite() {
-        return None;
-    }
+    let world_extent = view_world_extent(view)?;
+    let clip_scale = Vec2::new(2.0 / world_extent.x, 2.0 / world_extent.y);
 
-    let viewport_width = view.viewport_height * viewport_aspect_ratio(view)?;
-    if viewport_width <= 0.0 || !viewport_width.is_finite() {
-        return None;
-    }
-
-    let relative_center = world_center - camera_transform.translation;
     Some(SpriteInstance {
-        center: Vec2::new(
-            relative_center.x / (viewport_width * 0.5),
-            relative_center.y / (view.viewport_height * 0.5),
-        ),
-        half_size: Vec2::new(
-            world_size.x.abs() / viewport_width,
-            world_size.y.abs() / view.viewport_height,
-        ),
+        center: (world_center - view.world_position) * clip_scale,
+        x_axis: world_x_axis * clip_scale,
+        y_axis: world_y_axis * clip_scale,
         color,
     })
+}
+
+#[must_use]
+pub fn view_world_extent(view: &ExtractedView) -> Option<Vec2> {
+    if view.viewport.physical_height == 0
+        || view.viewport_height <= 0.0
+        || !view.viewport_height.is_finite()
+    {
+        return None;
+    }
+
+    let aspect = view.viewport.physical_width as f32 / view.viewport.physical_height as f32;
+    let width = view.viewport_height * aspect;
+    if width <= 0.0 || !width.is_finite() {
+        return None;
+    }
+
+    Some(Vec2::new(width, view.viewport_height))
 }
 
 #[must_use]
@@ -342,6 +432,8 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
     for item in items {
         if let Some(batch) = batches.last_mut()
             && batch.view_index == item.view_index
+            && batch.target == item.target
+            && batch.phase == item.phase
             && batch.layer == item.layer
             && batch.sort_key == item.sort_key
         {
@@ -352,6 +444,8 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
         batches.push(SpriteBatch {
             view_index: item.view_index,
             view_order: item.view_order,
+            target: item.target,
+            phase: item.phase,
             layer: item.layer,
             sort_key: item.sort_key,
             instances: vec![item.instance],
@@ -365,31 +459,42 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
     (
         left.view_order,
         left.view_index,
+        phase_order(left.phase),
         left.layer,
         left.sort_key,
-        left.entity_index,
+        left.entity_bits,
         left.source_order,
     )
         .cmp(&(
             right.view_order,
             right.view_index,
+            phase_order(right.phase),
             right.layer,
             right.sort_key,
-            right.entity_index,
+            right.entity_bits,
             right.source_order,
         ))
 }
 
-fn viewport_aspect_ratio(view: &ExtractedView) -> Option<f32> {
-    if view.viewport.physical_height == 0 {
-        return None;
+#[must_use]
+pub fn phase_order(phase: RenderPhaseLabel) -> u8 {
+    if phase == RenderPhaseLabel::OPAQUE_2D {
+        0
+    } else if phase == RenderPhaseLabel::TILEMAP_2D {
+        1
+    } else if phase == RenderPhaseLabel::TRANSPARENT_2D {
+        2
+    } else if phase == RenderPhaseLabel::GIZMO {
+        3
+    } else if phase == RenderPhaseLabel::UI {
+        4
+    } else {
+        u8::MAX
     }
-
-    Some(view.viewport.physical_width as f32 / view.viewport.physical_height as f32)
 }
 
-fn next_source_order(extracted: &ExtractedSprites) -> u32 {
-    saturating_u32(extracted.len())
+fn next_source_order(extracted: &ExtractedSprites) -> u64 {
+    extracted.len() as u64
 }
 
 fn saturating_u32(value: usize) -> u32 {
@@ -408,7 +513,8 @@ pub mod prelude {
         ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem,
         QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderPlugin,
         SpriteRenderStats, build_sprite_batches, compare_queued_sprite_items, extract_sprites,
-        queue_sprites, sort_and_batch_sprites, world_to_clip_instance,
+        phase_order, project_sprite_to_view, queue_sprites, sort_and_batch_sprites,
+        view_world_extent, world_to_clip_instance,
     };
 }
 
@@ -419,7 +525,7 @@ mod tests {
 
     use nara_app::App;
     use nara_asset::AssetId;
-    use nara_render::{Camera2d, RenderTarget, ViewportRect};
+    use nara_render::{Camera2d, RenderImage2d, ViewportRect};
     use nara_tilemap::{TileCell, TileCoord, TileIndex};
 
     fn test_view() -> ExtractedView {
@@ -427,10 +533,15 @@ mod tests {
             camera_entity: Entity::PLACEHOLDER,
             target: RenderTarget::PrimaryWindow,
             viewport: ViewportRect::new(0, 0, 200, 100).unwrap(),
+            world_position: Vec2::ZERO,
             viewport_height: 100.0,
             order: 0,
             clear_color: Color::BLACK,
         }
+    }
+
+    fn instance() -> SpriteInstance {
+        SpriteInstance::axis_aligned(Vec2::ZERO, Vec2::splat(0.5), Color::WHITE)
     }
 
     #[test]
@@ -445,8 +556,10 @@ mod tests {
                 kind: ExtractedSpriteKind::Sprite,
                 texture: None,
                 world_center: Vec2::new(9.0, 9.0),
-                world_size: Vec2::new(1.0, 1.0),
+                world_x_axis: Vec2::X,
+                world_y_axis: Vec2::Y,
                 color: Color::WHITE,
+                phase: RenderPhaseLabel::TRANSPARENT_2D,
                 layer: 0,
                 sort_key: 0,
             });
@@ -458,7 +571,30 @@ mod tests {
         let extracted = app.world().resource::<ExtractedSprites>();
         assert_eq!(extracted.len(), 1);
         assert_eq!(extracted.as_slice()[0].world_center, Vec2::ZERO);
-        assert_eq!(extracted.as_slice()[0].world_size, Vec2::new(16.0, 8.0));
+        assert_eq!(extracted.as_slice()[0].world_x_axis, Vec2::new(8.0, 0.0));
+        assert_eq!(extracted.as_slice()[0].world_y_axis, Vec2::new(0.0, 4.0));
+    }
+
+    #[test]
+    fn sprite_extraction_preserves_rotation_axes() {
+        let sprite = Sprite::from_color(Vec2::new(4.0, 2.0), Color::WHITE);
+        let transform = Transform2d {
+            rotation: std::f32::consts::FRAC_PI_2,
+            ..Transform2d::default()
+        };
+
+        let extracted = extract_sprite(Entity::PLACEHOLDER, &sprite, Some(&transform), 0);
+
+        assert!(
+            extracted
+                .world_x_axis
+                .abs_diff_eq(Vec2::new(0.0, 2.0), 0.000_001)
+        );
+        assert!(
+            extracted
+                .world_y_axis
+                .abs_diff_eq(Vec2::new(-1.0, 0.0), 0.000_001)
+        );
     }
 
     #[test]
@@ -490,7 +626,8 @@ mod tests {
             }
         );
         assert_eq!(extracted.as_slice()[0].world_center, Vec2::new(20.0, -5.0));
-        assert_eq!(extracted.as_slice()[0].world_size, Vec2::new(10.0, 20.0));
+        assert_eq!(extracted.as_slice()[0].world_x_axis, Vec2::new(5.0, 0.0));
+        assert_eq!(extracted.as_slice()[0].world_y_axis, Vec2::new(0.0, 10.0));
         assert_eq!(extracted.as_slice()[0].layer, 2);
     }
 
@@ -517,59 +654,76 @@ mod tests {
 
     #[test]
     fn sorting_is_stable_and_batches_adjacent_compatible_items() {
-        let instance = SpriteInstance {
-            center: Vec2::ZERO,
-            half_size: Vec2::splat(0.5),
-            color: Color::WHITE,
-        };
         let mut items = vec![
             QueuedSpriteItem {
                 view_index: 0,
                 view_order: 0,
+                target: RenderTarget::PrimaryWindow,
+                phase: RenderPhaseLabel::TRANSPARENT_2D,
                 layer: 1,
                 sort_key: 0,
-                entity_index: 3,
+                entity_bits: Entity::from_raw_u32(3).unwrap().to_bits(),
                 source_order: 0,
-                instance,
+                instance: instance(),
             },
             QueuedSpriteItem {
                 view_index: 0,
                 view_order: 0,
+                target: RenderTarget::PrimaryWindow,
+                phase: RenderPhaseLabel::TRANSPARENT_2D,
                 layer: 0,
                 sort_key: 0,
-                entity_index: 2,
+                entity_bits: Entity::from_raw_u32(2).unwrap().to_bits(),
                 source_order: 0,
-                instance,
+                instance: instance(),
             },
             QueuedSpriteItem {
                 view_index: 0,
                 view_order: 0,
+                target: RenderTarget::PrimaryWindow,
+                phase: RenderPhaseLabel::TRANSPARENT_2D,
                 layer: 0,
                 sort_key: 0,
-                entity_index: 1,
+                entity_bits: Entity::from_raw_u32(1).unwrap().to_bits(),
                 source_order: 0,
-                instance,
+                instance: instance(),
             },
             QueuedSpriteItem {
                 view_index: 0,
                 view_order: 0,
+                target: RenderTarget::PrimaryWindow,
+                phase: RenderPhaseLabel::TRANSPARENT_2D,
                 layer: 1,
                 sort_key: 1,
-                entity_index: 4,
+                entity_bits: Entity::from_raw_u32(4).unwrap().to_bits(),
                 source_order: 0,
-                instance,
+                instance: instance(),
             },
         ];
 
         items.sort_by(compare_queued_sprite_items);
         let batches = build_sprite_batches(&items);
 
+        let mut expected_equal_key_bits = [
+            Entity::from_raw_u32(1).unwrap().to_bits(),
+            Entity::from_raw_u32(2).unwrap().to_bits(),
+        ];
+        expected_equal_key_bits.sort();
+
         assert_eq!(
             items
                 .iter()
-                .map(|item| (item.layer, item.sort_key, item.entity_index))
+                .take(2)
+                .map(|item| item.entity_bits)
                 .collect::<Vec<_>>(),
-            vec![(0, 0, 1), (0, 0, 2), (1, 0, 3), (1, 1, 4)]
+            expected_equal_key_bits
+        );
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| (item.layer, item.sort_key))
+                .collect::<Vec<_>>(),
+            vec![(0, 0), (0, 0), (1, 0), (1, 1)]
         );
         assert_eq!(batches.len(), 3);
         assert_eq!(batches[0].instances.len(), 2);
@@ -578,18 +732,99 @@ mod tests {
     }
 
     #[test]
-    fn generated_instances_fit_camera_viewport_aspect() {
+    fn target_or_phase_changes_split_batches() {
+        let mut items = vec![
+            QueuedSpriteItem {
+                target: RenderTarget::PrimaryWindow,
+                phase: RenderPhaseLabel::TILEMAP_2D,
+                ..queued_item(0)
+            },
+            QueuedSpriteItem {
+                target: RenderTarget::PrimaryWindow,
+                phase: RenderPhaseLabel::TRANSPARENT_2D,
+                ..queued_item(1)
+            },
+            QueuedSpriteItem {
+                target: RenderTarget::Image(Handle::new(AssetId::from_raw(8))),
+                phase: RenderPhaseLabel::TRANSPARENT_2D,
+                ..queued_item(2)
+            },
+        ];
+
+        items.sort_by(compare_queued_sprite_items);
+        let batches = build_sprite_batches(&items);
+
+        assert_eq!(batches.len(), 3);
+        assert!(
+            batches
+                .iter()
+                .any(|batch| batch.phase == RenderPhaseLabel::TILEMAP_2D)
+        );
+        assert!(
+            batches
+                .iter()
+                .any(|batch| batch.phase == RenderPhaseLabel::TRANSPARENT_2D)
+        );
+        assert!(
+            batches
+                .iter()
+                .any(|batch| matches!(batch.target, RenderTarget::Image(_)))
+        );
+    }
+
+    #[test]
+    fn generated_instances_fit_camera_viewport_aspect_and_position() {
+        let view = ExtractedView {
+            world_position: Vec2::new(10.0, 5.0),
+            ..test_view()
+        };
         let instance = world_to_clip_instance(
-            &test_view(),
-            Transform2d::default(),
-            Vec2::new(50.0, 25.0),
-            Vec2::new(20.0, 10.0),
+            &view,
+            Vec2::new(60.0, 30.0),
+            Vec2::new(10.0, 0.0),
+            Vec2::new(0.0, 5.0),
             Color::WHITE,
         )
         .unwrap();
 
-        assert_eq!(instance.center, Vec2::new(0.5, 0.5));
-        assert_eq!(instance.half_size, Vec2::new(0.1, 0.1));
+        assert_eq!(view_world_extent(&view), Some(Vec2::new(200.0, 100.0)));
+        assert!(instance.center.abs_diff_eq(Vec2::new(0.5, 0.5), 0.000_001));
+        assert!(
+            instance
+                .half_size()
+                .abs_diff_eq(Vec2::new(0.1, 0.1), 0.000_001)
+        );
+    }
+
+    #[test]
+    fn app_pipeline_extracts_tilemaps_into_batches() {
+        let target = RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(9)));
+        let mut app = App::new();
+        app.add_plugin(SpriteRenderPlugin).unwrap();
+        app.world_mut().spawn(Camera2d {
+            target,
+            viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+            viewport_height: 100.0,
+            ..Camera2d::default()
+        });
+        let mut tilemap = Tilemap::new(Vec2::new(10.0, 10.0));
+        tilemap.set_cell(
+            TileCoord::new(0, 0),
+            TileCell::new(TileIndex::new(1)).with_color(Color::rgb(1.0, 0.0, 0.0)),
+        );
+        app.world_mut().spawn(tilemap);
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let batches = app.world().resource::<SpriteBatches>();
+        assert_eq!(batches.total_instances(), 1);
+        assert_eq!(batches.as_slice()[0].phase, RenderPhaseLabel::TILEMAP_2D);
+        assert_eq!(batches.as_slice()[0].target, target);
+        assert!(
+            batches.as_slice()[0].instances[0]
+                .center
+                .abs_diff_eq(Vec2::new(0.1, 0.1), 0.000_001)
+        );
     }
 
     #[test]
@@ -603,5 +838,19 @@ mod tests {
 
         assert_eq!(tilemap.get_cell(coord), Some(&cell));
         assert_eq!(tilemap.dirty_chunks().count(), 0);
+    }
+
+    fn queued_item(entity_index: u32) -> QueuedSpriteItem {
+        QueuedSpriteItem {
+            view_index: 0,
+            view_order: 0,
+            target: RenderTarget::PrimaryWindow,
+            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            layer: 0,
+            sort_key: 0,
+            entity_bits: Entity::from_raw_u32(entity_index).unwrap().to_bits(),
+            source_order: 0,
+            instance: instance(),
+        }
     }
 }
