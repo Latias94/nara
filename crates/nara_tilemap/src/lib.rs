@@ -497,7 +497,7 @@ fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCode
         ])),
         AssetRef::StableId(id) => Ok(ComponentValue::map([
             ("kind", ComponentValue::String("stable_id".to_string())),
-            ("value", ComponentValue::String(id.clone())),
+            ("value", ComponentValue::String(id.to_string())),
         ])),
     }
 }

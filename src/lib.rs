@@ -55,8 +55,9 @@ pub mod prelude {
         App, AppExit, AppRunError, CoreStage, FixedTime, Plugin, PluginError, StartupStage, Time,
     };
     pub use nara_asset::{
-        Asset, AssetId, AssetPath, AssetPathError, AssetRef, AssetRefError, AssetServer, Assets,
-        Handle,
+        Asset, AssetDatabaseError, AssetError, AssetId, AssetMeta, AssetPath, AssetPathError,
+        AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, Handle,
+        MissingMetaPolicy, ProjectAssetDatabase, StableAssetId, StableAssetIdError,
     };
     pub use nara_audio::{AudioClip, AudioCommand, AudioSink};
     pub use nara_core::{Color, Vec2, Vec3};

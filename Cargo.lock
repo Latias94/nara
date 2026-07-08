@@ -1217,6 +1217,7 @@ dependencies = [
  "nara_ecs",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
