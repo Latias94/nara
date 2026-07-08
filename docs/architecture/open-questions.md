@@ -108,9 +108,23 @@ The next implementation slice uses main-world explicit extraction data and backe
 
 Follow-up details still to settle:
 
-1. Which crates are created immediately versus temporarily collapsed?
-2. What trait or data shape represents queued render items once sprite/tilemap rendering starts?
-3. What concrete second use case should trigger full `RenderGraph` implementation?
+Implemented in the 2D render foundation slice:
+
+- `nara_sprite`, `nara_tilemap`, and `nara_sprite_render` are real crates, while `nara_render`
+  keeps cameras, views, targets, frame lifecycle, and phase labels.
+- The first queued render shape is concrete data, not a trait: `ExtractedSprites`,
+  `QueuedSpriteItems`, and `SpriteBatches`. Backends consume batches rather than gameplay
+  authoring components.
+- `nara_render_wgpu` draws colored quad instance batches and remains the only crate that imports
+  `wgpu`.
+
+Still open:
+
+1. What abstraction generalizes `SpriteBatches` once runtime UI, gizmos, text, or 3D submit their
+   own phase items?
+2. What concrete second pass/resource use case should trigger full `RenderGraph` implementation?
+3. How will texture upload, atlases, bind groups, and material specialization attach to the current
+   sprite/tilemap authoring data?
 
 ## Platform and Runner
 

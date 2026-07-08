@@ -107,3 +107,8 @@ wgpu = ["dep:nara_render_wgpu"]
 name = "windowed_clear"
 path = "examples/windowed_clear.rs"
 required-features = ["winit", "wgpu"]
+
+[[example]]
+name = "windowed_sprites"
+path = "examples/windowed_sprites.rs"
+required-features = ["winit", "wgpu"]

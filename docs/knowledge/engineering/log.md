@@ -10,3 +10,4 @@ This root log is an optional rollup. Prefer append-only concepts in `logs/` duri
 * **Architecture decision**: Added ADR 0032 for render backend integration boundary and removed the duplicate generic ADR 0004.
 * **Platform/window/render backend slice**: Added fallible app runners and fixed update, backend-independent window data, `nara_winit`, graph-ready render-domain extraction data, and `nara_render_wgpu` clear-pass backend skeleton behind optional facade features.
 * **Plan**: Created the 2D sprite/tilemap render foundation plan and registered active implementation context; tilemap chunk identity and dirty revisions are planned in authoring data while chunked GPU caching remains deferred.
+* **2D render foundation**: Implemented split sprite/tilemap authoring crates, backend-neutral `nara_sprite_render` extraction/queue/sort/batch data, and a wgpu colored quad path consuming `SpriteBatches`.

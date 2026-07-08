@@ -11,6 +11,7 @@ This file provides repo-local guidance for agents working on nara.
 - Keep backend crates behind adapters. Core gameplay-facing crates must not directly depend on `wgpu`, `winit`, egui, or dear-imgui.
 - `nara_winit` owns all `winit` imports and desktop event-loop integration.
 - `nara_render_wgpu` owns all `wgpu` imports and GPU surface/device lifecycle.
+- `nara_sprite_render` owns backend-neutral 2D extraction, queueing, sorting, and batching. GPU backends should consume `SpriteBatches`, not gameplay `Sprite` or `Tilemap` components.
 - The root `nara` facade must keep `winit` and `wgpu` optional; default features stay backend-free.
 - `repo-ref/` contains reference source trees. Treat it as read-only reference material and keep it out of git.
 
@@ -29,7 +30,7 @@ This file provides repo-local guidance for agents working on nara.
 - Format with `cargo fmt --all`.
 - Prefer `cargo nextest run --workspace` for tests.
 - Run `cargo check --workspace` before considering implementation work complete.
-- Check optional backend examples with `cargo check -p nara --features winit,wgpu --example windowed_clear` when touching platform or render backend code.
+- Check optional backend examples with `cargo check -p nara --features winit,wgpu --example windowed_clear` and `cargo check -p nara --features winit,wgpu --example windowed_sprites` when touching platform or render backend code.
 - Use dependency boundary searches when touching backend crates: `rg -n "winit::|winit =" crates src Cargo.toml` and `rg -n "wgpu::|wgpu =" crates src Cargo.toml`.
 - Use precise commits with Conventional Commit messages.
 - Do not discard or rewrite user changes. Never use `git reset --hard`, `git checkout --`, `git restore`, `git clean`, or stash to remove work unless the user explicitly asks.

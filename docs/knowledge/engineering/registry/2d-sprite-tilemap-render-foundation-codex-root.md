@@ -3,11 +3,11 @@ type: "Work Registration"
 title: "2D sprite tilemap render foundation"
 description: "Registration for 2D sprite tilemap render foundation."
 timestamp: 2026-07-08T06:42:11Z
-status: "active"
-last_seen: 2026-07-08T06:42:11Z
+status: "implemented"
+last_seen: 2026-07-08T07:15:00Z
 producer_id: "codex-root"
 related_plan: "docs/plans/2026-07-08-002-feat-2d-sprite-tilemap-render-foundation-plan.md"
-git_branch: "main"
+git_branch: "feat/2d-render-foundation"
 ---
 
 # Scope
@@ -20,12 +20,11 @@ data, and teaches the wgpu backend to draw colored quad instance batches.
 
 # Current Claim
 
-Plan written and registered on local `main` after the platform/window/wgpu
-foundation branch was fast-forward merged. Headless document review was
-degraded because several review subagents were interrupted by the runtime; the
-main thread performed conservative self-review and integrated the returned
-Godot/wgpu research note about tilemap chunk/dirty semantics and instance
-buffer rendering.
+The implementation has landed on `feat/2d-render-foundation` through focused
+commits. The slice now has explicit render pipeline stages, split sprite and
+tilemap authoring crates, backend-neutral `nara_sprite_render` batches, and a
+wgpu colored quad path consuming those batches. Final examples, docs, memory,
+verification, and merge-back are the remaining tail.
 
 # Latest Links
 
@@ -34,9 +33,8 @@ buffer rendering.
 
 # Handoff
 
-Next action: create a goal from the related plan, then execute units in
-dependency order without writing progress into the plan body. Register or log
-durable findings after commits and verification gates.
+Next action: finish U6 examples/docs/verification, commit the tail, then merge
+the completed branch back into local `main`.
 
 # Citations
 

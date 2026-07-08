@@ -48,10 +48,16 @@ flowchart TD
     App --> Input[nara_input]
     App --> Audio[nara_audio]
     App --> Render[nara_render: render data + backend seam]
+    App --> Sprite[nara_sprite: sprite authoring]
+    App --> Tilemap[nara_tilemap: tilemap authoring]
+    App --> SpriteRender[nara_sprite_render: 2D extract + queue + batch]
     App --> Window[nara_window: normalized window data]
     Window --> WinitAdapter[nara_winit adapter]
     App --> Tooling[nara_tooling: snapshots + inspector seam]
-    Render --> WgpuAdapter[nara_render_wgpu adapter]
+    Render --> SpriteRender
+    Sprite --> SpriteRender
+    Tilemap --> SpriteRender
+    SpriteRender --> WgpuAdapter[nara_render_wgpu adapter]
     Tooling --> DebugUi[future egui / dear-imgui adapters]
 ```
 
@@ -68,11 +74,14 @@ flowchart TD
 | `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>` | Loaders, import cache, hot reload, dependency graph |
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneAsset` | Scene/prefab instantiate mapping and stable IDs |
-| `nara_render` | `Sprite`, `Camera2d`, `RenderTarget`, `ExtractedView`, `RenderFrame` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
+| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
+| `nara_sprite` | `Sprite`, `Texture2d`, `TextureRegion`, `SpriteAnchor` | Sprite authoring assets and component data; no backend handles |
+| `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into quads now and chunked cached render data later |
+| `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, and backend-neutral colored quad batches |
 | `nara_input` | `InputState`, `KeyCode` | winit event normalization and action maps |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Gameplay APIs and renderer backend internals |
-| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | Gameplay authoring data and non-wgpu backends |
+| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, and colored quad submission from `SpriteBatches` |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
 | `nara_tooling` | `WorldSnapshot`, `ToolingPlugin` | egui/dear-imgui inspectors and editor integration |
 
@@ -84,15 +93,19 @@ sequenceDiagram
     participant App as nara_app::App
     participant ECS as nara_ecs::World
     participant Asset as nara_asset::AssetServer
-    participant Render as nara_render::RenderBackend
+    participant Render as nara_render
+    participant SpriteRender as nara_sprite_render
+    participant Wgpu as nara_render_wgpu
 
     Game->>App: add_plugin / add_systems
     App->>ECS: run startup schedules once
     loop frame
         App->>ECS: PreUpdate / Update / PostUpdate
-        App->>ECS: Extract render-facing data
-        Render->>ECS: read Sprite / Camera2d data
-        Render-->>App: FrameStats
+        Render->>ECS: extract Camera2d views
+        SpriteRender->>ECS: extract Sprite / Tilemap / Transform2d data
+        SpriteRender->>SpriteRender: queue, sort, and batch colored quads
+        Wgpu->>SpriteRender: read SpriteBatches
+        Wgpu-->>App: FrameStats
     end
     Game->>Asset: reserve/load typed Handle<T>
 ```
@@ -131,7 +144,7 @@ sequenceDiagram
 | Test baseline | `cargo nextest run --workspace` passes | Local and CI |
 | Foundation compile cost | No heavy graphics/window deps in default facade | Dependency tree review |
 | User-facing startup API | A minimal app can call `App::new().update()` and examples can use `Commands`/`Query` systems | Example and smoke test |
-| Backend isolation | Gameplay crates do not import `wgpu` directly | `rg "wgpu::" crates/nara_* src` |
+| Backend isolation | Gameplay and render-domain crates do not import `wgpu` directly | `rg "wgpu::" crates src Cargo.toml` |
 | Tooling readiness | Runtime can produce a `WorldSnapshot` without editor deps | Unit or smoke test |
 
 ## Risks and Mitigations
@@ -148,5 +161,6 @@ sequenceDiagram
 
 1. Expand component metadata registration for built-in scene/render/transform components.
 2. Add scene/prefab stable entity IDs and serialization/validation diagnostics.
-3. Add sprite batching/tilemap rendering on top of the render target/view/phase seam.
-4. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot` and component registry data.
+3. Add texture upload, atlas-aware sprite batching, and image asset import on top of the colored-quad path.
+4. Add built-in component reflection registration for sprite, tilemap, transform, camera, and window data.
+5. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot` and component registry data.

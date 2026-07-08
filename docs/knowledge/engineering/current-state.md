@@ -11,8 +11,8 @@ status: "active"
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
 - Snapshot timestamp: 2026-07-08T06:05:00Z
-- Last verified: `cargo fmt --all --check`, `cargo check --workspace`, `cargo check --examples`, `cargo check -p nara --features winit,wgpu --example windowed_clear`, `cargo nextest run --workspace`, `cargo run -q`, `cargo run -q --example hello_world`, backend dependency boundary searches, default backend-free dependency tree, and engineering memory validation.
-- Next action: Move to sprite/tilemap batching, scene serialization, or built-in reflection registration follow-up.
+- Last verified: focused render checks for `nara_render`, `nara_sprite_render`, and `nara_render_wgpu`; full final verification is pending for the 2D render foundation tail.
+- Next action: Finish 2D render examples/docs/verification, then merge `feat/2d-render-foundation` back to local `main`.
 
 # Active Registrations
 
@@ -33,8 +33,11 @@ status: "active"
   - `nara_winit` owns all `winit` imports, desktop event-loop integration, native window creation, raw handle registration, and keyboard/mouse translation.
   - `nara_render` now exposes graph-ready render-domain data: `RenderTarget`, `ViewportRect`, `ExtractedView`, `ExtractedViews`, `RenderPhaseLabel`, and `RenderFrame`.
   - `nara_render_wgpu` owns all `wgpu` imports and a clear-pass backend skeleton with surface status policy tests.
+  - `nara_sprite` owns sprite authoring data, while `nara_tilemap` owns tilemap authoring data with dirty chunk revisions.
+  - `nara_sprite_render` lowers sprite/tilemap authoring data into backend-neutral colored quad batches.
+  - `nara_render_wgpu` now draws colored quad batches from `SpriteBatches` through a private wgpu pipeline.
 - Pending follow-ups:
-  - Built-in component reflection registration and scene/prefab serialization remain design-to-implementation follow-up work after the platform/backend slice.
+  - Texture upload, atlas batching, built-in component reflection registration, and scene/prefab serialization remain design-to-implementation follow-up work.
 - Blocked:
   - None.
 
