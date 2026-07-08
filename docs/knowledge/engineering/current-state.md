@@ -3,20 +3,20 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-08T08:25:00Z
+timestamp: 2026-07-08T09:19:21Z
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-08T08:25:00Z
-- Last verified: 2D render foundation and module-split tail passed fmt, workspace check, examples check, backend example checks, `cargo nextest run --workspace` with 58 tests, headless smoke runs, backend boundary searches, default backend-free dependency tree, authoring split search, and engineering memory validation.
-- Next action: Continue from local `main` with the next planned runtime slice.
+- Snapshot timestamp: 2026-07-08T09:19:21Z
+- Last verified: Scene/prefab serialization foundation passed fmt, workspace checks with and without serde, examples check, winit/wgpu backend example checks, `scene_prefab_roundtrip`, serde ID/path regression tests, `cargo nextest run --workspace` with 77 tests, backend boundary searches, and runtime serialization leak searches.
+- Next action: After the feature branch is merged to local `main`, continue with texture upload/image import, scene patch transactions, component schema export/migrations, or asset `.meta` identity.
 
 # Active Registrations
 
-- [2D sprite tilemap render foundation](registry/2026-07-08T063946Z-active-2d-sprite-tilemap-render-foundation.md)
+- None.
 
 # Integrated Summary
 
@@ -36,9 +36,16 @@ status: "active"
   - `nara_sprite` owns sprite authoring data, while `nara_tilemap` owns tilemap authoring data with dirty chunk revisions.
   - `nara_sprite_render` lowers sprite/tilemap authoring data into backend-neutral colored quad batches through split `types`, `extract`, and `queue` modules.
   - `nara_render_wgpu` now draws colored quad batches from `SpriteBatches` through split surface lifecycle and sprite pipeline modules.
+  - `nara_asset` now separates persistent `AssetRef`/`AssetPath` from runtime `Handle<T>`.
+  - `nara_reflect` owns `ComponentValue` and preflight/apply component codecs.
+  - `nara_scene` owns `SceneDocument`, `PrefabDocument`, stable `SceneEntityId`, validation, spawn/export, and `SceneEntitySource` provenance.
+  - Built-in scene, transform, render, sprite, and tilemap codecs register through their owning crate plugins.
 - Pending follow-ups:
-  - Texture upload, atlas batching, built-in component reflection registration, and scene/prefab serialization remain design-to-implementation follow-up work.
+  - Texture upload, atlas batching, `.meta` asset identity/import cache, scene patch transactions, field-level prefab overrides, nested prefab source resolution, component schema export, and migration chains remain follow-up work.
 - Blocked:
   - None.
 
 # Citations
+
+- [Scene/prefab serialization progress](progress/2026-07-08T084957Z-scene-prefab-serialization-foundation.md)
+- [Scene/prefab serialization final verification](verification/2026-07-08T091921Z-scene-prefab-serialization-foundation-final.md)

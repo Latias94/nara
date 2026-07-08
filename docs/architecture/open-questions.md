@@ -51,10 +51,17 @@ Accepted direction: Bevy-reflect-backed `ComponentRegistry` with stable schema I
 Still open:
 
 1. What derive should a data-facing component need?
-2. How does nara define stable schema IDs?
-3. How are component migrations represented?
-4. Does the registry emit JSON Schema, a custom compact schema, or both?
-5. Which components are inspectable but not serializable?
+2. How are component migrations represented?
+3. Does the registry emit JSON Schema, a custom compact schema, or both?
+4. Which components are inspectable but not serializable?
+
+Resolved in the scene/prefab serialization foundation:
+
+- `ComponentRegistry` now owns `ComponentValue` and preflight/apply component codecs.
+- Data-facing components can be serializable through explicit codecs without requiring runtime
+  components that contain handles to derive direct serde or Bevy Reflect.
+- Built-in scene, transform, render, sprite, and tilemap codecs use stable reverse-domain
+  `ComponentTypeId` strings such as `nara.transform.Transform2d`.
 
 ## Scene and Prefab Semantics
 
@@ -62,11 +69,20 @@ Accepted direction: scene and prefab files are dimension-neutral ECS data docume
 
 Follow-up details still to settle:
 
-1. Primary hand-authored format: RON or JSON?
-2. Stable scene entity IDs: UUID, integer local IDs, or path-like IDs?
-3. Are prefab overrides whole-component first, or field-level from day one?
-4. How are nested prefab overrides addressed?
-5. How does scene loading validate AI-generated data before spawning ECS entities?
+1. How are field-level prefab overrides represented on top of `ComponentValue`?
+2. How are nested prefab source assets resolved, cached, and diagnosed?
+3. How do scene patch transactions integrate with runtime `SceneEntitySource` provenance?
+
+Resolved in the scene/prefab serialization foundation:
+
+- JSON is the AI/tooling format and RON is the Rust-native hand-authored format; both share
+  `SceneDocument` / `PrefabDocument`.
+- Stable scene entity IDs are validated path-like strings stored as `SceneEntityId`, not runtime
+  `Entity` values.
+- The first prefab semantics support direct `PrefabDocument` instantiation and top-level
+  whole-component override tests; nested source resolution is deferred.
+- Scene loading preflights IDs, parent graph, component registrations, component versions, payloads,
+  and asset refs before mutating the target world.
 
 ## Asset Identity
 
@@ -74,10 +90,18 @@ Accepted direction: typed handles with UUID-ready asset identity. See ADR [0007-
 
 Follow-up details still to settle:
 
-1. What exact serialized shape should `AssetRef` use?
-2. Where do `.meta` files live, if any?
-3. Are imported artifacts content-addressed?
-4. Does Phase 1 expose async asset states now or only reserve them in types?
+1. Where do `.meta` files live, if any?
+2. Are imported artifacts content-addressed?
+3. Does Phase 1 expose async asset states now or only reserve them in types?
+
+Resolved in the scene/prefab serialization foundation:
+
+- `AssetRef::Path` is the first successful serialized shape. Paths are project-asset-root-relative
+  logical paths using `/`, rejecting empty, absolute, drive-prefixed, backslash, `.` and `..`
+  traversal forms.
+- `Handle<T>` no longer serializes as runtime `AssetId`; persistent scene data uses `AssetRef`.
+- Stable asset IDs remain reserved for the `.meta`/import database slice and report unsupported
+  diagnostics when encountered in this foundation.
 
 ## Runtime Concurrency
 

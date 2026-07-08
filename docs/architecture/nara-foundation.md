@@ -41,10 +41,10 @@ flowchart TD
     App --> ECS[nara_ecs: bevy_ecs substrate]
     Facade --> Core[nara_core: color + math primitives]
     Facade --> Transform[nara_transform: spatial components]
-    Facade --> Reflect[nara_reflect: component schema registry]
-    Facade --> Diagnostic[nara_diagnostic: structured diagnostics]
-    App --> Asset[nara_asset: AssetServer + Handle]
-    App --> Scene[nara_scene: scene data components]
+    Facade --> Reflect[nara_reflect: component schema + value codec registry]
+    Facade --> Diagnostic[nara_diagnostic: structured diagnostics + context]
+    App --> Asset[nara_asset: AssetServer + Handle + AssetRef]
+    App --> Scene[nara_scene: runtime hierarchy + scene documents]
     App --> Input[nara_input]
     App --> Audio[nara_audio]
     App --> Render[nara_render: render data + backend seam]
@@ -70,10 +70,10 @@ flowchart TD
 | `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
-| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions | Bevy-reflect-backed component metadata and migrations |
+| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs | Bevy-reflect-backed component metadata, schema export, and migrations |
 | `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents |
-| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>` | Loaders, import cache, hot reload, dependency graph |
-| `nara_scene` | `Name`, `Parent`, `Children`, `SceneAsset` | Scene/prefab instantiate mapping and stable IDs |
+| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath` | Loaders, import cache, hot reload, dependency graph |
+| `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `SceneEntityId`, scene spawn/export | Scene/prefab patching, nested prefab source resolution, hot reload validation |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
 | `nara_sprite` | `Sprite`, `Texture2d`, `TextureRegion`, `SpriteAnchor` | Sprite authoring assets and component data; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into quads now and chunked cached render data later |
@@ -108,6 +108,7 @@ sequenceDiagram
         Wgpu-->>App: FrameStats
     end
     Game->>Asset: reserve/load typed Handle<T>
+    Game->>Scene: validate SceneDocument, spawn into World, export deterministic document
 ```
 
 ## Alternatives Considered
@@ -155,12 +156,12 @@ sequenceDiagram
 | ECS abstraction becomes a leaky alias | High | Medium | Keep `nara_ecs` intentionally thin, document Bevy ECS semantics, and add nara-owned conventions only at product boundaries |
 | Renderer seam too generic for wgpu | Medium | Medium | Build `nara_render_wgpu` next and let real surface lifecycle pressure the interface |
 | Tooling leaks into runtime | Medium | Medium | Keep `nara_tooling` as a client of snapshots/registries, not a dependency of core ECS |
-| Scene serialization stores runtime entity IDs | High | Medium | Use stable scene IDs and instantiate-time entity remapping |
+| Scene serialization stores runtime entity IDs | High | Low | Implemented `SceneEntityId`, `SceneEntitySource`, and instantiate-time remapping; keep runtime `Parent`/`Children` out of persistent documents |
 
 ## Next Implementation Slices
 
-1. Expand component metadata registration for built-in scene/render/transform components.
-2. Add scene/prefab stable entity IDs and serialization/validation diagnostics.
-3. Add texture upload, atlas-aware sprite batching, and image asset import on top of the colored-quad path.
-4. Add built-in component reflection registration for sprite, tilemap, transform, camera, and window data.
-5. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot` and component registry data.
+1. Add texture upload, atlas-aware sprite batching, and image asset import on top of the colored-quad path.
+2. Add scene patch transactions, field-level prefab overrides, and nested prefab source resolution on top of `SceneDocument`.
+3. Add component schema export and migration chains for older scene files.
+4. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot`, `ComponentRegistry`, and scene diagnostics.
+5. Add `.meta` asset identity, importer cache, and hot reload for `AssetRef` beyond path-backed references.

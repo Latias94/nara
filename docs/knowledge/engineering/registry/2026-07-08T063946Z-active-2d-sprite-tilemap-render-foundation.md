@@ -4,12 +4,12 @@ title: "2D sprite tilemap render foundation"
 description: "Tracks the active implementation context for the 002 2D sprite/tilemap render foundation plan."
 tags: ["engineering-memory", "registry", "render", "sprite", "tilemap"]
 timestamp: 2026-07-08T06:39:46Z
-status: "active"
+status: "implemented"
 ---
 
 # Active Work
 
-Implement the 2D sprite/tilemap render foundation plan on local `main` after the platform/window/render backend slice was fast-forward merged.
+Historical registration for the 2D sprite/tilemap render foundation plan. The implementation has landed on local `main`.
 
 # Implementation Authority
 
@@ -29,4 +29,4 @@ Implement the 2D sprite/tilemap render foundation plan on local `main` after the
 
 # Current Notes
 
-The Godot/wgpu read-only research reinforced adding tilemap chunk identity and dirty revisions now, while keeping chunked GPU mesh caching deferred.
+The Godot/wgpu read-only research reinforced adding tilemap chunk identity and dirty revisions early, while keeping chunked GPU mesh caching deferred. The slice is implemented; no active claim remains.
