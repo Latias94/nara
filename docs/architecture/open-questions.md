@@ -210,12 +210,18 @@ The first UI-agnostic inspector model is `SceneInspectorState` in `nara_tooling`
 `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then emits
 `SceneInspectorCommand` values that apply scene patches.
 
+Play Mode uses an isolated runtime `World` spawned from a validated edit document snapshot. Stop
+Play discards runtime changes by default; Apply Changes is explicit and patch-based. See ADR
+[0034-editor-play-mode-world-boundary.md](adr/0034-editor-play-mode-world-boundary.md).
+
 Follow-up details still to settle:
 
 1. Does debug UI use egui first or dear-imgui-rs first?
 2. What minimum runtime UI is required before editor dogfooding?
 3. Which accepted patch operations need specialized incremental `WorldCommand` paths before
    rebuild-style projection is too expensive?
+4. What is the first supported Apply Changes subset for Play Mode: selected entity fields,
+   selected component, or whole scene diff?
 
 ## Backend and Domain Extension Seams
 

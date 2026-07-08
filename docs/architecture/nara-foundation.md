@@ -166,13 +166,15 @@ sequenceDiagram
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then applies field/reparent commands as scene patches.
+- Play Mode uses an isolated runtime `World` spawned from a validated edit document snapshot. Stop Play discards runtime changes by default; Apply Changes is explicit and must produce scene patches.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
 ## Next Implementation Slices
 
-1. Add the first debug UI adapter that renders `SceneInspectorModel` and submits `SceneInspectorCommand`.
-2. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
-3. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
-4. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
+1. Implement editor mode state and isolated Play world lifecycle from ADR 0034.
+2. Add the first debug UI adapter that renders `SceneInspectorModel` and submits `SceneInspectorCommand`.
+3. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
+4. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
+5. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
