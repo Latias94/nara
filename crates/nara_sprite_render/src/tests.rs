@@ -433,6 +433,31 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
 }
 
 #[test]
+fn tilemap_extraction_skips_out_of_range_atlas_tiles() {
+    let tileset = Handle::new(AssetId::from_raw(21));
+    let image = Handle::new(AssetId::from_raw(22));
+    let mut tilesets = Assets::<TileSet>::default();
+    tilesets.insert(
+        tileset,
+        TileSet::from_image(image, TileAtlasLayout::grid(Vec2::new(16.0, 16.0), 4, 2)),
+    );
+
+    let mut app = App::new();
+    app.add_plugin(SpriteRenderPlugin).unwrap();
+    app.world_mut().insert_resource(tilesets);
+    let mut tilemap = Tilemap::new(Vec2::new(16.0, 16.0)).with_tileset(tileset);
+    tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(8)));
+    app.world_mut().spawn(tilemap);
+
+    app.run_once(Duration::ZERO).unwrap();
+
+    assert_eq!(app.world().resource::<ExtractedSprites>().len(), 0);
+    let stats = app.world().resource::<SpriteRenderStats>();
+    assert_eq!(stats.invalid_tile_regions, 1);
+    assert_eq!(stats.extracted_tile_cells, 0);
+}
+
+#[test]
 fn dirty_tile_chunks_can_clear_without_losing_authored_cells() {
     let mut tilemap = Tilemap::default();
     let coord = TileCoord::new(-1, 2);

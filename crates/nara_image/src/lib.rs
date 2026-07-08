@@ -7,10 +7,11 @@ use std::{
 
 use nara_app::{App, CoreStage, Plugin};
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetStates, Assets, ImportArtifactDigest,
-    ImportArtifactPathError, ImportArtifactRecord, ImportError, ImportRequest, ImportedAssetType,
-    Importer, ImporterDescriptor, ImporterDescriptorError, ImporterId, ImporterSelectionError,
-    ImporterVersion, LoadState, SourceExtension, SourceHash, StableAssetId,
+    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetStates, Assets, Handle,
+    ImportArtifactDigest, ImportArtifactPathError, ImportArtifactRecord, ImportError,
+    ImportRequest, ImportedAssetType, Importer, ImporterDescriptor, ImporterDescriptorError,
+    ImporterId, ImporterSelectionError, ImporterVersion, LoadState, SourceExtension, SourceHash,
+    StableAssetId,
 };
 use nara_ecs::{Res, ResMut, Resource};
 use nara_render::{
@@ -421,6 +422,7 @@ impl PreparedImageResource {
 #[derive(Debug, Default, Resource)]
 pub struct ImagePrepareStats {
     pub prepared: u32,
+    pub removed: u32,
     pub skipped_missing_state: u32,
     pub skipped_not_loaded: u32,
     pub stale_results: u32,
@@ -448,6 +450,29 @@ pub fn prepare_images(
     mut stats: ResMut<ImagePrepareStats>,
 ) {
     *stats = ImagePrepareStats::default();
+    let removed_keys = prepared_images
+        .keys()
+        .filter(|key| key.kind() == RenderResourceKind::IMAGE_2D)
+        .filter(|key| {
+            let handle = Handle::<ImageAsset>::new(key.asset_id());
+            images.get(handle).is_none()
+                || states
+                    .state(key.asset_id())
+                    .is_none_or(|state| state.load_state() == &LoadState::Removed)
+        })
+        .collect::<Vec<_>>();
+    for key in removed_keys {
+        if prepared_images
+            .remove(
+                key,
+                &mut invalidations,
+                RenderPrepareInvalidationReason::AssetRemoved,
+            )
+            .is_some()
+        {
+            stats.removed += 1;
+        }
+    }
 
     for (handle, image) in images.iter() {
         let Some(state) = states.state(handle.id()) else {
@@ -654,31 +679,7 @@ mod tests {
 
     #[test]
     fn prepare_system_writes_backend_neutral_image_resource() {
-        let record = image_record("textures/player.png");
-        let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
-        let imported = ImageImporter::default()
-            .import_image(request(&record, &bytes))
-            .unwrap();
-        let mut server = AssetServer::new();
-        let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
-        let mut images = Assets::<ImageAsset>::default();
-        let mut states = AssetStates::default();
-        let mut asset_events = AssetEvents::default();
-        images
-            .commit_loaded(
-                handle,
-                imported.into_image(),
-                &mut states,
-                &mut asset_events,
-                None,
-                None,
-            )
-            .unwrap();
-        let mut app = App::new();
-        app.add_plugin(nara_render::RenderPlugin).unwrap();
-        app.add_plugin(ImagePreparePlugin).unwrap();
-        app.world_mut().insert_resource(images);
-        app.world_mut().insert_resource(states);
+        let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
 
         app.update();
 
@@ -689,6 +690,121 @@ mod tests {
         assert_eq!(resource.extent(), ImageExtent::new(1, 1));
         assert_eq!(resource.pixel_len(), 4);
         assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    }
+
+    #[test]
+    fn prepare_system_invalidates_when_image_descriptor_changes() {
+        let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+        app.update();
+        app.world_mut()
+            .resource_mut::<RenderPrepareInvalidations>()
+            .drain();
+        let old_snapshot = app
+            .world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .get(image_resource_key(handle))
+            .unwrap()
+            .snapshot();
+
+        let changed_importer = ImageImporter::default().with_sampler(ImageSamplerDescriptor {
+            min_filter: ImageFilterMode::Nearest,
+            ..ImageSamplerDescriptor::default()
+        });
+        let changed = changed_importer
+            .import_image(request(
+                &image_record("textures/player.png"),
+                &rgba_png(1, 1, &[0, 0, 255, 255]),
+            ))
+            .unwrap();
+        let mut images = app
+            .world_mut()
+            .remove_resource::<Assets<ImageAsset>>()
+            .unwrap();
+        let mut states = app.world_mut().remove_resource::<AssetStates>().unwrap();
+        let expected_version = states.version(handle.id()).unwrap();
+        let source_hash = changed.image().source().source_hash();
+        let artifact_hash = changed.artifact().key().digest();
+        images
+            .commit_reload(
+                handle,
+                expected_version,
+                changed.into_image(),
+                &mut states,
+                &mut AssetEvents::default(),
+                Some(source_hash),
+                Some(artifact_hash),
+            )
+            .unwrap();
+        app.world_mut().insert_resource(images);
+        app.world_mut().insert_resource(states);
+
+        app.update();
+
+        let prepared = app
+            .world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>();
+        let new_snapshot = prepared.get(image_resource_key(handle)).unwrap().snapshot();
+        assert_ne!(old_snapshot, new_snapshot);
+        assert_eq!(
+            new_snapshot.asset_version().raw(),
+            expected_version.raw() + 1
+        );
+        assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+        assert!(
+            app.world()
+                .resource::<RenderPrepareInvalidations>()
+                .iter()
+                .any(
+                    |invalidation| invalidation.key() == image_resource_key(handle)
+                        && invalidation.reason()
+                            == RenderPrepareInvalidationReason::DescriptorChanged
+                )
+        );
+    }
+
+    #[test]
+    fn prepare_system_removes_prepared_resources_for_removed_images() {
+        let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+        app.update();
+        app.world_mut()
+            .resource_mut::<RenderPrepareInvalidations>()
+            .drain();
+        assert!(
+            app.world()
+                .resource::<PreparedRenderResources<PreparedImageResource>>()
+                .get_ready(image_resource_key(handle))
+                .is_some()
+        );
+
+        let mut images = app
+            .world_mut()
+            .remove_resource::<Assets<ImageAsset>>()
+            .unwrap();
+        let mut states = app.world_mut().remove_resource::<AssetStates>().unwrap();
+        images
+            .remove_with_state(handle, &mut states, &mut AssetEvents::default())
+            .unwrap();
+        app.world_mut().insert_resource(images);
+        app.world_mut().insert_resource(states);
+
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<PreparedRenderResources<PreparedImageResource>>()
+                .get_ready(image_resource_key(handle))
+                .is_none()
+        );
+        assert_eq!(app.world().resource::<ImagePrepareStats>().removed, 1);
+        assert!(
+            app.world()
+                .resource::<RenderPrepareInvalidations>()
+                .iter()
+                .any(
+                    |invalidation| invalidation.key() == image_resource_key(handle)
+                        && invalidation.reason() == RenderPrepareInvalidationReason::AssetRemoved
+                )
+        );
     }
 
     #[test]
@@ -709,5 +825,33 @@ mod tests {
             image_descriptor_hash(&image),
             image_descriptor_hash(&changed)
         );
+    }
+
+    fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {
+        let record = image_record("textures/player.png");
+        let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
+        let imported = importer.import_image(request(&record, &bytes)).unwrap();
+        let mut server = AssetServer::new();
+        let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+        let mut images = Assets::<ImageAsset>::default();
+        let mut states = AssetStates::default();
+        let source_hash = imported.image().source().source_hash();
+        let artifact_hash = imported.artifact().key().digest();
+        images
+            .commit_loaded(
+                handle,
+                imported.into_image(),
+                &mut states,
+                &mut AssetEvents::default(),
+                Some(source_hash),
+                Some(artifact_hash),
+            )
+            .unwrap();
+        let mut app = App::new();
+        app.add_plugin(nara_render::RenderPlugin).unwrap();
+        app.add_plugin(ImagePreparePlugin).unwrap();
+        app.world_mut().insert_resource(images);
+        app.world_mut().insert_resource(states);
+        (app, handle)
     }
 }

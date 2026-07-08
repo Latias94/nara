@@ -5,7 +5,7 @@ use nara::{
 };
 
 const PLAYER_TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
-const TILESET_TEXTURE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
+const TILESET_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
 
 fn main() {
     let mut registry = ComponentRegistry::new();
@@ -93,7 +93,7 @@ fn main() {
     let stable_json = stable_export.document.to_json_string().unwrap();
     assert!(stable_json.contains("\"stable_id\""));
     assert!(stable_json.contains(PLAYER_TEXTURE_ID));
-    assert!(stable_json.contains(TILESET_TEXTURE_ID));
+    assert!(stable_json.contains(TILESET_ID));
     assert!(!stable_json.contains("AssetId"));
 }
 
@@ -175,7 +175,7 @@ fn tilemap_value() -> ComponentValue {
         ("tile_size", vec2_value(16.0, 16.0)),
         ("layer", ComponentValue::I64(0)),
         ("sort_key", ComponentValue::I64(0)),
-        ("tileset", asset_ref_value("stable_id", TILESET_TEXTURE_ID)),
+        ("tileset", asset_ref_value("stable_id", TILESET_ID)),
         (
             "cells",
             ComponentValue::List(vec![ComponentValue::map([
@@ -232,9 +232,9 @@ fn sample_asset_database() -> ProjectAssetDatabase {
         .unwrap();
     database
         .insert(AssetRecord::new(
-            StableAssetId::parse_str(TILESET_TEXTURE_ID).unwrap(),
-            AssetPath::new("textures/tiles.png").unwrap(),
-            AssetSourceKind::Image,
+            StableAssetId::parse_str(TILESET_ID).unwrap(),
+            AssetPath::new("tilesets/basic.tileset.ron").unwrap(),
+            AssetSourceKind::Other("tileset".to_string()),
         ))
         .unwrap();
     database

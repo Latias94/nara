@@ -35,7 +35,7 @@ pub fn extract_sprites(
         let missing_tileset = tilemap.tileset.is_some() && tileset.is_none();
         for (coord, cell) in tilemap.cells() {
             let source_order = next_source_order(&extracted);
-            let extracted_cell = extract_tile_cell(
+            let Some(extracted_cell) = extract_tile_cell(
                 entity,
                 tilemap,
                 tileset,
@@ -44,13 +44,12 @@ pub fn extract_sprites(
                 cell.tile,
                 cell.color,
                 source_order,
-            );
+            ) else {
+                stats.invalid_tile_regions = stats.invalid_tile_regions.saturating_add(1);
+                continue;
+            };
             if missing_tileset {
                 stats.missing_tilesets = stats.missing_tilesets.saturating_add(1);
-            } else if tileset.and_then(|tileset| tileset.image).is_some()
-                && !extracted_cell.is_textured()
-            {
-                stats.invalid_tile_regions = stats.invalid_tile_regions.saturating_add(1);
             }
             extracted.push(extracted_cell);
             stats.extracted_tile_cells = stats.extracted_tile_cells.saturating_add(1);
@@ -100,7 +99,7 @@ pub fn extract_tile_cell(
     tile: TileIndex,
     color: Color,
     source_order: u64,
-) -> ExtractedSprite {
+) -> Option<ExtractedSprite> {
     let transform = transform.copied().unwrap_or_default();
     let matrix = transform.matrix();
     let tile_size = tilemap.tile_size;
@@ -118,8 +117,11 @@ pub fn extract_tile_cell(
                 .map(|region| TextureUvRect::new(region.min, region.size))?,
         ))
     });
+    if tileset.and_then(|tileset| tileset.image).is_some() && tile_texture.is_none() {
+        return None;
+    }
 
-    ExtractedSprite {
+    Some(ExtractedSprite {
         entity,
         source_order,
         kind: ExtractedSpriteKind::TilemapCell { coord, tile },
@@ -134,7 +136,7 @@ pub fn extract_tile_cell(
         phase: RenderPhaseLabel::TILEMAP_2D,
         layer: tilemap.layer.index,
         sort_key: tilemap.sort_key,
-    }
+    })
 }
 
 fn next_source_order(extracted: &ExtractedSprites) -> u64 {

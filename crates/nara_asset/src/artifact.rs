@@ -821,6 +821,18 @@ mod tests {
             first,
             ImportDependencyDigest::from_dependencies([&different_role, &dependency_b])
         );
+
+        let different_source_hash = ImportDependency::new(
+            dependency_a.stable_id(),
+            dependency_a.path().clone(),
+            SourceHash::from_bytes(b"changed-a"),
+            dependency_a.source_kind().clone(),
+            dependency_a.role().clone(),
+        );
+        assert_ne!(
+            first,
+            ImportDependencyDigest::from_dependencies([&different_source_hash, &dependency_b])
+        );
     }
 
     #[test]

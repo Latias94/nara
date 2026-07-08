@@ -18,6 +18,18 @@ pub enum AssetSourceKind {
     Other(String),
 }
 
+impl Display for AssetSourceKind {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unknown => formatter.write_str("unknown"),
+            Self::Image => formatter.write_str("image"),
+            Self::Scene => formatter.write_str("scene"),
+            Self::Prefab => formatter.write_str("prefab"),
+            Self::Other(kind) => formatter.write_str(kind),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AssetMeta {

@@ -98,6 +98,29 @@ fn sprite_path_asset_ref_still_resolves_without_project_database() {
 }
 
 #[test]
+fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutation() {
+    let registry = component_registry();
+    let database = asset_database(PLAYER_STABLE_ID, "textures/player.png");
+    let document = sprite_scene(asset_ref_value("path", "textures/missing.png"));
+    let mut world = World::new();
+    let before = world.iter_entities().count();
+
+    let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+
+    assert!(report.diagnostics.has_errors());
+    assert_eq!(world.iter_entities().count(), before);
+    assert!(world.get_resource::<AssetServer>().is_none());
+    assert!(report.entity_map.is_empty());
+    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code.as_str() == "scene.invalid-component-payload"
+            && diagnostic.context.entity_id.as_deref() == Some("player")
+            && diagnostic.context.component_id.as_deref() == Some("nara.sprite.Sprite")
+            && diagnostic.context.field_path.as_deref() == Some("texture.value")
+            && diagnostic.context.asset_ref.as_deref() == Some("textures/missing.png")
+    }));
+}
+
+#[test]
 fn prefab_stable_asset_id_uses_asset_database_preflight() {
     let registry = component_registry();
     let database = asset_database(PLAYER_STABLE_ID, "textures/player.png");

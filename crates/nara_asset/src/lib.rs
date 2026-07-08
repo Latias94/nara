@@ -49,6 +49,11 @@ pub enum AssetRefExportPolicy {
 pub enum AssetRefError {
     InvalidPath(AssetPathError),
     MissingProjectDatabase(StableAssetId),
+    UnexpectedSourceKind {
+        asset_ref: String,
+        expected: AssetSourceKind,
+        actual: AssetSourceKind,
+    },
     UnknownHandle(AssetId),
     Database(AssetDatabaseError),
     Asset(AssetError),
@@ -64,6 +69,14 @@ impl Display for AssetRefError {
                     "stable asset id '{id}' requires a project asset database"
                 )
             }
+            Self::UnexpectedSourceKind {
+                asset_ref,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "asset reference '{asset_ref}' expected source kind '{expected}', got '{actual}'"
+            ),
             Self::UnknownHandle(id) => write!(formatter, "asset handle {:?} has no known path", id),
             Self::Database(error) => Display::fmt(error, formatter),
             Self::Asset(error) => Display::fmt(error, formatter),
@@ -108,6 +121,32 @@ impl AssetRef {
         asset_server.reserve_record(record).map_err(Into::into)
     }
 
+    pub fn resolve_with_database_as<T>(
+        &self,
+        asset_server: &mut AssetServer,
+        database: &ProjectAssetDatabase,
+        expected_source_kind: &AssetSourceKind,
+    ) -> Result<Handle<T>, AssetRefError> {
+        let record = self.validate_with_database_as(database, expected_source_kind)?;
+        asset_server.reserve_record(record).map_err(Into::into)
+    }
+
+    pub fn validate_with_database_as<'a>(
+        &self,
+        database: &'a ProjectAssetDatabase,
+        expected_source_kind: &AssetSourceKind,
+    ) -> Result<&'a AssetRecord, AssetRefError> {
+        let record = database.resolve_ref(self)?;
+        if record.source_kind() != expected_source_kind {
+            return Err(AssetRefError::UnexpectedSourceKind {
+                asset_ref: self.to_string(),
+                expected: expected_source_kind.clone(),
+                actual: record.source_kind().clone(),
+            });
+        }
+        Ok(record)
+    }
+
     pub fn from_handle<T>(
         asset_server: &AssetServer,
         handle: Handle<T>,
@@ -144,6 +183,10 @@ mod tests {
 
     fn stable_id() -> StableAssetId {
         StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
+    }
+
+    fn other_stable_id() -> StableAssetId {
+        StableAssetId::parse_str("b73f0f16-09e8-4265-b090-b689b41c197e").unwrap()
     }
 
     fn asset_record(path: &str) -> AssetRecord {
@@ -236,6 +279,50 @@ mod tests {
         assert_eq!(path_handle, stable_handle);
         assert_eq!(server.path(path_handle.id()), Some("textures/player.png"));
         assert_eq!(server.stable_id(path_handle.id()), Some(stable_id()));
+    }
+
+    #[test]
+    fn asset_server_rejects_path_rebound_to_different_stable_id() {
+        let mut server = AssetServer::new();
+        let first = AssetRecord::new(
+            stable_id(),
+            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        let second = AssetRecord::new(
+            other_stable_id(),
+            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+
+        let handle = server.reserve_record::<String>(&first).unwrap();
+        let error = server.reserve_record::<String>(&second).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::AssetIdAlreadyBoundToStableId { .. }
+        ));
+        assert_eq!(server.stable_id(handle.id()), Some(stable_id()));
+    }
+
+    #[test]
+    fn asset_server_rejects_stable_id_rebound_to_different_path() {
+        let mut server = AssetServer::new();
+        let first = asset_record("textures/player.png");
+        let second = AssetRecord::new(
+            stable_id(),
+            AssetPath::new("textures/player-v2.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+
+        let handle = server.reserve_record::<String>(&first).unwrap();
+        let error = server.reserve_record::<String>(&second).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::AssetIdAlreadyBoundToPath { .. }
+        ));
+        assert_eq!(server.path(handle.id()), Some("textures/player.png"));
     }
 
     #[test]

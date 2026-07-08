@@ -4,13 +4,14 @@ use std::collections::BTreeMap;
 
 mod sprite;
 mod surface;
+mod texture;
 
 use crate::sprite::{
-    WgpuSpriteBatchBuffer, WgpuSpriteDrawStats, WgpuSpritePipeline, WgpuSpriteTextureCache,
-    create_sprite_batch_buffers, create_sprite_pipeline, draw_sprite_batch_buffers,
-    sprite_batch_draw_stats,
+    WgpuSpriteBatchBuffer, WgpuSpriteDrawStats, WgpuSpritePipeline, create_sprite_batch_buffers,
+    create_sprite_pipeline, draw_sprite_batch_buffers, sprite_batch_draw_stats,
 };
 use crate::surface::{WgpuSurfaceState, configure_surface, create_surface, surface_extent};
+use crate::texture::WgpuSpriteTextureCache;
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::Assets;
 use nara_ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};

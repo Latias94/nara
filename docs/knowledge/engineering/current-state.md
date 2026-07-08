@@ -3,15 +3,15 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-08T12:09:28Z
+timestamp: 2026-07-08T12:52:16Z
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-08T12:09:28Z
-- Last verified: Asset import/render resource seam passed fmt, workspace checks with and without serde, examples check, `scene_prefab_roundtrip`, default-feature `asset_import_texture`, `winit,wgpu` backend examples, `cargo nextest run --workspace` with 126 tests, dependency tree review, backend boundary searches, runtime serialization leak searches, and engineering memory validation.
+- Snapshot timestamp: 2026-07-08T12:52:16Z
+- Last verified: Asset import/render resource seam review hardening passed fmt, workspace checks with and without serde, examples check, `scene_prefab_roundtrip`, default-feature `asset_import_texture`, `winit,wgpu` backend examples, `cargo nextest run --workspace` with 136 tests, default facade dependency-tree review, backend boundary searches, and engineering memory validation.
 - Next action: Plan the next high-leverage foundation slice: scene patch transactions and field-level prefab overrides, component schema export/migration chains, or async task-pool-backed import/reload work.
 
 # Active Registrations
@@ -46,11 +46,13 @@ status: "active"
   - `nara_sprite_render` now queues colored and textured sprite/tilemap batches with explicit render resource keys and UVs.
   - `nara_render_wgpu` now samples prepared image resources through backend-private texture, view, sampler, bind-group, and pipeline caches.
   - Scene/prefab spawn now supports asset-aware preflight through `ProjectAssetDatabase` and scratch `AssetServer` state before mutating the target world.
+  - Review hardening now enforces one-to-one runtime asset identity binding, source-kind aware sprite/tileset preflight, path-ref database validation, prepared image removal cleanup, invalid atlas tile skips, and split wgpu sprite texture responsibilities.
 - Pending follow-ups:
   - Scene patch transactions, field-level prefab overrides, nested prefab source resolution, component schema export, and migration chains remain follow-up work.
   - Engine-owned IO/task-pool execution, file watching, async import jobs, and reload scheduling remain deferred behind the current synchronous import/reload-ready contracts.
   - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset` and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
   - Material/sampler authoring, texture atlases, compression profiles, mip generation, and 3D mesh import remain future extensions of the asset/import/render prepare seam.
+  - Importer typed payload APIs, `nara_scene` module split, shared asset-ref codec helpers, boundary-search CI, and real import-cache filesystem containment tests remain accepted residuals from review.
 - Blocked:
   - None.
 
@@ -62,3 +64,5 @@ status: "active"
 - [ADR 0033](../../architecture/adr/0033-asset-import-and-render-resource-preparation-seam.md)
 - [Asset/render seam final verification](verification/2026-07-08T120928Z-asset-render-resource-seam-final.md)
 - [Asset/render seam final memory event](logs/2026-07/2026-07-08T120928Z-verification-u9-asset-render-resource-seam-final-examples-docs-boundary.md)
+- [Asset/render seam review hardening verification](verification/2026-07-08T125216Z-asset-render-resource-seam-review-hardening.md)
+- [Asset/render seam review hardening memory event](logs/2026-07/2026-07-08T125216Z-review-hardening-asset-render-resource-seam.md)

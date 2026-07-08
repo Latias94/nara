@@ -11,7 +11,8 @@ pub use bevy_reflect;
 pub use bevy_reflect::prelude::*;
 use bevy_reflect::{GetTypeRegistration, TypeRegistry};
 use nara_asset::{
-    AssetRef, AssetRefError, AssetRefExportPolicy, AssetServer, Handle, ProjectAssetDatabase,
+    AssetRef, AssetRefError, AssetRefExportPolicy, AssetServer, AssetSourceKind, Handle,
+    ProjectAssetDatabase,
 };
 use nara_ecs::{Component, Entity, Resource, World};
 
@@ -365,11 +366,45 @@ impl<'a> ComponentDecodeContext<'a> {
         &mut self,
         asset_ref: &AssetRef,
     ) -> Option<Result<Handle<T>, AssetRefError>> {
+        self.resolve_asset_ref_as(asset_ref, None)
+    }
+
+    pub fn resolve_asset_ref_with_kind<T>(
+        &mut self,
+        asset_ref: &AssetRef,
+        expected_source_kind: &AssetSourceKind,
+    ) -> Option<Result<Handle<T>, AssetRefError>> {
+        self.resolve_asset_ref_as(asset_ref, Some(expected_source_kind))
+    }
+
+    pub fn validate_asset_ref_with_kind(
+        &self,
+        asset_ref: &AssetRef,
+        expected_source_kind: &AssetSourceKind,
+    ) -> Option<Result<(), AssetRefError>> {
+        let database = self.project_asset_database?;
+        Some(
+            asset_ref
+                .validate_with_database_as(database, expected_source_kind)
+                .map(|_| ()),
+        )
+    }
+
+    fn resolve_asset_ref_as<T>(
+        &mut self,
+        asset_ref: &AssetRef,
+        expected_source_kind: Option<&AssetSourceKind>,
+    ) -> Option<Result<Handle<T>, AssetRefError>> {
         let database = self.project_asset_database;
         let asset_server = self.asset_server.as_deref_mut()?;
         self.asset_server_touched = true;
         Some(match database {
-            Some(database) => asset_ref.resolve_with_database(asset_server, database),
+            Some(database) => match expected_source_kind {
+                Some(expected_source_kind) => {
+                    asset_ref.resolve_with_database_as(asset_server, database, expected_source_kind)
+                }
+                None => asset_ref.resolve_with_database(asset_server, database),
+            },
             None => asset_ref.resolve(asset_server),
         })
     }

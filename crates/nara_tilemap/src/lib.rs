@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use nara_app::{App, Plugin};
-use nara_asset::{AssetRef, AssetRefError, AssetServer, Assets, Handle};
+use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
 use nara_image::ImageAsset;
@@ -475,10 +475,20 @@ fn prepare_tileset_handle(
     field: &str,
     asset_ref: AssetRef,
 ) -> Result<PreparedTileset, ComponentCodecError> {
-    if let Some(result) = context.resolve_asset_ref::<TileSet>(&asset_ref) {
+    let expected_source_kind = tileset_asset_source_kind();
+    if let Some(result) =
+        context.resolve_asset_ref_with_kind::<TileSet>(&asset_ref, &expected_source_kind)
+    {
         return result
             .map(PreparedTileset::Resolved)
             .map_err(|error| invalid_asset_ref(field, &asset_ref, error));
+    }
+
+    if let Some(result) = context.validate_asset_ref_with_kind(&asset_ref, &expected_source_kind) {
+        return match result {
+            Ok(()) => Ok(PreparedTileset::Deferred(asset_ref)),
+            Err(error) => Err(invalid_asset_ref(field, &asset_ref, error)),
+        };
     }
 
     if let Some(stable_id) = asset_ref.as_stable_id() {
@@ -495,6 +505,10 @@ fn prepare_tileset_handle(
     }
 
     Ok(PreparedTileset::Deferred(asset_ref))
+}
+
+fn tileset_asset_source_kind() -> AssetSourceKind {
+    AssetSourceKind::Other("tileset".to_string())
 }
 
 fn resolve_prepared_tileset(
@@ -900,6 +914,61 @@ mod tests {
                 && asset_ref == format!("stable_id:{unknown_stable_id}")
         ));
         assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
+    }
+
+    #[test]
+    fn tilemap_codec_rejects_wrong_tileset_source_kind() {
+        let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let mut database = ProjectAssetDatabase::default();
+        database
+            .insert(AssetRecord::new(
+                stable_id,
+                AssetPath::new("textures/terrain.png").unwrap(),
+                AssetSourceKind::Image,
+            ))
+            .unwrap();
+        let mut asset_server = AssetServer::new();
+        let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
+            .with_project_asset_database(&database);
+        let mut registry = ComponentRegistry::new();
+        register_tilemap_components(&mut registry);
+
+        let result = registry
+            .preflight_component_with_context(
+                &tilemap_type_id(),
+                &tilemap_value(AssetRef::StableId(stable_id)),
+                &mut context,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            result,
+            Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "tileset.value"
+        ));
+        assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
+    }
+
+    #[test]
+    fn tilemap_codec_validates_path_refs_when_database_is_present() {
+        let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        let database = test_database(stable_id, "tilesets/terrain.ron");
+        let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
+        let mut registry = ComponentRegistry::new();
+        register_tilemap_components(&mut registry);
+
+        let result = registry
+            .preflight_component_with_context(
+                &tilemap_type_id(),
+                &tilemap_value(AssetRef::path("tilesets/missing.ron").unwrap()),
+                &mut context,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            result,
+            Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "tileset.value"
+        ));
+        assert!(!context.asset_server_touched());
     }
 
     fn tilemap_value(tileset: AssetRef) -> ComponentValue {

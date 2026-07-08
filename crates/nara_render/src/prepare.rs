@@ -249,6 +249,10 @@ impl<T: PreparedRenderResource> PreparedRenderResources<T> {
         }
     }
 
+    pub fn keys(&self) -> impl Iterator<Item = RenderResourceKey> + '_ {
+        self.records.keys().copied()
+    }
+
     #[must_use]
     pub fn needs_prepare(&self, snapshot: RenderResourceSnapshot) -> bool {
         let Some(record) = self.records.get(&snapshot.key()) else {

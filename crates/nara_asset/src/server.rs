@@ -26,6 +26,16 @@ pub enum AssetError {
         existing_id: AssetId,
         requested_id: AssetId,
     },
+    AssetIdAlreadyBoundToPath {
+        id: AssetId,
+        existing_path: AssetPath,
+        requested_path: AssetPath,
+    },
+    AssetIdAlreadyBoundToStableId {
+        id: AssetId,
+        existing_stable_id: StableAssetId,
+        requested_stable_id: StableAssetId,
+    },
 }
 
 impl Display for AssetError {
@@ -54,6 +64,24 @@ impl Display for AssetError {
                 formatter,
                 "stable asset id '{stable_id}' is already bound to runtime handle {:?}, not {:?}",
                 existing_id, requested_id
+            ),
+            Self::AssetIdAlreadyBoundToPath {
+                id,
+                existing_path,
+                requested_path,
+            } => write!(
+                formatter,
+                "runtime handle {:?} is already bound to asset path '{existing_path}', not '{requested_path}'",
+                id
+            ),
+            Self::AssetIdAlreadyBoundToStableId {
+                id,
+                existing_stable_id,
+                requested_stable_id,
+            } => write!(
+                formatter,
+                "runtime handle {:?} is already bound to stable asset id '{existing_stable_id}', not '{requested_stable_id}'",
+                id
             ),
         }
     }
@@ -152,6 +180,15 @@ impl AssetServer {
                 requested_id: id,
             });
         }
+        if let Some(existing_path) = self.reverse_paths.get(&id).cloned()
+            && existing_path != path
+        {
+            return Err(AssetError::AssetIdAlreadyBoundToPath {
+                id,
+                existing_path,
+                requested_path: path,
+            });
+        }
 
         self.paths.insert(path.clone(), id);
         self.reverse_paths.insert(id, path);
@@ -166,6 +203,15 @@ impl AssetServer {
                 stable_id,
                 existing_id,
                 requested_id: id,
+            });
+        }
+        if let Some(existing_stable_id) = self.reverse_stable_ids.get(&id).copied()
+            && existing_stable_id != stable_id
+        {
+            return Err(AssetError::AssetIdAlreadyBoundToStableId {
+                id,
+                existing_stable_id,
+                requested_stable_id: stable_id,
             });
         }
 
