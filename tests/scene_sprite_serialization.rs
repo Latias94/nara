@@ -142,6 +142,75 @@ fn prefab_stable_asset_id_uses_asset_database_preflight() {
 }
 
 #[test]
+fn prefab_patch_field_override_preserves_inherited_sprite_data() {
+    let registry = component_registry();
+    let prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
+        ComponentTypeId::new("nara.sprite.Sprite"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion(1),
+            sprite_value(asset_ref_value("path", "textures/player.png")),
+        ),
+    )]);
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: scene_id("player"),
+        component: ComponentTypeId::new("nara.sprite.Sprite"),
+        path: ComponentFieldPath::from_fields(["color", "r"]),
+        value: ComponentValue::f64(0.25).unwrap(),
+    }]);
+    let mut world = World::new();
+
+    let report = spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
+
+    assert!(!report.diagnostics.has_errors());
+    let sprite = world
+        .get::<Sprite>(report.entity_map.get(&scene_id("player")).unwrap())
+        .unwrap();
+    assert_eq!(sprite.color.r, 0.25);
+    assert_eq!(sprite.color.g, 1.0);
+    assert_eq!(sprite.size, Vec2::new(16.0, 16.0));
+    assert!(sprite.texture.is_some());
+}
+
+#[test]
+fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
+    let registry = component_registry();
+    let prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
+        ComponentTypeId::new("nara.sprite.Sprite"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion(1),
+            sprite_value(ComponentValue::Null),
+        ),
+    )]);
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetAssetRefField {
+        entity: scene_id("player"),
+        component: ComponentTypeId::new("nara.sprite.Sprite"),
+        path: ComponentFieldPath::from_fields(["texture"]),
+        asset_ref: AssetRef::stable_id(UNKNOWN_STABLE_ID).unwrap(),
+    }]);
+    let database = ProjectAssetDatabase::default();
+    let mut world = World::new();
+    let before = world.iter_entities().count();
+
+    let report = spawn_prefab_with_patch_and_asset_database(
+        &mut world, &registry, &prefab, &patch, &database,
+    );
+    let expected_asset_ref = format!("stable_id:{UNKNOWN_STABLE_ID}");
+
+    assert!(report.diagnostics.has_errors());
+    assert_eq!(world.iter_entities().count(), before);
+    assert!(world.get_resource::<AssetServer>().is_none());
+    assert!(report.entity_map.is_empty());
+    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code.as_str() == "scene.invalid-component-payload"
+            && diagnostic.context.operation_index == Some(0)
+            && diagnostic.context.entity_id.as_deref() == Some("player")
+            && diagnostic.context.component_id.as_deref() == Some("nara.sprite.Sprite")
+            && diagnostic.context.field_path.as_deref() == Some("texture.value")
+            && diagnostic.context.asset_ref.as_deref() == Some(expected_asset_ref.as_str())
+    }));
+}
+
+#[test]
 fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
     let mut registry = component_registry();
     nara::tilemap::register_tilemap_components(&mut registry);

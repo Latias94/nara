@@ -6,10 +6,7 @@ use nara_reflect::{
     PreparedComponent,
 };
 
-use crate::{
-    PrefabComponentOverrides, PrefabDocument, SceneDocument, SceneEntityId, SceneEntityRecord,
-    document::validate_scene_entity_id,
-};
+use crate::{SceneDocument, SceneEntityId, SceneEntityRecord, document::validate_scene_entity_id};
 
 pub(crate) struct PreparedScene {
     pub(crate) entities: Vec<PreparedSceneEntity>,
@@ -237,30 +234,6 @@ fn codec_error_asset_ref(error: &ComponentCodecError) -> Option<&str> {
         | ComponentCodecError::EntityMissing
         | ComponentCodecError::Message(_) => None,
     }
-}
-
-pub(crate) fn validate_prefab_overrides(
-    prefab: &PrefabDocument,
-    overrides: &PrefabComponentOverrides,
-) -> DiagnosticReport {
-    let ids = prefab
-        .entities
-        .iter()
-        .map(|entity| entity.id.clone())
-        .collect::<BTreeSet<_>>();
-    let mut diagnostics = DiagnosticReport::default();
-    for entity_id in overrides.keys() {
-        if !ids.contains(entity_id) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "scene.unknown-prefab-override-entity",
-                    "prefab override targets an entity id that does not exist in the prefab",
-                )
-                .with_entity_id(entity_id.as_str()),
-            );
-        }
-    }
-    diagnostics
 }
 
 fn sorted_entities(document: &SceneDocument) -> Vec<&SceneEntityRecord> {

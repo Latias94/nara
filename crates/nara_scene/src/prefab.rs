@@ -1,10 +1,8 @@
-use std::collections::BTreeMap;
-
 use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_diagnostic::DiagnosticReport;
-use nara_reflect::{ComponentRegistry, ComponentTypeId};
+use nara_reflect::ComponentRegistry;
 
-use crate::{SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord};
+use crate::{SceneDocument, SceneEntityRecord, ScenePatchDocument};
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -12,9 +10,6 @@ pub struct PrefabDocument {
     pub format_version: u32,
     pub entities: Vec<SceneEntityRecord>,
 }
-
-pub type PrefabComponentOverrides =
-    BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, SceneComponentRecord>>;
 
 impl PrefabDocument {
     pub const CURRENT_FORMAT_VERSION: u32 = 1;
@@ -35,30 +30,36 @@ impl PrefabDocument {
 
     #[must_use]
     pub fn instantiate(&self) -> SceneDocument {
-        self.instantiate_with_overrides(&PrefabComponentOverrides::new())
-    }
-
-    #[must_use]
-    pub fn instantiate_with_overrides(
-        &self,
-        overrides: &PrefabComponentOverrides,
-    ) -> SceneDocument {
-        let mut entities = self.entities.clone();
-        for entity in &mut entities {
-            if let Some(component_overrides) = overrides.get(&entity.id) {
-                for (component_id, component) in component_overrides {
-                    entity
-                        .components
-                        .insert(component_id.clone(), component.clone());
-                }
-            }
-        }
         let mut document = SceneDocument {
             format_version: self.format_version,
-            entities,
+            entities: self.entities.clone(),
         };
         document.canonicalize();
         document
+    }
+
+    #[must_use]
+    pub fn instantiate_with_patch(
+        &self,
+        registry: &ComponentRegistry,
+        patch: &ScenePatchDocument,
+    ) -> PrefabInstantiationReport {
+        let mut document = self.instantiate();
+        let patch_report = patch.apply_to_scene(&mut document, registry);
+        PrefabInstantiationReport::from_patch_report(document, patch_report)
+    }
+
+    #[must_use]
+    pub fn instantiate_with_patch_and_asset_database(
+        &self,
+        registry: &ComponentRegistry,
+        patch: &ScenePatchDocument,
+        database: &ProjectAssetDatabase,
+    ) -> PrefabInstantiationReport {
+        let mut document = self.instantiate();
+        let patch_report =
+            patch.apply_to_scene_with_asset_database(&mut document, registry, database);
+        PrefabInstantiationReport::from_patch_report(document, patch_report)
     }
 
     #[must_use]
@@ -86,10 +87,38 @@ impl Default for PrefabDocument {
     }
 }
 
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct PrefabInstantiationReport {
+    pub document: Option<SceneDocument>,
+    pub inverse: Option<ScenePatchDocument>,
+    pub diagnostics: DiagnosticReport,
+}
+
+impl PrefabInstantiationReport {
+    fn from_patch_report(
+        document: SceneDocument,
+        patch_report: crate::ScenePatchReport,
+    ) -> PrefabInstantiationReport {
+        if patch_report.applied {
+            return PrefabInstantiationReport {
+                document: Some(document),
+                inverse: patch_report.inverse,
+                diagnostics: patch_report.diagnostics,
+            };
+        }
+
+        PrefabInstantiationReport {
+            document: None,
+            inverse: None,
+            diagnostics: patch_report.diagnostics,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PrefabInstance {
     pub source: AssetRef,
     #[cfg_attr(feature = "serde", serde(default))]
-    pub overrides: BTreeMap<ComponentTypeId, SceneComponentRecord>,
+    pub overrides: ScenePatchDocument,
 }

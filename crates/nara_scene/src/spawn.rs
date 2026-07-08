@@ -6,9 +6,9 @@ use nara_ecs::{Component, Entity, World};
 use nara_reflect::{ComponentDecodeContext, ComponentRegistry};
 
 use crate::{
-    PrefabComponentOverrides, PrefabDocument, SceneDocument, SceneEntityId,
+    PrefabDocument, SceneDocument, SceneEntityId, ScenePatchDocument,
     hierarchy::{Parent, sync_children},
-    validation::{preflight_scene_with_context, validate_prefab_overrides},
+    validation::preflight_scene_with_context,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -204,7 +204,7 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         prefab: &PrefabDocument,
     ) -> SceneSpawnReport {
-        self.spawn_prefab_with_overrides(world, registry, prefab, &PrefabComponentOverrides::new())
+        self.spawn_prefab_with_patch(world, registry, prefab, &ScenePatchDocument::default())
     }
 
     pub fn spawn_prefab_with_asset_database(
@@ -214,23 +214,24 @@ impl SceneSpawner {
         prefab: &PrefabDocument,
         database: &ProjectAssetDatabase,
     ) -> SceneSpawnReport {
-        self.spawn_prefab_with_overrides_and_asset_database(
+        self.spawn_prefab_with_patch_and_asset_database(
             world,
             registry,
             prefab,
-            &PrefabComponentOverrides::new(),
+            &ScenePatchDocument::default(),
             database,
         )
     }
 
-    pub fn spawn_prefab_with_overrides(
+    pub fn spawn_prefab_with_patch(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
         prefab: &PrefabDocument,
-        overrides: &PrefabComponentOverrides,
+        patch: &ScenePatchDocument,
     ) -> SceneSpawnReport {
-        let mut diagnostics = validate_prefab_overrides(prefab, overrides);
+        let instantiate = prefab.instantiate_with_patch(registry, patch);
+        let mut diagnostics = instantiate.diagnostics;
         if diagnostics.has_errors() {
             return SceneSpawnReport {
                 entity_map: SceneEntityMap::default(),
@@ -238,25 +239,26 @@ impl SceneSpawner {
             };
         }
 
-        let mut report = self.spawn(
-            world,
-            registry,
-            &prefab.instantiate_with_overrides(overrides),
-        );
+        let document = instantiate
+            .document
+            .expect("successful prefab patch instantiation should include document");
+        let mut report = self.spawn(world, registry, &document);
         diagnostics.extend(report.diagnostics);
         report.diagnostics = diagnostics;
         report
     }
 
-    pub fn spawn_prefab_with_overrides_and_asset_database(
+    pub fn spawn_prefab_with_patch_and_asset_database(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
         prefab: &PrefabDocument,
-        overrides: &PrefabComponentOverrides,
+        patch: &ScenePatchDocument,
         database: &ProjectAssetDatabase,
     ) -> SceneSpawnReport {
-        let mut diagnostics = validate_prefab_overrides(prefab, overrides);
+        let instantiate =
+            prefab.instantiate_with_patch_and_asset_database(registry, patch, database);
+        let mut diagnostics = instantiate.diagnostics;
         if diagnostics.has_errors() {
             return SceneSpawnReport {
                 entity_map: SceneEntityMap::default(),
@@ -264,12 +266,10 @@ impl SceneSpawner {
             };
         }
 
-        let mut report = self.spawn_with_asset_database(
-            world,
-            registry,
-            &prefab.instantiate_with_overrides(overrides),
-            database,
-        );
+        let document = instantiate
+            .document
+            .expect("successful prefab patch instantiation should include document");
+        let mut report = self.spawn_with_asset_database(world, registry, &document, database);
         diagnostics.extend(report.diagnostics);
         report.diagnostics = diagnostics;
         report
@@ -315,24 +315,23 @@ pub fn spawn_prefab_with_asset_database(
 }
 
 #[must_use]
-pub fn spawn_prefab_with_overrides(
+pub fn spawn_prefab_with_patch(
     world: &mut World,
     registry: &ComponentRegistry,
     prefab: &PrefabDocument,
-    overrides: &PrefabComponentOverrides,
+    patch: &ScenePatchDocument,
 ) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_prefab_with_overrides(world, registry, prefab, overrides)
+    SceneSpawner::new().spawn_prefab_with_patch(world, registry, prefab, patch)
 }
 
 #[must_use]
-pub fn spawn_prefab_with_overrides_and_asset_database(
+pub fn spawn_prefab_with_patch_and_asset_database(
     world: &mut World,
     registry: &ComponentRegistry,
     prefab: &PrefabDocument,
-    overrides: &PrefabComponentOverrides,
+    patch: &ScenePatchDocument,
     database: &ProjectAssetDatabase,
 ) -> SceneSpawnReport {
-    SceneSpawner::new().spawn_prefab_with_overrides_and_asset_database(
-        world, registry, prefab, overrides, database,
-    )
+    SceneSpawner::new()
+        .spawn_prefab_with_patch_and_asset_database(world, registry, prefab, patch, database)
 }

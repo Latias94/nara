@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use nara_asset::AssetRef;
+use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
     ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentTypeId, ComponentValue,
@@ -36,7 +36,29 @@ impl ScenePatchDocument {
         document: &mut SceneDocument,
         registry: &ComponentRegistry,
     ) -> ScenePatchReport {
-        let source_validation = document.validate(registry);
+        self.apply_to_scene_with_validator(document, registry, |document, registry| {
+            document.validate(registry)
+        })
+    }
+
+    pub fn apply_to_scene_with_asset_database(
+        &self,
+        document: &mut SceneDocument,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> ScenePatchReport {
+        self.apply_to_scene_with_validator(document, registry, |document, registry| {
+            document.validate_with_asset_database(registry, database)
+        })
+    }
+
+    fn apply_to_scene_with_validator(
+        &self,
+        document: &mut SceneDocument,
+        registry: &ComponentRegistry,
+        mut validate: impl FnMut(&SceneDocument, &ComponentRegistry) -> DiagnosticReport,
+    ) -> ScenePatchReport {
+        let source_validation = validate(document, registry);
         if source_validation.has_errors() {
             return ScenePatchReport {
                 applied: false,
@@ -63,7 +85,7 @@ impl ScenePatchDocument {
             };
 
             scratch.canonicalize();
-            let validation = scratch.validate(registry);
+            let validation = validate(&scratch, registry);
             if validation.has_errors() {
                 return ScenePatchReport {
                     applied: false,

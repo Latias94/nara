@@ -103,15 +103,15 @@ pub mod prelude {
         WgpuRenderBackend, WgpuRenderError, WgpuRenderPlugin,
     };
     pub use nara_scene::{
-        Children, HierarchyPlugin, Name, Parent, PrefabComponentOverrides, PrefabDocument,
-        PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError,
-        SceneEntityMap, SceneEntityRecord, SceneEntitySource, SceneExportOptions,
-        SceneExportReport, SceneFormatError, SceneInstanceId, ScenePatchDocument,
-        ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner, Visibility,
-        export_scene, export_scene_with_options, spawn_child, spawn_prefab,
-        spawn_prefab_with_asset_database, spawn_prefab_with_overrides,
-        spawn_prefab_with_overrides_and_asset_database, spawn_scene,
-        spawn_scene_with_asset_database, sync_children,
+        Children, HierarchyPlugin, Name, Parent, PrefabDocument, PrefabInstance,
+        PrefabInstantiationReport, SceneComponentRecord, SceneDocument, SceneEntityId,
+        SceneEntityIdError, SceneEntityMap, SceneEntityRecord, SceneEntitySource,
+        SceneExportOptions, SceneExportReport, SceneFormatError, SceneInstanceId,
+        ScenePatchDocument, ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner,
+        Visibility, export_scene, export_scene_with_options, spawn_child, spawn_prefab,
+        spawn_prefab_with_asset_database, spawn_prefab_with_patch,
+        spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
+        sync_children,
     };
     pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, TextureRegion};
     pub use nara_sprite_render::{

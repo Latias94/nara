@@ -8,8 +8,9 @@ use nara_asset::{
 use nara_ecs::{Component, World};
 use nara_reflect::bevy_reflect;
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent, Reflect,
+    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
+    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PreparedComponent, Reflect,
 };
 #[derive(Clone, Debug, PartialEq, Component, Reflect)]
 struct TestPosition {
@@ -128,7 +129,7 @@ fn unsupported_prefab_instance_prevents_world_mutation() {
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance {
             source: AssetRef::path("prefabs/enemy.ron").unwrap(),
-            overrides: BTreeMap::new(),
+            overrides: ScenePatchDocument::default(),
         }),
     }]);
     let mut world = World::new();
@@ -416,21 +417,22 @@ fn repeated_prefab_spawns_export_with_instance_namespaces() {
 }
 
 #[test]
-fn direct_prefab_spawn_supports_whole_component_overrides() {
+fn direct_prefab_spawn_applies_patch_field_overrides() {
     let registry = test_registry();
     let id = scene_id("enemy");
     let prefab =
         PrefabDocument::new([SceneEntityRecord::new(id.clone())
             .with_component(position_type_id(), position_record(1))]);
-    let mut overrides = PrefabComponentOverrides::new();
-    overrides.insert(
-        id.clone(),
-        BTreeMap::from([(position_type_id(), position_record(9))]),
-    );
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: id.clone(),
+        component: position_type_id(),
+        path: ComponentFieldPath::from_fields(["x"]),
+        value: ComponentValue::I64(9),
+    }]);
     let mut world = World::new();
     let mut spawner = SceneSpawner::new();
 
-    let report = spawner.spawn_prefab_with_overrides(&mut world, &registry, &prefab, &overrides);
+    let report = spawner.spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
 
     assert!(!report.diagnostics.has_errors());
     let entity = report.entity_map.get(&id).unwrap();
@@ -438,21 +440,66 @@ fn direct_prefab_spawn_supports_whole_component_overrides() {
 }
 
 #[test]
-fn unknown_prefab_override_entity_prevents_world_mutation() {
+fn prefab_patch_can_add_and_remove_components() {
+    let registry = test_registry();
+    let added = scene_id("added");
+    let removed = scene_id("removed");
+    let prefab = PrefabDocument::new([
+        SceneEntityRecord::new(added.clone()),
+        SceneEntityRecord::new(removed.clone())
+            .with_component(position_type_id(), position_record(4)),
+    ]);
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::AddComponent {
+            entity: added.clone(),
+            component: position_type_id(),
+            value: position_record(7),
+        },
+        ScenePatchOperation::RemoveComponent {
+            entity: removed.clone(),
+            component: position_type_id(),
+        },
+    ]);
+    let mut world = World::new();
+
+    let report = spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
+
+    assert!(!report.diagnostics.has_errors());
+    assert_eq!(
+        world
+            .get::<TestPosition>(report.entity_map.get(&added).unwrap())
+            .unwrap()
+            .x,
+        7
+    );
+    assert!(
+        world
+            .get::<TestPosition>(report.entity_map.get(&removed).unwrap())
+            .is_none()
+    );
+}
+
+#[test]
+fn unknown_prefab_patch_target_prevents_world_mutation() {
     let registry = test_registry();
     let prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("enemy"))
         .with_component(position_type_id(), position_record(1))]);
-    let mut overrides = PrefabComponentOverrides::new();
-    overrides.insert(scene_id("missing"), BTreeMap::new());
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: scene_id("missing"),
+        component: position_type_id(),
+        path: ComponentFieldPath::from_fields(["x"]),
+        value: ComponentValue::I64(9),
+    }]);
     let mut world = World::new();
     let before = world.iter_entities().count();
 
-    let report = spawn_prefab_with_overrides(&mut world, &registry, &prefab, &overrides);
+    let report = spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.unknown-prefab-override-entity"
+        diagnostic.code.as_str() == "scene.patch-missing-entity"
+            && diagnostic.context.operation_index == Some(0)
             && diagnostic.context.entity_id.as_deref() == Some("missing")
     }));
 }
@@ -551,6 +598,14 @@ fn test_registry() -> ComponentRegistry {
                     ComponentValue::I64(i64::from(position.x)),
                 )]))
             },
+        )
+        .unwrap()
+        .register_component_fields(
+            &position_type_id(),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["x"]),
+                ComponentValueKind::I64,
+            )],
         )
         .unwrap();
     registry
