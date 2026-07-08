@@ -79,11 +79,11 @@ pub mod prelude {
         WgpuRenderBackend, WgpuRenderError, WgpuRenderPlugin,
     };
     pub use nara_scene::{
-        Children, HierarchyPlugin, Name, Parent, PrefabDocument, PrefabInstance,
-        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError, SceneEntityMap,
-        SceneEntityRecord, SceneEntitySource, SceneExportReport, SceneFormatError, SceneInstanceId,
-        SceneSpawnReport, SceneSpawner, Visibility, export_scene, spawn_child, spawn_scene,
-        sync_children,
+        Children, HierarchyPlugin, Name, Parent, PrefabComponentOverrides, PrefabDocument,
+        PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError,
+        SceneEntityMap, SceneEntityRecord, SceneEntitySource, SceneExportReport, SceneFormatError,
+        SceneInstanceId, SceneSpawnReport, SceneSpawner, Visibility, export_scene, spawn_child,
+        spawn_prefab, spawn_prefab_with_overrides, spawn_scene, sync_children,
     };
     pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, Texture2d, TextureRegion};
     pub use nara_sprite_render::{

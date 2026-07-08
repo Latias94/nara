@@ -121,6 +121,12 @@ impl DiagnosticReport {
         self.diagnostics.push(diagnostic);
     }
 
+    pub fn extend(&mut self, report: Self) {
+        for diagnostic in report.diagnostics {
+            self.push(diagnostic);
+        }
+    }
+
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics

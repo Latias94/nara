@@ -67,7 +67,7 @@ pub fn register_transform_components(registry: &mut ComponentRegistry) {
             |value| {
                 Ok(Transform2d {
                     translation: read_vec2(value.field("translation")?, "translation")?,
-                    rotation: value.field_f64("rotation")? as f32,
+                    rotation: read_f32(value.field("rotation")?, "rotation")?,
                     scale: read_vec2(value.field("scale")?, "scale")?,
                 })
             },
@@ -87,17 +87,19 @@ pub fn register_transform_components(registry: &mut ComponentRegistry) {
 
 fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
     Ok(Vec2::new(
-        value.field("x").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.x"), "finite float")
-            })
-        })? as f32,
-        value.field("y").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.y"), "finite float")
-            })
-        })? as f32,
+        read_f32(value.field("x")?, &format!("{field}.x"))?,
+        read_f32(value.field("y")?, &format!("{field}.y"))?,
     ))
+}
+
+fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+    let value = value
+        .as_f64()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
+    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return Err(ComponentCodecError::invalid_field(field, "finite f32"));
+    }
+    Ok(value as f32)
 }
 
 fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {

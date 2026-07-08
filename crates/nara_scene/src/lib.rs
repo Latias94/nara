@@ -66,7 +66,6 @@ pub enum Visibility {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SceneEntityId(String);
 
 impl SceneEntityId {
@@ -79,6 +78,27 @@ impl SceneEntityId {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SceneEntityId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SceneEntityId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(id).map_err(serde::de::Error::custom)
     }
 }
 
@@ -209,12 +229,15 @@ impl SceneComponentRecord {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PrefabDocument {
     pub format_version: u32,
     pub entities: Vec<SceneEntityRecord>,
 }
+
+pub type PrefabComponentOverrides =
+    BTreeMap<SceneEntityId, BTreeMap<ComponentTypeId, SceneComponentRecord>>;
 
 impl PrefabDocument {
     pub const CURRENT_FORMAT_VERSION: u32 = 1;
@@ -231,6 +254,39 @@ impl PrefabDocument {
 
     pub fn canonicalize(&mut self) {
         self.entities.sort_by(|left, right| left.id.cmp(&right.id));
+    }
+
+    #[must_use]
+    pub fn instantiate(&self) -> SceneDocument {
+        self.instantiate_with_overrides(&PrefabComponentOverrides::new())
+    }
+
+    #[must_use]
+    pub fn instantiate_with_overrides(
+        &self,
+        overrides: &PrefabComponentOverrides,
+    ) -> SceneDocument {
+        let mut entities = self.entities.clone();
+        for entity in &mut entities {
+            if let Some(component_overrides) = overrides.get(&entity.id) {
+                for (component_id, component) in component_overrides {
+                    entity
+                        .components
+                        .insert(component_id.clone(), component.clone());
+                }
+            }
+        }
+        let mut document = SceneDocument {
+            format_version: self.format_version,
+            entities,
+        };
+        document.canonicalize();
+        document
+    }
+
+    #[must_use]
+    pub fn validate(&self, registry: &ComponentRegistry) -> DiagnosticReport {
+        self.instantiate().validate(registry)
     }
 
     #[cfg(feature = "serde")]
@@ -259,6 +315,15 @@ impl PrefabDocument {
             .map_err(|error| SceneFormatError::Ron(error.to_string()))?;
         document.canonicalize();
         Ok(document)
+    }
+}
+
+impl Default for PrefabDocument {
+    fn default() -> Self {
+        Self {
+            format_version: Self::CURRENT_FORMAT_VERSION,
+            entities: Vec::new(),
+        }
     }
 }
 
@@ -427,6 +492,40 @@ impl SceneSpawner {
             diagnostics,
         }
     }
+
+    pub fn spawn_prefab(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        prefab: &PrefabDocument,
+    ) -> SceneSpawnReport {
+        self.spawn_prefab_with_overrides(world, registry, prefab, &PrefabComponentOverrides::new())
+    }
+
+    pub fn spawn_prefab_with_overrides(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        prefab: &PrefabDocument,
+        overrides: &PrefabComponentOverrides,
+    ) -> SceneSpawnReport {
+        let mut diagnostics = validate_prefab_overrides(prefab, overrides);
+        if diagnostics.has_errors() {
+            return SceneSpawnReport {
+                entity_map: SceneEntityMap::default(),
+                diagnostics,
+            };
+        }
+
+        let mut report = self.spawn(
+            world,
+            registry,
+            &prefab.instantiate_with_overrides(overrides),
+        );
+        diagnostics.extend(report.diagnostics);
+        report.diagnostics = diagnostics;
+        report
+    }
 }
 
 #[must_use]
@@ -436,6 +535,25 @@ pub fn spawn_scene(
     document: &SceneDocument,
 ) -> SceneSpawnReport {
     SceneSpawner::new().spawn(world, registry, document)
+}
+
+#[must_use]
+pub fn spawn_prefab(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    prefab: &PrefabDocument,
+) -> SceneSpawnReport {
+    SceneSpawner::new().spawn_prefab(world, registry, prefab)
+}
+
+#[must_use]
+pub fn spawn_prefab_with_overrides(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    prefab: &PrefabDocument,
+    overrides: &PrefabComponentOverrides,
+) -> SceneSpawnReport {
+    SceneSpawner::new().spawn_prefab_with_overrides(world, registry, prefab, overrides)
 }
 
 #[must_use]
@@ -510,6 +628,25 @@ pub fn export_scene(world: &World, registry: &ComponentRegistry) -> SceneExportR
             components,
             prefab: None,
         });
+    }
+
+    let exported_ids = records
+        .iter()
+        .map(|record| record.id.clone())
+        .collect::<BTreeSet<_>>();
+    for record in &mut records {
+        if let Some(parent) = &record.parent {
+            if !exported_ids.contains(parent) {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        "scene.export-parent-skipped",
+                        "parent entity is not exported with this scene",
+                    )
+                    .with_entity_id(record.id.as_str()),
+                );
+                record.parent = None;
+            }
+        }
     }
 
     SceneExportReport {
@@ -587,7 +724,24 @@ fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> Pr
     let mut seen = BTreeSet::<SceneEntityId>::new();
     let mut ids = BTreeSet::<SceneEntityId>::new();
 
+    if document.format_version != SceneDocument::CURRENT_FORMAT_VERSION {
+        diagnostics.push(Diagnostic::error(
+            "scene.unsupported-format-version",
+            format!(
+                "scene format version {} is unsupported; expected {}",
+                document.format_version,
+                SceneDocument::CURRENT_FORMAT_VERSION
+            ),
+        ));
+    }
+
     for entity in &document.entities {
+        if let Err(error) = validate_scene_entity_id(entity.id.as_str()) {
+            diagnostics.push(
+                Diagnostic::error("scene.invalid-entity-id", error.to_string())
+                    .with_entity_id(entity.id.as_str()),
+            );
+        }
         if !seen.insert(entity.id.clone()) {
             diagnostics.push(
                 Diagnostic::error("scene.duplicate-entity-id", "duplicate scene entity id")
@@ -599,12 +753,30 @@ fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> Pr
 
     for entity in &document.entities {
         if let Some(parent) = &entity.parent {
+            if let Err(error) = validate_scene_entity_id(parent.as_str()) {
+                diagnostics.push(
+                    Diagnostic::error("scene.invalid-parent-id", error.to_string())
+                        .with_entity_id(entity.id.as_str())
+                        .with_field_path("parent"),
+                );
+            }
             if !ids.contains(parent) {
                 diagnostics.push(
                     Diagnostic::error("scene.missing-parent", "parent entity id does not exist")
                         .with_entity_id(entity.id.as_str()),
                 );
             }
+        }
+        if let Some(prefab) = &entity.prefab {
+            diagnostics.push(
+                Diagnostic::error(
+                    "scene.prefab-instance-unsupported",
+                    "external prefab source resolution is not implemented in this slice; instantiate PrefabDocument directly",
+                )
+                .with_entity_id(entity.id.as_str())
+                .with_field_path("prefab.source")
+                .with_asset_ref(prefab.source.to_string()),
+            );
         }
     }
 
@@ -658,6 +830,9 @@ fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> Pr
                     if let Some(field_path) = codec_error_field_path(&error) {
                         diagnostic = diagnostic.with_field_path(field_path);
                     }
+                    if let Some(asset_ref) = codec_error_asset_ref(&error) {
+                        diagnostic = diagnostic.with_asset_ref(asset_ref);
+                    }
                     diagnostics.push(diagnostic);
                 }
                 None => diagnostics.push(
@@ -687,9 +862,44 @@ fn preflight_scene(document: &SceneDocument, registry: &ComponentRegistry) -> Pr
 fn codec_error_field_path(error: &ComponentCodecError) -> Option<&str> {
     match error {
         ComponentCodecError::MissingField { field }
-        | ComponentCodecError::InvalidField { field, .. } => Some(field.as_str()),
+        | ComponentCodecError::InvalidField { field, .. }
+        | ComponentCodecError::InvalidAssetRef { field, .. } => Some(field.as_str()),
         ComponentCodecError::EntityMissing | ComponentCodecError::Message(_) => None,
     }
+}
+
+fn codec_error_asset_ref(error: &ComponentCodecError) -> Option<&str> {
+    match error {
+        ComponentCodecError::InvalidAssetRef { asset_ref, .. } => Some(asset_ref.as_str()),
+        ComponentCodecError::MissingField { .. }
+        | ComponentCodecError::InvalidField { .. }
+        | ComponentCodecError::EntityMissing
+        | ComponentCodecError::Message(_) => None,
+    }
+}
+
+fn validate_prefab_overrides(
+    prefab: &PrefabDocument,
+    overrides: &PrefabComponentOverrides,
+) -> DiagnosticReport {
+    let ids = prefab
+        .entities
+        .iter()
+        .map(|entity| entity.id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut diagnostics = DiagnosticReport::default();
+    for entity_id in overrides.keys() {
+        if !ids.contains(entity_id) {
+            diagnostics.push(
+                Diagnostic::error(
+                    "scene.unknown-prefab-override-entity",
+                    "prefab override targets an entity id that does not exist in the prefab",
+                )
+                .with_entity_id(entity_id.as_str()),
+            );
+        }
+    }
+    diagnostics
 }
 
 fn sorted_entities(document: &SceneDocument) -> Vec<&SceneEntityRecord> {
@@ -920,6 +1130,59 @@ mod tests {
     }
 
     #[test]
+    fn validates_document_format_version() {
+        let registry = test_registry();
+        let document = SceneDocument {
+            format_version: SceneDocument::CURRENT_FORMAT_VERSION + 1,
+            entities: vec![SceneEntityRecord::new(scene_id("player"))],
+        };
+
+        let report = document.validate(&registry);
+
+        assert!(report.has_errors());
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_str() == "scene.unsupported-format-version")
+        );
+    }
+
+    #[test]
+    fn prefab_default_uses_current_format_version() {
+        assert_eq!(
+            PrefabDocument::default().format_version,
+            PrefabDocument::CURRENT_FORMAT_VERSION
+        );
+    }
+
+    #[test]
+    fn unsupported_prefab_instance_prevents_world_mutation() {
+        let registry = test_registry();
+        let document = SceneDocument::new([SceneEntityRecord {
+            id: scene_id("enemy"),
+            parent: None,
+            components: BTreeMap::new(),
+            prefab: Some(PrefabInstance {
+                source: AssetRef::path("prefabs/enemy.ron").unwrap(),
+                overrides: BTreeMap::new(),
+            }),
+        }]);
+        let mut world = World::new();
+        let before = world.iter_entities().count();
+
+        let report = spawn_scene(&mut world, &registry, &document);
+
+        assert!(report.diagnostics.has_errors());
+        assert_eq!(world.iter_entities().count(), before);
+        assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code.as_str() == "scene.prefab-instance-unsupported"
+                && diagnostic.context.field_path.as_deref() == Some("prefab.source")
+                && diagnostic.context.asset_ref.as_deref() == Some("prefabs/enemy.ron")
+        }));
+    }
+
+    #[test]
     fn invalid_component_payload_does_not_mutate_world() {
         let registry = test_registry();
         let document = SceneDocument::new([SceneEntityRecord::new(scene_id("bad"))
@@ -1033,6 +1296,90 @@ mod tests {
         assert_eq!(ids, vec!["enemy", "instance_2/enemy"]);
     }
 
+    #[test]
+    fn direct_prefab_spawn_supports_whole_component_overrides() {
+        let registry = test_registry();
+        let id = scene_id("enemy");
+        let prefab = PrefabDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(1))]);
+        let mut overrides = PrefabComponentOverrides::new();
+        overrides.insert(
+            id.clone(),
+            BTreeMap::from([(position_type_id(), position_record(9))]),
+        );
+        let mut world = World::new();
+        let mut spawner = SceneSpawner::new();
+
+        let report =
+            spawner.spawn_prefab_with_overrides(&mut world, &registry, &prefab, &overrides);
+
+        assert!(!report.diagnostics.has_errors());
+        let entity = report.entity_map.get(&id).unwrap();
+        assert_eq!(world.get::<TestPosition>(entity).unwrap().x, 9);
+    }
+
+    #[test]
+    fn unknown_prefab_override_entity_prevents_world_mutation() {
+        let registry = test_registry();
+        let prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("enemy"))
+            .with_component(position_type_id(), position_record(1))]);
+        let mut overrides = PrefabComponentOverrides::new();
+        overrides.insert(scene_id("missing"), BTreeMap::new());
+        let mut world = World::new();
+        let before = world.iter_entities().count();
+
+        let report = spawn_prefab_with_overrides(&mut world, &registry, &prefab, &overrides);
+
+        assert!(report.diagnostics.has_errors());
+        assert_eq!(world.iter_entities().count(), before);
+        assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code.as_str() == "scene.unknown-prefab-override-entity"
+                && diagnostic.context.entity_id.as_deref() == Some("missing")
+        }));
+    }
+
+    #[test]
+    fn export_drops_parent_that_is_not_in_document() {
+        let registry = test_registry();
+        let mut world = World::new();
+        let parent = world.spawn_empty().id();
+        let child = world
+            .spawn((
+                Parent(parent),
+                SceneEntitySource {
+                    instance_id: SceneInstanceId::from_raw(1),
+                    entity_id: scene_id("child"),
+                },
+                TestPosition { x: 3 },
+            ))
+            .id();
+
+        let export = export_scene(&world, &registry);
+
+        assert_eq!(export.document.entities.len(), 1);
+        assert_eq!(export.document.entities[0].id.as_str(), "child");
+        assert_eq!(export.document.entities[0].parent, None);
+        assert_eq!(world.get::<Parent>(child).unwrap().0, parent);
+        assert!(
+            export
+                .diagnostics
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_str() == "scene.export-parent-skipped")
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn scene_entity_id_deserialization_validates_shape() {
+        let error = serde_json::from_str::<SceneDocument>(
+            r#"{"format_version":1,"entities":[{"id":"root/../player","components":{}}]}"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(".."));
+    }
+
     fn test_registry() -> ComponentRegistry {
         let mut registry = ComponentRegistry::new();
         registry
@@ -1044,7 +1391,10 @@ mod tests {
                         .get("x")
                         .and_then(ComponentValue::as_i64)
                         .ok_or_else(|| ComponentCodecError::invalid_field("x", "i64"))?;
-                    Ok(TestPosition { x: x as i32 })
+                    Ok(TestPosition {
+                        x: i32::try_from(x)
+                            .map_err(|_| ComponentCodecError::invalid_field("x", "i32"))?,
+                    })
                 },
                 |position| {
                     Ok(ComponentValue::map([(

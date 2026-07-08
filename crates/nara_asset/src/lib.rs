@@ -42,7 +42,6 @@ pub struct Handle<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AssetPath(String);
 
 impl AssetPath {
@@ -55,6 +54,27 @@ impl AssetPath {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for AssetPath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for AssetPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let path = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(path).map_err(serde::de::Error::custom)
     }
 }
 
@@ -137,6 +157,15 @@ impl AssetRef {
             .path(handle.id())
             .ok_or_else(|| AssetRefError::UnknownHandle(handle.id()))?;
         Self::path(path).map_err(Into::into)
+    }
+}
+
+impl Display for AssetRef {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Path(path) => formatter.write_str(path.as_str()),
+            Self::StableId(id) => write!(formatter, "stable_id:{id}"),
+        }
     }
 }
 
@@ -401,6 +430,14 @@ mod tests {
             AssetPath::new("textures//player.png"),
             Err(AssetPathError::ContainsEmptySegment)
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn asset_path_deserialization_validates_shape() {
+        let error = serde_json::from_str::<AssetPath>(r#""textures/../player.png""#).unwrap_err();
+
+        assert!(error.to_string().contains(".."));
     }
 
     #[test]

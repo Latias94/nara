@@ -288,8 +288,8 @@ pub fn register_render_components(registry: &mut ComponentRegistry) {
                     target: read_render_target(value.get("target"))?,
                     viewport: read_optional_viewport(value.get("viewport"))?,
                     clear_color: read_optional_color(value.get("clear_color"))?,
-                    viewport_height: value.field_f64("viewport_height")? as f32,
-                    order: optional_i64(value, "order")?.unwrap_or(0) as i32,
+                    viewport_height: read_f32(value.field("viewport_height")?, "viewport_height")?,
+                    order: optional_i32(value, "order")?.unwrap_or(0),
                 })
             },
             |camera| {
@@ -348,14 +348,23 @@ fn read_optional_viewport(
         None | Some(ComponentValue::Null) => Ok(None),
         Some(value) => Ok(Some(
             ViewportRect::new(
-                value.field_u64("physical_x")? as u32,
-                value.field_u64("physical_y")? as u32,
-                value.field_u64("physical_width")? as u32,
-                value.field_u64("physical_height")? as u32,
+                read_u32(value, "physical_x", "viewport.physical_x")?,
+                read_u32(value, "physical_y", "viewport.physical_y")?,
+                read_u32(value, "physical_width", "viewport.physical_width")?,
+                read_u32(value, "physical_height", "viewport.physical_height")?,
             )
             .ok_or_else(|| ComponentCodecError::invalid_field("viewport", "non-empty viewport"))?,
         )),
     }
+}
+
+fn read_u32(
+    value: &ComponentValue,
+    field: &str,
+    display_field: &str,
+) -> Result<u32, ComponentCodecError> {
+    let value = value.field_u64(field)?;
+    u32::try_from(value).map_err(|_| ComponentCodecError::invalid_field(display_field, "u32"))
 }
 
 fn viewport_value(value: ViewportRect) -> Result<ComponentValue, ComponentCodecError> {
@@ -390,27 +399,21 @@ fn read_optional_color(
 
 fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
     Ok(Color::rgba(
-        value.field("r").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.r"), "finite float")
-            })
-        })? as f32,
-        value.field("g").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.g"), "finite float")
-            })
-        })? as f32,
-        value.field("b").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.b"), "finite float")
-            })
-        })? as f32,
-        value.field("a").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.a"), "finite float")
-            })
-        })? as f32,
+        read_f32(value.field("r")?, &format!("{field}.r"))?,
+        read_f32(value.field("g")?, &format!("{field}.g"))?,
+        read_f32(value.field("b")?, &format!("{field}.b"))?,
+        read_f32(value.field("a")?, &format!("{field}.a"))?,
     ))
+}
+
+fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+    let value = value
+        .as_f64()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
+    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return Err(ComponentCodecError::invalid_field(field, "finite f32"));
+    }
+    Ok(value as f32)
 }
 
 fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
@@ -422,13 +425,14 @@ fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
     ]))
 }
 
-fn optional_i64(value: &ComponentValue, field: &str) -> Result<Option<i64>, ComponentCodecError> {
+fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, ComponentCodecError> {
     value
         .get(field)
         .map(|value| {
-            value
+            let value = value
                 .as_i64()
-                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i64"))
+                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i32"))?;
+            i32::try_from(value).map_err(|_| ComponentCodecError::invalid_field(field, "i32"))
         })
         .transpose()
 }

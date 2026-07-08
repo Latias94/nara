@@ -117,9 +117,9 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
             |value| {
                 let size = read_vec2(value.field("size")?, "size")?;
                 let color = read_color(value.field("color")?, "color")?;
-                let texture_ref = read_optional_asset_ref(value.get("texture"))?;
-                let layer = optional_i64(value, "layer")?.unwrap_or(0) as i32;
-                let sort_key = optional_i64(value, "sort_key")?.unwrap_or(0) as i32;
+                let texture_ref = read_optional_asset_ref(value.get("texture"), "texture")?;
+                let layer = optional_i32(value, "layer")?.unwrap_or(0);
+                let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
 
                 Ok(PreparedComponent::new(move |world, entity| {
                     let texture = resolve_optional_texture(world, texture_ref.as_ref())?;
@@ -187,30 +187,33 @@ fn resolve_optional_texture(
         .map_err(|error| ComponentCodecError::Message(error.to_string()))
 }
 
-fn optional_i64(value: &ComponentValue, field: &str) -> Result<Option<i64>, ComponentCodecError> {
+fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, ComponentCodecError> {
     value
         .get(field)
         .map(|value| {
-            value
+            let value = value
                 .as_i64()
-                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i64"))
+                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i32"))?;
+            i32::try_from(value).map_err(|_| ComponentCodecError::invalid_field(field, "i32"))
         })
         .transpose()
 }
 
 fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodecError> {
     Ok(Vec2::new(
-        value.field("x").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.x"), "finite float")
-            })
-        })? as f32,
-        value.field("y").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.y"), "finite float")
-            })
-        })? as f32,
+        read_f32(value.field("x")?, &format!("{field}.x"))?,
+        read_f32(value.field("y")?, &format!("{field}.y"))?,
     ))
+}
+
+fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+    let value = value
+        .as_f64()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
+    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return Err(ComponentCodecError::invalid_field(field, "finite f32"));
+    }
+    Ok(value as f32)
 }
 
 fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
@@ -222,26 +225,10 @@ fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
 
 fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
     Ok(Color::rgba(
-        value.field("r").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.r"), "finite float")
-            })
-        })? as f32,
-        value.field("g").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.g"), "finite float")
-            })
-        })? as f32,
-        value.field("b").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.b"), "finite float")
-            })
-        })? as f32,
-        value.field("a").and_then(|value| {
-            value.as_f64().ok_or_else(|| {
-                ComponentCodecError::invalid_field(format!("{field}.a"), "finite float")
-            })
-        })? as f32,
+        read_f32(value.field("r")?, &format!("{field}.r"))?,
+        read_f32(value.field("g")?, &format!("{field}.g"))?,
+        read_f32(value.field("b")?, &format!("{field}.b"))?,
+        read_f32(value.field("a")?, &format!("{field}.a"))?,
     ))
 }
 
@@ -256,20 +243,30 @@ fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
 
 fn read_optional_asset_ref(
     value: Option<&ComponentValue>,
+    field: &str,
 ) -> Result<Option<AssetRef>, ComponentCodecError> {
     match value {
         None | Some(ComponentValue::Null) => Ok(None),
-        Some(value) => read_asset_ref(value).map(Some),
+        Some(value) => read_asset_ref(value, field).map(Some),
     }
 }
 
-fn read_asset_ref(value: &ComponentValue) -> Result<AssetRef, ComponentCodecError> {
+fn read_asset_ref(value: &ComponentValue, field: &str) -> Result<AssetRef, ComponentCodecError> {
     match value.field_str("kind")? {
-        "path" => AssetRef::path(value.field_str("value")?)
-            .map_err(|error| ComponentCodecError::Message(error.to_string())),
-        "stable_id" => Ok(AssetRef::stable_id(value.field_str("value")?)),
+        "path" => AssetRef::path(value.field_str("value")?).map_err(|error| {
+            ComponentCodecError::invalid_asset_ref(
+                format!("{field}.value"),
+                value.field_str("value").unwrap_or_default(),
+                error.to_string(),
+            )
+        }),
+        "stable_id" => Err(ComponentCodecError::invalid_asset_ref(
+            format!("{field}.value"),
+            value.field_str("value").unwrap_or_default(),
+            "stable asset ids are reserved for the asset meta database slice",
+        )),
         _ => Err(ComponentCodecError::invalid_field(
-            "kind",
+            format!("{field}.kind"),
             "'path' or 'stable_id'",
         )),
     }

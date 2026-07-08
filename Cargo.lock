@@ -1216,6 +1216,7 @@ dependencies = [
  "bevy_ecs",
  "nara_ecs",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

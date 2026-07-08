@@ -240,8 +240,18 @@ impl Error for ComponentRegistryError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentCodecError {
-    MissingField { field: String },
-    InvalidField { field: String, expected: String },
+    MissingField {
+        field: String,
+    },
+    InvalidField {
+        field: String,
+        expected: String,
+    },
+    InvalidAssetRef {
+        field: String,
+        asset_ref: String,
+        message: String,
+    },
     EntityMissing,
     Message(String),
 }
@@ -261,6 +271,19 @@ impl ComponentCodecError {
             expected: expected.into(),
         }
     }
+
+    #[must_use]
+    pub fn invalid_asset_ref(
+        field: impl Into<String>,
+        asset_ref: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::InvalidAssetRef {
+            field: field.into(),
+            asset_ref: asset_ref.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl Display for ComponentCodecError {
@@ -271,6 +294,16 @@ impl Display for ComponentCodecError {
                 write!(
                     formatter,
                     "invalid component field '{field}', expected {expected}"
+                )
+            }
+            Self::InvalidAssetRef {
+                field,
+                asset_ref,
+                message,
+            } => {
+                write!(
+                    formatter,
+                    "invalid asset reference in '{field}' ('{asset_ref}'): {message}"
                 )
             }
             Self::EntityMissing => formatter.write_str("target entity does not exist"),
