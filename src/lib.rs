@@ -105,16 +105,16 @@ pub mod prelude {
     pub use nara_scene::{
         Children, HierarchyPlugin, InMemoryPrefabSourceResolver, Name, Parent, PrefabDocument,
         PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
-        PrefabSourceResolver, SceneAuthoringHistoryStatus, SceneAuthoringSession,
-        SceneAuthoringSyncReport, SceneComponentRecord, SceneDocument, SceneEntityId,
-        SceneEntityIdError, SceneEntityMap, SceneEntityRecord, SceneEntitySource,
-        SceneExportOptions, SceneExportReport, SceneFormatError, SceneInstanceId,
-        ScenePatchDocument, ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner,
-        Visibility, export_scene, export_scene_with_options, spawn_child, spawn_prefab,
-        spawn_prefab_with_asset_database, spawn_prefab_with_patch,
-        spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
-        spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
-        sync_children,
+        PrefabSourceResolver, SceneAuthoringHistoryStatus, SceneAuthoringRevision,
+        SceneAuthoringSession, SceneAuthoringSourceId, SceneAuthoringSyncReport,
+        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError, SceneEntityMap,
+        SceneEntityRecord, SceneEntitySource, SceneExportOptions, SceneExportReport,
+        SceneFormatError, SceneInstanceId, ScenePatchDocument, ScenePatchOperation,
+        ScenePatchReport, SceneSpawnReport, SceneSpawner, Visibility, export_scene,
+        export_scene_with_options, spawn_child, spawn_prefab, spawn_prefab_with_asset_database,
+        spawn_prefab_with_patch, spawn_prefab_with_patch_and_asset_database, spawn_scene,
+        spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
+        spawn_scene_with_prefab_resolver_and_asset_database, sync_children,
     };
     pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, TextureRegion};
     pub use nara_sprite_render::{
@@ -127,10 +127,11 @@ pub mod prelude {
         TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
     };
     pub use nara_tooling::{
+        SceneApplyChangesReport, SceneEditorMode, SceneEditorModel, SceneEditorState,
         SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
         SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
-        SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, ToolingPlugin,
-        WorldSnapshot,
+        SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, ScenePlaySession,
+        ScenePlayTransitionReport, ToolingPlugin, WorldSnapshot,
     };
     pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
     pub use nara_window::{

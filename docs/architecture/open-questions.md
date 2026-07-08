@@ -214,6 +214,20 @@ Play Mode uses an isolated runtime `World` spawned from a validated edit documen
 Play discards runtime changes by default; Apply Changes is explicit and patch-based. See ADR
 [0034-editor-play-mode-world-boundary.md](adr/0034-editor-play-mode-world-boundary.md).
 
+Resolved in the Play Mode core slice:
+
+- `SceneAuthoringSession` exposes an opaque source revision stamp that advances on successful
+  authoring document mutations and not on sync, failed patches, empty undo/redo, or live-world
+  cleanup.
+- `nara_tooling::SceneEditorState` owns the first UI-agnostic `Edit` / `Play` / `Paused` model.
+  It starts isolated Play sessions through the same plain, prefab-resolved, asset-aware, and
+  combined `SceneSpawner` paths as scene loading.
+- Mode-aware inspector commands keep direct edit-mode patch behavior but reject persistent patch
+  commands in Play or Paused. Selection remains a safe UI state change.
+- `SceneApplyChangesReport` is currently a diagnostic guard only. It reports unsupported
+  apply-back when the source revision still matches and revision mismatch when the authoring
+  document changed after Play started.
+
 Follow-up details still to settle:
 
 1. Does debug UI use egui first or dear-imgui-rs first?

@@ -166,6 +166,7 @@ fn failed_world_sync_keeps_existing_live_projection() {
 fn empty_undo_redo_report_non_applied_info_diagnostics() {
     let registry = scene_registry();
     let mut session = SceneAuthoringSession::new(SceneDocument::default());
+    let revision = session.revision();
 
     let undo = session.undo(&registry);
     let redo = session.redo(&registry);
@@ -182,6 +183,117 @@ fn empty_undo_redo_report_non_applied_info_diagnostics() {
         redo.diagnostics.diagnostics()[0].code.as_str(),
         "scene.redo-empty"
     );
+    assert_eq!(session.revision(), revision);
+}
+
+#[test]
+fn authoring_revision_changes_only_for_successful_document_mutations() {
+    let registry = scene_registry();
+    let player = scene_id("player");
+    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
+        player.clone(),
+        "Player",
+    )]));
+    let initial = session.revision();
+    let mut world = World::new();
+
+    let sync = session.sync_world(&mut world, &registry);
+    assert!(sync.synced);
+    assert_eq!(session.revision(), initial);
+
+    let invalid_patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: player.clone(),
+        component: label_type_id(),
+        path: ComponentFieldPath::from_fields(["missing"]),
+        value: ComponentValue::String("Hero".to_string()),
+    }]);
+    let invalid_report = session.apply_patch(&invalid_patch, &registry);
+    assert!(!invalid_report.applied);
+    assert_eq!(session.revision(), initial);
+
+    let empty_report = session.apply_patch(&ScenePatchDocument::default(), &registry);
+    assert!(empty_report.applied);
+    assert_eq!(session.revision(), initial);
+
+    let patch_report = session.apply_patch(&set_label_patch(&player, "Hero"), &registry);
+    assert!(patch_report.applied);
+    let after_patch = session.revision();
+    assert_eq!(after_patch.source_id(), initial.source_id());
+    assert_eq!(after_patch.generation(), initial.generation() + 1);
+
+    session.clear_history();
+    assert_eq!(session.revision(), after_patch);
+
+    let removed_entities = session.clear_live_world(&mut world);
+    assert_eq!(removed_entities, 1);
+    assert_eq!(session.revision(), after_patch);
+
+    session.replace_document(SceneDocument::new([labeled_entity(
+        player.clone(),
+        "Replacement",
+    )]));
+    let after_replace = session.revision();
+    assert_eq!(after_replace.source_id(), initial.source_id());
+    assert_eq!(after_replace.generation(), after_patch.generation() + 1);
+    assert_eq!(
+        session.history_status(),
+        SceneAuthoringHistoryStatus {
+            undo_depth: 0,
+            redo_depth: 0,
+        }
+    );
+
+    let failed_sync = session.sync_world(&mut world, &ComponentRegistry::new());
+    assert!(!failed_sync.synced);
+    assert_eq!(session.revision(), after_replace);
+}
+
+#[test]
+fn authoring_revision_advances_for_successful_undo_and_redo() {
+    let registry = scene_registry();
+    let player = scene_id("player");
+    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
+        player.clone(),
+        "Player",
+    )]));
+    let initial = session.revision();
+
+    let patch_report = session.apply_patch(&set_label_patch(&player, "Hero"), &registry);
+    assert!(patch_report.applied);
+    let after_patch = session.revision();
+    assert_eq!(after_patch.generation(), initial.generation() + 1);
+
+    let undo_report = session.undo(&registry);
+    assert!(undo_report.applied);
+    let after_undo = session.revision();
+    assert_eq!(after_undo.source_id(), initial.source_id());
+    assert_eq!(after_undo.generation(), after_patch.generation() + 1);
+
+    let empty_undo = session.undo(&registry);
+    assert!(!empty_undo.applied);
+    assert_eq!(session.revision(), after_undo);
+
+    let redo_report = session.redo(&registry);
+    assert!(redo_report.applied);
+    let after_redo = session.revision();
+    assert_eq!(after_redo.source_id(), initial.source_id());
+    assert_eq!(after_redo.generation(), after_undo.generation() + 1);
+
+    let empty_redo = session.redo(&registry);
+    assert!(!empty_redo.applied);
+    assert_eq!(session.revision(), after_redo);
+}
+
+#[test]
+fn authoring_revision_source_identity_prevents_cross_session_equality() {
+    let first = SceneAuthoringSession::new(SceneDocument::default());
+    let second = SceneAuthoringSession::new(SceneDocument::default());
+
+    assert_eq!(
+        first.revision().generation(),
+        second.revision().generation()
+    );
+    assert_ne!(first.revision(), second.revision());
 }
 
 fn scene_registry() -> ComponentRegistry {
@@ -234,6 +346,15 @@ fn document_label(document: &SceneDocument, id: &SceneEntityId) -> String {
         .and_then(|component| component.value.field_str("text").ok())
         .unwrap()
         .to_string()
+}
+
+fn set_label_patch(entity: &SceneEntityId, text: &str) -> ScenePatchDocument {
+    ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: entity.clone(),
+        component: label_type_id(),
+        path: ComponentFieldPath::from_fields(["text"]),
+        value: ComponentValue::String(text.to_string()),
+    }])
 }
 
 fn label_type_id() -> ComponentTypeId {

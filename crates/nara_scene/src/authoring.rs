@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
@@ -7,6 +9,37 @@ use crate::{
     PrefabSourceResolver, SceneDocument, SceneEntityMap, ScenePatchDocument, ScenePatchReport,
     SceneSpawnReport, SceneSpawner, hierarchy::sync_children,
 };
+
+static NEXT_AUTHORING_SOURCE_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SceneAuthoringSourceId(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SceneAuthoringRevision {
+    source_id: SceneAuthoringSourceId,
+    generation: u64,
+}
+
+impl SceneAuthoringRevision {
+    #[must_use]
+    pub const fn source_id(self) -> SceneAuthoringSourceId {
+        self.source_id
+    }
+
+    #[must_use]
+    pub const fn generation(self) -> u64 {
+        self.generation
+    }
+
+    #[must_use]
+    const fn next(self) -> Self {
+        Self {
+            source_id: self.source_id,
+            generation: self.generation + 1,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SceneAuthoringHistoryStatus {
@@ -25,6 +58,7 @@ pub struct SceneAuthoringSyncReport {
 #[derive(Debug)]
 pub struct SceneAuthoringSession {
     document: SceneDocument,
+    revision: SceneAuthoringRevision,
     undo_stack: Vec<ScenePatchDocument>,
     redo_stack: Vec<ScenePatchDocument>,
     live_entities: SceneEntityMap,
@@ -37,6 +71,10 @@ impl SceneAuthoringSession {
     pub fn new(document: SceneDocument) -> Self {
         Self {
             document,
+            revision: SceneAuthoringRevision {
+                source_id: next_authoring_source_id(),
+                generation: 0,
+            },
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             live_entities: SceneEntityMap::default(),
@@ -50,8 +88,14 @@ impl SceneAuthoringSession {
         &self.document
     }
 
+    #[must_use]
+    pub fn revision(&self) -> SceneAuthoringRevision {
+        self.revision
+    }
+
     pub fn replace_document(&mut self, document: SceneDocument) {
         self.document = document;
+        self.advance_revision();
         self.clear_history();
         self.live_dirty = true;
     }
@@ -205,6 +249,7 @@ impl SceneAuthoringSession {
         if !report.applied || patch.is_empty() {
             return;
         }
+        self.advance_revision();
         self.live_dirty = true;
         self.redo_stack.clear();
         if let Some(inverse) = report.inverse.clone() {
@@ -226,6 +271,7 @@ impl SceneAuthoringSession {
             return report;
         }
 
+        self.advance_revision();
         self.live_dirty = true;
         if let Some(inverse) = report.inverse.clone() {
             match direction {
@@ -234,6 +280,10 @@ impl SceneAuthoringSession {
             }
         }
         report
+    }
+
+    fn advance_revision(&mut self) {
+        self.revision = self.revision.next();
     }
 
     fn finish_world_sync(
@@ -275,6 +325,10 @@ impl SceneAuthoringSession {
 enum HistoryDirection {
     Undo,
     Redo,
+}
+
+fn next_authoring_source_id() -> SceneAuthoringSourceId {
+    SceneAuthoringSourceId(NEXT_AUTHORING_SOURCE_ID.fetch_add(1, Ordering::Relaxed))
 }
 
 fn history_miss_report(code: impl Into<String>, message: impl Into<String>) -> ScenePatchReport {

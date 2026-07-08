@@ -13,7 +13,10 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
-pub use authoring::{SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneAuthoringSyncReport};
+pub use authoring::{
+    SceneAuthoringHistoryStatus, SceneAuthoringRevision, SceneAuthoringSession,
+    SceneAuthoringSourceId, SceneAuthoringSyncReport,
+};
 pub use document::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError, SceneEntityRecord,
 };

@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-08T13:35:00Z
+timestamp: 2026-07-08T16:39:26Z
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-08T13:35:00Z
-- Last verified: Asset import/render resource seam review hardening passed fmt, workspace checks with and without serde, examples check, `scene_prefab_roundtrip`, default-feature `asset_import_texture`, `winit,wgpu` backend examples, `cargo nextest run --workspace` with 136 tests, default facade dependency-tree review, backend boundary searches, and engineering memory validation.
-- Next action: Execute `docs/plans/2026-07-08-005-feat-scene-patch-prefab-schema-foundation-plan.md` to build scene patch transactions, field-level prefab overrides, component schema export, migrations, and prefab source resolution.
+- Snapshot timestamp: 2026-07-08T16:39:26Z
+- Last verified: Editor Play Mode core passed fmt, workspace checks with and without serde, focused `nara_scene`/`nara_tooling`/`nara` tests, `cargo nextest run --workspace` with 186 tests, examples checks with and without serde, `winit,wgpu` backend example checks, backend boundary searches, runtime identity leak searches, and diff hygiene.
+- Next action: Design the first editor/debug UI adapter that renders `SceneEditorModel` / `SceneInspectorModel`, or define the first supported Apply Changes patchable subset.
 
 # Active Registrations
 
@@ -48,8 +48,14 @@ status: "active"
   - Scene/prefab spawn now supports asset-aware preflight through `ProjectAssetDatabase` and scratch `AssetServer` state before mutating the target world.
   - Review hardening now enforces one-to-one runtime asset identity binding, source-kind aware sprite/tileset preflight, path-ref database validation, prepared image removal cleanup, invalid atlas tile skips, and split wgpu sprite texture responsibilities.
   - Created the next implementation-ready plan for scene patch transactions, patch-based prefab overrides, component schema export, migrations, and nested prefab source resolution.
+  - `SceneAuthoringSession` now exposes `SceneAuthoringRevision`, an opaque source revision stamp with source identity plus generation.
+  - `nara_tooling` is split into `snapshot`, `inspector`, and `play` modules behind a small public facade.
+  - `SceneEditorState` owns the first UI-agnostic Edit/Play/Paused model and starts isolated Play worlds through plain, prefab-resolved, asset-aware, and combined spawn paths.
+  - Stop Play drops runtime state; mode-aware inspector commands reject persistent scene patches in Play or Paused.
+  - `SceneApplyChangesReport` is guard-only: it reports unsupported apply-back or source revision mismatch and returns no patches.
 - Pending follow-ups:
-  - Scene patch transactions, field-level prefab overrides, nested prefab source resolution, component schema export, and migration chains remain follow-up work.
+  - The first editor/debug UI adapter still needs to render `SceneEditorModel` and submit mode-aware commands.
+  - The first Apply Changes patchable subset remains undecided; runtime-to-`ScenePatchDocument` diffing is not implemented.
   - Engine-owned IO/task-pool execution, file watching, async import jobs, and reload scheduling remain deferred behind the current synchronous import/reload-ready contracts.
   - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset` and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
   - Material/sampler authoring, texture atlases, compression profiles, mip generation, and 3D mesh import remain future extensions of the asset/import/render prepare seam.
@@ -69,3 +75,4 @@ status: "active"
 - [Asset/render seam review hardening memory event](logs/2026-07/2026-07-08T125216Z-review-hardening-asset-render-resource-seam.md)
 - [Scene patch prefab schema foundation plan](../../plans/2026-07-08-005-feat-scene-patch-prefab-schema-foundation-plan.md)
 - [Scene patch prefab schema planning memory event](logs/2026-07/2026-07-08T133500Z-planning-scene-patch-prefab-schema-foundation.md)
+- [Editor Play Mode core implementation memory event](logs/2026-07/2026-07-08T163926Z-editor-play-mode-core-implemented.md)

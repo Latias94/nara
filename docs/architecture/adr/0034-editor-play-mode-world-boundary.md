@@ -85,6 +85,14 @@ EditorMode
 
 The exact Rust names can evolve, but these semantics should remain stable.
 
+Current implementation:
+
+- `nara_scene::SceneAuthoringRevision` is the source revision stamp.
+- `nara_tooling::SceneEditorMode` represents `Edit`, `Play`, and `Paused`.
+- `nara_tooling::SceneEditorState` owns the first UI-agnostic lifecycle controller.
+- `nara_tooling::ScenePlaySession` stores the isolated runtime `World`, `SceneEntityMap`, and
+  source revision.
+
 Important invariants:
 
 - A Play world records the edit document revision it was spawned from.
@@ -158,6 +166,9 @@ sequenceDiagram
 
 Rules:
 
+- The current implementation exposes `SceneApplyChangesReport` as a guard only. It returns
+  diagnostics for unsupported apply-back or revision mismatch and does not produce
+  `ScenePatchDocument` values yet.
 - Apply Changes never copies raw runtime `Entity`, `AssetId`, backend handles, task handles, GPU
   resources, timers, or transient events into scene documents.
 - Apply Changes must be component-schema-aware. Only serializable or explicitly authoring-mapped
@@ -202,7 +213,10 @@ automatic persistence the default.
 
 ## Consequences
 
-- `nara_editor` or a future editor crate should own mode state and Play world lifecycle.
+- `nara_tooling` currently owns UI-agnostic mode state and Play world lifecycle. A future
+  `nara_editor` crate should take over only when viewport scheduling, input routing, render
+  integration, hot reload streaming, or multiple simultaneous Play worlds require editor-owned
+  orchestration.
 - `nara_scene` should continue treating documents as persistent data and worlds as projections.
 - `nara_tooling` must expose mode-aware models rather than assuming every inspector command is
   persistent.
@@ -217,7 +231,7 @@ automatic persistence the default.
 |---|---:|---|
 | Play isolation | Play systems cannot mutate the edit preview world accidentally | Play Mode tests with distinct entity maps |
 | Stop safety | Stop Play discards runtime-only changes by default | Play/Stop integration test |
-| Explicit persistence | Apply Changes creates `ScenePatchDocument` and undo entry | Apply-back tests |
+| Explicit persistence | Apply Changes is explicit; current guard rejects unsupported write-back and revision mismatch without producing patches | Apply Changes guard tests; future apply-back tests |
 | Revision safety | Apply-back detects edit document changes made after Play started | Revision mismatch test |
 | Persistence hygiene | Runtime `Entity`, `AssetId`, backend handles, and transient components never serialize into scene data | Serialization leak search and tests |
 
@@ -233,7 +247,6 @@ automatic persistence the default.
 
 ## Follow-Up Questions
 
-- What exact type owns `EditorMode`: future `nara_editor`, `nara_tooling`, or `nara_app` resource?
 - What is the first supported Apply Changes subset: selected entity fields, entire selected
   component, or whole scene diff?
 - How should a Play world receive hot reloaded assets without mutating the edit document?

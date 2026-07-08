@@ -53,7 +53,7 @@ flowchart TD
     App --> SpriteRender[nara_sprite_render: 2D extract + queue + batch]
     App --> Window[nara_window: normalized window data]
     Window --> WinitAdapter[nara_winit adapter]
-    App --> Tooling[nara_tooling: snapshots + UI-agnostic inspector model]
+    App --> Tooling[nara_tooling: snapshots + UI-agnostic inspector + Play Mode model]
     Render --> SpriteRender
     Sprite --> SpriteRender
     Tilemap --> SpriteRender
@@ -83,7 +83,7 @@ flowchart TD
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Gameplay APIs and renderer backend internals |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, and colored quad submission from `SpriteBatches` |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
-| `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneInspectorModel`, `SceneInspectorCommand`, `ToolingPlugin` | UI-agnostic inspector/query/command models consumed by egui, dear-imgui, future nara UI, and AI agents |
+| `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `ToolingPlugin` | UI-agnostic inspector/query/command models, isolated Play Mode lifecycle state, and conservative Apply Changes status guards consumed by egui, dear-imgui, future nara UI, and AI agents |
 
 ## Runtime Flow
 
@@ -164,17 +164,18 @@ sequenceDiagram
 
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
-- `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
+- `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then applies field/reparent commands as scene patches.
-- Play Mode uses an isolated runtime `World` spawned from a validated edit document snapshot. Stop Play discards runtime changes by default; Apply Changes is explicit and must produce scene patches.
+- `nara_tooling::SceneEditorState` owns the first UI-agnostic Play Mode model. It starts plain, prefab-resolved, asset-aware, and combined Play sessions by spawning a fresh isolated runtime `World` through `SceneSpawner`, exposes Play/Paused/Edit mode state, and rejects persistent inspector edits while Play or Paused is active.
+- Stop Play drops the runtime `World` and discards runtime changes by default. `SceneApplyChangesReport` currently provides only conservative diagnostics for unsupported apply-back or source revision mismatch; patch export/diffing remains deferred.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
 ## Next Implementation Slices
 
-1. Implement editor mode state and isolated Play world lifecycle from ADR 0034.
-2. Add the first debug UI adapter that renders `SceneInspectorModel` and submits `SceneInspectorCommand`.
+1. Add the first debug UI adapter that renders `SceneEditorModel` / `SceneInspectorModel` and submits mode-aware tooling commands.
+2. Define the first supported Apply Changes subset and implement runtime-to-`ScenePatchDocument` diffing behind the existing guarded status API.
 3. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
 4. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
 5. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
