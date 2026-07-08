@@ -555,6 +555,7 @@ dependencies = [
  "nara_scene",
  "nara_tooling",
  "nara_transform",
+ "nara_window",
 ]
 
 [[package]]
@@ -668,6 +669,17 @@ dependencies = [
  "bevy_ecs",
  "nara_core",
  "nara_ecs",
+ "serde",
+]
+
+[[package]]
+name = "nara_window"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_app",
+ "nara_ecs",
+ "raw-window-handle",
  "serde",
 ]
 

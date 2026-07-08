@@ -12,6 +12,7 @@ pub use nara_render as render;
 pub use nara_scene as scene;
 pub use nara_tooling as tooling;
 pub use nara_transform as transform;
+pub use nara_window as window;
 
 use nara_app::{App, Plugin};
 
@@ -57,4 +58,8 @@ pub mod prelude {
     };
     pub use nara_tooling::{ToolingPlugin, WorldSnapshot};
     pub use nara_transform::{GlobalTransform2d, Transform2d};
+    pub use nara_window::{
+        PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowEvent, WindowEvents, WindowId,
+        WindowMode, WindowPlugin, WindowResolution, apply_window_event, push_window_event,
+    };
 }
