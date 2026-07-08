@@ -57,6 +57,7 @@ nara_winit = { path = "crates/nara_winit" }
 
 bevy_ecs = "0.19"
 bevy_reflect = { version = "0.19", features = ["glam"] }
+blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
 glam = { version = "0.30", features = ["serde"] }
 raw-window-handle = "0.6"

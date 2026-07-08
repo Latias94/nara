@@ -55,9 +55,15 @@ pub mod prelude {
         App, AppExit, AppRunError, CoreStage, FixedTime, Plugin, PluginError, StartupStage, Time,
     };
     pub use nara_asset::{
-        Asset, AssetDatabaseError, AssetError, AssetId, AssetMeta, AssetPath, AssetPathError,
-        AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, Handle,
-        MissingMetaPolicy, ProjectAssetDatabase, StableAssetId, StableAssetIdError,
+        ArtifactFormatVersion, ArtifactLabel, Asset, AssetDatabaseError, AssetError, AssetId,
+        AssetMeta, AssetPath, AssetPathError, AssetRecord, AssetRef, AssetRefError, AssetServer,
+        AssetSourceKind, Assets, DigestParseError, Handle, ImportArtifactDigest, ImportArtifactKey,
+        ImportArtifactPath, ImportArtifactPathError, ImportArtifactRecord, ImportDependency,
+        ImportDependencyDigest, ImportDependencyRole, ImportError, ImportLabelError,
+        ImportLabelKind, ImportProfile, ImportRequest, ImportSettingsHash, ImportedAssetType,
+        Importer, ImporterDescriptor, ImporterDescriptorError, ImporterId, ImporterRegistry,
+        ImporterRegistryError, ImporterSelectionError, ImporterVersion, MissingMetaPolicy,
+        ProjectAssetDatabase, SourceExtension, SourceHash, StableAssetId, StableAssetIdError,
     };
     pub use nara_audio::{AudioClip, AudioCommand, AudioSink};
     pub use nara_core::{Color, Vec2, Vec3};

@@ -1,7 +1,9 @@
 //! Asset identity, project metadata, typed handles, and in-memory asset tables.
 
+mod artifact;
 mod database;
 mod identity;
+mod import;
 mod server;
 mod storage;
 
@@ -10,12 +12,23 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+pub use artifact::{
+    ArtifactFormatVersion, ArtifactLabel, DigestParseError, ImportArtifactDigest,
+    ImportArtifactKey, ImportArtifactPath, ImportArtifactPathError, ImportArtifactRecord,
+    ImportDependency, ImportDependencyDigest, ImportDependencyRole, ImportLabelError,
+    ImportLabelKind, ImportProfile, ImportSettingsHash, ImportedAssetType, ImporterId,
+    ImporterVersion, SourceHash,
+};
 pub use database::{
     AssetDatabaseError, AssetMeta, AssetRecord, AssetSourceKind, MissingMetaPolicy,
     ProjectAssetDatabase,
 };
 pub use identity::{
     AssetId, AssetPath, AssetPathError, AssetRef, StableAssetId, StableAssetIdError,
+};
+pub use import::{
+    ImportError, ImportRequest, Importer, ImporterDescriptor, ImporterDescriptorError,
+    ImporterRegistry, ImporterRegistryError, ImporterSelectionError, SourceExtension,
 };
 pub use server::{AssetError, AssetServer};
 pub use storage::{Asset, Assets, Handle};

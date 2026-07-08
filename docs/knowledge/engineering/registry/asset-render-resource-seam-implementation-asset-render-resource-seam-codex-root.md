@@ -4,13 +4,13 @@ title: "Asset render resource seam implementation"
 description: "Plan and implementation lane for ADR 0033 asset import and render resource preparation seam."
 timestamp: 2026-07-08T10:07:14Z
 status: "active"
-last_seen: 2026-07-08T10:22:10Z
+last_seen: 2026-07-08T10:36:11Z
 registration_id: "asset-render-resource-seam-codex-root"
 tags: ["nara", "asset", "render", "ce-plan", "ce-work"]
 producer_id: "codex-root"
 related_plan: "docs/plans/2026-07-08-004-feat-asset-render-resource-seam-plan.md"
 git_branch: "feat/asset-render-resource-seam"
-latest_link: "docs/knowledge/engineering/logs/2026-07/2026-07-08T102159Z-verification-u1-asset-identity-and-project-database-implemented-stableassetid-uuid-validatio.md"
+latest_link: "docs/knowledge/engineering/logs/2026-07/2026-07-08T103611Z-verification-u2-importer-registry-and-import-artifact-cache-records-implemented-blake3-backe.md"
 ---
 
 # Scope
@@ -19,10 +19,11 @@ Implement stable asset metadata, importer cache, image assets, render prepare st
 
 # Current Claim
 
-U1 asset identity/database is implemented and locally verified; next unit is U2 importer registry and deterministic import artifact cache records.
+U1 and U2 are implemented and locally verified; next unit is U3 nara_image with PNG-first image import through the importer registry.
 
 # Latest Links
 
+- docs/knowledge/engineering/logs/2026-07/2026-07-08T103611Z-verification-u2-importer-registry-and-import-artifact-cache-records-implemented-blake3-backe.md
 - docs/knowledge/engineering/logs/2026-07/2026-07-08T102159Z-verification-u1-asset-identity-and-project-database-implemented-stableassetid-uuid-validatio.md
 - docs/plans/2026-07-08-004-feat-asset-render-resource-seam-plan.md
 
