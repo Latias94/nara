@@ -1,0 +1,18 @@
+[package]
+name = "nara_scene"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+bevy_ecs.workspace = true
+nara_app.workspace = true
+nara_core.workspace = true
+nara_ecs.workspace = true
+nara_transform.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde", "nara_core/serde", "nara_ecs/serde", "nara_transform/serde"]

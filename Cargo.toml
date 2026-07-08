@@ -1,0 +1,76 @@
+[package]
+name = "nara"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+description = "A Rust-native, declarative, data-driven game engine foundation."
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/nara_app",
+    "crates/nara_asset",
+    "crates/nara_audio",
+    "crates/nara_core",
+    "crates/nara_diagnostic",
+    "crates/nara_ecs",
+    "crates/nara_input",
+    "crates/nara_reflect",
+    "crates/nara_render",
+    "crates/nara_scene",
+    "crates/nara_tooling",
+    "crates/nara_transform",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+nara_app = { path = "crates/nara_app" }
+nara_asset = { path = "crates/nara_asset" }
+nara_audio = { path = "crates/nara_audio" }
+nara_core = { path = "crates/nara_core" }
+nara_diagnostic = { path = "crates/nara_diagnostic" }
+nara_ecs = { path = "crates/nara_ecs" }
+nara_input = { path = "crates/nara_input" }
+nara_reflect = { path = "crates/nara_reflect" }
+nara_render = { path = "crates/nara_render" }
+nara_scene = { path = "crates/nara_scene" }
+nara_tooling = { path = "crates/nara_tooling" }
+nara_transform = { path = "crates/nara_transform" }
+
+bevy_ecs = "0.19"
+bevy_reflect = { version = "0.19", features = ["glam"] }
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+
+[dependencies]
+nara_app.workspace = true
+nara_asset.workspace = true
+nara_audio.workspace = true
+nara_core.workspace = true
+nara_diagnostic.workspace = true
+nara_ecs.workspace = true
+nara_input.workspace = true
+nara_reflect.workspace = true
+nara_render.workspace = true
+nara_scene.workspace = true
+nara_tooling.workspace = true
+nara_transform.workspace = true
+
+[features]
+default = []
+serde = [
+    "nara_asset/serde",
+    "nara_core/serde",
+    "nara_ecs/serde",
+    "nara_transform/serde",
+    "nara_render/serde",
+    "nara_scene/serde",
+]

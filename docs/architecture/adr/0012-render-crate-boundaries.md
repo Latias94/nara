@@ -1,0 +1,77 @@
+# ADR 0012: Render Crate Boundaries
+
+**Status**: Accepted
+**Date**: 2026-07-08
+
+## Context
+
+nara needs a mature renderer architecture without pulling wgpu details into user-facing gameplay crates. We have accepted a dimension-aware runtime and phase-based rendering.
+
+## Decision
+
+Split render crates by authoring domain, render domain, and backend implementation.
+
+Target crate taxonomy:
+
+```text
+nara_render
+  View, ExtractedView, render phases, render items, frame stats, backend traits
+
+nara_render_wgpu
+  wgpu instance/device/surface/pipeline/buffer/texture implementation
+
+nara_sprite
+  Sprite, SpriteMaterial, TextureAtlas, sprite authoring data
+
+nara_tilemap
+  Tilemap, TileLayer, Tileset, tile authoring data
+
+nara_sprite_render
+  sprite/tilemap extraction, queueing, sorting, batching for nara_render
+```
+
+Phase 1 may collapse some crates temporarily, but public module responsibilities should follow this split.
+
+## Alternatives Considered
+
+### Option A: One `nara_render` crate with everything
+
+**Pros**: Simple initial Cargo setup.
+
+**Cons**: wgpu, sprite, tilemap, and render-domain abstractions become entangled.
+
+**Decision**: Rejected as the long-term design.
+
+### Option B: Bevy render stack wholesale
+
+**Pros**: Mature renderer.
+
+**Cons**: Too complex and too Bevy-shaped for nara's product boundary.
+
+**Decision**: Rejected.
+
+### Option C: Domain/backend split (Chosen)
+
+**Pros**: Keeps authoring data clean, backend replaceable, and 3D expansion additive.
+
+**Cons**: More crates and integration points.
+
+**Decision**: Chosen.
+
+## Success Metrics
+
+| Metric | Target | Measurement |
+|---|---:|---|
+| Backend isolation | Gameplay/domain crates do not import `wgpu` | `rg "wgpu::" crates` |
+| Authoring clarity | Sprite/tilemap users do not touch mesh/pipeline internals | Example review |
+| Phase model | Extraction/queue/sort/render are explicit | Code review |
+| 3D readiness | Future mesh/PBR crates can add render phases without replacing sprite pipeline | Design review |
+
+## Risks and Mitigations
+
+| Risk | Severity | Likelihood | Mitigation |
+|---|---|---:|---|
+| Too many crates too early | Medium | Medium | Collapse temporarily but keep module responsibilities clear |
+| Render traits become too generic | High | Medium | Design from concrete sprite/tilemap and future mesh needs |
+| Backend leaks upward | High | Medium | Enforce dependency direction and tests |
+
