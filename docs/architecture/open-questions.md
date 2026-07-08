@@ -200,14 +200,18 @@ Accepted direction: the editor is a client of runtime APIs and should dogfood na
 
 Runtime UI is nara-owned ECS UI; egui/dear-imgui-rs are allowed for early debug/editor tooling only. See ADR [0025-runtime-ui-system.md](adr/0025-runtime-ui-system.md).
 
-Editor/AI authoring changes use validated patch transactions with undo/redo support. See ADR [0026-editor-command-patch-and-undo-model.md](adr/0026-editor-command-patch-and-undo-model.md).
+Editor/AI authoring changes use validated patch transactions with undo/redo support. The first
+live sync boundary is `SceneAuthoringSession`, which projects a document into a managed live
+`World` slice by rebuild. See ADR
+[0026-editor-command-patch-and-undo-model.md](adr/0026-editor-command-patch-and-undo-model.md).
 
 Follow-up details still to settle:
 
 1. Does debug UI use egui first or dear-imgui-rs first?
 2. What is the minimum `WorldSnapshot` needed for inspector work?
 3. What minimum runtime UI is required before editor dogfooding?
-4. What live `WorldCommand` bridge is needed to apply accepted document patches during Play Mode?
+4. Which accepted patch operations need specialized incremental `WorldCommand` paths before
+   rebuild-style projection is too expensive?
 
 ## Backend and Domain Extension Seams
 

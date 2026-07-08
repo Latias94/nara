@@ -105,7 +105,8 @@ pub mod prelude {
     pub use nara_scene::{
         Children, HierarchyPlugin, InMemoryPrefabSourceResolver, Name, Parent, PrefabDocument,
         PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
-        PrefabSourceResolver, SceneComponentRecord, SceneDocument, SceneEntityId,
+        PrefabSourceResolver, SceneAuthoringHistoryStatus, SceneAuthoringSession,
+        SceneAuthoringSyncReport, SceneComponentRecord, SceneDocument, SceneEntityId,
         SceneEntityIdError, SceneEntityMap, SceneEntityRecord, SceneEntitySource,
         SceneExportOptions, SceneExportReport, SceneFormatError, SceneInstanceId,
         ScenePatchDocument, ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner,

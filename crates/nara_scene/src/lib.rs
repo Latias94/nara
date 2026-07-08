@@ -1,5 +1,6 @@
 //! Scene runtime hierarchy components and persistent scene document data.
 
+mod authoring;
 mod document;
 mod export;
 mod format;
@@ -12,6 +13,7 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use authoring::{SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneAuthoringSyncReport};
 pub use document::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError, SceneEntityRecord,
 };

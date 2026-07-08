@@ -73,7 +73,7 @@ flowchart TD
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Bevy-reflect-backed component metadata, asset-aware scene preflight, schema export, and migrations |
 | `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records | Import cache records, hot reload, dependency graph |
-| `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `ScenePatchDocument`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, field-level prefab overrides, nested prefab expansion, hot reload validation |
+| `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
 | `nara_sprite` | `Sprite`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` texture binding | Sprite authoring component data; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into textured quads now and chunked cached render data later |
@@ -164,13 +164,14 @@ sequenceDiagram
 
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
+- `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
 ## Next Implementation Slices
 
-1. Connect document patch transactions to live editor/runtime world synchronization and an undo stack UI.
-2. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
-3. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
-4. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot`, `ComponentRegistry`, scene diagnostics, and patch reports.
+1. Add an editor/debug UI adapter that consumes `SceneAuthoringSession`, `WorldSnapshot`, `ComponentRegistry`, scene diagnostics, and patch reports.
+2. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
+3. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
+4. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
