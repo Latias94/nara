@@ -20,7 +20,7 @@ nara will use a **dimension-aware runtime** with **2D-first authoring**.
 
 This means:
 
-- User-facing Phase 1 APIs optimize for 2D: `Transform2d`, `Camera2d`, `Sprite`, `Tilemap`, `Layer`, `SortKey`, and `Texture2d`.
+- User-facing Phase 1 APIs optimize for 2D: `Transform2d`, `Camera2d`, `Sprite`, `Tilemap`, `Layer`, `SortKey`, `Handle<ImageAsset>`, and `TextureRegion`.
 - Runtime infrastructure must be designed as multi-domain from the start: scene storage, asset handles, render extraction, view/camera targets, render phases, and plugin lifecycle must not assume 2D only.
 - 3D support should be added as parallel domain modules later: `Transform3d`, `Camera3d`, `Mesh`, `Material3d`, `Light`, `SpatialBounds`, `Visibility3d`, and 3D render phases.
 - Scene and prefab files remain component-based and dimension-neutral. A scene is entities plus registered components, not a "2D scene" or "3D scene" file type.

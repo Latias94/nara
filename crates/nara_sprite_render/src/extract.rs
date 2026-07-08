@@ -1,17 +1,21 @@
+use nara_asset::Assets;
 use nara_core::{Color, Vec2};
-use nara_ecs::{Entity, Query, ResMut};
+use nara_ecs::{Entity, Query, Res, ResMut};
 use nara_render::RenderPhaseLabel;
 use nara_sprite::Sprite;
-use nara_tilemap::{TileCoord, TileIndex, Tilemap};
+use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::Transform2d;
 
-use crate::{ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, SpriteRenderStats};
+use crate::{
+    ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, SpriteRenderStats, TextureUvRect,
+};
 
 pub fn extract_sprites(
     mut extracted: ResMut<ExtractedSprites>,
     mut stats: ResMut<SpriteRenderStats>,
     sprites: Query<(Entity, &Sprite, Option<&Transform2d>)>,
     tilemaps: Query<(Entity, &Tilemap, Option<&Transform2d>)>,
+    tilesets: Option<Res<Assets<TileSet>>>,
 ) {
     extracted.clear();
     *stats = SpriteRenderStats::default();
@@ -23,17 +27,32 @@ pub fn extract_sprites(
     }
 
     for (entity, tilemap, transform) in tilemaps.iter() {
+        let tileset = tilemap.tileset.and_then(|handle| {
+            tilesets
+                .as_deref()
+                .and_then(|tilesets| tilesets.get(handle))
+        });
+        let missing_tileset = tilemap.tileset.is_some() && tileset.is_none();
         for (coord, cell) in tilemap.cells() {
             let source_order = next_source_order(&extracted);
-            extracted.push(extract_tile_cell(
+            let extracted_cell = extract_tile_cell(
                 entity,
                 tilemap,
+                tileset,
                 transform,
                 coord,
                 cell.tile,
                 cell.color,
                 source_order,
-            ));
+            );
+            if missing_tileset {
+                stats.missing_tilesets = stats.missing_tilesets.saturating_add(1);
+            } else if tileset.and_then(|tileset| tileset.image).is_some()
+                && !extracted_cell.is_textured()
+            {
+                stats.invalid_tile_regions = stats.invalid_tile_regions.saturating_add(1);
+            }
+            extracted.push(extracted_cell);
             stats.extracted_tile_cells = stats.extracted_tile_cells.saturating_add(1);
         }
     }
@@ -57,6 +76,10 @@ pub fn extract_sprite(
         source_order,
         kind: ExtractedSpriteKind::Sprite,
         texture: sprite.texture,
+        texture_region: sprite
+            .texture_region
+            .map(TextureUvRect::from_texture_region)
+            .unwrap_or(TextureUvRect::FULL),
         world_center: matrix.transform_point2(local_center),
         world_x_axis: matrix.transform_vector2(local_x_axis),
         world_y_axis: matrix.transform_vector2(local_y_axis),
@@ -71,6 +94,7 @@ pub fn extract_sprite(
 pub fn extract_tile_cell(
     entity: Entity,
     tilemap: &Tilemap,
+    tileset: Option<&TileSet>,
     transform: Option<&Transform2d>,
     coord: TileCoord,
     tile: TileIndex,
@@ -86,12 +110,23 @@ pub fn extract_tile_cell(
     );
     let local_x_axis = Vec2::new(tile_size.x * 0.5, 0.0);
     let local_y_axis = Vec2::new(0.0, tile_size.y * 0.5);
+    let tile_texture = tileset.and_then(|tileset| {
+        Some((
+            tileset.image?,
+            tileset
+                .normalized_region(tile)
+                .map(|region| TextureUvRect::new(region.min, region.size))?,
+        ))
+    });
 
     ExtractedSprite {
         entity,
         source_order,
         kind: ExtractedSpriteKind::TilemapCell { coord, tile },
-        texture: None,
+        texture: tile_texture.map(|(texture, _)| texture),
+        texture_region: tile_texture
+            .map(|(_, texture_region)| texture_region)
+            .unwrap_or(TextureUvRect::FULL),
         world_center: matrix.transform_point2(local_center),
         world_x_axis: matrix.transform_vector2(local_x_axis),
         world_y_axis: matrix.transform_vector2(local_y_axis),

@@ -1,12 +1,16 @@
 use std::cmp::Ordering;
 
+use nara_asset::Assets;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
-use nara_render::{ExtractedView, ExtractedViews, RenderPhaseLabel};
+use nara_image::{ImageAsset, PreparedImageResource, image_resource_key};
+use nara_render::{
+    ExtractedView, ExtractedViews, PreparedRenderResources, RenderPhaseLabel, RenderResourceKey,
+};
 
 use crate::{
     ExtractedSprite, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches,
-    SpriteInstance, SpriteRenderStats,
+    SpriteInstance, SpriteRenderStats, TextureUvRect,
 };
 
 pub fn queue_sprites(
@@ -14,23 +18,26 @@ pub fn queue_sprites(
     mut stats: ResMut<SpriteRenderStats>,
     views: Res<ExtractedViews>,
     extracted: Res<crate::ExtractedSprites>,
+    images: Option<Res<Assets<ImageAsset>>>,
+    prepared_images: Option<Res<PreparedRenderResources<PreparedImageResource>>>,
 ) {
     queued.clear();
-    stats.unsupported_textured_sprites = saturating_u32(
-        extracted
-            .as_slice()
-            .iter()
-            .filter(|sprite| sprite.is_textured())
-            .count(),
+    stats.missing_textures = 0;
+    stats.unprepared_textures = 0;
+    stats.invalid_texture_regions = 0;
+
+    let queueable_sprites = resolve_queueable_sprites(
+        extracted.as_slice().iter(),
+        images.as_deref(),
+        prepared_images.as_deref(),
+        &mut stats,
     );
 
     for (view_index, view) in views.as_slice().iter().enumerate() {
-        for sprite in extracted
-            .as_slice()
-            .iter()
-            .filter(|sprite| !sprite.is_textured())
-        {
-            let Some(instance) = project_sprite_to_view(view, sprite) else {
+        for queueable in &queueable_sprites {
+            let Some(instance) =
+                project_sprite_to_view_with_uv(view, queueable.sprite, queueable.uv)
+            else {
                 continue;
             };
 
@@ -38,11 +45,12 @@ pub fn queue_sprites(
                 view_index,
                 view_order: view.order,
                 target: view.target,
-                phase: sprite.phase,
-                layer: sprite.layer,
-                sort_key: sprite.sort_key,
-                entity_bits: sprite.entity.to_bits(),
-                source_order: sprite.source_order,
+                phase: queueable.sprite.phase,
+                layer: queueable.sprite.layer,
+                sort_key: queueable.sprite.sort_key,
+                texture: queueable.texture,
+                entity_bits: queueable.sprite.entity.to_bits(),
+                source_order: queueable.sprite.source_order,
                 instance,
             });
         }
@@ -67,12 +75,22 @@ pub fn project_sprite_to_view(
     view: &ExtractedView,
     sprite: &ExtractedSprite,
 ) -> Option<SpriteInstance> {
-    world_to_clip_instance(
+    project_sprite_to_view_with_uv(view, sprite, sprite.texture_region)
+}
+
+#[must_use]
+pub fn project_sprite_to_view_with_uv(
+    view: &ExtractedView,
+    sprite: &ExtractedSprite,
+    uv: TextureUvRect,
+) -> Option<SpriteInstance> {
+    world_to_clip_instance_with_uv(
         view,
         sprite.world_center,
         sprite.world_x_axis,
         sprite.world_y_axis,
         sprite.color,
+        uv,
     )
 }
 
@@ -84,6 +102,25 @@ pub fn world_to_clip_instance(
     world_y_axis: Vec2,
     color: Color,
 ) -> Option<SpriteInstance> {
+    world_to_clip_instance_with_uv(
+        view,
+        world_center,
+        world_x_axis,
+        world_y_axis,
+        color,
+        TextureUvRect::FULL,
+    )
+}
+
+#[must_use]
+pub fn world_to_clip_instance_with_uv(
+    view: &ExtractedView,
+    world_center: Vec2,
+    world_x_axis: Vec2,
+    world_y_axis: Vec2,
+    color: Color,
+    uv: TextureUvRect,
+) -> Option<SpriteInstance> {
     let world_extent = view_world_extent(view)?;
     let clip_scale = Vec2::new(2.0 / world_extent.x, 2.0 / world_extent.y);
 
@@ -92,6 +129,7 @@ pub fn world_to_clip_instance(
         x_axis: world_x_axis * clip_scale,
         y_axis: world_y_axis * clip_scale,
         color,
+        uv,
     })
 }
 
@@ -125,6 +163,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             && batch.phase == item.phase
             && batch.layer == item.layer
             && batch.sort_key == item.sort_key
+            && batch.texture == item.texture
         {
             batch.instances.push(item.instance);
             continue;
@@ -137,6 +176,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             phase: item.phase,
             layer: item.layer,
             sort_key: item.sort_key,
+            texture: item.texture,
             instances: vec![item.instance],
         });
     }
@@ -153,6 +193,7 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
         left.sort_key,
         left.source_order,
         left.entity_bits,
+        left.texture,
     )
         .cmp(&(
             right.view_order,
@@ -162,6 +203,7 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
             right.sort_key,
             right.source_order,
             right.entity_bits,
+            right.texture,
         ))
 }
 
@@ -184,4 +226,65 @@ pub fn phase_order(phase: RenderPhaseLabel) -> u8 {
 
 fn saturating_u32(value: usize) -> u32 {
     value.min(u32::MAX as usize) as u32
+}
+
+struct QueueableSprite<'a> {
+    sprite: &'a ExtractedSprite,
+    texture: Option<RenderResourceKey>,
+    uv: TextureUvRect,
+}
+
+fn resolve_queueable_sprites<'a>(
+    sprites: impl Iterator<Item = &'a ExtractedSprite>,
+    images: Option<&Assets<ImageAsset>>,
+    prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
+    stats: &mut SpriteRenderStats,
+) -> Vec<QueueableSprite<'a>> {
+    sprites
+        .filter_map(|sprite| {
+            resolve_sprite_texture(sprite, images, prepared_images, stats).map(|(texture, uv)| {
+                QueueableSprite {
+                    sprite,
+                    texture,
+                    uv,
+                }
+            })
+        })
+        .collect()
+}
+
+fn resolve_sprite_texture(
+    sprite: &ExtractedSprite,
+    images: Option<&Assets<ImageAsset>>,
+    prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
+    stats: &mut SpriteRenderStats,
+) -> Option<(Option<RenderResourceKey>, TextureUvRect)> {
+    if !sprite.texture_region.is_valid() {
+        stats.invalid_texture_regions = stats.invalid_texture_regions.saturating_add(1);
+        return None;
+    }
+
+    let Some(texture) = sprite.texture else {
+        return Some((None, sprite.texture_region));
+    };
+    let Some(images) = images else {
+        stats.missing_textures = stats.missing_textures.saturating_add(1);
+        return None;
+    };
+    if images.get(texture).is_none() {
+        stats.missing_textures = stats.missing_textures.saturating_add(1);
+        return None;
+    }
+
+    let key = image_resource_key(texture);
+    let Some(prepared_images) = prepared_images else {
+        stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
+        return None;
+    };
+    if prepared_images.get_ready(key).is_none() {
+        stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
+        return None;
+    }
+
+    Some((Some(key), sprite.texture_region))
 }

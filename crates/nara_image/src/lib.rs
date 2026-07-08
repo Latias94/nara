@@ -431,7 +431,10 @@ pub struct ImagePreparePlugin;
 
 impl Plugin for ImagePreparePlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<Assets<ImageAsset>>();
+        app.init_resource::<AssetStates>();
         app.init_resource::<PreparedRenderResources<PreparedImageResource>>();
+        app.init_resource::<RenderPrepareInvalidations>();
         app.init_resource::<ImagePrepareStats>();
         app.add_systems(CoreStage::Prepare, prepare_images);
     }

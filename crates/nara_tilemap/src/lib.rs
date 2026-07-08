@@ -3,9 +3,10 @@
 use std::collections::BTreeMap;
 
 use nara_app::{App, Plugin};
-use nara_asset::{AssetRef, AssetServer, Handle};
+use nara_asset::{AssetRef, AssetServer, Assets, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
+use nara_image::ImageAsset;
 use nara_reflect::{
     ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, PreparedComponent,
@@ -121,14 +122,146 @@ impl Default for TileLayer {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TileAtlasLayout {
+    pub tile_size: Vec2,
+    pub columns: u32,
+    pub rows: u32,
+    pub margin: Vec2,
+    pub spacing: Vec2,
+}
+
+impl TileAtlasLayout {
+    #[must_use]
+    pub fn new(tile_size: Vec2, columns: u32, rows: u32) -> Option<Self> {
+        let layout = Self {
+            tile_size,
+            columns,
+            rows,
+            margin: Vec2::ZERO,
+            spacing: Vec2::ZERO,
+        };
+        layout.is_valid().then_some(layout)
+    }
+
+    #[must_use]
+    pub fn grid(tile_size: Vec2, columns: u32, rows: u32) -> Self {
+        Self::new(tile_size, columns, rows).expect("tile atlas layout must be valid")
+    }
+
+    #[must_use]
+    pub fn with_margin(mut self, margin: Vec2) -> Self {
+        self.margin = margin;
+        assert!(self.is_valid(), "tile atlas margin must be valid");
+        self
+    }
+
+    #[must_use]
+    pub fn with_spacing(mut self, spacing: Vec2) -> Self {
+        self.spacing = spacing;
+        assert!(self.is_valid(), "tile atlas spacing must be valid");
+        self
+    }
+
+    #[must_use]
+    pub fn atlas_size(self) -> Vec2 {
+        Vec2::new(
+            self.margin
+                .x
+                .mul_add(2.0, self.tile_size.x * self.columns as f32)
+                + self.spacing.x * self.columns.saturating_sub(1) as f32,
+            self.margin
+                .y
+                .mul_add(2.0, self.tile_size.y * self.rows as f32)
+                + self.spacing.y * self.rows.saturating_sub(1) as f32,
+        )
+    }
+
+    #[must_use]
+    pub fn normalized_region(self, tile: TileIndex) -> Option<TileAtlasRegion> {
+        if !self.is_valid() {
+            return None;
+        }
+        let raw = tile.raw();
+        let x = raw % self.columns;
+        let y = raw / self.columns;
+        if y >= self.rows {
+            return None;
+        }
+
+        let atlas_size = self.atlas_size();
+        let min = Vec2::new(
+            self.margin.x + (self.tile_size.x + self.spacing.x) * x as f32,
+            self.margin.y + (self.tile_size.y + self.spacing.y) * y as f32,
+        ) / atlas_size;
+        let size = self.tile_size / atlas_size;
+        Some(TileAtlasRegion { min, size })
+    }
+
+    #[must_use]
+    pub fn is_valid(self) -> bool {
+        let atlas_size = self.atlas_size();
+        self.columns > 0
+            && self.rows > 0
+            && self.tile_size.is_finite()
+            && self.margin.is_finite()
+            && self.spacing.is_finite()
+            && self.tile_size.x > 0.0
+            && self.tile_size.y > 0.0
+            && self.margin.x >= 0.0
+            && self.margin.y >= 0.0
+            && self.spacing.x >= 0.0
+            && self.spacing.y >= 0.0
+            && atlas_size.is_finite()
+            && atlas_size.x > 0.0
+            && atlas_size.y > 0.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TileAtlasRegion {
+    pub min: Vec2,
+    pub size: Vec2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TileSet {
     pub tile_size: Vec2,
+    pub image: Option<Handle<ImageAsset>>,
+    pub atlas: Option<TileAtlasLayout>,
 }
 
 impl TileSet {
     #[must_use]
-    pub const fn new(tile_size: Vec2) -> Self {
-        Self { tile_size }
+    pub fn new(tile_size: Vec2) -> Self {
+        Self {
+            tile_size,
+            image: None,
+            atlas: None,
+        }
+    }
+
+    #[must_use]
+    pub fn from_image(image: Handle<ImageAsset>, atlas: TileAtlasLayout) -> Self {
+        Self {
+            tile_size: atlas.tile_size,
+            image: Some(image),
+            atlas: Some(atlas),
+        }
+    }
+
+    #[must_use]
+    pub fn with_image(mut self, image: Handle<ImageAsset>, atlas: TileAtlasLayout) -> Self {
+        self.tile_size = atlas.tile_size;
+        self.image = Some(image);
+        self.atlas = Some(atlas);
+        self
+    }
+
+    #[must_use]
+    pub fn normalized_region(self, tile: TileIndex) -> Option<TileAtlasRegion> {
+        let _image = self.image?;
+        self.atlas?.normalized_region(tile)
     }
 }
 
@@ -252,6 +385,7 @@ pub struct TilemapPlugin;
 
 impl Plugin for TilemapPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<Assets<TileSet>>();
         app.init_resource::<ComponentRegistry>();
         register_tilemap_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
     }
@@ -504,8 +638,8 @@ fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCode
 
 pub mod prelude {
     pub use crate::{
-        DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileCell, TileChunkCoord, TileCoord,
-        TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
+        DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileAtlasLayout, TileAtlasRegion,
+        TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
     };
 }
 
@@ -611,5 +745,23 @@ mod tests {
         assert_eq!(tilemap.tile_size, Vec2::new(8.0, 8.0));
         assert_eq!(tilemap.layer, TileLayer::new(4));
         assert_eq!(tilemap.sort_key, -9);
+    }
+
+    #[test]
+    fn tileset_records_image_handle_and_atlas_regions() {
+        let image = Handle::new(AssetId::from_raw(31));
+        let atlas = TileAtlasLayout::grid(Vec2::new(16.0, 8.0), 4, 2);
+        let tileset = TileSet::from_image(image, atlas);
+
+        assert_eq!(tileset.image, Some(image));
+        assert_eq!(tileset.tile_size, Vec2::new(16.0, 8.0));
+        assert_eq!(
+            tileset.normalized_region(TileIndex::new(5)),
+            Some(TileAtlasRegion {
+                min: Vec2::new(0.25, 0.5),
+                size: Vec2::new(0.25, 0.5),
+            })
+        );
+        assert_eq!(tileset.normalized_region(TileIndex::new(8)), None);
     }
 }

@@ -1,8 +1,9 @@
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
-use nara_render::{RenderPhaseLabel, RenderTarget};
-use nara_sprite::Texture2d;
+use nara_image::ImageAsset;
+use nara_render::{RenderPhaseLabel, RenderResourceKey, RenderTarget};
+use nara_sprite::TextureRegion;
 use nara_tilemap::{TileCoord, TileIndex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +17,8 @@ pub struct ExtractedSprite {
     pub entity: Entity,
     pub source_order: u64,
     pub kind: ExtractedSpriteKind,
-    pub texture: Option<Handle<Texture2d>>,
+    pub texture: Option<Handle<ImageAsset>>,
+    pub texture_region: TextureUvRect,
     pub world_center: Vec2,
     pub world_x_axis: Vec2,
     pub world_y_axis: Vec2,
@@ -30,6 +32,46 @@ impl ExtractedSprite {
     #[must_use]
     pub fn is_textured(self) -> bool {
         self.texture.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextureUvRect {
+    pub min: Vec2,
+    pub size: Vec2,
+}
+
+impl TextureUvRect {
+    pub const FULL: Self = Self {
+        min: Vec2::ZERO,
+        size: Vec2::ONE,
+    };
+
+    #[must_use]
+    pub const fn new(min: Vec2, size: Vec2) -> Self {
+        Self { min, size }
+    }
+
+    #[must_use]
+    pub fn from_texture_region(region: TextureRegion) -> Self {
+        Self::new(region.min, region.size)
+    }
+
+    #[must_use]
+    pub fn max(self) -> Vec2 {
+        self.min + self.size
+    }
+
+    #[must_use]
+    pub fn is_valid(self) -> bool {
+        self.min.is_finite()
+            && self.size.is_finite()
+            && self.size.x > 0.0
+            && self.size.y > 0.0
+            && self.min.x >= 0.0
+            && self.min.y >= 0.0
+            && self.max().x <= 1.0
+            && self.max().y <= 1.0
     }
 }
 
@@ -69,6 +111,7 @@ pub struct SpriteInstance {
     pub x_axis: Vec2,
     pub y_axis: Vec2,
     pub color: Color,
+    pub uv: TextureUvRect,
 }
 
 impl SpriteInstance {
@@ -79,6 +122,7 @@ impl SpriteInstance {
             x_axis: Vec2::new(half_size.x, 0.0),
             y_axis: Vec2::new(0.0, half_size.y),
             color,
+            uv: TextureUvRect::FULL,
         }
     }
 
@@ -96,6 +140,7 @@ pub struct QueuedSpriteItem {
     pub phase: RenderPhaseLabel,
     pub layer: i32,
     pub sort_key: i32,
+    pub texture: Option<RenderResourceKey>,
     pub entity_bits: u64,
     pub source_order: u64,
     pub instance: SpriteInstance,
@@ -148,6 +193,7 @@ pub struct SpriteBatch {
     pub phase: RenderPhaseLabel,
     pub layer: i32,
     pub sort_key: i32,
+    pub texture: Option<RenderResourceKey>,
     pub instances: Vec<SpriteInstance>,
 }
 
@@ -196,7 +242,11 @@ impl SpriteBatches {
 pub struct SpriteRenderStats {
     pub extracted_sprites: u32,
     pub extracted_tile_cells: u32,
-    pub unsupported_textured_sprites: u32,
+    pub missing_tilesets: u32,
+    pub invalid_tile_regions: u32,
+    pub missing_textures: u32,
+    pub unprepared_textures: u32,
+    pub invalid_texture_regions: u32,
     pub queued_items: u32,
     pub batches: u32,
 }

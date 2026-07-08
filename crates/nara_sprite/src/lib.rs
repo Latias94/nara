@@ -4,17 +4,11 @@ use nara_app::{App, Plugin};
 use nara_asset::{AssetRef, AssetServer, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
+use nara_image::ImageAsset;
 use nara_reflect::{
     ComponentCodecError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, PreparedComponent,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Texture2d {
-    pub width: u32,
-    pub height: u32,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -24,9 +18,48 @@ pub struct TextureRegion {
 }
 
 impl TextureRegion {
+    pub const FULL: Self = Self {
+        min: Vec2::ZERO,
+        size: Vec2::ONE,
+    };
+
     #[must_use]
     pub const fn new(min: Vec2, size: Vec2) -> Self {
         Self { min, size }
+    }
+
+    #[must_use]
+    pub fn from_pixels(min: Vec2, size: Vec2, image_size: Vec2) -> Option<Self> {
+        if image_size.x <= 0.0
+            || image_size.y <= 0.0
+            || !image_size.is_finite()
+            || !min.is_finite()
+            || !size.is_finite()
+            || size.x <= 0.0
+            || size.y <= 0.0
+        {
+            return None;
+        }
+
+        let region = Self::new(min / image_size, size / image_size);
+        region.is_valid_uv().then_some(region)
+    }
+
+    #[must_use]
+    pub fn max(self) -> Vec2 {
+        self.min + self.size
+    }
+
+    #[must_use]
+    pub fn is_valid_uv(self) -> bool {
+        self.min.is_finite()
+            && self.size.is_finite()
+            && self.size.x > 0.0
+            && self.size.y > 0.0
+            && self.min.x >= 0.0
+            && self.min.y >= 0.0
+            && self.max().x <= 1.0
+            && self.max().y <= 1.0
     }
 }
 
@@ -50,7 +83,7 @@ impl Default for SpriteAnchor {
 
 #[derive(Debug, Clone, PartialEq, Component)]
 pub struct Sprite {
-    pub texture: Option<Handle<Texture2d>>,
+    pub texture: Option<Handle<ImageAsset>>,
     pub texture_region: Option<TextureRegion>,
     pub color: Color,
     pub size: Vec2,
@@ -74,7 +107,7 @@ impl Sprite {
     }
 
     #[must_use]
-    pub fn from_texture(texture: Handle<Texture2d>, size: Vec2) -> Self {
+    pub fn from_texture(texture: Handle<ImageAsset>, size: Vec2) -> Self {
         Self {
             texture: Some(texture),
             texture_region: None,
@@ -84,6 +117,12 @@ impl Sprite {
             layer: 0,
             sort_key: 0,
         }
+    }
+
+    #[must_use]
+    pub fn with_texture_region(mut self, region: TextureRegion) -> Self {
+        self.texture_region = Some(region);
+        self
     }
 
     #[must_use]
@@ -118,6 +157,8 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
                 let size = read_vec2(value.field("size")?, "size")?;
                 let color = read_color(value.field("color")?, "color")?;
                 let texture_ref = read_optional_asset_ref(value.get("texture"), "texture")?;
+                let texture_region =
+                    read_optional_texture_region(value.get("texture_region"), "texture_region")?;
                 let layer = optional_i32(value, "layer")?.unwrap_or(0);
                 let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
 
@@ -125,7 +166,7 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
                     let texture = resolve_optional_texture(world, texture_ref.as_ref())?;
                     let sprite = Sprite {
                         texture,
-                        texture_region: None,
+                        texture_region,
                         color,
                         size,
                         anchor: SpriteAnchor::CENTER,
@@ -165,6 +206,14 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
                     ("sort_key", ComponentValue::I64(i64::from(sprite.sort_key))),
                 ];
                 fields.push(("texture", texture.unwrap_or(ComponentValue::Null)));
+                fields.push((
+                    "texture_region",
+                    sprite
+                        .texture_region
+                        .map(texture_region_value)
+                        .transpose()?
+                        .unwrap_or(ComponentValue::Null),
+                ));
                 Ok(Some(ComponentValue::map(fields)))
             },
         )
@@ -174,7 +223,7 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
 fn resolve_optional_texture(
     world: &mut World,
     texture_ref: Option<&AssetRef>,
-) -> Result<Option<Handle<Texture2d>>, ComponentCodecError> {
+) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
     let Some(texture_ref) = texture_ref else {
         return Ok(None);
     };
@@ -182,7 +231,7 @@ fn resolve_optional_texture(
         world.insert_resource(AssetServer::new());
     }
     texture_ref
-        .resolve::<Texture2d>(&mut world.resource_mut::<AssetServer>())
+        .resolve::<ImageAsset>(&mut world.resource_mut::<AssetServer>())
         .map(Some)
         .map_err(|error| ComponentCodecError::Message(error.to_string()))
 }
@@ -220,6 +269,35 @@ fn vec2_value(value: Vec2) -> Result<ComponentValue, ComponentCodecError> {
     Ok(ComponentValue::map([
         ("x", ComponentValue::f64(f64::from(value.x))?),
         ("y", ComponentValue::f64(f64::from(value.y))?),
+    ]))
+}
+
+fn read_optional_texture_region(
+    value: Option<&ComponentValue>,
+    field: &str,
+) -> Result<Option<TextureRegion>, ComponentCodecError> {
+    match value {
+        None | Some(ComponentValue::Null) => Ok(None),
+        Some(value) => {
+            let region = TextureRegion::new(
+                read_vec2(value.field("min")?, &format!("{field}.min"))?,
+                read_vec2(value.field("size")?, &format!("{field}.size"))?,
+            );
+            if !region.is_valid_uv() {
+                return Err(ComponentCodecError::invalid_field(
+                    field,
+                    "valid normalized uv region",
+                ));
+            }
+            Ok(Some(region))
+        }
+    }
+}
+
+fn texture_region_value(region: TextureRegion) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("min", vec2_value(region.min)?),
+        ("size", vec2_value(region.size)?),
     ]))
 }
 
@@ -286,7 +364,7 @@ fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCode
 }
 
 pub mod prelude {
-    pub use crate::{Sprite, SpriteAnchor, SpritePlugin, Texture2d, TextureRegion};
+    pub use crate::{Sprite, SpriteAnchor, SpritePlugin, TextureRegion};
 }
 
 #[cfg(test)]
@@ -309,10 +387,31 @@ mod tests {
     #[test]
     fn creates_texture_sprite_without_backend_handles() {
         let texture = Handle::new(AssetId::from_raw(7));
-        let sprite = Sprite::from_texture(texture, Vec2::new(32.0, 32.0));
+        let sprite = Sprite::from_texture(texture, Vec2::new(32.0, 32.0))
+            .with_texture_region(TextureRegion::new(Vec2::ZERO, Vec2::splat(0.5)));
 
         assert_eq!(sprite.texture, Some(texture));
+        assert_eq!(
+            sprite.texture_region,
+            Some(TextureRegion::new(Vec2::ZERO, Vec2::splat(0.5)))
+        );
         assert_eq!(sprite.color, Color::WHITE);
+    }
+
+    #[test]
+    fn converts_pixel_regions_to_normalized_uv_regions() {
+        let region = TextureRegion::from_pixels(
+            Vec2::new(16.0, 32.0),
+            Vec2::new(16.0, 16.0),
+            Vec2::new(64.0, 128.0),
+        )
+        .unwrap();
+
+        assert_eq!(
+            region,
+            TextureRegion::new(Vec2::new(0.25, 0.25), Vec2::new(0.25, 0.125))
+        );
+        assert!(region.is_valid_uv());
     }
 
     #[test]

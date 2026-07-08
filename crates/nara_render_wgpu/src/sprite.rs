@@ -172,6 +172,7 @@ mod tests {
     use super::*;
     use nara_core::{Color, Vec2};
     use nara_render::{RenderPhaseLabel, RenderTarget};
+    use nara_sprite_render::TextureUvRect;
 
     fn batch(instances: Vec<SpriteInstance>) -> SpriteBatch {
         SpriteBatch {
@@ -181,6 +182,7 @@ mod tests {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 0,
             sort_key: 0,
+            texture: None,
             instances,
         }
     }
@@ -192,6 +194,7 @@ mod tests {
             x_axis: Vec2::new(0.1, 0.2),
             y_axis: Vec2::new(-0.3, 0.4),
             color: Color::rgba(0.3, 0.4, 0.5, 0.6),
+            uv: TextureUvRect::FULL,
         }]);
 
         assert_eq!(

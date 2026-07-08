@@ -4,13 +4,13 @@ title: "Asset render resource seam implementation"
 description: "Plan and implementation lane for ADR 0033 asset import and render resource preparation seam."
 timestamp: 2026-07-08T10:07:14Z
 status: "active"
-last_seen: 2026-07-08T10:57:30Z
+last_seen: 2026-07-08T11:20:05Z
 registration_id: "asset-render-resource-seam-codex-root"
 tags: ["nara", "asset", "render", "ce-plan", "ce-work"]
 producer_id: "codex-root"
 related_plan: "docs/plans/2026-07-08-004-feat-asset-render-resource-seam-plan.md"
 git_branch: "feat/asset-render-resource-seam"
-latest_link: "docs/knowledge/engineering/logs/2026-07/2026-07-08T105730Z-verification-u5-render-prepare-implemented-nara-render-preparedrenderresources-table-render.md"
+latest_link: "docs/knowledge/engineering/logs/2026-07/2026-07-08T112005Z-verification-u6-textured-sprite-tilemap-batching-implemented-imageasset-renderresourcekey-uv.md"
 ---
 
 # Scope
@@ -19,10 +19,11 @@ Implement stable asset metadata, importer cache, image assets, render prepare st
 
 # Current Claim
 
-U1 through U5 are implemented and locally verified; next unit is U6 sprite/tilemap authoring and backend-neutral texture batching.
+U1 through U6 are implemented and locally verified; next unit is U7 wgpu texture cache, bind groups, sampler state, and shader sampling.
 
 # Latest Links
 
+- docs/knowledge/engineering/logs/2026-07/2026-07-08T112005Z-verification-u6-textured-sprite-tilemap-batching-implemented-imageasset-renderresourcekey-uv.md
 - docs/knowledge/engineering/logs/2026-07/2026-07-08T105730Z-verification-u5-render-prepare-implemented-nara-render-preparedrenderresources-table-render.md
 - docs/knowledge/engineering/logs/2026-07/2026-07-08T104945Z-verification-u4-asset-state-implemented-assetversion-loadstate-assetstates-assetevents-d.md
 - docs/knowledge/engineering/logs/2026-07/2026-07-08T104403Z-verification-u3-nara-image-implemented-backend-neutral-imageasset-metadata-pixels-sampler-ty.md

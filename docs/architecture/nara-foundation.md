@@ -75,9 +75,9 @@ flowchart TD
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath` | Loaders, import cache, hot reload, dependency graph |
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `SceneEntityId`, scene spawn/export | Scene/prefab patching, nested prefab source resolution, hot reload validation |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
-| `nara_sprite` | `Sprite`, `Texture2d`, `TextureRegion`, `SpriteAnchor` | Sprite authoring assets and component data; no backend handles |
-| `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into quads now and chunked cached render data later |
-| `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, and backend-neutral colored quad batches |
+| `nara_sprite` | `Sprite`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` texture binding | Sprite authoring component data; no backend handles |
+| `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into textured quads now and chunked cached render data later |
+| `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, resource-keyed textured quad batches |
 | `nara_input` | `InputState`, `KeyCode` | winit event normalization and action maps |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Gameplay APIs and renderer backend internals |
@@ -103,7 +103,7 @@ sequenceDiagram
         App->>ECS: PreUpdate / Update / PostUpdate
         Render->>ECS: extract Camera2d views
         SpriteRender->>ECS: extract Sprite / Tilemap / Transform2d data
-        SpriteRender->>SpriteRender: queue, sort, and batch colored quads
+        SpriteRender->>SpriteRender: queue, sort, and batch colored/textured quads
         Wgpu->>SpriteRender: read SpriteBatches
         Wgpu-->>App: FrameStats
     end

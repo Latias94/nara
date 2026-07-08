@@ -1448,6 +1448,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_image",
  "nara_reflect",
  "serde",
 ]
@@ -1461,6 +1462,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_image",
  "nara_render",
  "nara_sprite",
  "nara_tilemap",
@@ -1476,6 +1478,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_image",
  "nara_reflect",
  "serde",
 ]

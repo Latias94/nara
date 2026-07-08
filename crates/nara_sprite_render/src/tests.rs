@@ -2,14 +2,22 @@ use super::*;
 use std::time::Duration;
 
 use nara_app::App;
-use nara_asset::{AssetId, Handle};
+use nara_asset::{
+    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetId, AssetPath, AssetStates, Assets,
+    Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
+    ImportSettingsHash, ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
+};
 use nara_core::{Color, Vec2};
 use nara_ecs::Entity;
+use nara_image::{
+    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSamplerDescriptor,
+    ImageSourceMetadata, image_resource_key,
+};
 use nara_render::{
     Camera2d, ExtractedView, RenderImage2d, RenderPhaseLabel, RenderTarget, ViewportRect,
 };
-use nara_sprite::Sprite;
-use nara_tilemap::{TileCell, TileCoord, TileIndex, Tilemap};
+use nara_sprite::{Sprite, TextureRegion};
+use nara_tilemap::{TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::Transform2d;
 
 fn test_view() -> ExtractedView {
@@ -39,6 +47,7 @@ fn extraction_clears_stale_sprites_and_uses_identity_transform() {
             source_order: 99,
             kind: ExtractedSpriteKind::Sprite,
             texture: None,
+            texture_region: TextureUvRect::FULL,
             world_center: Vec2::new(9.0, 9.0),
             world_x_axis: Vec2::X,
             world_y_axis: Vec2::Y,
@@ -116,7 +125,7 @@ fn tilemap_cells_lower_to_world_positions() {
 }
 
 #[test]
-fn queueing_skips_textured_sprites_and_records_count() {
+fn queueing_records_missing_texture_assets() {
     let mut app = App::new();
     app.add_plugin(SpriteRenderPlugin).unwrap();
     app.world_mut().spawn(Camera2d {
@@ -133,7 +142,46 @@ fn queueing_skips_textured_sprites_and_records_count() {
     let queued = app.world().resource::<QueuedSpriteItems>();
     let stats = app.world().resource::<SpriteRenderStats>();
     assert!(queued.is_empty());
-    assert_eq!(stats.unsupported_textured_sprites, 1);
+    assert_eq!(stats.missing_textures, 1);
+    assert_eq!(stats.unprepared_textures, 0);
+}
+
+#[test]
+fn queueing_uses_prepared_image_resource_keys_and_uvs() {
+    let image = Handle::new(AssetId::from_raw(7));
+    let mut app = App::new();
+    app.add_plugin(SpriteRenderPlugin).unwrap();
+    insert_loaded_image(&mut app, image);
+    app.world_mut().spawn(Camera2d {
+        viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+        ..Camera2d::default()
+    });
+    app.world_mut().spawn(
+        Sprite::from_texture(image, Vec2::new(10.0, 10.0))
+            .with_texture_region(TextureRegion::new(Vec2::new(0.25, 0.0), Vec2::splat(0.5))),
+    );
+
+    app.run_once(Duration::ZERO).unwrap();
+
+    let queued = app.world().resource::<QueuedSpriteItems>();
+    let batches = app.world().resource::<SpriteBatches>();
+    let stats = app.world().resource::<SpriteRenderStats>();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(
+        queued.as_slice()[0].texture,
+        Some(image_resource_key(image))
+    );
+    assert_eq!(
+        queued.as_slice()[0].instance.uv,
+        TextureUvRect::new(Vec2::new(0.25, 0.0), Vec2::splat(0.5))
+    );
+    assert_eq!(batches.len(), 1);
+    assert_eq!(
+        batches.as_slice()[0].texture,
+        Some(image_resource_key(image))
+    );
+    assert_eq!(stats.missing_textures, 0);
+    assert_eq!(stats.unprepared_textures, 0);
 }
 
 #[test]
@@ -146,6 +194,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 0,
             sort_key: 0,
+            texture: None,
             entity_bits: Entity::from_raw_u32(3).unwrap().to_bits(),
             source_order: 0,
             instance: instance(),
@@ -157,6 +206,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 0,
             sort_key: 0,
+            texture: None,
             entity_bits: Entity::from_raw_u32(2).unwrap().to_bits(),
             source_order: 1,
             instance: instance(),
@@ -168,6 +218,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 1,
             sort_key: 0,
+            texture: None,
             entity_bits: Entity::from_raw_u32(1).unwrap().to_bits(),
             source_order: 2,
             instance: instance(),
@@ -179,6 +230,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 1,
             sort_key: 1,
+            texture: None,
             entity_bits: Entity::from_raw_u32(4).unwrap().to_bits(),
             source_order: 3,
             instance: instance(),
@@ -210,6 +262,44 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
     assert_eq!(batches[0].instances.len(), 2);
     assert_eq!(batches[1].instances.len(), 1);
     assert_eq!(batches[2].instances.len(), 1);
+}
+
+#[test]
+fn texture_changes_split_batches_without_reordering_source_order() {
+    let texture_a = image_resource_key(Handle::new(AssetId::from_raw(1)));
+    let texture_b = image_resource_key(Handle::new(AssetId::from_raw(2)));
+    let mut items = vec![
+        QueuedSpriteItem {
+            texture: Some(texture_a),
+            ..queued_item(0)
+        },
+        QueuedSpriteItem {
+            texture: Some(texture_b),
+            ..queued_item(1)
+        },
+        QueuedSpriteItem {
+            texture: Some(texture_a),
+            ..queued_item(2)
+        },
+    ];
+
+    items.sort_by(compare_queued_sprite_items);
+    let batches = build_sprite_batches(&items);
+
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.source_order)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+    assert_eq!(
+        batches
+            .iter()
+            .map(|batch| batch.texture)
+            .collect::<Vec<_>>(),
+        vec![Some(texture_a), Some(texture_b), Some(texture_a)]
+    );
 }
 
 #[test]
@@ -309,6 +399,40 @@ fn app_pipeline_extracts_tilemaps_into_batches() {
 }
 
 #[test]
+fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
+    let tileset = Handle::new(AssetId::from_raw(21));
+    let image = Handle::new(AssetId::from_raw(22));
+    let mut tilesets = Assets::<TileSet>::default();
+    tilesets.insert(
+        tileset,
+        TileSet::from_image(image, TileAtlasLayout::grid(Vec2::new(16.0, 16.0), 4, 2)),
+    );
+
+    let mut app = App::new();
+    app.add_plugin(SpriteRenderPlugin).unwrap();
+    app.world_mut().insert_resource(tilesets);
+    let mut tilemap = Tilemap::new(Vec2::new(16.0, 16.0)).with_tileset(tileset);
+    tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(5)));
+    app.world_mut().spawn(tilemap);
+
+    app.run_once(Duration::ZERO).unwrap();
+
+    let extracted = app.world().resource::<ExtractedSprites>();
+    assert_eq!(extracted.len(), 1);
+    assert_eq!(extracted.as_slice()[0].texture, Some(image));
+    assert_eq!(
+        extracted.as_slice()[0].texture_region,
+        TextureUvRect::new(Vec2::new(0.25, 0.5), Vec2::new(0.25, 0.5))
+    );
+    assert_eq!(
+        app.world()
+            .resource::<SpriteRenderStats>()
+            .invalid_tile_regions,
+        0
+    );
+}
+
+#[test]
 fn dirty_tile_chunks_can_clear_without_losing_authored_cells() {
     let mut tilemap = Tilemap::default();
     let coord = TileCoord::new(-1, 2);
@@ -329,8 +453,62 @@ fn queued_item(entity_index: u32) -> QueuedSpriteItem {
         phase: RenderPhaseLabel::TRANSPARENT_2D,
         layer: 0,
         sort_key: 0,
+        texture: None,
         entity_bits: Entity::from_raw_u32(entity_index).unwrap().to_bits(),
         source_order: entity_index as u64,
         instance: instance(),
     }
+}
+
+fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {
+    let image = test_image();
+    let source_hash = image.source().source_hash();
+    let import_hash = image.source().artifact().key().digest();
+    let mut images = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    images
+        .commit_loaded(
+            handle,
+            image,
+            &mut states,
+            &mut events,
+            Some(source_hash),
+            Some(import_hash),
+        )
+        .unwrap();
+    app.world_mut().insert_resource(images);
+    app.world_mut().insert_resource(states);
+}
+
+fn test_image() -> ImageAsset {
+    let stable_id = StableAssetId::parse_str("ce2ab2f8-c58b-48e3-b94e-9465340262a1").unwrap();
+    let source_hash = SourceHash::from_bytes(b"test image");
+    let key = ImportArtifactKey::new(
+        stable_id,
+        source_hash,
+        ImportDependencyDigest::empty(),
+        ImporterId::new("nara-image").unwrap(),
+        ImporterVersion::new(1),
+        ImportSettingsHash::default(),
+        ImportProfile::default(),
+        ImportedAssetType::new("image").unwrap(),
+        ArtifactLabel::default(),
+        ArtifactFormatVersion::new(1),
+    );
+    let artifact = ImportArtifactRecord::new(key).unwrap();
+    let source = ImageSourceMetadata::new(
+        stable_id,
+        AssetPath::new("textures/test.png").unwrap(),
+        source_hash,
+        artifact,
+    );
+    ImageAsset::new(
+        source,
+        ImageExtent::new(2, 2),
+        ImageFormat::Rgba8,
+        ImageColorSpace::Srgb,
+        ImageSamplerDescriptor::default(),
+        vec![255; 16],
+    )
 }

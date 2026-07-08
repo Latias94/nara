@@ -14,11 +14,12 @@ use nara_render::RenderPlugin;
 pub use crate::extract::{extract_sprite, extract_sprites, extract_tile_cell};
 pub use crate::queue::{
     build_sprite_batches, compare_queued_sprite_items, phase_order, project_sprite_to_view,
-    queue_sprites, sort_and_batch_sprites, view_world_extent, world_to_clip_instance,
+    project_sprite_to_view_with_uv, queue_sprites, sort_and_batch_sprites, view_world_extent,
+    world_to_clip_instance, world_to_clip_instance_with_uv,
 };
 pub use crate::types::{
     ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem, QueuedSpriteItems,
-    SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderStats,
+    SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderStats, TextureUvRect,
 };
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -27,6 +28,7 @@ pub struct SpriteRenderPlugin;
 impl Plugin for SpriteRenderPlugin {
     fn build(&self, app: &mut App) {
         add_plugin_or_ignore_duplicate(app, RenderPlugin);
+        add_plugin_or_ignore_duplicate(app, nara_image::ImagePreparePlugin);
         app.init_resource::<ExtractedSprites>();
         app.init_resource::<QueuedSpriteItems>();
         app.init_resource::<SpriteBatches>();
@@ -51,8 +53,9 @@ pub mod prelude {
     pub use crate::{
         ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem,
         QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderPlugin,
-        SpriteRenderStats, build_sprite_batches, compare_queued_sprite_items, extract_sprites,
-        phase_order, project_sprite_to_view, queue_sprites, sort_and_batch_sprites,
-        view_world_extent, world_to_clip_instance,
+        SpriteRenderStats, TextureUvRect, build_sprite_batches, compare_queued_sprite_items,
+        extract_sprites, phase_order, project_sprite_to_view, project_sprite_to_view_with_uv,
+        queue_sprites, sort_and_batch_sprites, view_world_extent, world_to_clip_instance,
+        world_to_clip_instance_with_uv,
     };
 }

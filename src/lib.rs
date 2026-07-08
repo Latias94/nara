@@ -106,15 +106,15 @@ pub mod prelude {
         SceneInstanceId, SceneSpawnReport, SceneSpawner, Visibility, export_scene, spawn_child,
         spawn_prefab, spawn_prefab_with_overrides, spawn_scene, sync_children,
     };
-    pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, Texture2d, TextureRegion};
+    pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, TextureRegion};
     pub use nara_sprite_render::{
         ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem,
         QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderPlugin,
-        SpriteRenderStats,
+        SpriteRenderStats, TextureUvRect,
     };
     pub use nara_tilemap::{
-        DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileCell, TileChunkCoord, TileCoord,
-        TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
+        DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileAtlasLayout, TileAtlasRegion,
+        TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
     };
     pub use nara_tooling::{ToolingPlugin, WorldSnapshot};
     pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
