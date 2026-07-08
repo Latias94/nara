@@ -49,9 +49,9 @@ flowchart TD
     App --> Audio[nara_audio]
     App --> Render[nara_render: render data + backend seam]
     App --> Window[nara_window: normalized window data]
-    Window --> WinitAdapter[future nara_winit adapter]
+    Window --> WinitAdapter[nara_winit adapter]
     App --> Tooling[nara_tooling: snapshots + inspector seam]
-    Render --> WgpuAdapter[future nara_render_wgpu adapter]
+    Render --> WgpuAdapter[nara_render_wgpu adapter]
     Tooling --> DebugUi[future egui / dear-imgui adapters]
 ```
 
@@ -68,11 +68,11 @@ flowchart TD
 | `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>` | Loaders, import cache, hot reload, dependency graph |
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneAsset` | Scene/prefab instantiate mapping and stable IDs |
-| `nara_render` | `Sprite`, `Camera2d`, `RenderBackend` | wgpu surface/device/render-pass lifecycle, batching |
+| `nara_render` | `Sprite`, `Camera2d`, `RenderTarget`, `ExtractedView`, `RenderFrame` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
 | `nara_input` | `InputState`, `KeyCode` | winit event normalization and action maps |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
-| `nara_winit` | `WinitPlugin`, desktop runner adapter | Gameplay APIs and renderer backend internals |
-| `nara_render_wgpu` | `WgpuRenderPlugin`, wgpu backend state | Gameplay authoring data and non-wgpu backends |
+| `nara_winit` | `WinitPlugin`, `WinitRunner` | Gameplay APIs and renderer backend internals |
+| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | Gameplay authoring data and non-wgpu backends |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
 | `nara_tooling` | `WorldSnapshot`, `ToolingPlugin` | egui/dear-imgui inspectors and editor integration |
 
@@ -146,8 +146,7 @@ sequenceDiagram
 
 ## Next Implementation Slices
 
-1. Implement the platform/window/render backend foundation plan in `docs/plans/2026-07-08-001-platform-window-render-backend-foundation-plan.md`.
-2. Expand component metadata registration for built-in scene/render/transform components.
-3. Add scene/prefab stable entity IDs and serialization/validation diagnostics.
-4. Add sprite batching/tilemap rendering on top of the render target/view/phase seam.
-5. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot` and component registry data.
+1. Expand component metadata registration for built-in scene/render/transform components.
+2. Add scene/prefab stable entity IDs and serialization/validation diagnostics.
+3. Add sprite batching/tilemap rendering on top of the render target/view/phase seam.
+4. Add a Phase 2 debug UI adapter that consumes `WorldSnapshot` and component registry data.

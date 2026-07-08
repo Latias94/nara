@@ -3,9 +3,10 @@
 use std::collections::BTreeMap;
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
-use nara_ecs::{Query, Res, ResMut, Resource};
+use nara_ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_render::{
     Color, Extent2d, ExtractedViews, FrameStats, RenderFrame, RenderPlugin, RenderTarget,
+    begin_render_frame,
 };
 use nara_window::{
     PresentMode, PrimaryWindowId, Window, WindowId,
@@ -20,7 +21,10 @@ impl Plugin for WgpuRenderPlugin {
     fn build(&self, app: &mut App) {
         add_plugin_or_ignore_duplicate(app, RenderPlugin);
         app.init_resource::<WgpuRenderBackend>();
-        app.add_systems(CoreStage::Render, render_clear_passes);
+        app.add_systems(
+            CoreStage::Render,
+            render_clear_passes.after(begin_render_frame),
+        );
     }
 
     fn cleanup(&self, app: &mut App) {

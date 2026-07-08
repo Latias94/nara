@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-08T05:00:00Z
+timestamp: 2026-07-08T06:05:00Z
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-08T05:00:00Z
-- Last verified: `cargo fmt --all`, `cargo check --workspace`, `cargo nextest run --workspace`, `cargo run -q`, `cargo run -q --example hello_world`.
-- Next action: Implement `docs/plans/2026-07-08-001-platform-window-render-backend-foundation-plan.md`, starting with ADR 0032 and then app runner/window/render backend crates.
+- Snapshot timestamp: 2026-07-08T06:05:00Z
+- Last verified: `cargo fmt --all --check`, `cargo check --workspace`, `cargo check --examples`, `cargo check -p nara --features winit,wgpu --example windowed_clear`, `cargo nextest run --workspace`, `cargo run -q`, `cargo run -q --example hello_world`, backend dependency boundary searches, default backend-free dependency tree, and engineering memory validation.
+- Next action: Move to sprite/tilemap batching, scene serialization, or built-in reflection registration follow-up.
 
 # Active Registrations
 
@@ -28,9 +28,12 @@ status: "active"
   - `nara_reflect` owns stable `ComponentTypeId`, schema versioning, and a Bevy-reflect-backed `ComponentRegistry`.
   - `nara_diagnostic` owns structured diagnostic reports and severities.
   - `examples/hello_world.rs` uses `Commands` and `Query` systems through the nara facade.
-- In progress:
-  - Platform/window/render backend foundation goal is active.
-  - ADR 0032 records the render backend integration boundary: fallible runner contract, backend-only raw handle providers, frame-local main-world extraction data, and optional `winit`/`wgpu` facade features.
+  - `nara_app` owns a fallible runner contract, `run_once(Duration)`, `First`, `FixedUpdate`, and fixed-step time resources.
+  - `nara_window` owns backend-independent window IDs, primary window data, normalized events, and raw-handle provider storage.
+  - `nara_winit` owns all `winit` imports, desktop event-loop integration, native window creation, raw handle registration, and keyboard/mouse translation.
+  - `nara_render` now exposes graph-ready render-domain data: `RenderTarget`, `ViewportRect`, `ExtractedView`, `ExtractedViews`, `RenderPhaseLabel`, and `RenderFrame`.
+  - `nara_render_wgpu` owns all `wgpu` imports and a clear-pass backend skeleton with surface status policy tests.
+- Pending follow-ups:
   - Built-in component reflection registration and scene/prefab serialization remain design-to-implementation follow-up work after the platform/backend slice.
 - Blocked:
   - None.

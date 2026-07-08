@@ -90,3 +90,8 @@ serde = [
 ]
 winit = ["dep:nara_winit"]
 wgpu = ["dep:nara_render_wgpu"]
+
+[[example]]
+name = "windowed_clear"
+path = "examples/windowed_clear.rs"
+required-features = ["winit", "wgpu"]
