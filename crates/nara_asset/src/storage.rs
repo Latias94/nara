@@ -7,7 +7,10 @@ use std::{
 
 use nara_ecs::Resource;
 
-use crate::{AssetError, AssetId, AssetServer};
+use crate::{
+    AssetError, AssetEventKind, AssetEvents, AssetId, AssetServer, AssetStateError, AssetStates,
+    AssetVersion, ImportArtifactDigest, SourceHash,
+};
 
 pub trait Asset: Send + Sync + 'static {}
 
@@ -95,6 +98,69 @@ impl<T: Asset> Assets<T> {
 
     pub fn insert(&mut self, handle: Handle<T>, value: T) -> Option<T> {
         self.values.insert(handle.id(), value)
+    }
+
+    pub fn commit_loaded(
+        &mut self,
+        handle: Handle<T>,
+        value: T,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+        source_hash: Option<SourceHash>,
+        import_hash: Option<ImportArtifactDigest>,
+    ) -> Result<AssetVersion, AssetStateError> {
+        let id = handle.id();
+        let version = states.next_version(id)?;
+        let event_kind = if self.values.contains_key(&id) {
+            AssetEventKind::Modified
+        } else {
+            AssetEventKind::Added
+        };
+
+        self.values.insert(id, value);
+        states.set_loaded_at(id, version, source_hash, import_hash);
+        events.push(id, version, event_kind);
+        Ok(version)
+    }
+
+    pub fn commit_reload(
+        &mut self,
+        handle: Handle<T>,
+        expected_version: AssetVersion,
+        value: T,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+        source_hash: Option<SourceHash>,
+        import_hash: Option<ImportArtifactDigest>,
+    ) -> Result<AssetVersion, AssetStateError> {
+        states.ensure_version(handle.id(), expected_version)?;
+        self.commit_loaded(handle, value, states, events, source_hash, import_hash)
+    }
+
+    pub fn record_reload_failure(
+        &mut self,
+        handle: Handle<T>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+        message: impl Into<String>,
+    ) -> Result<AssetVersion, AssetStateError> {
+        let version = states.set_failed(handle.id(), message.into())?;
+        events.push(handle.id(), version, AssetEventKind::ReloadFailed);
+        Ok(version)
+    }
+
+    pub fn remove_with_state(
+        &mut self,
+        handle: Handle<T>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+    ) -> Result<Option<T>, AssetStateError> {
+        let id = handle.id();
+        let version = states.next_version(id)?;
+        let removed = self.values.remove(&id);
+        states.set_removed_at(id, version);
+        events.push(id, version, AssetEventKind::Removed);
+        Ok(removed)
     }
 
     #[must_use]

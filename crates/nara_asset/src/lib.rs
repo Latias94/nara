@@ -5,6 +5,7 @@ mod database;
 mod identity;
 mod import;
 mod server;
+mod state;
 mod storage;
 
 use std::{
@@ -31,6 +32,10 @@ pub use import::{
     ImporterRegistry, ImporterRegistryError, ImporterSelectionError, SourceExtension,
 };
 pub use server::{AssetError, AssetServer};
+pub use state::{
+    AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEvents, AssetState, AssetStateError,
+    AssetStates, AssetVersion, LoadState,
+};
 pub use storage::{Asset, Assets, Handle};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
