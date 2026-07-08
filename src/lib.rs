@@ -6,6 +6,7 @@ pub use nara_audio as audio;
 pub use nara_core as core;
 pub use nara_diagnostic as diagnostic;
 pub use nara_ecs as ecs;
+pub use nara_image as image;
 pub use nara_input as input;
 pub use nara_reflect as reflect;
 pub use nara_render as render;
@@ -69,6 +70,11 @@ pub mod prelude {
     pub use nara_core::{Color, Vec2, Vec3};
     pub use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, DiagnosticSeverity};
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
+    pub use nara_image::{
+        ImageAddressMode, ImageAsset, ImageColorSpace, ImageExtent, ImageFilterMode, ImageFormat,
+        ImageImportError, ImageImportedAsset, ImageImporter, ImageSamplerDescriptor,
+        ImageSourceMetadata,
+    };
     pub use nara_input::{ButtonInput, InputPlugin, InputState, KeyCode, MouseButton};
     pub use nara_reflect::{
         ComponentCodec, ComponentCodecError, ComponentFloat, ComponentRegistry,

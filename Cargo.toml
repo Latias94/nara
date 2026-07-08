@@ -15,6 +15,7 @@ members = [
     "crates/nara_core",
     "crates/nara_diagnostic",
     "crates/nara_ecs",
+    "crates/nara_image",
     "crates/nara_input",
     "crates/nara_reflect",
     "crates/nara_render",
@@ -42,6 +43,7 @@ nara_audio = { path = "crates/nara_audio" }
 nara_core = { path = "crates/nara_core" }
 nara_diagnostic = { path = "crates/nara_diagnostic" }
 nara_ecs = { path = "crates/nara_ecs" }
+nara_image = { path = "crates/nara_image" }
 nara_input = { path = "crates/nara_input" }
 nara_reflect = { path = "crates/nara_reflect" }
 nara_render = { path = "crates/nara_render" }
@@ -60,6 +62,7 @@ bevy_reflect = { version = "0.19", features = ["glam"] }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
 glam = { version = "0.30", features = ["serde"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 raw-window-handle = "0.6"
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -78,6 +81,7 @@ nara_audio.workspace = true
 nara_core.workspace = true
 nara_diagnostic.workspace = true
 nara_ecs.workspace = true
+nara_image.workspace = true
 nara_input.workspace = true
 nara_reflect.workspace = true
 nara_render.workspace = true
@@ -98,6 +102,7 @@ serde = [
     "nara_core/serde",
     "nara_diagnostic/serde",
     "nara_ecs/serde",
+    "nara_image/serde",
     "nara_reflect/serde",
     "nara_transform/serde",
     "nara_render/serde",

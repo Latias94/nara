@@ -140,6 +140,7 @@ impl Error for ImporterDescriptorError {}
 
 pub struct ImportRequest<'a> {
     source: &'a AssetRecord,
+    source_bytes: &'a [u8],
     source_hash: SourceHash,
     dependency_digest: ImportDependencyDigest,
     settings_hash: ImportSettingsHash,
@@ -148,16 +149,17 @@ pub struct ImportRequest<'a> {
 
 impl<'a> ImportRequest<'a> {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         source: &'a AssetRecord,
-        source_hash: SourceHash,
+        source_bytes: &'a [u8],
         dependency_digest: ImportDependencyDigest,
         settings_hash: ImportSettingsHash,
         profile: ImportProfile,
     ) -> Self {
         Self {
             source,
-            source_hash,
+            source_bytes,
+            source_hash: SourceHash::from_bytes(source_bytes),
             dependency_digest,
             settings_hash,
             profile,
@@ -167,6 +169,11 @@ impl<'a> ImportRequest<'a> {
     #[must_use]
     pub const fn source(&self) -> &AssetRecord {
         self.source
+    }
+
+    #[must_use]
+    pub const fn source_bytes(&self) -> &[u8] {
+        self.source_bytes
     }
 
     #[must_use]
@@ -455,7 +462,7 @@ mod tests {
     fn request<'a>(record: &'a AssetRecord) -> ImportRequest<'a> {
         ImportRequest::new(
             record,
-            SourceHash::from_bytes(b"source"),
+            b"source",
             ImportDependencyDigest::empty(),
             ImportSettingsHash::from_bytes(b"settings"),
             ImportProfile::default(),
