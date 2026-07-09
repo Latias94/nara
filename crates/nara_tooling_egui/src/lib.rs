@@ -11,8 +11,9 @@ use nara_reflect::{
 };
 use nara_scene::SceneEntityId;
 use nara_tooling::{
-    SceneEditorMode, SceneEditorModel, SceneInspectorCommand, SceneInspectorComponentView,
-    SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
+    EditorWorkspaceCommand, SceneEditorMode, SceneEditorModel, SceneInspectorCommand,
+    SceneInspectorComponentView, SceneInspectorFieldState, SceneInspectorFieldView,
+    SceneInspectorModel,
 };
 
 #[derive(Debug, Default)]
@@ -52,32 +53,22 @@ impl EguiSceneEditorPanel {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EguiSceneEditorPanelResponse {
-    pub action: Option<EguiSceneEditorAction>,
-    pub inspector_commands: Vec<SceneInspectorCommand>,
+    pub workspace_commands: Vec<EditorWorkspaceCommand>,
 }
 
 impl EguiSceneEditorPanelResponse {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.action.is_none() && self.inspector_commands.is_empty()
+        self.workspace_commands.is_empty()
     }
 
-    fn request_action(&mut self, action: EguiSceneEditorAction) {
-        self.action = Some(action);
+    fn push_workspace_command(&mut self, command: EditorWorkspaceCommand) {
+        self.workspace_commands.push(command);
     }
 
     fn extend_inspector(&mut self, response: EguiSceneInspectorPanelResponse) {
-        self.inspector_commands.extend(response.inspector_commands);
+        self.workspace_commands.extend(response.workspace_commands);
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EguiSceneEditorAction {
-    StartPlay,
-    PausePlay,
-    ResumePlay,
-    StopPlay,
-    ApplyChanges,
 }
 
 #[derive(Debug, Default)]
@@ -384,17 +375,29 @@ impl EguiSceneInspectorPanel {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EguiSceneInspectorPanelResponse {
-    pub inspector_commands: Vec<SceneInspectorCommand>,
+    pub workspace_commands: Vec<EditorWorkspaceCommand>,
 }
 
 impl EguiSceneInspectorPanelResponse {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.inspector_commands.is_empty()
+        self.workspace_commands.is_empty()
     }
 
     fn push_command(&mut self, command: SceneInspectorCommand) {
-        self.inspector_commands.push(command);
+        let command = match command {
+            SceneInspectorCommand::SelectEntity { entity } => {
+                EditorWorkspaceCommand::SelectEntity {
+                    document: None,
+                    entity,
+                }
+            }
+            command => EditorWorkspaceCommand::ApplyInspectorCommand {
+                document: None,
+                command,
+            },
+        };
+        self.workspace_commands.push(command);
     }
 }
 
@@ -433,31 +436,33 @@ fn render_editor_toolbar(
             .add_enabled(mode.is_edit(), Button::new("Start"))
             .clicked()
         {
-            response.request_action(EguiSceneEditorAction::StartPlay);
+            response.push_workspace_command(EditorWorkspaceCommand::StartPlay { document: None });
         }
         if ui
             .add_enabled(mode.is_play(), Button::new("Pause"))
             .clicked()
         {
-            response.request_action(EguiSceneEditorAction::PausePlay);
+            response.push_workspace_command(EditorWorkspaceCommand::PausePlay { document: None });
         }
         if ui
             .add_enabled(mode.is_paused(), Button::new("Resume"))
             .clicked()
         {
-            response.request_action(EguiSceneEditorAction::ResumePlay);
+            response.push_workspace_command(EditorWorkspaceCommand::ResumePlay { document: None });
         }
         if ui
             .add_enabled(!mode.is_edit(), Button::new("Stop"))
             .clicked()
         {
-            response.request_action(EguiSceneEditorAction::StopPlay);
+            response.push_workspace_command(EditorWorkspaceCommand::StopPlay { document: None });
         }
         if ui
             .add_enabled(!mode.is_edit(), Button::new("Apply Changes"))
             .clicked()
         {
-            response.request_action(EguiSceneEditorAction::ApplyChanges);
+            response.push_workspace_command(EditorWorkspaceCommand::ApplyChangesStatus {
+                document: None,
+            });
         }
     });
 }

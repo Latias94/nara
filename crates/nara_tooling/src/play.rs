@@ -387,6 +387,33 @@ impl SceneEditorState {
         }
     }
 
+    #[must_use]
+    pub fn model_with_selection(
+        &mut self,
+        session: &SceneAuthoringSession,
+        registry: &ComponentRegistry,
+        selected_entity: Option<&SceneEntityId>,
+        edit_world_snapshot: Option<&WorldSnapshot>,
+    ) -> SceneEditorModel {
+        let inspector = self.inspector.model_with_selection(
+            session,
+            registry,
+            selected_entity,
+            edit_world_snapshot,
+        );
+        let play_world_snapshot = self
+            .play_session
+            .as_mut()
+            .map(|play_session| WorldSnapshot::capture(play_session.world_mut()));
+
+        SceneEditorModel {
+            mode: self.mode(),
+            inspector,
+            play_world_snapshot,
+            diagnostics: DiagnosticReport::default(),
+        }
+    }
+
     pub fn apply_inspector_command(
         &mut self,
         session: &mut SceneAuthoringSession,

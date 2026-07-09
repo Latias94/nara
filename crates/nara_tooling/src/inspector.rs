@@ -50,6 +50,17 @@ impl SceneInspectorState {
         )
     }
 
+    #[must_use]
+    pub fn model_with_selection(
+        &self,
+        session: &SceneAuthoringSession,
+        registry: &ComponentRegistry,
+        selected_entity: Option<&SceneEntityId>,
+        world_snapshot: Option<&WorldSnapshot>,
+    ) -> SceneInspectorModel {
+        build_inspector_model(session, registry, selected_entity, world_snapshot)
+    }
+
     pub fn apply_command(
         &mut self,
         session: &mut SceneAuthoringSession,

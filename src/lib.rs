@@ -329,18 +329,20 @@ pub mod advanced_prelude {
 
 pub mod tooling_prelude {
     pub use nara_tooling::{
-        SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus,
-        SceneApplyChangesReport, SceneApplyChangesRequest, SceneEditorMode, SceneEditorModel,
-        SceneEditorState, SceneInspectorCommand, SceneInspectorCommandReport,
-        SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
-        SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
-        SceneInspectorState, ScenePlaySession, ScenePlayTransitionReport, ToolingPlugin,
-        WorldSnapshot,
+        EditorDocumentId, EditorExternalReloadState, EditorSceneModel, EditorSceneSlot,
+        EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,
+        EditorWorkspaceCommandReport, EditorWorkspaceModel, SceneApplyChangesComponentReport,
+        SceneApplyChangesComponentStatus, SceneApplyChangesReport, SceneApplyChangesRequest,
+        SceneEditorMode, SceneEditorModel, SceneEditorState, SceneInspectorCommand,
+        SceneInspectorCommandReport, SceneInspectorComponentView, SceneInspectorEntityRow,
+        SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
+        SceneInspectorModel, SceneInspectorState, ScenePlaySession, ScenePlayTransitionReport,
+        ToolingPlugin, WorldSnapshot,
     };
     #[cfg(feature = "egui")]
     pub use nara_tooling_egui::{
-        EguiSceneEditorAction, EguiSceneEditorPanel, EguiSceneEditorPanelResponse,
-        EguiSceneInspectorPanel, EguiSceneInspectorPanelResponse,
+        EguiSceneEditorPanel, EguiSceneEditorPanelResponse, EguiSceneInspectorPanel,
+        EguiSceneInspectorPanelResponse,
     };
 }
 

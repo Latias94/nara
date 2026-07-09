@@ -3,6 +3,7 @@
 mod inspector;
 mod play;
 mod snapshot;
+mod workspace;
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
 
@@ -17,6 +18,11 @@ pub use play::{
     ScenePlaySession, ScenePlayTransitionReport,
 };
 pub use snapshot::WorldSnapshot;
+pub use workspace::{
+    EditorDocumentId, EditorExternalReloadState, EditorSceneModel, EditorSceneSlot,
+    EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,
+    EditorWorkspaceCommandReport, EditorWorkspaceModel,
+};
 
 #[derive(Debug, Default)]
 pub struct ToolingPlugin;
@@ -30,6 +36,7 @@ impl Plugin for ToolingPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<EditorWorkspace>();
         app.add_systems(CoreStage::Last, || {});
         Ok(())
     }
