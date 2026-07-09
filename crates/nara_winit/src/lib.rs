@@ -47,12 +47,13 @@ impl Default for WinitPlugin {
 }
 
 impl Plugin for WinitPlugin {
-    fn build(&self, app: &mut App) {
-        add_plugin_or_ignore_duplicate(app, WindowPlugin::default());
-        add_plugin_or_ignore_duplicate(app, InputPlugin);
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_plugin_if_missing(WindowPlugin::default())?;
+        app.add_plugin_if_missing(InputPlugin)?;
 
         let runner = self.runner;
         app.set_runner(move |app| runner.run(app));
+        Ok(())
     }
 }
 
@@ -275,13 +276,6 @@ impl ApplicationHandler for WinitApp {
         let delta = now.saturating_duration_since(self.last_frame);
         self.last_frame = now;
         self.run_frame(delta, event_loop);
-    }
-}
-
-fn add_plugin_or_ignore_duplicate(app: &mut App, plugin: impl Plugin) {
-    match app.add_plugin(plugin) {
-        Ok(_) | Err(PluginError::Duplicate { .. }) => {}
-        Err(error) => panic!("failed to install winit prerequisite plugin: {error}"),
     }
 }
 

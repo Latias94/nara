@@ -1,6 +1,6 @@
 //! Transform components and spatial primitives.
 
-use nara_app::{App, Plugin};
+use nara_app::{App, Plugin, PluginError};
 use nara_core::{Mat3, Vec2};
 use nara_ecs::Component;
 use nara_reflect::{
@@ -54,9 +54,10 @@ impl Default for GlobalTransform2d {
 pub struct TransformPlugin;
 
 impl Plugin for TransformPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<ComponentRegistry>();
         register_transform_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
+        Ok(())
     }
 }
 

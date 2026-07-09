@@ -39,13 +39,14 @@ use nara_window::PresentMode;
 pub struct WgpuRenderPlugin;
 
 impl Plugin for WgpuRenderPlugin {
-    fn build(&self, app: &mut App) {
-        add_plugin_or_ignore_duplicate(app, SpriteRenderPlugin);
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_plugin_if_missing(SpriteRenderPlugin)?;
         app.init_resource::<WgpuRenderBackend>();
         app.add_systems(
             CoreStage::Render,
             render_clear_passes.after(begin_render_frame),
         );
+        Ok(())
     }
 
     fn cleanup(&self, app: &mut App) {
@@ -477,13 +478,6 @@ pub fn render_clear_passes(
     if let Err(error) = result {
         backend.mark_error(&error);
         frame.mark_skipped();
-    }
-}
-
-fn add_plugin_or_ignore_duplicate(app: &mut App, plugin: impl Plugin) {
-    match app.add_plugin(plugin) {
-        Ok(_) | Err(PluginError::Duplicate { .. }) => {}
-        Err(error) => panic!("failed to install wgpu prerequisite plugin: {error}"),
     }
 }
 

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use nara_app::{App, Plugin};
+use nara_app::{App, Plugin, PluginError};
 use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
@@ -385,10 +385,11 @@ impl Default for Tilemap {
 pub struct TilemapPlugin;
 
 impl Plugin for TilemapPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<Assets<TileSet>>();
         app.init_resource::<ComponentRegistry>();
         register_tilemap_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
+        Ok(())
     }
 }
 

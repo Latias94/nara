@@ -2,7 +2,7 @@
 
 use std::{collections::HashSet, hash::Hash};
 
-use nara_app::{App, CoreStage, Plugin};
+use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_ecs::{ResMut, Resource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -88,10 +88,11 @@ pub type InputState = ButtonInput<KeyCode>;
 pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(ButtonInput::<MouseButton>::default())
             .add_systems(CoreStage::Last, clear_input_transitions);
+        Ok(())
     }
 }
 

@@ -1,4 +1,4 @@
-use nara_app::{App, CoreStage, Plugin};
+use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_ecs::{Bundle, Component, Entity, World};
 use nara_reflect::{
     ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
@@ -97,10 +97,11 @@ pub fn sync_children(world: &mut World) {
 pub struct HierarchyPlugin;
 
 impl Plugin for HierarchyPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<ComponentRegistry>();
         register_scene_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
         app.add_systems(CoreStage::PostUpdate, sync_children);
+        Ok(())
     }
 }
 

@@ -4,7 +4,7 @@ mod inspector;
 mod play;
 mod snapshot;
 
-use nara_app::{App, CoreStage, Plugin};
+use nara_app::{App, CoreStage, Plugin, PluginError};
 
 pub use inspector::{
     SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
@@ -21,7 +21,8 @@ pub use snapshot::WorldSnapshot;
 pub struct ToolingPlugin;
 
 impl Plugin for ToolingPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(CoreStage::Last, || {});
+        Ok(())
     }
 }

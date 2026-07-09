@@ -26,9 +26,9 @@ pub use crate::types::{
 pub struct SpriteRenderPlugin;
 
 impl Plugin for SpriteRenderPlugin {
-    fn build(&self, app: &mut App) {
-        add_plugin_or_ignore_duplicate(app, RenderPlugin);
-        add_plugin_or_ignore_duplicate(app, nara_image::ImagePreparePlugin);
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_plugin_if_missing(RenderPlugin)?;
+        app.add_plugin_if_missing(nara_image::ImagePreparePlugin)?;
         app.init_resource::<ExtractedSprites>();
         app.init_resource::<QueuedSpriteItems>();
         app.init_resource::<SpriteBatches>();
@@ -39,13 +39,7 @@ impl Plugin for SpriteRenderPlugin {
         );
         app.add_systems(CoreStage::Queue, queue_sprites);
         app.add_systems(CoreStage::Sort, sort_and_batch_sprites);
-    }
-}
-
-fn add_plugin_or_ignore_duplicate(app: &mut App, plugin: impl Plugin) {
-    match app.add_plugin(plugin) {
-        Ok(_) | Err(PluginError::Duplicate { .. }) => {}
-        Err(error) => panic!("failed to install sprite render prerequisite plugin: {error}"),
+        Ok(())
     }
 }
 

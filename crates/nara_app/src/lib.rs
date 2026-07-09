@@ -66,7 +66,7 @@ impl CoreStage {
 }
 
 pub trait Plugin: Send + Sync + 'static {
-    fn build(&self, app: &mut App);
+    fn build(&self, app: &mut App) -> Result<(), PluginError>;
 
     fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
         Ok(())
@@ -87,8 +87,9 @@ impl<T> Plugin for T
 where
     T: Fn(&mut App) + Send + Sync + 'static,
 {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         self(app);
+        Ok(())
     }
 }
 
@@ -98,6 +99,11 @@ pub enum PluginError {
     Duplicate { name: &'static str },
     #[error("plugins cannot be added after plugin finishing has started: {name}")]
     AddedAfterFinish { name: &'static str },
+    #[error("plugin {plugin} requires missing prerequisite plugin {prerequisite}")]
+    MissingPrerequisite {
+        plugin: &'static str,
+        prerequisite: &'static str,
+    },
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -343,10 +349,41 @@ impl App {
             return Err(PluginError::Duplicate { name });
         }
 
-        plugin.build(self);
+        plugin.build(self)?;
         self.plugin_names.insert(name);
         self.plugins.push(Box::new(plugin));
         Ok(self)
+    }
+
+    pub fn add_plugin_if_missing(&mut self, plugin: impl Plugin) -> Result<&mut Self, PluginError> {
+        let name = plugin.name();
+        if self.plugins_finished {
+            return Err(PluginError::AddedAfterFinish { name });
+        }
+        if plugin.is_unique() && self.plugin_names.contains(name) {
+            return Ok(self);
+        }
+        self.add_plugin(plugin)
+    }
+
+    #[must_use]
+    pub fn has_plugin(&self, name: &'static str) -> bool {
+        self.plugin_names.contains(name)
+    }
+
+    pub fn require_plugin(
+        &self,
+        plugin: &'static str,
+        prerequisite: &'static str,
+    ) -> Result<(), PluginError> {
+        if self.has_plugin(prerequisite) {
+            Ok(())
+        } else {
+            Err(PluginError::MissingPrerequisite {
+                plugin,
+                prerequisite,
+            })
+        }
     }
 
     pub fn finish_plugins(&mut self) -> Result<&mut Self, PluginError> {
@@ -442,6 +479,39 @@ mod tests {
 
     #[derive(Debug, Default, Resource)]
     struct Order(Vec<&'static str>);
+
+    #[derive(Debug, Default, Resource)]
+    struct PluginBuildCount(u32);
+
+    #[derive(Debug, Default, Clone, Copy)]
+    struct CountingPlugin;
+
+    impl Plugin for CountingPlugin {
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            if !app.world().contains_resource::<PluginBuildCount>() {
+                app.insert_resource(PluginBuildCount::default());
+            }
+            app.world_mut().resource_mut::<PluginBuildCount>().0 += 1;
+            Ok(())
+        }
+
+        fn name(&self) -> &'static str {
+            "test.CountingPlugin"
+        }
+    }
+
+    #[derive(Debug, Default, Clone, Copy)]
+    struct FailingPlugin;
+
+    impl Plugin for FailingPlugin {
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.require_plugin(self.name(), "test.MissingPlugin")
+        }
+
+        fn name(&self) -> &'static str {
+            "test.FailingPlugin"
+        }
+    }
 
     fn spawn_entity(mut commands: Commands) {
         commands.spawn(Spawned);
@@ -617,6 +687,50 @@ mod tests {
         assert_eq!(
             app.run().unwrap_err(),
             AppRunError::runner("window creation failed")
+        );
+    }
+
+    #[test]
+    fn failed_plugin_build_is_reported_without_registering_plugin() {
+        let mut app = App::new();
+
+        let Err(error) = app.add_plugin(FailingPlugin) else {
+            panic!("failing plugin should return an installation error");
+        };
+        assert_eq!(
+            error,
+            PluginError::MissingPrerequisite {
+                plugin: "test.FailingPlugin",
+                prerequisite: "test.MissingPlugin"
+            }
+        );
+        assert!(!app.has_plugin("test.FailingPlugin"));
+    }
+
+    #[test]
+    fn add_plugin_if_missing_skips_duplicate_without_rebuilding() {
+        let mut app = App::new();
+
+        app.add_plugin_if_missing(CountingPlugin).unwrap();
+        app.add_plugin_if_missing(CountingPlugin).unwrap();
+
+        assert!(app.has_plugin("test.CountingPlugin"));
+        assert_eq!(app.world().resource::<PluginBuildCount>().0, 1);
+    }
+
+    #[test]
+    fn add_plugin_if_missing_rejects_install_after_finish() {
+        let mut app = App::new();
+        app.finish_plugins().unwrap();
+
+        let Err(error) = app.add_plugin_if_missing(CountingPlugin) else {
+            panic!("installing after finish should return an error");
+        };
+        assert_eq!(
+            error,
+            PluginError::AddedAfterFinish {
+                name: "test.CountingPlugin"
+            }
         );
     }
 }

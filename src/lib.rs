@@ -24,7 +24,7 @@ pub use nara_window as window;
 #[cfg(feature = "winit")]
 pub use nara_winit as winit;
 
-use nara_app::{App, Plugin};
+use nara_app::{App, Plugin, PluginError};
 
 /// Minimal runtime defaults for headless examples, tests, and AI-generated scenes.
 ///
@@ -34,23 +34,16 @@ use nara_app::{App, Plugin};
 pub struct MinimalPlugins;
 
 impl Plugin for MinimalPlugins {
-    fn build(&self, app: &mut App) {
-        app.add_plugin(nara_scene::HierarchyPlugin)
-            .expect("HierarchyPlugin should be unique");
-        app.add_plugin(nara_transform::TransformPlugin)
-            .expect("TransformPlugin should be unique");
-        app.add_plugin(nara_input::InputPlugin)
-            .expect("InputPlugin should be unique");
-        app.add_plugin(nara_sprite::SpritePlugin)
-            .expect("SpritePlugin should be unique");
-        app.add_plugin(nara_tilemap::TilemapPlugin)
-            .expect("TilemapPlugin should be unique");
-        app.add_plugin(nara_render::RenderPlugin)
-            .expect("RenderPlugin should be unique");
-        app.add_plugin(nara_image::ImagePreparePlugin)
-            .expect("ImagePreparePlugin should be unique");
-        app.add_plugin(nara_sprite_render::SpriteRenderPlugin)
-            .expect("SpriteRenderPlugin should be unique");
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
+        app.add_plugin_if_missing(nara_transform::TransformPlugin)?;
+        app.add_plugin_if_missing(nara_input::InputPlugin)?;
+        app.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
+        app.add_plugin_if_missing(nara_tilemap::TilemapPlugin)?;
+        app.add_plugin_if_missing(nara_render::RenderPlugin)?;
+        app.add_plugin_if_missing(nara_image::ImagePreparePlugin)?;
+        app.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
+        Ok(())
     }
 }
 

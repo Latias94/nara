@@ -2,7 +2,7 @@
 
 mod prepare;
 
-use nara_app::{App, CoreStage, Plugin};
+use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::Handle;
 pub use nara_core::Color;
 use nara_core::Vec2;
@@ -276,7 +276,7 @@ pub trait RenderBackend {
 pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<ComponentRegistry>();
         register_render_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
         app.init_resource::<ClearColor>();
@@ -286,6 +286,7 @@ impl Plugin for RenderPlugin {
         app.init_resource::<RenderPrepareInvalidations>();
         app.add_systems(CoreStage::Extract, extract_views);
         app.add_systems(CoreStage::Render, begin_render_frame);
+        Ok(())
     }
 }
 

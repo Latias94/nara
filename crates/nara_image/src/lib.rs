@@ -5,7 +5,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_app::{App, CoreStage, Plugin};
+use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::{
     ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetStates, Assets, Handle,
     ImportArtifactDigest, ImportArtifactPathError, ImportArtifactRecord, ImportError,
@@ -432,13 +432,14 @@ pub struct ImagePrepareStats {
 pub struct ImagePreparePlugin;
 
 impl Plugin for ImagePreparePlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<Assets<ImageAsset>>();
         app.init_resource::<AssetStates>();
         app.init_resource::<PreparedRenderResources<PreparedImageResource>>();
         app.init_resource::<RenderPrepareInvalidations>();
         app.init_resource::<ImagePrepareStats>();
         app.add_systems(CoreStage::Prepare, prepare_images);
+        Ok(())
     }
 }
 

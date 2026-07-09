@@ -1,6 +1,6 @@
 //! Backend-independent window data and events.
 
-use nara_app::{App, Plugin};
+use nara_app::{App, Plugin, PluginError};
 use nara_ecs::{Component, Resource, World};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -263,7 +263,7 @@ impl Default for WindowPlugin {
 }
 
 impl Plugin for WindowPlugin {
-    fn build(&self, app: &mut App) {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<WindowEvents>();
         app.init_resource::<backend::BackendWindowHandles>();
         app.insert_resource(PrimaryWindowId::default());
@@ -273,6 +273,7 @@ impl Plugin for WindowPlugin {
             app.insert_resource(PrimaryWindowId(primary_id));
             app.world_mut().spawn((window.clone(), PrimaryWindow));
         }
+        Ok(())
     }
 }
 
