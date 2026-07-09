@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0045: Component Schema Capability Metadata
 
 ## Context
 
@@ -61,4 +62,3 @@ Rules:
 | Future networking needs deeper determinism | Medium | Medium | Document current deterministic-friendly but not lockstep guarantee |
 | Replication needs stable IDs not present everywhere | Medium | High | Add persistent IDs only for replicated/saved entities |
 | Scope creep | High | Medium | Keep networking out of Phase 1 milestones |
-

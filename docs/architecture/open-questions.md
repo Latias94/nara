@@ -36,6 +36,11 @@ Design principle from discussion:
 Accepted direction: nara owns plugins and app lifecycle, with staged plugin lifecycle and diagnostics-aware failure. See ADR [0010-plugin-lifecycle-dependencies-and-failure.md](adr/0010-plugin-lifecycle-dependencies-and-failure.md).
 
 Terminology note: `Plugin` means a Bevy-style Rust engine module/capability package, not a Zed-style WASM extension. WASM scripting is separate; see ADR [0021-scripting-and-wasm-boundary.md](adr/0021-scripting-and-wasm-boundary.md).
+Plugin metadata and default plugin groups are now settled at the policy level. Plugins expose
+stable IDs, declared capabilities, optional requirements/conflicts, and inspectable group
+membership; groups such as `CorePlugins`, `Runtime2dPlugins`, and desktop backend groups are
+explicit product bundles. See ADR
+[0046-plugin-metadata-and-default-plugin-groups.md](adr/0046-plugin-metadata-and-default-plugin-groups.md).
 
 Resolved in the foundation hardening slice:
 
@@ -48,18 +53,26 @@ Resolved in the foundation hardening slice:
 
 Still open:
 
-1. Do plugins declare dependencies by type/label before they run?
-2. What plugin metadata should groups expose for diagnostics, editor tooling, and generated docs?
+1. What exact `PluginId` shape should the first implementation expose: reverse-domain string,
+   type-backed label, or both?
+2. Should `requires` name plugins, capabilities, resources, schedule sets, or all of them?
+3. Which exact group should examples use as the default 2D desktop game bundle?
 
 ## Component Metadata Details
 
 Accepted direction: Bevy-reflect-backed `ComponentRegistry` with stable schema IDs and migrations. See ADR [0004-use-bevy-reflect-backed-component-metadata.md](adr/0004-use-bevy-reflect-backed-component-metadata.md) and ADR [0011-component-schema-ids-and-migrations.md](adr/0011-component-schema-ids-and-migrations.md).
+Field-level capability metadata is now settled by ADR
+[0045-component-schema-capability-metadata.md](adr/0045-component-schema-capability-metadata.md):
+component schemas describe domain eligibility for scene/save/inspect/edit/animate/replicate/script
+and reference semantics, while each domain still owns behavior policy.
 
 Still open:
 
 1. What derive should a data-facing component need?
 2. Does the registry eventually emit JSON Schema in addition to the current compact schema catalog?
-3. Which components are inspectable but not serializable?
+3. What exact Rust API should capability registration use: bitflags, enum sets, or builder methods?
+4. Which existing built-in fields should be editable versus inspect-only in the first
+   implementation?
 
 Resolved in the scene/prefab serialization foundation:
 
@@ -299,6 +312,10 @@ live sync boundary is `SceneAuthoringSession`, which projects a document into a 
 The first UI-agnostic inspector model is `SceneInspectorState` in `nara_tooling`. It consumes
 `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then emits
 `SceneInspectorCommand` values that apply scene patches.
+The editor workspace layer is now settled by ADR
+[0047-editor-workspace-and-scene-document-state.md](adr/0047-editor-workspace-and-scene-document-state.md):
+`nara_tooling` should own UI-agnostic open-document slots, active document state, selection sets,
+document revisions, dirty/saved state, external reload conflicts, and workspace commands.
 
 Play Mode uses an isolated runtime `World` spawned from a validated edit document snapshot. Stop
 Play discards runtime changes by default; Apply Changes is explicit and patch-based. See ADR
@@ -356,6 +373,8 @@ Follow-up details still to settle:
    replacements?
 3. How should prefab-expanded entity write-back produce source-prefab override patches?
 4. What editor dogfooding milestone should switch a real panel from egui to nara UI?
+5. What is the first minimal `EditorWorkspace` API: scenes only, or scenes plus prefab documents?
+6. What external reload conflict workflow should exist before a full visual editor?
 
 ## Backend and Domain Extension Seams
 
@@ -460,6 +479,9 @@ Accepted directions:
 - Text/font is a dedicated engine domain. See ADR [0031-text-and-font-strategy.md](adr/0031-text-and-font-strategy.md).
 - Runtime services share a common backend boundary. See ADR
   [0042-runtime-service-and-backend-boundary.md](adr/0042-runtime-service-and-backend-boundary.md).
+- Save, networking, animation, scripting, and editor tooling share component field capability
+  metadata as the first eligibility gate. See ADR
+  [0045-component-schema-capability-metadata.md](adr/0045-component-schema-capability-metadata.md).
 
 Follow-up details still to settle:
 
@@ -475,6 +497,8 @@ Accepted direction: the root `nara` facade stays small, optional backends remain
 the default prelude is gameplay-first and backend-free. Backend, tooling, debug, render extraction,
 queue/batch, and GPU cache internals should live in advanced or module-specific preludes. See ADR
 [0044-root-facade-and-prelude-layering-policy.md](adr/0044-root-facade-and-prelude-layering-policy.md).
+Default plugin groups are explicit facade products, not silent feature side effects. See ADR
+[0046-plugin-metadata-and-default-plugin-groups.md](adr/0046-plugin-metadata-and-default-plugin-groups.md).
 
 Follow-up details still to settle:
 

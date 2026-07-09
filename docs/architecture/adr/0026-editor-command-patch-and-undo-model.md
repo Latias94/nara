@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy
+**Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
+Editor Workspace and Scene Document State
 
 ## Context
 

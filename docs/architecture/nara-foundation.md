@@ -71,13 +71,13 @@ flowchart TD
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
 | `nara` | Facade and layered preludes | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs |
-| `nara_app` | `App`, `Plugin`, `PluginError`, `StartupStage`, `CoreStage`, real/virtual/fixed time resources, runtime state transition hooks | Fallible plugin installation, plugin lifecycle, runner policy, explicit pause/time-scale/background policy, bounded fixed-step catch-up |
+| `nara_app` | `App`, `Plugin`, `PluginError`, plugin metadata/groups, `StartupStage`, `CoreStage`, real/virtual/fixed time resources, runtime state transition hooks | Fallible plugin installation, inspectable plugin capabilities/groups, runner policy, explicit pause/time-scale/background policy, bounded fixed-step catch-up |
 | future `nara_project` | `nara.toml` manifest validation and effective settings lowering | Project settings authority for file-backed apps: paths, startup scene, task defaults, window defaults, input-map sources, and profile overrides |
 | `nara_tasks` | `TaskPools`, `TaskPoolConfig`, `TaskPoolKind`, `TaskExecutionMode`, `TaskHandle<T>`, `TaskCancellationToken`, `TaskStats` | Engine-owned deterministic inline executor and std worker-pool backend for IO/compute/async-compute jobs |
 | `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
-| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry modules for Bevy-reflect-backed component metadata, asset-aware scene preflight, schema export, and migrations |
+| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry modules for Bevy-reflect-backed component metadata, asset-aware scene preflight, schema/capability export, and migrations |
 | `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents; tracing output is an explicit bridge |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, hot reload scheduling, dependency graph, reload generations |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, semantic watch event queue, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
@@ -95,7 +95,7 @@ flowchart TD
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that updates window resources plus keyboard, mouse-button, and pointer state |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, image texture caches split from material/sampler bind groups, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
-| `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic inspector/query/command models, isolated Play Mode lifecycle state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
+| `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, future `EditorWorkspace`, open document state, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses, `EguiSceneEditorAction` | egui-only rendering adapter that consumes tooling models and returns tooling commands/actions; no scene/session/world ownership |
 
 ## Runtime Flow
@@ -242,26 +242,44 @@ second real adapter or stronger isolation pressure.
 - The root facade uses layered preludes. `nara::prelude` is gameplay-first and backend-free;
   backend/tooling/debug/render internals move to advanced or module-specific preludes. See ADR
   [0044](adr/0044-root-facade-and-prelude-layering-policy.md).
+- Component schemas carry capability metadata for scene/save/inspect/edit/animate/replicate/script
+  eligibility at component and field granularity. Capabilities gate domain participation but do not
+  replace domain policy. See ADR
+  [0045](adr/0045-component-schema-capability-metadata.md).
+- Plugins expose stable IDs, declared capabilities, requirements/conflicts, and inspectable group
+  membership. Default plugin groups are explicit product bundles, and `MinimalPlugins` stays
+  headless/minimal. See ADR
+  [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md).
+- Editor workspace state belongs in `nara_tooling`: open document slots, active document, selection
+  sets, dirty/saved revisions, external reload conflicts, per-document undo/redo, and workspace
+  commands remain UI-toolkit agnostic. See ADR
+  [0047](adr/0047-editor-workspace-and-scene-document-state.md).
 
 ## Next Implementation Slices
 
 1. Implement the refined app loop/time/state contract: real/virtual/fixed time resources, pause,
    state transition stage, bounded catch-up diagnostics, and frame-transient event cleanup.
-2. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
+2. Add component schema capability metadata before save/network/animation/script/editor APIs depend
+   on divergent field eligibility rules.
+3. Add plugin metadata and explicit default plugin groups, then decouple wgpu device/surface setup
+   from sprite/UI submitter installation through a convenience group.
+4. Introduce the first `EditorWorkspace` model in `nara_tooling` before expanding editor
+   dogfooding beyond isolated inspector/play-mode panels.
+5. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
    widget state, keyboard/gamepad focus, action-map routing, and editor dogfooding once the runtime
    model is stable.
-3. Harden render resource lifetime before adding more resource classes: explicit cache retention,
+6. Harden render resource lifetime before adding more resource classes: explicit cache retention,
    eviction diagnostics, device-loss rebuild behavior, and decoupled submitter plugin groups.
-4. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
+7. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
    composition, 3D depth/prepass, or transient resource lifetime creates pressure beyond
    `RenderPassPlan`.
-5. Define document-level migration chains for scene, prefab, and patch files before changing their
+8. Define document-level migration chains for scene, prefab, and patch files before changing their
    persisted shape again.
-6. Audit the root facade/prelude and move backend/tooling/debug/internal render types out of the
+9. Audit the root facade/prelude and move backend/tooling/debug/internal render types out of the
    gameplay prelude.
-7. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
+10. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
-8. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
+11. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
    override write-back, and edit-while-playing merge semantics are designed.
-9. Design reusable material assets and custom shader specialization after inline
+12. Design reusable material assets and custom shader specialization after inline
    `Material2dDescriptor` has enough runtime/UI pressure.

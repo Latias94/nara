@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0001, ADR 0012, ADR 0015, ADR 0032
+**Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups
 
 ## Context
 
@@ -108,4 +109,3 @@ right imports.
   `advanced_prelude`?
 - Should `nara::minimal_prelude` exist, or is `nara::prelude` already the minimal gameplay surface?
 - How should generated API docs group facade exports so new users see the intended import path?
-

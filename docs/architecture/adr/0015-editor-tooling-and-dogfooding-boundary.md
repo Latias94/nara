@@ -2,6 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0045: Component Schema Capability Metadata; ADR 0047: Editor
+Workspace and Scene Document State
 
 ## Context
 

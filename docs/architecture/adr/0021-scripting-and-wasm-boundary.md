@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0045: Component Schema Capability Metadata
 
 ## Context
 
@@ -62,4 +63,3 @@ Rules:
 | Scripting design constrains ECS too early | Medium | Medium | Only define boundary now; implement later |
 | Users confuse plugins and scripts | Medium | High | Keep terminology explicit in docs |
 | Capability API too weak | Medium | Medium | Design from real script use cases before implementation |
-

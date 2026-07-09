@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0045: Component Schema Capability Metadata
 
 ## Context
 
@@ -62,4 +63,3 @@ Rules:
 | Field paths break on migrations | High | Medium | Use component schema migrations and validation |
 | Animation scope explodes | High | Medium | Start with sprite/frame clips |
 | Interpolation rules are unclear | Medium | Medium | Define per-field animation value traits later |
-

@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0045: Component Schema Capability Metadata
 
 ## Context
 
@@ -62,4 +63,3 @@ Rules:
 | Save schema drifts from component schema | High | Medium | Use `ComponentRegistry` and versioned migrations |
 | Runtime-created entities lack stable IDs | Medium | High | Add persistent entity IDs for save-eligible runtime entities |
 | Backend state needed for restore | Medium | Medium | Reconstruct backend state from stable components after load |
-

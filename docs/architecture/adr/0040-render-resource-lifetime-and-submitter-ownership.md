@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
+**Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups
 
 ## Context
 
@@ -131,4 +132,3 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
   with a shared reporting adapter?
 - Which feature first forces `RenderGraph`: editor viewports, post-processing, render-to-texture,
   3D depth/prepass, or text/UI composition targets?
-
