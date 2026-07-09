@@ -19,6 +19,7 @@ members = [
     "crates/nara_image",
     "crates/nara_input",
     "crates/nara_material",
+    "crates/nara_project",
     "crates/nara_reflect",
     "crates/nara_render",
     "crates/nara_render_wgpu",
@@ -53,6 +54,7 @@ nara_ecs = { path = "crates/nara_ecs" }
 nara_image = { path = "crates/nara_image" }
 nara_input = { path = "crates/nara_input" }
 nara_material = { path = "crates/nara_material" }
+nara_project = { path = "crates/nara_project" }
 nara_reflect = { path = "crates/nara_reflect" }
 nara_render = { path = "crates/nara_render" }
 nara_render_wgpu = { path = "crates/nara_render_wgpu" }
@@ -82,6 +84,7 @@ ron = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+toml = "1.1"
 tracing = "0.1"
 uuid = "1.23.4"
 winit = "=0.30.12"
@@ -99,6 +102,7 @@ nara_ecs.workspace = true
 nara_image.workspace = true
 nara_input.workspace = true
 nara_material.workspace = true
+nara_project.workspace = true
 nara_reflect.workspace = true
 nara_render.workspace = true
 nara_render_wgpu = { workspace = true, optional = true }

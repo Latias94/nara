@@ -11,6 +11,7 @@ pub use nara_ecs as ecs;
 pub use nara_image as image;
 pub use nara_input as input;
 pub use nara_material as material;
+pub use nara_project as project;
 pub use nara_reflect as reflect;
 pub use nara_render as render;
 #[cfg(feature = "wgpu")]
@@ -236,6 +237,16 @@ pub mod prelude {
     pub use nara_material::{
         AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, Material2dKey,
         SamplerDescriptor, material2d_descriptor_key,
+    };
+    pub use nara_project::{
+        EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveProjectInfo,
+        EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
+        EffectiveStartupSettings, EffectiveTaskSettings, EffectiveWindowSettings,
+        ProjectDiagnosticsManifest, ProjectInfo, ProjectInputManifest, ProjectManifest,
+        ProjectManifestLoad, ProjectPath, ProjectPathError, ProjectPathsManifest,
+        ProjectPluginPlan, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
+        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskExecutionMode,
+        ProjectTasksManifest, ProjectWindowManifest,
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentCodec, ComponentCodecError, ComponentDecodeContext,

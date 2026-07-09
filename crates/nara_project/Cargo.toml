@@ -1,0 +1,17 @@
+[package]
+name = "nara_project"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+nara_app.workspace = true
+nara_diagnostic.workspace = true
+nara_ecs.workspace = true
+nara_tasks.workspace = true
+nara_window.workspace = true
+bevy_ecs.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
