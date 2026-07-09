@@ -29,7 +29,7 @@ fn main() {
             entity: player.clone(),
             component: sprite_id(),
             component_version: v1(),
-            path: ComponentFieldPath::from_fields(["texture"]),
+            path: ComponentFieldPath::from_fields(["material", "image"]),
             asset_ref: AssetRef::path("textures/player.png").unwrap(),
         },
         ScenePatchOperation::Reparent {
@@ -86,10 +86,36 @@ fn transform_value(x: f64, y: f64) -> ComponentValue {
 fn sprite_value(texture: ComponentValue) -> ComponentValue {
     ComponentValue::map([
         ("size", vec2_value(32.0, 32.0)),
-        ("color", color_value(1.0, 1.0, 1.0, 1.0)),
+        (
+            "material",
+            ComponentValue::map([
+                ("image", texture),
+                ("sampler", sampler_value()),
+                ("alpha_mode", ComponentValue::String("blend".to_string())),
+                ("tint", color_value(1.0, 1.0, 1.0, 1.0)),
+            ]),
+        ),
         ("layer", ComponentValue::I64(0)),
         ("sort_key", ComponentValue::I64(0)),
-        ("texture", texture),
+    ])
+}
+
+fn sampler_value() -> ComponentValue {
+    ComponentValue::map([
+        ("min_filter", ComponentValue::String("linear".to_string())),
+        ("mag_filter", ComponentValue::String("linear".to_string())),
+        (
+            "mipmap_filter",
+            ComponentValue::String("linear".to_string()),
+        ),
+        (
+            "address_mode_u",
+            ComponentValue::String("clamp_to_edge".to_string()),
+        ),
+        (
+            "address_mode_v",
+            ComponentValue::String("clamp_to_edge".to_string()),
+        ),
     ])
 }
 

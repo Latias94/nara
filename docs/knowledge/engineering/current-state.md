@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-09T15:46:56+08:00
+timestamp: 2026-07-09T16:31:28+08:00
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-09T15:46:56+08:00
-- Last verified: Apply Changes M1 passed `cargo fmt --all --check`, `cargo nextest run -p nara_tooling -p nara_scene -p nara_reflect` with 59 tests, `cargo check --workspace`, and targeted runtime identity leak search for Apply Changes paths.
-- Next action: Continue M2 material/sampler authoring above `ImageAsset` from `docs/plans/2026-07-09-004-feat-render-ui-apply-foundation-plan.md`.
+- Snapshot timestamp: 2026-07-09T16:31:28+08:00
+- Last verified: Material/2D migration M2 passed `cargo fmt --all`, focused M2 nextest with 63 tests, material serde nextest with 3 tests, workspace checks with and without serde, `windowed_clear` / `windowed_sprites` winit+wgpu example checks, `asset_import_texture` run, serde example checks, prefab/scene example runs, boundary searches, stale-contract search, and `git diff --check`.
+- Next action: Continue M3 runtime UI and backend-neutral pass plan from `docs/plans/2026-07-09-004-feat-render-ui-apply-foundation-plan.md`.
 
 # Active Registrations
 
@@ -41,10 +41,11 @@ status: "active"
   - `nara_scene` owns `SceneDocument`, `PrefabDocument`, stable `SceneEntityId`, validation, spawn/export, and `SceneEntitySource` provenance.
   - Built-in scene, transform, render, sprite, and tilemap codecs register through their owning crate plugins.
   - `nara_asset` now owns stable asset IDs, `.meta` records, project asset database validation, importer descriptors, artifact cache records under `.nara/import-cache/`, asset versions, reload state, dependency edges, and typed runtime handle allocation.
-  - `nara_image` now owns backend-neutral PNG image import, image metadata, sampler intent, prepared image resource snapshots, and render prepare systems.
-  - `nara_sprite` and `nara_tilemap` now author reusable `Handle<ImageAsset>` texture references and serialize semantic `AssetRef::Path` or `AssetRef::StableId` values through codec context.
-  - `nara_sprite_render` now queues colored and textured sprite/tilemap batches with explicit render resource keys and UVs.
-  - `nara_render_wgpu` now samples prepared image resources through backend-private texture, view, sampler, bind-group, and pipeline caches.
+  - `nara_image` now owns backend-neutral PNG image import, image metadata, prepared image resource snapshots, and render prepare systems. Image assets no longer own sampler or material policy.
+  - `nara_material` now owns backend-neutral 2D material intent: filter/address modes, sampler descriptor, alpha mode, inline material descriptor, semantic image references, and material keys.
+  - `nara_sprite` and `nara_tilemap` now author material-first wrappers around reusable `Handle<ImageAsset>` image references and serialize semantic `AssetRef::Path` or `AssetRef::StableId` values through codec context.
+  - `nara_sprite_render` now queues colored and textured sprite/tilemap batches with `SpriteMaterialKey` values that include image render resource key, sampler, alpha mode, and tint.
+  - `nara_render_wgpu` now samples prepared image resources through backend-private texture caches split from material/sampler bind-group caches.
   - Scene/prefab spawn now supports asset-aware preflight through `ProjectAssetDatabase` and scratch `AssetServer` state before mutating the target world.
   - Review hardening now enforces one-to-one runtime asset identity binding, source-kind aware sprite/tileset preflight, path-ref database validation, prepared image removal cleanup, invalid atlas tile skips, and split wgpu sprite texture responsibilities.
   - Created the next implementation-ready plan for scene patch transactions, patch-based prefab overrides, component schema export, migrations, and nested prefab source resolution.
@@ -68,8 +69,8 @@ status: "active"
 - Pending follow-ups:
   - The egui adapter is debug/editor tooling only; long-term runtime UI remains a nara-owned engine UI design problem.
   - Apply Changes beyond the first whole-component selected subset remains deferred: field-level diff minimization, prefab override write-back, whole-scene diffing, and edit-while-playing merge UI are not implemented.
-  - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset` and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
-  - Material/sampler authoring, texture atlases, compression profiles, mip generation, and 3D mesh import remain future extensions of the asset/import/render prepare seam.
+  - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset`, `nara_material`, and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
+  - Reusable material assets, custom shader specialization, texture atlases, compression profiles, mip generation, and 3D mesh import remain future extensions of the asset/import/render prepare seam.
   - `nara_scene` module split, shared asset-ref codec helpers, boundary-search CI, and real import-cache filesystem containment tests remain accepted residuals from review.
 - Blocked:
   - None.
@@ -93,3 +94,5 @@ status: "active"
 - [Async hot reload foundation verification](verification/2026-07-09-async-hot-reload-foundation.md)
 - [Apply Changes M1 verification](verification/2026-07-09-apply-changes-m1.md)
 - [Apply Changes M1 memory event](logs/2026-07/2026-07-09T154656Z-apply-changes-m1-selected-component-patch-export.md)
+- [Material/2D migration M2 verification](verification/2026-07-09-material-2d-m2.md)
+- [Material/2D migration M2 memory event](logs/2026-07/2026-07-09T163128Z-material-2d-m2-image-sampler-removal.md)

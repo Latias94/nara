@@ -222,16 +222,21 @@ Still open:
 1. What abstraction generalizes `SpriteBatches` once runtime UI, gizmos, text, or 3D submit their
    own phase items?
 2. What concrete second pass/resource use case should trigger full `RenderGraph` implementation?
-3. What material input shape should sit above image textures once sprites need sampler/material
-   overrides?
+3. What reusable material asset and shader-specialization model should sit above inline 2D material
+   descriptors once projects need shared material files?
 
 Resolved by ADR 0033:
 
 - Texture upload, atlases, materials, UI images, and future 3D assets attach through asset import,
   backend-neutral render resource preparation, and backend-owned GPU resource caches.
 - The first backend-neutral texture resource is `ImageAsset` prepared into
-  `PreparedImageResource`; sprites and tilemaps carry typed handles and UVs.
-- `nara_render_wgpu` owns textures, samplers, bind groups, buffers, and pipeline cache details.
+  `PreparedImageResource`; images own content/import identity only.
+- `nara_material` owns the first sampler/material authoring layer through `SamplerDescriptor`,
+  `AlphaMode2d`, `Material2dDescriptor`, and material keys.
+- Sprites and tilemaps carry material-first wrappers around typed image handles and UVs.
+- `nara_sprite_render` batches by `SpriteMaterialKey`, not by texture-only keys.
+- `nara_render_wgpu` owns textures, samplers, bind groups, buffers, and pipeline cache details, with
+  image texture upload cached separately from material/sampler bind-group identity.
 - Gameplay/domain crates store typed handles or backend-neutral descriptors, not backend handles.
 
 Resolved in the async hot reload foundation:

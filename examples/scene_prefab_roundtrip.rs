@@ -163,10 +163,17 @@ fn camera_value() -> ComponentValue {
 fn sprite_value() -> ComponentValue {
     ComponentValue::map([
         ("size", vec2_value(32.0, 32.0)),
-        ("color", color_value(0.2, 0.7, 1.0, 1.0)),
+        (
+            "material",
+            ComponentValue::map([
+                ("image", asset_ref_value("stable_id", PLAYER_TEXTURE_ID)),
+                ("sampler", sampler_value()),
+                ("alpha_mode", ComponentValue::String("blend".to_string())),
+                ("tint", color_value(0.2, 0.7, 1.0, 1.0)),
+            ]),
+        ),
         ("layer", ComponentValue::I64(1)),
         ("sort_key", ComponentValue::I64(0)),
-        ("texture", asset_ref_value("stable_id", PLAYER_TEXTURE_ID)),
     ])
 }
 
@@ -211,6 +218,25 @@ fn color_value(r: f64, g: f64, b: f64, a: f64) -> ComponentValue {
         ("g", ComponentValue::f64(g).unwrap()),
         ("b", ComponentValue::f64(b).unwrap()),
         ("a", ComponentValue::f64(a).unwrap()),
+    ])
+}
+
+fn sampler_value() -> ComponentValue {
+    ComponentValue::map([
+        ("min_filter", ComponentValue::String("linear".to_string())),
+        ("mag_filter", ComponentValue::String("linear".to_string())),
+        (
+            "mipmap_filter",
+            ComponentValue::String("linear".to_string()),
+        ),
+        (
+            "address_mode_u",
+            ComponentValue::String("clamp_to_edge".to_string()),
+        ),
+        (
+            "address_mode_v",
+            ComponentValue::String("clamp_to_edge".to_string()),
+        ),
     ])
 }
 

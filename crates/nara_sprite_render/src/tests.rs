@@ -10,9 +10,9 @@ use nara_asset::{
 use nara_core::{Color, Vec2};
 use nara_ecs::Entity;
 use nara_image::{
-    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSamplerDescriptor,
-    ImageSourceMetadata, image_resource_key,
+    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata, image_resource_key,
 };
+use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{
     Camera2d, ExtractedView, RenderImage2d, RenderPhaseLabel, RenderTarget, ViewportRect,
 };
@@ -46,7 +46,7 @@ fn extraction_clears_stale_sprites_and_uses_identity_transform() {
             entity: Entity::PLACEHOLDER,
             source_order: 99,
             kind: ExtractedSpriteKind::Sprite,
-            texture: None,
+            material: ExtractedSpriteMaterial::from_color(Color::WHITE),
             texture_region: TextureUvRect::FULL,
             world_center: Vec2::new(9.0, 9.0),
             world_x_axis: Vec2::X,
@@ -168,7 +168,7 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
     let stats = app.world().resource::<SpriteRenderStats>();
     assert_eq!(queued.len(), 1);
     assert_eq!(
-        queued.as_slice()[0].texture,
+        queued.as_slice()[0].material.image,
         Some(image_resource_key(image))
     );
     assert_eq!(
@@ -177,7 +177,7 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
     );
     assert_eq!(batches.len(), 1);
     assert_eq!(
-        batches.as_slice()[0].texture,
+        batches.as_slice()[0].material.image,
         Some(image_resource_key(image))
     );
     assert_eq!(stats.missing_textures, 0);
@@ -194,7 +194,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 0,
             sort_key: 0,
-            texture: None,
+            material: material_key(None),
             entity_bits: Entity::from_raw_u32(3).unwrap().to_bits(),
             source_order: 0,
             instance: instance(),
@@ -206,7 +206,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 0,
             sort_key: 0,
-            texture: None,
+            material: material_key(None),
             entity_bits: Entity::from_raw_u32(2).unwrap().to_bits(),
             source_order: 1,
             instance: instance(),
@@ -218,7 +218,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 1,
             sort_key: 0,
-            texture: None,
+            material: material_key(None),
             entity_bits: Entity::from_raw_u32(1).unwrap().to_bits(),
             source_order: 2,
             instance: instance(),
@@ -230,7 +230,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 1,
             sort_key: 1,
-            texture: None,
+            material: material_key(None),
             entity_bits: Entity::from_raw_u32(4).unwrap().to_bits(),
             source_order: 3,
             instance: instance(),
@@ -265,20 +265,20 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
 }
 
 #[test]
-fn texture_changes_split_batches_without_reordering_source_order() {
+fn material_image_sort_groups_matching_keys_and_splits_batches() {
     let texture_a = image_resource_key(Handle::new(AssetId::from_raw(1)));
     let texture_b = image_resource_key(Handle::new(AssetId::from_raw(2)));
     let mut items = vec![
         QueuedSpriteItem {
-            texture: Some(texture_a),
+            material: material_key(Some(texture_a)),
             ..queued_item(0)
         },
         QueuedSpriteItem {
-            texture: Some(texture_b),
+            material: material_key(Some(texture_b)),
             ..queued_item(1)
         },
         QueuedSpriteItem {
-            texture: Some(texture_a),
+            material: material_key(Some(texture_a)),
             ..queued_item(2)
         },
     ];
@@ -291,14 +291,51 @@ fn texture_changes_split_batches_without_reordering_source_order() {
             .iter()
             .map(|item| item.source_order)
             .collect::<Vec<_>>(),
-        vec![0, 1, 2]
+        vec![0, 2, 1]
     );
     assert_eq!(
         batches
             .iter()
-            .map(|batch| batch.texture)
+            .map(|batch| batch.material.image)
             .collect::<Vec<_>>(),
-        vec![Some(texture_a), Some(texture_b), Some(texture_a)]
+        vec![Some(texture_a), Some(texture_b)]
+    );
+    assert_eq!(batches[0].instances.len(), 2);
+    assert_eq!(batches[1].instances.len(), 1);
+}
+
+#[test]
+fn same_image_with_different_samplers_splits_batches() {
+    let image = Handle::new(AssetId::from_raw(7));
+    let mut app = App::new();
+    app.add_plugin(SpriteRenderPlugin).unwrap();
+    insert_loaded_image(&mut app, image);
+    app.world_mut().spawn(Camera2d {
+        viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+        ..Camera2d::default()
+    });
+    app.world_mut()
+        .spawn(Sprite::from_texture(image, Vec2::new(10.0, 10.0)));
+    app.world_mut().spawn(
+        Sprite::from_texture(image, Vec2::new(10.0, 10.0))
+            .with_sampler(SamplerDescriptor::NEAREST_CLAMP),
+    );
+
+    app.run_once(Duration::ZERO).unwrap();
+
+    let batches = app.world().resource::<SpriteBatches>();
+    assert_eq!(batches.len(), 2);
+    assert_eq!(
+        batches.as_slice()[0].material.image,
+        Some(image_resource_key(image))
+    );
+    assert_eq!(
+        batches.as_slice()[1].material.image,
+        Some(image_resource_key(image))
+    );
+    assert_ne!(
+        batches.as_slice()[0].material.sampler,
+        batches.as_slice()[1].material.sampler
     );
 }
 
@@ -419,7 +456,7 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
 
     let extracted = app.world().resource::<ExtractedSprites>();
     assert_eq!(extracted.len(), 1);
-    assert_eq!(extracted.as_slice()[0].texture, Some(image));
+    assert_eq!(extracted.as_slice()[0].material.image, Some(image));
     assert_eq!(
         extracted.as_slice()[0].texture_region,
         TextureUvRect::new(Vec2::new(0.25, 0.5), Vec2::new(0.25, 0.5))
@@ -478,7 +515,7 @@ fn queued_item(entity_index: u32) -> QueuedSpriteItem {
         phase: RenderPhaseLabel::TRANSPARENT_2D,
         layer: 0,
         sort_key: 0,
-        texture: None,
+        material: material_key(None),
         entity_bits: Entity::from_raw_u32(entity_index).unwrap().to_bits(),
         source_order: entity_index as u64,
         instance: instance(),
@@ -533,7 +570,15 @@ fn test_image() -> ImageAsset {
         ImageExtent::new(2, 2),
         ImageFormat::Rgba8,
         ImageColorSpace::Srgb,
-        ImageSamplerDescriptor::default(),
         vec![255; 16],
     )
+}
+
+fn material_key(image: Option<nara_render::RenderResourceKey>) -> SpriteMaterialKey {
+    SpriteMaterialKey {
+        image,
+        sampler: SamplerDescriptor::default(),
+        alpha_mode: AlphaMode2d::Blend,
+        tint: ColorKey::from_color(Color::WHITE),
+    }
 }

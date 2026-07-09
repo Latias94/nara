@@ -7,7 +7,8 @@ use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::Transform2d;
 
 use crate::{
-    ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, SpriteRenderStats, TextureUvRect,
+    ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
+    SpriteRenderStats, TextureUvRect,
 };
 
 pub fn extract_sprites(
@@ -74,7 +75,12 @@ pub fn extract_sprite(
         entity,
         source_order,
         kind: ExtractedSpriteKind::Sprite,
-        texture: sprite.texture,
+        material: ExtractedSpriteMaterial {
+            image: sprite.material.image,
+            sampler: sprite.material.sampler,
+            alpha_mode: sprite.material.alpha_mode,
+            tint: sprite.material.tint,
+        },
         texture_region: sprite
             .texture_region
             .map(TextureUvRect::from_texture_region)
@@ -82,7 +88,7 @@ pub fn extract_sprite(
         world_center: matrix.transform_point2(local_center),
         world_x_axis: matrix.transform_vector2(local_x_axis),
         world_y_axis: matrix.transform_vector2(local_y_axis),
-        color: sprite.color,
+        color: sprite.material.tint,
         phase: RenderPhaseLabel::TRANSPARENT_2D,
         layer: sprite.layer,
         sort_key: sprite.sort_key,
@@ -111,32 +117,49 @@ pub fn extract_tile_cell(
     let local_y_axis = Vec2::new(0.0, tile_size.y * 0.5);
     let tile_texture = tileset.and_then(|tileset| {
         Some((
-            tileset.image?,
+            tileset.material.image?,
             tileset
                 .normalized_region(tile)
                 .map(|region| TextureUvRect::new(region.min, region.size))?,
         ))
     });
-    if tileset.and_then(|tileset| tileset.image).is_some() && tile_texture.is_none() {
+    if tileset.and_then(|tileset| tileset.material.image).is_some() && tile_texture.is_none() {
         return None;
     }
+    let material = tileset
+        .map(|tileset| ExtractedSpriteMaterial {
+            image: tileset.material.image,
+            sampler: tileset.material.sampler,
+            alpha_mode: tileset.material.alpha_mode,
+            tint: tileset.material.tint,
+        })
+        .unwrap_or_else(|| ExtractedSpriteMaterial::from_color(Color::WHITE));
 
     Some(ExtractedSprite {
         entity,
         source_order,
         kind: ExtractedSpriteKind::TilemapCell { coord, tile },
-        texture: tile_texture.map(|(texture, _)| texture),
+        material,
         texture_region: tile_texture
             .map(|(_, texture_region)| texture_region)
             .unwrap_or(TextureUvRect::FULL),
         world_center: matrix.transform_point2(local_center),
         world_x_axis: matrix.transform_vector2(local_x_axis),
         world_y_axis: matrix.transform_vector2(local_y_axis),
-        color,
+        color: multiply_color(material.tint, color),
         phase: RenderPhaseLabel::TILEMAP_2D,
         layer: tilemap.layer.index,
         sort_key: tilemap.sort_key,
     })
+}
+
+fn multiply_color(left: Color, right: Color) -> Color {
+    Color::rgba(
+        left.r * right.r,
+        left.g * right.g,
+        left.b * right.b,
+        left.a * right.a,
+    )
 }
 
 fn next_source_order(extracted: &ExtractedSprites) -> u64 {

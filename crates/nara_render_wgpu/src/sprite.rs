@@ -130,17 +130,19 @@ pub(crate) fn create_sprite_batch_buffers(
         .iter()
         .filter(|batch| !batch.instances.is_empty())
         .map(|batch| {
-            let bind_group = match batch.texture {
+            let bind_group = match batch.material.image {
                 Some(key) => texture_cache.image_bind_group(
                     device,
                     queue,
                     texture_layout,
-                    key,
+                    batch.material,
                     images.ok_or(WgpuSpriteTextureError::MissingImageAsset { key })?,
                     prepared_images
                         .ok_or(WgpuSpriteTextureError::MissingPreparedResource { key })?,
                 )?,
-                None => texture_cache.fallback_bind_group(device, queue, texture_layout),
+                None => {
+                    texture_cache.fallback_bind_group(device, queue, texture_layout, batch.material)
+                }
             };
             let instances = pack_sprite_instances(&batch.instances);
             let instance_count = saturating_u32(instances.len());
@@ -225,8 +227,9 @@ fn saturating_u32(value: usize) -> u32 {
 mod tests {
     use super::*;
     use nara_core::{Color, Vec2};
+    use nara_material::{AlphaMode2d, SamplerDescriptor};
     use nara_render::{RenderPhaseLabel, RenderTarget};
-    use nara_sprite_render::TextureUvRect;
+    use nara_sprite_render::{ColorKey, SpriteMaterialKey, TextureUvRect};
 
     fn batch(instances: Vec<SpriteInstance>) -> SpriteBatch {
         SpriteBatch {
@@ -236,7 +239,12 @@ mod tests {
             phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 0,
             sort_key: 0,
-            texture: None,
+            material: SpriteMaterialKey {
+                image: None,
+                sampler: SamplerDescriptor::default(),
+                alpha_mode: AlphaMode2d::Blend,
+                tint: ColorKey::from_color(Color::WHITE),
+            },
             instances,
         }
     }

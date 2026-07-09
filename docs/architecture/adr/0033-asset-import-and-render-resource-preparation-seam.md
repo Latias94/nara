@@ -35,9 +35,11 @@ Rules:
   data.
 - Import artifact identity is content-addressed by stable asset ID, source content hash, importer
   ID/version, import settings hash, and target/import profile when relevant.
-- Importers produce backend-neutral runtime assets or descriptors, such as image pixels, texture
-  descriptors, sprite atlas metadata, mesh data, material descriptors, or font atlases. They do not
-  create backend-native handles.
+- Importers produce backend-neutral runtime assets or descriptors, such as image pixels, sprite
+  atlas metadata, mesh data, material descriptors, or font atlases. They do not create
+  backend-native handles.
+- Image assets describe image content and import identity only. Sampler, alpha, tint, and material
+  policy live above images in `nara_material`.
 - `nara_render` owns the backend-neutral render resource preparation interface and frame phase
   vocabulary: asset versions, render resource descriptors, prepare invalidation, and prepare/queue
   ordering.
@@ -57,8 +59,8 @@ The first implementation slice after scene/prefab serialization should therefore
 2. an importer registry and imported artifact cache model;
 3. image import and texture descriptor assets;
 4. render resource preparation state/events in `nara_render`;
-5. wgpu texture/sampler/cache creation in `nara_render_wgpu`;
-6. sprite/tilemap texture usage through typed handles and prepared render resources.
+5. material-aware sprite/tilemap usage through typed handles and prepared render resources;
+6. wgpu image texture caches plus sampler/material bind-group caches in `nara_render_wgpu`.
 
 ## Alternatives Considered
 
@@ -120,8 +122,12 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 - Component codecs that encode persistent data can use `ComponentEncodeContext` and
   `AssetRefExportPolicy` to choose path output or stable-ID output without serializing runtime
   `AssetId` values.
-- Sprite and tilemap authoring components store typed handles to `ImageAsset`/`TileSet`; backend
-  texture objects remain private to `nara_render_wgpu`.
+- `nara_material` owns `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`,
+  `Material2dDescriptor`, semantic image references, and material hashing/keying.
+- `nara_image::ImageAsset` and `PreparedImageResource` intentionally do not store sampler data.
+  Changing sampler policy is a material change, not an image import or prepare change.
+- Sprite and tilemap authoring components store typed handles to `ImageAsset`/`TileSet` inside
+  narrow material wrappers; backend texture objects remain private to `nara_render_wgpu`.
 - `nara_image::ImagePlugin` is the first domain implementation of the async import seam. It registers
   `ImageImporter`, spawns image reload jobs from `AssetReloadRequest` values in
   `TaskUpdateSet::SpawnAssetJobs`, applies typed `ImageAsset` results in
@@ -141,6 +147,12 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 - `AssetWatchPlugin` must use the same root as `AssetSourceRoot`. Cross-root rename events preserve
   the in-root side instead of dropping the whole event, and `.meta` removal maps to source removal
   rather than ordinary metadata modification.
+- `nara_sprite_render` resolves sprite/tilemap material data into `SpriteMaterialKey` values
+  containing image resource key, sampler, alpha mode, and tint. Sorting and batching use these
+  material keys rather than texture-only keys.
+- `nara_render_wgpu::WgpuSpriteTextureCache` caches GPU image textures by prepared image snapshot
+  and caches sampler/bind-group choices by `SpriteMaterialKey`. Sampler-only changes create a new
+  bind group without rebuilding the prepared image resource or reuploading the texture.
 
 ## Success Metrics
 
@@ -150,7 +162,7 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 | Backend isolation | `nara_asset`, `nara_sprite`, `nara_tilemap`, and `nara_render` do not import `wgpu` | Dependency search |
 | Source/artifact split | Source `.meta` and generated `.nara/import-cache` records are separate | Fixture and docs review |
 | Hot reload readiness | Asset version changes invalidate prepared render resources without changing handles | Unit tests |
-| Texture path reuse | Sprite textures use the same import/prepare/cache path that UI/materials can later use | Example review |
+| Texture path reuse | Sprite/tilemap materials use the same image import/prepare/cache path that UI/materials can later use | Example review |
 
 ## Risks and Mitigations
 
@@ -164,8 +176,8 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 ## Follow-Up Questions
 
 - Which import profile fields belong in artifact cache keys for desktop-only Phase 1?
-- What material/sampler authoring layer should sit above `ImageAsset` once sprites, UI, and text need
-  per-material controls?
+- What reusable material-asset layer should sit above inline `Material2dDescriptor` once projects
+  need shared materials, shader specialization, or editor-authored material files?
 
 ## Citations
 

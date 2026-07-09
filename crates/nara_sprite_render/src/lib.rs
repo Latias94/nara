@@ -18,8 +18,9 @@ pub use crate::queue::{
     world_to_clip_instance, world_to_clip_instance_with_uv,
 };
 pub use crate::types::{
-    ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem, QueuedSpriteItems,
-    SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderStats, TextureUvRect,
+    ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
+    QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance,
+    SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
 };
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -45,11 +46,12 @@ impl Plugin for SpriteRenderPlugin {
 
 pub mod prelude {
     pub use crate::{
-        ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem,
-        QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderPlugin,
-        SpriteRenderStats, TextureUvRect, build_sprite_batches, compare_queued_sprite_items,
-        extract_sprites, phase_order, project_sprite_to_view, project_sprite_to_view_with_uv,
-        queue_sprites, sort_and_batch_sprites, view_world_extent, world_to_clip_instance,
+        ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
+        QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance,
+        SpriteMaterialKey, SpriteRenderPlugin, SpriteRenderStats, TextureUvRect,
+        build_sprite_batches, compare_queued_sprite_items, extract_sprites, phase_order,
+        project_sprite_to_view, project_sprite_to_view_with_uv, queue_sprites,
+        sort_and_batch_sprites, view_world_extent, world_to_clip_instance,
         world_to_clip_instance_with_uv,
     };
 }

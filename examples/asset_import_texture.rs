@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let batches = app.world().resource::<SpriteBatches>();
     assert_eq!(batches.total_instances(), 1);
     assert_eq!(
-        batches.as_slice()[0].texture,
+        batches.as_slice()[0].material.image,
         Some(image_resource_key(texture))
     );
     assert_eq!(

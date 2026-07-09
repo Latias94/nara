@@ -2,6 +2,7 @@ use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
 use nara_image::ImageAsset;
+use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderPhaseLabel, RenderResourceKey, RenderTarget};
 use nara_sprite::TextureRegion;
 use nara_tilemap::{TileCoord, TileIndex};
@@ -17,7 +18,7 @@ pub struct ExtractedSprite {
     pub entity: Entity,
     pub source_order: u64,
     pub kind: ExtractedSpriteKind,
-    pub texture: Option<Handle<ImageAsset>>,
+    pub material: ExtractedSpriteMaterial,
     pub texture_region: TextureUvRect,
     pub world_center: Vec2,
     pub world_x_axis: Vec2,
@@ -31,7 +32,27 @@ pub struct ExtractedSprite {
 impl ExtractedSprite {
     #[must_use]
     pub fn is_textured(self) -> bool {
-        self.texture.is_some()
+        self.material.image.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExtractedSpriteMaterial {
+    pub image: Option<Handle<ImageAsset>>,
+    pub sampler: SamplerDescriptor,
+    pub alpha_mode: AlphaMode2d,
+    pub tint: Color,
+}
+
+impl ExtractedSpriteMaterial {
+    #[must_use]
+    pub fn from_color(tint: Color) -> Self {
+        Self {
+            image: None,
+            sampler: SamplerDescriptor::default(),
+            alpha_mode: AlphaMode2d::Blend,
+            tint,
+        }
     }
 }
 
@@ -140,10 +161,53 @@ pub struct QueuedSpriteItem {
     pub phase: RenderPhaseLabel,
     pub layer: i32,
     pub sort_key: i32,
-    pub texture: Option<RenderResourceKey>,
+    pub material: SpriteMaterialKey,
     pub entity_bits: u64,
     pub source_order: u64,
     pub instance: SpriteInstance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SpriteMaterialKey {
+    pub image: Option<RenderResourceKey>,
+    pub sampler: SamplerDescriptor,
+    pub alpha_mode: AlphaMode2d,
+    pub tint: ColorKey,
+}
+
+impl SpriteMaterialKey {
+    #[must_use]
+    pub fn from_material(
+        material: ExtractedSpriteMaterial,
+        image: Option<RenderResourceKey>,
+    ) -> Self {
+        Self {
+            image,
+            sampler: material.sampler,
+            alpha_mode: material.alpha_mode,
+            tint: ColorKey::from_color(material.tint),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ColorKey {
+    pub r: u32,
+    pub g: u32,
+    pub b: u32,
+    pub a: u32,
+}
+
+impl ColorKey {
+    #[must_use]
+    pub const fn from_color(color: Color) -> Self {
+        Self {
+            r: color.r.to_bits(),
+            g: color.g.to_bits(),
+            b: color.b.to_bits(),
+            a: color.a.to_bits(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Resource)]
@@ -193,7 +257,7 @@ pub struct SpriteBatch {
     pub phase: RenderPhaseLabel,
     pub layer: i32,
     pub sort_key: i32,
-    pub texture: Option<RenderResourceKey>,
+    pub material: SpriteMaterialKey,
     pub instances: Vec<SpriteInstance>,
 }
 

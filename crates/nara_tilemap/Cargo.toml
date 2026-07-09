@@ -12,9 +12,16 @@ nara_asset.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
 nara_image.workspace = true
+nara_material.workspace = true
 nara_reflect.workspace = true
 serde = { workspace = true, optional = true }
 
 [features]
 default = []
-serde = ["dep:serde", "nara_asset/serde", "nara_core/serde", "nara_image/serde"]
+serde = [
+    "dep:serde",
+    "nara_asset/serde",
+    "nara_core/serde",
+    "nara_image/serde",
+    "nara_material/serde",
+]

@@ -10,6 +10,7 @@ pub use nara_diagnostic as diagnostic;
 pub use nara_ecs as ecs;
 pub use nara_image as image;
 pub use nara_input as input;
+pub use nara_material as material;
 pub use nara_reflect as reflect;
 pub use nara_render as render;
 #[cfg(feature = "wgpu")]
@@ -85,13 +86,16 @@ pub mod prelude {
     pub use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, DiagnosticSeverity};
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
     pub use nara_image::{
-        ImageAddressMode, ImageAsset, ImageColorSpace, ImageExtent, ImageFilterMode, ImageFormat,
-        ImageImportError, ImageImportedAsset, ImageImporter, ImagePlugin, ImagePreparePlugin,
-        ImagePrepareStats, ImageReloadError, ImageReloadStats, ImageSamplerDescriptor,
-        ImageSourceMetadata, PreparedImageResource, image_descriptor_hash, image_resource_key,
-        prepare_images,
+        ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageImportError,
+        ImageImportedAsset, ImageImporter, ImagePlugin, ImagePreparePlugin, ImagePrepareStats,
+        ImageReloadError, ImageReloadStats, ImageSourceMetadata, PreparedImageResource,
+        image_descriptor_hash, image_resource_key, prepare_images,
     };
     pub use nara_input::{ButtonInput, InputPlugin, InputState, KeyCode, MouseButton};
+    pub use nara_material::{
+        AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, Material2dKey,
+        SamplerDescriptor, material2d_descriptor_key,
+    };
     pub use nara_reflect::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
@@ -128,11 +132,11 @@ pub mod prelude {
         spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
         spawn_scene_with_prefab_resolver_and_asset_database, sync_children,
     };
-    pub use nara_sprite::{Sprite, SpriteAnchor, SpritePlugin, TextureRegion};
+    pub use nara_sprite::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
     pub use nara_sprite_render::{
-        ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem,
-        QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderPlugin,
-        SpriteRenderStats, TextureUvRect,
+        ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
+        QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance,
+        SpriteMaterialKey, SpriteRenderPlugin, SpriteRenderStats, TextureUvRect,
     };
     pub use nara_tasks::{
         TaskCancellationToken, TaskExecutionMode, TaskHandle, TaskId, TaskPlugin, TaskPoolConfig,
@@ -140,7 +144,8 @@ pub mod prelude {
     };
     pub use nara_tilemap::{
         DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileAtlasLayout, TileAtlasRegion,
-        TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
+        TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, TileSetMaterial,
+        Tilemap, TilemapPlugin,
     };
     pub use nara_tooling::{
         SceneApplyChangesReport, SceneEditorMode, SceneEditorModel, SceneEditorState,

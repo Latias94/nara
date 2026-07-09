@@ -5,6 +5,7 @@ use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
 use nara_image::ImageAsset;
+use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
@@ -84,22 +85,74 @@ impl Default for SpriteAnchor {
 
 #[derive(Debug, Clone, PartialEq, Component)]
 pub struct Sprite {
-    pub texture: Option<Handle<ImageAsset>>,
+    pub material: SpriteMaterial,
     pub texture_region: Option<TextureRegion>,
-    pub color: Color,
     pub size: Vec2,
     pub anchor: SpriteAnchor,
     pub layer: i32,
     pub sort_key: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpriteMaterial {
+    pub image: Option<Handle<ImageAsset>>,
+    pub sampler: SamplerDescriptor,
+    pub alpha_mode: AlphaMode2d,
+    pub tint: Color,
+}
+
+impl SpriteMaterial {
+    #[must_use]
+    pub fn from_color(tint: Color) -> Self {
+        Self {
+            image: None,
+            sampler: SamplerDescriptor::default(),
+            alpha_mode: AlphaMode2d::Blend,
+            tint,
+        }
+    }
+
+    #[must_use]
+    pub fn from_image(image: Handle<ImageAsset>) -> Self {
+        Self {
+            image: Some(image),
+            sampler: SamplerDescriptor::default(),
+            alpha_mode: AlphaMode2d::Blend,
+            tint: Color::WHITE,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_sampler(mut self, sampler: SamplerDescriptor) -> Self {
+        self.sampler = sampler;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode2d) -> Self {
+        self.alpha_mode = alpha_mode;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_tint(mut self, tint: Color) -> Self {
+        self.tint = tint;
+        self
+    }
+}
+
+impl Default for SpriteMaterial {
+    fn default() -> Self {
+        Self::from_color(Color::WHITE)
+    }
+}
+
 impl Sprite {
     #[must_use]
     pub fn from_color(size: Vec2, color: Color) -> Self {
         Self {
-            texture: None,
+            material: SpriteMaterial::from_color(color),
             texture_region: None,
-            color,
             size,
             anchor: SpriteAnchor::CENTER,
             layer: 0,
@@ -110,9 +163,8 @@ impl Sprite {
     #[must_use]
     pub fn from_texture(texture: Handle<ImageAsset>, size: Vec2) -> Self {
         Self {
-            texture: Some(texture),
+            material: SpriteMaterial::from_image(texture),
             texture_region: None,
-            color: Color::WHITE,
             size,
             anchor: SpriteAnchor::CENTER,
             layer: 0,
@@ -123,6 +175,24 @@ impl Sprite {
     #[must_use]
     pub fn with_texture_region(mut self, region: TextureRegion) -> Self {
         self.texture_region = Some(region);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_sampler(mut self, sampler: SamplerDescriptor) -> Self {
+        self.material.sampler = sampler;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode2d) -> Self {
+        self.material.alpha_mode = alpha_mode;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_tint(mut self, tint: Color) -> Self {
+        self.material.tint = tint;
         self
     }
 
@@ -159,20 +229,17 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
             sprite_fields(),
             |value, context| {
                 let size = read_vec2(value.field("size")?, "size")?;
-                let color = read_color(value.field("color")?, "color")?;
-                let texture_ref = read_optional_asset_ref(value.get("texture"), "texture")?;
-                let texture = prepare_optional_texture(context, texture_ref)?;
+                let material = read_sprite_material(value.field("material")?, context)?;
                 let texture_region =
                     read_optional_texture_region(value.get("texture_region"), "texture_region")?;
                 let layer = optional_i32(value, "layer")?.unwrap_or(0);
                 let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
 
                 Ok(PreparedComponent::new(move |world, entity| {
-                    let texture = resolve_prepared_texture(world, texture)?;
+                    let material = resolve_prepared_material(world, material)?;
                     let sprite = Sprite {
-                        texture,
+                        material,
                         texture_region,
-                        color,
                         size,
                         anchor: SpriteAnchor::CENTER,
                         layer,
@@ -189,7 +256,7 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
                 let Some(sprite) = world.get::<Sprite>(entity) else {
                     return Ok(None);
                 };
-                let texture = match sprite.texture {
+                let image = match sprite.material.image {
                     Some(handle) => Some(asset_ref_value(
                         &AssetRef::from_handle_with_policy(
                             world.get_resource::<AssetServer>().ok_or_else(|| {
@@ -204,14 +271,19 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
                     )?),
                     None => None,
                 };
+                let material = material_value(
+                    image.unwrap_or(ComponentValue::Null),
+                    sprite.material.sampler,
+                    sprite.material.alpha_mode,
+                    sprite.material.tint,
+                )?;
 
                 let mut fields = vec![
                     ("size", vec2_value(sprite.size)?),
-                    ("color", color_value(sprite.color)?),
+                    ("material", material),
                     ("layer", ComponentValue::I64(i64::from(sprite.layer))),
                     ("sort_key", ComponentValue::I64(i64::from(sprite.sort_key))),
                 ];
-                fields.push(("texture", texture.unwrap_or(ComponentValue::Null)));
                 fields.push((
                     "texture_region",
                     sprite
@@ -226,7 +298,7 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
         .expect("nara.sprite.Sprite component registration should be unique");
 }
 
-fn sprite_fields() -> [ComponentFieldSchema; 10] {
+fn sprite_fields() -> [ComponentFieldSchema; 16] {
     [
         ComponentFieldSchema::required(
             ComponentFieldPath::from_fields(["size", "x"]),
@@ -237,20 +309,55 @@ fn sprite_fields() -> [ComponentFieldSchema; 10] {
             ComponentValueKind::F64,
         ),
         ComponentFieldSchema::required(
-            ComponentFieldPath::from_fields(["color", "r"]),
+            ComponentFieldPath::from_fields(["material", "tint", "r"]),
             ComponentValueKind::F64,
         ),
         ComponentFieldSchema::required(
-            ComponentFieldPath::from_fields(["color", "g"]),
+            ComponentFieldPath::from_fields(["material", "tint", "g"]),
             ComponentValueKind::F64,
         ),
         ComponentFieldSchema::required(
-            ComponentFieldPath::from_fields(["color", "b"]),
+            ComponentFieldPath::from_fields(["material", "tint", "b"]),
             ComponentValueKind::F64,
         ),
         ComponentFieldSchema::required(
-            ComponentFieldPath::from_fields(["color", "a"]),
+            ComponentFieldPath::from_fields(["material", "tint", "a"]),
             ComponentValueKind::F64,
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["material", "image"]),
+            ComponentValueKind::AssetRef,
+            ComponentValue::Null,
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["material", "sampler", "min_filter"]),
+            ComponentValueKind::String,
+            ComponentValue::String("linear".to_string()),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["material", "sampler", "mag_filter"]),
+            ComponentValueKind::String,
+            ComponentValue::String("linear".to_string()),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["material", "sampler", "mipmap_filter"]),
+            ComponentValueKind::String,
+            ComponentValue::String("linear".to_string()),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["material", "sampler", "address_mode_u"]),
+            ComponentValueKind::String,
+            ComponentValue::String("clamp_to_edge".to_string()),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["material", "sampler", "address_mode_v"]),
+            ComponentValueKind::String,
+            ComponentValue::String("clamp_to_edge".to_string()),
+        ),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldPath::from_fields(["material", "alpha_mode"]),
+            ComponentValueKind::String,
+            ComponentValue::String("blend".to_string()),
         ),
         ComponentFieldSchema::optional_with_default(
             ComponentFieldPath::from_fields(["layer"]),
@@ -263,11 +370,6 @@ fn sprite_fields() -> [ComponentFieldSchema; 10] {
             ComponentValue::I64(0),
         ),
         ComponentFieldSchema::optional_with_default(
-            ComponentFieldPath::from_fields(["texture"]),
-            ComponentValueKind::AssetRef,
-            ComponentValue::Null,
-        ),
-        ComponentFieldSchema::optional_with_default(
             ComponentFieldPath::from_fields(["texture_region"]),
             ComponentValueKind::Map,
             ComponentValue::Null,
@@ -275,19 +377,47 @@ fn sprite_fields() -> [ComponentFieldSchema; 10] {
     ]
 }
 
+#[derive(Debug, Clone)]
 enum PreparedTexture {
     Resolved(Handle<ImageAsset>),
     Deferred(AssetRef),
 }
 
+#[derive(Debug, Clone)]
+struct PreparedSpriteMaterial {
+    image: Option<PreparedTexture>,
+    sampler: SamplerDescriptor,
+    alpha_mode: AlphaMode2d,
+    tint: Color,
+}
+
+fn read_sprite_material(
+    value: &ComponentValue,
+    context: &mut ComponentDecodeContext<'_>,
+) -> Result<PreparedSpriteMaterial, ComponentCodecError> {
+    let tint = read_color(value.field("tint")?, "material.tint")?;
+    let image_ref = read_optional_asset_ref(value.get("image"), "material.image")?;
+    let image = prepare_optional_texture(context, image_ref, "material.image.value")?;
+    let sampler = read_sampler(value.get("sampler"), "material.sampler")?;
+    let alpha_mode = read_alpha_mode(value.get("alpha_mode"), "material.alpha_mode")?;
+
+    Ok(PreparedSpriteMaterial {
+        image,
+        sampler,
+        alpha_mode,
+        tint,
+    })
+}
+
 fn prepare_optional_texture(
     context: &mut ComponentDecodeContext<'_>,
     texture_ref: Option<AssetRef>,
+    field: &str,
 ) -> Result<Option<PreparedTexture>, ComponentCodecError> {
     let Some(texture_ref) = texture_ref else {
         return Ok(None);
     };
-    prepare_texture_handle(context, "texture.value", texture_ref).map(Some)
+    prepare_texture_handle(context, field, texture_ref).map(Some)
 }
 
 fn prepare_texture_handle(
@@ -335,14 +465,27 @@ fn resolve_prepared_texture(
         None => Ok(None),
         Some(PreparedTexture::Resolved(handle)) => Ok(Some(handle)),
         Some(PreparedTexture::Deferred(texture_ref)) => {
-            resolve_optional_texture(world, Some(&texture_ref))
+            resolve_optional_texture(world, Some(&texture_ref), "material.image.value")
         }
     }
+}
+
+fn resolve_prepared_material(
+    world: &mut World,
+    material: PreparedSpriteMaterial,
+) -> Result<SpriteMaterial, ComponentCodecError> {
+    Ok(SpriteMaterial {
+        image: resolve_prepared_texture(world, material.image)?,
+        sampler: material.sampler,
+        alpha_mode: material.alpha_mode,
+        tint: material.tint,
+    })
 }
 
 fn resolve_optional_texture(
     world: &mut World,
     texture_ref: Option<&AssetRef>,
+    field: &str,
 ) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
     let Some(texture_ref) = texture_ref else {
         return Ok(None);
@@ -353,7 +496,7 @@ fn resolve_optional_texture(
     texture_ref
         .resolve::<ImageAsset>(&mut world.resource_mut::<AssetServer>())
         .map(Some)
-        .map_err(|error| invalid_asset_ref("texture.value", texture_ref, error))
+        .map_err(|error| invalid_asset_ref(field, texture_ref, error))
 }
 
 fn invalid_asset_ref(
@@ -447,6 +590,172 @@ fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
     ]))
 }
 
+fn read_sampler(
+    value: Option<&ComponentValue>,
+    field: &str,
+) -> Result<SamplerDescriptor, ComponentCodecError> {
+    let Some(value) = value else {
+        return Ok(SamplerDescriptor::default());
+    };
+    if matches!(value, ComponentValue::Null) {
+        return Ok(SamplerDescriptor::default());
+    }
+    Ok(SamplerDescriptor {
+        min_filter: read_filter_mode(
+            value.get("min_filter"),
+            &format!("{field}.min_filter"),
+            FilterMode::Linear,
+        )?,
+        mag_filter: read_filter_mode(
+            value.get("mag_filter"),
+            &format!("{field}.mag_filter"),
+            FilterMode::Linear,
+        )?,
+        mipmap_filter: read_filter_mode(
+            value.get("mipmap_filter"),
+            &format!("{field}.mipmap_filter"),
+            FilterMode::Linear,
+        )?,
+        address_mode_u: read_address_mode(
+            value.get("address_mode_u"),
+            &format!("{field}.address_mode_u"),
+            AddressMode::ClampToEdge,
+        )?,
+        address_mode_v: read_address_mode(
+            value.get("address_mode_v"),
+            &format!("{field}.address_mode_v"),
+            AddressMode::ClampToEdge,
+        )?,
+    })
+}
+
+fn read_filter_mode(
+    value: Option<&ComponentValue>,
+    field: &str,
+    default: FilterMode,
+) -> Result<FilterMode, ComponentCodecError> {
+    let Some(value) = value else {
+        return Ok(default);
+    };
+    match value
+        .as_str()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "filter mode string"))?
+    {
+        "nearest" => Ok(FilterMode::Nearest),
+        "linear" => Ok(FilterMode::Linear),
+        _ => Err(ComponentCodecError::invalid_field(
+            field,
+            "'nearest' or 'linear'",
+        )),
+    }
+}
+
+fn read_address_mode(
+    value: Option<&ComponentValue>,
+    field: &str,
+    default: AddressMode,
+) -> Result<AddressMode, ComponentCodecError> {
+    let Some(value) = value else {
+        return Ok(default);
+    };
+    match value
+        .as_str()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "address mode string"))?
+    {
+        "clamp_to_edge" => Ok(AddressMode::ClampToEdge),
+        "repeat" => Ok(AddressMode::Repeat),
+        "mirror_repeat" => Ok(AddressMode::MirrorRepeat),
+        _ => Err(ComponentCodecError::invalid_field(
+            field,
+            "'clamp_to_edge', 'repeat', or 'mirror_repeat'",
+        )),
+    }
+}
+
+fn read_alpha_mode(
+    value: Option<&ComponentValue>,
+    field: &str,
+) -> Result<AlphaMode2d, ComponentCodecError> {
+    let Some(value) = value else {
+        return Ok(AlphaMode2d::Blend);
+    };
+    match value
+        .as_str()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "alpha mode string"))?
+    {
+        "opaque" => Ok(AlphaMode2d::Opaque),
+        "blend" => Ok(AlphaMode2d::Blend),
+        _ => Err(ComponentCodecError::invalid_field(
+            field,
+            "'opaque' or 'blend'",
+        )),
+    }
+}
+
+fn material_value(
+    image: ComponentValue,
+    sampler: SamplerDescriptor,
+    alpha_mode: AlphaMode2d,
+    tint: Color,
+) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("image", image),
+        ("sampler", sampler_value(sampler)),
+        (
+            "alpha_mode",
+            ComponentValue::String(alpha_mode_str(alpha_mode).to_string()),
+        ),
+        ("tint", color_value(tint)?),
+    ]))
+}
+
+fn sampler_value(sampler: SamplerDescriptor) -> ComponentValue {
+    ComponentValue::map([
+        (
+            "min_filter",
+            ComponentValue::String(filter_mode_str(sampler.min_filter).to_string()),
+        ),
+        (
+            "mag_filter",
+            ComponentValue::String(filter_mode_str(sampler.mag_filter).to_string()),
+        ),
+        (
+            "mipmap_filter",
+            ComponentValue::String(filter_mode_str(sampler.mipmap_filter).to_string()),
+        ),
+        (
+            "address_mode_u",
+            ComponentValue::String(address_mode_str(sampler.address_mode_u).to_string()),
+        ),
+        (
+            "address_mode_v",
+            ComponentValue::String(address_mode_str(sampler.address_mode_v).to_string()),
+        ),
+    ])
+}
+
+fn filter_mode_str(filter_mode: FilterMode) -> &'static str {
+    match filter_mode {
+        FilterMode::Nearest => "nearest",
+        FilterMode::Linear => "linear",
+    }
+}
+
+fn address_mode_str(address_mode: AddressMode) -> &'static str {
+    match address_mode {
+        AddressMode::ClampToEdge => "clamp_to_edge",
+        AddressMode::Repeat => "repeat",
+        AddressMode::MirrorRepeat => "mirror_repeat",
+    }
+}
+
+fn alpha_mode_str(alpha_mode: AlphaMode2d) -> &'static str {
+    match alpha_mode {
+        AlphaMode2d::Opaque => "opaque",
+        AlphaMode2d::Blend => "blend",
+    }
+}
+
 fn read_optional_asset_ref(
     value: Option<&ComponentValue>,
     field: &str,
@@ -494,7 +803,7 @@ fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCode
 }
 
 pub mod prelude {
-    pub use crate::{Sprite, SpriteAnchor, SpritePlugin, TextureRegion};
+    pub use crate::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
 }
 
 #[cfg(test)]
@@ -509,7 +818,10 @@ mod tests {
     fn creates_color_sprite_with_default_authoring_state() {
         let sprite = Sprite::from_color(Vec2::new(16.0, 16.0), Color::WHITE);
 
-        assert_eq!(sprite.texture, None);
+        assert_eq!(sprite.material.image, None);
+        assert_eq!(sprite.material.sampler, SamplerDescriptor::default());
+        assert_eq!(sprite.material.alpha_mode, AlphaMode2d::Blend);
+        assert_eq!(sprite.material.tint, Color::WHITE);
         assert_eq!(sprite.texture_region, None);
         assert_eq!(sprite.size, Vec2::new(16.0, 16.0));
         assert_eq!(sprite.anchor, SpriteAnchor::CENTER);
@@ -523,12 +835,12 @@ mod tests {
         let sprite = Sprite::from_texture(texture, Vec2::new(32.0, 32.0))
             .with_texture_region(TextureRegion::new(Vec2::ZERO, Vec2::splat(0.5)));
 
-        assert_eq!(sprite.texture, Some(texture));
+        assert_eq!(sprite.material.image, Some(texture));
         assert_eq!(
             sprite.texture_region,
             Some(TextureRegion::new(Vec2::ZERO, Vec2::splat(0.5)))
         );
-        assert_eq!(sprite.color, Color::WHITE);
+        assert_eq!(sprite.material.tint, Color::WHITE);
     }
 
     #[test]
@@ -585,7 +897,7 @@ mod tests {
         prepared.apply(&mut world, entity).unwrap();
 
         let sprite = world.get::<Sprite>(entity).unwrap();
-        let texture = sprite.texture.unwrap();
+        let texture = sprite.material.image.unwrap();
         assert_eq!(asset_server.path(texture.id()), Some("textures/player.png"));
         assert_eq!(asset_server.stable_id(texture.id()), Some(stable_id));
     }
@@ -615,7 +927,7 @@ mod tests {
                 field,
                 asset_ref,
                 ..
-            }) if field == "texture.value"
+            }) if field == "material.image.value"
                 && asset_ref == format!("stable_id:{unknown_stable_id}")
         ));
         assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
@@ -648,7 +960,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "texture.value"
+            Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "material.image.value"
         ));
         assert_eq!(asset_server.path(AssetId::from_raw(1)), None);
     }
@@ -671,7 +983,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "texture.value"
+            Err(ComponentCodecError::InvalidAssetRef { field, .. }) if field == "material.image.value"
         ));
         assert!(!context.asset_server_touched());
     }
@@ -692,27 +1004,69 @@ mod tests {
                 .map(|field| (field.path.to_string(), field.value_kind, field.required))
                 .collect::<Vec<_>>(),
             vec![
-                ("color.a".to_string(), ComponentValueKind::F64, true),
-                ("color.b".to_string(), ComponentValueKind::F64, true),
-                ("color.g".to_string(), ComponentValueKind::F64, true),
-                ("color.r".to_string(), ComponentValueKind::F64, true),
                 ("layer".to_string(), ComponentValueKind::I64, false),
+                (
+                    "material.alpha_mode".to_string(),
+                    ComponentValueKind::String,
+                    false
+                ),
+                (
+                    "material.image".to_string(),
+                    ComponentValueKind::AssetRef,
+                    false
+                ),
+                (
+                    "material.sampler.address_mode_u".to_string(),
+                    ComponentValueKind::String,
+                    false
+                ),
+                (
+                    "material.sampler.address_mode_v".to_string(),
+                    ComponentValueKind::String,
+                    false
+                ),
+                (
+                    "material.sampler.mag_filter".to_string(),
+                    ComponentValueKind::String,
+                    false
+                ),
+                (
+                    "material.sampler.min_filter".to_string(),
+                    ComponentValueKind::String,
+                    false
+                ),
+                (
+                    "material.sampler.mipmap_filter".to_string(),
+                    ComponentValueKind::String,
+                    false
+                ),
+                ("material.tint.a".to_string(), ComponentValueKind::F64, true),
+                ("material.tint.b".to_string(), ComponentValueKind::F64, true),
+                ("material.tint.g".to_string(), ComponentValueKind::F64, true),
+                ("material.tint.r".to_string(), ComponentValueKind::F64, true),
                 ("size.x".to_string(), ComponentValueKind::F64, true),
                 ("size.y".to_string(), ComponentValueKind::F64, true),
                 ("sort_key".to_string(), ComponentValueKind::I64, false),
-                ("texture".to_string(), ComponentValueKind::AssetRef, false),
                 ("texture_region".to_string(), ComponentValueKind::Map, false),
             ]
         );
     }
 
-    fn sprite_value(texture: AssetRef) -> ComponentValue {
+    fn sprite_value(image: AssetRef) -> ComponentValue {
         ComponentValue::map([
             ("size", vec2_value(Vec2::new(32.0, 32.0)).unwrap()),
-            ("color", color_value(Color::WHITE).unwrap()),
+            (
+                "material",
+                material_value(
+                    asset_ref_value(&image).unwrap(),
+                    SamplerDescriptor::NEAREST_CLAMP,
+                    AlphaMode2d::Blend,
+                    Color::WHITE,
+                )
+                .unwrap(),
+            ),
             ("layer", ComponentValue::I64(0)),
             ("sort_key", ComponentValue::I64(0)),
-            ("texture", asset_ref_value(&texture).unwrap()),
         ])
     }
 

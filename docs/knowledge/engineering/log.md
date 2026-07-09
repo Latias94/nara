@@ -25,3 +25,4 @@ This root log is an optional rollup. Prefer append-only concepts in `logs/` duri
 
 ## 2026-07-09
 * **Apply Changes M1**: Implemented selected-entity / explicit-component Apply Changes patch export and authoring-session apply. Supported changes produce `ScenePatchDocument` operations, enter normal undo history, and reject stale revisions, runtime-only components, missing entities, prefab-expanded entities, and patch validation failures with diagnostics.
+* **Material/2D migration M2**: Added `nara_material`, removed sampler/material policy from `ImageAsset` and `PreparedImageResource`, migrated sprites and tilemaps to material-first wrappers, changed sprite render queueing/batching to `SpriteMaterialKey`, and split wgpu image texture caches from material/sampler bind-group caches.

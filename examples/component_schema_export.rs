@@ -19,7 +19,7 @@ fn main() {
     assert!(json.contains("nara.sprite.Sprite"));
     assert!(json.contains("nara.tilemap.Tilemap"));
     assert!(json.contains("translation"));
-    assert!(json.contains("texture"));
+    assert!(json.contains("material.image"));
     assert!(!json.contains("bevy_ecs::"));
 
     println!("{json}");

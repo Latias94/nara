@@ -14,14 +14,14 @@ fn main() {
             entity: scene_id("visual"),
             component: sprite_id(),
             component_version: v1(),
-            path: ComponentFieldPath::from_fields(["color", "r"]),
+            path: ComponentFieldPath::from_fields(["material", "tint", "r"]),
             value: ComponentValue::f64(0.25).unwrap(),
         },
         ScenePatchOperation::SetAssetRefField {
             entity: scene_id("visual"),
             component: sprite_id(),
             component_version: v1(),
-            path: ComponentFieldPath::from_fields(["texture"]),
+            path: ComponentFieldPath::from_fields(["material", "image"]),
             asset_ref: AssetRef::path("textures/enemy.png").unwrap(),
         },
     ]);
@@ -52,8 +52,8 @@ fn main() {
     assert!(!report.diagnostics.has_errors());
     let visual = report.entity_map.get(&scene_id("enemy/visual")).unwrap();
     let sprite = world.get::<Sprite>(visual).unwrap();
-    assert_eq!(sprite.color.r, 0.25);
-    assert!(sprite.texture.is_some());
+    assert_eq!(sprite.material.tint.r, 0.25);
+    assert!(sprite.material.image.is_some());
 
     println!("{json}");
 }
@@ -61,10 +61,36 @@ fn main() {
 fn sprite_value() -> ComponentValue {
     ComponentValue::map([
         ("size", vec2_value(32.0, 32.0)),
-        ("color", color_value(1.0, 1.0, 1.0, 1.0)),
+        (
+            "material",
+            ComponentValue::map([
+                ("image", ComponentValue::Null),
+                ("sampler", sampler_value()),
+                ("alpha_mode", ComponentValue::String("blend".to_string())),
+                ("tint", color_value(1.0, 1.0, 1.0, 1.0)),
+            ]),
+        ),
         ("layer", ComponentValue::I64(0)),
         ("sort_key", ComponentValue::I64(0)),
-        ("texture", ComponentValue::Null),
+    ])
+}
+
+fn sampler_value() -> ComponentValue {
+    ComponentValue::map([
+        ("min_filter", ComponentValue::String("linear".to_string())),
+        ("mag_filter", ComponentValue::String("linear".to_string())),
+        (
+            "mipmap_filter",
+            ComponentValue::String("linear".to_string()),
+        ),
+        (
+            "address_mode_u",
+            ComponentValue::String("clamp_to_edge".to_string()),
+        ),
+        (
+            "address_mode_v",
+            ComponentValue::String("clamp_to_edge".to_string()),
+        ),
     ])
 }
 

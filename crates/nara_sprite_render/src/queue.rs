@@ -4,13 +4,11 @@ use nara_asset::Assets;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
 use nara_image::{ImageAsset, PreparedImageResource, image_resource_key};
-use nara_render::{
-    ExtractedView, ExtractedViews, PreparedRenderResources, RenderPhaseLabel, RenderResourceKey,
-};
+use nara_render::{ExtractedView, ExtractedViews, PreparedRenderResources, RenderPhaseLabel};
 
 use crate::{
     ExtractedSprite, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches,
-    SpriteInstance, SpriteRenderStats, TextureUvRect,
+    SpriteInstance, SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
 };
 
 pub fn queue_sprites(
@@ -48,7 +46,7 @@ pub fn queue_sprites(
                 phase: queueable.sprite.phase,
                 layer: queueable.sprite.layer,
                 sort_key: queueable.sprite.sort_key,
-                texture: queueable.texture,
+                material: queueable.material,
                 entity_bits: queueable.sprite.entity.to_bits(),
                 source_order: queueable.sprite.source_order,
                 instance,
@@ -163,7 +161,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             && batch.phase == item.phase
             && batch.layer == item.layer
             && batch.sort_key == item.sort_key
-            && batch.texture == item.texture
+            && batch.material == item.material
         {
             batch.instances.push(item.instance);
             continue;
@@ -176,7 +174,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             phase: item.phase,
             layer: item.layer,
             sort_key: item.sort_key,
-            texture: item.texture,
+            material: item.material,
             instances: vec![item.instance],
         });
     }
@@ -191,9 +189,9 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
         phase_order(left.phase),
         left.layer,
         left.sort_key,
+        left.material,
         left.source_order,
         left.entity_bits,
-        left.texture,
     )
         .cmp(&(
             right.view_order,
@@ -201,9 +199,9 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
             phase_order(right.phase),
             right.layer,
             right.sort_key,
+            right.material,
             right.source_order,
             right.entity_bits,
-            right.texture,
         ))
 }
 
@@ -230,7 +228,7 @@ fn saturating_u32(value: usize) -> u32 {
 
 struct QueueableSprite<'a> {
     sprite: &'a ExtractedSprite,
-    texture: Option<RenderResourceKey>,
+    material: SpriteMaterialKey,
     uv: TextureUvRect,
 }
 
@@ -242,10 +240,10 @@ fn resolve_queueable_sprites<'a>(
 ) -> Vec<QueueableSprite<'a>> {
     sprites
         .filter_map(|sprite| {
-            resolve_sprite_texture(sprite, images, prepared_images, stats).map(|(texture, uv)| {
+            resolve_sprite_material(sprite, images, prepared_images, stats).map(|(material, uv)| {
                 QueueableSprite {
                     sprite,
-                    texture,
+                    material,
                     uv,
                 }
             })
@@ -253,19 +251,22 @@ fn resolve_queueable_sprites<'a>(
         .collect()
 }
 
-fn resolve_sprite_texture(
+fn resolve_sprite_material(
     sprite: &ExtractedSprite,
     images: Option<&Assets<ImageAsset>>,
     prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
     stats: &mut SpriteRenderStats,
-) -> Option<(Option<RenderResourceKey>, TextureUvRect)> {
+) -> Option<(SpriteMaterialKey, TextureUvRect)> {
     if !sprite.texture_region.is_valid() {
         stats.invalid_texture_regions = stats.invalid_texture_regions.saturating_add(1);
         return None;
     }
 
-    let Some(texture) = sprite.texture else {
-        return Some((None, sprite.texture_region));
+    let Some(texture) = sprite.material.image else {
+        return Some((
+            SpriteMaterialKey::from_material(sprite.material, None),
+            sprite.texture_region,
+        ));
     };
     let Some(images) = images else {
         stats.missing_textures = stats.missing_textures.saturating_add(1);
@@ -286,5 +287,8 @@ fn resolve_sprite_texture(
         return None;
     }
 
-    Some((Some(key), sprite.texture_region))
+    Some((
+        SpriteMaterialKey::from_material(sprite.material, Some(key)),
+        sprite.texture_region,
+    ))
 }

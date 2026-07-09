@@ -56,45 +56,6 @@ impl ImageExtent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
-pub enum ImageFilterMode {
-    Nearest,
-    Linear,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
-pub enum ImageAddressMode {
-    ClampToEdge,
-    Repeat,
-    MirrorRepeat,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ImageSamplerDescriptor {
-    pub min_filter: ImageFilterMode,
-    pub mag_filter: ImageFilterMode,
-    pub mipmap_filter: ImageFilterMode,
-    pub address_mode_u: ImageAddressMode,
-    pub address_mode_v: ImageAddressMode,
-}
-
-impl Default for ImageSamplerDescriptor {
-    fn default() -> Self {
-        Self {
-            min_filter: ImageFilterMode::Linear,
-            mag_filter: ImageFilterMode::Linear,
-            mipmap_filter: ImageFilterMode::Linear,
-            address_mode_u: ImageAddressMode::ClampToEdge,
-            address_mode_v: ImageAddressMode::ClampToEdge,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ImageSourceMetadata {
@@ -148,7 +109,6 @@ pub struct ImageAsset {
     extent: ImageExtent,
     format: ImageFormat,
     color_space: ImageColorSpace,
-    sampler: ImageSamplerDescriptor,
     pixels: Vec<u8>,
 }
 
@@ -159,7 +119,6 @@ impl ImageAsset {
         extent: ImageExtent,
         format: ImageFormat,
         color_space: ImageColorSpace,
-        sampler: ImageSamplerDescriptor,
         pixels: Vec<u8>,
     ) -> Self {
         Self {
@@ -167,7 +126,6 @@ impl ImageAsset {
             extent,
             format,
             color_space,
-            sampler,
             pixels,
         }
     }
@@ -190,11 +148,6 @@ impl ImageAsset {
     #[must_use]
     pub const fn color_space(&self) -> ImageColorSpace {
         self.color_space
-    }
-
-    #[must_use]
-    pub const fn sampler(&self) -> ImageSamplerDescriptor {
-        self.sampler
     }
 
     #[must_use]
@@ -235,7 +188,6 @@ impl ImageImportedAsset {
 pub struct ImageImporter {
     descriptor: ImporterDescriptor,
     color_space: ImageColorSpace,
-    sampler: ImageSamplerDescriptor,
 }
 
 impl Default for ImageImporter {
@@ -255,19 +207,12 @@ impl ImageImporter {
                 ArtifactFormatVersion::new(1),
             )?,
             color_space: ImageColorSpace::Srgb,
-            sampler: ImageSamplerDescriptor::default(),
         })
     }
 
     #[must_use]
     pub fn with_color_space(mut self, color_space: ImageColorSpace) -> Self {
         self.color_space = color_space;
-        self
-    }
-
-    #[must_use]
-    pub fn with_sampler(mut self, sampler: ImageSamplerDescriptor) -> Self {
-        self.sampler = sampler;
         self
     }
 
@@ -308,7 +253,6 @@ impl ImageImporter {
             ImageExtent::new(width, height),
             ImageFormat::Rgba8,
             self.color_space,
-            self.sampler,
             pixels,
         );
 
@@ -385,7 +329,6 @@ pub struct PreparedImageResource {
     extent: ImageExtent,
     format: ImageFormat,
     color_space: ImageColorSpace,
-    sampler: ImageSamplerDescriptor,
     source_hash: SourceHash,
     artifact_hash: ImportArtifactDigest,
     pixel_len: usize,
@@ -398,7 +341,6 @@ impl PreparedImageResource {
             extent: image.extent(),
             format: image.format(),
             color_space: image.color_space(),
-            sampler: image.sampler(),
             source_hash: image.source().source_hash(),
             artifact_hash: image.source().artifact().key().digest(),
             pixel_len: image.pixels().len(),
@@ -418,11 +360,6 @@ impl PreparedImageResource {
     #[must_use]
     pub const fn color_space(&self) -> ImageColorSpace {
         self.color_space
-    }
-
-    #[must_use]
-    pub const fn sampler(&self) -> ImageSamplerDescriptor {
-        self.sampler
     }
 
     #[must_use]
@@ -825,11 +762,6 @@ pub fn image_descriptor_hash(image: &ImageAsset) -> ImportArtifactDigest {
     bytes.extend_from_slice(&image.extent().height.to_le_bytes());
     bytes.push(image_format_tag(image.format()));
     bytes.push(image_color_space_tag(image.color_space()));
-    bytes.push(filter_mode_tag(image.sampler().min_filter));
-    bytes.push(filter_mode_tag(image.sampler().mag_filter));
-    bytes.push(filter_mode_tag(image.sampler().mipmap_filter));
-    bytes.push(address_mode_tag(image.sampler().address_mode_u));
-    bytes.push(address_mode_tag(image.sampler().address_mode_v));
     bytes.extend_from_slice(&(image.pixels().len() as u64).to_le_bytes());
     ImportArtifactDigest::from_bytes(bytes)
 }
@@ -844,21 +776,6 @@ fn image_color_space_tag(color_space: ImageColorSpace) -> u8 {
     match color_space {
         ImageColorSpace::Srgb => 1,
         ImageColorSpace::Linear => 2,
-    }
-}
-
-fn filter_mode_tag(filter_mode: ImageFilterMode) -> u8 {
-    match filter_mode {
-        ImageFilterMode::Nearest => 1,
-        ImageFilterMode::Linear => 2,
-    }
-}
-
-fn address_mode_tag(address_mode: ImageAddressMode) -> u8 {
-    match address_mode {
-        ImageAddressMode::ClampToEdge => 1,
-        ImageAddressMode::Repeat => 2,
-        ImageAddressMode::MirrorRepeat => 3,
     }
 }
 
@@ -1042,10 +959,7 @@ mod tests {
             .unwrap()
             .snapshot();
 
-        let changed_importer = ImageImporter::default().with_sampler(ImageSamplerDescriptor {
-            min_filter: ImageFilterMode::Nearest,
-            ..ImageSamplerDescriptor::default()
-        });
+        let changed_importer = ImageImporter::default().with_color_space(ImageColorSpace::Linear);
         let changed = changed_importer
             .import_image(request(
                 &image_record("textures/player.png"),
@@ -1388,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_hash_changes_when_sampler_changes() {
+    fn descriptor_hash_changes_when_content_descriptor_changes() {
         let record = image_record("textures/player.png");
         let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
         let image = ImageImporter::default()
@@ -1396,10 +1310,7 @@ mod tests {
             .unwrap()
             .into_image();
         let mut changed = image.clone();
-        changed.sampler = ImageSamplerDescriptor {
-            min_filter: ImageFilterMode::Nearest,
-            ..changed.sampler()
-        };
+        changed.color_space = ImageColorSpace::Linear;
 
         assert_ne!(
             image_descriptor_hash(&image),

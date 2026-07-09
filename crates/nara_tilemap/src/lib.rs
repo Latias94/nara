@@ -7,6 +7,7 @@ use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, 
 use nara_core::{Color, Vec2};
 use nara_ecs::{Component, World};
 use nara_image::ImageAsset;
+use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
@@ -228,8 +229,62 @@ pub struct TileAtlasRegion {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TileSet {
     pub tile_size: Vec2,
-    pub image: Option<Handle<ImageAsset>>,
+    pub material: TileSetMaterial,
     pub atlas: Option<TileAtlasLayout>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TileSetMaterial {
+    pub image: Option<Handle<ImageAsset>>,
+    pub sampler: SamplerDescriptor,
+    pub alpha_mode: AlphaMode2d,
+    pub tint: Color,
+}
+
+impl TileSetMaterial {
+    #[must_use]
+    pub fn from_color(tint: Color) -> Self {
+        Self {
+            image: None,
+            sampler: SamplerDescriptor::default(),
+            alpha_mode: AlphaMode2d::Blend,
+            tint,
+        }
+    }
+
+    #[must_use]
+    pub fn from_image(image: Handle<ImageAsset>) -> Self {
+        Self {
+            image: Some(image),
+            sampler: SamplerDescriptor::default(),
+            alpha_mode: AlphaMode2d::Blend,
+            tint: Color::WHITE,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_sampler(mut self, sampler: SamplerDescriptor) -> Self {
+        self.sampler = sampler;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode2d) -> Self {
+        self.alpha_mode = alpha_mode;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_tint(mut self, tint: Color) -> Self {
+        self.tint = tint;
+        self
+    }
+}
+
+impl Default for TileSetMaterial {
+    fn default() -> Self {
+        Self::from_color(Color::WHITE)
+    }
 }
 
 impl TileSet {
@@ -237,7 +292,7 @@ impl TileSet {
     pub fn new(tile_size: Vec2) -> Self {
         Self {
             tile_size,
-            image: None,
+            material: TileSetMaterial::default(),
             atlas: None,
         }
     }
@@ -246,7 +301,7 @@ impl TileSet {
     pub fn from_image(image: Handle<ImageAsset>, atlas: TileAtlasLayout) -> Self {
         Self {
             tile_size: atlas.tile_size,
-            image: Some(image),
+            material: TileSetMaterial::from_image(image),
             atlas: Some(atlas),
         }
     }
@@ -254,14 +309,32 @@ impl TileSet {
     #[must_use]
     pub fn with_image(mut self, image: Handle<ImageAsset>, atlas: TileAtlasLayout) -> Self {
         self.tile_size = atlas.tile_size;
-        self.image = Some(image);
+        self.material.image = Some(image);
         self.atlas = Some(atlas);
         self
     }
 
     #[must_use]
+    pub const fn with_sampler(mut self, sampler: SamplerDescriptor) -> Self {
+        self.material.sampler = sampler;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode2d) -> Self {
+        self.material.alpha_mode = alpha_mode;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_tint(mut self, tint: Color) -> Self {
+        self.material.tint = tint;
+        self
+    }
+
+    #[must_use]
     pub fn normalized_region(self, tile: TileIndex) -> Option<TileAtlasRegion> {
-        let _image = self.image?;
+        let _image = self.material.image?;
         self.atlas?.normalized_region(tile)
     }
 }
@@ -757,7 +830,8 @@ fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCode
 pub mod prelude {
     pub use crate::{
         DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileAtlasLayout, TileAtlasRegion,
-        TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
+        TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, TileSetMaterial,
+        Tilemap, TilemapPlugin,
     };
 }
 
@@ -874,7 +948,10 @@ mod tests {
         let atlas = TileAtlasLayout::grid(Vec2::new(16.0, 8.0), 4, 2);
         let tileset = TileSet::from_image(image, atlas);
 
-        assert_eq!(tileset.image, Some(image));
+        assert_eq!(tileset.material.image, Some(image));
+        assert_eq!(tileset.material.sampler, SamplerDescriptor::default());
+        assert_eq!(tileset.material.alpha_mode, AlphaMode2d::Blend);
+        assert_eq!(tileset.material.tint, Color::WHITE);
         assert_eq!(tileset.tile_size, Vec2::new(16.0, 8.0));
         assert_eq!(
             tileset.normalized_region(TileIndex::new(5)),
