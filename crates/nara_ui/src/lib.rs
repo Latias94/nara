@@ -16,7 +16,10 @@ use nara_reflect::ComponentRegistry;
 use nara_render::{RenderPlugin, RenderTarget};
 
 pub use crate::codec::register_ui_components;
-pub use crate::interaction::{UiInteractionState, top_hit, update_ui_interaction};
+pub use crate::interaction::{
+    UiInteractionState, UiInteractionTarget, UiPointerRoute, top_hit, top_hit_target,
+    update_ui_interaction,
+};
 pub use crate::layout::{
     ComputedUiLayout, ComputedUiLayouts, UiRect, compute_ui_layouts, rect_from_viewport,
     resolve_node_rect,
@@ -239,9 +242,9 @@ impl Plugin for UiPlugin {
 
 pub mod prelude {
     pub use crate::{
-        ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiNode, UiPanel, UiPanelMaterial,
-        UiPlugin, UiRect, UiRoot, UiStyle, UiVal, compute_ui_layouts, top_hit,
-        update_ui_interaction,
+        ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiInteractionTarget, UiNode,
+        UiPanel, UiPanelMaterial, UiPlugin, UiPointerRoute, UiRect, UiRoot, UiStyle, UiVal,
+        compute_ui_layouts, top_hit, top_hit_target, update_ui_interaction,
     };
 }
 

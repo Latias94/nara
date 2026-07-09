@@ -265,8 +265,8 @@ pub mod prelude {
     };
     pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
     pub use nara_ui::{
-        ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiNode, UiPanel, UiPanelMaterial,
-        UiPlugin, UiRect, UiRoot, UiStyle, UiVal,
+        ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiInteractionTarget, UiNode,
+        UiPanel, UiPanelMaterial, UiPlugin, UiPointerRoute, UiRect, UiRoot, UiStyle, UiVal,
     };
     pub use nara_ui_render::UiRenderPlugin;
 }

@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use nara_app::App;
 use nara_asset::{
-    AssetPath, AssetRecord, AssetRef, AssetServer, AssetSourceKind, ProjectAssetDatabase,
-    StableAssetId,
+    AssetId, AssetPath, AssetRecord, AssetRef, AssetServer, AssetSourceKind, Handle,
+    ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{Color, Vec2};
 use nara_ecs::World;
@@ -13,12 +13,12 @@ use nara_reflect::{
     ComponentDecodeContext, ComponentEncodeContext, ComponentRegistry, ComponentTypeId,
     ComponentValue, ComponentValueKind,
 };
-use nara_render::{Camera2d, ViewportRect};
+use nara_render::{Camera2d, RenderImage2d, RenderTarget, ViewportRect};
 use nara_scene::Parent;
 
 use crate::{
-    ComputedUiLayouts, UiInteractionState, UiNode, UiPanel, UiPlugin, UiRoot, UiStyle, UiVal,
-    register_ui_components,
+    ComputedUiLayouts, UiInteractionState, UiNode, UiPanel, UiPlugin, UiPointerRoute, UiRoot,
+    UiStyle, UiVal, register_ui_components,
 };
 
 #[test]
@@ -267,6 +267,150 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
 }
 
 #[test]
+fn routed_pointer_hits_only_matching_view_target() {
+    let mut app = App::new();
+    app.add_plugin(UiPlugin).unwrap();
+    let first_target = render_image_target(1);
+    let second_target = render_image_target(2);
+    app.world_mut().spawn(Camera2d {
+        target: first_target,
+        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+        order: 0,
+        ..Camera2d::default()
+    });
+    app.world_mut().spawn(Camera2d {
+        target: second_target,
+        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+        order: 1,
+        ..Camera2d::default()
+    });
+    let first_root = app
+        .world_mut()
+        .spawn(UiRoot {
+            target: first_target,
+            order: 0,
+        })
+        .id();
+    let second_root = app
+        .world_mut()
+        .spawn(UiRoot {
+            target: second_target,
+            order: 0,
+        })
+        .id();
+    let first = app
+        .world_mut()
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)),
+            Parent(first_root),
+        ))
+        .id();
+    let second = app
+        .world_mut()
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)),
+            Parent(second_root),
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<PointerState>()
+        .set_position(Vec2::new(10.0, 10.0));
+    app.world_mut()
+        .resource_mut::<UiInteractionState>()
+        .set_pointer_route(UiPointerRoute::for_target_view(second_target, 1));
+
+    app.run_once(Duration::ZERO).unwrap();
+
+    let interaction = app.world().resource::<UiInteractionState>();
+    let hovered = interaction.hovered_target().unwrap();
+    assert_ne!(hovered.entity, first);
+    assert_eq!(hovered.entity, second);
+    assert_eq!(hovered.target, second_target);
+    assert_eq!(hovered.view_index, 1);
+}
+
+#[test]
+fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
+    let mut app = App::new();
+    app.add_plugin(UiPlugin).unwrap();
+    app.world_mut().spawn(Camera2d {
+        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+        ..Camera2d::default()
+    });
+    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
+    let button = app
+        .world_mut()
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).focusable(),
+            Parent(root),
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<PointerState>()
+        .set_position(Vec2::new(10.0, 10.0));
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Left);
+
+    app.run_once(Duration::ZERO).unwrap();
+    assert_eq!(
+        app.world().resource::<UiInteractionState>().pressed(),
+        Some(button)
+    );
+    assert!(
+        !app.world()
+            .resource::<ButtonInput<MouseButton>>()
+            .just_pressed(MouseButton::Left)
+    );
+
+    app.world_mut()
+        .resource_mut::<PointerState>()
+        .set_position(Vec2::new(150.0, 10.0));
+    app.run_once(Duration::ZERO).unwrap();
+
+    let interaction = app.world().resource::<UiInteractionState>();
+    assert_eq!(interaction.hovered(), None);
+    assert_eq!(interaction.pressed(), Some(button));
+    assert_eq!(interaction.focused(), Some(button));
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .release(MouseButton::Left);
+    app.run_once(Duration::ZERO).unwrap();
+
+    assert_eq!(app.world().resource::<UiInteractionState>().pressed(), None);
+}
+
+#[test]
+fn clipped_child_does_not_hit_test_outside_parent_clip() {
+    let mut app = App::new();
+    app.add_plugin(UiPlugin).unwrap();
+    app.world_mut().spawn(Camera2d {
+        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+        ..Camera2d::default()
+    });
+    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
+    let clipped_parent = app
+        .world_mut()
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 50.0, 50.0)).clipping_children(),
+            Parent(root),
+        ))
+        .id();
+    app.world_mut().spawn((
+        UiNode::new(UiStyle::absolute(40.0, 40.0, 50.0, 50.0)),
+        Parent(clipped_parent),
+    ));
+    app.world_mut()
+        .resource_mut::<PointerState>()
+        .set_position(Vec2::new(75.0, 75.0));
+
+    app.run_once(Duration::ZERO).unwrap();
+
+    assert_eq!(app.world().resource::<UiInteractionState>().hovered(), None);
+}
+
+#[test]
 fn ui_panel_codec_resolves_stable_image_refs_during_preflight() {
     let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
     let mut database = ProjectAssetDatabase::default();
@@ -372,4 +516,8 @@ fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
 
 fn stable_id(id: &str) -> StableAssetId {
     StableAssetId::parse_str(id).unwrap()
+}
+
+fn render_image_target(id: u64) -> RenderTarget {
+    RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(id)))
 }
