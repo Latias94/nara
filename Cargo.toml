@@ -173,6 +173,10 @@ name = "asset_import_texture"
 path = "examples/asset_import_texture.rs"
 
 [[example]]
+name = "headless_server"
+path = "examples/headless_server.rs"
+
+[[example]]
 name = "scene_prefab_roundtrip"
 path = "examples/scene_prefab_roundtrip.rs"
 required-features = ["serde"]

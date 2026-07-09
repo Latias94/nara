@@ -40,7 +40,7 @@ flowchart TD
     Facade --> App[nara_app: App + Plugin + stages]
     App --> ECS[nara_ecs: bevy_ecs substrate]
     App --> Tasks[nara_tasks: task pools + handles]
-    App --> Project[nara_project future: nara.toml validation + settings lowering]
+    App --> Project[nara_project: nara.toml validation + settings lowering]
     Facade --> Core[nara_core: color + math primitives]
     Facade --> Transform[nara_transform: spatial components]
     Facade --> Reflect[nara_reflect: component schema + value codec registry]
@@ -48,7 +48,8 @@ flowchart TD
     App --> Asset[nara_asset: AssetServer + Handle + AssetRef + reload scheduling]
     AssetWatch[nara_asset_watch: optional filesystem watcher adapter] --> Asset
     App --> Scene[nara_scene: runtime hierarchy + scene documents]
-    App --> Input[nara_input]
+    App --> Input[nara_input: retained input + action outcomes]
+    App --> Gameplay[nara_gameplay: gameplay command stream]
     App --> Audio[nara_audio]
     App --> Render[nara_render: render data + backend seam]
     App --> Image[nara_image: typed image import + prepared image resources]
@@ -72,7 +73,7 @@ flowchart TD
 |---|---|---|
 | `nara` | Facade and layered preludes | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs |
 | `nara_app` | `App`, `Plugin`, `PluginError`, plugin metadata/groups, `StartupStage`, `CoreStage`, real/virtual/fixed time resources, runtime state transition hooks | Fallible plugin installation, inspectable plugin capabilities/groups, runner policy, explicit pause/time-scale/background policy, bounded fixed-step catch-up |
-| future `nara_project` | `nara.toml` manifest validation and effective settings lowering | Project settings authority for file-backed apps: paths, startup scene, task defaults, window defaults, input-map sources, and profile overrides |
+| `nara_project` | `ProjectManifest`, profile overlays, `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority for file-backed apps: paths, startup scene, task defaults, window defaults, input-map sources, diagnostics capacity, and headless/server/editor/dev/release profile resolution |
 | `nara_tasks` | `TaskPools`, `TaskPoolConfig`, `TaskPoolKind`, `TaskExecutionMode`, `TaskHandle<T>`, `TaskCancellationToken`, `TaskStats` | Engine-owned deterministic inline executor and std worker-pool backend for IO/compute/async-compute jobs |
 | `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
@@ -90,7 +91,8 @@ flowchart TD
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteMaterialKey`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, and material-keyed textured quad batches |
 | `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState`, `UiPointerRoute`, `UiInteractionTarget` | Runtime ECS UI authoring data, layout projection, and target/view-aware pointer hover/capture/focus state; no editor UI toolkit or backend handles |
 | `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, UI-owned material/instance/UV types, image/color material queueing, clipping, sort, and batching for the UI render phase |
-| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `PointerState`, future normalized events/action maps/text routing | Backend-normalized input state, input routing, action mapping, UI focus/capture integration, and replay diagnostics |
+| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized input state, frame-transient action outcome resolution, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
+| `nara_gameplay` | `GameplayCommandQueue`, `GameplayCommandEnvelope`, `GameplayCommandTypeId`, `GameplayCommandTarget`, `ActionCommandMap`, `GameplayCommandPlugin` | Semantic gameplay command stream for fixed-step gameplay, replay/AI/test producers, future server authority, and action-to-command bridging without networking transports or runtime entity handles |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that updates window resources plus keyboard, mouse-button, and pointer state |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
@@ -193,11 +195,13 @@ second real adapter or stronger isolation pressure.
 
 - `nara_app::Plugin::build` is fallible. Plugin prerequisites use `add_plugin_if_missing` or structured `PluginError` values instead of panic helpers.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
+- `nara_project` implements the first manifest authority: TOML parsing, unknown-field rejection, logical project path validation, file-size budget guard for `nara.toml`, profile overlays, inferred `server` profile defaults, `ProjectPluginPlan`, and side-effect-free `EffectiveProjectSettings` lowering into runtime time, task, window, input, and diagnostics value objects.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
 - `nara_tasks` owns deterministic and threaded engine task pools. `CoreStage::TaskUpdate` provides the explicit main-thread result integration stage with ordered sets for polling, source-change coalescing, job spawning, and result application.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains. Serializable components require explicit schema fields, duplicate Rust `TypeId` registration is rejected, and invalid schema defaults fail at registration.
 - `nara_diagnostic::DiagnosticReport` collects diagnostics without implicit logging. `emit_to_tracing` is the explicit bridge for logs.
+- `nara_diagnostic::RuntimeDiagnostics` is the shared runtime observation bus. It provides bounded retention, dedupe by key, severity/domain/code filtering, dropped-entry counters, runtime context fields, and explicit tracing emission through `DiagnosticsPlugin`.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and `RenderPassPlan`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource and consumes the explicit pass plan for clear/world/UI/gizmo order.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
@@ -216,6 +220,9 @@ second real adapter or stronger isolation pressure.
 - `nara_sprite_render` sorts and batches by `SpriteMaterialKey`, which contains image render resource key plus sampler, alpha mode, and tint. `nara_render_wgpu` caches GPU image textures by prepared image snapshot and caches sampler bind groups by material key.
 - `nara_asset_watch` is an optional desktop watcher adapter behind the root `asset-watch` feature. It owns `notify`, validates its root against `AssetSourceRoot`, preserves in-root rename sides, and translates raw filesystem events into semantic `AssetSourceChange` values without leaking watcher types into `nara_asset`.
 - `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit events.
+- `nara_input::ActionMap` resolves retained key/mouse state into frame-transient `ActionOutcomes` in `InputSet::ResolveActions`, with action IDs, contexts, key/mouse bindings, started/released phases, and deterministic binding order.
+- `nara_gameplay` owns semantic gameplay commands through `GameplayCommandQueue`, `GameplayCommandEnvelope`, `GameplayCommandTarget`, `GameplayCommandPayload`, and `ActionCommandMap`. `GameplayCommandPlugin` maps action outcomes into commands before fixed gameplay systems and clears commands at the frame cleanup boundary; command data avoids networking transports and runtime `Entity` handles.
+- `HeadlessRuntimePlugins` and `ServerPlugins` are concrete root facade bundles. `HeadlessRuntimePlugins` composes `MinimalPlugins` plus gameplay commands for local headless drivers; `ServerPlugins` installs diagnostics, deterministic task pools, asset/scene/transform foundations, and gameplay commands without window/render/audio/editor/toolkit or raw input resources by default.
 - `nara_ui` owns the first runtime ECS UI foundation: `UiRoot`, `UiNode`, `UiPanel`, material-aware image/color panel data, computed top-left logical-pixel layouts, and target/view-aware pointer hover/capture/focus state. Computed layout and interaction resources are runtime-only.
 - `nara_ui_render` extracts runtime UI panels from computed layouts, queues UI-owned color/image material keys through the same `nara_image` prepare and `nara_material` sampler/alpha/tint path as sprites, clips panels, and emits `UiBatches` for the UI render phase.
 - `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path according to `RenderPassPlan`; pass order is no longer an implicit backend-only draw-loop rule. The backend owns texture/bind-group cache lifetime, uses grace-frame eviction, and keys pipelines by render target format plus `AlphaMode2d`.
@@ -289,39 +296,32 @@ second real adapter or stronger isolation pressure.
 
 ## Next Implementation Slices
 
-1. Add the runtime diagnostics bus before more subsystem-specific diagnostics proliferate.
-2. Define document-level migration chains and golden fixtures for scene, prefab, patch, asset
+1. Define document-level migration chains and golden fixtures for scene, prefab, patch, asset
    metadata, import artifact, and schema catalog files before changing persisted shapes again.
-3. Add task backpressure, cancellation reporting, task age metrics, and long-running diagnostics
+2. Add task backpressure, cancellation reporting, task age metrics, and long-running diagnostics
    before asset import/editor workloads scale.
-4. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
+3. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
    buffers, buffer/pipeline stats, and device-loss recovery for all GPU resource classes.
-5. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
+4. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
    widget state, keyboard/gamepad focus, action-map routing, and editor dogfooding once the runtime
    model is stable.
-6. Define the gameplay command/action output boundary before replay, AI drivers, or future server
-   authority depend on raw input state.
-7. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
+5. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
    composition, 3D depth/prepass, or transient resource lifetime creates pressure beyond
    `RenderPassPlan`.
-8. Build file-backed `nara_project` manifest loading and effective runtime settings lowering,
-   including headless/server/editor/dev/release profile resolution.
-9. Define headless/server plugin groups and smoke tests before any networking or dedicated server
-   crate exists.
-10. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
+6. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
-11. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
+7. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
    override write-back, and edit-while-playing merge semantics are designed.
-12. Design reusable material assets and custom shader specialization after inline
+8. Design reusable material assets and custom shader specialization after inline
    `Material2dDescriptor` has enough runtime/UI pressure.
-13. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
+9. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
     or widening file-backed editor workflows.
-14. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
+10. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
     formats again.
-15. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
+11. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
     jobs.
-16. Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
-17. Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
+12. Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
+13. Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
     pressure.
-18. Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
+14. Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
     GitHub Actions.

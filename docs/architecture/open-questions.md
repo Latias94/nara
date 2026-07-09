@@ -316,16 +316,27 @@ Settled policy:
 - Networking remains a future optional domain crate/plugin, not a core ECS or `nara_app` feature.
 - Server diagnostics and future metrics must be visible without editor UI or a tracing subscriber.
 
+Resolved in the server-ready runtime authority slice:
+
+- `nara_project::ProjectManifest` parses `nara.toml`, validates required fields and logical paths,
+  rejects unknown fields, enforces a manifest byte budget, and resolves named profile overlays into
+  `EffectiveProjectSettings`.
+- A profile named `server` now infers `ProjectPluginPlan::Server`, disables window defaults, and
+  lowers tasks to deterministic execution unless explicit code-first configuration overrides it.
+- `HeadlessRuntimePlugins` and `ServerPlugins` are concrete facade groups. `ServerPlugins` installs
+  diagnostics, deterministic task pools, asset/scene/transform foundations, and gameplay commands
+  while excluding window/render/audio/editor/toolkit and raw input resources by default.
+- `nara_input::ActionMap` emits frame-transient `ActionOutcomes`; `nara_gameplay::ActionCommandMap`
+  maps those outcomes to semantic `GameplayCommandEnvelope` values consumable by fixed gameplay,
+  replay, AI drivers, tests, and future server authority.
+
 Follow-up details still to settle:
 
-1. What exact manifest fields select `headless`, `server`, `editor`, `dev`, and `release`
-   profiles?
-2. What is the first minimal gameplay command schema for replay, AI-driver, and future server
-   authority?
-3. What persistent runtime entity ID type should bridge scene-spawned and runtime-created entities?
-4. Should plugin metadata expose profile suitability flags, or should plugin groups encode that
-   policy manually first?
-5. What minimum metrics set is useful before a real server: tick time, fixed catch-up, task queue
+1. What persistent runtime identity model should bridge scene-spawned and runtime-created objects
+   across save, replay, and future replication?
+2. Should plugin metadata expose profile suitability flags such as headless-safe/server-ready, or
+   should plugin groups keep encoding that policy manually until more groups exist?
+3. What minimum metrics set is useful before a real server: tick time, fixed catch-up, task queue
    depth, diagnostic counts, asset states, or entity/component counts?
 
 ## Editor and Tooling
@@ -450,11 +461,20 @@ Follow-up details still to settle:
 Accepted direction: `nara.toml` plus conventional `assets/`, `scenes/`, `prefabs/`, `scripts/`, and `.nara/` generated cache directories. See ADR [0020-project-layout-and-package-format.md](adr/0020-project-layout-and-package-format.md).
 Settings authority is now settled by ADR [0035-project-manifest-and-runtime-settings-authority.md](adr/0035-project-manifest-and-runtime-settings-authority.md): `nara.toml` is the file-backed project authority, with code-first resource/plugin overrides for embedded apps.
 
+Resolved in the server-ready runtime authority slice:
+
+- The first `nara.toml` schema fields are implemented in `nara_project`: `schema_version`,
+  `[project]`, `[paths]`, `[startup]`, `[runtime]`, `[tasks]`, `[window]`, `[input]`,
+  `[diagnostics]`, and `[profiles.<name>]`.
+- Project stable identity is optional in the first implementation.
+- Profile overlays live inline in `nara.toml` for now and resolve deterministically into
+  `EffectiveProjectSettings`.
+
 Follow-up details still to settle:
 
-1. What exact TOML field names should the first manifest parser expose?
-2. Should project stable identity be required immediately or optional until package/export exists?
-3. What template should `nara new` generate later?
+1. What template should `nara new` generate later?
+2. Should future profile files be allowed as an implementation detail while preserving one
+   effective manifest authority?
 
 ## Event, Command, Determinism, and Replay
 
@@ -465,11 +485,19 @@ Main-loop and pause semantics are now refined by ADR
 The next implementation slice should expose the refined time domains and state transition stage,
 not only `FixedTime` and testable `run_once(Duration)`.
 
+Resolved in the server-ready runtime authority slice:
+
+- `nara_gameplay` adds a semantic command stream with command type IDs, source, frame/fixed context,
+  stable target vocabulary, schema-friendly payload values, deterministic queue ordering, and
+  frame cleanup.
+- Local action outcomes can map into gameplay commands before fixed gameplay systems without
+  introducing networking transports.
+
 Follow-up details still to settle:
 
 1. Should nara provide reusable `Events<T>` / `Requests<T>` wrappers with stage metadata?
-2. Which channels belong in future deterministic replay capture first?
-3. What data is required for a future replay capture?
+2. Which non-command channels belong in future deterministic replay capture first?
+3. What data is required for a future replay capture beyond command envelopes?
 
 ## Runtime UI
 
@@ -495,8 +523,8 @@ Follow-up details still to settle:
 3. What text shaping/rendering libraries are acceptable?
 4. How should UI/screen-space cameras, multiple viewports, and editor overlays compose once full
    render graph pressure arrives?
-5. What is the smallest Phase 1 action-map schema that still supports rebinding and UI/gameplay
-   context priority?
+5. How should richer action-map contexts, UI consumed flags, text/IME, gamepad, and accessibility
+   routing compose on top of the first key/mouse action outcome layer?
 
 ## Save, Networking, Animation, Audio, Text
 
