@@ -80,6 +80,7 @@ Scene, prefab, and patch documents lack strict unknown-field and patch-format co
 - This slice does not add a generic JSON Patch layer. nara patch operations stay domain-specific and schema-aware.
 - This slice does not introduce editor-only shortcuts around `SceneAuthoringSession`; editor and AI mutation still go through scene patches.
 - This slice does not hide failed verification behind compatibility modes. Lenient migration/import paths may exist only as explicit APIs with tests and naming that make the weaker contract visible.
+- Strict unknown-field parsing in this slice applies first to scene, prefab, and patch authoring formats. Asset meta and imported artifact records are tightened only where U5 finds runtime identity leakage or an equivalent project-data risk.
 
 ### Acceptance Examples
 
@@ -106,9 +107,9 @@ Scene, prefab, and patch documents lack strict unknown-field and patch-format co
 
 ### Key Technical Decisions
 
-- KTD1. Persistent formats fail closed by default. Lenient parsing is a separate migration/import API, not the default authoring or save path.
-- KTD2. Scene spawn remains an ECS mutation, not a scratch-world wholesale merge. The first durable transaction can track spawned entities and resource snapshots, then roll them back on apply failure.
-- KTD3. Patch versioning belongs in `ScenePatchDocument`; field operations carry component schema version context so future field renames and migrations have a stable anchor.
+- KTD1. Persistent formats fail closed by default. Lenient parsing is a separate migration/import API, not the default authoring or save path; this slice either lands a named minimal migration entry point or records that entry point as an explicit residual rather than weakening the default parser.
+- KTD2. Scene spawn remains an ECS mutation, not a scratch-world wholesale merge. Component apply must be constrained to target entity/component mutation plus explicitly whitelisted rollback-aware resources; any future apply hook that mutates other entities, resources, or external state must register rollback behavior or fail preflight.
+- KTD3. Patch versioning belongs in `ScenePatchDocument`; field operations carry `component_type_id` plus required `component_schema_version` so future field renames and migrations have a stable anchor. Missing version context is accepted only through explicit migration/import paths.
 - KTD4. `ComponentRegistry` treats one Rust component type mapping to multiple stable component IDs as invalid until a real alias/migration story exists.
 - KTD5. Serializable component registration requires explicit field schema. Runtime-only component registration remains possible, but it must be named as runtime-only.
 - KTD6. `nara_reflect` module split is part of correctness work. Values, paths, schemas, codecs, migrations, and registry state have different invariants and test surfaces.
@@ -144,6 +145,8 @@ Plugin and render changes keep the same principle at runtime setup boundaries: e
 - Registry hardening and `nara_reflect` module split should land before plugin/render follow-ups because many crates register built-in component schemas.
 - Plugin lifecycle changes should land before render prerequisite helpers are rewritten.
 - Final docs and memory must reflect the actual code decisions, not the plan's initial guesses.
+- Execute in two commit clusters to lower failure coupling without shrinking scope. Cluster A covers U1-U5 and must be green and committed before Cluster B. Cluster B covers U6-U8 after the data-safety chain is stable, followed by U9-U10 docs, review, and final verification.
+- Before U1, restore the local compile baseline if the active worktree already fails. The known `nara_reflect` `MissingSerializableComponentFields` field-name mismatch belongs to the U4 registry-hardening path but must be repaired before broader verification can be trusted.
 
 ### Sources & Research
 
@@ -190,7 +193,7 @@ Plugin and render changes keep the same principle at runtime setup boundaries: e
 - **Requirements:** R3, R4.
 - **Dependencies:** U1, U2.
 - **Files:** `crates/nara_scene/src/patch.rs`, `crates/nara_scene/src/prefab.rs`, `crates/nara_scene/src/authoring.rs`, `crates/nara_tooling/src/inspector.rs`, `crates/nara_tooling/src/play.rs`, `crates/nara_tooling_egui/src/lib.rs` only if action models need type updates, tests in `crates/nara_scene/src/tests.rs` and `tests/scene_patch_transactions.rs`.
-- **Approach:** Add a patch format version constant and store it in `ScenePatchDocument`. Add component schema version context to field-path operations and update constructors/helpers so call sites fill it from `ComponentFieldSchema` where possible. Validate unsupported patch versions and incompatible schema versions before applying operations.
+- **Approach:** Add a patch format version constant and store it in `ScenePatchDocument`. Add required `component_type_id + component_schema_version` context to field-path operations and update constructors/helpers so normal authoring call sites fill it from `ComponentFieldSchema`. Validate unsupported patch versions, missing authoring schema versions, and incompatible schema versions before applying operations; legacy missing version data belongs only in explicit migration/import APIs.
 - **Test Scenarios:** Default patch serializes current format version; unsupported patch version fails validation without mutation; field operation with matching component schema version succeeds; field operation with stale schema version diagnoses before mutation; prefab override patches preserve version data through expansion and roundtrip.
 - **Verification:** `cargo nextest run -p nara_scene -p nara_tooling -p nara_tooling_egui`; `cargo check --workspace --features serde`.
 - **Execution note:** Prefer explicit breakage over compatibility shims for in-repo call sites; update all constructors/tests to the new versioned shape.
@@ -201,10 +204,10 @@ Plugin and render changes keep the same principle at runtime setup boundaries: e
 - **Requirements:** R9, R10, R11, R17.
 - **Dependencies:** U1, U3.
 - **Files:** `crates/nara_reflect/src/lib.rs`, new `crates/nara_reflect/src/value.rs`, `path.rs`, `schema.rs`, `codec.rs`, `migration.rs`, `registry.rs`, `crates/nara_reflect/Cargo.toml` if module tests need support, owner registration sites in `crates/nara_scene`, `crates/nara_transform`, `crates/nara_render`, `crates/nara_sprite`, `crates/nara_tilemap`.
-- **Approach:** Move existing reflection responsibilities into narrow modules with public re-exports from `lib.rs`. Add duplicate Rust `TypeId` rejection, default-value kind validation, schema coverage checks for serializable components, and a clearly named runtime-only registration path for components without serializable field schema.
+- **Approach:** Add or strengthen failing tests and characterization around current registry behavior first. Then move existing reflection responsibilities into narrow modules with public re-exports from `lib.rs`, keeping pure movement separate from invariant changes when practical. Add duplicate Rust `TypeId` rejection, default-value kind validation, schema coverage checks for serializable components, and a clearly named runtime-only registration path for components without serializable field schema.
 - **Test Scenarios:** Duplicate stable ID fails; duplicate Rust `TypeId` with a different stable ID fails; duplicate field path fails; optional default kind mismatch fails; serializable component without field schema fails; runtime-only registration without field schema succeeds and is absent from schema export; existing built-in schemas still export deterministically.
 - **Verification:** `cargo nextest run -p nara_reflect -p nara_scene -p nara_sprite -p nara_tilemap -p nara_transform -p nara_render`; `cargo check --workspace --features serde`.
-- **Execution note:** Split first, then harden invariants in the smaller modules so failures localize to the right responsibility.
+- **Execution note:** Prove the old weak behavior with tests before implementation, then keep pure module movement and invariant changes in reviewable commit boundaries.
 
 ### U5. Tighten asset runtime identity persistence boundaries
 
@@ -234,7 +237,7 @@ Plugin and render changes keep the same principle at runtime setup boundaries: e
 - **Requirements:** R14, R15, R16.
 - **Dependencies:** U6.
 - **Files:** `crates/nara_diagnostic/src/lib.rs`, `crates/nara_render/src/lib.rs`, `crates/nara_render_wgpu/src/lib.rs`, tests in those crates and affected examples.
-- **Approach:** Remove unconditional tracing side effects from `DiagnosticReport::push` and add an explicit emit/log helper if needed. Replace or evolve the unused `RenderBackend` trait so actual backend integration exposes status, skipped-frame reason, last error, and render diagnostics through resources or events that non-backend crates can observe without importing `wgpu`.
+- **Approach:** Remove unconditional tracing side effects from `DiagnosticReport::push` and add an explicit emit/log helper if needed. Treat the implemented plugin/resources/systems/status path as the official backend contract. Delete the public `RenderBackend` trait if it still has only one real backend consumer rather than stabilizing a speculative abstraction; expose status, skipped-frame reason, last error, and render diagnostics through resources or events that non-backend crates can observe without importing `wgpu`.
 - **Test Scenarios:** Pushing diagnostics does not require tracing side effects; explicit tracing bridge can emit diagnostics; wgpu skipped frame records backend status; render-domain crates still do not import `wgpu`; default facade remains backend-free.
 - **Verification:** `cargo nextest run -p nara_diagnostic -p nara_render -p nara_render_wgpu -p nara`; `cargo check --workspace`; backend boundary searches from the Verification Contract.
 - **Execution note:** Let the implemented plugin/resource path define the contract; do not preserve an unused abstraction only because it exists.
@@ -244,8 +247,8 @@ Plugin and render changes keep the same principle at runtime setup boundaries: e
 - **Goal:** Keep future codegen, editor controls, render features, and component domains from growing on monolithic files.
 - **Requirements:** R10, R16, R17.
 - **Dependencies:** U4, then any previous unit whose touched module is being split.
-- **Files:** `crates/nara_reflect/src/*`, `crates/nara_sprite/src/*`, `crates/nara_tilemap/src/*`, `crates/nara_tooling_egui/src/*`, `crates/nara_image/src/*` if touched by asset boundary fixes, crate `lib.rs` re-exports.
-- **Approach:** Split only modules already touched by previous units or already large enough to block maintainability. Preserve public crate APIs through re-exports where the contract remains correct. Delete abandoned compatibility shims, dead helper APIs, and obsolete tests that encode removed behavior.
+- **Files:** `crates/nara_reflect/src/*` as the required split, plus any of `crates/nara_sprite/src/*`, `crates/nara_tilemap/src/*`, `crates/nara_tooling_egui/src/*`, or `crates/nara_image/src/*` only when U1-U7 already touched the crate and the split reduces current diff complexity.
+- **Approach:** Split `nara_reflect` as required by U4. Split other touched crates only when the current behavior change has created a real maintainability blocker; do not start unrelated broad module surgery. Preserve public crate APIs through re-exports where the contract remains correct. Delete abandoned compatibility shims, dead helper APIs, and obsolete tests that encode removed behavior.
 - **Test Scenarios:** Public re-exports compile; examples compile without path changes except intentional breaking plugin/patch APIs; no new backend dependencies leak into gameplay-facing crates; removed old helpers have no in-repo callers.
 - **Verification:** `cargo check --workspace`; `cargo nextest run --workspace`; dependency boundary searches.
 - **Execution note:** Refactor in small commits after behavior-bearing units are green so mechanical split failures are easy to isolate.
@@ -309,8 +312,8 @@ Plugin and render changes keep the same principle at runtime setup boundaries: e
 
 - Requirements R1-R18 are implemented or explicitly recorded as deferred residuals with a reason tied to a future plan.
 - Default scene/prefab/patch import and export paths fail closed on unknown fields and component encode/apply errors.
-- Scene and prefab spawn cannot leave partial entities or scratch asset state after apply failure.
-- `ScenePatchDocument` has a versioned wire contract, and field operations carry component schema version context.
+- Scene and prefab spawn cannot leave partial entities or scratch asset state after apply failure, and component apply cannot mutate non-target state unless it participates in rollback.
+- `ScenePatchDocument` has a versioned wire contract, and field operations carry `component_type_id + component_schema_version` context.
 - `ComponentRegistry` rejects duplicate identity, invalid schema defaults, and accidental serializable components without schema.
 - `nara_reflect` responsibilities are split enough that value, path, schema, codec, migration, and registry invariants can evolve independently.
 - Runtime asset identity remains runtime-only in project-facing serialization.
