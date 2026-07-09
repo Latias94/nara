@@ -106,6 +106,13 @@ impl PointerState {
 pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.input"),
+            nara_app::PluginCategory::Runtime,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(ButtonInput::<MouseButton>::default())

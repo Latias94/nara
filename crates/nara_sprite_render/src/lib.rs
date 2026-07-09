@@ -27,6 +27,13 @@ pub use crate::types::{
 pub struct SpriteRenderPlugin;
 
 impl Plugin for SpriteRenderPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.sprite-render"),
+            nara_app::PluginCategory::Render,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(RenderPlugin)?;
         app.add_plugin_if_missing(nara_image::ImagePreparePlugin)?;

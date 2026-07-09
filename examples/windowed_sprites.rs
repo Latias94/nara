@@ -1,11 +1,11 @@
 use image::ImageEncoder;
-use nara::prelude::*;
+use nara::{advanced_prelude::*, backend_prelude::*};
 
 const WINDOW_TEXTURE_STABLE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
 
 fn main() -> Result<(), AppRunError> {
     let mut app = App::new();
-    app.add_plugin(MinimalPlugins)?
+    app.add_plugins(Runtime2dPlugins)?
         .add_plugin(WindowPlugin {
             primary_window: Some(Window::new(
                 "nara windowed sprites",

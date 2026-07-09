@@ -1,5 +1,7 @@
 //! Stable component schema identifiers and authoring field metadata.
 
+use std::collections::BTreeSet;
+
 use crate::{ComponentFieldPath, ComponentValue};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -36,8 +38,16 @@ pub struct ComponentSchema {
     pub id: ComponentTypeId,
     pub version: ComponentSchemaVersion,
     pub rust_type_path: String,
-    pub serializable: bool,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub capabilities: BTreeSet<ComponentCapability>,
     pub fields: Vec<ComponentFieldSchema>,
+}
+
+impl ComponentSchema {
+    #[must_use]
+    pub fn has_capability(&self, capability: ComponentCapability) -> bool {
+        self.capabilities.contains(&capability)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -52,6 +62,8 @@ pub struct ComponentFieldSchema {
     pub path: ComponentFieldPath,
     pub value_kind: ComponentValueKind,
     pub required: bool,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub capabilities: BTreeSet<ComponentCapability>,
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
@@ -66,6 +78,7 @@ impl ComponentFieldSchema {
             path,
             value_kind,
             required: true,
+            capabilities: BTreeSet::new(),
             default_value: None,
         }
     }
@@ -76,6 +89,7 @@ impl ComponentFieldSchema {
             path,
             value_kind,
             required: false,
+            capabilities: BTreeSet::new(),
             default_value: None,
         }
     }
@@ -90,8 +104,59 @@ impl ComponentFieldSchema {
             path,
             value_kind,
             required: false,
+            capabilities: BTreeSet::new(),
             default_value: Some(default_value),
         }
+    }
+
+    #[must_use]
+    pub fn with_capability(mut self, capability: ComponentCapability) -> Self {
+        self.capabilities.insert(capability);
+        self
+    }
+
+    #[must_use]
+    pub fn with_capabilities(
+        mut self,
+        capabilities: impl IntoIterator<Item = ComponentCapability>,
+    ) -> Self {
+        self.capabilities.extend(capabilities);
+        self
+    }
+
+    #[must_use]
+    pub fn has_capability(&self, capability: ComponentCapability) -> bool {
+        self.capabilities.contains(&capability)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum ComponentCapability {
+    Scene,
+    Inspect,
+    Edit,
+    Animate,
+    Replicate,
+    Script,
+    AssetRef,
+    EntityRef,
+}
+
+impl ComponentCapability {
+    #[must_use]
+    pub fn scene_authoring() -> BTreeSet<Self> {
+        BTreeSet::from([Self::Scene, Self::Inspect, Self::Edit])
+    }
+
+    #[must_use]
+    pub fn scene_field_for_kind(kind: ComponentValueKind) -> BTreeSet<Self> {
+        let mut capabilities = Self::scene_authoring();
+        if matches!(kind, ComponentValueKind::AssetRef) {
+            capabilities.insert(Self::AssetRef);
+        }
+        capabilities
     }
 }
 

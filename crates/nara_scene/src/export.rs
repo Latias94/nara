@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use nara_asset::AssetRefExportPolicy;
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
-use nara_reflect::{ComponentEncodeContext, ComponentRegistry};
+use nara_reflect::{ComponentCapability, ComponentEncodeContext, ComponentRegistry};
 
 use crate::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
@@ -74,7 +74,10 @@ pub fn export_scene_with_options(
         }
 
         let mut components = BTreeMap::new();
-        for schema in registry.schemas().filter(|schema| schema.serializable) {
+        for schema in registry
+            .schemas()
+            .filter(|schema| schema.has_capability(ComponentCapability::Scene))
+        {
             let Some(encoded) =
                 registry.encode_component_with_context(&schema.id, world, entity, &encode_context)
             else {

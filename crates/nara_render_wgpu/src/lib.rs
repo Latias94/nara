@@ -23,8 +23,8 @@ use nara_render::{
     RenderBackendStatus, RenderFrame, RenderFrameSkipReason, RenderPassPlan, RenderPassStep,
     RenderPassStepLabel, RenderPhaseInput, begin_render_frame, build_render_pass_plan,
 };
-use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteRenderPlugin};
-use nara_ui_render::{UiBatch, UiBatches, UiRenderPlugin};
+use nara_sprite_render::{SpriteBatch, SpriteBatches};
+use nara_ui_render::{UiBatch, UiBatches};
 use nara_window::{
     PrimaryWindowId, Window, WindowId,
     backend::{BackendWindowHandles, RawWindowHandleProvider},
@@ -45,9 +45,15 @@ const WGPU_RENDER_BACKEND: &str = "wgpu";
 pub struct WgpuRenderPlugin;
 
 impl Plugin for WgpuRenderPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.render-wgpu"),
+            nara_app::PluginCategory::Backend,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(SpriteRenderPlugin)?;
-        app.add_plugin_if_missing(UiRenderPlugin)?;
+        app.add_plugin_if_missing(nara_render::RenderPlugin)?;
         app.init_resource::<WgpuRenderBackend>();
         app.init_resource::<RenderBackendStatus>();
         app.world_mut()
@@ -536,8 +542,8 @@ pub fn render_clear_passes(
     handles: Option<Res<BackendWindowHandles>>,
     windows: Query<&Window>,
     views: Res<ExtractedViews>,
-    sprite_batches: Res<SpriteBatches>,
-    ui_batches: Res<UiBatches>,
+    sprite_batches: Option<Res<SpriteBatches>>,
+    ui_batches: Option<Res<UiBatches>>,
     images: Option<Res<Assets<ImageAsset>>>,
     prepared_images: Option<Res<PreparedRenderResources<PreparedImageResource>>>,
     primary_window_id: Option<Res<PrimaryWindowId>>,
@@ -546,12 +552,16 @@ pub fn render_clear_passes(
     mut status: ResMut<RenderBackendStatus>,
 ) {
     let primary_window_id = primary_window_id.map(|resource| resource.0);
+    let empty_sprite_batches = SpriteBatches::default();
+    let empty_ui_batches = UiBatches::default();
+    let sprite_batches = sprite_batches.as_deref().unwrap_or(&empty_sprite_batches);
+    let ui_batches = ui_batches.as_deref().unwrap_or(&empty_ui_batches);
     let result = backend.render_clear_passes(
         handles.as_deref(),
         &windows,
         &views,
-        &sprite_batches,
-        &ui_batches,
+        sprite_batches,
+        ui_batches,
         images.as_deref(),
         prepared_images.as_deref(),
         primary_window_id,
@@ -683,8 +693,10 @@ mod tests {
         ExtractedView, RenderBackendStatus, RenderFrame, RenderFrameState, RenderPhaseLabel,
         RenderTarget, ViewportRect,
     };
-    use nara_sprite_render::{ColorKey, SpriteInstance, SpriteMaterialKey, TextureUvRect};
-    use nara_ui_render::{UiBatch, UiClipRect};
+    use nara_sprite_render::{
+        ColorKey, SpriteBatches, SpriteInstance, SpriteMaterialKey, TextureUvRect,
+    };
+    use nara_ui_render::{UiBatch, UiBatches, UiClipRect};
 
     #[test]
     fn backend_starts_uninitialized() {
@@ -711,6 +723,8 @@ mod tests {
         assert_eq!(status.state(), RenderBackendState::Uninitialized);
         assert_eq!(skip.frame_index(), frame.index);
         assert_eq!(skip.reason(), RenderFrameSkipReason::NoViews);
+        assert!(!app.world().contains_resource::<SpriteBatches>());
+        assert!(!app.world().contains_resource::<UiBatches>());
     }
 
     #[test]

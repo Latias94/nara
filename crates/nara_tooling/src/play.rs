@@ -5,7 +5,9 @@ use std::{collections::BTreeSet, fmt};
 use nara_asset::{AssetRefExportPolicy, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
-use nara_reflect::{ComponentEncodeContext, ComponentRegistry, ComponentTypeId};
+use nara_reflect::{
+    ComponentCapability, ComponentEncodeContext, ComponentRegistry, ComponentTypeId,
+};
 use nara_scene::{
     PrefabSourceResolver, SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord,
     SceneDocument, SceneEntityId, SceneEntityMap, SceneEntityRecord, ScenePatchDocument,
@@ -842,14 +844,16 @@ fn export_component_change(
         };
     };
 
-    if !schema.serializable {
+    if !schema.has_capability(ComponentCapability::Scene)
+        || !schema.has_capability(ComponentCapability::Edit)
+    {
         return ExportedComponentChange {
             report: rejected_component_report(
                 &document_entity.id,
                 component,
                 Diagnostic::error(
-                    "tooling.apply-changes-nonserializable-component",
-                    "Apply Changes targets a component that is not serializable",
+                    "tooling.apply-changes-component-not-editable",
+                    "Apply Changes targets a component without scene/edit capabilities",
                 )
                 .with_entity_id(document_entity.id.as_str())
                 .with_component_id(component.as_str()),
@@ -1350,7 +1354,7 @@ mod tests {
             SceneApplyChangesComponentStatus::Rejected
         );
         assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code.as_str() == "tooling.apply-changes-nonserializable-component"
+            diagnostic.code.as_str() == "tooling.apply-changes-component-not-editable"
         }));
         assert_eq!(document_name_value(&session, &id), "Hero");
         assert_eq!(session.history_status().undo_depth, 0);
@@ -1480,7 +1484,7 @@ mod tests {
     fn test_registry_with_migrating_position() -> ComponentRegistry {
         let mut registry = test_registry();
         registry
-            .register_serializable_component_with_fields::<MigratingPosition, _, _>(
+            .register_scene_component_with_fields::<MigratingPosition, _, _>(
                 migrating_position_type_id(),
                 ComponentSchemaVersion(2),
                 [ComponentFieldSchema::required(

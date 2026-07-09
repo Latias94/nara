@@ -1,8 +1,8 @@
-use nara::prelude::*;
+use nara::{backend_prelude::*, prelude::*};
 
 fn main() -> Result<(), AppRunError> {
     let mut app = App::new();
-    app.add_plugin(MinimalPlugins)?
+    app.add_plugins(Runtime2dPlugins)?
         .add_plugin(WindowPlugin {
             primary_window: Some(Window::new(
                 "nara windowed clear",

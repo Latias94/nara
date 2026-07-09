@@ -22,6 +22,13 @@ pub use snapshot::WorldSnapshot;
 pub struct ToolingPlugin;
 
 impl Plugin for ToolingPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.tooling"),
+            nara_app::PluginCategory::Tooling,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(CoreStage::Last, || {});
         Ok(())

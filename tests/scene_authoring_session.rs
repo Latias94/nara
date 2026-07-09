@@ -304,7 +304,7 @@ fn scene_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     let label_id = label_type_id();
     registry
-        .register_serializable_component_with_fields::<TestLabel, _, _>(
+        .register_scene_component_with_fields::<TestLabel, _, _>(
             label_id.clone(),
             ComponentSchemaVersion(1),
             [ComponentFieldSchema::required(

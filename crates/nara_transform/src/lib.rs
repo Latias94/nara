@@ -54,6 +54,13 @@ impl Default for GlobalTransform2d {
 pub struct TransformPlugin;
 
 impl Plugin for TransformPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.transform"),
+            nara_app::PluginCategory::Core,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<ComponentRegistry>();
         register_transform_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
@@ -64,7 +71,7 @@ impl Plugin for TransformPlugin {
 pub fn register_transform_components(registry: &mut ComponentRegistry) {
     let component_id = ComponentTypeId::new("nara.transform.Transform2d");
     registry
-        .register_serializable_component_with_fields::<Transform2d, _, _>(
+        .register_scene_component_with_fields::<Transform2d, _, _>(
             component_id.clone(),
             ComponentSchemaVersion(1),
             transform_fields(),

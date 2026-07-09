@@ -18,8 +18,8 @@ use crate::{
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
     path::ComponentFieldPath,
     schema::{
-        ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValueKind,
+        ComponentCapability, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValueKind,
     },
     value::ComponentValue,
 };
@@ -33,7 +33,7 @@ pub enum ComponentRegistryError {
         requested_component_id: ComponentTypeId,
     },
     UnknownComponentId(ComponentTypeId),
-    MissingSerializableComponentFields {
+    MissingSceneComponentFields {
         component_id: ComponentTypeId,
     },
     DuplicateComponentFieldPath {
@@ -87,10 +87,10 @@ impl Display for ComponentRegistryError {
                     id.as_str()
                 )
             }
-            Self::MissingSerializableComponentFields { component_id } => {
+            Self::MissingSceneComponentFields { component_id } => {
                 write!(
                     formatter,
-                    "serializable component id '{}' requires explicit schema fields",
+                    "scene component id '{}' requires explicit schema fields",
                     component_id.as_str()
                 )
             }
@@ -182,28 +182,12 @@ impl ComponentRegistry {
     where
         T: Component + Reflect + GetTypeRegistration,
     {
-        self.register_component_schema::<T>(id, version, false, Vec::new())?;
+        self.register_component_schema::<T>(id, version, BTreeSet::new(), Vec::new())?;
         self.type_registry.register::<T>();
         Ok(self)
     }
 
-    pub fn register_serializable_component<T, Decode, Encode>(
-        &mut self,
-        id: ComponentTypeId,
-        version: ComponentSchemaVersion,
-        decode: Decode,
-        encode: Encode,
-    ) -> Result<&mut Self, ComponentRegistryError>
-    where
-        T: Component,
-        Decode: Fn(&ComponentValue) -> Result<T, ComponentCodecError> + Send + Sync + 'static,
-        Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
-    {
-        let _ = (version, decode, encode);
-        Err(ComponentRegistryError::MissingSerializableComponentFields { component_id: id })
-    }
-
-    pub fn register_serializable_component_with_fields<T, Decode, Encode>(
+    pub fn register_scene_component_with_fields<T, Decode, Encode>(
         &mut self,
         id: ComponentTypeId,
         version: ComponentSchemaVersion,
@@ -216,8 +200,13 @@ impl ComponentRegistry {
         Decode: Fn(&ComponentValue) -> Result<T, ComponentCodecError> + Send + Sync + 'static,
         Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
     {
-        let fields = serializable_component_fields(&id, fields)?;
-        self.register_component_schema::<T>(id.clone(), version, true, fields)?;
+        let fields = scene_component_fields(&id, fields)?;
+        self.register_component_schema::<T>(
+            id.clone(),
+            version,
+            ComponentCapability::scene_authoring(),
+            fields,
+        )?;
         let codec = FnComponentCodec {
             preflight: move |value: &ComponentValue, _context: &mut ComponentDecodeContext<'_>| {
                 let component = decode(value)?;
@@ -232,28 +221,6 @@ impl ComponentRegistry {
         };
         self.codecs.insert(id, Box::new(codec));
         Ok(self)
-    }
-
-    pub fn register_component_codec<T, Preflight, Encode>(
-        &mut self,
-        id: ComponentTypeId,
-        version: ComponentSchemaVersion,
-        preflight: Preflight,
-        encode: Encode,
-    ) -> Result<&mut Self, ComponentRegistryError>
-    where
-        T: Component,
-        Preflight: Fn(&ComponentValue) -> Result<PreparedComponent, ComponentCodecError>
-            + Send
-            + Sync
-            + 'static,
-        Encode: Fn(&World, Entity) -> Result<Option<ComponentValue>, ComponentCodecError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let _ = (version, preflight, encode);
-        Err(ComponentRegistryError::MissingSerializableComponentFields { component_id: id })
     }
 
     pub fn register_component_codec_with_fields<T, Preflight, Encode>(
@@ -284,35 +251,6 @@ impl ComponentRegistry {
         )
     }
 
-    pub fn register_component_codec_with_context<T, Preflight, Encode>(
-        &mut self,
-        id: ComponentTypeId,
-        version: ComponentSchemaVersion,
-        preflight: Preflight,
-        encode: Encode,
-    ) -> Result<&mut Self, ComponentRegistryError>
-    where
-        T: Component,
-        Preflight: for<'a> Fn(
-                &ComponentValue,
-                &mut ComponentDecodeContext<'a>,
-            ) -> Result<PreparedComponent, ComponentCodecError>
-            + Send
-            + Sync
-            + 'static,
-        Encode: for<'a> Fn(
-                &World,
-                Entity,
-                &ComponentEncodeContext<'a>,
-            ) -> Result<Option<ComponentValue>, ComponentCodecError>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let _ = (version, preflight, encode);
-        Err(ComponentRegistryError::MissingSerializableComponentFields { component_id: id })
-    }
-
     pub fn register_component_codec_with_context_and_fields<T, Preflight, Encode>(
         &mut self,
         id: ComponentTypeId,
@@ -339,8 +277,13 @@ impl ComponentRegistry {
             + Sync
             + 'static,
     {
-        let fields = serializable_component_fields(&id, fields)?;
-        self.register_component_schema::<T>(id.clone(), version, true, fields)?;
+        let fields = scene_component_fields(&id, fields)?;
+        self.register_component_schema::<T>(
+            id.clone(),
+            version,
+            ComponentCapability::scene_authoring(),
+            fields,
+        )?;
         self.codecs
             .insert(id, Box::new(FnComponentCodec { preflight, encode }));
         Ok(self)
@@ -549,7 +492,7 @@ impl ComponentRegistry {
         &mut self,
         id: ComponentTypeId,
         version: ComponentSchemaVersion,
-        serializable: bool,
+        capabilities: BTreeSet<ComponentCapability>,
         fields: Vec<ComponentFieldSchema>,
     ) -> Result<(), ComponentRegistryError>
     where
@@ -571,7 +514,7 @@ impl ComponentRegistry {
             id: id.clone(),
             version,
             rust_type_path: std::any::type_name::<T>().to_string(),
-            serializable,
+            capabilities,
             fields,
         };
         self.rust_type_ids.insert(rust_type_id, id.clone());
@@ -580,15 +523,22 @@ impl ComponentRegistry {
     }
 }
 
-fn serializable_component_fields(
+fn scene_component_fields(
     component_id: &ComponentTypeId,
     fields: impl IntoIterator<Item = ComponentFieldSchema>,
 ) -> Result<Vec<ComponentFieldSchema>, ComponentRegistryError> {
-    let fields = canonical_component_fields(component_id, fields)?;
+    let mut fields = canonical_component_fields(component_id, fields)?;
     if fields.is_empty() {
-        return Err(ComponentRegistryError::MissingSerializableComponentFields {
+        return Err(ComponentRegistryError::MissingSceneComponentFields {
             component_id: component_id.clone(),
         });
+    }
+    for field in &mut fields {
+        if field.capabilities.is_empty() {
+            field.capabilities = ComponentCapability::scene_field_for_kind(field.value_kind);
+        } else if matches!(field.value_kind, ComponentValueKind::AssetRef) {
+            field.capabilities.insert(ComponentCapability::AssetRef);
+        }
     }
     Ok(fields)
 }

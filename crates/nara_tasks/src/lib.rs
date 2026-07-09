@@ -551,6 +551,13 @@ impl TaskPlugin {
 }
 
 impl Plugin for TaskPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.tasks"),
+            nara_app::PluginCategory::Core,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.configure_sets(
             CoreStage::TaskUpdate,
@@ -566,7 +573,7 @@ impl Plugin for TaskPlugin {
         if !app.world().contains_resource::<TaskPools>() {
             let pools = TaskPools::try_new(self.config.clone()).map_err(|error| {
                 PluginError::SetupFailed {
-                    plugin: self.name(),
+                    plugin: self.plugin_id(),
                     message: error.to_string(),
                 }
             })?;

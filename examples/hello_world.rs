@@ -2,8 +2,8 @@ use nara::prelude::*;
 
 fn main() {
     let mut app = App::new();
-    app.add_plugin(MinimalPlugins)
-        .expect("minimal plugins should install once")
+    app.add_plugins(Runtime2dPlugins)
+        .expect("2D runtime plugins should install once")
         .add_startup_systems(StartupStage::Scene, setup_scene)
         .add_systems(CoreStage::Update, move_sprites);
 

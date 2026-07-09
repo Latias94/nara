@@ -287,6 +287,13 @@ impl AssetWatchPlugin {
 }
 
 impl Plugin for AssetWatchPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.asset-watch"),
+            nara_app::PluginCategory::Asset,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(AssetPlugin)?;
         let watch_root = if app.world().contains_resource::<AssetSourceRoot>() {
@@ -297,12 +304,12 @@ impl Plugin for AssetWatchPlugin {
                 .to_path_buf();
             if !same_lexical_path(&existing_root, &self.root).map_err(|error| {
                 PluginError::SetupFailed {
-                    plugin: self.name(),
+                    plugin: self.plugin_id(),
                     message: error.to_string(),
                 }
             })? {
                 return Err(PluginError::SetupFailed {
-                    plugin: self.name(),
+                    plugin: self.plugin_id(),
                     message: format!(
                         "asset watch root '{}' does not match AssetSourceRoot '{}'",
                         self.root.display(),
@@ -320,7 +327,7 @@ impl Plugin for AssetWatchPlugin {
         let watcher =
             AssetWatcher::watch_recursive(&watch_root, queue.clone()).map_err(|error| {
                 PluginError::SetupFailed {
-                    plugin: self.name(),
+                    plugin: self.plugin_id(),
                     message: error.to_string(),
                 }
             })?;

@@ -440,7 +440,7 @@ fn component_migration_runs_before_scene_preflight_without_mutating_document() {
 fn missing_component_migration_reports_unsupported_version() {
     let mut registry = ComponentRegistry::new();
     registry
-        .register_serializable_component_with_fields::<TestPosition, _, _>(
+        .register_scene_component_with_fields::<TestPosition, _, _>(
             position_type_id(),
             ComponentSchemaVersion(2),
             [ComponentFieldSchema::required(
@@ -971,7 +971,7 @@ fn scene_component_schemas_expose_scalar_fields() {
 fn test_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     registry
-        .register_serializable_component_with_fields::<TestPosition, _, _>(
+        .register_scene_component_with_fields::<TestPosition, _, _>(
             position_type_id(),
             ComponentSchemaVersion(1),
             [ComponentFieldSchema::required(
@@ -1002,7 +1002,7 @@ fn test_registry() -> ComponentRegistry {
 fn migrated_position_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     registry
-        .register_serializable_component_with_fields::<TestPosition, _, _>(
+        .register_scene_component_with_fields::<TestPosition, _, _>(
             position_type_id(),
             ComponentSchemaVersion(2),
             [ComponentFieldSchema::required(

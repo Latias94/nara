@@ -158,6 +158,32 @@ fn stale_patch_component_schema_version_fails_before_mutating_document() {
 }
 
 #[test]
+fn set_field_without_edit_capability_fails_before_mutating_document() {
+    let registry = readonly_field_registry();
+    let player = scene_id("player");
+    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())
+        .with_component(position_type_id(), position_record(1, None))]);
+    let original = scene.clone();
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: player,
+        component: position_type_id(),
+        component_version: ComponentSchemaVersion(1),
+        path: ComponentFieldPath::from_fields(["x"]),
+        value: ComponentValue::I64(9),
+    }]);
+
+    let report = patch.apply_to_scene(&mut scene, &registry);
+
+    assert!(!report.applied);
+    assert_eq!(scene, original);
+    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code.as_str() == "scene.patch-field-capability-missing"
+            && diagnostic.context.operation_index == Some(0)
+            && diagnostic.context.field_path.as_deref() == Some("x")
+    }));
+}
+
+#[test]
 fn remove_entity_removes_subtree_and_inverse_restores_it() {
     let registry = test_registry();
     let root = scene_id("root");
@@ -253,7 +279,7 @@ fn test_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     let component_id = position_type_id();
     registry
-        .register_serializable_component_with_fields::<TestPosition, _, _>(
+        .register_scene_component_with_fields::<TestPosition, _, _>(
             component_id.clone(),
             ComponentSchemaVersion(1),
             [
@@ -295,6 +321,37 @@ fn test_registry() -> ComponentRegistry {
                     fields.push(("y", ComponentValue::I64(i64::from(y))));
                 }
                 Ok(ComponentValue::map(fields))
+            },
+        )
+        .unwrap();
+    registry
+}
+
+fn readonly_field_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    let component_id = position_type_id();
+    registry
+        .register_scene_component_with_fields::<TestPosition, _, _>(
+            component_id.clone(),
+            ComponentSchemaVersion(1),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["x"]),
+                ComponentValueKind::I64,
+            )
+            .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])],
+            |value| {
+                let x = value.field_i64("x")?;
+                Ok(TestPosition {
+                    x: i32::try_from(x)
+                        .map_err(|_| ComponentCodecError::invalid_field("x", "i32"))?,
+                    y: None,
+                })
+            },
+            |position| {
+                Ok(ComponentValue::map([(
+                    "x",
+                    ComponentValue::I64(i64::from(position.x)),
+                )]))
             },
         )
         .unwrap();

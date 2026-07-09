@@ -1,8 +1,8 @@
 //! Application lifecycle and plugin orchestration for nara.
 
 use std::{
-    any::type_name,
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
+    fmt::{self, Display, Formatter},
     time::Duration,
 };
 
@@ -75,7 +75,155 @@ pub enum TaskUpdateSet {
     ApplyAssetResults,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PluginId(&'static str);
+
+impl PluginId {
+    #[must_use]
+    pub const fn new(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl Display for PluginId {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PluginCapability(&'static str);
+
+impl PluginCapability {
+    #[must_use]
+    pub const fn new(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl Display for PluginCapability {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PluginGroupId(&'static str);
+
+impl PluginGroupId {
+    #[must_use]
+    pub const fn new(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl Display for PluginGroupId {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PluginCategory {
+    Core,
+    Asset,
+    Runtime,
+    Render,
+    Platform,
+    Tooling,
+    Backend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PluginMetadata {
+    pub id: PluginId,
+    pub category: PluginCategory,
+    pub provides: &'static [PluginCapability],
+    pub requires_plugins: &'static [PluginId],
+    pub requires_capabilities: &'static [PluginCapability],
+    pub conflicts: &'static [PluginId],
+    pub unique: bool,
+}
+
+impl PluginMetadata {
+    #[must_use]
+    pub const fn new(id: PluginId, category: PluginCategory) -> Self {
+        Self {
+            id,
+            category,
+            provides: &[],
+            requires_plugins: &[],
+            requires_capabilities: &[],
+            conflicts: &[],
+            unique: true,
+        }
+    }
+
+    #[must_use]
+    pub const fn provides(mut self, capabilities: &'static [PluginCapability]) -> Self {
+        self.provides = capabilities;
+        self
+    }
+
+    #[must_use]
+    pub const fn requires_plugins(mut self, plugins: &'static [PluginId]) -> Self {
+        self.requires_plugins = plugins;
+        self
+    }
+
+    #[must_use]
+    pub const fn requires_capabilities(
+        mut self,
+        capabilities: &'static [PluginCapability],
+    ) -> Self {
+        self.requires_capabilities = capabilities;
+        self
+    }
+
+    #[must_use]
+    pub const fn conflicts(mut self, plugins: &'static [PluginId]) -> Self {
+        self.conflicts = plugins;
+        self
+    }
+
+    #[must_use]
+    pub const fn non_unique(mut self) -> Self {
+        self.unique = false;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PluginGroupMetadata {
+    pub id: PluginGroupId,
+    pub plugins: &'static [PluginId],
+}
+
+impl PluginGroupMetadata {
+    #[must_use]
+    pub const fn new(id: PluginGroupId, plugins: &'static [PluginId]) -> Self {
+        Self { id, plugins }
+    }
+}
+
 pub trait Plugin: Send + Sync + 'static {
+    fn metadata(&self) -> PluginMetadata;
+
     fn build(&self, app: &mut App) -> Result<(), PluginError>;
 
     fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
@@ -84,41 +232,44 @@ pub trait Plugin: Send + Sync + 'static {
 
     fn cleanup(&self, _app: &mut App) {}
 
-    fn name(&self) -> &'static str {
-        type_name::<Self>()
-    }
-
-    fn is_unique(&self) -> bool {
-        true
+    fn plugin_id(&self) -> PluginId {
+        self.metadata().id
     }
 }
 
-impl<T> Plugin for T
-where
-    T: Fn(&mut App) + Send + Sync + 'static,
-{
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        self(app);
-        Ok(())
-    }
+pub trait PluginGroup: Send + Sync + 'static {
+    fn metadata(&self) -> PluginGroupMetadata;
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError>;
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PluginError {
-    #[error("duplicate plugin: {name}")]
-    Duplicate { name: &'static str },
-    #[error("plugins cannot be added after plugin finishing has started: {name}")]
-    AddedAfterFinish { name: &'static str },
+    #[error("duplicate plugin: {plugin}")]
+    Duplicate { plugin: PluginId },
+    #[error("plugins cannot be added after plugin finishing has started: {plugin}")]
+    AddedAfterFinish { plugin: PluginId },
+    #[error("plugin groups cannot be added after plugin finishing has started: {group}")]
+    GroupAddedAfterFinish { group: PluginGroupId },
+    #[error("duplicate plugin group: {group}")]
+    DuplicateGroup { group: PluginGroupId },
     #[error("plugin {plugin} requires missing prerequisite plugin {prerequisite}")]
-    MissingPrerequisite {
-        plugin: &'static str,
-        prerequisite: &'static str,
+    MissingPluginPrerequisite {
+        plugin: PluginId,
+        prerequisite: PluginId,
+    },
+    #[error("plugin {plugin} requires missing capability {capability}")]
+    MissingCapabilityPrerequisite {
+        plugin: PluginId,
+        capability: PluginCapability,
+    },
+    #[error("plugin {plugin} conflicts with installed plugin {conflict}")]
+    ConflictingPlugin {
+        plugin: PluginId,
+        conflict: PluginId,
     },
     #[error("plugin {plugin} failed to initialize: {message}")]
-    SetupFailed {
-        plugin: &'static str,
-        message: String,
-    },
+    SetupFailed { plugin: PluginId, message: String },
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -257,7 +408,10 @@ pub struct App {
     schedules: BTreeMap<CoreStage, Schedule>,
     runner: Option<RunnerFn>,
     plugins: Vec<Box<dyn Plugin>>,
-    plugin_names: HashSet<&'static str>,
+    plugin_install_counts: BTreeMap<PluginId, usize>,
+    plugin_metadata: BTreeMap<PluginId, PluginMetadata>,
+    provided_capabilities: BTreeSet<PluginCapability>,
+    plugin_groups: BTreeMap<PluginGroupId, PluginGroupMetadata>,
     plugins_finished: bool,
     started: bool,
 }
@@ -300,7 +454,10 @@ impl App {
             schedules,
             runner: Some(Box::new(default_runner)),
             plugins: Vec::new(),
-            plugin_names: HashSet::new(),
+            plugin_install_counts: BTreeMap::new(),
+            plugin_metadata: BTreeMap::new(),
+            provided_capabilities: BTreeSet::new(),
+            plugin_groups: BTreeMap::new(),
             plugins_finished: false,
             started: false,
         }
@@ -365,49 +522,116 @@ impl App {
     }
 
     pub fn add_plugin(&mut self, plugin: impl Plugin) -> Result<&mut Self, PluginError> {
-        let name = plugin.name();
+        let metadata = plugin.metadata();
         if self.plugins_finished {
-            return Err(PluginError::AddedAfterFinish { name });
+            return Err(PluginError::AddedAfterFinish {
+                plugin: metadata.id,
+            });
         }
-        if plugin.is_unique() && self.plugin_names.contains(name) {
-            return Err(PluginError::Duplicate { name });
+        if metadata.unique && self.has_plugin(metadata.id) {
+            return Err(PluginError::Duplicate {
+                plugin: metadata.id,
+            });
         }
 
+        self.check_plugin_metadata(metadata)?;
         plugin.build(self)?;
-        self.plugin_names.insert(name);
+        *self.plugin_install_counts.entry(metadata.id).or_default() += 1;
+        self.plugin_metadata.entry(metadata.id).or_insert(metadata);
+        for capability in metadata.provides {
+            self.provided_capabilities.insert(*capability);
+        }
         self.plugins.push(Box::new(plugin));
         Ok(self)
     }
 
     pub fn add_plugin_if_missing(&mut self, plugin: impl Plugin) -> Result<&mut Self, PluginError> {
-        let name = plugin.name();
+        let metadata = plugin.metadata();
         if self.plugins_finished {
-            return Err(PluginError::AddedAfterFinish { name });
+            return Err(PluginError::AddedAfterFinish {
+                plugin: metadata.id,
+            });
         }
-        if plugin.is_unique() && self.plugin_names.contains(name) {
+        if metadata.unique && self.has_plugin(metadata.id) {
             return Ok(self);
         }
         self.add_plugin(plugin)
     }
 
+    pub fn add_plugins(&mut self, group: impl PluginGroup) -> Result<&mut Self, PluginError> {
+        let metadata = group.metadata();
+        if self.plugins_finished {
+            return Err(PluginError::GroupAddedAfterFinish { group: metadata.id });
+        }
+        if self.plugin_groups.contains_key(&metadata.id) {
+            return Err(PluginError::DuplicateGroup { group: metadata.id });
+        }
+        group.build(self)?;
+        self.plugin_groups.insert(metadata.id, metadata);
+        Ok(self)
+    }
+
     #[must_use]
-    pub fn has_plugin(&self, name: &'static str) -> bool {
-        self.plugin_names.contains(name)
+    pub fn has_plugin(&self, id: PluginId) -> bool {
+        self.plugin_install_counts.contains_key(&id)
+    }
+
+    #[must_use]
+    pub fn has_capability(&self, capability: PluginCapability) -> bool {
+        self.provided_capabilities.contains(&capability)
+    }
+
+    pub fn installed_plugins(&self) -> impl Iterator<Item = PluginMetadata> + '_ {
+        self.plugin_metadata.values().copied()
+    }
+
+    pub fn installed_plugin_groups(&self) -> impl Iterator<Item = PluginGroupMetadata> + '_ {
+        self.plugin_groups.values().copied()
     }
 
     pub fn require_plugin(
         &self,
-        plugin: &'static str,
-        prerequisite: &'static str,
+        plugin: PluginId,
+        prerequisite: PluginId,
     ) -> Result<(), PluginError> {
         if self.has_plugin(prerequisite) {
             Ok(())
         } else {
-            Err(PluginError::MissingPrerequisite {
+            Err(PluginError::MissingPluginPrerequisite {
                 plugin,
                 prerequisite,
             })
         }
+    }
+
+    pub fn require_capability(
+        &self,
+        plugin: PluginId,
+        capability: PluginCapability,
+    ) -> Result<(), PluginError> {
+        if self.has_capability(capability) {
+            Ok(())
+        } else {
+            Err(PluginError::MissingCapabilityPrerequisite { plugin, capability })
+        }
+    }
+
+    fn check_plugin_metadata(&self, metadata: PluginMetadata) -> Result<(), PluginError> {
+        for prerequisite in metadata.requires_plugins {
+            self.require_plugin(metadata.id, *prerequisite)?;
+        }
+        for capability in metadata.requires_capabilities {
+            self.require_capability(metadata.id, *capability)?;
+        }
+        for conflict in metadata.conflicts {
+            if self.has_plugin(*conflict) {
+                return Err(PluginError::ConflictingPlugin {
+                    plugin: metadata.id,
+                    conflict: *conflict,
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn finish_plugins(&mut self) -> Result<&mut Self, PluginError> {
@@ -507,10 +731,22 @@ mod tests {
     #[derive(Debug, Default, Resource)]
     struct PluginBuildCount(u32);
 
+    const COUNTING_PLUGIN_ID: PluginId = PluginId::new("nara.test.counting");
+    const FAILING_PLUGIN_ID: PluginId = PluginId::new("nara.test.failing");
+    const MISSING_PLUGIN_ID: PluginId = PluginId::new("nara.test.missing");
+    const COUNTING_CAPABILITY: PluginCapability = PluginCapability::new("nara.test.counting");
+    const CAPABILITY_PLUGIN_ID: PluginId = PluginId::new("nara.test.capability");
+    const COUNTING_GROUP_ID: PluginGroupId = PluginGroupId::new("nara.test.group");
+
     #[derive(Debug, Default, Clone, Copy)]
     struct CountingPlugin;
 
     impl Plugin for CountingPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new(COUNTING_PLUGIN_ID, PluginCategory::Core)
+                .provides(&[COUNTING_CAPABILITY])
+        }
+
         fn build(&self, app: &mut App) -> Result<(), PluginError> {
             if !app.world().contains_resource::<PluginBuildCount>() {
                 app.insert_resource(PluginBuildCount::default());
@@ -518,22 +754,47 @@ mod tests {
             app.world_mut().resource_mut::<PluginBuildCount>().0 += 1;
             Ok(())
         }
-
-        fn name(&self) -> &'static str {
-            "test.CountingPlugin"
-        }
     }
 
     #[derive(Debug, Default, Clone, Copy)]
     struct FailingPlugin;
 
     impl Plugin for FailingPlugin {
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            app.require_plugin(self.name(), "test.MissingPlugin")
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new(FAILING_PLUGIN_ID, PluginCategory::Core)
+                .requires_plugins(&[MISSING_PLUGIN_ID])
         }
 
-        fn name(&self) -> &'static str {
-            "test.FailingPlugin"
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.require_plugin(self.plugin_id(), MISSING_PLUGIN_ID)
+        }
+    }
+
+    #[derive(Debug, Default, Clone, Copy)]
+    struct CapabilityPlugin;
+
+    impl Plugin for CapabilityPlugin {
+        fn metadata(&self) -> PluginMetadata {
+            PluginMetadata::new(CAPABILITY_PLUGIN_ID, PluginCategory::Core)
+                .requires_capabilities(&[COUNTING_CAPABILITY])
+        }
+
+        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Default, Clone, Copy)]
+    struct CountingGroup;
+
+    impl PluginGroup for CountingGroup {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(COUNTING_GROUP_ID, &[COUNTING_PLUGIN_ID])
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.add_plugin_if_missing(CountingPlugin)?;
+            Ok(())
         }
     }
 
@@ -789,12 +1050,12 @@ mod tests {
         };
         assert_eq!(
             error,
-            PluginError::MissingPrerequisite {
-                plugin: "test.FailingPlugin",
-                prerequisite: "test.MissingPlugin"
+            PluginError::MissingPluginPrerequisite {
+                plugin: FAILING_PLUGIN_ID,
+                prerequisite: MISSING_PLUGIN_ID
             }
         );
-        assert!(!app.has_plugin("test.FailingPlugin"));
+        assert!(!app.has_plugin(FAILING_PLUGIN_ID));
     }
 
     #[test]
@@ -804,8 +1065,61 @@ mod tests {
         app.add_plugin_if_missing(CountingPlugin).unwrap();
         app.add_plugin_if_missing(CountingPlugin).unwrap();
 
-        assert!(app.has_plugin("test.CountingPlugin"));
+        assert!(app.has_plugin(COUNTING_PLUGIN_ID));
         assert_eq!(app.world().resource::<PluginBuildCount>().0, 1);
+    }
+
+    #[test]
+    fn add_plugin_rejects_duplicate_stable_plugin_id() {
+        let mut app = App::new();
+
+        app.add_plugin(CountingPlugin).unwrap();
+        let Err(error) = app.add_plugin(CountingPlugin) else {
+            panic!("duplicate stable plugin id should be rejected");
+        };
+
+        assert_eq!(
+            error,
+            PluginError::Duplicate {
+                plugin: COUNTING_PLUGIN_ID
+            }
+        );
+        assert_eq!(app.world().resource::<PluginBuildCount>().0, 1);
+    }
+
+    #[test]
+    fn plugin_requirements_can_target_capabilities() {
+        let mut app = App::new();
+
+        let Err(error) = app.add_plugin(CapabilityPlugin) else {
+            panic!("capability plugin should require missing capability");
+        };
+        assert_eq!(
+            error,
+            PluginError::MissingCapabilityPrerequisite {
+                plugin: CAPABILITY_PLUGIN_ID,
+                capability: COUNTING_CAPABILITY,
+            }
+        );
+
+        app.add_plugin(CountingPlugin).unwrap();
+        app.add_plugin(CapabilityPlugin).unwrap();
+
+        assert!(app.has_capability(COUNTING_CAPABILITY));
+        assert!(app.has_plugin(CAPABILITY_PLUGIN_ID));
+    }
+
+    #[test]
+    fn plugin_groups_are_recorded_with_stable_membership() {
+        let mut app = App::new();
+
+        app.add_plugins(CountingGroup).unwrap();
+
+        assert!(app.has_plugin(COUNTING_PLUGIN_ID));
+        let groups = app.installed_plugin_groups().collect::<Vec<_>>();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, COUNTING_GROUP_ID);
+        assert_eq!(groups[0].plugins, &[COUNTING_PLUGIN_ID]);
     }
 
     #[test]
@@ -819,7 +1133,7 @@ mod tests {
         assert_eq!(
             error,
             PluginError::AddedAfterFinish {
-                name: "test.CountingPlugin"
+                plugin: COUNTING_PLUGIN_ID
             }
         );
     }

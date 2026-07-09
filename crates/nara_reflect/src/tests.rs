@@ -29,7 +29,12 @@ fn registers_component_schema_by_stable_id_and_rust_type() {
         registry.schema(&id).unwrap().version,
         ComponentSchemaVersion(1)
     );
-    assert!(!registry.schema(&id).unwrap().serializable);
+    assert!(
+        !registry
+            .schema(&id)
+            .unwrap()
+            .has_capability(ComponentCapability::Scene)
+    );
     assert_eq!(
         registry.schema_for_type::<Position>().unwrap().id.as_str(),
         "nara.test.Position"
@@ -75,11 +80,11 @@ fn rejects_duplicate_component_rust_types() {
 }
 
 #[test]
-fn serializable_components_require_fields() {
+fn scene_components_require_fields() {
     let mut registry = ComponentRegistry::new();
     let id = ComponentTypeId::new("nara.test.Position");
 
-    let result = registry.register_serializable_component_with_fields::<Position, _, _>(
+    let result = registry.register_scene_component_with_fields::<Position, _, _>(
         id.clone(),
         ComponentSchemaVersion(1),
         [],
@@ -89,7 +94,7 @@ fn serializable_components_require_fields() {
 
     assert!(matches!(
         result,
-        Err(ComponentRegistryError::MissingSerializableComponentFields { component_id })
+        Err(ComponentRegistryError::MissingSceneComponentFields { component_id })
             if component_id == id
     ));
 }
@@ -100,7 +105,7 @@ fn rejects_component_field_default_kind_mismatch() {
     let id = ComponentTypeId::new("nara.test.Position");
     let path = ComponentFieldPath::from_fields(["x"]);
 
-    let result = registry.register_serializable_component_with_fields::<Position, _, _>(
+    let result = registry.register_scene_component_with_fields::<Position, _, _>(
         id.clone(),
         ComponentSchemaVersion(1),
         [ComponentFieldSchema::optional_with_default(
@@ -376,11 +381,11 @@ fn invalid_component_value_path_does_not_mutate_original() {
 }
 
 #[test]
-fn preflights_applies_and_encodes_serializable_component() {
+fn preflights_applies_and_encodes_scene_component() {
     let mut registry = ComponentRegistry::new();
     let id = ComponentTypeId::new("nara.test.Position");
     registry
-        .register_serializable_component_with_fields::<Position, _, _>(
+        .register_scene_component_with_fields::<Position, _, _>(
             id.clone(),
             ComponentSchemaVersion(1),
             [
@@ -415,7 +420,16 @@ fn preflights_applies_and_encodes_serializable_component() {
         )
         .unwrap();
 
-    assert!(registry.schema(&id).unwrap().serializable);
+    let schema = registry.schema(&id).unwrap();
+    assert!(schema.has_capability(ComponentCapability::Scene));
+    assert!(schema.has_capability(ComponentCapability::Inspect));
+    assert!(schema.has_capability(ComponentCapability::Edit));
+    assert!(
+        schema
+            .fields
+            .iter()
+            .all(|field| field.has_capability(ComponentCapability::Edit))
+    );
 
     let value = ComponentValue::map([
         ("x", ComponentValue::f64(2.0).unwrap()),

@@ -1,9 +1,9 @@
-use nara::prelude::*;
+use nara::advanced_prelude::*;
 
 fn main() {
     let mut app = App::new();
-    app.add_plugin(MinimalPlugins)
-        .expect("minimal plugins should install once")
+    app.add_plugins(Runtime2dPlugins)
+        .expect("2D runtime plugins should install once")
         .add_startup_systems(StartupStage::Scene, setup_scene);
 
     app.update();

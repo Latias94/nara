@@ -1,4 +1,4 @@
-use nara::prelude::*;
+use nara::{prelude::*, tooling_prelude::*};
 
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestLabel {
@@ -196,7 +196,7 @@ fn test_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     let label_id = label_type_id();
     registry
-        .register_serializable_component_with_fields::<TestLabel, _, _>(
+        .register_scene_component_with_fields::<TestLabel, _, _>(
             label_id.clone(),
             ComponentSchemaVersion(1),
             [

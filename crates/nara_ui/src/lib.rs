@@ -211,6 +211,13 @@ impl Default for UiPanelMaterial {
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.ui"),
+            nara_app::PluginCategory::Runtime,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(RenderPlugin)?;
         app.add_plugin_if_missing(nara_input::InputPlugin)?;

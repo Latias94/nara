@@ -406,6 +406,13 @@ impl RenderBackendStatus {
 pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.render"),
+            nara_app::PluginCategory::Render,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<ComponentRegistry>();
         register_render_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
@@ -424,7 +431,7 @@ impl Plugin for RenderPlugin {
 pub fn register_render_components(registry: &mut ComponentRegistry) {
     let component_id = ComponentTypeId::new("nara.render.Camera2d");
     registry
-        .register_serializable_component_with_fields::<Camera2d, _, _>(
+        .register_scene_component_with_fields::<Camera2d, _, _>(
             component_id.clone(),
             ComponentSchemaVersion(1),
             camera_fields(),
@@ -510,7 +517,7 @@ fn render_target_value(target: RenderTarget) -> Result<ComponentValue, Component
     match target {
         RenderTarget::PrimaryWindow => Ok(ComponentValue::String("primary_window".to_string())),
         RenderTarget::Window(_) | RenderTarget::Image(_) => Err(ComponentCodecError::Message(
-            "only primary window camera targets are scene-serializable in this slice".to_string(),
+            "only primary window camera targets are scene-capable in this slice".to_string(),
         )),
     }
 }

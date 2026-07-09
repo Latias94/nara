@@ -458,6 +458,13 @@ impl Default for Tilemap {
 pub struct TilemapPlugin;
 
 impl Plugin for TilemapPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.tilemap"),
+            nara_app::PluginCategory::Runtime,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<Assets<TileSet>>();
         app.init_resource::<ComponentRegistry>();

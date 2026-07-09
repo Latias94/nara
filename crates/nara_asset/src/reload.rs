@@ -541,6 +541,13 @@ fn transitive_dependents(
 pub struct AssetPlugin;
 
 impl Plugin for AssetPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.asset"),
+            nara_app::PluginCategory::Asset,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(TaskPlugin::default())?;
         app.init_resource::<AssetServer>();

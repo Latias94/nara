@@ -1,10 +1,12 @@
+use std::collections::BTreeSet;
+
 use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::Entity;
 use nara_reflect::{
-    ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentSchema,
-    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
     SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
@@ -180,7 +182,7 @@ pub struct SceneInspectorComponentView {
     pub document_version: ComponentSchemaVersion,
     pub schema_version: Option<ComponentSchemaVersion>,
     pub rust_type_path: Option<String>,
-    pub serializable: bool,
+    pub capabilities: BTreeSet<ComponentCapability>,
     pub schema_known: bool,
     pub raw_value: ComponentValue,
     pub fields: Vec<SceneInspectorFieldView>,
@@ -191,6 +193,7 @@ pub struct SceneInspectorFieldView {
     pub path: ComponentFieldPath,
     pub value_kind: ComponentValueKind,
     pub required: bool,
+    pub capabilities: BTreeSet<ComponentCapability>,
     pub default_value: Option<ComponentValue>,
     pub value: Option<ComponentValue>,
     pub state: SceneInspectorFieldState,
@@ -405,7 +408,9 @@ fn build_component_view(
         document_version: component.version,
         schema_version: schema.map(|schema| schema.version),
         rust_type_path: schema.map(|schema| schema.rust_type_path.clone()),
-        serializable: schema.is_some_and(|schema| schema.serializable),
+        capabilities: schema
+            .map(|schema| schema.capabilities.clone())
+            .unwrap_or_default(),
         schema_known: schema.is_some(),
         raw_value: component.value.clone(),
         fields: schema
@@ -434,6 +439,7 @@ fn build_field_view(
             path: field.path.clone(),
             value_kind: field.value_kind,
             required: field.required,
+            capabilities: field.capabilities.clone(),
             default_value: field.default_value.clone(),
             value: Some(value.clone()),
             state: SceneInspectorFieldState::Present,
@@ -442,6 +448,7 @@ fn build_field_view(
             path: field.path.clone(),
             value_kind: field.value_kind,
             required: field.required,
+            capabilities: field.capabilities.clone(),
             default_value: field.default_value.clone(),
             value: None,
             state: if field.required {

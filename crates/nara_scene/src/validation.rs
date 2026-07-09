@@ -136,11 +136,11 @@ fn preflight_scene_with_context_options(
                 );
                 continue;
             };
-            if !schema.serializable {
+            if !schema.has_capability(nara_reflect::ComponentCapability::Scene) {
                 diagnostics.push(
                     Diagnostic::error(
-                        "scene.component-not-serializable",
-                        "component is registered but not scene-serializable",
+                        "scene.component-not-scene-capable",
+                        "component is registered but not scene-capable",
                     )
                     .with_entity_id(entity.id.as_str())
                     .with_component_id(component_id.as_str()),

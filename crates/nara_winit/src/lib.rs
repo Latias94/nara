@@ -47,6 +47,13 @@ impl Default for WinitPlugin {
 }
 
 impl Plugin for WinitPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.winit"),
+            nara_app::PluginCategory::Platform,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(WindowPlugin::default())?;
         app.add_plugin_if_missing(InputPlugin)?;

@@ -15,7 +15,7 @@ use crate::{UiNode, UiPanel, UiPanelMaterial, UiRoot, UiStyle, UiVal};
 pub fn register_ui_components(registry: &mut ComponentRegistry) {
     let root_id = ComponentTypeId::new("nara.ui.UiRoot");
     registry
-        .register_serializable_component_with_fields::<UiRoot, _, _>(
+        .register_scene_component_with_fields::<UiRoot, _, _>(
             root_id.clone(),
             ComponentSchemaVersion(1),
             ui_root_fields(),
@@ -36,7 +36,7 @@ pub fn register_ui_components(registry: &mut ComponentRegistry) {
 
     let node_id = ComponentTypeId::new("nara.ui.UiNode");
     registry
-        .register_serializable_component_with_fields::<UiNode, _, _>(
+        .register_scene_component_with_fields::<UiNode, _, _>(
             node_id.clone(),
             ComponentSchemaVersion(1),
             ui_node_fields(),
@@ -261,7 +261,7 @@ fn render_target_value(target: RenderTarget) -> Result<ComponentValue, Component
     match target {
         RenderTarget::PrimaryWindow => Ok(ComponentValue::String("primary_window".to_string())),
         RenderTarget::Window(_) | RenderTarget::Image(_) => Err(ComponentCodecError::Message(
-            "only primary window UI roots are scene-serializable in this slice".to_string(),
+            "only primary window UI roots are scene-capable in this slice".to_string(),
         )),
     }
 }

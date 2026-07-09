@@ -18,19 +18,19 @@ pub use migration::{ComponentMigrationError, MigratedComponentValue};
 pub use path::{ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment};
 pub use registry::{ComponentRegistry, ComponentRegistryError};
 pub use schema::{
-    ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValueKind,
+    ComponentCapability, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValueKind,
 };
 pub use value::{ComponentFloat, ComponentValue, ComponentValueError};
 
 pub mod prelude {
     pub use crate::{
-        ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
-        ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
-        ComponentFieldSchema, ComponentFloat, ComponentMigrationError, ComponentRegistry,
-        ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValue, ComponentValueError, ComponentValueKind,
-        MigratedComponentValue, PreparedComponent,
+        ComponentCapability, ComponentCodec, ComponentCodecError, ComponentDecodeContext,
+        ComponentEncodeContext, ComponentFieldPath, ComponentFieldPathError,
+        ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat, ComponentMigrationError,
+        ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueError,
+        ComponentValueKind, MigratedComponentValue, PreparedComponent,
     };
     pub use bevy_reflect::prelude::*;
 }

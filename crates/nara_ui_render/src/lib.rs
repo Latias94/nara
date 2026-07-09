@@ -26,6 +26,13 @@ pub use crate::types::{
 pub struct UiRenderPlugin;
 
 impl Plugin for UiRenderPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.ui-render"),
+            nara_app::PluginCategory::Render,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(UiPlugin)?;
         app.add_plugin_if_missing(RenderPlugin)?;

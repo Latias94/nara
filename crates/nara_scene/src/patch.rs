@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
-    ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
 use crate::{
@@ -443,6 +443,14 @@ fn set_field(
         operation_index,
         entity,
     )?;
+    require_field_capability(
+        field_schema,
+        ComponentCapability::Edit,
+        component,
+        path,
+        operation_index,
+        entity,
+    )?;
     if !field_value_matches(field_schema, &value) {
         return Err(patch_diagnostic(
             operation_index,
@@ -499,6 +507,14 @@ fn remove_field(
         registry,
         component,
         component_version,
+        path,
+        operation_index,
+        entity,
+    )?;
+    require_field_capability(
+        field_schema,
+        ComponentCapability::Edit,
+        component,
         path,
         operation_index,
         entity,
@@ -576,6 +592,22 @@ fn set_asset_ref_field(
         registry,
         component,
         component_version,
+        path,
+        operation_index,
+        entity,
+    )?;
+    require_field_capability(
+        field_schema,
+        ComponentCapability::Edit,
+        component,
+        path,
+        operation_index,
+        entity,
+    )?;
+    require_field_capability(
+        field_schema,
+        ComponentCapability::AssetRef,
+        component,
         path,
         operation_index,
         entity,
@@ -690,6 +722,28 @@ fn field_schema<'a>(
                 Some(path),
             )
         })
+}
+
+fn require_field_capability(
+    field_schema: &ComponentFieldSchema,
+    capability: ComponentCapability,
+    component: &ComponentTypeId,
+    path: &ComponentFieldPath,
+    operation_index: usize,
+    entity: &SceneEntityId,
+) -> Result<(), Diagnostic> {
+    if field_schema.has_capability(capability) {
+        return Ok(());
+    }
+
+    Err(patch_diagnostic(
+        operation_index,
+        "scene.patch-field-capability-missing",
+        format!("patch field operation requires {capability:?} capability"),
+        Some(entity),
+        Some(component),
+        Some(path),
+    ))
 }
 
 fn field_value_matches(field: &ComponentFieldSchema, value: &ComponentValue) -> bool {

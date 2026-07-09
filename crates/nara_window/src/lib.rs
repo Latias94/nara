@@ -263,6 +263,13 @@ impl Default for WindowPlugin {
 }
 
 impl Plugin for WindowPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.window"),
+            nara_app::PluginCategory::Platform,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<WindowEvents>();
         app.init_resource::<backend::BackendWindowHandles>();

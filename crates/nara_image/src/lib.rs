@@ -439,6 +439,13 @@ struct PendingImageJobs {
 pub struct ImagePlugin;
 
 impl Plugin for ImagePlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.image"),
+            nara_app::PluginCategory::Asset,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(AssetPlugin)?;
         app.add_plugin_if_missing(ImagePreparePlugin)?;
@@ -462,6 +469,13 @@ impl Plugin for ImagePlugin {
 pub struct ImagePreparePlugin;
 
 impl Plugin for ImagePreparePlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.image.prepare"),
+            nara_app::PluginCategory::Render,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<Assets<ImageAsset>>();
         app.init_resource::<AssetStates>();
@@ -487,7 +501,7 @@ fn register_image_importer(app: &mut App) -> Result<(), PluginError> {
 
 fn image_plugin_setup_error(context: &'static str, error: ImporterRegistryError) -> PluginError {
     PluginError::SetupFailed {
-        plugin: "nara_image::ImagePlugin",
+        plugin: nara_app::PluginId::new("nara.image"),
         message: format!("{context}: {error}"),
     }
 }

@@ -97,6 +97,13 @@ pub fn sync_children(world: &mut World) {
 pub struct HierarchyPlugin;
 
 impl Plugin for HierarchyPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(
+            nara_app::PluginId::new("nara.scene.hierarchy"),
+            nara_app::PluginCategory::Core,
+        )
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<ComponentRegistry>();
         register_scene_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
@@ -108,7 +115,7 @@ impl Plugin for HierarchyPlugin {
 pub fn register_scene_components(registry: &mut ComponentRegistry) {
     let name_id = ComponentTypeId::new("nara.scene.Name");
     registry
-        .register_serializable_component_with_fields::<Name, _, _>(
+        .register_scene_component_with_fields::<Name, _, _>(
             name_id.clone(),
             ComponentSchemaVersion(1),
             [ComponentFieldSchema::required(
@@ -126,7 +133,7 @@ pub fn register_scene_components(registry: &mut ComponentRegistry) {
 
     let visibility_id = ComponentTypeId::new("nara.scene.Visibility");
     registry
-        .register_serializable_component_with_fields::<Visibility, _, _>(
+        .register_scene_component_with_fields::<Visibility, _, _>(
             visibility_id.clone(),
             ComponentSchemaVersion(1),
             [ComponentFieldSchema::required(

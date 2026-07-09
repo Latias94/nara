@@ -1,5 +1,5 @@
 use image::ImageEncoder;
-use nara::prelude::*;
+use nara::advanced_prelude::*;
 
 const TEXTURE_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 
@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let mut app = App::new();
-    app.add_plugin(MinimalPlugins)?;
+    app.add_plugins(Runtime2dPlugins)?;
     {
         let world = app.world_mut();
         world.insert_resource(asset_server);
