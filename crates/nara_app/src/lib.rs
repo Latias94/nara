@@ -298,28 +298,153 @@ pub enum AppExit {
 
 pub type RunnerFn = Box<dyn FnOnce(App) -> Result<AppExit, AppRunError>>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Resource)]
-pub struct Time {
-    pub delta_seconds: f32,
-    pub elapsed_seconds: f64,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Resource)]
+pub struct RealTime {
+    pub delta: Duration,
+    pub elapsed: Duration,
     pub frame: u64,
 }
 
-impl Default for Time {
+impl Default for RealTime {
     fn default() -> Self {
         Self {
-            delta_seconds: 0.0,
-            elapsed_seconds: 0.0,
+            delta: Duration::ZERO,
+            elapsed: Duration::ZERO,
             frame: 0,
         }
     }
 }
 
-impl Time {
+impl RealTime {
     pub fn advance(&mut self, delta: Duration) {
-        self.delta_seconds = delta.as_secs_f32();
-        self.elapsed_seconds += delta.as_secs_f64();
+        self.delta = delta;
+        self.elapsed = self.elapsed.checked_add(delta).unwrap_or(Duration::MAX);
         self.frame += 1;
+    }
+
+    #[must_use]
+    pub fn delta_seconds(&self) -> f32 {
+        self.delta.as_secs_f32()
+    }
+
+    #[must_use]
+    pub fn elapsed_seconds(&self) -> f64 {
+        self.elapsed.as_secs_f64()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Resource)]
+pub struct VirtualTime {
+    pub delta: Duration,
+    pub elapsed: Duration,
+    pub frame: u64,
+}
+
+impl Default for VirtualTime {
+    fn default() -> Self {
+        Self {
+            delta: Duration::ZERO,
+            elapsed: Duration::ZERO,
+            frame: 0,
+        }
+    }
+}
+
+impl VirtualTime {
+    pub fn advance(&mut self, delta: Duration) {
+        self.delta = delta;
+        self.elapsed = self.elapsed.checked_add(delta).unwrap_or(Duration::MAX);
+        self.frame += 1;
+    }
+
+    #[must_use]
+    pub fn delta_seconds(&self) -> f32 {
+        self.delta.as_secs_f32()
+    }
+
+    #[must_use]
+    pub fn elapsed_seconds(&self) -> f64 {
+        self.elapsed.as_secs_f64()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Resource)]
+pub struct RuntimeTimeSettings {
+    pub paused: bool,
+    pub time_scale: f32,
+    pub max_delta: Duration,
+}
+
+impl Default for RuntimeTimeSettings {
+    fn default() -> Self {
+        Self {
+            paused: false,
+            time_scale: 1.0,
+            max_delta: Duration::from_millis(250),
+        }
+    }
+}
+
+impl RuntimeTimeSettings {
+    #[must_use]
+    pub fn with_paused(mut self, paused: bool) -> Self {
+        self.paused = paused;
+        self
+    }
+
+    #[must_use]
+    pub fn with_time_scale(mut self, time_scale: f32) -> Self {
+        self.time_scale = time_scale;
+        self
+    }
+
+    #[must_use]
+    pub fn with_max_delta(mut self, max_delta: Duration) -> Self {
+        self.max_delta = max_delta;
+        self
+    }
+
+    fn virtual_delta(&self, real_delta: Duration) -> (Duration, bool) {
+        let clamped = real_delta.min(self.max_delta);
+        let was_clamped = clamped != real_delta;
+        if self.paused {
+            return (Duration::ZERO, was_clamped);
+        }
+        let scale = if self.time_scale.is_finite() {
+            self.time_scale.max(0.0)
+        } else {
+            0.0
+        };
+        (
+            Duration::from_secs_f64(clamped.as_secs_f64() * f64::from(scale)),
+            was_clamped,
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Resource)]
+pub struct RenderTime {
+    pub interpolation_alpha: f32,
+    pub overstep: Duration,
+}
+
+impl Default for RenderTime {
+    fn default() -> Self {
+        Self {
+            interpolation_alpha: 0.0,
+            overstep: Duration::ZERO,
+        }
+    }
+}
+
+impl RenderTime {
+    fn update_from_fixed(&mut self, fixed: &FixedTime) {
+        self.overstep = fixed.overstep;
+        self.interpolation_alpha = if fixed.timestep.is_zero() {
+            0.0
+        } else {
+            (fixed.overstep.as_secs_f64() / fixed.timestep.as_secs_f64()) as f32
+        };
     }
 }
 
@@ -330,6 +455,7 @@ pub struct FixedTime {
     accumulated: Duration,
     overstep: Duration,
     steps_this_frame: u32,
+    capped_this_frame: bool,
 }
 
 impl Default for FixedTime {
@@ -340,6 +466,7 @@ impl Default for FixedTime {
             accumulated: Duration::ZERO,
             overstep: Duration::ZERO,
             steps_this_frame: 0,
+            capped_this_frame: false,
         }
     }
 }
@@ -387,6 +514,11 @@ impl FixedTime {
         self.steps_this_frame
     }
 
+    #[must_use]
+    pub fn capped_this_frame(&self) -> bool {
+        self.capped_this_frame
+    }
+
     fn begin_frame(&mut self, delta: Duration) -> u32 {
         self.accumulated = self.accumulated.checked_add(delta).unwrap_or(Duration::MAX);
 
@@ -398,7 +530,54 @@ impl FixedTime {
 
         self.steps_this_frame = steps;
         self.overstep = self.accumulated;
+        self.capped_this_frame =
+            self.accumulated >= self.timestep && steps >= self.max_steps_per_frame;
         steps
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
+pub struct RuntimeFrameStatus {
+    pub frame: u64,
+    pub real_delta: Duration,
+    pub virtual_delta: Duration,
+    pub real_delta_clamped: bool,
+    pub fixed_steps: u32,
+    pub fixed_steps_capped: bool,
+    pub fixed_overstep: Duration,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AppFrameOutcome {
+    pub exit: Option<AppExit>,
+    pub status: RuntimeFrameStatus,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
+pub struct AppExitRequests {
+    requested: Option<AppExit>,
+}
+
+impl AppExitRequests {
+    pub fn request(&mut self, exit: AppExit) {
+        self.requested = Some(exit);
+    }
+
+    pub fn request_success(&mut self) {
+        self.request(AppExit::Success);
+    }
+
+    pub fn request_exit(&mut self) {
+        self.request(AppExit::Requested);
+    }
+
+    #[must_use]
+    pub const fn requested(&self) -> Option<AppExit> {
+        self.requested
+    }
+
+    fn take(&mut self) -> Option<AppExit> {
+        self.requested.take()
     }
 }
 
@@ -436,8 +615,13 @@ impl App {
     #[must_use]
     pub fn new() -> Self {
         let mut world = World::new();
-        world.insert_resource(Time::default());
+        world.insert_resource(RealTime::default());
+        world.insert_resource(VirtualTime::default());
+        world.insert_resource(RuntimeTimeSettings::default());
         world.insert_resource(FixedTime::default());
+        world.insert_resource(RenderTime::default());
+        world.insert_resource(RuntimeFrameStatus::default());
+        world.insert_resource(AppExitRequests::default());
 
         let startup_schedules = StartupStage::ALL
             .into_iter()
@@ -657,7 +841,7 @@ impl App {
         runner(self)
     }
 
-    pub fn run_once(&mut self, delta: Duration) -> Result<(), AppRunError> {
+    pub fn run_once(&mut self, real_delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
         self.finish_plugins()?;
 
         if !self.started {
@@ -669,8 +853,20 @@ impl App {
             self.started = true;
         }
 
-        self.world.resource_mut::<Time>().advance(delta);
-        let fixed_steps = self.world.resource_mut::<FixedTime>().begin_frame(delta);
+        self.world.resource_mut::<RealTime>().advance(real_delta);
+        let settings = *self.world.resource::<RuntimeTimeSettings>();
+        let (virtual_delta, real_delta_clamped) = settings.virtual_delta(real_delta);
+        self.world
+            .resource_mut::<VirtualTime>()
+            .advance(virtual_delta);
+        let fixed_steps = self
+            .world
+            .resource_mut::<FixedTime>()
+            .begin_frame(virtual_delta);
+        let fixed = *self.world.resource::<FixedTime>();
+        self.world
+            .resource_mut::<RenderTime>()
+            .update_from_fixed(&fixed);
 
         for stage in CoreStage::ALL {
             if let Some(schedule) = self.schedules.get_mut(&stage) {
@@ -684,16 +880,28 @@ impl App {
             }
         }
 
-        Ok(())
+        let fixed = *self.world.resource::<FixedTime>();
+        let status = RuntimeFrameStatus {
+            frame: self.world.resource::<RealTime>().frame,
+            real_delta,
+            virtual_delta,
+            real_delta_clamped,
+            fixed_steps,
+            fixed_steps_capped: fixed.capped_this_frame(),
+            fixed_overstep: fixed.overstep(),
+        };
+        *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+        let exit = self.world.resource_mut::<AppExitRequests>().take();
+        Ok(AppFrameOutcome { exit, status })
     }
 
-    pub fn try_update(&mut self) -> Result<(), AppRunError> {
+    pub fn try_update(&mut self) -> Result<AppFrameOutcome, AppRunError> {
         self.run_once(Duration::ZERO)
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self) -> AppFrameOutcome {
         self.try_update()
-            .expect("app update failed while running one frame");
+            .expect("app update failed while running one frame")
     }
 
     fn startup_schedule_mut(&mut self, stage: StartupStage) -> &mut Schedule {
@@ -710,8 +918,8 @@ impl App {
 }
 
 fn default_runner(mut app: App) -> Result<AppExit, AppRunError> {
-    app.run_once(Duration::ZERO)?;
-    Ok(AppExit::Success)
+    let outcome = app.run_once(Duration::ZERO)?;
+    Ok(outcome.exit.unwrap_or(AppExit::Success))
 }
 
 #[cfg(test)]
@@ -870,6 +1078,10 @@ mod tests {
         order.0.push("task_apply");
     }
 
+    fn request_exit(mut requests: ResMut<AppExitRequests>) {
+        requests.request_exit();
+    }
+
     #[test]
     fn update_runs_startup_once_and_update_every_frame() {
         let mut app = App::new();
@@ -896,16 +1108,72 @@ mod tests {
         app.insert_resource(Frames::default())
             .add_systems(CoreStage::FixedUpdate, count_frame);
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let outcome = app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
-        let time = app.world().resource::<Time>();
-        assert_eq!(time.frame, 1);
-        assert_eq!(
-            time.delta_seconds,
-            FixedTime::DEFAULT_TIMESTEP.as_secs_f32()
-        );
+        let real_time = app.world().resource::<RealTime>();
+        let virtual_time = app.world().resource::<VirtualTime>();
+        assert_eq!(real_time.frame, 1);
+        assert_eq!(real_time.delta, FixedTime::DEFAULT_TIMESTEP);
+        assert_eq!(virtual_time.delta, FixedTime::DEFAULT_TIMESTEP);
         assert_eq!(app.world().resource::<Frames>().0, 1);
         assert_eq!(app.world().resource::<FixedTime>().steps_this_frame(), 1);
+        assert_eq!(outcome.status.fixed_steps, 1);
+        assert_eq!(outcome.exit, None);
+    }
+
+    #[test]
+    fn paused_frame_advances_real_time_but_not_virtual_or_fixed_time() {
+        let mut app = App::new();
+        app.insert_resource(Frames::default())
+            .insert_resource(RuntimeTimeSettings::default().with_paused(true))
+            .add_systems(CoreStage::FixedUpdate, count_frame);
+
+        let outcome = app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        assert_eq!(
+            app.world().resource::<RealTime>().delta,
+            FixedTime::DEFAULT_TIMESTEP
+        );
+        assert_eq!(app.world().resource::<VirtualTime>().delta, Duration::ZERO);
+        assert_eq!(app.world().resource::<Frames>().0, 0);
+        assert_eq!(outcome.status.fixed_steps, 0);
+    }
+
+    #[test]
+    fn time_scale_changes_virtual_delta_and_fixed_accumulation() {
+        let mut app = App::new();
+        app.insert_resource(Frames::default())
+            .insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5))
+            .add_systems(CoreStage::FixedUpdate, count_frame);
+
+        let outcome = app.run_once(FixedTime::DEFAULT_TIMESTEP * 2).unwrap();
+
+        assert_eq!(
+            app.world().resource::<VirtualTime>().delta,
+            FixedTime::DEFAULT_TIMESTEP
+        );
+        assert_eq!(app.world().resource::<Frames>().0, 1);
+        assert_eq!(outcome.status.fixed_steps, 1);
+    }
+
+    #[test]
+    fn max_delta_clamps_large_real_elapsed_time() {
+        let mut app = App::new();
+        app.insert_resource(
+            RuntimeTimeSettings::default().with_max_delta(Duration::from_millis(1)),
+        );
+
+        let outcome = app.run_once(Duration::from_secs(1)).unwrap();
+
+        assert_eq!(
+            app.world().resource::<RealTime>().delta,
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            app.world().resource::<VirtualTime>().delta,
+            Duration::from_millis(1)
+        );
+        assert!(outcome.status.real_delta_clamped);
     }
 
     #[test]
@@ -932,6 +1200,23 @@ mod tests {
         assert_eq!(app.world().resource::<Frames>().0, 2);
         assert_eq!(app.world().resource::<FixedTime>().steps_this_frame(), 2);
         assert!(app.world().resource::<FixedTime>().accumulated() >= FixedTime::DEFAULT_TIMESTEP);
+        assert!(app.world().resource::<FixedTime>().capped_this_frame());
+        assert!(
+            app.world()
+                .resource::<RuntimeFrameStatus>()
+                .fixed_steps_capped
+        );
+    }
+
+    #[test]
+    fn app_exit_request_is_reported_in_frame_outcome() {
+        let mut app = App::new();
+        app.add_systems(CoreStage::Update, request_exit);
+
+        let outcome = app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(outcome.exit, Some(AppExit::Requested));
+        assert_eq!(app.world().resource::<AppExitRequests>().requested(), None);
     }
 
     #[test]

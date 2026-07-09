@@ -4,7 +4,10 @@ use std::{
     error::Error,
     fmt::{self, Debug, Display, Formatter},
     path::{Component, Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError, TaskUpdateSet};
@@ -84,6 +87,7 @@ pub enum AssetWatchError {
     MissingRenameTarget(PathBuf),
     Filesystem(String),
     Notify(String),
+    QueueUnavailable,
 }
 
 impl Display for AssetWatchError {
@@ -110,6 +114,7 @@ impl Display for AssetWatchError {
             ),
             Self::Filesystem(error) => write!(formatter, "asset watch filesystem error: {error}"),
             Self::Notify(error) => write!(formatter, "asset watch error: {error}"),
+            Self::QueueUnavailable => write!(formatter, "asset watch queue is unavailable"),
         }
     }
 }
@@ -197,9 +202,146 @@ impl AssetWatchTranslator {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetWatchDiagnosticKind {
+    Backend,
+    Queue,
+    Translation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetWatchDiagnostic {
+    kind: AssetWatchDiagnosticKind,
+    message: String,
+    logical_path: Option<AssetPath>,
+    context: Option<String>,
+}
+
+impl AssetWatchDiagnostic {
+    #[must_use]
+    pub fn from_error(error: &AssetWatchError) -> Self {
+        match error {
+            AssetWatchError::SourceOutsideRoot { .. } => Self::new(
+                AssetWatchDiagnosticKind::Translation,
+                "asset watch path is outside the source root",
+            )
+            .with_context("outside-root"),
+            AssetWatchError::NonUtf8Path(_) => Self::new(
+                AssetWatchDiagnosticKind::Translation,
+                "asset watch path is not UTF-8",
+            )
+            .with_context("non-utf8-path"),
+            AssetWatchError::InvalidLogicalPath(error) => Self::new(
+                AssetWatchDiagnosticKind::Translation,
+                format!("asset watch logical path is invalid: {error}"),
+            ),
+            AssetWatchError::MissingRenameTarget(_) => Self::new(
+                AssetWatchDiagnosticKind::Translation,
+                "asset watch rename event is missing a target path",
+            )
+            .with_context("missing-rename-target"),
+            AssetWatchError::Filesystem(_) => Self::new(
+                AssetWatchDiagnosticKind::Backend,
+                "asset watch filesystem error",
+            ),
+            AssetWatchError::Notify(_) => Self::new(
+                AssetWatchDiagnosticKind::Backend,
+                "asset watch backend error",
+            ),
+            AssetWatchError::QueueUnavailable => Self::new(
+                AssetWatchDiagnosticKind::Queue,
+                "asset watch queue is unavailable",
+            ),
+        }
+    }
+
+    #[must_use]
+    pub fn new(kind: AssetWatchDiagnosticKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            logical_path: None,
+            context: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_logical_path(mut self, path: AssetPath) -> Self {
+        self.logical_path = Some(path);
+        self
+    }
+
+    #[must_use]
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> AssetWatchDiagnosticKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    #[must_use]
+    pub fn logical_path(&self) -> Option<&AssetPath> {
+        self.logical_path.as_ref()
+    }
+
+    #[must_use]
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
+pub struct AssetWatchDiagnostics {
+    diagnostics: Vec<AssetWatchDiagnostic>,
+}
+
+impl AssetWatchDiagnostics {
+    pub fn push(&mut self, diagnostic: AssetWatchDiagnostic) {
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub fn push_error(&mut self, error: &AssetWatchError) {
+        self.push(AssetWatchDiagnostic::from_error(error));
+    }
+
+    pub fn clear(&mut self) {
+        self.diagnostics.clear();
+    }
+
+    #[must_use]
+    pub fn as_slice(&self) -> &[AssetWatchDiagnostic] {
+        &self.diagnostics
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.diagnostics.is_empty()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.diagnostics.len()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetWatchQueueItem {
+    Event(AssetWatchEvent),
+    Error(AssetWatchError),
+}
+
 #[derive(Clone, Default, Resource)]
 pub struct AssetWatchEventQueue {
-    events: Arc<Mutex<Vec<AssetWatchEvent>>>,
+    items: Arc<Mutex<Vec<AssetWatchQueueItem>>>,
+    lock_failed: Arc<AtomicBool>,
 }
 
 impl AssetWatchEventQueue {
@@ -208,21 +350,36 @@ impl AssetWatchEventQueue {
         Self::default()
     }
 
-    pub fn push(&self, event: AssetWatchEvent) {
-        if let Ok(mut events) = self.events.lock() {
-            events.push(event);
-        }
+    pub fn push(&self, event: AssetWatchEvent) -> Result<(), AssetWatchError> {
+        self.push_item(AssetWatchQueueItem::Event(event))
     }
 
-    pub fn drain(&self) -> Vec<AssetWatchEvent> {
-        self.events
+    pub fn push_error(&self, error: AssetWatchError) -> Result<(), AssetWatchError> {
+        self.push_item(AssetWatchQueueItem::Error(error))
+    }
+
+    fn push_item(&self, item: AssetWatchQueueItem) -> Result<(), AssetWatchError> {
+        let Ok(mut items) = self.items.lock() else {
+            self.lock_failed.store(true, Ordering::Relaxed);
+            return Err(AssetWatchError::QueueUnavailable);
+        };
+        items.push(item);
+        Ok(())
+    }
+
+    pub fn drain(&self) -> Result<Vec<AssetWatchQueueItem>, AssetWatchError> {
+        if self.lock_failed.swap(false, Ordering::Relaxed) {
+            return Err(AssetWatchError::QueueUnavailable);
+        }
+        self.items
             .lock()
-            .map_or_else(|_| Vec::new(), |mut events| std::mem::take(&mut *events))
+            .map(|mut items| std::mem::take(&mut *items))
+            .map_err(|_| AssetWatchError::QueueUnavailable)
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.events.lock().map_or(0, |events| events.len())
+        self.items.lock().map_or(0, |items| items.len())
     }
 
     #[must_use]
@@ -236,6 +393,7 @@ impl Debug for AssetWatchEventQueue {
         formatter
             .debug_struct("AssetWatchEventQueue")
             .field("len", &self.len())
+            .field("lock_failed", &self.lock_failed.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -251,14 +409,19 @@ impl AssetWatcher {
         queue: AssetWatchEventQueue,
     ) -> Result<Self, AssetWatchError> {
         let queue_for_callback = queue.clone();
-        let mut watcher = notify::recommended_watcher(move |result: notify::Result<Event>| {
-            if let Ok(event) = result {
-                for translated in watch_events_from_notify(event) {
-                    queue_for_callback.push(translated);
+        let mut watcher =
+            notify::recommended_watcher(move |result: notify::Result<Event>| match result {
+                Ok(event) => {
+                    for translated in watch_events_from_notify(event) {
+                        let _ = queue_for_callback.push(translated);
+                    }
                 }
-            }
-        })
-        .map_err(|error| AssetWatchError::Notify(error.to_string()))?;
+                Err(error) => {
+                    let _ =
+                        queue_for_callback.push_error(AssetWatchError::Notify(error.to_string()));
+                }
+            })
+            .map_err(|error| AssetWatchError::Notify(error.to_string()))?;
         watcher
             .watch(root.as_ref(), RecursiveMode::Recursive)
             .map_err(|error| AssetWatchError::Notify(error.to_string()))?;
@@ -324,6 +487,7 @@ impl Plugin for AssetWatchPlugin {
         };
 
         let queue = AssetWatchEventQueue::new();
+        app.init_resource::<AssetWatchDiagnostics>();
         let watcher =
             AssetWatcher::watch_recursive(&watch_root, queue.clone()).map_err(|error| {
                 PluginError::SetupFailed {
@@ -345,12 +509,29 @@ fn drain_asset_watch_events(
     queue: Res<AssetWatchEventQueue>,
     root: Res<AssetSourceRoot>,
     mut changes: ResMut<AssetSourceChanges>,
+    mut diagnostics: ResMut<AssetWatchDiagnostics>,
 ) {
+    diagnostics.clear();
     let translator = AssetWatchTranslator;
-    for event in queue.drain() {
-        if let Ok(translated) = translator.translate_event(&root, &event) {
-            for change in translated {
-                changes.push(change);
+    let items = match queue.drain() {
+        Ok(items) => items,
+        Err(error) => {
+            diagnostics.push_error(&error);
+            return;
+        }
+    };
+    for item in items {
+        match item {
+            AssetWatchQueueItem::Event(event) => match translator.translate_event(&root, &event) {
+                Ok(translated) => {
+                    for change in translated {
+                        changes.push(change);
+                    }
+                }
+                Err(error) => diagnostics.push_error(&error),
+            },
+            AssetWatchQueueItem::Error(error) => {
+                diagnostics.push_error(&error);
             }
         }
     }
@@ -682,16 +863,18 @@ mod tests {
         let source = root.join("textures").join("player.png");
         fs::write(&source, b"png").unwrap();
         let queue = AssetWatchEventQueue::new();
-        queue.push(AssetWatchEvent::modified(&source));
+        queue.push(AssetWatchEvent::modified(&source)).unwrap();
         let mut changes = AssetSourceChanges::new();
 
         let translator = AssetWatchTranslator;
-        for event in queue.drain() {
-            for change in translator
-                .translate_event(&AssetSourceRoot::new(&root), &event)
-                .unwrap()
-            {
-                changes.push(change);
+        for item in queue.drain().unwrap() {
+            if let AssetWatchQueueItem::Event(event) = item {
+                for change in translator
+                    .translate_event(&AssetSourceRoot::new(&root), &event)
+                    .unwrap()
+                {
+                    changes.push(change);
+                }
             }
         }
 
@@ -712,10 +895,11 @@ mod tests {
             AssetSourceKind::Image,
         );
         let queue = AssetWatchEventQueue::new();
-        queue.push(AssetWatchEvent::modified(&source));
+        queue.push(AssetWatchEvent::modified(&source)).unwrap();
         let mut app = App::new();
         app.insert_resource(AssetSourceRoot::new(&root));
         app.insert_resource(queue);
+        app.insert_resource(AssetWatchDiagnostics::default());
         app.add_plugin(AssetPlugin).unwrap();
         app.world_mut()
             .resource_mut::<ProjectAssetDatabase>()
@@ -732,6 +916,96 @@ mod tests {
         let request = requests.iter().next().unwrap();
         assert_eq!(request.path().as_str(), "textures/player.png");
         assert_eq!(request.request_kind(), AssetReloadRequestKind::LoadOrReload);
+        remove_temp_root(&root);
+    }
+
+    #[test]
+    fn notify_backend_error_is_visible_in_watch_diagnostics() {
+        let root = temp_root();
+        fs::create_dir_all(&root).unwrap();
+        let queue = AssetWatchEventQueue::new();
+        queue
+            .push_error(AssetWatchError::Notify("backend failed".to_string()))
+            .unwrap();
+        let mut app = App::new();
+        app.insert_resource(AssetSourceRoot::new(&root));
+        app.insert_resource(queue);
+        app.insert_resource(AssetWatchDiagnostics::default());
+        app.add_plugin(AssetPlugin).unwrap();
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
+        );
+
+        app.update();
+
+        let diagnostics = app.world().resource::<AssetWatchDiagnostics>();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics.as_slice()[0].kind(),
+            AssetWatchDiagnosticKind::Backend
+        );
+        remove_temp_root(&root);
+    }
+
+    #[test]
+    fn translation_failure_records_diagnostic_without_source_change() {
+        let root = temp_root();
+        fs::create_dir_all(&root).unwrap();
+        let outside = root.with_file_name("outside.png");
+        let queue = AssetWatchEventQueue::new();
+        queue.push(AssetWatchEvent::modified(&outside)).unwrap();
+        let mut app = App::new();
+        app.insert_resource(AssetSourceRoot::new(&root));
+        app.insert_resource(queue);
+        app.insert_resource(AssetWatchDiagnostics::default());
+        app.add_plugin(AssetPlugin).unwrap();
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
+        );
+
+        app.update();
+
+        assert!(app.world().resource::<AssetSourceChanges>().is_empty());
+        let diagnostics = app.world().resource::<AssetWatchDiagnostics>();
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics.as_slice()[0];
+        assert_eq!(diagnostic.kind(), AssetWatchDiagnosticKind::Translation);
+        let outside_path = outside.display().to_string();
+        assert!(!diagnostic.message().contains(&outside_path));
+        assert!(
+            diagnostic
+                .context()
+                .is_none_or(|context| !context.contains(&outside_path))
+        );
+        remove_temp_root(&root);
+    }
+
+    #[test]
+    fn multiple_watch_diagnostics_are_visible_in_one_frame() {
+        let root = temp_root();
+        fs::create_dir_all(&root).unwrap();
+        let queue = AssetWatchEventQueue::new();
+        queue
+            .push_error(AssetWatchError::Notify("first".to_string()))
+            .unwrap();
+        queue
+            .push_error(AssetWatchError::Notify("second".to_string()))
+            .unwrap();
+        let mut app = App::new();
+        app.insert_resource(AssetSourceRoot::new(&root));
+        app.insert_resource(queue);
+        app.insert_resource(AssetWatchDiagnostics::default());
+        app.add_plugin(AssetPlugin).unwrap();
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
+        );
+
+        app.update();
+
+        assert_eq!(app.world().resource::<AssetWatchDiagnostics>().len(), 2);
         remove_temp_root(&root);
     }
 

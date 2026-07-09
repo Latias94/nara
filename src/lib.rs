@@ -210,8 +210,9 @@ pub mod prelude {
     pub use crate::DesktopWgpuPlugins;
     pub use crate::{DesktopWindowPlugins, MinimalPlugins, Runtime2dPlugins};
     pub use nara_app::{
-        App, AppExit, AppRunError, CoreStage, FixedTime, Plugin, PluginError, PluginGroup,
-        StartupStage, Time,
+        App, AppExit, AppExitRequests, AppFrameOutcome, AppRunError, CoreStage, FixedTime, Plugin,
+        PluginError, PluginGroup, RealTime, RenderTime, RuntimeFrameStatus, RuntimeTimeSettings,
+        StartupStage, VirtualTime,
     };
     pub use nara_asset::{
         Asset, AssetId, AssetPath, AssetPathError, AssetPlugin, AssetRef, AssetRefError,
@@ -293,8 +294,9 @@ pub mod advanced_prelude {
     };
     #[cfg(feature = "asset-watch")]
     pub use nara_asset_watch::{
-        AssetWatchError, AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue,
-        AssetWatchPlugin, AssetWatchTranslator, AssetWatcher,
+        AssetWatchDiagnostic, AssetWatchDiagnosticKind, AssetWatchDiagnostics, AssetWatchError,
+        AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue, AssetWatchPlugin,
+        AssetWatchQueueItem, AssetWatchTranslator, AssetWatcher,
     };
     pub use nara_image::{
         ImageImportError, ImageImportedAsset, ImageImporter, ImagePreparePlugin, ImagePrepareStats,
@@ -348,8 +350,9 @@ pub mod backend_prelude {
         WgpuRenderBackend, WgpuRenderError, WgpuRenderPlugin,
     };
     pub use nara_window::{
-        PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowEvent, WindowEvents, WindowId,
-        WindowMode, WindowPlugin, WindowResolution, apply_window_event, push_window_event,
+        PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowCloseRequest,
+        WindowCloseRequests, WindowEvent, WindowEvents, WindowId, WindowMode, WindowPlugin,
+        WindowResolution, apply_window_event, push_window_event,
     };
     #[cfg(feature = "winit")]
     pub use nara_winit::{WinitControlFlow, WinitPlugin, WinitRunner};

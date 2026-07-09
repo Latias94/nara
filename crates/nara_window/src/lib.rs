@@ -1,7 +1,9 @@
 //! Backend-independent window data and events.
 
-use nara_app::{App, Plugin, PluginError};
-use nara_ecs::{Component, Resource, World};
+use std::collections::{BTreeMap, btree_map::Values};
+
+use nara_app::{App, AppExitRequests, CoreStage, Plugin, PluginError};
+use nara_ecs::{Component, ResMut, Resource, World, schedule::IntoScheduleConfigs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -97,7 +99,6 @@ pub struct Window {
     pub present_mode: PresentMode,
     pub resizable: bool,
     pub focused: bool,
-    pub close_requested: bool,
 }
 
 impl Default for Window {
@@ -110,7 +111,6 @@ impl Default for Window {
             present_mode: PresentMode::default(),
             resizable: true,
             focused: true,
-            close_requested: false,
         }
     }
 }
@@ -198,7 +198,7 @@ impl WindowEvents {
         self.events.push(event);
     }
 
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.events.clear();
     }
 
@@ -206,14 +206,85 @@ impl WindowEvents {
     pub fn as_slice(&self) -> &[WindowEvent] {
         &self.events
     }
+}
 
-    pub fn drain(&mut self) -> impl Iterator<Item = WindowEvent> + '_ {
-        self.events.drain(..)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowCloseRequest {
+    window_id: WindowId,
+    canceled: bool,
+}
+
+impl WindowCloseRequest {
+    #[must_use]
+    pub const fn window_id(&self) -> WindowId {
+        self.window_id
+    }
+
+    #[must_use]
+    pub const fn is_canceled(&self) -> bool {
+        self.canceled
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
+pub struct WindowCloseRequests {
+    requests: BTreeMap<WindowId, WindowCloseRequest>,
+}
+
+impl WindowCloseRequests {
+    pub fn request(&mut self, window_id: WindowId) {
+        self.requests.insert(
+            window_id,
+            WindowCloseRequest {
+                window_id,
+                canceled: false,
+            },
+        );
+    }
+
+    pub fn cancel(&mut self, window_id: WindowId) {
+        if let Some(request) = self.requests.get_mut(&window_id) {
+            request.canceled = true;
+        }
+    }
+
+    #[must_use]
+    pub fn is_requested(&self, window_id: WindowId) -> bool {
+        self.requests.contains_key(&window_id)
+    }
+
+    #[must_use]
+    pub fn is_canceled(&self, window_id: WindowId) -> bool {
+        self.requests
+            .get(&window_id)
+            .is_some_and(WindowCloseRequest::is_canceled)
+    }
+
+    #[must_use]
+    pub fn has_uncancelled(&self) -> bool {
+        self.requests.values().any(|request| !request.is_canceled())
+    }
+
+    pub fn iter(&self) -> Values<'_, WindowId, WindowCloseRequest> {
+        self.requests.values()
+    }
+
+    fn clear(&mut self) {
+        self.requests.clear();
     }
 }
 
 pub fn apply_window_event(world: &mut World, event: &WindowEvent) {
     let window_id = event.window_id();
+    if matches!(event, WindowEvent::CloseRequested { .. }) {
+        if !world.contains_resource::<WindowCloseRequests>() {
+            world.insert_resource(WindowCloseRequests::default());
+        }
+        world
+            .resource_mut::<WindowCloseRequests>()
+            .request(window_id);
+    }
+
     let mut query = world.query::<&mut Window>();
 
     for mut window in query.iter_mut(world) {
@@ -222,9 +293,6 @@ pub fn apply_window_event(world: &mut World, event: &WindowEvent) {
         }
 
         match event {
-            WindowEvent::CloseRequested { .. } => {
-                window.close_requested = true;
-            }
             WindowEvent::Resized { resolution, .. } => {
                 window.resolution = *resolution;
             }
@@ -235,6 +303,7 @@ pub fn apply_window_event(world: &mut World, event: &WindowEvent) {
                 window.resolution.scale_factor = *scale_factor;
             }
             WindowEvent::Created { .. }
+            | WindowEvent::CloseRequested { .. }
             | WindowEvent::Closed { .. }
             | WindowEvent::RedrawRequested { .. } => {}
         }
@@ -272,6 +341,7 @@ impl Plugin for WindowPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<WindowEvents>();
+        app.init_resource::<WindowCloseRequests>();
         app.init_resource::<backend::BackendWindowHandles>();
         app.insert_resource(PrimaryWindowId::default());
 
@@ -280,8 +350,33 @@ impl Plugin for WindowPlugin {
             app.insert_resource(PrimaryWindowId(primary_id));
             app.world_mut().spawn((window.clone(), PrimaryWindow));
         }
+        app.add_systems(
+            CoreStage::Last,
+            (
+                request_exit_for_uncancelled_close,
+                clear_window_frame_events,
+            )
+                .chain(),
+        );
         Ok(())
     }
+}
+
+fn request_exit_for_uncancelled_close(
+    close_requests: ResMut<WindowCloseRequests>,
+    mut exit_requests: ResMut<AppExitRequests>,
+) {
+    if close_requests.has_uncancelled() {
+        exit_requests.request_exit();
+    }
+}
+
+fn clear_window_frame_events(
+    mut events: ResMut<WindowEvents>,
+    mut close_requests: ResMut<WindowCloseRequests>,
+) {
+    events.clear();
+    close_requests.clear();
 }
 
 pub mod backend {
@@ -445,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_and_close_events_update_window_state() {
+    fn focus_event_updates_window_and_close_event_records_frame_request() {
         let mut world = World::new();
         world.spawn((Window::default(), PrimaryWindow));
 
@@ -467,7 +562,55 @@ mod tests {
         let window = query.single(&world).unwrap();
 
         assert!(!window.focused);
-        assert!(window.close_requested);
+        assert!(
+            world
+                .resource::<WindowCloseRequests>()
+                .is_requested(WindowId::PRIMARY)
+        );
+    }
+
+    fn cancel_primary_close(mut close_requests: ResMut<WindowCloseRequests>) {
+        close_requests.cancel(WindowId::PRIMARY);
+    }
+
+    #[test]
+    fn close_request_can_be_cancelled_before_last_stage_exit_request() {
+        let mut app = App::new();
+        app.add_plugin(WindowPlugin::default()).unwrap();
+        app.add_systems(CoreStage::Update, cancel_primary_close);
+        push_window_event(
+            app.world_mut(),
+            WindowEvent::CloseRequested {
+                window_id: WindowId::PRIMARY,
+            },
+        );
+
+        let outcome = app.run_once(std::time::Duration::ZERO).unwrap();
+
+        assert_eq!(outcome.exit, None);
+        assert!(
+            !app.world()
+                .resource::<WindowCloseRequests>()
+                .is_requested(WindowId::PRIMARY)
+        );
+        assert!(app.world().resource::<WindowEvents>().as_slice().is_empty());
+    }
+
+    #[test]
+    fn uncancelled_close_request_becomes_app_exit_request() {
+        let mut app = App::new();
+        app.add_plugin(WindowPlugin::default()).unwrap();
+        push_window_event(
+            app.world_mut(),
+            WindowEvent::CloseRequested {
+                window_id: WindowId::PRIMARY,
+            },
+        );
+
+        let outcome = app.run_once(std::time::Duration::ZERO).unwrap();
+
+        assert_eq!(outcome.exit, Some(nara_app::AppExit::Requested));
+        assert!(app.world().resource::<WindowEvents>().as_slice().is_empty());
     }
 
     #[test]

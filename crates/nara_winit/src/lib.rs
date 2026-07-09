@@ -176,8 +176,17 @@ impl WinitApp {
     }
 
     fn run_frame(&mut self, delta: Duration, event_loop: &ActiveEventLoop) {
-        if let Err(error) = self.app.run_once(delta) {
-            self.fail(event_loop, error);
+        let outcome = match self.app.run_once(delta) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.fail(event_loop, error);
+                return;
+            }
+        };
+
+        if let Some(exit) = outcome.exit {
+            self.exit = exit;
+            event_loop.exit();
             return;
         }
 
@@ -188,7 +197,7 @@ impl WinitApp {
 
     fn handle_window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
         winit_window_id: WinitWindowId,
         event: WinitWindowEvent,
     ) {
@@ -202,8 +211,6 @@ impl WinitApp {
                     self.app.world_mut(),
                     WindowEvent::CloseRequested { window_id },
                 );
-                self.exit = AppExit::Requested;
-                event_loop.exit();
             }
             WinitWindowEvent::Destroyed => {
                 push_window_event(self.app.world_mut(), WindowEvent::Closed { window_id });
