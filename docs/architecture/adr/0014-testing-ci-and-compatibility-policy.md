@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0055: Feature Matrix, Boundary Checks, and Compatibility Fixtures
 
 ## Context
 
@@ -63,4 +64,3 @@ Rules:
 | Breaking changes frustrate early users | Medium | Medium | Communicate pre-1.0 status clearly |
 | Tests lag behind architecture | High | Medium | Add smoke tests for each accepted interface |
 | ADRs become stale | Medium | Medium | Update ADR status or supersede when decisions change |
-

@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0001, ADR 0012, ADR 0015, ADR 0032
-**Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups
+**Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0055: Feature Matrix,
+Boundary Checks, and Compatibility Fixtures
 
 ## Context
 

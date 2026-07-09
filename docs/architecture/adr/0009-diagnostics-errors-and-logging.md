@@ -2,6 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0048: Runtime Diagnostics and Observability Bus; ADR 0049: Untrusted Project
+Input and Parse Budget Policy
 
 ## Context
 

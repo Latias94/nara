@@ -3,6 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0006, ADR 0011, ADR 0026, ADR 0038
+**Refined By**: ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0051: Persistent
+File Envelope, Migration, and Golden Fixtures
 
 ## Context
 
@@ -110,4 +112,3 @@ keeps validation deterministic.
   and asset metadata?
 - Should migration diagnostics include machine-readable repair suggestions for AI agents?
 - How long should pre-1.0 document versions be supported once the engine starts shipping examples?
-

@@ -254,6 +254,31 @@ second real adapter or stronger isolation pressure.
   sets, dirty/saved revisions, external reload conflicts, per-document undo/redo, and workspace
   commands remain UI-toolkit agnostic. See ADR
   [0047](adr/0047-editor-workspace-and-scene-document-state.md).
+- Runtime diagnostics use a shared observational bus for asset/watch/task/render/window/service
+  problems while retaining domain-specific detail and explicit tracing bridges. See ADR
+  [0048](adr/0048-runtime-diagnostics-and-observability-bus.md).
+- File-backed project data is untrusted input. Scene, prefab, patch, component value, image,
+  metadata, and artifact loaders need parse/decode budgets before mutating runtime or project state.
+  See ADR [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md).
+- Asset roots require filesystem containment policy beyond logical path validation. Symlinks,
+  Windows junctions, import cache paths, and package trust modes are part of asset safety. See ADR
+  [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md).
+- Persistent files use a common envelope plus per-kind migrations and golden fixtures. Scene,
+  prefab, patch, asset metadata, import artifacts, and schema catalogs should all carry kind,
+  format version, minimum engine version, and generator metadata. See ADR
+  [0051](adr/0051-persistent-file-envelope-migration-and-golden-fixtures.md).
+- Task pools need bounded queues, explicit spawn outcomes, coalescing, cancellation, age metrics,
+  and long-running diagnostics before asset/import/editor workloads scale. See ADR
+  [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md).
+- Large 2D maps require visibility, camera culling, and backend-neutral tilemap chunk caches instead
+  of full cell expansion every frame. See ADR
+  [0053](adr/0053-visibility-culling-and-tilemap-render-cache.md).
+- GPU uploads and dynamic buffers need backend-owned budgets, staging/ring-buffer reuse, deferred
+  upload stats, and diagnostics. See ADR
+  [0054](adr/0054-gpu-upload-budget-and-buffer-allocation-policy.md).
+- CI can stay deferred, but the local verification matrix, boundary checks, and persistent-format
+  golden fixtures are a policy contract that future CI must mirror. See ADR
+  [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md).
 
 ## Next Implementation Slices
 
@@ -283,3 +308,15 @@ second real adapter or stronger isolation pressure.
    override write-back, and edit-while-playing merge semantics are designed.
 12. Design reusable material assets and custom shader specialization after inline
    `Material2dDescriptor` has enough runtime/UI pressure.
+13. Add the runtime diagnostics bus before more subsystem-specific diagnostics proliferate.
+14. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
+    or widening file-backed editor workflows.
+15. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
+    formats again.
+16. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
+    jobs.
+17. Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
+18. Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
+    pressure.
+19. Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
+    GitHub Actions.

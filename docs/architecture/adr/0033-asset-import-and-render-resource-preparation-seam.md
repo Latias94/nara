@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-08
 **Refined By**: ADR 0037: Asset Load Request, Cache, and Lifetime Policy; ADR 0040:
-Render Resource Lifetime and Submitter Ownership
+Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
+Allocation Policy
 
 ## Context
 

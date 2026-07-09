@@ -2,6 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Refined By**: ADR 0050: Asset Root, Symlink, Junction, and Package Trust Policy; ADR 0051:
+Persistent File Envelope, Migration, and Golden Fixtures
 
 ## Context
 

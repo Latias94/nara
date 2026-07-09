@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
-**Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups
+**Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
+Culling, and Tilemap Render Cache; ADR 0054: GPU Upload Budget and Buffer Allocation Policy
 
 ## Context
 
@@ -52,8 +53,8 @@ Rules:
 - Backend caches should use explicit eviction policy: budget limits, generation invalidation,
   device loss, explicit asset removal, and grace-period unused eviction. A resource should not be
   rebuilt merely because it was unused for one frame.
-- Upload work should eventually be budgeted per frame and reported through render diagnostics or
-  backend status resources.
+- Upload work is budgeted per frame and reported through render diagnostics or backend status
+  resources, with details refined by ADR 0054.
 - Device loss clears backend-native caches, but prepared backend-neutral resources remain the source
   for rebuilding after recovery.
 - `RenderPassPlan` remains the static pass-order contract. `RenderPassDependency` is an assertion
@@ -128,7 +129,7 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 
 - What exact cache eviction defaults should desktop Phase 1 use: grace frames, memory budget, or
   both?
-- Should render diagnostics live in `nara_render` as backend-neutral resources or in each backend
-  with a shared reporting adapter?
+- Should render diagnostics live in `nara_render` as backend-neutral resources, in each backend with
+  a shared reporting adapter, or through the runtime diagnostics bus from ADR 0048?
 - Which feature first forces `RenderGraph`: editor viewports, post-processing, render-to-texture,
   3D depth/prepass, or text/UI composition targets?

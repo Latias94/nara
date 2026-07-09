@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0004, ADR 0011, ADR 0015, ADR 0021, ADR 0027, ADR 0028, ADR 0029
+**Refined By**: ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures
 
 ## Context
 
@@ -144,4 +145,3 @@ domain policy to each subsystem.
 - Should capability metadata include domain-specific policy payloads, or should domains register
   separate policy maps keyed by `ComponentTypeId` and `ComponentFieldPath`?
 - Which existing built-in fields should be editable versus inspect-only in the first implementation?
-

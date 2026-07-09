@@ -3,6 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0008, ADR 0016, ADR 0019, ADR 0021, ADR 0028, ADR 0030, ADR 0031
+**Refined By**: ADR 0048: Runtime Diagnostics and Observability Bus; ADR 0052: Task
+Backpressure, Cancellation, and Long-Running Diagnostics
 
 ## Context
 
@@ -117,7 +119,6 @@ existing task/app scheduling decisions.
 ## Open Questions
 
 - Which service should get the first fake/test backend contract: physics, audio, or text?
-- Should service diagnostics share one central `RuntimeServiceDiagnostics` resource or remain
-  domain-specific with a common reporting trait later?
+- Which service diagnostics should publish to the shared runtime diagnostics bus immediately, and
+  which should stay domain-only until tooling needs them?
 - Which service outputs must be replay-recordable in the first deterministic replay slice?
-

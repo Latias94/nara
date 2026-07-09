@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0042: Runtime Service and Backend Boundary
+**Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0052: Task Backpressure,
+Cancellation, and Long-Running Diagnostics
 
 ## Context
 

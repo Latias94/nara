@@ -43,6 +43,9 @@ This file provides repo-local guidance for agents working on nara.
 - Component schemas should carry explicit component/field capability metadata for scene/save/inspect/edit/animate/replicate/script eligibility. Capabilities gate participation; save/network/animation/script/editor domains still own behavior policy.
 - `nara_asset` persistent references use semantic `AssetRef::Path` or `AssetRef::StableId`; `Handle<T>` and `AssetId` are runtime-only and must not serialize as project data.
 - `nara_asset` owns source asset identity, `.meta` records, importer registry metadata, typed import job contracts, imported artifact records, dependency graph data, load states, reload generations, source change coalescing, and reload request scheduling. It must not own GPU resources, file watchers, or depend on render backend crates.
+- File-backed project input is untrusted. Scene, prefab, patch, component value, image, asset metadata, import artifact, and schema catalog loaders should follow ADR 0049 parse/decode budgets before mutating runtime or project state.
+- Logical `AssetPath` validation is not filesystem containment. File-backed asset roots, watcher paths, import-cache paths, symlinks, and Windows junctions must follow ADR 0050.
+- Persistent project files should converge on the ADR 0051 envelope: `kind`, `format_version`, `engine_min_version`, and `generator`, with golden fixtures for migration-sensitive formats.
 - `SourceChangeResolver` must keep reload scheduling generation-stamped, expected-version guarded, and dependency-aware. Same-frame source changes coalesce by logical path with the last semantic event winning; do not make `Removed` unconditionally dominate atomic-save modify sequences.
 - Asset source-change translation or scheduling failures must be observable through structured diagnostics. Do not discard `SourceChangeResolver` errors.
 - Asset reload policy keeps runtime `Handle<T>` stable across reloads, preserves the last good typed asset value on failed reload when one exists, records first-load failure without inventing values, and treats GPU objects as backend cache entries rather than imported artifacts.
@@ -52,10 +55,12 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_material` owns backend-neutral 2D material intent: `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, semantic image references, and material keys. Sprites, tilemaps, UI images, and future 2D material users should route sampler/alpha/tint through this domain.
 - Texture upload, atlases, materials, UI images, and future 3D assets must flow through the asset import + render resource preparation seam in ADR 0033 instead of direct path-to-wgpu shortcuts.
 - `nara_render_wgpu` owns backend GPU resource caches. Gameplay/domain crates store typed handles or backend-neutral descriptors, never `wgpu` handles.
+- GPU upload, dynamic buffer allocation, and backend resource stats should follow ADR 0054; per-frame buffer creation is a transitional implementation detail, not the long-term contract.
 - Sprite/tilemap render batches are material-aware. `nara_sprite_render` resolves runtime image handles into `SpriteMaterialKey` values containing image resource key, sampler, alpha mode, and tint; backend caches consume those keys instead of image-resource-only batch keys.
 - Runtime UI image panels are material-aware and flow through the same image prepare, sampler/material key, and backend texture cache path as sprites.
 - `nara_render_wgpu` consumes `RenderPassPlan` plus sprite/UI batches for clear/world/UI/gizmo ordering. Do not bury new pass ordering rules in the wgpu draw loop.
 - `nara_render_wgpu` must keep image texture upload cached separately from sampler/material bind-group identity so sampler changes do not require image reimport or texture reupload.
+- Large tilemaps should move toward ADR 0053 visibility/culling/chunk cache semantics instead of expanding all cells every frame when scale pressure appears.
 - Keep render modules split by responsibility: `nara_sprite_render::{types,extract,queue}`, `nara_ui_render::{types,extract,queue}`, and `nara_render_wgpu::{surface,sprite,ui}` should stay narrow instead of growing monolithic backend or render-bridge files.
 - `DiagnosticReport::push` only collects diagnostics. Use `Diagnostic::emit_to_tracing` or `DiagnosticReport::emit_to_tracing` explicitly when logs are desired.
 - The root `nara` facade must keep `winit` and `wgpu` optional; default features stay backend-free.
@@ -67,6 +72,8 @@ This file provides repo-local guidance for agents working on nara.
 - Record durable architecture decisions under `docs/architecture/adr/`.
 - Keep `docs/architecture/nara-foundation.md` aligned with implemented crate boundaries.
 - Use `docs/knowledge/engineering/` for session memory, subagent findings, verification, and handoff state.
+- Runtime diagnostics should be inspectable structured data first. Domain diagnostics may remain rich locally, but runtime problems that matter to tools should bridge into the ADR 0048 observability bus instead of relying on logs or private queues only.
+- Task pool changes must preserve main-thread integration, cooperative cancellation, deterministic testability, and ADR 0052 backpressure/diagnostics vocabulary.
 - Prefer fearless refactoring before compatibility layers. This project is pre-1.0; remove obsolete scaffolding instead of preserving it.
 - Keep scene/prefab/save data independent from runtime `bevy_ecs::Entity` values, runtime `AssetId`, and backend-native handles.
 - Runtime UI is expected to be nara-owned long term. egui/dear-imgui are acceptable for debug/editor tooling, not as the runtime UI foundation.
