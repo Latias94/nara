@@ -168,7 +168,7 @@ sequenceDiagram
 Rules:
 
 - The current implementation supports the first narrow Apply Changes subset: one selected
-  `SceneEntityId` plus explicitly requested registered serializable component IDs.
+  `SceneEntityId` plus explicitly requested registered scene/edit-capable component IDs.
 - `SceneEditorState::export_apply_changes*` encodes requested Play world components through
   `ComponentRegistry` and `ComponentEncodeContext`, compares them with the authoring document, and
   returns a candidate `ScenePatchDocument` without mutating `SceneAuthoringSession`.
@@ -177,8 +177,8 @@ Rules:
   path.
 - Apply Changes never copies raw runtime `Entity`, `AssetId`, backend handles, task handles, GPU
   resources, timers, or transient events into scene documents.
-- Apply Changes must be component-schema-aware. Only serializable or explicitly authoring-mapped
-  components can produce scene patches.
+- Apply Changes must be component-schema-aware. Only components with scene and edit capabilities,
+  or explicitly authoring-mapped components, can produce scene patches.
 - Unsupported runtime changes, runtime-only components, missing entities, prefab-expanded entities,
   and duplicate component requests produce diagnostics instead of best-effort serialization.
 - Supported no-op requests return no patch and do not create undo entries.
@@ -245,7 +245,7 @@ automatic persistence the default.
 |---|---:|---|
 | Play isolation | Play systems cannot mutate the edit preview world accidentally | Play Mode tests with distinct entity maps |
 | Stop safety | Stop Play discards runtime-only changes by default | Play/Stop integration test |
-| Explicit persistence | Apply Changes is explicit; selected serializable components produce scene patches, unsupported cases reject with diagnostics | Apply Changes export/apply tests |
+| Explicit persistence | Apply Changes is explicit; selected scene/edit-capable components produce scene patches, unsupported cases reject with diagnostics | Apply Changes export/apply tests |
 | Revision safety | Apply-back detects edit document changes made after Play started | Revision mismatch test |
 | Persistence hygiene | Runtime `Entity`, `AssetId`, backend handles, and transient components never serialize into scene data | Serialization leak search and tests |
 
@@ -255,7 +255,7 @@ automatic persistence the default.
 |---|---|---:|---|
 | World fork becomes expensive for large scenes | Medium | Medium | Start rebuild-style, add incremental spawn/cache later with the same mode contract |
 | Users expect Play changes to persist | Medium | High | Make mode visible and require explicit Apply Changes with diagnostics |
-| Apply-back diffs become too broad | High | Medium | Start with explicit serializable component subset and reject unsupported runtime state |
+| Apply-back diffs become too broad | High | Medium | Start with explicit scene/edit-capable component subset and reject unsupported runtime state |
 | Edit while playing creates merge conflicts | High | Medium | Track source revisions and reject ambiguous apply-back until merge tooling exists |
 | Runtime-only components leak into scenes | High | Low | Keep scene export/schema filters strict and test for handle/entity serialization leaks |
 

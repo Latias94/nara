@@ -332,8 +332,8 @@ Resolved in the Play Mode core slice:
 - Mode-aware inspector commands keep direct edit-mode patch behavior but reject persistent patch
   commands in Play or Paused. Selection remains a safe UI state change.
 - `SceneApplyChangesRequest` names one selected `SceneEntityId` plus explicit component IDs.
-  Registered serializable components can export candidate `ScenePatchDocument` values from the
-  isolated Play world and apply them through `SceneAuthoringSession`.
+  Registered scene/edit-capable components can export candidate `ScenePatchDocument` values from
+  the isolated Play world and apply them through `SceneAuthoringSession`.
 - Apply Changes records normal undo entries on success, reports supported no-op without undo, and
   rejects stale revisions, runtime-only components, missing scene entities, prefab-expanded
   entities, duplicate component requests, and patch validation failures with diagnostics.
@@ -342,7 +342,7 @@ Resolved in the first debug UI adapter slice:
 
 - Early debug/editor UI uses egui first through `nara_tooling_egui`.
 - `nara_tooling_egui` renders UI-agnostic `SceneEditorModel` and `SceneInspectorModel` values and
-  returns explicit editor actions plus `SceneInspectorCommand` values. It does not own scene
+  returns `EditorWorkspaceCommand` values. It does not own scene
   mutation, ECS storage, windowing, or GPU resources.
 - dear-imgui-rs remains an acceptable later adapter, and runtime UI remains nara-owned ECS UI
   rather than egui/dear-imgui.
@@ -373,7 +373,7 @@ Follow-up details still to settle:
    replacements?
 3. How should prefab-expanded entity write-back produce source-prefab override patches?
 4. What editor dogfooding milestone should switch a real panel from egui to nara UI?
-5. What is the first minimal `EditorWorkspace` API: scenes only, or scenes plus prefab documents?
+5. When should `EditorWorkspace` add prefab document slots instead of scene-only document slots?
 6. What external reload conflict workflow should exist before a full visual editor?
 
 ## Backend and Domain Extension Seams

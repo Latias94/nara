@@ -88,15 +88,15 @@ flowchart TD
 | `nara_sprite` | `Sprite`, `SpriteMaterial`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` material image binding | Sprite authoring component data with material-first image/sampler/alpha/tint; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileSetMaterial`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data with material-first tilesets that lower into textured quads now and chunked cached render data later |
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteMaterialKey`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, and material-keyed textured quad batches |
-| `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState` | Runtime ECS UI authoring data, layout projection, and pointer hover/press/focus state; no editor UI toolkit or backend handles |
-| `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, image/color material queueing, clipping, sort, and batching for the UI render phase |
+| `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState`, `UiPointerRoute`, `UiInteractionTarget` | Runtime ECS UI authoring data, layout projection, and target/view-aware pointer hover/capture/focus state; no editor UI toolkit or backend handles |
+| `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, UI-owned material/instance/UV types, image/color material queueing, clipping, sort, and batching for the UI render phase |
 | `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `PointerState`, future normalized events/action maps/text routing | Backend-normalized input state, input routing, action mapping, UI focus/capture integration, and replay diagnostics |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that updates window resources plus keyboard, mouse-button, and pointer state |
-| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, image texture caches split from material/sampler bind groups, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
+| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
-| `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, future `EditorWorkspace`, open document state, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
-| `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses, `EguiSceneEditorAction` | egui-only rendering adapter that consumes tooling models and returns tooling commands/actions; no scene/session/world ownership |
+| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, open scene document slots, active document, selection sets, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
+| `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
 ## Runtime Flow
 
@@ -203,8 +203,9 @@ second real adapter or stronger isolation pressure.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then applies field/reparent commands as scene patches.
 - `nara_tooling::SceneEditorState` owns the first UI-agnostic Play Mode model. It starts plain, prefab-resolved, asset-aware, and combined Play sessions by spawning a fresh isolated runtime `World` through `SceneSpawner`, exposes Play/Paused/Edit mode state, and rejects persistent inspector edits while Play or Paused is active.
-- Stop Play drops the runtime `World` and discards runtime changes by default. Apply Changes now supports a narrow selected-entity / explicit-component subset: it encodes registered serializable Play world components into `ScenePatchDocument` operations, applies them through `SceneAuthoringSession`, records undo, and rejects stale revisions, runtime-only components, prefab-expanded entities, and failed patch validation with diagnostics.
-- `nara_tooling_egui` is the first concrete debug/editor UI adapter. It renders `SceneEditorModel` and `SceneInspectorModel`, returns explicit editor actions and `SceneInspectorCommand` values, and keeps egui out of `nara_tooling` and runtime-facing crates.
+- Stop Play drops the runtime `World` and discards runtime changes by default. Apply Changes now supports a narrow selected-entity / explicit-component subset: it encodes registered scene/edit-capable Play world components into `ScenePatchDocument` operations, applies them through `SceneAuthoringSession`, records undo, and rejects stale revisions, runtime-only components, prefab-expanded entities, and failed patch validation with diagnostics.
+- `nara_tooling::EditorWorkspace` is the UI-agnostic editor document authority. It owns open scene slots, active document, selection sets, dirty/saved revisions, external reload pending/conflict state, per-document undo/redo, and workspace command reports.
+- `nara_tooling_egui` is the first concrete debug/editor UI adapter. It renders `SceneEditorModel` and `SceneInspectorModel`, returns `EditorWorkspaceCommand` values, and keeps egui out of `nara_tooling` and runtime-facing crates.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
 - `nara_asset` owns typed importer contracts, source change coalescing, dependency-aware reload request scheduling, load generations, asset state transitions, and asset load failure/removal events.
@@ -215,9 +216,9 @@ second real adapter or stronger isolation pressure.
 - `nara_sprite_render` sorts and batches by `SpriteMaterialKey`, which contains image render resource key plus sampler, alpha mode, and tint. `nara_render_wgpu` caches GPU image textures by prepared image snapshot and caches sampler bind groups by material key.
 - `nara_asset_watch` is an optional desktop watcher adapter behind the root `asset-watch` feature. It owns `notify`, validates its root against `AssetSourceRoot`, preserves in-root rename sides, and translates raw filesystem events into semantic `AssetSourceChange` values without leaking watcher types into `nara_asset`.
 - `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit events.
-- `nara_ui` owns the first runtime ECS UI foundation: `UiRoot`, `UiNode`, `UiPanel`, material-aware image/color panel data, computed top-left logical-pixel layouts, and pointer hover/press/focus state. Computed layout and interaction resources are runtime-only.
-- `nara_ui_render` extracts runtime UI panels from computed layouts, queues color/image materials through the same `nara_image` prepare and `nara_material` sampler/alpha/tint path as sprites, clips panels, and emits `UiBatches` for the UI render phase.
-- `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path according to `RenderPassPlan`; pass order is no longer an implicit backend-only draw-loop rule.
+- `nara_ui` owns the first runtime ECS UI foundation: `UiRoot`, `UiNode`, `UiPanel`, material-aware image/color panel data, computed top-left logical-pixel layouts, and target/view-aware pointer hover/capture/focus state. Computed layout and interaction resources are runtime-only.
+- `nara_ui_render` extracts runtime UI panels from computed layouts, queues UI-owned color/image material keys through the same `nara_image` prepare and `nara_material` sampler/alpha/tint path as sprites, clips panels, and emits `UiBatches` for the UI render phase.
+- `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path according to `RenderPassPlan`; pass order is no longer an implicit backend-only draw-loop rule. The backend owns texture/bind-group cache lifetime, uses grace-frame eviction, and keys pipelines by render target format plus `AlphaMode2d`.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
 ## Settled Policy Contracts Pending Full Implementation
@@ -252,7 +253,7 @@ second real adapter or stronger isolation pressure.
   [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md).
 - Editor workspace state belongs in `nara_tooling`: open document slots, active document, selection
   sets, dirty/saved revisions, external reload conflicts, per-document undo/redo, and workspace
-  commands remain UI-toolkit agnostic. See ADR
+  commands are implemented as UI-toolkit-agnostic `EditorWorkspace` state and reports. See ADR
   [0047](adr/0047-editor-workspace-and-scene-document-state.md).
 - Runtime diagnostics use a shared observational bus for asset/watch/task/render/window/service
   problems while retaining domain-specific detail and explicit tracing bridges. See ADR
@@ -282,34 +283,27 @@ second real adapter or stronger isolation pressure.
 
 ## Next Implementation Slices
 
-1. Implement the refined app loop/time/state contract: real/virtual/fixed time resources, pause,
-   state transition stage, bounded catch-up diagnostics, and frame-transient event cleanup.
-2. Add component schema capability metadata before save/network/animation/script/editor APIs depend
-   on divergent field eligibility rules.
-3. Add plugin metadata and explicit default plugin groups, then decouple wgpu device/surface setup
-   from sprite/UI submitter installation through a convenience group.
-4. Introduce the first `EditorWorkspace` model in `nara_tooling` before expanding editor
-   dogfooding beyond isolated inspector/play-mode panels.
+1. Add the runtime diagnostics bus before more subsystem-specific diagnostics proliferate.
+2. Define document-level migration chains and golden fixtures for scene, prefab, patch, asset
+   metadata, import artifact, and schema catalog files before changing persisted shapes again.
+3. Add task backpressure, cancellation reporting, task age metrics, and long-running diagnostics
+   before asset import/editor workloads scale.
+4. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
+   buffers, buffer/pipeline stats, and device-loss recovery for all GPU resource classes.
 5. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
    widget state, keyboard/gamepad focus, action-map routing, and editor dogfooding once the runtime
    model is stable.
-6. Harden render resource lifetime before adding more resource classes: explicit cache retention,
-   eviction diagnostics, device-loss rebuild behavior, and decoupled submitter plugin groups.
-7. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
+6. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
    composition, 3D depth/prepass, or transient resource lifetime creates pressure beyond
    `RenderPassPlan`.
-8. Define document-level migration chains for scene, prefab, and patch files before changing their
-   persisted shape again.
-9. Audit the root facade/prelude and move backend/tooling/debug/internal render types out of the
-   gameplay prelude.
-10. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
+7. Build file-backed `nara_project` manifest loading and effective runtime settings lowering.
+8. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
-11. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
+9. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
    override write-back, and edit-while-playing merge semantics are designed.
-12. Design reusable material assets and custom shader specialization after inline
+10. Design reusable material assets and custom shader specialization after inline
    `Material2dDescriptor` has enough runtime/UI pressure.
-13. Add the runtime diagnostics bus before more subsystem-specific diagnostics proliferate.
-14. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
+11. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
     or widening file-backed editor workflows.
 15. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
     formats again.

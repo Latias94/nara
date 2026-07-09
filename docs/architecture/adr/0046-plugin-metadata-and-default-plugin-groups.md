@@ -13,7 +13,8 @@ installation will obscure what a project actually enabled.
 
 There is already pressure:
 
-- `WgpuRenderPlugin` currently installs sprite and UI render submitters for convenience.
+- Before this ADR was implemented, `WgpuRenderPlugin` installed sprite and UI render submitters for
+  convenience.
 - `MinimalPlugins` can drift from a truly minimal runtime base.
 - Generated docs, diagnostics, editor views, and AI agents need to inspect installed capabilities.
 - File-backed project settings need to lower into predictable plugin groups.
@@ -118,15 +119,14 @@ or Bevy-compatible API surface.
 
 ## Consequences
 
-- `Plugin` or adjacent metadata APIs should grow stable IDs and capability declarations.
-- `WgpuRenderPlugin` should eventually stop unconditionally installing sprite/UI submitters; a
-  `DesktopWgpuPlugins` or `Runtime2dWgpuPlugins` group can preserve ergonomic examples.
-- Root facade/prelude cleanup should expose group names deliberately rather than exporting every
-  backend/plugin type in the gameplay prelude.
+- `Plugin` now exposes stable metadata with IDs, categories, capabilities, and group membership.
+- `WgpuRenderPlugin` no longer unconditionally installs sprite/UI submitters; `DesktopWgpuPlugins`
+  composes the desktop window, wgpu backend, sprite submitter, and UI submitter path explicitly.
+- Root facade/prelude cleanup exposes group names deliberately rather than exporting backend/plugin
+  internals through the gameplay prelude.
 
 ## Open Questions
 
 - Should `PluginId` be a static reverse-domain string, a type-backed label, or both?
 - Should `requires` name plugins, capabilities, resources, schedule sets, or all of them?
 - Which exact group should examples use as the default 2D desktop game bundle?
-
