@@ -1584,7 +1584,6 @@ dependencies = [
  "nara_transform",
  "nara_window",
  "serde",
- "thiserror 2.0.18",
 ]
 
 [[package]]

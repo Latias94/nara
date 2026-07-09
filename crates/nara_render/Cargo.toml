@@ -15,7 +15,6 @@ nara_reflect.workspace = true
 nara_transform.workspace = true
 nara_window.workspace = true
 serde = { workspace = true, optional = true }
-thiserror.workspace = true
 
 [features]
 default = []

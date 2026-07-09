@@ -6,14 +6,13 @@ use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::Handle;
 pub use nara_core::Color;
 use nara_core::Vec2;
-use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource, World};
+use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource};
 use nara_reflect::{
     ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
-use thiserror::Error;
 
 pub use prepare::{
     PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
@@ -258,18 +257,143 @@ pub struct FrameStats {
     pub sprites: u32,
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum RenderError {
-    #[error("render backend unavailable")]
-    BackendUnavailable,
-    #[error("surface unavailable")]
-    SurfaceUnavailable,
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum RenderBackendState {
+    #[default]
+    Uninitialized,
+    Initializing,
+    Ready,
+    Unavailable,
 }
 
-pub trait RenderBackend {
-    fn resize(&mut self, size: Extent2d);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderFrameSkipReason {
+    NoViews,
+    NoRenderableTarget,
+    SurfaceUnavailable,
+    BackendError,
+}
 
-    fn render(&mut self, world: &World) -> Result<FrameStats, RenderError>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderFrameSkip {
+    frame_index: u64,
+    reason: RenderFrameSkipReason,
+    message: Option<String>,
+}
+
+impl RenderFrameSkip {
+    #[must_use]
+    pub const fn new(frame_index: u64, reason: RenderFrameSkipReason) -> Self {
+        Self {
+            frame_index,
+            reason,
+            message: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_message(
+        frame_index: u64,
+        reason: RenderFrameSkipReason,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            frame_index,
+            reason,
+            message: Some(message.into()),
+        }
+    }
+
+    #[must_use]
+    pub const fn frame_index(&self) -> u64 {
+        self.frame_index
+    }
+
+    #[must_use]
+    pub const fn reason(&self) -> RenderFrameSkipReason {
+        self.reason
+    }
+
+    #[must_use]
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Resource)]
+pub struct RenderBackendStatus {
+    backend: Option<&'static str>,
+    state: RenderBackendState,
+    last_error: Option<String>,
+    last_skip: Option<RenderFrameSkip>,
+}
+
+impl Default for RenderBackendStatus {
+    fn default() -> Self {
+        Self {
+            backend: None,
+            state: RenderBackendState::Uninitialized,
+            last_error: None,
+            last_skip: None,
+        }
+    }
+}
+
+impl RenderBackendStatus {
+    #[must_use]
+    pub fn backend(&self) -> Option<&'static str> {
+        self.backend
+    }
+
+    #[must_use]
+    pub const fn state(&self) -> RenderBackendState {
+        self.state
+    }
+
+    #[must_use]
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+
+    #[must_use]
+    pub const fn last_skip(&self) -> Option<&RenderFrameSkip> {
+        self.last_skip.as_ref()
+    }
+
+    pub fn mark_state(&mut self, backend: &'static str, state: RenderBackendState) {
+        self.backend = Some(backend);
+        self.state = state;
+        if state == RenderBackendState::Ready {
+            self.last_error = None;
+        }
+    }
+
+    pub fn mark_ready(&mut self, backend: &'static str) {
+        self.mark_state(backend, RenderBackendState::Ready);
+    }
+
+    pub fn mark_unavailable(&mut self, backend: &'static str, error: impl Into<String>) {
+        self.backend = Some(backend);
+        self.state = RenderBackendState::Unavailable;
+        self.last_error = Some(error.into());
+    }
+
+    pub fn mark_skipped(&mut self, frame_index: u64, reason: RenderFrameSkipReason) {
+        self.last_skip = Some(RenderFrameSkip::new(frame_index, reason));
+    }
+
+    pub fn mark_skipped_with_message(
+        &mut self,
+        frame_index: u64,
+        reason: RenderFrameSkipReason,
+        message: impl Into<String>,
+    ) {
+        self.last_skip = Some(RenderFrameSkip::with_message(frame_index, reason, message));
+    }
+
+    pub fn clear_skip(&mut self) {
+        self.last_skip = None;
+    }
 }
 
 #[derive(Debug, Default)]
@@ -283,6 +407,7 @@ impl Plugin for RenderPlugin {
         app.init_resource::<ExtractedViews>();
         app.init_resource::<RenderFrame>();
         app.init_resource::<FrameStats>();
+        app.init_resource::<RenderBackendStatus>();
         app.init_resource::<RenderPrepareInvalidations>();
         app.add_systems(CoreStage::Extract, extract_views);
         app.add_systems(CoreStage::Render, begin_render_frame);
@@ -638,6 +763,31 @@ mod tests {
 
         frame.mark_submitted();
         assert_eq!(frame.state, RenderFrameState::Submitted);
+    }
+
+    #[test]
+    fn backend_status_records_state_errors_and_skipped_frames() {
+        let mut status = RenderBackendStatus::default();
+
+        status.mark_state("mock", RenderBackendState::Initializing);
+        assert_eq!(status.backend(), Some("mock"));
+        assert_eq!(status.state(), RenderBackendState::Initializing);
+
+        status.mark_unavailable("mock", "device lost");
+        status.mark_skipped_with_message(7, RenderFrameSkipReason::BackendError, "device lost");
+
+        assert_eq!(status.state(), RenderBackendState::Unavailable);
+        assert_eq!(status.last_error(), Some("device lost"));
+        let skip = status.last_skip().unwrap();
+        assert_eq!(skip.frame_index(), 7);
+        assert_eq!(skip.reason(), RenderFrameSkipReason::BackendError);
+        assert_eq!(skip.message(), Some("device lost"));
+
+        status.mark_ready("mock");
+        status.clear_skip();
+        assert_eq!(status.state(), RenderBackendState::Ready);
+        assert_eq!(status.last_error(), None);
+        assert_eq!(status.last_skip(), None);
     }
 
     #[test]

@@ -17,8 +17,8 @@ use nara_asset::Assets;
 use nara_ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_image::{ImageAsset, PreparedImageResource};
 use nara_render::{
-    Color, Extent2d, ExtractedViews, FrameStats, PreparedRenderResources, RenderFrame,
-    begin_render_frame,
+    Color, Extent2d, ExtractedViews, FrameStats, PreparedRenderResources, RenderBackendState,
+    RenderBackendStatus, RenderFrame, RenderFrameSkipReason, begin_render_frame,
 };
 use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteRenderPlugin};
 use nara_window::{
@@ -35,6 +35,8 @@ pub use crate::surface::{
 #[cfg(test)]
 use nara_window::PresentMode;
 
+const WGPU_RENDER_BACKEND: &str = "wgpu";
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuRenderPlugin;
 
@@ -42,6 +44,10 @@ impl Plugin for WgpuRenderPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(SpriteRenderPlugin)?;
         app.init_resource::<WgpuRenderBackend>();
+        app.init_resource::<RenderBackendStatus>();
+        app.world_mut()
+            .resource_mut::<RenderBackendStatus>()
+            .mark_state(WGPU_RENDER_BACKEND, RenderBackendState::Uninitialized);
         app.add_systems(
             CoreStage::Render,
             render_clear_passes.after(begin_render_frame),
@@ -127,7 +133,7 @@ impl WgpuRenderBackend {
 
     fn render_clear_passes(
         &mut self,
-        handles: &BackendWindowHandles,
+        handles: Option<&BackendWindowHandles>,
         windows: &Query<&Window>,
         views: &ExtractedViews,
         sprite_batches: &SpriteBatches,
@@ -136,16 +142,25 @@ impl WgpuRenderBackend {
         primary_window_id: Option<WindowId>,
         frame: &mut RenderFrame,
         stats: &mut FrameStats,
+        status: &mut RenderBackendStatus,
     ) -> Result<(), WgpuRenderError> {
         stats.draw_calls = 0;
         stats.sprites = 0;
+        status.mark_state(WGPU_RENDER_BACKEND, render_backend_state(self.state));
+        status.clear_skip();
 
         if views.is_empty() {
             frame.mark_skipped();
+            status.mark_skipped_with_message(
+                frame.index,
+                RenderFrameSkipReason::NoViews,
+                "no extracted render views",
+            );
             return Ok(());
         }
 
         self.ensure_device()?;
+        status.mark_ready(WGPU_RENDER_BACKEND);
         self.sprite_textures.prune_unused(sprite_batches.as_slice());
 
         let mut submitted_any = false;
@@ -155,6 +170,9 @@ impl WgpuRenderBackend {
                 continue;
             };
             let Some(window) = windows.iter().find(|window| window.id == window_id) else {
+                continue;
+            };
+            let Some(handles) = handles else {
                 continue;
             };
             let Some(provider) = handles.get(window_id) else {
@@ -181,6 +199,18 @@ impl WgpuRenderBackend {
             frame.mark_submitted();
         } else {
             frame.mark_skipped();
+            let (reason, message) = if handles.is_none() {
+                (
+                    RenderFrameSkipReason::SurfaceUnavailable,
+                    "backend window handles resource is missing",
+                )
+            } else {
+                (
+                    RenderFrameSkipReason::NoRenderableTarget,
+                    "no view resolved to an available backend surface",
+                )
+            };
+            status.mark_skipped_with_message(frame.index, reason, message);
         }
 
         Ok(())
@@ -452,7 +482,7 @@ pub enum WgpuRenderError {
 
 pub fn render_clear_passes(
     mut backend: ResMut<WgpuRenderBackend>,
-    handles: Res<BackendWindowHandles>,
+    handles: Option<Res<BackendWindowHandles>>,
     windows: Query<&Window>,
     views: Res<ExtractedViews>,
     sprite_batches: Res<SpriteBatches>,
@@ -461,10 +491,11 @@ pub fn render_clear_passes(
     primary_window_id: Option<Res<PrimaryWindowId>>,
     mut frame: ResMut<RenderFrame>,
     mut stats: ResMut<FrameStats>,
+    mut status: ResMut<RenderBackendStatus>,
 ) {
     let primary_window_id = primary_window_id.map(|resource| resource.0);
     let result = backend.render_clear_passes(
-        &handles,
+        handles.as_deref(),
         &windows,
         &views,
         &sprite_batches,
@@ -473,11 +504,27 @@ pub fn render_clear_passes(
         primary_window_id,
         &mut frame,
         &mut stats,
+        &mut status,
     );
 
     if let Err(error) = result {
         backend.mark_error(&error);
+        status.mark_unavailable(WGPU_RENDER_BACKEND, error.to_string());
+        status.mark_skipped_with_message(
+            frame.index,
+            RenderFrameSkipReason::BackendError,
+            error.to_string(),
+        );
         frame.mark_skipped();
+    }
+}
+
+fn render_backend_state(state: WgpuBackendState) -> RenderBackendState {
+    match state {
+        WgpuBackendState::Uninitialized => RenderBackendState::Uninitialized,
+        WgpuBackendState::Initializing => RenderBackendState::Initializing,
+        WgpuBackendState::Ready => RenderBackendState::Ready,
+        WgpuBackendState::Unavailable => RenderBackendState::Unavailable,
     }
 }
 
@@ -534,6 +581,10 @@ fn render_acquired_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    use nara_app::App;
+    use nara_render::{RenderBackendStatus, RenderFrame, RenderFrameState};
 
     #[test]
     fn backend_starts_uninitialized() {
@@ -543,6 +594,23 @@ mod tests {
         assert_eq!(backend.surface_count(), 0);
         assert_eq!(backend.sprite_texture_count(), 0);
         assert_eq!(backend.last_error(), None);
+    }
+
+    #[test]
+    fn plugin_reports_skipped_frame_status_without_views() {
+        let mut app = App::new();
+        app.add_plugin(WgpuRenderPlugin).unwrap();
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let frame = app.world().resource::<RenderFrame>();
+        let status = app.world().resource::<RenderBackendStatus>();
+        let skip = status.last_skip().unwrap();
+        assert_eq!(frame.state, RenderFrameState::Skipped);
+        assert_eq!(status.backend(), Some(WGPU_RENDER_BACKEND));
+        assert_eq!(status.state(), RenderBackendState::Uninitialized);
+        assert_eq!(skip.frame_index(), frame.index);
+        assert_eq!(skip.reason(), RenderFrameSkipReason::NoViews);
     }
 
     #[test]

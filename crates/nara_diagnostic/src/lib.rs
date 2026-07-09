@@ -104,6 +104,20 @@ impl Diagnostic {
         self.context.asset_ref = Some(asset_ref.into());
         self
     }
+
+    pub fn emit_to_tracing(&self) {
+        match self.severity {
+            DiagnosticSeverity::Error => {
+                tracing::error!(code = self.code.as_str(), "{}", self.message)
+            }
+            DiagnosticSeverity::Warning => {
+                tracing::warn!(code = self.code.as_str(), "{}", self.message);
+            }
+            DiagnosticSeverity::Info => {
+                tracing::info!(code = self.code.as_str(), "{}", self.message)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
@@ -114,23 +128,16 @@ pub struct DiagnosticReport {
 
 impl DiagnosticReport {
     pub fn push(&mut self, diagnostic: Diagnostic) {
-        match diagnostic.severity {
-            DiagnosticSeverity::Error => {
-                tracing::error!(code = diagnostic.code.as_str(), "{}", diagnostic.message)
-            }
-            DiagnosticSeverity::Warning => {
-                tracing::warn!(code = diagnostic.code.as_str(), "{}", diagnostic.message);
-            }
-            DiagnosticSeverity::Info => {
-                tracing::info!(code = diagnostic.code.as_str(), "{}", diagnostic.message)
-            }
-        }
         self.diagnostics.push(diagnostic);
     }
 
     pub fn extend(&mut self, report: Self) {
-        for diagnostic in report.diagnostics {
-            self.push(diagnostic);
+        self.diagnostics.extend(report.diagnostics);
+    }
+
+    pub fn emit_to_tracing(&self) {
+        for diagnostic in &self.diagnostics {
+            diagnostic.emit_to_tracing();
         }
     }
 
@@ -180,6 +187,26 @@ mod tests {
 
         assert!(report.has_errors());
         assert_eq!(report.diagnostics().len(), 2);
+    }
+
+    #[test]
+    fn report_collects_diagnostics_without_implicit_logging_bridge() {
+        let mut report = DiagnosticReport::default();
+        let mut other = DiagnosticReport::default();
+
+        report.push(Diagnostic::info("scene.ok", "scene is valid"));
+        other.push(Diagnostic::warning("asset.pending", "asset is pending"));
+        report.extend(other);
+
+        assert_eq!(
+            report
+                .diagnostics()
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>(),
+            vec!["scene.ok", "asset.pending"]
+        );
+        report.emit_to_tracing();
     }
 
     #[test]

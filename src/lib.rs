@@ -87,8 +87,9 @@ pub mod prelude {
     pub use nara_render::{
         Camera2d, ClearColor, Extent2d, ExtractedView, ExtractedViews, FrameStats,
         PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
-        RenderBackend, RenderError, RenderFrame, RenderFrameState, RenderImage2d, RenderPhaseLabel,
-        RenderPlugin, RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
+        RenderBackendState, RenderBackendStatus, RenderFrame, RenderFrameSkip,
+        RenderFrameSkipReason, RenderFrameState, RenderImage2d, RenderPhaseLabel, RenderPlugin,
+        RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
         RenderPrepareInvalidationReason, RenderPrepareInvalidations, RenderPrepareStatus,
         RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, RenderTarget, ViewportRect,
     };
