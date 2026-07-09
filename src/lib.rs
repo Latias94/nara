@@ -233,7 +233,11 @@ pub mod prelude {
     pub use nara_image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin, ImageSourceMetadata,
     };
-    pub use nara_input::{ButtonInput, InputPlugin, KeyCode, MouseButton, PointerState};
+    pub use nara_input::{
+        ActionBinding, ActionContext, ActionId, ActionIdError, ActionMap, ActionOutcome,
+        ActionOutcomes, ActionPhase, ActionValue, ButtonInput, InputBinding, InputPlugin, KeyCode,
+        MouseButton, PointerState,
+    };
     pub use nara_material::{
         AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, Material2dKey,
         SamplerDescriptor, material2d_descriptor_key,
