@@ -30,6 +30,8 @@ members = [
     "crates/nara_tooling",
     "crates/nara_tooling_egui",
     "crates/nara_transform",
+    "crates/nara_ui",
+    "crates/nara_ui_render",
     "crates/nara_window",
     "crates/nara_winit",
 ]
@@ -62,6 +64,8 @@ nara_tasks = { path = "crates/nara_tasks" }
 nara_tooling = { path = "crates/nara_tooling" }
 nara_tooling_egui = { path = "crates/nara_tooling_egui" }
 nara_transform = { path = "crates/nara_transform" }
+nara_ui = { path = "crates/nara_ui" }
+nara_ui_render = { path = "crates/nara_ui_render" }
 nara_window = { path = "crates/nara_window" }
 nara_winit = { path = "crates/nara_winit" }
 
@@ -106,6 +110,8 @@ nara_tasks.workspace = true
 nara_tooling.workspace = true
 nara_tooling_egui = { workspace = true, optional = true }
 nara_transform.workspace = true
+nara_ui.workspace = true
+nara_ui_render.workspace = true
 nara_window.workspace = true
 nara_winit = { workspace = true, optional = true }
 
@@ -130,6 +136,7 @@ serde = [
     "nara_scene/serde",
     "nara_sprite/serde",
     "nara_tilemap/serde",
+    "nara_ui/serde",
     "nara_window/serde",
 ]
 winit = ["dep:nara_winit"]
@@ -145,6 +152,11 @@ required-features = ["winit", "wgpu"]
 [[example]]
 name = "windowed_sprites"
 path = "examples/windowed_sprites.rs"
+required-features = ["winit", "wgpu"]
+
+[[example]]
+name = "runtime_ui_panel"
+path = "examples/runtime_ui_panel.rs"
 required-features = ["winit", "wgpu"]
 
 [[example]]

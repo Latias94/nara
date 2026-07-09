@@ -7,7 +7,7 @@ use std::{
 };
 
 use nara_app::{App, AppExit, AppRunError, Plugin, PluginError};
-use nara_input::{ButtonInput, InputPlugin, KeyCode, MouseButton};
+use nara_input::{ButtonInput, InputPlugin, KeyCode, MouseButton, PointerState};
 use nara_window::{
     Window, WindowEvent, WindowId, WindowPlugin, WindowResolution,
     backend::{BackendWindowHandles, RawWindowHandleProvider},
@@ -243,6 +243,12 @@ impl WinitApp {
             WinitWindowEvent::MouseInput { state, button, .. } => {
                 apply_mouse_input(self.app.world_mut(), state, button);
             }
+            WinitWindowEvent::CursorMoved { position, .. } => {
+                apply_cursor_moved(self.app.world_mut(), position.x, position.y);
+            }
+            WinitWindowEvent::CursorLeft { .. } => {
+                apply_cursor_left(self.app.world_mut());
+            }
             _ => {}
         }
     }
@@ -325,6 +331,15 @@ fn apply_mouse_input(world: &mut nara_ecs::World, state: ElementState, button: W
         ElementState::Pressed => input.press(button),
         ElementState::Released => input.release(button),
     }
+}
+
+fn apply_cursor_moved(world: &mut nara_ecs::World, x: f64, y: f64) {
+    let mut pointer = world.resource_mut::<PointerState>();
+    pointer.set_position(nara_core::Vec2::new(x as f32, y as f32));
+}
+
+fn apply_cursor_left(world: &mut nara_ecs::World) {
+    world.resource_mut::<PointerState>().clear_position();
 }
 
 #[must_use]
@@ -473,5 +488,6 @@ mod tests {
         assert!(app.world().contains_resource::<BackendWindowHandles>());
         assert!(app.world().contains_resource::<ButtonInput<KeyCode>>());
         assert!(app.world().contains_resource::<ButtonInput<MouseButton>>());
+        assert!(app.world().contains_resource::<PointerState>());
     }
 }

@@ -7,7 +7,7 @@ use nara_render::{
     PreparedRenderResources, RenderPrepareStatus, RenderResourceKey, RenderResourceKind,
     RenderResourceSnapshot,
 };
-use nara_sprite_render::{SpriteBatch, SpriteMaterialKey};
+use nara_sprite_render::SpriteMaterialKey;
 use thiserror::Error;
 
 const RGBA8_BYTES_PER_PIXEL: u32 = 4;
@@ -33,11 +33,11 @@ impl WgpuSpriteTextureCache {
         self.image_bindings.clear();
     }
 
-    pub(crate) fn prune_unused(&mut self, batches: &[SpriteBatch]) {
-        let used_materials = batches
-            .iter()
-            .map(|batch| batch.material)
-            .collect::<BTreeSet<_>>();
+    pub(crate) fn prune_unused_materials(
+        &mut self,
+        materials: impl IntoIterator<Item = SpriteMaterialKey>,
+    ) {
+        let used_materials = materials.into_iter().collect::<BTreeSet<_>>();
         let used_images = used_materials
             .iter()
             .filter_map(|material| material.image)

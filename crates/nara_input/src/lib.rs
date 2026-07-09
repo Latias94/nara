@@ -3,6 +3,7 @@
 use std::{collections::HashSet, hash::Hash};
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
+use nara_core::Vec2;
 use nara_ecs::{ResMut, Resource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -81,8 +82,25 @@ where
     }
 }
 
-/// Compatibility alias for the current keyboard state resource.
-pub type InputState = ButtonInput<KeyCode>;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Resource)]
+pub struct PointerState {
+    position: Option<Vec2>,
+}
+
+impl PointerState {
+    #[must_use]
+    pub const fn position(self) -> Option<Vec2> {
+        self.position
+    }
+
+    pub fn set_position(&mut self, position: Vec2) {
+        self.position = Some(position);
+    }
+
+    pub fn clear_position(&mut self) {
+        self.position = None;
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct InputPlugin;
@@ -91,6 +109,7 @@ impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(PointerState::default())
             .add_systems(CoreStage::Last, clear_input_transitions);
         Ok(())
     }
@@ -122,5 +141,16 @@ mod tests {
         input.release(KeyCode::Space);
         assert!(input.just_released(KeyCode::Space));
         assert!(!input.pressed(KeyCode::Space));
+    }
+
+    #[test]
+    fn tracks_pointer_position() {
+        let mut pointer = PointerState::default();
+
+        pointer.set_position(Vec2::new(12.0, 24.0));
+        assert_eq!(pointer.position(), Some(Vec2::new(12.0, 24.0)));
+
+        pointer.clear_position();
+        assert_eq!(pointer.position(), None);
     }
 }

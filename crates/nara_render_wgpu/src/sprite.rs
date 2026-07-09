@@ -2,7 +2,7 @@ use crate::texture::{WgpuSpriteTextureCache, WgpuSpriteTextureError};
 use bytemuck::{Pod, Zeroable};
 use nara_asset::Assets;
 use nara_image::{ImageAsset, PreparedImageResource};
-use nara_render::PreparedRenderResources;
+use nara_render::{PreparedRenderResources, RenderPhaseLabel};
 use nara_sprite_render::{SpriteBatch, SpriteInstance};
 use wgpu::util::DeviceExt;
 
@@ -39,6 +39,7 @@ pub(crate) struct WgpuSpritePipeline {
 pub(crate) struct WgpuSpriteBatchBuffer {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    phase: RenderPhaseLabel,
     instance_count: u32,
 }
 
@@ -155,23 +156,25 @@ pub(crate) fn create_sprite_batch_buffers(
             Ok(WgpuSpriteBatchBuffer {
                 buffer,
                 bind_group,
+                phase: batch.phase,
                 instance_count,
             })
         })
         .collect()
 }
 
-pub(crate) fn draw_sprite_batch_buffers<'pass>(
+pub(crate) fn draw_sprite_batch_buffers_for_phase<'pass>(
     render_pass: &mut wgpu::RenderPass<'pass>,
     pipeline: &'pass wgpu::RenderPipeline,
     buffers: &'pass [WgpuSpriteBatchBuffer],
+    phase: RenderPhaseLabel,
 ) {
-    if buffers.is_empty() {
+    if buffers.iter().all(|buffer| buffer.phase != phase) {
         return;
     }
 
     render_pass.set_pipeline(pipeline);
-    for buffer in buffers {
+    for buffer in buffers.iter().filter(|buffer| buffer.phase == phase) {
         render_pass.set_bind_group(0, &buffer.bind_group, &[]);
         render_pass.set_vertex_buffer(0, buffer.buffer.slice(..));
         render_pass.draw(0..VERTICES_PER_QUAD, 0..buffer.instance_count);

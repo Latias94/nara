@@ -1,5 +1,6 @@
 //! Renderer-facing data and backend seam.
 
+mod pass_plan;
 mod prepare;
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
@@ -14,6 +15,11 @@ use nara_reflect::{
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
 
+pub use pass_plan::{
+    RenderPassDependency, RenderPassDependencyError, RenderPassNodeId, RenderPassPlan,
+    RenderPassStep, RenderPassStepLabel, RenderPhaseInput, build_render_pass_plan,
+    render_phase_order,
+};
 pub use prepare::{
     PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
     RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
@@ -133,7 +139,7 @@ impl ViewportRect {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RenderPhaseLabel(&'static str);
 
 impl RenderPhaseLabel {

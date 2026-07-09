@@ -4,7 +4,9 @@ use nara_asset::Assets;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
 use nara_image::{ImageAsset, PreparedImageResource, image_resource_key};
-use nara_render::{ExtractedView, ExtractedViews, PreparedRenderResources, RenderPhaseLabel};
+use nara_render::{
+    ExtractedView, ExtractedViews, PreparedRenderResources, RenderPhaseLabel, render_phase_order,
+};
 
 use crate::{
     ExtractedSprite, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches,
@@ -207,19 +209,7 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
 
 #[must_use]
 pub fn phase_order(phase: RenderPhaseLabel) -> u8 {
-    if phase == RenderPhaseLabel::OPAQUE_2D {
-        0
-    } else if phase == RenderPhaseLabel::TILEMAP_2D {
-        1
-    } else if phase == RenderPhaseLabel::TRANSPARENT_2D {
-        2
-    } else if phase == RenderPhaseLabel::GIZMO {
-        3
-    } else if phase == RenderPhaseLabel::UI {
-        4
-    } else {
-        u8::MAX
-    }
+    render_phase_order(phase).min(u16::from(u8::MAX)) as u8
 }
 
 fn saturating_u32(value: usize) -> u32 {

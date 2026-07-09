@@ -1,5 +1,5 @@
 [package]
-name = "nara_render"
+name = "nara_ui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,12 +11,22 @@ nara_app.workspace = true
 nara_asset.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
+nara_image.workspace = true
+nara_input.workspace = true
+nara_material.workspace = true
 nara_reflect.workspace = true
-nara_transform.workspace = true
-nara_window.workspace = true
+nara_render.workspace = true
+nara_scene.workspace = true
 serde = { workspace = true, optional = true }
-thiserror.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde", "nara_asset/serde", "nara_core/serde", "nara_window/serde"]
+serde = [
+    "dep:serde",
+    "nara_asset/serde",
+    "nara_core/serde",
+    "nara_image/serde",
+    "nara_material/serde",
+    "nara_render/serde",
+    "nara_scene/serde",
+]

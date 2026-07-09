@@ -24,6 +24,8 @@ pub use nara_tooling as tooling;
 #[cfg(feature = "egui")]
 pub use nara_tooling_egui as tooling_egui;
 pub use nara_transform as transform;
+pub use nara_ui as ui;
+pub use nara_ui_render as ui_render;
 pub use nara_window as window;
 #[cfg(feature = "winit")]
 pub use nara_winit as winit;
@@ -49,6 +51,8 @@ impl Plugin for MinimalPlugins {
         app.add_plugin_if_missing(nara_render::RenderPlugin)?;
         app.add_plugin_if_missing(nara_image::ImagePlugin)?;
         app.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
+        app.add_plugin_if_missing(nara_ui::UiPlugin)?;
+        app.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
         Ok(())
     }
 }
@@ -91,7 +95,7 @@ pub mod prelude {
         ImageReloadError, ImageReloadStats, ImageSourceMetadata, PreparedImageResource,
         image_descriptor_hash, image_resource_key, prepare_images,
     };
-    pub use nara_input::{ButtonInput, InputPlugin, InputState, KeyCode, MouseButton};
+    pub use nara_input::{ButtonInput, InputPlugin, KeyCode, MouseButton, PointerState};
     pub use nara_material::{
         AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, Material2dKey,
         SamplerDescriptor, material2d_descriptor_key,
@@ -160,6 +164,15 @@ pub mod prelude {
         EguiSceneInspectorPanel, EguiSceneInspectorPanelResponse,
     };
     pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
+    pub use nara_ui::{
+        ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiNode, UiPanel, UiPanelMaterial,
+        UiPlugin, UiRect, UiRoot, UiStyle, UiVal,
+    };
+    pub use nara_ui_render::{
+        ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, QueuedUiItem, QueuedUiItems,
+        UiBatch, UiBatches, UiClipRect, UiInstance, UiMaterialKey, UiRenderPlugin, UiRenderStats,
+        UiTextureRect,
+    };
     pub use nara_window::{
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowEvent, WindowEvents, WindowId,
         WindowMode, WindowPlugin, WindowResolution, apply_window_event, push_window_event,

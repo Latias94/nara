@@ -1542,6 +1542,8 @@ dependencies = [
  "nara_tooling",
  "nara_tooling_egui",
  "nara_transform",
+ "nara_ui",
+ "nara_ui_render",
  "nara_window",
  "nara_winit",
  "ron",
@@ -1635,6 +1637,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "nara_app",
+ "nara_core",
  "nara_ecs",
 ]
 
@@ -1673,6 +1676,7 @@ dependencies = [
  "nara_transform",
  "nara_window",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1689,6 +1693,8 @@ dependencies = [
  "nara_material",
  "nara_render",
  "nara_sprite_render",
+ "nara_ui",
+ "nara_ui_render",
  "nara_window",
  "pollster",
  "thiserror 2.0.18",
@@ -1806,6 +1812,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara_ui"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_app",
+ "nara_asset",
+ "nara_core",
+ "nara_ecs",
+ "nara_image",
+ "nara_input",
+ "nara_material",
+ "nara_reflect",
+ "nara_render",
+ "nara_scene",
+ "serde",
+]
+
+[[package]]
+name = "nara_ui_render"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_app",
+ "nara_asset",
+ "nara_core",
+ "nara_ecs",
+ "nara_image",
+ "nara_material",
+ "nara_render",
+ "nara_scene",
+ "nara_sprite_render",
+ "nara_ui",
+]
+
+[[package]]
 name = "nara_window"
 version = "0.1.0"
 dependencies = [
@@ -1821,6 +1862,7 @@ name = "nara_winit"
 version = "0.1.0"
 dependencies = [
  "nara_app",
+ "nara_core",
  "nara_ecs",
  "nara_input",
  "nara_window",

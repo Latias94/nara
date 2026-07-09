@@ -5,22 +5,26 @@ use std::collections::BTreeMap;
 mod sprite;
 mod surface;
 mod texture;
+mod ui;
 
 use crate::sprite::{
     WgpuSpriteBatchBuffer, WgpuSpriteDrawStats, WgpuSpritePipeline, create_sprite_batch_buffers,
-    create_sprite_pipeline, draw_sprite_batch_buffers, sprite_batch_draw_stats,
+    create_sprite_pipeline, draw_sprite_batch_buffers_for_phase, sprite_batch_draw_stats,
 };
 use crate::surface::{WgpuSurfaceState, configure_surface, create_surface, surface_extent};
 use crate::texture::WgpuSpriteTextureCache;
+use crate::ui::{create_ui_batch_buffers, ui_batch_draw_stats};
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::Assets;
 use nara_ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_image::{ImageAsset, PreparedImageResource};
 use nara_render::{
     Color, Extent2d, ExtractedViews, FrameStats, PreparedRenderResources, RenderBackendState,
-    RenderBackendStatus, RenderFrame, RenderFrameSkipReason, begin_render_frame,
+    RenderBackendStatus, RenderFrame, RenderFrameSkipReason, RenderPassPlan, RenderPassStep,
+    RenderPassStepLabel, RenderPhaseInput, begin_render_frame, build_render_pass_plan,
 };
 use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteRenderPlugin};
+use nara_ui_render::{UiBatch, UiBatches, UiRenderPlugin};
 use nara_window::{
     PrimaryWindowId, Window, WindowId,
     backend::{BackendWindowHandles, RawWindowHandleProvider},
@@ -43,6 +47,7 @@ pub struct WgpuRenderPlugin;
 impl Plugin for WgpuRenderPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(SpriteRenderPlugin)?;
+        app.add_plugin_if_missing(UiRenderPlugin)?;
         app.init_resource::<WgpuRenderBackend>();
         app.init_resource::<RenderBackendStatus>();
         app.world_mut()
@@ -137,6 +142,7 @@ impl WgpuRenderBackend {
         windows: &Query<&Window>,
         views: &ExtractedViews,
         sprite_batches: &SpriteBatches,
+        ui_batches: &UiBatches,
         images: Option<&Assets<ImageAsset>>,
         prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
         primary_window_id: Option<WindowId>,
@@ -161,7 +167,14 @@ impl WgpuRenderBackend {
 
         self.ensure_device()?;
         status.mark_ready(WGPU_RENDER_BACKEND);
-        self.sprite_textures.prune_unused(sprite_batches.as_slice());
+        self.sprite_textures.prune_unused_materials(
+            sprite_batches
+                .as_slice()
+                .iter()
+                .map(|batch| batch.material)
+                .chain(ui_batches.as_slice().iter().map(|batch| batch.material)),
+        );
+        let pass_plan = build_wgpu_render_pass_plan(views, sprite_batches, ui_batches);
 
         let mut submitted_any = false;
         for (view_index, view) in views.as_slice().iter().enumerate() {
@@ -181,11 +194,15 @@ impl WgpuRenderBackend {
 
             let color = view.clear_color;
             let view_batches = sprite_batches.for_view(view_index).collect::<Vec<_>>();
+            let view_ui_batches = ui_batches.for_view(view_index).collect::<Vec<_>>();
+            let view_pass_steps = pass_plan.for_view(view_index).copied().collect::<Vec<_>>();
             if let Some(draw_stats) = self.render_window_clear_pass(
                 window,
                 provider,
                 color,
                 &view_batches,
+                &view_ui_batches,
+                &view_pass_steps,
                 images,
                 prepared_images,
             )? {
@@ -250,6 +267,8 @@ impl WgpuRenderBackend {
         provider: &RawWindowHandleProvider,
         clear_color: Color,
         sprite_batches: &[&SpriteBatch],
+        ui_batches: &[&UiBatch],
+        pass_steps: &[RenderPassStep],
         images: Option<&Assets<ImageAsset>>,
         prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
     ) -> Result<Option<WgpuSpriteDrawStats>, WgpuRenderError> {
@@ -266,7 +285,8 @@ impl WgpuRenderBackend {
         let has_sprite_work = sprite_batches
             .iter()
             .any(|batch| !batch.instances.is_empty());
-        let sprite_pipeline = if has_sprite_work {
+        let has_ui_work = ui_batches.iter().any(|batch| !batch.instances.is_empty());
+        let sprite_pipeline = if has_sprite_work || has_ui_work {
             self.ensure_sprite_pipeline(view_format)?;
             Some(self.sprite_pipeline(view_format)?.clone())
         } else {
@@ -283,18 +303,42 @@ impl WgpuRenderBackend {
             .ok_or(WgpuRenderError::BackendNotReady)?
             .clone();
         let sprite_buffers = if let Some(sprite_pipeline) = &sprite_pipeline {
-            create_sprite_batch_buffers(
-                &device,
-                &queue,
-                sprite_batches,
-                &sprite_pipeline.texture_bind_group_layout,
-                &mut self.sprite_textures,
-                images,
-                prepared_images,
-            )
-            .map_err(|error| WgpuRenderError::SpriteTexture {
-                message: error.to_string(),
-            })?
+            if has_sprite_work {
+                create_sprite_batch_buffers(
+                    &device,
+                    &queue,
+                    sprite_batches,
+                    &sprite_pipeline.texture_bind_group_layout,
+                    &mut self.sprite_textures,
+                    images,
+                    prepared_images,
+                )
+                .map_err(|error| WgpuRenderError::SpriteTexture {
+                    message: error.to_string(),
+                })?
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+        let ui_buffers = if let Some(sprite_pipeline) = &sprite_pipeline {
+            if has_ui_work {
+                create_ui_batch_buffers(
+                    &device,
+                    &queue,
+                    ui_batches,
+                    &sprite_pipeline.texture_bind_group_layout,
+                    &mut self.sprite_textures,
+                    images,
+                    prepared_images,
+                )
+                .map_err(|error| WgpuRenderError::SpriteTexture {
+                    message: error.to_string(),
+                })?
+            } else {
+                Vec::new()
+            }
         } else {
             Vec::new()
         };
@@ -316,8 +360,15 @@ impl WgpuRenderBackend {
                     clear_color,
                     sprite_pipeline.as_ref().map(|pipeline| &pipeline.pipeline),
                     &sprite_buffers,
+                    &ui_buffers,
+                    pass_steps,
                 )?;
-                Ok(Some(sprite_batch_draw_stats(sprite_batches)))
+                let sprite_stats = sprite_batch_draw_stats(sprite_batches);
+                let ui_stats = ui_batch_draw_stats(ui_batches);
+                Ok(Some(WgpuSpriteDrawStats {
+                    draw_calls: sprite_stats.draw_calls.saturating_add(ui_stats.draw_calls),
+                    sprites: sprite_stats.sprites,
+                }))
             }
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
                 drop(texture);
@@ -486,6 +537,7 @@ pub fn render_clear_passes(
     windows: Query<&Window>,
     views: Res<ExtractedViews>,
     sprite_batches: Res<SpriteBatches>,
+    ui_batches: Res<UiBatches>,
     images: Option<Res<Assets<ImageAsset>>>,
     prepared_images: Option<Res<PreparedRenderResources<PreparedImageResource>>>,
     primary_window_id: Option<Res<PrimaryWindowId>>,
@@ -499,6 +551,7 @@ pub fn render_clear_passes(
         &windows,
         &views,
         &sprite_batches,
+        &ui_batches,
         images.as_deref(),
         prepared_images.as_deref(),
         primary_window_id,
@@ -537,6 +590,8 @@ fn render_acquired_texture(
     clear_color: Color,
     sprite_pipeline: Option<&wgpu::RenderPipeline>,
     sprite_buffers: &[WgpuSpriteBatchBuffer],
+    ui_buffers: &[WgpuSpriteBatchBuffer],
+    pass_steps: &[RenderPassStep],
 ) -> Result<(), WgpuRenderError> {
     let config = surface_state
         .config
@@ -569,7 +624,25 @@ fn render_acquired_texture(
             multiview_mask: None,
         });
         if let Some(sprite_pipeline) = sprite_pipeline {
-            draw_sprite_batch_buffers(&mut pass, sprite_pipeline, sprite_buffers);
+            for step in pass_steps {
+                match step.node.label {
+                    RenderPassStepLabel::Clear => {}
+                    RenderPassStepLabel::Phase(phase) => {
+                        draw_sprite_batch_buffers_for_phase(
+                            &mut pass,
+                            sprite_pipeline,
+                            sprite_buffers,
+                            phase,
+                        );
+                        draw_sprite_batch_buffers_for_phase(
+                            &mut pass,
+                            sprite_pipeline,
+                            ui_buffers,
+                            phase,
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -578,13 +651,40 @@ fn render_acquired_texture(
     Ok(())
 }
 
+fn build_wgpu_render_pass_plan(
+    views: &ExtractedViews,
+    sprite_batches: &SpriteBatches,
+    ui_batches: &UiBatches,
+) -> RenderPassPlan {
+    build_render_pass_plan(
+        views,
+        sprite_batches
+            .as_slice()
+            .iter()
+            .map(|batch| RenderPhaseInput {
+                view_index: batch.view_index,
+                phase: batch.phase,
+            })
+            .chain(ui_batches.as_slice().iter().map(|batch| RenderPhaseInput {
+                view_index: batch.view_index,
+                phase: nara_render::RenderPhaseLabel::UI,
+            })),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
 
     use nara_app::App;
-    use nara_render::{RenderBackendStatus, RenderFrame, RenderFrameState};
+    use nara_core::Vec2;
+    use nara_render::{
+        ExtractedView, RenderBackendStatus, RenderFrame, RenderFrameState, RenderPhaseLabel,
+        RenderTarget, ViewportRect,
+    };
+    use nara_sprite_render::{ColorKey, SpriteInstance, SpriteMaterialKey, TextureUvRect};
+    use nara_ui_render::{UiBatch, UiClipRect};
 
     #[test]
     fn backend_starts_uninitialized() {
@@ -732,5 +832,78 @@ mod tests {
         assert_eq!(color.g, 0.5);
         assert_eq!(color.b, 0.75);
         assert_eq!(color.a, 1.0);
+    }
+
+    #[test]
+    fn backend_pass_plan_orders_world_before_ui() {
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            camera_entity: nara_ecs::Entity::PLACEHOLDER,
+            target: RenderTarget::PrimaryWindow,
+            viewport: ViewportRect::new(0, 0, 100, 100).unwrap(),
+            world_position: Vec2::ZERO,
+            viewport_height: 100.0,
+            order: 0,
+            clear_color: Color::BLACK,
+        });
+        let mut sprite_batches = SpriteBatches::default();
+        sprite_batches.replace(vec![SpriteBatch {
+            view_index: 0,
+            view_order: 0,
+            target: RenderTarget::PrimaryWindow,
+            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            layer: 0,
+            sort_key: 0,
+            material: material_key(),
+            instances: vec![SpriteInstance {
+                center: Vec2::ZERO,
+                x_axis: Vec2::X,
+                y_axis: Vec2::Y,
+                color: Color::WHITE,
+                uv: TextureUvRect::FULL,
+            }],
+        }]);
+        let mut ui_batches = UiBatches::default();
+        ui_batches.replace(vec![UiBatch {
+            view_index: 0,
+            view_order: 0,
+            target: RenderTarget::PrimaryWindow,
+            order: 0,
+            z_index: 0,
+            material: material_key(),
+            clip_rect: UiClipRect::from_rect(nara_ui::UiRect::from_origin_size(
+                0.0, 0.0, 10.0, 10.0,
+            )),
+            instances: vec![SpriteInstance {
+                center: Vec2::ZERO,
+                x_axis: Vec2::X,
+                y_axis: Vec2::Y,
+                color: Color::WHITE,
+                uv: TextureUvRect::FULL,
+            }],
+        }]);
+
+        let plan = build_wgpu_render_pass_plan(&views, &sprite_batches, &ui_batches);
+
+        assert_eq!(
+            plan.steps()
+                .iter()
+                .map(|step| step.node.label)
+                .collect::<Vec<_>>(),
+            vec![
+                RenderPassStepLabel::Clear,
+                RenderPassStepLabel::Phase(RenderPhaseLabel::TRANSPARENT_2D),
+                RenderPassStepLabel::Phase(RenderPhaseLabel::UI),
+            ]
+        );
+    }
+
+    fn material_key() -> SpriteMaterialKey {
+        SpriteMaterialKey {
+            image: None,
+            sampler: nara_material::SamplerDescriptor::default(),
+            alpha_mode: nara_material::AlphaMode2d::Blend,
+            tint: ColorKey::from_color(Color::WHITE),
+        }
     }
 }
