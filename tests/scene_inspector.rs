@@ -80,6 +80,7 @@ fn inspector_set_field_command_applies_patch_and_selects_target() {
         SceneInspectorCommand::SetField {
             entity: player.clone(),
             component: label_type_id(),
+            component_version: ComponentSchemaVersion(1),
             path: ComponentFieldPath::from_fields(["text"]),
             value: ComponentValue::String("Hero".to_string()),
         },
@@ -165,6 +166,7 @@ fn inspector_failed_patch_command_does_not_enter_history() {
         SceneInspectorCommand::RemoveField {
             entity: player.clone(),
             component: label_type_id(),
+            component_version: ComponentSchemaVersion(1),
             path: ComponentFieldPath::from_fields(["text"]),
         },
     );

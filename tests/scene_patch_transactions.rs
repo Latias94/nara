@@ -28,6 +28,7 @@ fn patch_adds_component_sets_field_reparents_and_inverse_restores() {
         ScenePatchOperation::SetField {
             entity: player.clone(),
             component: position_type_id(),
+            component_version: ComponentSchemaVersion(1),
             path: ComponentFieldPath::from_fields(["x"]),
             value: ComponentValue::I64(7),
         },
@@ -66,6 +67,7 @@ fn invalid_patch_operation_leaves_document_unchanged_with_operation_context() {
         ScenePatchOperation::SetField {
             entity: player.clone(),
             component: position_type_id(),
+            component_version: ComponentSchemaVersion(1),
             path: ComponentFieldPath::from_fields(["missing"]),
             value: ComponentValue::I64(9),
         },
@@ -84,6 +86,75 @@ fn invalid_patch_operation_leaves_document_unchanged_with_operation_context() {
         Some(position_type_id().as_str())
     );
     assert_eq!(diagnostic.context.field_path.as_deref(), Some("missing"));
+}
+
+#[test]
+fn patch_new_uses_current_format_version() {
+    let patch = ScenePatchDocument::new([]);
+
+    assert_eq!(
+        patch.format_version,
+        ScenePatchDocument::CURRENT_FORMAT_VERSION
+    );
+    assert_eq!(
+        ScenePatchDocument::default().format_version,
+        ScenePatchDocument::CURRENT_FORMAT_VERSION
+    );
+}
+
+#[test]
+fn unsupported_patch_format_version_fails_before_mutating_document() {
+    let registry = test_registry();
+    let player = scene_id("player");
+    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())
+        .with_component(position_type_id(), position_record(1, None))]);
+    let original = scene.clone();
+    let patch = ScenePatchDocument {
+        format_version: ScenePatchDocument::CURRENT_FORMAT_VERSION + 1,
+        operations: vec![ScenePatchOperation::SetField {
+            entity: player,
+            component: position_type_id(),
+            component_version: ComponentSchemaVersion(1),
+            path: ComponentFieldPath::from_fields(["x"]),
+            value: ComponentValue::I64(9),
+        }],
+    };
+
+    let report = patch.apply_to_scene(&mut scene, &registry);
+
+    assert!(!report.applied);
+    assert_eq!(scene, original);
+    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code.as_str() == "scene.patch-unsupported-format-version"
+    }));
+}
+
+#[test]
+fn stale_patch_component_schema_version_fails_before_mutating_document() {
+    let registry = test_registry();
+    let player = scene_id("player");
+    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())
+        .with_component(position_type_id(), position_record(1, None))]);
+    let original = scene.clone();
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: player,
+        component: position_type_id(),
+        component_version: ComponentSchemaVersion(0),
+        path: ComponentFieldPath::from_fields(["x"]),
+        value: ComponentValue::I64(9),
+    }]);
+
+    let report = patch.apply_to_scene(&mut scene, &registry);
+
+    assert!(!report.applied);
+    assert_eq!(scene, original);
+    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code.as_str() == "scene.patch-stale-component-schema-version"
+            && diagnostic.context.operation_index == Some(0)
+            && diagnostic.context.entity_id.as_deref() == Some("player")
+            && diagnostic.context.component_id.as_deref() == Some(position_type_id().as_str())
+            && diagnostic.context.field_path.as_deref() == Some("x")
+    }));
 }
 
 #[test]
@@ -128,6 +199,7 @@ fn remove_required_field_fails_before_mutating_document() {
     let report = ScenePatchDocument::new([ScenePatchOperation::RemoveField {
         entity: player,
         component: position_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["x"]),
     }])
     .apply_to_scene(&mut scene, &registry);
@@ -150,11 +222,13 @@ fn remove_optional_field_and_set_asset_ref_field_are_schema_checked() {
         ScenePatchOperation::RemoveField {
             entity: player.clone(),
             component: position_type_id(),
+            component_version: ComponentSchemaVersion(1),
             path: ComponentFieldPath::from_fields(["y"]),
         },
         ScenePatchOperation::SetAssetRefField {
             entity: player.clone(),
             component: position_type_id(),
+            component_version: ComponentSchemaVersion(1),
             path: ComponentFieldPath::from_fields(["asset"]),
             asset_ref: AssetRef::path("textures/player.png").unwrap(),
         },

@@ -154,6 +154,7 @@ fn prefab_patch_field_override_preserves_inherited_sprite_data() {
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: scene_id("player"),
         component: ComponentTypeId::new("nara.sprite.Sprite"),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["color", "r"]),
         value: ComponentValue::f64(0.25).unwrap(),
     }]);
@@ -184,6 +185,7 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetAssetRefField {
         entity: scene_id("player"),
         component: ComponentTypeId::new("nara.sprite.Sprite"),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["texture"]),
         asset_ref: AssetRef::stable_id(UNKNOWN_STABLE_ID).unwrap(),
     }]);

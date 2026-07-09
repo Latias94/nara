@@ -211,17 +211,20 @@ pub enum SceneInspectorCommand {
     SetField {
         entity: SceneEntityId,
         component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         path: ComponentFieldPath,
         value: ComponentValue,
     },
     RemoveField {
         entity: SceneEntityId,
         component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         path: ComponentFieldPath,
     },
     SetAssetRefField {
         entity: SceneEntityId,
         component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         path: ComponentFieldPath,
         asset_ref: AssetRef,
     },
@@ -250,31 +253,37 @@ impl SceneInspectorCommand {
             Self::SetField {
                 entity,
                 component,
+                component_version,
                 path,
                 value,
             } => ScenePatchOperation::SetField {
                 entity: entity.clone(),
                 component: component.clone(),
+                component_version: *component_version,
                 path: path.clone(),
                 value: value.clone(),
             },
             Self::RemoveField {
                 entity,
                 component,
+                component_version,
                 path,
             } => ScenePatchOperation::RemoveField {
                 entity: entity.clone(),
                 component: component.clone(),
+                component_version: *component_version,
                 path: path.clone(),
             },
             Self::SetAssetRefField {
                 entity,
                 component,
+                component_version,
                 path,
                 asset_ref,
             } => ScenePatchOperation::SetAssetRefField {
                 entity: entity.clone(),
                 component: component.clone(),
+                component_version: *component_version,
                 path: path.clone(),
                 asset_ref: asset_ref.clone(),
             },

@@ -29,6 +29,7 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player.clone(),
         component: label_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["text"]),
         value: ComponentValue::String("Hero".to_string()),
     }]);
@@ -66,6 +67,7 @@ fn authoring_session_undo_redo_are_transactional() {
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player.clone(),
         component: label_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["text"]),
         value: ComponentValue::String("Hero".to_string()),
     }]);
@@ -114,6 +116,7 @@ fn failed_authoring_patch_does_not_dirty_live_world_or_enter_history() {
     let invalid_patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player.clone(),
         component: label_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["missing"]),
         value: ComponentValue::String("Hero".to_string()),
     }]);
@@ -204,6 +207,7 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     let invalid_patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player.clone(),
         component: label_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["missing"]),
         value: ComponentValue::String("Hero".to_string()),
     }]);
@@ -352,6 +356,7 @@ fn set_label_patch(entity: &SceneEntityId, text: &str) -> ScenePatchDocument {
     ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: entity.clone(),
         component: label_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["text"]),
         value: ComponentValue::String(text.to_string()),
     }])

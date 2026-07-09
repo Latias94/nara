@@ -28,6 +28,7 @@ fn main() {
         ScenePatchOperation::SetAssetRefField {
             entity: player.clone(),
             component: sprite_id(),
+            component_version: v1(),
             path: ComponentFieldPath::from_fields(["texture"]),
             asset_ref: AssetRef::path("textures/player.png").unwrap(),
         },

@@ -13,12 +13,14 @@ fn main() {
         ScenePatchOperation::SetField {
             entity: scene_id("visual"),
             component: sprite_id(),
+            component_version: v1(),
             path: ComponentFieldPath::from_fields(["color", "r"]),
             value: ComponentValue::f64(0.25).unwrap(),
         },
         ScenePatchOperation::SetAssetRefField {
             entity: scene_id("visual"),
             component: sprite_id(),
+            component_version: v1(),
             path: ComponentFieldPath::from_fields(["texture"]),
             asset_ref: AssetRef::path("textures/enemy.png").unwrap(),
         },

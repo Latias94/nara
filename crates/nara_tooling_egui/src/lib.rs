@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 
 use egui::{Button, CollapsingHeader, RichText, ScrollArea, TextEdit, Ui};
-use nara_reflect::{ComponentFieldPath, ComponentTypeId, ComponentValue, ComponentValueKind};
+use nara_reflect::{
+    ComponentFieldPath, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+};
 use nara_scene::SceneEntityId;
 use nara_tooling::{
     SceneEditorMode, SceneEditorModel, SceneInspectorCommand, SceneInspectorComponentView,
@@ -188,6 +190,11 @@ impl EguiSceneInspectorPanel {
                     ui.monospace(component_value_label(&component.raw_value));
                     return;
                 }
+                let Some(component_version) = component.schema_version else {
+                    ui.label(RichText::new("Schema version unavailable").weak());
+                    ui.monospace(component_value_label(&component.raw_value));
+                    return;
+                };
 
                 if component.fields.is_empty() {
                     ui.label(RichText::new("No inspectable fields").weak());
@@ -199,6 +206,7 @@ impl EguiSceneInspectorPanel {
                         ui,
                         entity,
                         &component.component,
+                        component_version,
                         field,
                         editing_enabled,
                         response,
@@ -212,6 +220,7 @@ impl EguiSceneInspectorPanel {
         ui: &mut Ui,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         field: &SceneInspectorFieldView,
         editing_enabled: bool,
         response: &mut EguiSceneInspectorPanelResponse,
@@ -232,6 +241,7 @@ impl EguiSceneInspectorPanel {
                         &key,
                         entity,
                         component,
+                        component_version,
                         field,
                         editing_enabled,
                         response,
@@ -246,6 +256,7 @@ impl EguiSceneInspectorPanel {
                         &key,
                         entity,
                         component,
+                        component_version,
                         field,
                         editing_enabled,
                         response,
@@ -264,6 +275,7 @@ impl EguiSceneInspectorPanel {
                     response.push_command(SceneInspectorCommand::RemoveField {
                         entity: entity.clone(),
                         component: component.clone(),
+                        component_version,
                         path: field.path.clone(),
                     });
                 }
@@ -285,6 +297,7 @@ impl EguiSceneInspectorPanel {
         key: &EguiInspectorFieldKey,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         field: &SceneInspectorFieldView,
         editing_enabled: bool,
         response: &mut EguiSceneInspectorPanelResponse,
@@ -301,6 +314,7 @@ impl EguiSceneInspectorPanel {
             response.push_command(SceneInspectorCommand::SetField {
                 entity: entity.clone(),
                 component: component.clone(),
+                component_version,
                 path: field.path.clone(),
                 value: ComponentValue::Bool(value),
             });
@@ -313,6 +327,7 @@ impl EguiSceneInspectorPanel {
         key: &EguiInspectorFieldKey,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         field: &SceneInspectorFieldView,
         editing_enabled: bool,
         response: &mut EguiSceneInspectorPanelResponse,
@@ -331,6 +346,7 @@ impl EguiSceneInspectorPanel {
             match editable_set_field_command(
                 entity,
                 component,
+                component_version,
                 &field.path,
                 field.value_kind,
                 buffer_text,
@@ -561,6 +577,7 @@ fn parse_editable_value(kind: ComponentValueKind, text: &str) -> Result<Componen
 fn editable_set_field_command(
     entity: &SceneEntityId,
     component: &ComponentTypeId,
+    component_version: ComponentSchemaVersion,
     path: &ComponentFieldPath,
     kind: ComponentValueKind,
     text: &str,
@@ -568,6 +585,7 @@ fn editable_set_field_command(
     Ok(SceneInspectorCommand::SetField {
         entity: entity.clone(),
         component: component.clone(),
+        component_version,
         path: path.clone(),
         value: parse_editable_value(kind, text)?,
     })
@@ -631,11 +649,13 @@ mod tests {
     fn builds_set_field_command_for_editable_scalar_value() {
         let entity = SceneEntityId::new("player").unwrap();
         let component = ComponentTypeId::new("nara.test.Name");
+        let component_version = ComponentSchemaVersion(1);
         let path = ComponentFieldPath::from_fields(["display_name"]);
 
         let command = editable_set_field_command(
             &entity,
             &component,
+            component_version,
             &path,
             ComponentValueKind::String,
             "Hero",
@@ -647,6 +667,7 @@ mod tests {
             SceneInspectorCommand::SetField {
                 entity,
                 component,
+                component_version,
                 path,
                 value: ComponentValue::String("Hero".to_owned()),
             }

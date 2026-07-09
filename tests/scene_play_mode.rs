@@ -488,6 +488,7 @@ fn set_label_command(entity: &SceneEntityId, text: &str) -> SceneInspectorComman
     SceneInspectorCommand::SetField {
         entity: entity.clone(),
         component: label_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["text"]),
         value: ComponentValue::String(text.to_string()),
     }
@@ -497,6 +498,7 @@ fn set_label_patch(entity: &SceneEntityId, text: &str) -> ScenePatchDocument {
     ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: entity.clone(),
         component: label_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["text"]),
         value: ComponentValue::String(text.to_string()),
     }])

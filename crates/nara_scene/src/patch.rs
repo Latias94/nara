@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
-    ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
 use crate::{
@@ -12,17 +12,21 @@ use crate::{
     document::validate_scene_entity_id,
 };
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ScenePatchDocument {
+    pub format_version: u32,
     pub operations: Vec<ScenePatchOperation>,
 }
 
 impl ScenePatchDocument {
+    pub const CURRENT_FORMAT_VERSION: u32 = 1;
+
     #[must_use]
     pub fn new(operations: impl IntoIterator<Item = ScenePatchOperation>) -> Self {
         Self {
+            format_version: Self::CURRENT_FORMAT_VERSION,
             operations: operations.into_iter().collect(),
         }
     }
@@ -59,6 +63,23 @@ impl ScenePatchDocument {
         registry: &ComponentRegistry,
         mut validate: impl FnMut(&SceneDocument, &ComponentRegistry) -> DiagnosticReport,
     ) -> ScenePatchReport {
+        if self.format_version != Self::CURRENT_FORMAT_VERSION {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(Diagnostic::error(
+                "scene.patch-unsupported-format-version",
+                format!(
+                    "scene patch format version {} is unsupported; expected {}",
+                    self.format_version,
+                    Self::CURRENT_FORMAT_VERSION
+                ),
+            ));
+            return ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            };
+        }
+
         let source_validation = validate(document, registry);
         if source_validation.has_errors() {
             return ScenePatchReport {
@@ -112,6 +133,15 @@ impl ScenePatchDocument {
     }
 }
 
+impl Default for ScenePatchDocument {
+    fn default() -> Self {
+        Self {
+            format_version: Self::CURRENT_FORMAT_VERSION,
+            operations: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
@@ -147,12 +177,14 @@ pub enum ScenePatchOperation {
     SetField {
         entity: SceneEntityId,
         component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         path: ComponentFieldPath,
         value: ComponentValue,
     },
     RemoveField {
         entity: SceneEntityId,
         component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         path: ComponentFieldPath,
     },
     Reparent {
@@ -162,6 +194,7 @@ pub enum ScenePatchOperation {
     SetAssetRefField {
         entity: SceneEntityId,
         component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         path: ComponentFieldPath,
         asset_ref: AssetRef,
     },
@@ -201,6 +234,7 @@ fn apply_operation(
         ScenePatchOperation::SetField {
             entity,
             component,
+            component_version,
             path,
             value,
         } => set_field(
@@ -208,6 +242,7 @@ fn apply_operation(
             registry,
             entity,
             component,
+            component_version,
             path,
             value.clone(),
             operation_index,
@@ -215,14 +250,24 @@ fn apply_operation(
         ScenePatchOperation::RemoveField {
             entity,
             component,
+            component_version,
             path,
-        } => remove_field(document, registry, entity, component, path, operation_index),
+        } => remove_field(
+            document,
+            registry,
+            entity,
+            component,
+            component_version,
+            path,
+            operation_index,
+        ),
         ScenePatchOperation::Reparent { entity, parent } => {
             reparent_entity(document, entity, parent.as_ref(), operation_index)
         }
         ScenePatchOperation::SetAssetRefField {
             entity,
             component,
+            component_version,
             path,
             asset_ref,
         } => set_asset_ref_field(
@@ -230,6 +275,7 @@ fn apply_operation(
             registry,
             entity,
             component,
+            component_version,
             path,
             asset_ref,
             operation_index,
@@ -384,11 +430,19 @@ fn set_field(
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
+    component_version: &ComponentSchemaVersion,
     path: &ComponentFieldPath,
     value: ComponentValue,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    let field_schema = field_schema(registry, component, path, operation_index, entity)?;
+    let field_schema = field_schema(
+        registry,
+        component,
+        component_version,
+        path,
+        operation_index,
+        entity,
+    )?;
     if !field_value_matches(field_schema, &value) {
         return Err(patch_diagnostic(
             operation_index,
@@ -419,12 +473,14 @@ fn set_field(
         Some(value) => ScenePatchOperation::SetField {
             entity: entity.clone(),
             component: component.clone(),
+            component_version: *component_version,
             path: path.clone(),
             value,
         },
         None => ScenePatchOperation::RemoveField {
             entity: entity.clone(),
             component: component.clone(),
+            component_version: *component_version,
             path: path.clone(),
         },
     }])
@@ -435,10 +491,18 @@ fn remove_field(
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
+    component_version: &ComponentSchemaVersion,
     path: &ComponentFieldPath,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    let field_schema = field_schema(registry, component, path, operation_index, entity)?;
+    let field_schema = field_schema(
+        registry,
+        component,
+        component_version,
+        path,
+        operation_index,
+        entity,
+    )?;
     if field_schema.required && field_schema.default_value.is_none() {
         return Err(patch_diagnostic(
             operation_index,
@@ -465,6 +529,7 @@ fn remove_field(
     Ok(vec![ScenePatchOperation::SetField {
         entity: entity.clone(),
         component: component.clone(),
+        component_version: *component_version,
         path: path.clone(),
         value: previous,
     }])
@@ -502,11 +567,19 @@ fn set_asset_ref_field(
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
+    component_version: &ComponentSchemaVersion,
     path: &ComponentFieldPath,
     asset_ref: &AssetRef,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    let field_schema = field_schema(registry, component, path, operation_index, entity)?;
+    let field_schema = field_schema(
+        registry,
+        component,
+        component_version,
+        path,
+        operation_index,
+        entity,
+    )?;
     if field_schema.value_kind != ComponentValueKind::AssetRef {
         return Err(patch_diagnostic(
             operation_index,
@@ -522,6 +595,7 @@ fn set_asset_ref_field(
         registry,
         entity,
         component,
+        component_version,
         path,
         asset_ref_value(asset_ref),
         operation_index,
@@ -572,11 +646,12 @@ fn component_mut<'a>(
 fn field_schema<'a>(
     registry: &'a ComponentRegistry,
     component: &ComponentTypeId,
+    component_version: &ComponentSchemaVersion,
     path: &ComponentFieldPath,
     operation_index: usize,
     entity: &SceneEntityId,
 ) -> Result<&'a ComponentFieldSchema, Diagnostic> {
-    let Some(schema) = registry.schema(component) else {
+    let Some(component_schema) = registry.schema(component) else {
         return Err(patch_diagnostic(
             operation_index,
             "scene.patch-unknown-component",
@@ -586,7 +661,22 @@ fn field_schema<'a>(
             Some(path),
         ));
     };
-    schema
+
+    if component_schema.version != *component_version {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-stale-component-schema-version",
+            format!(
+                "patch targets component schema version {}; expected {}",
+                component_version.0, component_schema.version.0
+            ),
+            Some(entity),
+            Some(component),
+            Some(path),
+        ));
+    }
+
+    component_schema
         .fields
         .iter()
         .find(|field| field.path == *path)

@@ -202,6 +202,7 @@ fn prefab_instance_override_patch_applies_before_namespacing() {
     let overrides = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: scene_id("visual"),
         component: position_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["x"]),
         value: ComponentValue::I64(11),
     }]);
@@ -735,6 +736,7 @@ fn direct_prefab_spawn_applies_patch_field_overrides() {
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: id.clone(),
         component: position_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["x"]),
         value: ComponentValue::I64(9),
     }]);
@@ -796,6 +798,7 @@ fn unknown_prefab_patch_target_prevents_world_mutation() {
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: scene_id("missing"),
         component: position_type_id(),
+        component_version: ComponentSchemaVersion(1),
         path: ComponentFieldPath::from_fields(["x"]),
         value: ComponentValue::I64(9),
     }]);
@@ -918,13 +921,14 @@ fn prefab_json_rejects_unknown_fields() {
 #[cfg(feature = "serde")]
 #[test]
 fn patch_json_rejects_unknown_document_and_operation_fields() {
-    let document_error =
-        serde_json::from_str::<ScenePatchDocument>(r#"{"operations":[],"unexpected":true}"#)
-            .unwrap_err();
+    let document_error = serde_json::from_str::<ScenePatchDocument>(
+        r#"{"format_version":1,"operations":[],"unexpected":true}"#,
+    )
+    .unwrap_err();
     assert!(document_error.to_string().contains("unknown field"));
 
     let operation_error = serde_json::from_str::<ScenePatchDocument>(
-        r#"{"operations":[{"op":"remove_entity","args":{"entity":"player","unexpected":true}}]}"#,
+        r#"{"format_version":1,"operations":[{"op":"remove_entity","args":{"entity":"player","unexpected":true}}]}"#,
     )
     .unwrap_err();
     assert!(operation_error.to_string().contains("unknown field"));
