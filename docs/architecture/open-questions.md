@@ -228,13 +228,21 @@ Resolved in the Play Mode core slice:
   apply-back when the source revision still matches and revision mismatch when the authoring
   document changed after Play started.
 
+Resolved in the first debug UI adapter slice:
+
+- Early debug/editor UI uses egui first through `nara_tooling_egui`.
+- `nara_tooling_egui` renders UI-agnostic `SceneEditorModel` and `SceneInspectorModel` values and
+  returns explicit editor actions plus `SceneInspectorCommand` values. It does not own scene
+  mutation, ECS storage, windowing, or GPU resources.
+- dear-imgui-rs remains an acceptable later adapter, and runtime UI remains nara-owned ECS UI
+  rather than egui/dear-imgui.
+
 Follow-up details still to settle:
 
-1. Does debug UI use egui first or dear-imgui-rs first?
-2. What minimum runtime UI is required before editor dogfooding?
-3. Which accepted patch operations need specialized incremental `WorldCommand` paths before
+1. What minimum runtime UI is required before editor dogfooding?
+2. Which accepted patch operations need specialized incremental `WorldCommand` paths before
    rebuild-style projection is too expensive?
-4. What is the first supported Apply Changes subset for Play Mode: selected entity fields,
+3. What is the first supported Apply Changes subset for Play Mode: selected entity fields,
    selected component, or whole scene diff?
 
 ## Backend and Domain Extension Seams

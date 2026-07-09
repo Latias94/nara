@@ -25,6 +25,7 @@ members = [
     "crates/nara_sprite_render",
     "crates/nara_tilemap",
     "crates/nara_tooling",
+    "crates/nara_tooling_egui",
     "crates/nara_transform",
     "crates/nara_window",
     "crates/nara_winit",
@@ -53,6 +54,7 @@ nara_sprite = { path = "crates/nara_sprite" }
 nara_sprite_render = { path = "crates/nara_sprite_render" }
 nara_tilemap = { path = "crates/nara_tilemap" }
 nara_tooling = { path = "crates/nara_tooling" }
+nara_tooling_egui = { path = "crates/nara_tooling_egui" }
 nara_transform = { path = "crates/nara_transform" }
 nara_window = { path = "crates/nara_window" }
 nara_winit = { path = "crates/nara_winit" }
@@ -61,6 +63,7 @@ bevy_ecs = "0.19"
 bevy_reflect = { version = "0.19", features = ["glam"] }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
+egui = "0.35.0"
 glam = { version = "0.30", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 raw-window-handle = "0.6"
@@ -91,6 +94,7 @@ nara_sprite.workspace = true
 nara_sprite_render.workspace = true
 nara_tilemap.workspace = true
 nara_tooling.workspace = true
+nara_tooling_egui = { workspace = true, optional = true }
 nara_transform.workspace = true
 nara_window.workspace = true
 nara_winit = { workspace = true, optional = true }
@@ -119,6 +123,7 @@ serde = [
 ]
 winit = ["dep:nara_winit"]
 wgpu = ["dep:nara_render_wgpu"]
+egui = ["dep:nara_tooling_egui"]
 
 [[example]]
 name = "windowed_clear"

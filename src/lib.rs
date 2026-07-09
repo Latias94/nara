@@ -17,6 +17,8 @@ pub use nara_sprite as sprite;
 pub use nara_sprite_render as sprite_render;
 pub use nara_tilemap as tilemap;
 pub use nara_tooling as tooling;
+#[cfg(feature = "egui")]
+pub use nara_tooling_egui as tooling_egui;
 pub use nara_transform as transform;
 pub use nara_window as window;
 #[cfg(feature = "winit")]
@@ -132,6 +134,11 @@ pub mod prelude {
         SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
         SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, ScenePlaySession,
         ScenePlayTransitionReport, ToolingPlugin, WorldSnapshot,
+    };
+    #[cfg(feature = "egui")]
+    pub use nara_tooling_egui::{
+        EguiSceneEditorAction, EguiSceneEditorPanel, EguiSceneEditorPanelResponse,
+        EguiSceneInspectorPanel, EguiSceneInspectorPanelResponse,
     };
     pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
     pub use nara_window::{
