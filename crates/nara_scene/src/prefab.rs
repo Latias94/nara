@@ -6,6 +6,7 @@ use crate::{SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument}
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PrefabDocument {
     pub format_version: u32,
     pub entities: Vec<SceneEntityRecord>,
@@ -137,6 +138,7 @@ impl PrefabInstantiationReport {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PrefabInstance {
     pub source: AssetRef,
     #[cfg_attr(feature = "serde", serde(default))]

@@ -59,6 +59,7 @@ impl<'de> serde::Deserialize<'de> for SceneEntityId {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneDocument {
     pub format_version: u32,
     pub entities: Vec<SceneEntityRecord>,
@@ -121,6 +122,7 @@ impl Default for SceneDocument {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneEntityRecord {
     pub id: SceneEntityId,
     #[cfg_attr(
@@ -167,6 +169,7 @@ impl SceneEntityRecord {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneComponentRecord {
     pub version: ComponentSchemaVersion,
     pub value: ComponentValue,

@@ -89,7 +89,7 @@ pub fn export_scene_with_options(
                 }
                 Ok(None) => {}
                 Err(error) => diagnostics.push(
-                    Diagnostic::warning("scene.export-component-failed", error.to_string())
+                    Diagnostic::error("scene.export-component-failed", error.to_string())
                         .with_entity_id(id.as_str())
                         .with_component_id(schema.id.as_str()),
                 ),

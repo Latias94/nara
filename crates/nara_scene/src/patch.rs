@@ -14,6 +14,7 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct ScenePatchDocument {
     pub operations: Vec<ScenePatchOperation>,
 }
@@ -115,7 +116,12 @@ impl ScenePatchDocument {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "serde",
-    serde(tag = "op", content = "args", rename_all = "snake_case")
+    serde(
+        tag = "op",
+        content = "args",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )
 )]
 pub enum ScenePatchOperation {
     AddEntity {

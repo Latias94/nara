@@ -22,6 +22,9 @@ struct TestAssetLink {
     handle: Handle<TestAsset>,
 }
 
+#[derive(Clone, Debug, PartialEq, Component)]
+struct TestBrokenExport;
+
 #[derive(Debug)]
 struct TestAsset;
 
@@ -769,6 +772,35 @@ fn export_drops_parent_that_is_not_in_document() {
     );
 }
 
+#[test]
+fn export_component_encode_failure_is_an_error() {
+    let registry = broken_export_registry();
+    let mut world = World::new();
+    world.spawn((
+        SceneEntitySource {
+            instance_id: SceneInstanceId::from_raw(1),
+            entity_id: scene_id("broken"),
+        },
+        TestBrokenExport,
+    ));
+
+    let export = export_scene(&world, &registry);
+
+    assert!(export.diagnostics.has_errors());
+    assert!(
+        export
+            .diagnostics
+            .diagnostics()
+            .iter()
+            .any(
+                |diagnostic| diagnostic.code.as_str() == "scene.export-component-failed"
+                    && diagnostic.context.entity_id.as_deref() == Some("broken")
+                    && diagnostic.context.component_id.as_deref()
+                        == Some(broken_export_type_id().as_str())
+            )
+    );
+}
+
 #[cfg(feature = "serde")]
 #[test]
 fn scene_entity_id_deserialization_validates_shape() {
@@ -778,6 +810,52 @@ fn scene_entity_id_deserialization_validates_shape() {
     .unwrap_err();
 
     assert!(error.to_string().contains(".."));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn scene_json_rejects_unknown_document_entity_and_component_fields() {
+    let document_error =
+        SceneDocument::from_json_str(r#"{"format_version":1,"entities":[],"unexpected":true}"#)
+            .unwrap_err();
+    assert!(document_error.to_string().contains("unknown field"));
+
+    let entity_error = SceneDocument::from_json_str(
+        r#"{"format_version":1,"entities":[{"id":"player","components":{},"unexpected":true}]}"#,
+    )
+    .unwrap_err();
+    assert!(entity_error.to_string().contains("unknown field"));
+
+    let component_error = SceneDocument::from_json_str(
+        r#"{"format_version":1,"entities":[{"id":"player","components":{"nara.test.Position":{"version":1,"value":{"type":"null"},"unexpected":true}}}]}"#,
+    )
+    .unwrap_err();
+    assert!(component_error.to_string().contains("unknown field"));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn prefab_json_rejects_unknown_fields() {
+    let prefab_error =
+        PrefabDocument::from_json_str(r#"{"format_version":1,"entities":[],"unexpected":true}"#)
+            .unwrap_err();
+
+    assert!(prefab_error.to_string().contains("unknown field"));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn patch_json_rejects_unknown_document_and_operation_fields() {
+    let document_error =
+        serde_json::from_str::<ScenePatchDocument>(r#"{"operations":[],"unexpected":true}"#)
+            .unwrap_err();
+    assert!(document_error.to_string().contains("unknown field"));
+
+    let operation_error = serde_json::from_str::<ScenePatchDocument>(
+        r#"{"operations":[{"op":"remove_entity","args":{"entity":"player","unexpected":true}}]}"#,
+    )
+    .unwrap_err();
+    assert!(operation_error.to_string().contains("unknown field"));
 }
 
 #[test]
@@ -933,6 +1011,27 @@ fn test_asset_registry() -> ComponentRegistry {
     registry
 }
 
+fn broken_export_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_component_codec_with_context::<TestBrokenExport, _, _>(
+            broken_export_type_id(),
+            ComponentSchemaVersion(1),
+            |_value, _context| {
+                Ok(PreparedComponent::new(|world, entity| {
+                    let mut entity_mut = world
+                        .get_entity_mut(entity)
+                        .map_err(|_| ComponentCodecError::EntityMissing)?;
+                    entity_mut.insert(TestBrokenExport);
+                    Ok(())
+                }))
+            },
+            |_world, _entity, _context| Err(ComponentCodecError::invalid_field("broken", "boom")),
+        )
+        .unwrap();
+    registry
+}
+
 enum PreparedTestAsset {
     Resolved(Handle<TestAsset>),
     Deferred(AssetRef),
@@ -1047,6 +1146,10 @@ fn prefab_anchor_with_overrides(
 
 fn asset_link_type_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.test.AssetLink")
+}
+
+fn broken_export_type_id() -> ComponentTypeId {
+    ComponentTypeId::new("nara.test.BrokenExport")
 }
 
 fn position_type_id() -> ComponentTypeId {
