@@ -1528,6 +1528,7 @@ dependencies = [
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_gameplay",
  "nara_image",
  "nara_input",
  "nara_material",
@@ -1621,6 +1622,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara_gameplay"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_app",
+ "nara_ecs",
+ "nara_input",
+ "serde",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "nara_image"
 version = "0.1.0"
 dependencies = [
@@ -1642,6 +1656,7 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "serde",
 ]
 
 [[package]]

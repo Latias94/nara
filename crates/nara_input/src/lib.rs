@@ -9,9 +9,18 @@ use std::{
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_core::Vec2;
-use nara_ecs::{Res, ResMut, Resource};
+use nara_ecs::{
+    Res, ResMut, Resource,
+    schedule::{IntoScheduleConfigs, SystemSet},
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
+pub enum InputSet {
+    ResolveActions,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum KeyCode {
     Escape,
     Space,
@@ -24,6 +33,7 @@ pub enum KeyCode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MouseButton {
     Left,
     Right,
@@ -108,6 +118,7 @@ impl PointerState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionId(String);
 
 impl ActionId {
@@ -149,6 +160,7 @@ impl Display for ActionIdError {
 impl Error for ActionIdError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionContext(String);
 
 impl Default for ActionContext {
@@ -182,12 +194,14 @@ impl Display for ActionContext {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum InputBinding {
     Key(KeyCode),
     Mouse(MouseButton),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionBinding {
     pub action: ActionId,
     pub input: InputBinding,
@@ -221,6 +235,7 @@ impl ActionBinding {
 }
 
 #[derive(Debug, Default, Clone, Resource)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionMap {
     bindings: Vec<ActionBinding>,
     disabled_contexts: HashSet<ActionContext>,
@@ -259,12 +274,14 @@ impl ActionMap {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ActionPhase {
     Started,
     Released,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionValue {
     pub digital: bool,
 }
@@ -282,6 +299,7 @@ impl ActionValue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionOutcome {
     pub action: ActionId,
     pub context: ActionContext,
@@ -291,6 +309,7 @@ pub struct ActionOutcome {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Resource)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionOutcomes {
     outcomes: Vec<ActionOutcome>,
 }
@@ -332,7 +351,10 @@ impl Plugin for InputPlugin {
             .insert_resource(ActionMap::default())
             .insert_resource(ActionOutcomes::default())
             .insert_resource(PointerState::default())
-            .add_systems(CoreStage::PreUpdate, resolve_action_outcomes)
+            .add_systems(
+                CoreStage::PreUpdate,
+                resolve_action_outcomes.in_set(InputSet::ResolveActions),
+            )
             .add_systems(CoreStage::Last, clear_input_transitions);
         Ok(())
     }

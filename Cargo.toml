@@ -18,6 +18,7 @@ members = [
     "crates/nara_ecs",
     "crates/nara_image",
     "crates/nara_input",
+    "crates/nara_gameplay",
     "crates/nara_material",
     "crates/nara_project",
     "crates/nara_reflect",
@@ -53,6 +54,7 @@ nara_diagnostic = { path = "crates/nara_diagnostic" }
 nara_ecs = { path = "crates/nara_ecs" }
 nara_image = { path = "crates/nara_image" }
 nara_input = { path = "crates/nara_input" }
+nara_gameplay = { path = "crates/nara_gameplay" }
 nara_material = { path = "crates/nara_material" }
 nara_project = { path = "crates/nara_project" }
 nara_reflect = { path = "crates/nara_reflect" }
@@ -101,6 +103,7 @@ nara_diagnostic.workspace = true
 nara_ecs.workspace = true
 nara_image.workspace = true
 nara_input.workspace = true
+nara_gameplay.workspace = true
 nara_material.workspace = true
 nara_project.workspace = true
 nara_reflect.workspace = true
@@ -133,6 +136,8 @@ serde = [
     "nara_diagnostic/serde",
     "nara_ecs/serde",
     "nara_image/serde",
+    "nara_input/serde",
+    "nara_gameplay/serde",
     "nara_material/serde",
     "nara_reflect/serde",
     "nara_transform/serde",

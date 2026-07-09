@@ -8,6 +8,7 @@ pub use nara_audio as audio;
 pub use nara_core as core;
 pub use nara_diagnostic as diagnostic;
 pub use nara_ecs as ecs;
+pub use nara_gameplay as gameplay;
 pub use nara_image as image;
 pub use nara_input as input;
 pub use nara_material as material;
@@ -230,6 +231,13 @@ pub mod prelude {
         RuntimeDiagnosticFilter, RuntimeDiagnostics, RuntimeDiagnosticsSettings,
     };
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
+    pub use nara_gameplay::{
+        ActionCommandBinding, ActionCommandMap, GameplayCommandEnvelope, GameplayCommandIdError,
+        GameplayCommandPayload, GameplayCommandPayloadError, GameplayCommandPlugin,
+        GameplayCommandQueue, GameplayCommandSet, GameplayCommandSource, GameplayCommandTarget,
+        GameplayCommandTime, GameplayCommandTypeId, GameplayCommandValue, PersistentRuntimeId,
+        SceneStableId,
+    };
     pub use nara_image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin, ImageSourceMetadata,
     };
