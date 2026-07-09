@@ -8,7 +8,7 @@ use std::{
 
 use nara_ecs::{
     Resource, World,
-    schedule::{IntoScheduleConfigs, Schedule, ScheduleLabel},
+    schedule::{InternedSystemSet, IntoScheduleConfigs, Schedule, ScheduleLabel, SystemSet},
     system::ScheduleSystem,
 };
 use thiserror::Error;
@@ -35,6 +35,7 @@ impl StartupStage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ScheduleLabel)]
 pub enum CoreStage {
     First,
+    TaskUpdate,
     PreUpdate,
     FixedUpdate,
     Update,
@@ -49,8 +50,9 @@ pub enum CoreStage {
 }
 
 impl CoreStage {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::First,
+        Self::TaskUpdate,
         Self::PreUpdate,
         Self::FixedUpdate,
         Self::Update,
@@ -63,6 +65,14 @@ impl CoreStage {
         Self::Cleanup,
         Self::Last,
     ];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
+pub enum TaskUpdateSet {
+    Poll,
+    CoalesceAssetChanges,
+    SpawnAssetJobs,
+    ApplyAssetResults,
 }
 
 pub trait Plugin: Send + Sync + 'static {
@@ -103,6 +113,11 @@ pub enum PluginError {
     MissingPrerequisite {
         plugin: &'static str,
         prerequisite: &'static str,
+    },
+    #[error("plugin {plugin} failed to initialize: {message}")]
+    SetupFailed {
+        plugin: &'static str,
+        message: String,
     },
 }
 
@@ -332,6 +347,15 @@ impl App {
         self
     }
 
+    pub fn configure_sets<M>(
+        &mut self,
+        stage: CoreStage,
+        sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
+    ) -> &mut Self {
+        self.schedule_mut(stage).configure_sets(sets);
+        self
+    }
+
     pub fn set_runner(
         &mut self,
         runner: impl FnOnce(App) -> Result<AppExit, AppRunError> + 'static,
@@ -525,6 +549,10 @@ mod tests {
         order.0.push("first");
     }
 
+    fn push_task_update(mut order: ResMut<Order>) {
+        order.0.push("task_update");
+    }
+
     fn push_pre_update(mut order: ResMut<Order>) {
         order.0.push("pre_update");
     }
@@ -563,6 +591,22 @@ mod tests {
 
     fn push_last(mut order: ResMut<Order>) {
         order.0.push("last");
+    }
+
+    fn push_task_poll(mut order: ResMut<Order>) {
+        order.0.push("task_poll");
+    }
+
+    fn push_task_coalesce(mut order: ResMut<Order>) {
+        order.0.push("task_coalesce");
+    }
+
+    fn push_task_spawn(mut order: ResMut<Order>) {
+        order.0.push("task_spawn");
+    }
+
+    fn push_task_apply(mut order: ResMut<Order>) {
+        order.0.push("task_apply");
     }
 
     #[test]
@@ -634,6 +678,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(Order::default())
             .add_systems(CoreStage::First, push_first)
+            .add_systems(CoreStage::TaskUpdate, push_task_update)
             .add_systems(CoreStage::PreUpdate, push_pre_update)
             .add_systems(CoreStage::FixedUpdate, push_fixed_update)
             .add_systems(CoreStage::Update, push_update);
@@ -642,7 +687,52 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<Order>().0,
-            ["first", "pre_update", "fixed_update", "update"]
+            [
+                "first",
+                "task_update",
+                "pre_update",
+                "fixed_update",
+                "update"
+            ]
+        );
+    }
+
+    #[test]
+    fn task_update_sets_run_in_order() {
+        let mut app = App::new();
+        app.insert_resource(Order::default())
+            .configure_sets(
+                CoreStage::TaskUpdate,
+                (
+                    TaskUpdateSet::Poll,
+                    TaskUpdateSet::CoalesceAssetChanges,
+                    TaskUpdateSet::SpawnAssetJobs,
+                    TaskUpdateSet::ApplyAssetResults,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                CoreStage::TaskUpdate,
+                push_task_apply.in_set(TaskUpdateSet::ApplyAssetResults),
+            )
+            .add_systems(
+                CoreStage::TaskUpdate,
+                push_task_spawn.in_set(TaskUpdateSet::SpawnAssetJobs),
+            )
+            .add_systems(
+                CoreStage::TaskUpdate,
+                push_task_poll.in_set(TaskUpdateSet::Poll),
+            )
+            .add_systems(
+                CoreStage::TaskUpdate,
+                push_task_coalesce.in_set(TaskUpdateSet::CoalesceAssetChanges),
+            );
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(
+            app.world().resource::<Order>().0,
+            ["task_poll", "task_coalesce", "task_spawn", "task_apply"]
         );
     }
 

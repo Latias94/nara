@@ -15,6 +15,7 @@ pub use nara_render_wgpu as render_wgpu;
 pub use nara_scene as scene;
 pub use nara_sprite as sprite;
 pub use nara_sprite_render as sprite_render;
+pub use nara_tasks as tasks;
 pub use nara_tilemap as tilemap;
 pub use nara_tooling as tooling;
 #[cfg(feature = "egui")]
@@ -36,6 +37,7 @@ pub struct MinimalPlugins;
 impl Plugin for MinimalPlugins {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
+        app.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
         app.add_plugin_if_missing(nara_transform::TransformPlugin)?;
         app.add_plugin_if_missing(nara_input::InputPlugin)?;
         app.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
@@ -50,7 +52,8 @@ impl Plugin for MinimalPlugins {
 pub mod prelude {
     pub use crate::MinimalPlugins;
     pub use nara_app::{
-        App, AppExit, AppRunError, CoreStage, FixedTime, Plugin, PluginError, StartupStage, Time,
+        App, AppExit, AppRunError, CoreStage, FixedTime, Plugin, PluginError, StartupStage,
+        TaskUpdateSet, Time,
     };
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, Asset, AssetDatabaseError, AssetDependencyGraph,
@@ -117,6 +120,10 @@ pub mod prelude {
         ExtractedSprite, ExtractedSpriteKind, ExtractedSprites, QueuedSpriteItem,
         QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance, SpriteRenderPlugin,
         SpriteRenderStats, TextureUvRect,
+    };
+    pub use nara_tasks::{
+        TaskCancellationToken, TaskExecutionMode, TaskHandle, TaskId, TaskPlugin, TaskPoolConfig,
+        TaskPoolKind, TaskPoolStats, TaskPools, TaskResult, TaskResultState, TaskStats,
     };
     pub use nara_tilemap::{
         DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileAtlasLayout, TileAtlasRegion,

@@ -1,0 +1,14 @@
+[package]
+name = "nara_tasks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+bevy_ecs.workspace = true
+nara_app.workspace = true
+nara_ecs.workspace = true
+
+[features]
+default = []

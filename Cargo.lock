@@ -1474,6 +1474,7 @@ dependencies = [
  "nara_scene",
  "nara_sprite",
  "nara_sprite_render",
+ "nara_tasks",
  "nara_tilemap",
  "nara_tooling",
  "nara_tooling_egui",
@@ -1650,6 +1651,15 @@ dependencies = [
  "nara_sprite",
  "nara_tilemap",
  "nara_transform",
+]
+
+[[package]]
+name = "nara_tasks"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_app",
+ "nara_ecs",
 ]
 
 [[package]]
