@@ -40,6 +40,7 @@ const TASK_PLUGIN_ID: PluginId = PluginId::new("nara.tasks");
 const ASSET_PLUGIN_ID: PluginId = PluginId::new("nara.asset");
 const TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.transform");
 const INPUT_PLUGIN_ID: PluginId = PluginId::new("nara.input");
+const GAMEPLAY_COMMAND_PLUGIN_ID: PluginId = PluginId::new("nara.gameplay.commands");
 const SPRITE_PLUGIN_ID: PluginId = PluginId::new("nara.sprite");
 const TILEMAP_PLUGIN_ID: PluginId = PluginId::new("nara.tilemap");
 const RENDER_PLUGIN_ID: PluginId = PluginId::new("nara.render");
@@ -61,6 +62,25 @@ const MINIMAL_PLUGIN_IDS: &[PluginId] = &[
     ASSET_PLUGIN_ID,
     TRANSFORM_PLUGIN_ID,
     INPUT_PLUGIN_ID,
+];
+
+const HEADLESS_RUNTIME_PLUGIN_IDS: &[PluginId] = &[
+    HIERARCHY_PLUGIN_ID,
+    DIAGNOSTIC_PLUGIN_ID,
+    TASK_PLUGIN_ID,
+    ASSET_PLUGIN_ID,
+    TRANSFORM_PLUGIN_ID,
+    INPUT_PLUGIN_ID,
+    GAMEPLAY_COMMAND_PLUGIN_ID,
+];
+
+const SERVER_PLUGIN_IDS: &[PluginId] = &[
+    HIERARCHY_PLUGIN_ID,
+    DIAGNOSTIC_PLUGIN_ID,
+    TASK_PLUGIN_ID,
+    ASSET_PLUGIN_ID,
+    TRANSFORM_PLUGIN_ID,
+    GAMEPLAY_COMMAND_PLUGIN_ID,
 ];
 
 const RUNTIME_2D_PLUGIN_IDS: &[PluginId] = &[
@@ -123,6 +143,52 @@ impl PluginGroup for MinimalPlugins {
         app.add_plugin_if_missing(nara_asset::AssetPlugin)?;
         app.add_plugin_if_missing(nara_transform::TransformPlugin)?;
         app.add_plugin_if_missing(nara_input::InputPlugin)?;
+        Ok(())
+    }
+}
+
+/// Headless runtime defaults for tests, AI drivers, and non-windowed game logic.
+///
+/// This group keeps low-level input observations available for local drivers,
+/// but adds semantic gameplay command resources so gameplay systems can consume
+/// commands instead of raw keyboard or pointer state.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HeadlessRuntimePlugins;
+
+impl PluginGroup for HeadlessRuntimePlugins {
+    fn metadata(&self) -> PluginGroupMetadata {
+        PluginGroupMetadata::new(
+            PluginGroupId::new("nara.plugins.headless-runtime"),
+            HEADLESS_RUNTIME_PLUGIN_IDS,
+        )
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_plugins(MinimalPlugins)?;
+        app.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
+        Ok(())
+    }
+}
+
+/// Dedicated-server-ready defaults without desktop, render, editor, audio, or raw input plugins.
+///
+/// Networking is intentionally not included. Server producers should write
+/// semantic commands into `GameplayCommandQueue`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ServerPlugins;
+
+impl PluginGroup for ServerPlugins {
+    fn metadata(&self) -> PluginGroupMetadata {
+        PluginGroupMetadata::new(PluginGroupId::new("nara.plugins.server"), SERVER_PLUGIN_IDS)
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
+        app.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
+        app.add_plugin_if_missing(nara_tasks::TaskPlugin::deterministic())?;
+        app.add_plugin_if_missing(nara_asset::AssetPlugin)?;
+        app.add_plugin_if_missing(nara_transform::TransformPlugin)?;
+        app.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
         Ok(())
     }
 }
@@ -210,10 +276,41 @@ impl PluginGroup for ToolingPlugins {
     }
 }
 
+pub fn add_project_plugin_plan(
+    app: &mut App,
+    plan: nara_project::ProjectPluginPlan,
+) -> Result<&mut App, PluginError> {
+    match plan {
+        nara_project::ProjectPluginPlan::Minimal => app.add_plugins(MinimalPlugins),
+        nara_project::ProjectPluginPlan::HeadlessRuntime => app.add_plugins(HeadlessRuntimePlugins),
+        nara_project::ProjectPluginPlan::Server => app.add_plugins(ServerPlugins),
+        nara_project::ProjectPluginPlan::Runtime2d => app.add_plugins(Runtime2dPlugins),
+        nara_project::ProjectPluginPlan::DesktopWindow => app.add_plugins(DesktopWindowPlugins),
+        nara_project::ProjectPluginPlan::DesktopWgpu => add_desktop_wgpu_plugin_plan(app),
+        nara_project::ProjectPluginPlan::Tooling => app.add_plugins(ToolingPlugins),
+    }
+}
+
+#[cfg(feature = "wgpu")]
+fn add_desktop_wgpu_plugin_plan(app: &mut App) -> Result<&mut App, PluginError> {
+    app.add_plugins(DesktopWgpuPlugins)
+}
+
+#[cfg(not(feature = "wgpu"))]
+fn add_desktop_wgpu_plugin_plan(_app: &mut App) -> Result<&mut App, PluginError> {
+    Err(PluginError::SetupFailed {
+        plugin: PluginId::new("nara.project.plugin-plan"),
+        message: "desktop-wgpu project plugin plan requires the 'wgpu' feature".to_owned(),
+    })
+}
+
 pub mod prelude {
     #[cfg(feature = "wgpu")]
     pub use crate::DesktopWgpuPlugins;
-    pub use crate::{DesktopWindowPlugins, MinimalPlugins, Runtime2dPlugins};
+    pub use crate::{
+        DesktopWindowPlugins, HeadlessRuntimePlugins, MinimalPlugins, Runtime2dPlugins,
+        ServerPlugins, add_project_plugin_plan,
+    };
     pub use nara_app::{
         App, AppExit, AppExitRequests, AppFrameOutcome, AppRunError, CoreStage, FixedTime, Plugin,
         PluginError, PluginGroup, RealTime, RenderTime, RuntimeFrameStatus, RuntimeTimeSettings,
@@ -428,5 +525,90 @@ mod tests {
                 .contains_resource::<nara_sprite_render::SpriteBatches>()
         );
         assert!(app.world().contains_resource::<nara_ui_render::UiBatches>());
+    }
+
+    #[test]
+    fn headless_runtime_plugins_install_command_resources() {
+        let mut app = App::new();
+
+        app.add_plugins(HeadlessRuntimePlugins).unwrap();
+
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<nara_gameplay::GameplayCommandQueue>()
+        );
+        assert!(app.world().contains_resource::<nara_input::PointerState>());
+        assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
+        assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
+    }
+
+    #[test]
+    fn server_plugins_install_command_runtime_without_desktop_or_raw_input() {
+        let mut app = App::new();
+
+        app.add_plugins(ServerPlugins).unwrap();
+
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<nara_gameplay::GameplayCommandQueue>()
+        );
+        assert!(app.world().contains_resource::<nara_asset::AssetServer>());
+        assert_eq!(
+            app.world()
+                .resource::<nara_tasks::TaskPools>()
+                .config()
+                .execution_mode(),
+            nara_tasks::TaskExecutionMode::Deterministic
+        );
+        assert!(!app.world().contains_resource::<nara_input::PointerState>());
+        assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
+        assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
+        assert!(
+            !app.world()
+                .contains_resource::<nara_tooling::EditorWorkspace>()
+        );
+    }
+
+    #[test]
+    fn server_plugins_preserve_explicit_task_plugin_configuration() {
+        let mut app = App::new();
+        app.add_plugin(nara_tasks::TaskPlugin::new(
+            nara_tasks::TaskPoolConfig::threaded(1, 1, 1),
+        ))
+        .unwrap();
+
+        app.add_plugins(ServerPlugins).unwrap();
+
+        assert_eq!(
+            app.world()
+                .resource::<nara_tasks::TaskPools>()
+                .config()
+                .execution_mode(),
+            nara_tasks::TaskExecutionMode::Threaded
+        );
+    }
+
+    #[test]
+    fn project_plugin_plan_server_maps_to_server_plugins() {
+        let mut app = App::new();
+
+        add_project_plugin_plan(&mut app, nara_project::ProjectPluginPlan::Server).unwrap();
+
+        assert!(
+            app.installed_plugin_groups()
+                .any(|group| group.id == PluginGroupId::new("nara.plugins.server"))
+        );
+        assert!(
+            app.world()
+                .contains_resource::<nara_gameplay::GameplayCommandQueue>()
+        );
     }
 }
