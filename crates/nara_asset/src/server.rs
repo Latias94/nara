@@ -118,16 +118,24 @@ impl AssetServer {
 
     pub fn reserve<T>(&mut self, path: impl Into<String>) -> Result<Handle<T>, AssetError> {
         let path = AssetPath::new(path.into()).map_err(AssetError::InvalidPath)?;
+        self.reserve_path_id(path).map(Handle::new)
+    }
+
+    pub fn reserve_path_id(&mut self, path: AssetPath) -> Result<AssetId, AssetError> {
         if let Some(id) = self.paths.get(&path).copied() {
-            return Ok(Handle::new(id));
+            return Ok(id);
         }
 
         let id = self.allocate_id()?;
         self.bind_path(id, path)?;
-        Ok(Handle::new(id))
+        Ok(id)
     }
 
     pub fn reserve_record<T>(&mut self, record: &AssetRecord) -> Result<Handle<T>, AssetError> {
+        self.reserve_record_id(record).map(Handle::new)
+    }
+
+    pub fn reserve_record_id(&mut self, record: &AssetRecord) -> Result<AssetId, AssetError> {
         let path_id = self.paths.get(record.path()).copied();
         let stable_id = self.stable_ids.get(&record.stable_id()).copied();
 
@@ -144,7 +152,7 @@ impl AssetServer {
 
         self.bind_path(id, record.path().clone())?;
         self.bind_stable_id(id, record.stable_id())?;
-        Ok(Handle::new(id))
+        Ok(id)
     }
 
     pub fn reserve_anonymous<T>(&mut self) -> Result<Handle<T>, AssetError> {

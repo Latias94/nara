@@ -5,6 +5,8 @@ use std::{
     path::{Component, Path},
 };
 
+use nara_ecs::Resource;
+
 use crate::{AssetPath, AssetRef, StableAssetId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,7 +179,7 @@ impl Display for AssetDatabaseError {
 
 impl Error for AssetDatabaseError {}
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
 pub struct ProjectAssetDatabase {
     by_path: BTreeMap<AssetPath, AssetRecord>,
     by_stable_id: BTreeMap<StableAssetId, AssetPath>,

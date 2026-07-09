@@ -1500,7 +1500,9 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "blake3",
+ "nara_app",
  "nara_ecs",
+ "nara_tasks",
  "serde",
  "serde_json",
  "uuid",
@@ -1549,6 +1551,7 @@ dependencies = [
  "nara_asset",
  "nara_ecs",
  "nara_render",
+ "nara_tasks",
  "serde",
 ]
 

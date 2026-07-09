@@ -8,7 +8,9 @@ license.workspace = true
 [dependencies]
 bevy_ecs.workspace = true
 blake3.workspace = true
+nara_app.workspace = true
 nara_ecs.workspace = true
+nara_tasks.workspace = true
 serde = { workspace = true, optional = true }
 uuid.workspace = true
 

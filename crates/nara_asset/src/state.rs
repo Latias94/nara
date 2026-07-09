@@ -167,6 +167,21 @@ impl AssetStates {
             .insert(id, AssetState::new(version, LoadState::Removed, None, None));
     }
 
+    pub fn set_loading(&mut self, id: AssetId) -> AssetVersion {
+        let current = self.state(id).cloned().unwrap_or_default();
+        let version = current.version();
+        self.states.insert(
+            id,
+            AssetState::new(
+                version,
+                LoadState::Loading,
+                current.source_hash(),
+                current.import_hash(),
+            ),
+        );
+        version
+    }
+
     pub(crate) fn set_failed(
         &mut self,
         id: AssetId,
@@ -244,6 +259,7 @@ pub enum AssetEventKind {
     Added,
     Modified,
     Removed,
+    LoadFailed,
     ReloadFailed,
 }
 
@@ -315,6 +331,7 @@ impl AssetEvents {
 pub struct AssetDependencyGraph {
     source_to_artifacts: BTreeMap<StableAssetId, BTreeSet<ImportArtifactDigest>>,
     artifact_to_sources: BTreeMap<ImportArtifactDigest, BTreeSet<StableAssetId>>,
+    source_to_dependents: BTreeMap<StableAssetId, BTreeSet<StableAssetId>>,
 }
 
 impl AssetDependencyGraph {
@@ -380,6 +397,32 @@ impl AssetDependencyGraph {
     #[must_use]
     pub fn affected_artifacts(&self, source: StableAssetId) -> Vec<ImportArtifactDigest> {
         self.artifacts_for_source(source).collect()
+    }
+
+    pub fn add_source_dependency(&mut self, source: StableAssetId, dependent: StableAssetId) {
+        self.source_to_dependents
+            .entry(source)
+            .or_default()
+            .insert(dependent);
+    }
+
+    pub fn remove_source_dependency(&mut self, source: StableAssetId, dependent: StableAssetId) {
+        if let Some(dependents) = self.source_to_dependents.get_mut(&source) {
+            dependents.remove(&dependent);
+            if dependents.is_empty() {
+                self.source_to_dependents.remove(&source);
+            }
+        }
+    }
+
+    pub fn dependents_for_source(
+        &self,
+        source: StableAssetId,
+    ) -> impl Iterator<Item = StableAssetId> + '_ {
+        self.source_to_dependents
+            .get(&source)
+            .into_iter()
+            .flat_map(|dependents| dependents.iter().copied())
     }
 }
 

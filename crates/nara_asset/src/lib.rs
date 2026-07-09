@@ -4,6 +4,7 @@ mod artifact;
 mod database;
 mod identity;
 mod import;
+mod reload;
 mod server;
 mod state;
 mod storage;
@@ -28,8 +29,15 @@ pub use identity::{
     AssetId, AssetPath, AssetPathError, AssetRef, StableAssetId, StableAssetIdError,
 };
 pub use import::{
-    ImportError, ImportRequest, Importer, ImporterDescriptor, ImporterDescriptorError,
-    ImporterRegistry, ImporterRegistryError, ImporterSelectionError, SourceExtension,
+    ImportError, ImportJobInput, ImportRequest, ImportedAsset, Importer, ImporterDescriptor,
+    ImporterDescriptorError, ImporterRegistry, ImporterRegistryError, ImporterSelectionError,
+    SourceExtension, TypedImporter,
+};
+pub use reload::{
+    AssetLoadGeneration, AssetLoadGenerations, AssetPlugin, AssetReloadRequest,
+    AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequests, AssetSourceChange,
+    AssetSourceChangeKind, AssetSourceChanges, AssetSourceRoot, SourceChangeResolver,
+    UnresolvedAssetSourceChange,
 };
 pub use server::{AssetError, AssetServer};
 pub use state::{

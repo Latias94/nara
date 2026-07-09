@@ -1,0 +1,693 @@
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
+
+use nara_app::{App, CoreStage, Plugin, PluginError, TaskUpdateSet};
+use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_tasks::TaskPlugin;
+
+use crate::{
+    AssetDatabaseError, AssetDependencyGraph, AssetError, AssetId, AssetPath, AssetRecord,
+    AssetServer, AssetSourceKind, AssetStates, AssetVersion, ImportArtifactDigest,
+    ProjectAssetDatabase, StableAssetId,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq, Resource)]
+pub struct AssetSourceRoot {
+    root: PathBuf,
+}
+
+impl AssetSourceRoot {
+    #[must_use]
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    #[must_use]
+    pub fn source_path(&self, path: &AssetPath) -> PathBuf {
+        path.as_str()
+            .split('/')
+            .fold(self.root.clone(), |path, segment| path.join(segment))
+    }
+
+    pub fn logical_path_from_source_path(
+        &self,
+        source_path: impl AsRef<Path>,
+    ) -> Result<AssetPath, AssetDatabaseError> {
+        ProjectAssetDatabase::logical_path_from_source_path(&self.root, source_path)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AssetSourceChangeKind {
+    MetaModified,
+    Modified,
+    Removed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetSourceChange {
+    path: AssetPath,
+    kind: AssetSourceChangeKind,
+}
+
+impl AssetSourceChange {
+    #[must_use]
+    pub const fn new(path: AssetPath, kind: AssetSourceChangeKind) -> Self {
+        Self { path, kind }
+    }
+
+    #[must_use]
+    pub const fn path(&self) -> &AssetPath {
+        &self.path
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> AssetSourceChangeKind {
+        self.kind
+    }
+}
+
+#[derive(Debug, Default, Resource)]
+pub struct AssetSourceChanges {
+    changes: Vec<AssetSourceChange>,
+}
+
+impl AssetSourceChanges {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, change: AssetSourceChange) {
+        self.changes.push(change);
+    }
+
+    pub fn modified(&mut self, path: AssetPath) {
+        self.push(AssetSourceChange::new(
+            path,
+            AssetSourceChangeKind::Modified,
+        ));
+    }
+
+    pub fn meta_modified(&mut self, path: AssetPath) {
+        self.push(AssetSourceChange::new(
+            path,
+            AssetSourceChangeKind::MetaModified,
+        ));
+    }
+
+    pub fn removed(&mut self, path: AssetPath) {
+        self.push(AssetSourceChange::new(path, AssetSourceChangeKind::Removed));
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> impl Iterator<Item = &AssetSourceChange> {
+        self.changes.iter()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.changes.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
+
+    pub fn drain_coalesced(&mut self) -> Vec<AssetSourceChange> {
+        let mut by_path = BTreeMap::<AssetPath, AssetSourceChangeKind>::new();
+        for change in self.changes.drain(..) {
+            by_path
+                .entry(change.path)
+                .and_modify(|kind| *kind = coalesce_change_kind(*kind, change.kind))
+                .or_insert(change.kind);
+        }
+
+        by_path
+            .into_iter()
+            .map(|(path, kind)| AssetSourceChange::new(path, kind))
+            .collect()
+    }
+}
+
+fn coalesce_change_kind(
+    left: AssetSourceChangeKind,
+    right: AssetSourceChangeKind,
+) -> AssetSourceChangeKind {
+    use AssetSourceChangeKind::{MetaModified, Modified, Removed};
+    match (left, right) {
+        (Removed, _) | (_, Removed) => Removed,
+        (Modified, _) | (_, Modified) => Modified,
+        (MetaModified, MetaModified) => MetaModified,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AssetLoadGeneration(u64);
+
+impl AssetLoadGeneration {
+    pub const ZERO: Self = Self(0);
+
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Default, Resource)]
+pub struct AssetLoadGenerations {
+    generations: BTreeMap<AssetId, AssetLoadGeneration>,
+}
+
+impl AssetLoadGenerations {
+    #[must_use]
+    pub fn current(&self, id: AssetId) -> AssetLoadGeneration {
+        self.generations
+            .get(&id)
+            .copied()
+            .unwrap_or(AssetLoadGeneration::ZERO)
+    }
+
+    pub fn begin_request(&mut self, id: AssetId) -> AssetLoadGeneration {
+        let next = AssetLoadGeneration(self.current(id).raw().saturating_add(1));
+        self.generations.insert(id, next);
+        next
+    }
+
+    #[must_use]
+    pub fn is_current(&self, id: AssetId, generation: AssetLoadGeneration) -> bool {
+        self.current(id) == generation
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AssetReloadRequestId(u64);
+
+impl AssetReloadRequestId {
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetReloadRequestKind {
+    LoadOrReload,
+    Remove,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetReloadRequest {
+    id: AssetReloadRequestId,
+    asset_id: AssetId,
+    stable_id: StableAssetId,
+    path: AssetPath,
+    source_kind: AssetSourceKind,
+    request_kind: AssetReloadRequestKind,
+    source_change_kind: AssetSourceChangeKind,
+    expected_version: AssetVersion,
+    generation: AssetLoadGeneration,
+    affected_artifacts: Vec<ImportArtifactDigest>,
+}
+
+impl AssetReloadRequest {
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn new(
+        id: AssetReloadRequestId,
+        asset_id: AssetId,
+        record: &AssetRecord,
+        request_kind: AssetReloadRequestKind,
+        source_change_kind: AssetSourceChangeKind,
+        expected_version: AssetVersion,
+        generation: AssetLoadGeneration,
+        affected_artifacts: Vec<ImportArtifactDigest>,
+    ) -> Self {
+        Self {
+            id,
+            asset_id,
+            stable_id: record.stable_id(),
+            path: record.path().clone(),
+            source_kind: record.source_kind().clone(),
+            request_kind,
+            source_change_kind,
+            expected_version,
+            generation,
+            affected_artifacts,
+        }
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> AssetReloadRequestId {
+        self.id
+    }
+
+    #[must_use]
+    pub const fn asset_id(&self) -> AssetId {
+        self.asset_id
+    }
+
+    #[must_use]
+    pub const fn stable_id(&self) -> StableAssetId {
+        self.stable_id
+    }
+
+    #[must_use]
+    pub const fn path(&self) -> &AssetPath {
+        &self.path
+    }
+
+    #[must_use]
+    pub const fn source_kind(&self) -> &AssetSourceKind {
+        &self.source_kind
+    }
+
+    #[must_use]
+    pub const fn request_kind(&self) -> AssetReloadRequestKind {
+        self.request_kind
+    }
+
+    #[must_use]
+    pub const fn source_change_kind(&self) -> AssetSourceChangeKind {
+        self.source_change_kind
+    }
+
+    #[must_use]
+    pub const fn expected_version(&self) -> AssetVersion {
+        self.expected_version
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> AssetLoadGeneration {
+        self.generation
+    }
+
+    #[must_use]
+    pub fn affected_artifacts(&self) -> &[ImportArtifactDigest] {
+        &self.affected_artifacts
+    }
+
+    #[must_use]
+    pub fn record(&self) -> AssetRecord {
+        AssetRecord::new(self.stable_id, self.path.clone(), self.source_kind.clone())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedAssetSourceChange {
+    change: AssetSourceChange,
+}
+
+impl UnresolvedAssetSourceChange {
+    #[must_use]
+    pub const fn new(change: AssetSourceChange) -> Self {
+        Self { change }
+    }
+
+    #[must_use]
+    pub const fn change(&self) -> &AssetSourceChange {
+        &self.change
+    }
+}
+
+#[derive(Debug, Default, Resource)]
+pub struct AssetReloadRequests {
+    next_id: u64,
+    requests: Vec<AssetReloadRequest>,
+    unresolved: Vec<UnresolvedAssetSourceChange>,
+}
+
+impl AssetReloadRequests {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push_resolved(
+        &mut self,
+        asset_id: AssetId,
+        record: &AssetRecord,
+        request_kind: AssetReloadRequestKind,
+        source_change_kind: AssetSourceChangeKind,
+        expected_version: AssetVersion,
+        generation: AssetLoadGeneration,
+        affected_artifacts: Vec<ImportArtifactDigest>,
+    ) -> AssetReloadRequestId {
+        let id = AssetReloadRequestId(self.next_id);
+        self.next_id = self.next_id.saturating_add(1);
+        self.requests.push(AssetReloadRequest::new(
+            id,
+            asset_id,
+            record,
+            request_kind,
+            source_change_kind,
+            expected_version,
+            generation,
+            affected_artifacts,
+        ));
+        id
+    }
+
+    pub fn push_unresolved(&mut self, change: AssetSourceChange) {
+        self.unresolved
+            .push(UnresolvedAssetSourceChange::new(change));
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> impl Iterator<Item = &AssetReloadRequest> {
+        self.requests.iter()
+    }
+
+    #[must_use]
+    pub fn unresolved(&self) -> &[UnresolvedAssetSourceChange] {
+        &self.unresolved
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.requests.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.requests.is_empty() && self.unresolved.is_empty()
+    }
+
+    pub fn drain_for_source_kind(
+        &mut self,
+        source_kind: &AssetSourceKind,
+    ) -> Vec<AssetReloadRequest> {
+        let mut drained = Vec::new();
+        let mut kept = Vec::new();
+
+        for request in self.requests.drain(..) {
+            if request.source_kind() == source_kind {
+                drained.push(request);
+            } else {
+                kept.push(request);
+            }
+        }
+
+        self.requests = kept;
+        drained.sort_by_key(AssetReloadRequest::id);
+        drained
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SourceChangeResolver;
+
+impl SourceChangeResolver {
+    pub fn resolve_change(
+        &self,
+        change: AssetSourceChange,
+        database: &ProjectAssetDatabase,
+        dependencies: &AssetDependencyGraph,
+        asset_server: &mut AssetServer,
+        states: &mut AssetStates,
+        generations: &mut AssetLoadGenerations,
+        requests: &mut AssetReloadRequests,
+    ) -> Result<(), AssetError> {
+        let Some(record) = database.record_for_path(change.path()) else {
+            requests.push_unresolved(change);
+            return Ok(());
+        };
+
+        self.enqueue_record(
+            record,
+            change.kind(),
+            dependencies,
+            asset_server,
+            states,
+            generations,
+            requests,
+        )?;
+
+        for dependent in dependencies.dependents_for_source(record.stable_id()) {
+            if dependent == record.stable_id() {
+                continue;
+            }
+            if let Some(dependent_record) = database.record_for_stable_id(dependent) {
+                self.enqueue_record(
+                    dependent_record,
+                    AssetSourceChangeKind::Modified,
+                    dependencies,
+                    asset_server,
+                    states,
+                    generations,
+                    requests,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn enqueue_record(
+        &self,
+        record: &AssetRecord,
+        change_kind: AssetSourceChangeKind,
+        dependencies: &AssetDependencyGraph,
+        asset_server: &mut AssetServer,
+        states: &mut AssetStates,
+        generations: &mut AssetLoadGenerations,
+        requests: &mut AssetReloadRequests,
+    ) -> Result<(), AssetError> {
+        let asset_id = asset_server.reserve_record_id(record)?;
+        let expected_version = states.set_loading(asset_id);
+        let generation = generations.begin_request(asset_id);
+        let request_kind = if change_kind == AssetSourceChangeKind::Removed {
+            AssetReloadRequestKind::Remove
+        } else {
+            AssetReloadRequestKind::LoadOrReload
+        };
+        let affected_artifacts = dependencies.affected_artifacts(record.stable_id());
+
+        requests.push_resolved(
+            asset_id,
+            record,
+            request_kind,
+            change_kind,
+            expected_version,
+            generation,
+            affected_artifacts,
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AssetPlugin;
+
+impl Plugin for AssetPlugin {
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_plugin_if_missing(TaskPlugin::default())?;
+        app.init_resource::<AssetServer>();
+        app.init_resource::<AssetStates>();
+        app.init_resource::<crate::AssetEvents>();
+        app.init_resource::<AssetDependencyGraph>();
+        app.init_resource::<ProjectAssetDatabase>();
+        app.init_resource::<AssetSourceChanges>();
+        app.init_resource::<AssetReloadRequests>();
+        app.init_resource::<AssetLoadGenerations>();
+        app.configure_sets(
+            CoreStage::TaskUpdate,
+            (
+                TaskUpdateSet::Poll,
+                TaskUpdateSet::CoalesceAssetChanges,
+                TaskUpdateSet::SpawnAssetJobs,
+                TaskUpdateSet::ApplyAssetResults,
+            )
+                .chain(),
+        );
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            resolve_asset_source_changes.in_set(TaskUpdateSet::CoalesceAssetChanges),
+        );
+        Ok(())
+    }
+}
+
+pub fn resolve_asset_source_changes(
+    mut changes: ResMut<AssetSourceChanges>,
+    database: Res<ProjectAssetDatabase>,
+    dependencies: Res<AssetDependencyGraph>,
+    mut asset_server: ResMut<AssetServer>,
+    mut states: ResMut<AssetStates>,
+    mut generations: ResMut<AssetLoadGenerations>,
+    mut requests: ResMut<AssetReloadRequests>,
+) {
+    let resolver = SourceChangeResolver;
+    for change in changes.drain_coalesced() {
+        let _ = resolver.resolve_change(
+            change,
+            &database,
+            &dependencies,
+            &mut asset_server,
+            &mut states,
+            &mut generations,
+            &mut requests,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AssetEventKind, AssetEvents, Assets};
+
+    fn stable_id() -> StableAssetId {
+        StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
+    }
+
+    fn dependent_stable_id() -> StableAssetId {
+        StableAssetId::parse_str("b73f0f16-09e8-4265-b090-b689b41c197e").unwrap()
+    }
+
+    fn image_record(path: &str, stable_id: StableAssetId) -> AssetRecord {
+        AssetRecord::new(
+            stable_id,
+            AssetPath::new(path).unwrap(),
+            AssetSourceKind::Image,
+        )
+    }
+
+    #[test]
+    fn source_changes_coalesce_duplicate_frame_events() {
+        let mut changes = AssetSourceChanges::new();
+        let path = AssetPath::new("textures/player.png").unwrap();
+        changes.meta_modified(path.clone());
+        changes.modified(path.clone());
+        changes.removed(path.clone());
+
+        let coalesced = changes.drain_coalesced();
+
+        assert_eq!(
+            coalesced,
+            vec![AssetSourceChange::new(path, AssetSourceChangeKind::Removed)]
+        );
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn asset_plugin_resolves_manual_changes_into_generation_requests() {
+        let mut app = App::new();
+        app.insert_resource(nara_tasks::TaskPools::deterministic());
+        app.add_plugin(AssetPlugin).unwrap();
+        app.world_mut()
+            .resource_mut::<ProjectAssetDatabase>()
+            .insert(image_record("textures/player.png", stable_id()))
+            .unwrap();
+        app.world_mut()
+            .resource_mut::<AssetSourceChanges>()
+            .modified(AssetPath::new("textures/player.png").unwrap());
+
+        app.update();
+
+        let requests = app.world().resource::<AssetReloadRequests>();
+        let request = requests.iter().next().unwrap();
+        assert_eq!(request.path().as_str(), "textures/player.png");
+        assert_eq!(request.generation().raw(), 1);
+        assert_eq!(request.expected_version(), AssetVersion::ZERO);
+        assert_eq!(request.request_kind(), AssetReloadRequestKind::LoadOrReload);
+        assert_eq!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(request.asset_id())
+                .unwrap()
+                .load_state(),
+            &crate::LoadState::Loading
+        );
+    }
+
+    #[test]
+    fn resolver_records_unresolved_changes_instead_of_guessing() {
+        let mut app = App::new();
+        app.insert_resource(nara_tasks::TaskPools::deterministic());
+        app.add_plugin(AssetPlugin).unwrap();
+        app.world_mut()
+            .resource_mut::<AssetSourceChanges>()
+            .modified(AssetPath::new("textures/missing.png").unwrap());
+
+        app.update();
+
+        let requests = app.world().resource::<AssetReloadRequests>();
+        assert_eq!(requests.len(), 0);
+        assert_eq!(requests.unresolved().len(), 1);
+    }
+
+    #[test]
+    fn dependency_records_enqueue_dependent_assets() {
+        let mut app = App::new();
+        app.insert_resource(nara_tasks::TaskPools::deterministic());
+        app.add_plugin(AssetPlugin).unwrap();
+        {
+            let mut database = app.world_mut().resource_mut::<ProjectAssetDatabase>();
+            database
+                .insert(image_record("textures/source.png", stable_id()))
+                .unwrap();
+            database
+                .insert(image_record(
+                    "textures/dependent.png",
+                    dependent_stable_id(),
+                ))
+                .unwrap();
+        }
+        app.world_mut()
+            .resource_mut::<AssetDependencyGraph>()
+            .add_source_dependency(stable_id(), dependent_stable_id());
+        app.world_mut()
+            .resource_mut::<AssetSourceChanges>()
+            .modified(AssetPath::new("textures/source.png").unwrap());
+
+        app.update();
+
+        let paths = app
+            .world()
+            .resource::<AssetReloadRequests>()
+            .iter()
+            .map(|request| request.path().as_str().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["textures/source.png", "textures/dependent.png"]);
+    }
+
+    #[test]
+    fn first_load_failure_uses_distinct_event_without_value() {
+        let mut assets = Assets::<String>::default();
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+        let mut server = AssetServer::new();
+        let handle = server
+            .reserve_record::<String>(&image_record("textures/player.png", stable_id()))
+            .unwrap();
+        states.set_loading(handle.id());
+
+        assets
+            .record_load_failure(handle, &mut states, &mut events, "decode failed")
+            .unwrap();
+
+        assert!(assets.get(handle).is_none());
+        assert_eq!(
+            states.state(handle.id()).unwrap().load_state(),
+            &crate::LoadState::Failed {
+                message: "decode failed".to_string()
+            }
+        );
+        assert_eq!(
+            events.drain(),
+            vec![crate::AssetEvent::new(
+                handle.id(),
+                AssetVersion::ZERO,
+                AssetEventKind::LoadFailed
+            )]
+        );
+    }
+}

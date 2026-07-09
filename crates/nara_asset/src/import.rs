@@ -4,6 +4,8 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+use nara_ecs::Resource;
+
 use crate::{
     ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetRecord, ImportArtifactKey,
     ImportArtifactPathError, ImportArtifactRecord, ImportDependencyDigest, ImportLabelError,
@@ -217,10 +219,111 @@ impl<'a> ImportRequest<'a> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportJobInput {
+    source: AssetRecord,
+    source_bytes: Vec<u8>,
+    dependency_digest: ImportDependencyDigest,
+    settings_hash: ImportSettingsHash,
+    profile: ImportProfile,
+}
+
+impl ImportJobInput {
+    #[must_use]
+    pub fn new(
+        source: AssetRecord,
+        source_bytes: Vec<u8>,
+        dependency_digest: ImportDependencyDigest,
+        settings_hash: ImportSettingsHash,
+        profile: ImportProfile,
+    ) -> Self {
+        Self {
+            source,
+            source_bytes,
+            dependency_digest,
+            settings_hash,
+            profile,
+        }
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> &AssetRecord {
+        &self.source
+    }
+
+    #[must_use]
+    pub fn source_bytes(&self) -> &[u8] {
+        &self.source_bytes
+    }
+
+    #[must_use]
+    pub const fn dependency_digest(&self) -> ImportDependencyDigest {
+        self.dependency_digest
+    }
+
+    #[must_use]
+    pub const fn settings_hash(&self) -> ImportSettingsHash {
+        self.settings_hash
+    }
+
+    #[must_use]
+    pub const fn profile(&self) -> &ImportProfile {
+        &self.profile
+    }
+
+    #[must_use]
+    pub fn request(&self) -> ImportRequest<'_> {
+        ImportRequest::new(
+            &self.source,
+            &self.source_bytes,
+            self.dependency_digest,
+            self.settings_hash,
+            self.profile.clone(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedAsset<T> {
+    artifact: ImportArtifactRecord,
+    value: T,
+}
+
+impl<T> ImportedAsset<T> {
+    #[must_use]
+    pub fn new(artifact: ImportArtifactRecord, value: T) -> Self {
+        Self { artifact, value }
+    }
+
+    #[must_use]
+    pub const fn artifact(&self) -> &ImportArtifactRecord {
+        &self.artifact
+    }
+
+    #[must_use]
+    pub const fn value(&self) -> &T {
+        &self.value
+    }
+
+    pub fn into_value(self) -> T {
+        self.value
+    }
+}
+
 pub trait Importer: Send + Sync + 'static {
     fn descriptor(&self) -> &ImporterDescriptor;
 
     fn import(&self, request: ImportRequest<'_>) -> Result<ImportArtifactRecord, ImportError>;
+}
+
+pub trait TypedImporter<T>: Send + Sync + 'static {
+    fn descriptor(&self) -> &ImporterDescriptor;
+
+    fn import_typed(&self, request: ImportRequest<'_>) -> Result<ImportedAsset<T>, ImportError>;
+
+    fn import_job(&self, input: &ImportJobInput) -> Result<ImportedAsset<T>, ImportError> {
+        self.import_typed(input.request())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,7 +412,7 @@ impl Display for ImporterSelectionError {
 
 impl Error for ImporterSelectionError {}
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct ImporterRegistry {
     importers: BTreeMap<ImporterId, Box<dyn Importer>>,
     extension_to_importer: BTreeMap<SourceExtension, ImporterId>,

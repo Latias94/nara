@@ -38,12 +38,13 @@ impl Plugin for MinimalPlugins {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
         app.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
+        app.add_plugin_if_missing(nara_asset::AssetPlugin)?;
         app.add_plugin_if_missing(nara_transform::TransformPlugin)?;
         app.add_plugin_if_missing(nara_input::InputPlugin)?;
         app.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
         app.add_plugin_if_missing(nara_tilemap::TilemapPlugin)?;
         app.add_plugin_if_missing(nara_render::RenderPlugin)?;
-        app.add_plugin_if_missing(nara_image::ImagePreparePlugin)?;
+        app.add_plugin_if_missing(nara_image::ImagePlugin)?;
         app.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
         Ok(())
     }
@@ -57,16 +58,20 @@ pub mod prelude {
     };
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, Asset, AssetDatabaseError, AssetDependencyGraph,
-        AssetError, AssetEvent, AssetEventKind, AssetEvents, AssetId, AssetMeta, AssetPath,
-        AssetPathError, AssetRecord, AssetRef, AssetRefError, AssetRefExportPolicy, AssetServer,
-        AssetSourceKind, AssetState, AssetStateError, AssetStates, AssetVersion, Assets,
-        DigestParseError, Handle, ImportArtifactDigest, ImportArtifactKey, ImportArtifactPath,
-        ImportArtifactPathError, ImportArtifactRecord, ImportDependency, ImportDependencyDigest,
-        ImportDependencyRole, ImportError, ImportLabelError, ImportLabelKind, ImportProfile,
-        ImportRequest, ImportSettingsHash, ImportedAssetType, Importer, ImporterDescriptor,
-        ImporterDescriptorError, ImporterId, ImporterRegistry, ImporterRegistryError,
-        ImporterSelectionError, ImporterVersion, LoadState, MissingMetaPolicy,
-        ProjectAssetDatabase, SourceExtension, SourceHash, StableAssetId, StableAssetIdError,
+        AssetError, AssetEvent, AssetEventKind, AssetEvents, AssetId, AssetLoadGeneration,
+        AssetLoadGenerations, AssetMeta, AssetPath, AssetPathError, AssetPlugin, AssetRecord,
+        AssetRef, AssetRefError, AssetRefExportPolicy, AssetReloadRequest, AssetReloadRequestId,
+        AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetSourceChange,
+        AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind, AssetSourceRoot, AssetState,
+        AssetStateError, AssetStates, AssetVersion, Assets, DigestParseError, Handle,
+        ImportArtifactDigest, ImportArtifactKey, ImportArtifactPath, ImportArtifactPathError,
+        ImportArtifactRecord, ImportDependency, ImportDependencyDigest, ImportDependencyRole,
+        ImportError, ImportJobInput, ImportLabelError, ImportLabelKind, ImportProfile,
+        ImportRequest, ImportSettingsHash, ImportedAsset, ImportedAssetType, Importer,
+        ImporterDescriptor, ImporterDescriptorError, ImporterId, ImporterRegistry,
+        ImporterRegistryError, ImporterSelectionError, ImporterVersion, LoadState,
+        MissingMetaPolicy, ProjectAssetDatabase, SourceChangeResolver, SourceExtension, SourceHash,
+        StableAssetId, StableAssetIdError, TypedImporter, UnresolvedAssetSourceChange,
     };
     pub use nara_audio::{AudioClip, AudioCommand, AudioSink};
     pub use nara_core::{Color, Vec2, Vec3};
@@ -74,9 +79,10 @@ pub mod prelude {
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
     pub use nara_image::{
         ImageAddressMode, ImageAsset, ImageColorSpace, ImageExtent, ImageFilterMode, ImageFormat,
-        ImageImportError, ImageImportedAsset, ImageImporter, ImagePreparePlugin, ImagePrepareStats,
-        ImageSamplerDescriptor, ImageSourceMetadata, PreparedImageResource, image_descriptor_hash,
-        image_resource_key, prepare_images,
+        ImageImportError, ImageImportedAsset, ImageImporter, ImagePlugin, ImagePreparePlugin,
+        ImagePrepareStats, ImageReloadError, ImageReloadStats, ImageSamplerDescriptor,
+        ImageSourceMetadata, PreparedImageResource, image_descriptor_hash, image_resource_key,
+        prepare_images,
     };
     pub use nara_input::{ButtonInput, InputPlugin, InputState, KeyCode, MouseButton};
     pub use nara_reflect::{

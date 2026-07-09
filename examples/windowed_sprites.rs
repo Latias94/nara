@@ -93,9 +93,9 @@ fn import_demo_texture(
     )
     .unwrap();
     let imported = ImageImporter::default()
-        .import_image(ImportRequest::new(
-            &record,
-            &png_bytes,
+        .import_job(&ImportJobInput::new(
+            record.clone(),
+            png_bytes,
             ImportDependencyDigest::empty(),
             ImportSettingsHash::default(),
             ImportProfile::default(),
@@ -105,13 +105,13 @@ fn import_demo_texture(
         .unwrap()
         .resolve_with_database::<ImageAsset>(asset_server, &database)
         .unwrap();
-    let source_hash = imported.image().source().source_hash();
+    let source_hash = imported.value().source().source_hash();
     let artifact_hash = imported.artifact().key().digest();
     let mut events = AssetEvents::default();
     images
         .commit_loaded(
             texture,
-            imported.into_image(),
+            imported.into_value(),
             states,
             &mut events,
             Some(source_hash),

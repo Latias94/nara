@@ -149,6 +149,20 @@ impl<T: Asset> Assets<T> {
         Ok(version)
     }
 
+    pub fn record_load_failure(
+        &mut self,
+        handle: Handle<T>,
+        states: &mut AssetStates,
+        events: &mut AssetEvents,
+        message: impl Into<String>,
+    ) -> Result<AssetVersion, AssetStateError> {
+        let id = handle.id();
+        self.values.remove(&id);
+        let version = states.set_failed(id, message.into())?;
+        events.push(id, version, AssetEventKind::LoadFailed);
+        Ok(version)
+    }
+
     pub fn remove_with_state(
         &mut self,
         handle: Handle<T>,

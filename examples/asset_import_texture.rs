@@ -22,9 +22,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             255, 255, 0, 255,
         ],
     )?;
-    let imported = ImageImporter::default().import_image(ImportRequest::new(
-        &record,
-        &png_bytes,
+    let imported = ImageImporter::default().import_job(&ImportJobInput::new(
+        record.clone(),
+        png_bytes,
         ImportDependencyDigest::empty(),
         ImportSettingsHash::default(),
         ImportProfile::default(),
@@ -34,14 +34,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let texture = AssetRef::stable_id(TEXTURE_STABLE_ID)?
         .resolve_with_database::<ImageAsset>(&mut asset_server, &database)?;
 
-    let source_hash = imported.image().source().source_hash();
+    let source_hash = imported.value().source().source_hash();
     let artifact_hash = imported.artifact().key().digest();
     let mut images = Assets::<ImageAsset>::default();
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
     images.commit_loaded(
         texture,
-        imported.into_image(),
+        imported.into_value(),
         &mut states,
         &mut events,
         Some(source_hash),
@@ -79,7 +79,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>();
     assert!(prepared.get_ready(image_resource_key(texture)).is_some());
-    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
 
     let batches = app.world().resource::<SpriteBatches>();
     assert_eq!(batches.total_instances(), 1);
