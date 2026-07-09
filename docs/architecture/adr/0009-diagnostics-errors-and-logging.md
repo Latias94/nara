@@ -16,7 +16,10 @@ Rules:
 - Library internals use typed errors and structured diagnostics; avoid panic for recoverable failures.
 - Panics are acceptable for programmer bugs and violated invariants.
 - User/project data failures return diagnostics with context: path, span/range when available, entity ID, component ID, asset reference, plugin name, and severity.
-- Use `tracing` as the underlying event/logging layer.
+- Collect diagnostics as inspectable data first; do not emit logs as an implicit side effect of
+  adding a diagnostic to a report.
+- Use `tracing` through explicit bridges such as `Diagnostic::emit_to_tracing` or
+  `DiagnosticReport::emit_to_tracing`.
 - Scene/asset/component validation returns diagnostic collections instead of one string error.
 - Editor, CLI, debug UI, and AI agents should consume the same diagnostics model.
 
@@ -29,6 +32,8 @@ flowchart TD
     Diagnostics --> CLI[CLI Output]
     Diagnostics --> Editor[Editor Problems Panel]
     Diagnostics --> AI[AI Repair Loop]
+    Diagnostics --> TraceBridge[explicit emit_to_tracing]
+    TraceBridge --> Tracing[tracing]
     Runtime[Runtime Events] --> Tracing[tracing]
 ```
 
@@ -60,9 +65,13 @@ flowchart TD
 
 ## Consequences
 
-- `nara_diagnostic` should eventually exist.
-- Asset and scene APIs should return diagnostic reports for validation/import failures.
-- Plugin/backend initialization can return typed errors that carry diagnostic reports.
+- `nara_diagnostic` owns `Diagnostic`, `DiagnosticContext`, and `DiagnosticReport`.
+- Asset, scene, tooling, and backend-facing APIs return diagnostic reports for validation/import
+  failures when multiple messages or user-fixable context are useful.
+- Plugin/backend initialization can return typed errors and may also surface diagnostics/status
+  resources.
+- Runtime/tooling/AI code can inspect diagnostic reports without installing or observing a tracing
+  subscriber.
 - Tests should assert diagnostic codes, not only text.
 
 ## Success Metrics
@@ -72,7 +81,7 @@ flowchart TD
 | Structured data | Diagnostics carry code, severity, message, and optional source context | API review |
 | Tooling reuse | CLI/editor/debug UI consume the same report type | Future tests |
 | AI repair loop | Validation output identifies fixable scene/component paths | Future integration test |
-| Logging consistency | Runtime events use `tracing` | Code review |
+| Logging consistency | Runtime events use `tracing`; diagnostic logging is explicit | Code review |
 
 ## Risks and Mitigations
 
@@ -81,4 +90,3 @@ flowchart TD
 | Diagnostics become verbose boilerplate | Medium | Medium | Provide helpers and derive-like utilities later |
 | Error text becomes unstable for tests | Low | High | Test diagnostic codes and structured fields |
 | Panic policy is unclear | Medium | Medium | Document panic only for programmer bugs/invariants |
-

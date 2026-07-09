@@ -7,10 +7,13 @@ This file provides repo-local guidance for agents working on nara.
 - nara is a Rust-native, code-first, data-driven game engine.
 - The runtime is ECS-first. Components are data; systems own behavior.
 - `nara_ecs` uses `bevy_ecs` as the ECS substrate. Do not reintroduce a custom ECS unless an ADR explicitly replaces ADR 0002.
-- `nara_app` owns nara's product-facing `App`, `Plugin`, stage, runner, and lifecycle boundary. Do not adopt `bevy_app`.
+- `nara_app` owns nara's product-facing `App`, fallible `Plugin`, stage, runner, and lifecycle boundary. Do not adopt `bevy_app`.
+- Plugin setup and prerequisite failures must return `PluginError`; do not reintroduce panic-based plugin prerequisite helpers.
 - Keep backend crates behind adapters. Core gameplay-facing crates must not directly depend on `wgpu`, `winit`, egui, or dear-imgui.
 - `nara_winit` owns all `winit` imports and desktop event-loop integration.
+- `nara_render` owns backend-neutral render concepts, frame lifecycle, phases, `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons. Do not reintroduce a public `RenderBackend` trait until a second backend or test adapter creates real abstraction pressure.
 - `nara_render_wgpu` owns all `wgpu` imports and GPU surface/device lifecycle.
+- `nara_render_wgpu` reports backend initialization, skipped frames, and backend errors through `RenderBackendStatus`.
 - `nara_sprite_render` owns backend-neutral 2D extraction, queueing, sorting, and batching. GPU backends should consume `SpriteBatches`, not gameplay `Sprite` or `Tilemap` components.
 - `nara_scene` owns persistent `SceneDocument` / `PrefabDocument`, stable `SceneEntityId`, validation, and world spawn/export. Scene/prefab documents must not store runtime `Entity`, runtime `AssetId`, or backend handles.
 - Scene/prefab authoring edits should use `ScenePatchDocument` transactions. Patch operations serialize as `op + args`, validate against schema-aware `ComponentFieldPath`, and return inverse patches for undo.
@@ -21,12 +24,13 @@ This file provides repo-local guidance for agents working on nara.
 - Prefab overrides are `ScenePatchDocument` values applied relative to source prefab IDs before expansion. Do not reintroduce whole-component prefab override maps.
 - Nested prefab source resolution goes through `PrefabSourceResolver`; expanded prefab IDs use the `anchor/source_entity` namespace rule.
 - `nara_scene` must keep scene/prefab spawn two-phase: preflight first, then mutate the target `World`. Asset-aware spawn uses a scratch `AssetServer` and only writes it back after the full preflight succeeds.
-- `nara_reflect` owns `ComponentValue`, component preflight/apply codecs, `ComponentDecodeContext`, and `ComponentEncodeContext`. Domain crates register their own built-in component codecs through their plugins.
+- `nara_reflect` owns `ComponentValue`, schema metadata, `ComponentFieldPath`, component preflight/apply codecs, migrations, `ComponentDecodeContext`, and `ComponentEncodeContext`. Keep its value, schema, path, codec, migration, and registry modules focused. Domain crates register their own built-in component codecs through their plugins.
 - `nara_asset` persistent references use semantic `AssetRef::Path` or `AssetRef::StableId`; `Handle<T>` and `AssetId` are runtime-only and must not serialize as project data.
 - `nara_asset` owns source asset identity, `.meta` records, importer registry metadata, imported artifact records, dependency graph data, load states, and reload events. It must not own GPU resources or depend on render backend crates.
 - Texture upload, atlases, materials, UI images, and future 3D assets must flow through the asset import + render resource preparation seam in ADR 0033 instead of direct path-to-wgpu shortcuts.
 - `nara_render_wgpu` owns backend GPU resource caches. Gameplay/domain crates store typed handles or backend-neutral descriptors, never `wgpu` handles.
 - Keep render modules split by responsibility: `nara_sprite_render::{types,extract,queue}` and `nara_render_wgpu::{surface,sprite}` should stay narrow instead of growing monolithic backend or render-bridge files.
+- `DiagnosticReport::push` only collects diagnostics. Use `Diagnostic::emit_to_tracing` or `DiagnosticReport::emit_to_tracing` explicitly when logs are desired.
 - The root `nara` facade must keep `winit` and `wgpu` optional; default features stay backend-free.
 - `repo-ref/` contains reference source trees. Treat it as read-only reference material and keep it out of git.
 

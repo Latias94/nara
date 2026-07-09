@@ -25,7 +25,7 @@ flowchart LR
     Render -. future .-> Wgpu[nara_render_wgpu]
 ```
 
-`nara_render` exposes renderer-facing data and a `RenderBackend` trait. It does not own wgpu directly. Scene hierarchy remains ECS data (`Parent`, `Children`) rather than a runtime object tree.
+`nara_render` exposes backend-neutral renderer-facing data, phases, and backend status resources. It does not own wgpu directly, and backend integration is currently expressed through plugin-installed systems/resources rather than a speculative public backend trait. Scene hierarchy remains ECS data (`Parent`, `Children`) rather than a runtime object tree.
 
 ## Alternatives Considered
 
@@ -68,4 +68,4 @@ flowchart LR
 |---|---|---:|---|
 | Crate sprawl before product value | Medium | Medium | Keep crates empty/light until an interface is exercised |
 | Facade hides too much complexity | Medium | Low | Keep direct crate imports supported |
-| Renderer seam misses real wgpu constraints | High | Medium | Build `nara_render_wgpu` next and revise only the backend trait if needed |
+| Renderer seam misses real wgpu constraints | High | Medium | Build concrete backend/plugin resources first and introduce a public backend trait only when a second backend or test adapter proves the shared contract |

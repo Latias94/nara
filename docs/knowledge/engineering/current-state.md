@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-08T16:39:26Z
+timestamp: 2026-07-09T12:37:27+08:00
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-08T16:39:26Z
-- Last verified: Editor Play Mode core passed fmt, workspace checks with and without serde, focused `nara_scene`/`nara_tooling`/`nara` tests, `cargo nextest run --workspace` with 186 tests, examples checks with and without serde, `winit,wgpu` backend example checks, backend boundary searches, runtime identity leak searches, and diff hygiene.
-- Next action: Design the first editor/debug UI adapter that renders `SceneEditorModel` / `SceneInspectorModel`, or define the first supported Apply Changes patchable subset.
+- Snapshot timestamp: 2026-07-09T12:37:27+08:00
+- Last verified: Foundation hardening passed `cargo fmt --all`, workspace checks with and without serde, `cargo nextest run --workspace` with 206 tests, `winit,wgpu` backend example checks, serde scene/prefab/patch/schema examples, backend boundary searches, runtime identity leak searches, engineering memory validation, and diff hygiene.
+- Next action: Choose the next foundation slice, likely async/task execution and hot-reload scheduling, the first Apply Changes patchable subset, runtime UI data model, or the first render-graph forcing use case.
 
 # Active Registrations
 
@@ -53,8 +53,15 @@ status: "active"
   - `SceneEditorState` owns the first UI-agnostic Edit/Play/Paused model and starts isolated Play worlds through plain, prefab-resolved, asset-aware, and combined spawn paths.
   - Stop Play drops runtime state; mode-aware inspector commands reject persistent scene patches in Play or Paused.
   - `SceneApplyChangesReport` is guard-only: it reports unsupported apply-back or source revision mismatch and returns no patches.
+  - `nara_tooling_egui` provides the first concrete egui debug/editor adapter while keeping `nara_tooling` UI-toolkit agnostic.
+  - Foundation hardening now requires explicit serializable component schemas, rejects duplicate runtime type registrations, checks schema default kinds, and keeps scene/prefab spawn preflight-first.
+  - `nara_reflect` is split into focused value, schema, path, codec, migration, registry, and test modules behind the same public facade.
+  - `nara_app` plugin installation is fallible through `PluginError`; duplicate unique plugins are rejected, and plugin groups use `add_plugin_if_missing`.
+  - `nara_diagnostic` no longer logs from `DiagnosticReport::push`; logging is an explicit `emit_to_tracing` bridge.
+  - `nara_render` exposes `RenderBackendStatus` / `RenderBackendState` / skipped-frame reasons, and `nara_render_wgpu` reports backend state through that resource.
+  - The unused public `RenderBackend` trait was removed; backend extension remains plugin/resource/system based until another backend proves the shared contract.
 - Pending follow-ups:
-  - The first editor/debug UI adapter still needs to render `SceneEditorModel` and submit mode-aware commands.
+  - The egui adapter is debug/editor tooling only; long-term runtime UI remains a nara-owned engine UI design problem.
   - The first Apply Changes patchable subset remains undecided; runtime-to-`ScenePatchDocument` diffing is not implemented.
   - Engine-owned IO/task-pool execution, file watching, async import jobs, and reload scheduling remain deferred behind the current synchronous import/reload-ready contracts.
   - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset` and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
@@ -76,3 +83,5 @@ status: "active"
 - [Scene patch prefab schema foundation plan](../../plans/2026-07-08-005-feat-scene-patch-prefab-schema-foundation-plan.md)
 - [Scene patch prefab schema planning memory event](logs/2026-07/2026-07-08T133500Z-planning-scene-patch-prefab-schema-foundation.md)
 - [Editor Play Mode core implementation memory event](logs/2026-07/2026-07-08T163926Z-editor-play-mode-core-implemented.md)
+- [Foundation hardening progress](progress/2026-07-09-foundation-hardening.md)
+- [Foundation hardening verification](verification/2026-07-09-foundation-hardening.md)

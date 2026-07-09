@@ -18,8 +18,13 @@ Rules:
 - `nara_window` owns normalized window data and backend-only raw-window-handle provider types keyed by `WindowId`.
 - `nara_winit` is the only crate that depends on `winit`; it owns live platform windows and registers backend handle providers.
 - `nara_render` owns graph-ready render targets, viewport rectangles, extracted views, render phase labels, and frame lifecycle data, but no `wgpu` types.
+- `nara_render` owns the backend-neutral `RenderBackendStatus` resource for backend name,
+  readiness state, last error, and skipped-frame reason. This status resource is the current
+  backend observation seam, not a speculative render backend trait.
 - Extracted render data is frame-local, rebuilt or cleared during `Extract`, not serialized, and not exported through the gameplay prelude initially.
-- `nara_render_wgpu` is the only crate that depends on `wgpu`; it consumes `nara_window::backend` providers and guarantees surfaces are dropped before the provider/window guard.
+- `nara_render_wgpu` is the only crate that depends on `wgpu`; it consumes
+  `nara_window::backend` providers, guarantees surfaces are dropped before the provider/window
+  guard, and writes wgpu skipped-frame/backend-error state into `RenderBackendStatus`.
 - The root `nara` facade keeps `winit` and `wgpu` behind explicit optional features. Default `MinimalPlugins` stays headless and backend-free.
 
 wgpu initialization may use `pollster` for the first native-desktop slice.
@@ -67,6 +72,7 @@ The backend should still model `Uninitialized`, `Initializing`, `Ready`, and `Un
 | Default facade cost | Root facade without default features does not include `winit` or `wgpu` | `cargo tree -p nara --no-default-features` |
 | Surface safety | Surface creation consumes backend handle providers whose guard outlives the surface | Code review and tests |
 | Extraction locality | Extracted render data is cleared or rebuilt each frame and stays out of gameplay prelude | Unit tests and API review |
+| Backend observability | Skipped frames and backend errors are visible without importing `wgpu` | `RenderBackendStatus` tests |
 
 ## Risks and Mitigations
 
@@ -76,6 +82,7 @@ The backend should still model `Uninitialized`, `Initializing`, `Ready`, and `Un
 | Main-world extracted data becomes gameplay API | High | Medium | Keep `Extracted*` out of prelude and mark it renderer-domain/frame-local |
 | Blocking GPU init freezes platform loop | Medium | Medium | Restrict `pollster` to native desktop and model backend initialization states |
 | Feature gates leak backend dependencies | Medium | Medium | Add facade feature and cargo-tree checks |
+| Backend status becomes wgpu-shaped | Medium | Medium | Keep public status categories backend-neutral; backend-specific detail remains a string or adapter-owned type |
 
 ## Citations
 

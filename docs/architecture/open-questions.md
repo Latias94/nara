@@ -37,12 +37,19 @@ Accepted direction: nara owns plugins and app lifecycle, with staged plugin life
 
 Terminology note: `Plugin` means a Bevy-style Rust engine module/capability package, not a Zed-style WASM extension. WASM scripting is separate; see ADR [0021-scripting-and-wasm-boundary.md](adr/0021-scripting-and-wasm-boundary.md).
 
+Resolved in the foundation hardening slice:
+
+- `Plugin::build` is fallible and returns `PluginError`.
+- `App::add_plugin` rejects duplicate unique plugins.
+- Plugin groups can use `App::add_plugin_if_missing` when idempotent composition is intended.
+- Backend and domain prerequisite failures return structured plugin errors instead of panicking.
+- Runner initialization remains owned by app runners and platform adapters, not by ordinary plugin
+  build code.
+
 Still open:
 
-1. Do plugins declare dependencies by type/label?
-2. Are duplicate plugins ignored, rejected, or allowed?
-3. Does `Plugin::build` stay infallible, or do backend plugins need a fallible init phase?
-4. Does runner initialization belong in plugins, `App::run`, or a platform adapter?
+1. Do plugins declare dependencies by type/label before they run?
+2. What plugin metadata should groups expose for diagnostics, editor tooling, and generated docs?
 
 ## Component Metadata Details
 
@@ -64,6 +71,11 @@ Resolved in the scene/prefab serialization foundation:
 - `ComponentSchemaCatalog` is the current compact schema export format.
 - Component migrations are registered as one-step `ComponentValue` transforms and composed by
   `ComponentRegistry` before scene/prefab preflight.
+- Serializable registrations require explicit field schemas.
+- Duplicate Rust `TypeId` registrations are rejected instead of silently replacing codecs.
+- Schema defaults are checked against their declared field value kinds during registration.
+- The reflection crate is split into focused value, schema, path, codec, migration, and registry
+  modules.
 - Field paths are structured `ComponentFieldPath` values with `Field` and `Index` segments.
 
 ## Scene and Prefab Semantics
@@ -150,6 +162,14 @@ Follow-up details still to settle:
 2. How are source spans represented for JSON/RON scene files?
 3. Which diagnostics are warnings versus hard errors during hot reload?
 
+Resolved in the foundation hardening slice:
+
+- `DiagnosticReport::push` only collects structured diagnostics.
+- Logging is an explicit bridge through `Diagnostic::emit_to_tracing` or
+  `DiagnosticReport::emit_to_tracing`.
+- Runtime code that needs inspection should pass diagnostic reports/resources instead of relying on
+  implicit log side effects.
+
 ## Render Crate Boundaries
 
 Accepted direction: split render domain, backend, sprite, tilemap, and sprite-render responsibilities. See ADR [0012-render-crate-boundaries.md](adr/0012-render-crate-boundaries.md). Render graph policy is phase-based first and graph-ready later; see ADR [0017-render-graph-policy.md](adr/0017-render-graph-policy.md).
@@ -167,6 +187,13 @@ Implemented in the 2D render foundation slice:
   authoring components.
 - `nara_render_wgpu` draws colored and textured quad instance batches and remains the only crate
   that imports `wgpu`.
+- `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons as
+  backend observation resources.
+- `nara_render_wgpu` updates render backend status for uninitialized, missing-window, rendering,
+  and backend-error states.
+- The unused public `RenderBackend` trait was removed; the current backend seam is
+  plugin-installed resources, systems, and status observations until a second backend or test
+  adapter creates real abstraction pressure.
 
 Still open:
 

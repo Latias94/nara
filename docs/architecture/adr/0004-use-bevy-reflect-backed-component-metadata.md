@@ -65,6 +65,16 @@ Important distinction: gameplay systems should stay strongly typed. Reflection i
 - Scene/prefab data should be designed around registered component metadata, not arbitrary untyped blobs.
 - AI-facing schema generation should be a nara layer, not raw Bevy reflection exposed directly.
 
+## Implementation Notes
+
+As of 2026-07-09:
+
+- `nara_reflect` keeps Bevy reflect integration behind a nara-owned registry and is split into
+  dedicated schema, value, path, codec, migration, and registry modules.
+- Domain crates register their own built-in component schemas/codecs through their plugins.
+- The registry rejects duplicate Rust type mappings and invalid schema metadata before those
+  schemas can reach scene files, editor UI, or AI-generated documents.
+
 ## Success Metrics
 
 | Metric | Target | Measurement |

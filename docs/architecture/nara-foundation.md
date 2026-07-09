@@ -67,22 +67,22 @@ flowchart TD
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
 | `nara` | Facade and prelude | Re-export only; no backend logic |
-| `nara_app` | `App`, `Plugin`, `StartupStage`, `CoreStage`, `Time`, `FixedTime` | Plugin ordering, lifecycle, runner policy, frame/fixed-step time resources |
+| `nara_app` | `App`, `Plugin`, `PluginError`, `StartupStage`, `CoreStage`, `Time`, `FixedTime` | Fallible plugin installation, plugin lifecycle, runner policy, frame/fixed-step time resources |
 | `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
-| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Bevy-reflect-backed component metadata, asset-aware scene preflight, schema export, and migrations |
-| `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents |
+| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry modules for Bevy-reflect-backed component metadata, asset-aware scene preflight, schema export, and migrations |
+| `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents; tracing output is an explicit bridge |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records | Import cache records, hot reload, dependency graph |
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation |
-| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle |
+| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle, backend state, skipped-frame reason, and last error |
 | `nara_sprite` | `Sprite`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` texture binding | Sprite authoring component data; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into textured quads now and chunked cached render data later |
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, resource-keyed textured quad batches |
 | `nara_input` | `InputState`, `KeyCode` | winit event normalization and action maps |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Gameplay APIs and renderer backend internals |
-| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, and colored quad submission from `SpriteBatches` |
+| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, colored/textured quad submission from `SpriteBatches`, and `RenderBackendStatus` updates |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
 | `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `ToolingPlugin` | UI-agnostic inspector/query/command models, isolated Play Mode lifecycle state, and conservative Apply Changes status guards consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses, `EguiSceneEditorAction` | egui-only rendering adapter that consumes tooling models and returns tooling commands/actions; no scene/session/world ownership |
@@ -139,7 +139,9 @@ sequenceDiagram
 
 **Pros**: Produces pixels sooner.
 **Cons**: Gameplay code learns wgpu too early; surface/device lifetime concerns leak into API; later tooling and hot reload become retrofits.
-**Decision**: Deferred. The `RenderBackend` seam comes first, then `nara_render_wgpu`.
+**Decision**: Rejected as a public contract. The implemented seam is plugin-installed systems,
+backend-owned resources, and `RenderBackendStatus`; speculative backend traits should wait for a
+second real adapter or stronger isolation pressure.
 
 ## Success Metrics
 
@@ -158,13 +160,17 @@ sequenceDiagram
 |---|---|---:|---|
 | Rebuilding too much of Bevy | High | Medium | Keep nara's public interface narrower and document rejected scope |
 | ECS abstraction becomes a leaky alias | High | Medium | Keep `nara_ecs` intentionally thin, document Bevy ECS semantics, and add nara-owned conventions only at product boundaries |
-| Renderer seam too generic for wgpu | Medium | Medium | Build `nara_render_wgpu` next and let real surface lifecycle pressure the interface |
+| Renderer seam becomes speculative | Medium | Medium | Let plugin/resources/status define the current backend contract; add traits only when real adapters require them |
 | Tooling leaks into runtime | Medium | Medium | Keep `nara_tooling` as a client of snapshots/registries, not a dependency of core ECS |
 | Scene serialization stores runtime entity IDs | High | Low | Implemented `SceneEntityId`, `SceneEntitySource`, and instantiate-time remapping; keep runtime `Parent`/`Children` out of persistent documents |
 
 ## Implemented Authoring Foundations
 
-- `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains.
+- `nara_app::Plugin::build` is fallible. Plugin prerequisites use `add_plugin_if_missing` or structured `PluginError` values instead of panic helpers.
+- `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
+- `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains. Serializable components require explicit schema fields, duplicate Rust `TypeId` registration is rejected, and invalid schema defaults fail at registration.
+- `nara_diagnostic::DiagnosticReport` collects diagnostics without implicit logging. `emit_to_tracing` is the explicit bridge for logs.
+- `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, and `RenderFrameSkipReason`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then applies field/reparent commands as scene patches.

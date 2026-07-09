@@ -84,7 +84,7 @@ Backend capabilities should be represented by resources installed by plugins:
 
 ```text
 PhysicsBackend2d
-RenderBackend
+RenderBackendStatus / backend adapter resource
 AudioBackend
 SceneFormatRegistry
 ```
@@ -123,6 +123,8 @@ This keeps tests and headless runs replaceable.
 - Render, audio, serialization, and scripting should follow the same domain/adapter split.
 - Core ECS data must avoid storing raw backend handles in serializable components.
 - Backend plugins need diagnostics for unsupported component combinations or invalid data.
+- Render backend observation currently uses plugin-installed resources and `RenderBackendStatus`;
+  a public backend trait should wait for a real second adapter or a concrete test backend need.
 
 ## Success Metrics
 

@@ -64,11 +64,17 @@ As of 2026-07-08:
 - `ComponentSchemaVersion` is stored with each `SceneComponentRecord`.
 - `ComponentRegistry::schema_catalog()` exports a deterministic `ComponentSchemaCatalog`.
 - Component owners register explicit `ComponentFieldSchema` metadata beside their codecs.
+- Serializable component registration requires explicit schema fields. Runtime-only registration
+  remains available through the non-serializable component path.
+- `ComponentRegistry` rejects duplicate stable component IDs, duplicate Rust `TypeId` mappings,
+  duplicate field paths, and invalid default values.
 - Field paths use structured `ComponentFieldPath` / `ComponentFieldPathSegment` values rather than
   ad hoc dotted strings. Display strings are diagnostic/UI conveniences only.
 - `ComponentRegistry::register_component_migration` composes one-step `ComponentValue` migrations
   before scene/prefab preflight rejects older schema versions.
 - `rust_type_path` remains useful metadata for debugging, but it is not the stable file identity.
+- `nara_reflect` is split into `schema`, `value`, `path`, `codec`, `migration`, and `registry`
+  modules while preserving the crate-level public API.
 
 ## Success Metrics
 
