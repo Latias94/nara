@@ -1,15 +1,78 @@
 use nara_asset::Handle;
-use nara_core::Color;
+use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
 use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderResourceKey, RenderTarget};
-use nara_sprite_render::{ColorKey, SpriteInstance, SpriteMaterialKey, TextureUvRect};
 use nara_ui::UiRect;
 
-pub type UiInstance = SpriteInstance;
-pub type UiMaterialKey = SpriteMaterialKey;
-pub type UiTextureRect = TextureUvRect;
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiTextureRect {
+    pub min: Vec2,
+    pub size: Vec2,
+}
+
+impl UiTextureRect {
+    pub const FULL: Self = Self {
+        min: Vec2::ZERO,
+        size: Vec2::ONE,
+    };
+
+    #[must_use]
+    pub const fn new(min: Vec2, size: Vec2) -> Self {
+        Self { min, size }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiInstance {
+    pub center: Vec2,
+    pub x_axis: Vec2,
+    pub y_axis: Vec2,
+    pub color: Color,
+    pub uv: UiTextureRect,
+}
+
+impl UiInstance {
+    #[must_use]
+    pub const fn axis_aligned(center: Vec2, half_size: Vec2, color: Color) -> Self {
+        Self {
+            center,
+            x_axis: Vec2::new(half_size.x, 0.0),
+            y_axis: Vec2::new(0.0, half_size.y),
+            color,
+            uv: UiTextureRect::FULL,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UiMaterialKey {
+    pub image: Option<RenderResourceKey>,
+    pub sampler: SamplerDescriptor,
+    pub alpha_mode: AlphaMode2d,
+    pub tint: UiColorKey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UiColorKey {
+    pub r: u32,
+    pub g: u32,
+    pub b: u32,
+    pub a: u32,
+}
+
+impl UiColorKey {
+    #[must_use]
+    pub const fn from_color(color: Color) -> Self {
+        Self {
+            r: color.r.to_bits(),
+            g: color.g.to_bits(),
+            b: color.b.to_bits(),
+            a: color.a.to_bits(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExtractedUiItem {
@@ -222,6 +285,6 @@ pub fn material_key(
         image,
         sampler: material.sampler,
         alpha_mode: material.alpha_mode,
-        tint: ColorKey::from_color(material.tint),
+        tint: UiColorKey::from_color(material.tint),
     }
 }

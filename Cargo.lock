@@ -1843,7 +1843,6 @@ dependencies = [
  "nara_material",
  "nara_render",
  "nara_scene",
- "nara_sprite_render",
  "nara_ui",
 ]
 

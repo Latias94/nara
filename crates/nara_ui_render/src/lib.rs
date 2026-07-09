@@ -19,7 +19,8 @@ pub use crate::queue::{
 };
 pub use crate::types::{
     ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, QueuedUiItem, QueuedUiItems, UiBatch,
-    UiBatches, UiClipRect, UiInstance, UiMaterialKey, UiRenderStats, UiTextureRect, material_key,
+    UiBatches, UiClipRect, UiColorKey, UiInstance, UiMaterialKey, UiRenderStats, UiTextureRect,
+    material_key,
 };
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -54,8 +55,8 @@ impl Plugin for UiRenderPlugin {
 pub mod prelude {
     pub use crate::{
         ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, QueuedUiItem, QueuedUiItems,
-        UiBatch, UiBatches, UiClipRect, UiInstance, UiMaterialKey, UiRenderPlugin, UiRenderStats,
-        UiTextureRect, build_ui_batches, compare_queued_ui_items, extract_ui, material_key,
-        queue_ui, sort_and_batch_ui, ui_rect_to_clip_instance,
+        UiBatch, UiBatches, UiClipRect, UiColorKey, UiInstance, UiMaterialKey, UiRenderPlugin,
+        UiRenderStats, UiTextureRect, build_ui_batches, compare_queued_ui_items, extract_ui,
+        material_key, queue_ui, sort_and_batch_ui, ui_rect_to_clip_instance,
     };
 }

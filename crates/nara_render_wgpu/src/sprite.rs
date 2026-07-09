@@ -2,6 +2,7 @@ use crate::texture::{WgpuSpriteTextureCache, WgpuSpriteTextureError};
 use bytemuck::{Pod, Zeroable};
 use nara_asset::Assets;
 use nara_image::{ImageAsset, PreparedImageResource};
+use nara_material::AlphaMode2d;
 use nara_render::{PreparedRenderResources, RenderPhaseLabel};
 use nara_sprite_render::{SpriteBatch, SpriteInstance};
 use wgpu::util::DeviceExt;
@@ -30,9 +31,20 @@ const SPRITE_INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr
 
 #[derive(Debug, Clone)]
 pub(crate) struct WgpuSpritePipeline {
-    pub(crate) format: wgpu::TextureFormat,
+    pub(crate) key: WgpuSpritePipelineKey,
     pub(crate) pipeline: wgpu::RenderPipeline,
-    pub(crate) texture_bind_group_layout: wgpu::BindGroupLayout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WgpuSpritePipelineKey {
+    pub(crate) format: wgpu::TextureFormat,
+    pub(crate) alpha_mode: AlphaMode2d,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WgpuSpritePipelineDrawRef {
+    pub(crate) alpha_mode: AlphaMode2d,
+    pub(crate) pipeline: wgpu::RenderPipeline,
 }
 
 #[derive(Debug)]
@@ -40,6 +52,7 @@ pub(crate) struct WgpuSpriteBatchBuffer {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     phase: RenderPhaseLabel,
+    alpha_mode: AlphaMode2d,
     instance_count: u32,
 }
 
@@ -49,36 +62,41 @@ pub(crate) struct WgpuSpriteDrawStats {
     pub(crate) sprites: u32,
 }
 
+pub(crate) fn create_sprite_texture_bind_group_layout(
+    device: &wgpu::Device,
+) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("nara_wgpu_sprite_texture_bind_group_layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
 pub(crate) fn create_sprite_pipeline(
     device: &wgpu::Device,
-    format: wgpu::TextureFormat,
+    key: WgpuSpritePipelineKey,
+    texture_bind_group_layout: &wgpu::BindGroupLayout,
 ) -> WgpuSpritePipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("sprite.wgsl"));
-    let texture_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("nara_wgpu_sprite_texture_bind_group_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("nara_wgpu_sprite_pipeline_layout"),
-        bind_group_layouts: &[Some(&texture_bind_group_layout)],
+        bind_group_layouts: &[Some(texture_bind_group_layout)],
         immediate_size: 0,
     });
     let vertex_buffer_layout = sprite_instance_buffer_layout();
@@ -101,21 +119,13 @@ pub(crate) fn create_sprite_pipeline(
             module: &shader,
             entry_point: Some("fs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
+            targets: &[Some(sprite_color_target_state(key.format, key.alpha_mode))],
         }),
         multiview_mask: None,
         cache: None,
     });
 
-    WgpuSpritePipeline {
-        format,
-        pipeline,
-        texture_bind_group_layout,
-    }
+    WgpuSpritePipeline { key, pipeline }
 }
 
 pub(crate) fn create_sprite_batch_buffers(
@@ -126,6 +136,7 @@ pub(crate) fn create_sprite_batch_buffers(
     texture_cache: &mut WgpuSpriteTextureCache,
     images: Option<&Assets<ImageAsset>>,
     prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
+    frame_index: u64,
 ) -> Result<Vec<WgpuSpriteBatchBuffer>, WgpuSpriteTextureError> {
     batches
         .iter()
@@ -140,10 +151,15 @@ pub(crate) fn create_sprite_batch_buffers(
                     images.ok_or(WgpuSpriteTextureError::MissingImageAsset { key })?,
                     prepared_images
                         .ok_or(WgpuSpriteTextureError::MissingPreparedResource { key })?,
+                    frame_index,
                 )?,
-                None => {
-                    texture_cache.fallback_bind_group(device, queue, texture_layout, batch.material)
-                }
+                None => texture_cache.fallback_bind_group(
+                    device,
+                    queue,
+                    texture_layout,
+                    batch.material,
+                    frame_index,
+                ),
             };
             let instances = pack_sprite_instances(&batch.instances);
             let instance_count = saturating_u32(instances.len());
@@ -157,6 +173,7 @@ pub(crate) fn create_sprite_batch_buffers(
                 buffer,
                 bind_group,
                 phase: batch.phase,
+                alpha_mode: batch.material.alpha_mode,
                 instance_count,
             })
         })
@@ -165,7 +182,7 @@ pub(crate) fn create_sprite_batch_buffers(
 
 pub(crate) fn draw_sprite_batch_buffers_for_phase<'pass>(
     render_pass: &mut wgpu::RenderPass<'pass>,
-    pipeline: &'pass wgpu::RenderPipeline,
+    pipelines: &'pass [WgpuSpritePipelineDrawRef],
     buffers: &'pass [WgpuSpriteBatchBuffer],
     phase: RenderPhaseLabel,
 ) {
@@ -173,8 +190,19 @@ pub(crate) fn draw_sprite_batch_buffers_for_phase<'pass>(
         return;
     }
 
-    render_pass.set_pipeline(pipeline);
+    let mut bound_alpha_mode = None::<AlphaMode2d>;
     for buffer in buffers.iter().filter(|buffer| buffer.phase == phase) {
+        let Some(pipeline) = pipelines
+            .iter()
+            .find(|pipeline| pipeline.alpha_mode == buffer.alpha_mode)
+            .map(|pipeline| &pipeline.pipeline)
+        else {
+            continue;
+        };
+        if bound_alpha_mode != Some(buffer.alpha_mode) {
+            render_pass.set_pipeline(pipeline);
+            bound_alpha_mode = Some(buffer.alpha_mode);
+        }
         render_pass.set_bind_group(0, &buffer.bind_group, &[]);
         render_pass.set_vertex_buffer(0, buffer.buffer.slice(..));
         render_pass.draw(0..VERTICES_PER_QUAD, 0..buffer.instance_count);
@@ -200,6 +228,20 @@ fn sprite_instance_buffer_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
         array_stride: std::mem::size_of::<WgpuSpriteInstance>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: &SPRITE_INSTANCE_ATTRIBUTES,
+    }
+}
+
+pub(crate) fn sprite_color_target_state(
+    format: wgpu::TextureFormat,
+    alpha_mode: AlphaMode2d,
+) -> wgpu::ColorTargetState {
+    wgpu::ColorTargetState {
+        format,
+        blend: match alpha_mode {
+            AlphaMode2d::Opaque => None,
+            AlphaMode2d::Blend => Some(wgpu::BlendState::ALPHA_BLENDING),
+        },
+        write_mask: wgpu::ColorWrites::ALL,
     }
 }
 
@@ -307,5 +349,19 @@ mod tests {
         assert_eq!(layout.attributes[3].offset, 24);
         assert_eq!(layout.attributes[4].offset, 40);
         assert_eq!(layout.attributes[5].offset, 48);
+    }
+
+    #[test]
+    fn color_target_respects_alpha_mode() {
+        assert_eq!(
+            sprite_color_target_state(wgpu::TextureFormat::Bgra8UnormSrgb, AlphaMode2d::Opaque)
+                .blend,
+            None
+        );
+        assert_eq!(
+            sprite_color_target_state(wgpu::TextureFormat::Bgra8UnormSrgb, AlphaMode2d::Blend)
+                .blend,
+            Some(wgpu::BlendState::ALPHA_BLENDING)
+        );
     }
 }

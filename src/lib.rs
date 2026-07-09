@@ -322,7 +322,8 @@ pub mod advanced_prelude {
     };
     pub use nara_ui_render::{
         ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, QueuedUiItem, QueuedUiItems,
-        UiBatch, UiBatches, UiClipRect, UiInstance, UiMaterialKey, UiRenderStats, UiTextureRect,
+        UiBatch, UiBatches, UiClipRect, UiColorKey, UiInstance, UiMaterialKey, UiRenderStats,
+        UiTextureRect,
     };
 }
 

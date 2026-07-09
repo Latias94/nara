@@ -11,13 +11,29 @@ use nara_sprite_render::SpriteMaterialKey;
 use thiserror::Error;
 
 const RGBA8_BYTES_PER_PIXEL: u32 = 4;
+const DEFAULT_UNUSED_GRACE_FRAMES: u64 = 2;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct WgpuSpriteTextureCache {
+    policy: WgpuTextureCachePolicy,
+    stats: WgpuTextureCacheStats,
     fallback_texture: Option<WgpuTextureResource>,
     fallback_bindings: BTreeMap<SpriteMaterialKey, WgpuSpriteTextureBinding>,
     images: BTreeMap<RenderResourceKey, WgpuImageTextureResource>,
     image_bindings: BTreeMap<SpriteMaterialKey, WgpuSpriteImageBinding>,
+}
+
+impl Default for WgpuSpriteTextureCache {
+    fn default() -> Self {
+        Self {
+            policy: WgpuTextureCachePolicy::default(),
+            stats: WgpuTextureCacheStats::default(),
+            fallback_texture: None,
+            fallback_bindings: BTreeMap::new(),
+            images: BTreeMap::new(),
+            image_bindings: BTreeMap::new(),
+        }
+    }
 }
 
 impl WgpuSpriteTextureCache {
@@ -26,33 +42,57 @@ impl WgpuSpriteTextureCache {
         self.images.len()
     }
 
+    #[must_use]
+    pub(crate) fn stats(&self) -> WgpuTextureCacheStats {
+        let mut stats = self.stats;
+        stats.image_textures = self.images.len();
+        stats.image_bindings = self.image_bindings.len();
+        stats.fallback_bindings = self.fallback_bindings.len();
+        stats.has_fallback_texture = self.fallback_texture.is_some();
+        stats
+    }
+
     pub(crate) fn clear(&mut self) {
         self.fallback_texture = None;
         self.fallback_bindings.clear();
         self.images.clear();
         self.image_bindings.clear();
+        self.stats = WgpuTextureCacheStats::default();
     }
 
-    pub(crate) fn prune_unused_materials(
-        &mut self,
-        materials: impl IntoIterator<Item = SpriteMaterialKey>,
-    ) {
-        let used_materials = materials.into_iter().collect::<BTreeSet<_>>();
-        let used_images = used_materials
-            .iter()
-            .filter_map(|material| material.image)
-            .collect::<BTreeSet<_>>();
+    pub(crate) fn begin_frame(&mut self, frame_index: u64) {
+        self.stats = WgpuTextureCacheStats::default();
+        self.evict_unused(frame_index);
+    }
 
-        self.images.retain(|key, _| used_images.contains(key));
-        self.image_bindings
-            .retain(|material, _| used_materials.contains(material) && material.image.is_some());
-        self.fallback_bindings
-            .retain(|material, _| used_materials.contains(material) && material.image.is_none());
-        if !used_materials
-            .iter()
-            .any(|material| material.image.is_none())
-        {
+    fn evict_unused(&mut self, frame_index: u64) {
+        let grace_frames = self.policy.unused_grace_frames;
+        let before_images = self.images.len();
+        self.images.retain(|_, image| {
+            !unused_past_grace(frame_index, image.last_used_frame, grace_frames)
+        });
+        self.stats.evicted_image_textures = before_images.saturating_sub(self.images.len());
+
+        let live_images = self.images.keys().copied().collect::<BTreeSet<_>>();
+        let before_image_bindings = self.image_bindings.len();
+        self.image_bindings.retain(|material, binding| {
+            material.image.is_some()
+                && live_images.contains(&material.image.unwrap())
+                && !unused_past_grace(frame_index, binding.last_used_frame, grace_frames)
+        });
+        self.stats.evicted_image_bindings =
+            before_image_bindings.saturating_sub(self.image_bindings.len());
+
+        let before_fallback_bindings = self.fallback_bindings.len();
+        self.fallback_bindings.retain(|_, binding| {
+            !unused_past_grace(frame_index, binding.last_used_frame, grace_frames)
+        });
+        self.stats.evicted_fallback_bindings =
+            before_fallback_bindings.saturating_sub(self.fallback_bindings.len());
+
+        if self.fallback_texture.is_some() && self.fallback_bindings.is_empty() {
             self.fallback_texture = None;
+            self.stats.evicted_fallback_textures = 1;
         }
     }
 
@@ -62,6 +102,7 @@ impl WgpuSpriteTextureCache {
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
         material: SpriteMaterialKey,
+        frame_index: u64,
     ) -> wgpu::BindGroup {
         if self.fallback_texture.is_none() {
             self.fallback_texture = Some(create_texture_resource(
@@ -84,16 +125,15 @@ impl WgpuSpriteTextureCache {
                     "nara_wgpu_sprite_fallback_bind_group",
                     &texture.view,
                     material.sampler,
+                    frame_index,
                 )
             };
             self.fallback_bindings.insert(material, binding);
         }
 
-        self.fallback_bindings
-            .get(&material)
-            .unwrap()
-            .bind_group
-            .clone()
+        let binding = self.fallback_bindings.get_mut(&material).unwrap();
+        binding.last_used_frame = frame_index;
+        binding.bind_group.clone()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -105,6 +145,7 @@ impl WgpuSpriteTextureCache {
         material: SpriteMaterialKey,
         images: &Assets<ImageAsset>,
         prepared_images: &PreparedRenderResources<PreparedImageResource>,
+        frame_index: u64,
     ) -> Result<wgpu::BindGroup, WgpuSpriteTextureError> {
         let key = material
             .image
@@ -123,15 +164,32 @@ impl WgpuSpriteTextureCache {
             .ok_or(WgpuSpriteTextureError::MissingImageAsset { key })?;
         validate_prepared_image_matches_asset(key, image, prepared)?;
 
-        let texture_needs_upload = self
-            .images
-            .get(&key)
-            .map(|existing| existing.snapshot != snapshot)
-            .unwrap_or(true);
-        if texture_needs_upload {
+        let upload_action = texture_upload_action(
+            self.images.get(&key).map(|existing| existing.snapshot),
+            snapshot,
+        );
+        if upload_action.requires_upload() {
             let texture = create_image_texture_resource(device, queue, key, image)?;
-            self.images
-                .insert(key, WgpuImageTextureResource { snapshot, texture });
+            self.images.insert(
+                key,
+                WgpuImageTextureResource {
+                    snapshot,
+                    texture,
+                    last_used_frame: frame_index,
+                },
+            );
+            match upload_action {
+                TextureUploadAction::UploadNew => {
+                    self.stats.uploaded_images = self.stats.uploaded_images.saturating_add(1);
+                }
+                TextureUploadAction::ReuploadChangedSnapshot => {
+                    self.stats.reuploaded_images = self.stats.reuploaded_images.saturating_add(1);
+                }
+                TextureUploadAction::ReuseExisting => {}
+            }
+        } else if let Some(existing) = self.images.get_mut(&key) {
+            existing.last_used_frame = frame_index;
+            self.stats.reused_images = self.stats.reused_images.saturating_add(1);
         }
 
         let binding_needs_update = self
@@ -148,26 +206,58 @@ impl WgpuSpriteTextureCache {
                     "nara_wgpu_sprite_image_bind_group",
                     &texture.view,
                     material.sampler,
+                    frame_index,
                 )
             };
-            self.image_bindings
-                .insert(material, WgpuSpriteImageBinding { snapshot, binding });
+            self.image_bindings.insert(
+                material,
+                WgpuSpriteImageBinding {
+                    snapshot,
+                    binding,
+                    last_used_frame: frame_index,
+                },
+            );
         }
 
-        Ok(self
-            .image_bindings
-            .get(&material)
-            .unwrap()
-            .binding
-            .bind_group
-            .clone())
+        let binding = self.image_bindings.get_mut(&material).unwrap();
+        binding.last_used_frame = frame_index;
+        Ok(binding.binding.bind_group.clone())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WgpuTextureCachePolicy {
+    pub unused_grace_frames: u64,
+}
+
+impl Default for WgpuTextureCachePolicy {
+    fn default() -> Self {
+        Self {
+            unused_grace_frames: DEFAULT_UNUSED_GRACE_FRAMES,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct WgpuTextureCacheStats {
+    pub uploaded_images: u32,
+    pub reuploaded_images: u32,
+    pub reused_images: u32,
+    pub evicted_image_textures: usize,
+    pub evicted_image_bindings: usize,
+    pub evicted_fallback_textures: u32,
+    pub evicted_fallback_bindings: usize,
+    pub image_textures: usize,
+    pub image_bindings: usize,
+    pub fallback_bindings: usize,
+    pub has_fallback_texture: bool,
 }
 
 #[derive(Debug)]
 struct WgpuImageTextureResource {
     snapshot: RenderResourceSnapshot,
     texture: WgpuTextureResource,
+    last_used_frame: u64,
 }
 
 #[derive(Debug)]
@@ -180,12 +270,14 @@ struct WgpuTextureResource {
 struct WgpuSpriteImageBinding {
     snapshot: RenderResourceSnapshot,
     binding: WgpuSpriteTextureBinding,
+    last_used_frame: u64,
 }
 
 #[derive(Debug)]
 struct WgpuSpriteTextureBinding {
     bind_group: wgpu::BindGroup,
     _sampler: wgpu::Sampler,
+    last_used_frame: u64,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -334,6 +426,7 @@ fn create_texture_bind_group(
     label: &'static str,
     view: &wgpu::TextureView,
     sampler_descriptor: SamplerDescriptor,
+    last_used_frame: u64,
 ) -> WgpuSpriteTextureBinding {
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("nara_wgpu_sprite_sampler"),
@@ -363,6 +456,7 @@ fn create_texture_bind_group(
     WgpuSpriteTextureBinding {
         bind_group,
         _sampler: sampler,
+        last_used_frame,
     }
 }
 
@@ -416,10 +510,38 @@ fn address_mode(address_mode: AddressMode) -> wgpu::AddressMode {
     }
 }
 
+fn unused_past_grace(current_frame: u64, last_used_frame: u64, grace_frames: u64) -> bool {
+    current_frame.saturating_sub(last_used_frame) > grace_frames
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextureUploadAction {
+    UploadNew,
+    ReuploadChangedSnapshot,
+    ReuseExisting,
+}
+
+impl TextureUploadAction {
+    fn requires_upload(self) -> bool {
+        !matches!(self, Self::ReuseExisting)
+    }
+}
+
+fn texture_upload_action(
+    existing: Option<RenderResourceSnapshot>,
+    incoming: RenderResourceSnapshot,
+) -> TextureUploadAction {
+    match existing {
+        None => TextureUploadAction::UploadNew,
+        Some(existing) if existing != incoming => TextureUploadAction::ReuploadChangedSnapshot,
+        Some(_) => TextureUploadAction::ReuseExisting,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_asset::AssetId;
+    use nara_asset::{AssetId, AssetVersion, ImportArtifactDigest};
 
     #[test]
     fn texture_format_matches_image_color_space() {
@@ -456,5 +578,68 @@ mod tests {
             address_mode(AddressMode::MirrorRepeat),
             wgpu::AddressMode::MirrorRepeat
         );
+    }
+
+    #[test]
+    fn cache_policy_retains_resources_through_grace_window() {
+        assert!(!unused_past_grace(10, 10, 2));
+        assert!(!unused_past_grace(11, 10, 2));
+        assert!(!unused_past_grace(12, 10, 2));
+        assert!(unused_past_grace(13, 10, 2));
+        assert!(!unused_past_grace(0, 10, 2));
+    }
+
+    #[test]
+    fn cache_stats_report_current_resource_counts() {
+        let mut cache = WgpuSpriteTextureCache::default();
+        cache.stats.uploaded_images = 3;
+
+        assert_eq!(
+            cache.stats(),
+            WgpuTextureCacheStats {
+                uploaded_images: 3,
+                image_textures: 0,
+                image_bindings: 0,
+                fallback_bindings: 0,
+                has_fallback_texture: false,
+                ..WgpuTextureCacheStats::default()
+            }
+        );
+
+        cache.clear();
+        assert_eq!(cache.stats(), WgpuTextureCacheStats::default());
+    }
+
+    #[test]
+    fn texture_upload_action_tracks_snapshot_changes() {
+        let first = snapshot(1, 1, b"descriptor-a");
+        let same = snapshot(1, 1, b"descriptor-a");
+        let new_version = snapshot(1, 2, b"descriptor-a");
+        let new_descriptor = snapshot(1, 1, b"descriptor-b");
+
+        assert_eq!(
+            texture_upload_action(None, first),
+            TextureUploadAction::UploadNew
+        );
+        assert_eq!(
+            texture_upload_action(Some(first), same),
+            TextureUploadAction::ReuseExisting
+        );
+        assert_eq!(
+            texture_upload_action(Some(first), new_version),
+            TextureUploadAction::ReuploadChangedSnapshot
+        );
+        assert_eq!(
+            texture_upload_action(Some(first), new_descriptor),
+            TextureUploadAction::ReuploadChangedSnapshot
+        );
+    }
+
+    fn snapshot(asset_id: u64, version: u64, descriptor: &[u8]) -> RenderResourceSnapshot {
+        RenderResourceSnapshot::new(
+            RenderResourceKey::new(AssetId::from_raw(asset_id), RenderResourceKind::IMAGE_2D),
+            AssetVersion::from_raw(version),
+            ImportArtifactDigest::from_bytes(descriptor),
+        )
     }
 }

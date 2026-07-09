@@ -14,7 +14,6 @@ nara_ecs.workspace = true
 nara_image.workspace = true
 nara_material.workspace = true
 nara_render.workspace = true
-nara_sprite_render.workspace = true
 nara_ui.workspace = true
 
 [dev-dependencies]
