@@ -207,8 +207,8 @@ Implemented in the 2D render foundation slice:
 - The first queued render shape is concrete data, not a trait: `ExtractedSprites`,
   `QueuedSpriteItems`, and `SpriteBatches`. Backends consume batches rather than gameplay
   authoring components.
-- `nara_render_wgpu` draws colored and textured quad instance batches and remains the only crate
-  that imports `wgpu`.
+- `nara_render_wgpu` draws sprite/tilemap and runtime UI quad instance batches and remains the only
+  crate that imports `wgpu`.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons as
   backend observation resources.
 - `nara_render_wgpu` updates render backend status for uninitialized, missing-window, rendering,
@@ -217,12 +217,18 @@ Implemented in the 2D render foundation slice:
   plugin-installed resources, systems, and status observations until a second backend or test
   adapter creates real abstraction pressure.
 
+Resolved in the runtime UI / pass-plan slice:
+
+- `nara_ui_render` adds a second backend-neutral batch stream, `UiBatches`, instead of forcing UI
+  through sprite authoring data.
+- `nara_render::RenderPassPlan` is the first general pass-order contract for clear, world 2D, UI,
+  and gizmo phases. Backends consume the plan rather than hardcoding UI/world order in private draw
+  loops.
+
 Still open:
 
-1. What abstraction generalizes `SpriteBatches` once runtime UI, gizmos, text, or 3D submit their
-   own phase items?
-2. What concrete second pass/resource use case should trigger full `RenderGraph` implementation?
-3. What reusable material asset and shader-specialization model should sit above inline 2D material
+1. What concrete second pass/resource use case should trigger full `RenderGraph` implementation?
+2. What reusable material asset and shader-specialization model should sit above inline 2D material
    descriptors once projects need shared material files?
 
 Resolved by ADR 0033:
@@ -234,7 +240,7 @@ Resolved by ADR 0033:
 - `nara_material` owns the first sampler/material authoring layer through `SamplerDescriptor`,
   `AlphaMode2d`, `Material2dDescriptor`, and material keys.
 - Sprites and tilemaps carry material-first wrappers around typed image handles and UVs.
-- `nara_sprite_render` batches by `SpriteMaterialKey`, not by texture-only keys.
+- `nara_sprite_render` batches by `SpriteMaterialKey`, not by image-resource-only keys.
 - `nara_render_wgpu` owns textures, samplers, bind groups, buffers, and pipeline cache details, with
   image texture upload cached separately from material/sampler bind-group identity.
 - Gameplay/domain crates store typed handles or backend-neutral descriptors, not backend handles.
@@ -302,14 +308,23 @@ Resolved in the first debug UI adapter slice:
 - dear-imgui-rs remains an acceptable later adapter, and runtime UI remains nara-owned ECS UI
   rather than egui/dear-imgui.
 
+Resolved in the first runtime UI slice:
+
+- `nara_ui` provides ECS UI authoring components, computed layout resources, and pointer
+  hover/press/focus state.
+- `nara_ui_render` turns computed UI panels into color/image batches using the same image prepare
+  and material-key path as sprites.
+- The first dogfooding threshold is now concrete: panels, images, clipping, pass ordering, and
+  pointer hit testing exist, but text, widgets, richer layout, and editor viewport integration are
+  still missing.
+
 Follow-up details still to settle:
 
-1. What minimum runtime UI is required before editor dogfooding?
-2. Which accepted patch operations need specialized incremental `WorldCommand` paths before
+1. Which accepted patch operations need specialized incremental `WorldCommand` paths before
    rebuild-style projection is too expensive?
-3. When should Apply Changes emit field-level patch operations instead of whole-component
+2. When should Apply Changes emit field-level patch operations instead of whole-component
    replacements?
-4. How should prefab-expanded entity write-back produce source-prefab override patches?
+3. How should prefab-expanded entity write-back produce source-prefab override patches?
 
 ## Backend and Domain Extension Seams
 
@@ -368,11 +383,23 @@ Follow-up details still to settle:
 
 Accepted direction: nara builds its own runtime ECS UI. See ADR [0025-runtime-ui-system.md](adr/0025-runtime-ui-system.md).
 
+Implemented first slice:
+
+- UI is ordinary ECS data using `UiRoot`, `UiNode`, `UiPanel`, and `Parent` hierarchy components.
+- Layout currently resolves simple absolute/percentage style values into runtime-only
+  `ComputedUiLayouts` in top-left logical UI pixels.
+- Pointer hover/press/focus state is runtime-only and fed by `PointerState`.
+- UI rendering has its own extraction/queue/batch path and submits through the UI render phase
+  after world 2D phases.
+
 Follow-up details still to settle:
 
-1. Flexbox-like layout, grid, or custom retained layout?
-2. How does UI relate to scene hierarchy and cameras?
+1. Which advanced layout model should come next: flexbox-like layout, grid, or a smaller retained
+   layout model?
+2. What exact editor dogfooding milestone should switch from egui panels to nara UI panels?
 3. What text shaping/rendering libraries are acceptable?
+4. How should UI/screen-space cameras, multiple viewports, and editor overlays compose once full
+   render graph pressure arrives?
 
 ## Save, Networking, Animation, Audio, Text
 

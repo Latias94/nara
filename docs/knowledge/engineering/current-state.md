@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-09T16:31:28+08:00
+timestamp: 2026-07-09T17:48:07+08:00
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-09T16:31:28+08:00
-- Last verified: Material/2D migration M2 passed `cargo fmt --all`, focused M2 nextest with 63 tests, material serde nextest with 3 tests, workspace checks with and without serde, `windowed_clear` / `windowed_sprites` winit+wgpu example checks, `asset_import_texture` run, serde example checks, prefab/scene example runs, boundary searches, stale-contract search, and `git diff --check`.
-- Next action: Continue M3 runtime UI and backend-neutral pass plan from `docs/plans/2026-07-09-004-feat-render-ui-apply-foundation-plan.md`.
+- Snapshot timestamp: 2026-07-09T17:48:07+08:00
+- Last verified: Full render/UI/apply foundation Verification Contract passed: fmt, workspace checks with and without serde, `cargo nextest run --workspace` with 267 tests, three winit+wgpu examples, `asset_import_texture`, `asset-watch`, dependency boundary searches, runtime identity leak search, stale-contract search, engineering memory validation, and `git diff --check`.
+- Next action: Commit and push the U9/U10 documentation, facade, and integration-test cleanup to `origin/main`.
 
 # Active Registrations
 
@@ -46,6 +46,10 @@ status: "active"
   - `nara_sprite` and `nara_tilemap` now author material-first wrappers around reusable `Handle<ImageAsset>` image references and serialize semantic `AssetRef::Path` or `AssetRef::StableId` values through codec context.
   - `nara_sprite_render` now queues colored and textured sprite/tilemap batches with `SpriteMaterialKey` values that include image render resource key, sampler, alpha mode, and tint.
   - `nara_render_wgpu` now samples prepared image resources through backend-private texture caches split from material/sampler bind-group caches.
+  - `nara_input` now owns normalized pointer state through `PointerState`, and `nara_winit` updates it from desktop cursor events.
+  - `nara_ui` now owns the first nara runtime ECS UI foundation: `UiRoot`, `UiNode`, `UiPanel`, material-aware image/color panels, simple top-left logical-pixel layout projection, and runtime-only pointer interaction state.
+  - `nara_ui_render` now extracts runtime UI panels, queues color/image materials through the same `nara_image` prepare and `nara_material` policy path as sprites, clips panels, and emits `UiBatches`.
+  - `nara_render` now owns `RenderPassPlan` for clear/world/UI/gizmo ordering, and `nara_render_wgpu` consumes sprite and UI batches through that plan.
   - Scene/prefab spawn now supports asset-aware preflight through `ProjectAssetDatabase` and scratch `AssetServer` state before mutating the target world.
   - Review hardening now enforces one-to-one runtime asset identity binding, source-kind aware sprite/tileset preflight, path-ref database validation, prepared image removal cleanup, invalid atlas tile skips, and split wgpu sprite texture responsibilities.
   - Created the next implementation-ready plan for scene patch transactions, patch-based prefab overrides, component schema export, migrations, and nested prefab source resolution.
@@ -67,9 +71,8 @@ status: "active"
   - `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, spawns owned image import jobs, applies typed results behind stable handles, records failed first loads/reloads/removals, composes `ImagePreparePlugin`, and invalidates prepared image resources through the render prepare seam.
   - `nara_asset_watch` is an optional desktop watcher adapter behind `asset-watch`. It owns `notify`, validates watcher roots against `AssetSourceRoot`, preserves in-root rename sides, maps `.meta` events to semantic source changes, and never mutates asset or render storage directly.
 - Pending follow-ups:
-  - The egui adapter is debug/editor tooling only; long-term runtime UI remains a nara-owned engine UI design problem.
+  - The egui adapter is debug/editor tooling only. Runtime UI now has a panel/layout/input/render foundation, but text, widgets, richer layout, keyboard/gamepad focus, editor dogfooding, and viewport composition remain future work.
   - Apply Changes beyond the first whole-component selected subset remains deferred: field-level diff minimization, prefab override write-back, whole-scene diffing, and edit-while-playing merge UI are not implemented.
-  - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset`, `nara_material`, and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
   - Reusable material assets, custom shader specialization, texture atlases, compression profiles, mip generation, and 3D mesh import remain future extensions of the asset/import/render prepare seam.
   - `nara_scene` module split, shared asset-ref codec helpers, boundary-search CI, and real import-cache filesystem containment tests remain accepted residuals from review.
 - Blocked:
@@ -96,3 +99,8 @@ status: "active"
 - [Apply Changes M1 memory event](logs/2026-07/2026-07-09T154656Z-apply-changes-m1-selected-component-patch-export.md)
 - [Material/2D migration M2 verification](verification/2026-07-09-material-2d-m2.md)
 - [Material/2D migration M2 memory event](logs/2026-07/2026-07-09T163128Z-material-2d-m2-image-sampler-removal.md)
+- [Runtime UI and pass plan M3 progress](progress/2026-07-09-runtime-ui-pass-plan-m3.md)
+- [Runtime UI and pass plan M3 verification](verification/2026-07-09-runtime-ui-pass-plan-m3.md)
+- [Runtime UI and pass plan M3 memory event](logs/2026-07/2026-07-09T173026Z-runtime-ui-pass-plan-m3.md)
+- [Render UI apply foundation final verification](verification/2026-07-09-render-ui-apply-foundation-final.md)
+- [Render UI apply foundation final memory event](logs/2026-07/2026-07-09T174807Z-render-ui-apply-foundation-final-verification.md)

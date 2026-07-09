@@ -16,7 +16,10 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
     assert!(!report.diagnostics.has_errors());
     let entity = report.entity_map.get(&scene_id("player")).unwrap();
     let sprite = world.get::<Sprite>(entity).unwrap();
-    let texture = sprite.texture.expect("sprite texture should resolve");
+    let texture = sprite
+        .material
+        .image
+        .expect("sprite texture should resolve");
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(asset_server.path(texture.id()), Some("textures/player.png"));
     assert_eq!(
@@ -74,7 +77,7 @@ fn unknown_sprite_stable_asset_id_fails_without_world_mutation() {
         diagnostic.code.as_str() == "scene.invalid-component-payload"
             && diagnostic.context.entity_id.as_deref() == Some("player")
             && diagnostic.context.component_id.as_deref() == Some("nara.sprite.Sprite")
-            && diagnostic.context.field_path.as_deref() == Some("texture.value")
+            && diagnostic.context.field_path.as_deref() == Some("material.image.value")
             && diagnostic.context.asset_ref.as_deref() == Some(expected_asset_ref.as_str())
     }));
 }
@@ -90,7 +93,10 @@ fn sprite_path_asset_ref_still_resolves_without_project_database() {
     assert!(!report.diagnostics.has_errors());
     let entity = report.entity_map.get(&scene_id("player")).unwrap();
     let sprite = world.get::<Sprite>(entity).unwrap();
-    let texture = sprite.texture.expect("sprite texture should resolve");
+    let texture = sprite
+        .material
+        .image
+        .expect("sprite texture should resolve");
     assert_eq!(
         world.resource::<AssetServer>().path(texture.id()),
         Some("textures/player.png")
@@ -115,7 +121,7 @@ fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutat
         diagnostic.code.as_str() == "scene.invalid-component-payload"
             && diagnostic.context.entity_id.as_deref() == Some("player")
             && diagnostic.context.component_id.as_deref() == Some("nara.sprite.Sprite")
-            && diagnostic.context.field_path.as_deref() == Some("texture.value")
+            && diagnostic.context.field_path.as_deref() == Some("material.image.value")
             && diagnostic.context.asset_ref.as_deref() == Some("textures/missing.png")
     }));
 }
@@ -138,7 +144,7 @@ fn prefab_stable_asset_id_uses_asset_database_preflight() {
     assert!(!report.diagnostics.has_errors());
     let entity = report.entity_map.get(&scene_id("player")).unwrap();
     let sprite = world.get::<Sprite>(entity).unwrap();
-    assert!(sprite.texture.is_some());
+    assert!(sprite.material.image.is_some());
 }
 
 #[test]
@@ -155,7 +161,7 @@ fn prefab_patch_field_override_preserves_inherited_sprite_data() {
         entity: scene_id("player"),
         component: ComponentTypeId::new("nara.sprite.Sprite"),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["color", "r"]),
+        path: ComponentFieldPath::from_fields(["material", "tint", "r"]),
         value: ComponentValue::f64(0.25).unwrap(),
     }]);
     let mut world = World::new();
@@ -166,10 +172,10 @@ fn prefab_patch_field_override_preserves_inherited_sprite_data() {
     let sprite = world
         .get::<Sprite>(report.entity_map.get(&scene_id("player")).unwrap())
         .unwrap();
-    assert_eq!(sprite.color.r, 0.25);
-    assert_eq!(sprite.color.g, 1.0);
+    assert_eq!(sprite.material.tint.r, 0.25);
+    assert_eq!(sprite.material.tint.g, 1.0);
     assert_eq!(sprite.size, Vec2::new(16.0, 16.0));
-    assert!(sprite.texture.is_some());
+    assert!(sprite.material.image.is_some());
 }
 
 #[test]
@@ -186,7 +192,7 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
         entity: scene_id("player"),
         component: ComponentTypeId::new("nara.sprite.Sprite"),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["texture"]),
+        path: ComponentFieldPath::from_fields(["material", "image"]),
         asset_ref: AssetRef::stable_id(UNKNOWN_STABLE_ID).unwrap(),
     }]);
     let database = ProjectAssetDatabase::default();
@@ -207,7 +213,7 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
             && diagnostic.context.operation_index == Some(0)
             && diagnostic.context.entity_id.as_deref() == Some("player")
             && diagnostic.context.component_id.as_deref() == Some("nara.sprite.Sprite")
-            && diagnostic.context.field_path.as_deref() == Some("texture.value")
+            && diagnostic.context.field_path.as_deref() == Some("material.image.value")
             && diagnostic.context.asset_ref.as_deref() == Some(expected_asset_ref.as_str())
     }));
 }
@@ -292,7 +298,7 @@ fn sprite_scene(texture: ComponentValue) -> SceneDocument {
         )])
 }
 
-fn sprite_value(texture: ComponentValue) -> ComponentValue {
+fn sprite_value(image: ComponentValue) -> ComponentValue {
     ComponentValue::map([
         (
             "size",
@@ -302,17 +308,22 @@ fn sprite_value(texture: ComponentValue) -> ComponentValue {
             ]),
         ),
         (
-            "color",
+            "material",
             ComponentValue::map([
-                ("r", ComponentValue::f64(1.0).unwrap()),
-                ("g", ComponentValue::f64(1.0).unwrap()),
-                ("b", ComponentValue::f64(1.0).unwrap()),
-                ("a", ComponentValue::f64(1.0).unwrap()),
+                ("image", image),
+                (
+                    "tint",
+                    ComponentValue::map([
+                        ("r", ComponentValue::f64(1.0).unwrap()),
+                        ("g", ComponentValue::f64(1.0).unwrap()),
+                        ("b", ComponentValue::f64(1.0).unwrap()),
+                        ("a", ComponentValue::f64(1.0).unwrap()),
+                    ]),
+                ),
             ]),
         ),
         ("layer", ComponentValue::I64(0)),
         ("sort_key", ComponentValue::I64(0)),
-        ("texture", texture),
     ])
 }
 
@@ -349,7 +360,12 @@ fn exported_sprite_texture(document: &SceneDocument) -> (&str, &str) {
         .components
         .get(&ComponentTypeId::new("nara.sprite.Sprite"))
         .unwrap();
-    let texture = component.value.field("texture").unwrap();
+    let texture = component
+        .value
+        .field("material")
+        .unwrap()
+        .field("image")
+        .unwrap();
     (
         texture.field_str("kind").unwrap(),
         texture.field_str("value").unwrap(),

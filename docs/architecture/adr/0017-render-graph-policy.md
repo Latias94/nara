@@ -25,6 +25,16 @@ Phase 1 renderer:
 - Supports views, render targets, extracted data, queued render items, sorting, and backend submission.
 - Keeps pass ordering simple and mostly static.
 
+Implementation note, 2026-07-09:
+
+- `nara_render` now owns `RenderPassPlan`, `RenderPassStep`, `RenderPhaseInput`, and dependency
+  validation. This is the static-pass contract between phase queues and backends.
+- The first pass order is clear -> opaque 2D -> tilemap 2D -> transparent 2D -> UI -> gizmo per
+  ordered view. `nara_render_wgpu` consumes the plan rather than owning the ordering policy.
+- `nara_sprite_render` and `nara_ui_render` remain independent batch producers. A full render graph
+  is still deferred until resource lifetime, post-processing, render-to-texture, editor viewport
+  composition, or 3D depth/prepass needs exceed static pass planning.
+
 Future renderer:
 
 - Can introduce `RenderGraph` for multi-pass features such as post-processing, shadow maps, editor view composition, render-to-texture, UI composition, and 3D pipelines.
@@ -141,10 +151,11 @@ Do not build a full graph only for the initial sprite pass. Introduce it when at
 
 ## Follow-Up Questions
 
-- What are the first phase labels: `Opaque2d`, `Transparent2d`, `Tilemap2d`, `Gizmo`, `Ui`?
-- Should UI render before or after debug gizmos?
+- What concrete second pass/resource use case should promote `RenderPassPlan` into a full
+  `RenderGraph`?
 - Does editor viewport composition require graph earlier than runtime post-processing?
-- Where should render resource lifetime tracking live?
+- Where should render resource lifetime tracking live once graph nodes produce and consume
+  intermediate textures, depth targets, or UI composition targets?
 
 ## Citations
 

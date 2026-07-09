@@ -16,14 +16,18 @@ status: "accepted"
 - Start Play now spawns a fresh isolated runtime `World` through `SceneSpawner` for plain, prefab-resolved, asset-aware, and combined scene paths.
 - Stop Play drops the Play world. Runtime mutations do not write back to `SceneDocument` or the edit preview world by default.
 - Mode-aware inspector commands preserve edit-mode patch behavior but reject persistent patch commands in Play or Paused. Selection remains a safe UI state change.
-- Apply Changes is intentionally guard-only in this slice. It reports unsupported write-back or source revision mismatch and does not return `ScenePatchDocument`.
+- Apply Changes initially reported diagnostics only in this slice. This note is superseded by the
+  2026-07-09 selected-entity / explicit-component patch export/apply implementation, which can
+  return `ScenePatchDocument` for supported components.
 
 ## Durable Boundary Knowledge
 
 - Do not compare raw `Entity` values across different `World` instances to prove Play isolation. `Entity` is world-local and two fresh worlds may allocate equal raw values.
 - Use `SceneEntityId` as the durable bridge, `SceneEntityMap` as the per-world projection map, and component-state assertions to prove world/storage isolation.
 - A Play session records the exact `SceneAuthoringRevision` it was spawned from. Undoing back to equivalent document content still leaves a later revision and should conservatively mismatch apply-back.
-- Future Apply Changes work should plug into `SceneApplyChangesReport` only after a concrete patchable subset is designed.
+- The first concrete patchable subset is selected `SceneEntityId` plus explicit registered
+  serializable component IDs. Broader field-level, prefab-expanded, and whole-scene write-back
+  remains future work.
 
 ## Verification Snapshot
 

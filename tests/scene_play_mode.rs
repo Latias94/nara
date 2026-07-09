@@ -228,7 +228,10 @@ fn asset_and_combined_play_start_variants_follow_spawn_preflight() {
         .unwrap()
         .get::<Sprite>(play_entity)
         .unwrap();
-    let texture = sprite.texture.expect("sprite texture should resolve");
+    let texture = sprite
+        .material
+        .image
+        .expect("sprite texture should resolve");
     assert_eq!(
         editor
             .play_world()
@@ -268,7 +271,8 @@ fn asset_and_combined_play_start_variants_follow_spawn_preflight() {
             .unwrap()
             .get::<Sprite>(visual)
             .unwrap()
-            .texture
+            .material
+            .image
             .is_some()
     );
     assert!(editor.stop_play().applied);
@@ -345,7 +349,7 @@ fn mode_aware_inspector_rejects_persistent_play_edits_and_models_play_snapshot()
 }
 
 #[test]
-fn apply_changes_is_a_guarded_unsupported_status_not_a_patch_export() {
+fn apply_changes_exports_selected_component_and_keeps_revision_guards() {
     let registry = scene_registry();
     let player = scene_id("player");
     let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
@@ -357,14 +361,10 @@ fn apply_changes_is_a_guarded_unsupported_status_not_a_patch_export() {
     let start = editor.start_play(&session, &registry);
     assert!(start.applied);
 
-    let unsupported = editor.apply_changes_status(&session);
-    assert!(!unsupported.applied);
-    assert!(!unsupported.supported);
-    assert_eq!(unsupported.source_revision, Some(session.revision()));
-    assert_eq!(
-        unsupported.diagnostics.diagnostics()[0].code.as_str(),
-        "tooling.apply-changes-unsupported"
-    );
+    let status = editor.apply_changes_status(&session);
+    assert!(!status.applied);
+    assert!(status.supported);
+    assert_eq!(status.source_revision, Some(session.revision()));
 
     let play_entity = editor.play_entity_map().unwrap().get(&player).unwrap();
     editor
@@ -374,18 +374,34 @@ fn apply_changes_is_a_guarded_unsupported_status_not_a_patch_export() {
         .unwrap()
         .text = "Runtime".to_string();
 
-    let patch_report = session.apply_patch(&set_label_patch(&player, "Hero"), &registry);
-    assert!(patch_report.applied);
-    assert_eq!(document_label(session.document(), &player), "Hero");
-    assert_eq!(
-        editor
-            .play_world()
-            .unwrap()
-            .get::<TestLabel>(play_entity)
-            .unwrap()
-            .text,
-        "Runtime"
+    let export = editor.export_apply_changes(
+        &session,
+        &registry,
+        SceneApplyChangesRequest::new(player.clone(), [label_type_id()]),
     );
+    assert!(export.supported);
+    assert!(!export.applied);
+    assert_eq!(export.components.len(), 1);
+    assert_eq!(
+        export.components[0].status,
+        SceneApplyChangesComponentStatus::Pending
+    );
+    assert_eq!(export.patch.as_ref().unwrap().operations.len(), 1);
+    assert_eq!(session.history_status().undo_depth, 0);
+
+    let apply = editor.apply_changes(
+        &mut session,
+        &registry,
+        SceneApplyChangesRequest::new(player.clone(), [label_type_id()]),
+    );
+    assert!(apply.applied);
+    assert!(apply.supported);
+    assert_eq!(
+        apply.components[0].status,
+        SceneApplyChangesComponentStatus::Applied
+    );
+    assert_eq!(document_label(session.document(), &player), "Runtime");
+    assert_eq!(session.history_status().undo_depth, 1);
 
     let mismatch = editor.apply_changes_status(&session);
     assert!(!mismatch.applied);
@@ -490,16 +506,6 @@ fn set_label_command(entity: &SceneEntityId, text: &str) -> SceneInspectorComman
     }
 }
 
-fn set_label_patch(entity: &SceneEntityId, text: &str) -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::SetField {
-        entity: entity.clone(),
-        component: label_type_id(),
-        component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["text"]),
-        value: ComponentValue::String(text.to_string()),
-    }])
-}
-
 fn document_label(document: &SceneDocument, id: &SceneEntityId) -> String {
     document
         .entities
@@ -523,7 +529,7 @@ fn asset_database(stable_id_value: &str, path: &str) -> ProjectAssetDatabase {
     database
 }
 
-fn sprite_value(texture: ComponentValue) -> ComponentValue {
+fn sprite_value(image: ComponentValue) -> ComponentValue {
     ComponentValue::map([
         (
             "size",
@@ -533,17 +539,22 @@ fn sprite_value(texture: ComponentValue) -> ComponentValue {
             ]),
         ),
         (
-            "color",
+            "material",
             ComponentValue::map([
-                ("r", ComponentValue::f64(1.0).unwrap()),
-                ("g", ComponentValue::f64(1.0).unwrap()),
-                ("b", ComponentValue::f64(1.0).unwrap()),
-                ("a", ComponentValue::f64(1.0).unwrap()),
+                ("image", image),
+                (
+                    "tint",
+                    ComponentValue::map([
+                        ("r", ComponentValue::f64(1.0).unwrap()),
+                        ("g", ComponentValue::f64(1.0).unwrap()),
+                        ("b", ComponentValue::f64(1.0).unwrap()),
+                        ("a", ComponentValue::f64(1.0).unwrap()),
+                    ]),
+                ),
             ]),
         ),
         ("layer", ComponentValue::I64(0)),
         ("sort_key", ComponentValue::I64(0)),
-        ("texture", texture),
     ])
 }
 

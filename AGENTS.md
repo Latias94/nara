@@ -13,10 +13,12 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_app::CoreStage::TaskUpdate` is the explicit main-thread integration point for background results. Keep `TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs, ApplyAssetResults}` ordering stable unless an ADR replaces the task/update contract.
 - Keep backend crates behind adapters. Core gameplay-facing crates must not directly depend on `wgpu`, `winit`, egui, or dear-imgui.
 - `nara_winit` owns all `winit` imports and desktop event-loop integration.
-- `nara_render` owns backend-neutral render concepts, frame lifecycle, phases, `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons. Do not reintroduce a public `RenderBackend` trait until a second backend or test adapter creates real abstraction pressure.
+- `nara_render` owns backend-neutral render concepts, frame lifecycle, phases, `RenderPassPlan`, `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons. Full render graph work waits for a concrete second-pass/resource-lifetime use case.
 - `nara_render_wgpu` owns all `wgpu` imports and GPU surface/device lifecycle.
 - `nara_render_wgpu` reports backend initialization, skipped frames, and backend errors through `RenderBackendStatus`.
 - `nara_sprite_render` owns backend-neutral 2D extraction, queueing, sorting, and batching. GPU backends should consume `SpriteBatches`, not gameplay `Sprite` or `Tilemap` components.
+- `nara_ui` owns runtime UI authoring components, computed layout resources, and pointer interaction state. It must not depend on egui, dear-imgui, winit, or wgpu.
+- `nara_ui_render` owns backend-neutral runtime UI extraction, queueing, clipping, sorting, and batching. GPU backends should consume `UiBatches`, not gameplay/editor UI state directly.
 - `nara_scene` owns persistent `SceneDocument` / `PrefabDocument`, stable `SceneEntityId`, validation, and world spawn/export. Scene/prefab documents must not store runtime `Entity`, runtime `AssetId`, or backend handles.
 - Scene/prefab authoring edits should use `ScenePatchDocument` transactions. Patch operations serialize as `op + args`, validate against schema-aware `ComponentFieldPath`, and return inverse patches for undo.
 - `SceneAuthoringSession` is the first authoring/live sync boundary. It treats `SceneDocument` as truth, stores undo/redo as inverse patches, and rebuilds its managed live `World` projection instead of mutating arbitrary ECS storage directly.
@@ -36,9 +38,11 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_material` owns backend-neutral 2D material intent: `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, semantic image references, and material keys. Sprites, tilemaps, UI images, and future 2D material users should route sampler/alpha/tint through this domain.
 - Texture upload, atlases, materials, UI images, and future 3D assets must flow through the asset import + render resource preparation seam in ADR 0033 instead of direct path-to-wgpu shortcuts.
 - `nara_render_wgpu` owns backend GPU resource caches. Gameplay/domain crates store typed handles or backend-neutral descriptors, never `wgpu` handles.
-- Sprite/tilemap render batches are material-aware. `nara_sprite_render` resolves runtime image handles into `SpriteMaterialKey` values containing image resource key, sampler, alpha mode, and tint; backend caches consume those keys instead of texture-only batch keys.
+- Sprite/tilemap render batches are material-aware. `nara_sprite_render` resolves runtime image handles into `SpriteMaterialKey` values containing image resource key, sampler, alpha mode, and tint; backend caches consume those keys instead of image-resource-only batch keys.
+- Runtime UI image panels are material-aware and flow through the same image prepare, sampler/material key, and backend texture cache path as sprites.
+- `nara_render_wgpu` consumes `RenderPassPlan` plus sprite/UI batches for clear/world/UI/gizmo ordering. Do not bury new pass ordering rules in the wgpu draw loop.
 - `nara_render_wgpu` must keep image texture upload cached separately from sampler/material bind-group identity so sampler changes do not require image reimport or texture reupload.
-- Keep render modules split by responsibility: `nara_sprite_render::{types,extract,queue}` and `nara_render_wgpu::{surface,sprite}` should stay narrow instead of growing monolithic backend or render-bridge files.
+- Keep render modules split by responsibility: `nara_sprite_render::{types,extract,queue}`, `nara_ui_render::{types,extract,queue}`, and `nara_render_wgpu::{surface,sprite,ui}` should stay narrow instead of growing monolithic backend or render-bridge files.
 - `DiagnosticReport::push` only collects diagnostics. Use `Diagnostic::emit_to_tracing` or `DiagnosticReport::emit_to_tracing` explicitly when logs are desired.
 - The root `nara` facade must keep `winit` and `wgpu` optional; default features stay backend-free.
 - `repo-ref/` contains reference source trees. Treat it as read-only reference material and keep it out of git.
@@ -58,7 +62,7 @@ This file provides repo-local guidance for agents working on nara.
 - Format with `cargo fmt --all`.
 - Prefer `cargo nextest run --workspace` for tests.
 - Run `cargo check --workspace` before considering implementation work complete.
-- Check optional backend examples with `cargo check -p nara --features winit,wgpu --example windowed_clear` and `cargo check -p nara --features winit,wgpu --example windowed_sprites` when touching platform or render backend code.
+- Check optional backend examples with `cargo check -p nara --features winit,wgpu --example windowed_clear`, `cargo check -p nara --features winit,wgpu --example windowed_sprites`, and `cargo check -p nara --features winit,wgpu --example runtime_ui_panel` when touching platform, input, UI, or render backend code.
 - Use dependency boundary searches when touching backend crates: `rg -n "winit::|winit =" crates src Cargo.toml` and `rg -n "wgpu::|wgpu =" crates src Cargo.toml`.
 - Use precise commits with Conventional Commit messages.
 - Do not discard or rewrite user changes. Never use `git reset --hard`, `git checkout --`, `git restore`, `git clean`, or stash to remove work unless the user explicitly asks.

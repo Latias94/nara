@@ -187,6 +187,11 @@ Rules:
 - Whole-scene runtime diffing, field-level diff minimization, prefab override write-back, and
   edit-while-playing merge UI remain future work.
 
+Implementation note, 2026-07-09: the selected-entity / explicit-component subset is implemented in
+`nara_tooling`. Earlier Play Mode diagnostics-only apply-back notes are superseded by the
+patch-producing flow above; unsupported or ambiguous changes still reject with diagnostics rather
+than falling back to broad world diffing.
+
 ## Alternatives Considered
 
 ### Option A: Single shared World for edit and play

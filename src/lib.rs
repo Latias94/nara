@@ -152,11 +152,13 @@ pub mod prelude {
         Tilemap, TilemapPlugin,
     };
     pub use nara_tooling::{
-        SceneApplyChangesReport, SceneEditorMode, SceneEditorModel, SceneEditorState,
-        SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
-        SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
-        SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, ScenePlaySession,
-        ScenePlayTransitionReport, ToolingPlugin, WorldSnapshot,
+        SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus,
+        SceneApplyChangesReport, SceneApplyChangesRequest, SceneEditorMode, SceneEditorModel,
+        SceneEditorState, SceneInspectorCommand, SceneInspectorCommandReport,
+        SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
+        SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
+        SceneInspectorState, ScenePlaySession, ScenePlayTransitionReport, ToolingPlugin,
+        WorldSnapshot,
     };
     #[cfg(feature = "egui")]
     pub use nara_tooling_egui::{

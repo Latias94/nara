@@ -1,13 +1,19 @@
 ---
 type: "Memory Event"
 title: "Verification: U7 wgpu texture cache and shader sampling implemented"
-description: "U7 connected SpriteBatch texture keys and UVs to nara_render_wgpu texture upload, bind groups, samplers, and WGSL sampling."
+description: "U7 connected sprite batch image resource keys and UVs to nara_render_wgpu texture upload, bind groups, samplers, and WGSL sampling; later M2 material keys superseded resource-only keys."
 timestamp: 2026-07-08T11:35:34Z
 event_kind: "Verification"
 ---
 # Event
 
-U7 wgpu sprite texture path implemented. `nara_render_wgpu` now depends on `nara_asset` and `nara_image`, reads `Assets<ImageAsset>` plus `PreparedRenderResources<PreparedImageResource>`, uploads ready RGBA8 images into a `WgpuSpriteTextureCache`, binds either an image texture or a white fallback texture per sprite batch, and samples through `sprite.wgsl` using per-instance UV data. The cache compares `RenderResourceSnapshot` for hot-reload updates and prunes unused image resources from the current frame's `SpriteBatches`.
+U7 wgpu sprite texture path implemented. `nara_render_wgpu` now depends on `nara_asset` and
+`nara_image`, reads `Assets<ImageAsset>` plus
+`PreparedRenderResources<PreparedImageResource>`, uploads ready RGBA8 images into a
+`WgpuSpriteTextureCache`, binds either an image texture or a white fallback texture per sprite
+batch, and samples through `sprite.wgsl` using per-instance UV data. The cache compares
+`RenderResourceSnapshot` for hot-reload updates. The later M2/M3 work generalized pruning and
+bind-group identity to material keys from current sprite and UI batches.
 
 # Verification
 

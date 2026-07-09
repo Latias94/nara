@@ -80,16 +80,18 @@ flowchart TD
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, hot reload scheduling, dependency graph, reload generations |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, semantic watch event queue, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation |
-| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle, backend state, skipped-frame reason, and last error |
+| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, explicit pass planning, frame lifecycle, backend state, skipped-frame reason, and last error |
 | `nara_image` | `ImageAsset`, `ImageImporter`, `ImagePlugin`, prepared image resources, image reload stats | Typed PNG import, async image reload jobs, backend-neutral image content preparation, and image asset load failure/removal handling; no sampler/material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, `Material2dKey` | Backend-neutral 2D material intent shared by sprites, tilemaps, runtime UI images, and future material assets |
 | `nara_sprite` | `Sprite`, `SpriteMaterial`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` material image binding | Sprite authoring component data with material-first image/sampler/alpha/tint; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileSetMaterial`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data with material-first tilesets that lower into textured quads now and chunked cached render data later |
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteMaterialKey`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, and material-keyed textured quad batches |
-| `nara_input` | `InputState`, `KeyCode` | winit event normalization and action maps |
+| `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState` | Runtime ECS UI authoring data, layout projection, and pointer hover/press/focus state; no editor UI toolkit or backend handles |
+| `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, image/color material queueing, clipping, sort, and batching for the UI render phase |
+| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `PointerState` | Backend-normalized input button and pointer state consumed by gameplay and runtime UI |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
-| `nara_winit` | `WinitPlugin`, `WinitRunner` | Gameplay APIs and renderer backend internals |
-| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, image texture caches split from material/sampler bind groups, colored/textured quad submission from `SpriteBatches`, and `RenderBackendStatus` updates |
+| `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that updates window resources plus keyboard, mouse-button, and pointer state |
+| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, image texture caches split from material/sampler bind groups, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
 | `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic inspector/query/command models, isolated Play Mode lifecycle state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses, `EguiSceneEditorAction` | egui-only rendering adapter that consumes tooling models and returns tooling commands/actions; no scene/session/world ownership |
@@ -106,6 +108,8 @@ sequenceDiagram
     participant Image as nara_image::ImagePlugin
     participant Render as nara_render
     participant SpriteRender as nara_sprite_render
+    participant Ui as nara_ui
+    participant UiRender as nara_ui_render
     participant Wgpu as nara_render_wgpu
 
     Game->>App: add_plugin / add_systems
@@ -121,7 +125,11 @@ sequenceDiagram
         Render->>ECS: extract Camera2d views
         SpriteRender->>ECS: extract Sprite / Tilemap / Transform2d data
         SpriteRender->>SpriteRender: queue, sort, and batch material-keyed colored/textured quads
+        Ui->>ECS: compute UI layouts and pointer interaction
+        UiRender->>UiRender: extract, queue, sort, clip, and batch UI panels
+        Render->>Wgpu: build RenderPassPlan for clear/world/UI/gizmo order
         Wgpu->>SpriteRender: read SpriteBatches
+        Wgpu->>UiRender: read UiBatches
         Wgpu-->>App: FrameStats
     end
     Game->>Asset: build ProjectAssetDatabase / reserve typed Handle<T>
@@ -186,7 +194,7 @@ second real adapter or stronger isolation pressure.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains. Serializable components require explicit schema fields, duplicate Rust `TypeId` registration is rejected, and invalid schema defaults fail at registration.
 - `nara_diagnostic::DiagnosticReport` collects diagnostics without implicit logging. `emit_to_tracing` is the explicit bridge for logs.
-- `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, and `RenderFrameSkipReason`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource.
+- `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and `RenderPassPlan`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource and consumes the explicit pass plan for clear/world/UI/gizmo order.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then applies field/reparent commands as scene patches.
@@ -200,12 +208,16 @@ second real adapter or stronger isolation pressure.
 - `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, spawns image reload tasks from asset reload requests, applies typed image content behind stable handles, updates load states/events, and invalidates prepared image resources. Sampler, alpha, and tint policy live in `nara_material`, not in image assets.
 - `nara_sprite_render` sorts and batches by `SpriteMaterialKey`, which contains image render resource key plus sampler, alpha mode, and tint. `nara_render_wgpu` caches GPU image textures by prepared image snapshot and caches sampler bind groups by material key.
 - `nara_asset_watch` is an optional desktop watcher adapter behind the root `asset-watch` feature. It owns `notify`, validates its root against `AssetSourceRoot`, preserves in-root rename sides, and translates raw filesystem events into semantic `AssetSourceChange` values without leaking watcher types into `nara_asset`.
+- `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit events.
+- `nara_ui` owns the first runtime ECS UI foundation: `UiRoot`, `UiNode`, `UiPanel`, material-aware image/color panel data, computed top-left logical-pixel layouts, and pointer hover/press/focus state. Computed layout and interaction resources are runtime-only.
+- `nara_ui_render` extracts runtime UI panels from computed layouts, queues color/image materials through the same `nara_image` prepare and `nara_material` sampler/alpha/tint path as sprites, clips panels, and emits `UiBatches` for the UI render phase.
+- `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path according to `RenderPassPlan`; pass order is no longer an implicit backend-only draw-loop rule.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
 ## Next Implementation Slices
 
-1. Build runtime UI data/layout/input/render extraction on top of the existing image prepare and material-key seam.
-2. Decide whether runtime UI data/layout or a second render pass should be the next render-graph forcing use case.
+1. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout, widget state, keyboard/gamepad focus, and editor dogfooding once the runtime model is stable.
+2. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport composition, 3D depth/prepass, or resource lifetime tracking creates pressure beyond `RenderPassPlan`.
 3. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
 4. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab override write-back, and edit-while-playing merge semantics are designed.
 5. Design reusable material assets and custom shader specialization after inline `Material2dDescriptor` has enough runtime/UI pressure.

@@ -1,7 +1,7 @@
 ---
 type: "Memory Event"
 title: "Verification: U6 textured sprite/tilemap batching implemented"
-description: "U6 replaced sprite-local Texture2d with ImageAsset handles and added resource-keyed UV sprite batches."
+description: "U6 replaced sprite-local Texture2d with ImageAsset handles and added resource-keyed UV sprite batches; later M2 material keys superseded the resource-only batch key."
 timestamp: 2026-07-08T11:20:05Z
 event_kind: "Verification"
 ---
@@ -24,7 +24,10 @@ U6 sprite/tilemap render resource seam implemented. `nara_sprite::Sprite` now bi
 
 # Impact
 
-U7 can now focus on the wgpu texture cache, bind groups, sampler state, and shader sampling using `SpriteBatch::texture` and `SpriteInstance::uv`; it no longer needs to understand gameplay `Sprite` or `Tilemap` components.
+U7 used this as the bridge into the first wgpu texture cache and shader sampling path. The later
+M2 material migration replaced resource-only batch keys with `SpriteMaterialKey` values containing
+image resource key, sampler, alpha mode, and tint; backends still do not need to understand
+gameplay `Sprite` or `Tilemap` components.
 
 # Citations
 

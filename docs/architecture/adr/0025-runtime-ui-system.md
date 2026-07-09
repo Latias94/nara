@@ -36,6 +36,21 @@ nara_editor
   may initially use egui/dear-imgui, later dogfoods nara_ui where practical
 ```
 
+Implementation note, 2026-07-09:
+
+- `nara_ui` exists as the first runtime ECS UI slice. It provides `UiRoot`, `UiNode`, `UiPanel`,
+  `UiPanelMaterial`, simple style values, runtime-only `ComputedUiLayouts`, and runtime-only
+  `UiInteractionState`.
+- UI uses ordinary ECS hierarchy through `Parent`/`Children`. Persistent UI authoring components
+  are registered in the component registry; computed layout and interaction resources are not scene
+  data.
+- `nara_input::PointerState` feeds hover, press, and focus foundation. Keyboard/gamepad focus,
+  navigation, widgets, and actions remain future work.
+- `nara_ui_render` extracts panels, resolves color/image materials through `nara_image` and
+  `nara_material`, clips panels, and emits `UiBatches` for the UI render phase.
+- Text/font work remains delegated to `nara_text`; no placeholder text system is hidden in UI
+  rendering.
+
 ## Alternatives Considered
 
 ### Option A: Use egui as runtime UI
@@ -66,9 +81,9 @@ nara_editor
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Data-driven UI | UI can be declared as components/data | Future example |
-| Input routing | Focus/hover/click routing works through engine input | Future tests |
-| Render integration | UI has its own render phase and clipping | Future render tests |
+| Data-driven UI | UI can be declared as ECS components/data | `nara_ui` component codec and layout tests |
+| Input routing | Hover/press/focus foundation works through engine pointer input | `nara_ui` interaction tests |
+| Render integration | UI has its own render phase, clipping, color/image panel batching, and desktop example | `nara_ui_render` tests and `runtime_ui_panel` example check |
 | Tooling compatibility | Inspector can inspect UI components | Future editor test |
 | Editor dogfooding | Editor can gradually adopt nara UI modules | Future milestone |
 
@@ -83,10 +98,11 @@ nara_editor
 
 ## Follow-Up Questions
 
-- Flexbox-like layout, grid, or custom retained layout?
-- How does UI relate to scene hierarchy and cameras?
+- Which advanced layout model should follow the current simple style resolver: flexbox-like layout,
+  grid, or a smaller retained model?
+- How should UI/screen-space cameras, multiple viewports, and editor overlays compose?
 - What text shaping/rendering libraries are acceptable?
-- What minimum runtime UI is required before editor dogfooding?
+- What exact editor dogfooding milestone should switch selected panels from egui to nara UI?
 
 ## Citations
 

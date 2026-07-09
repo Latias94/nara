@@ -149,10 +149,13 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   rather than ordinary metadata modification.
 - `nara_sprite_render` resolves sprite/tilemap material data into `SpriteMaterialKey` values
   containing image resource key, sampler, alpha mode, and tint. Sorting and batching use these
-  material keys rather than texture-only keys.
+  material keys rather than image-resource-only keys.
+- `nara_ui_render` resolves UI image panel material data into `UiMaterialKey` values using the
+  same prepared image resources, sampler descriptors, alpha mode, and tint policy. Runtime UI does
+  not introduce a second direct path from asset paths to backend textures.
 - `nara_render_wgpu::WgpuSpriteTextureCache` caches GPU image textures by prepared image snapshot
-  and caches sampler/bind-group choices by `SpriteMaterialKey`. Sampler-only changes create a new
-  bind group without rebuilding the prepared image resource or reuploading the texture.
+  and caches sampler/bind-group choices by sprite/UI material keys. Sampler-only changes create a
+  new bind group without rebuilding the prepared image resource or reuploading the texture.
 
 ## Success Metrics
 
@@ -162,7 +165,7 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 | Backend isolation | `nara_asset`, `nara_sprite`, `nara_tilemap`, and `nara_render` do not import `wgpu` | Dependency search |
 | Source/artifact split | Source `.meta` and generated `.nara/import-cache` records are separate | Fixture and docs review |
 | Hot reload readiness | Asset version changes invalidate prepared render resources without changing handles | Unit tests |
-| Texture path reuse | Sprite/tilemap materials use the same image import/prepare/cache path that UI/materials can later use | Example review |
+| Texture path reuse | Sprite/tilemap and runtime UI image materials use the same image import/prepare/cache path that reusable materials can later use | Example review and UI render tests |
 
 ## Risks and Mitigations
 
