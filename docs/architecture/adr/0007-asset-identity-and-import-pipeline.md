@@ -67,6 +67,30 @@ Core rules:
 - Import cache design is deferred but not ignored.
 - Asset loading can begin synchronous/path-based, but the API must allow asynchronous load states later.
 
+## Implementation Notes
+
+- `nara_asset` now separates persistent identity (`AssetRef`, `AssetPath`, `StableAssetId`,
+  `.meta`, and `ProjectAssetDatabase`) from runtime identity (`AssetId`, `Handle<T>`, and
+  `AssetVersion`).
+- Source changes enter asset loading through `AssetSourceChanges` and `SourceChangeResolver`.
+  The resolver coalesces source changes, maps `.meta` updates to source assets, walks source
+  dependency edges, and emits `AssetReloadRequest` values.
+- Same-frame source changes coalesce by logical path with the last semantic event winning. This keeps
+  atomic-save sequences such as remove-then-modify from being permanently interpreted as deletion.
+- Dependency-triggered reload walks source dependency edges transitively with de-duplication, so a
+  changed source can enqueue directly and indirectly dependent runtime assets.
+- Asset reload requests carry `AssetLoadGeneration` values. Apply systems must ignore stale task
+  results when a newer generation has been requested for the same asset.
+- Domain apply systems also check the request's expected `AssetVersion` before committing successful
+  first-load results or failure states. Generations reject superseded requests; expected versions
+  reject older task completions after any other state mutation advanced the asset.
+- Import work receives owned `ImportJobInput` values and returns typed `ImportedAsset<T>` values
+  through `TypedImporter<T>`. Importers may read source bytes and produce backend-neutral runtime
+  assets, but they must not allocate GPU resources.
+- `AssetPlugin` installs the asset resources and the `TaskUpdateSet::CoalesceAssetChanges` resolver.
+  Domain plugins are responsible for registering their own typed importers and spawning/applying
+  domain reload jobs.
+
 ## Success Metrics
 
 | Metric | Target | Measurement |
@@ -88,10 +112,9 @@ Core rules:
 
 ## Follow-Up Questions
 
-- What exact serialized shape should `AssetRef` use?
-- Do `.meta` files live beside source assets or in a project database?
-- Are imported artifacts content-addressed by source hash, importer version, and settings?
-- Does Phase 1 `AssetServer` expose async states now or only reserve the states in types?
+- Which import profile fields belong in artifact cache keys for desktop-only Phase 1?
+- How should rename/move operations preserve stable IDs once the editor owns `.meta` lifecycle?
+- What project-level diagnostics should be emitted for repeatedly failing hot reloads?
 
 ## Citations
 

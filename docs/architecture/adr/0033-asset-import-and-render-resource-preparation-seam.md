@@ -122,6 +122,25 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   `AssetId` values.
 - Sprite and tilemap authoring components store typed handles to `ImageAsset`/`TileSet`; backend
   texture objects remain private to `nara_render_wgpu`.
+- `nara_image::ImagePlugin` is the first domain implementation of the async import seam. It registers
+  `ImageImporter`, spawns image reload jobs from `AssetReloadRequest` values in
+  `TaskUpdateSet::SpawnAssetJobs`, applies typed `ImageAsset` results in
+  `TaskUpdateSet::ApplyAssetResults`, and then updates backend-neutral `PreparedImageResources` in
+  `CoreStage::Prepare`.
+- `ImagePlugin` composes `ImagePreparePlugin` rather than registering a parallel prepare path. This
+  keeps prepare stats and render-resource invalidation single-pass even when sprite rendering also
+  depends on image preparation.
+- `ImageImporter` receives owned `ImportJobInput` and returns `ImportedAsset<ImageAsset>`. It does
+  not read global ECS state and does not create GPU resources.
+- Image reload preserves stable handles while changing `AssetVersion`, `LoadState`, asset events,
+  prepared-resource invalidation, and source dependency edges behind those handles.
+- Removed source assets clear `Assets<ImageAsset>` state and prepared image resources. Failed first
+  loads and failed reloads update asset state without inventing a replacement backend resource.
+- `nara_asset_watch` is the optional desktop filesystem adapter. It owns `notify` and converts raw
+  watcher events into `AssetSourceChange` values; asset/import code remains watcher-agnostic.
+- `AssetWatchPlugin` must use the same root as `AssetSourceRoot`. Cross-root rename events preserve
+  the in-root side instead of dropping the whole event, and `.meta` removal maps to source removal
+  rather than ordinary metadata modification.
 
 ## Success Metrics
 
@@ -144,12 +163,9 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 
 ## Follow-Up Questions
 
-- What exact `.meta` schema fields are required in the first slice?
-- Should `AssetServer` expose `LoadState` immediately, or should load state live in a separate
-  project asset database resource first?
-- What is the first backend-neutral texture descriptor type: image asset, texture asset, or material
-  input?
 - Which import profile fields belong in artifact cache keys for desktop-only Phase 1?
+- What material/sampler authoring layer should sit above `ImageAsset` once sprites, UI, and text need
+  per-material controls?
 
 ## Citations
 

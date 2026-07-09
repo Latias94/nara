@@ -39,15 +39,18 @@ flowchart TD
     User[Game code / AI agent] --> Facade[nara facade crate]
     Facade --> App[nara_app: App + Plugin + stages]
     App --> ECS[nara_ecs: bevy_ecs substrate]
+    App --> Tasks[nara_tasks: task pools + handles]
     Facade --> Core[nara_core: color + math primitives]
     Facade --> Transform[nara_transform: spatial components]
     Facade --> Reflect[nara_reflect: component schema + value codec registry]
     Facade --> Diagnostic[nara_diagnostic: structured diagnostics + context]
-    App --> Asset[nara_asset: AssetServer + Handle + AssetRef]
+    App --> Asset[nara_asset: AssetServer + Handle + AssetRef + reload scheduling]
+    AssetWatch[nara_asset_watch: optional filesystem watcher adapter] --> Asset
     App --> Scene[nara_scene: runtime hierarchy + scene documents]
     App --> Input[nara_input]
     App --> Audio[nara_audio]
     App --> Render[nara_render: render data + backend seam]
+    App --> Image[nara_image: typed image import + prepared image resources]
     App --> Sprite[nara_sprite: sprite authoring]
     App --> Tilemap[nara_tilemap: tilemap authoring]
     App --> SpriteRender[nara_sprite_render: 2D extract + queue + batch]
@@ -68,14 +71,17 @@ flowchart TD
 |---|---|---|
 | `nara` | Facade and prelude | Re-export only; no backend logic |
 | `nara_app` | `App`, `Plugin`, `PluginError`, `StartupStage`, `CoreStage`, `Time`, `FixedTime` | Fallible plugin installation, plugin lifecycle, runner policy, frame/fixed-step time resources |
+| `nara_tasks` | `TaskPools`, `TaskPoolConfig`, `TaskPoolKind`, `TaskExecutionMode`, `TaskHandle<T>`, `TaskCancellationToken`, `TaskStats` | Engine-owned deterministic inline executor and std worker-pool backend for IO/compute/async-compute jobs |
 | `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry modules for Bevy-reflect-backed component metadata, asset-aware scene preflight, schema export, and migrations |
 | `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents; tracing output is an explicit bridge |
-| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records | Import cache records, hot reload, dependency graph |
+| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, hot reload scheduling, dependency graph, reload generations |
+| `nara_asset_watch` | Optional `AssetWatchPlugin`, semantic watch event queue, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, frame lifecycle, backend state, skipped-frame reason, and last error |
+| `nara_image` | `ImageAsset`, `ImageImporter`, `ImagePlugin`, prepared image resources, image reload stats | Typed PNG import, async image reload jobs, backend-neutral image preparation, and image asset load failure/removal handling |
 | `nara_sprite` | `Sprite`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` texture binding | Sprite authoring component data; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data that can lower into textured quads now and chunked cached render data later |
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, resource-keyed textured quad batches |
@@ -93,8 +99,10 @@ flowchart TD
 sequenceDiagram
     participant Game as Game Code
     participant App as nara_app::App
+    participant Tasks as nara_tasks::TaskPools
     participant ECS as nara_ecs::World
     participant Asset as nara_asset::AssetServer
+    participant Image as nara_image::ImagePlugin
     participant Render as nara_render
     participant SpriteRender as nara_sprite_render
     participant Wgpu as nara_render_wgpu
@@ -102,7 +110,13 @@ sequenceDiagram
     Game->>App: add_plugin / add_systems
     App->>ECS: run startup schedules once
     loop frame
+        App->>Tasks: TaskUpdate::Poll
+        App->>Asset: coalesce source changes into reload requests
+        Image->>Tasks: spawn owned image import jobs
+        Tasks-->>Image: poll completed typed image results
+        Image->>Asset: apply load states, versions, and asset events
         App->>ECS: PreUpdate / Update / PostUpdate
+        Image->>Render: prepare backend-neutral image resource snapshots
         Render->>ECS: extract Camera2d views
         SpriteRender->>ECS: extract Sprite / Tilemap / Transform2d data
         SpriteRender->>SpriteRender: queue, sort, and batch colored/textured quads
@@ -167,6 +181,7 @@ second real adapter or stronger isolation pressure.
 ## Implemented Authoring Foundations
 
 - `nara_app::Plugin::build` is fallible. Plugin prerequisites use `add_plugin_if_missing` or structured `PluginError` values instead of panic helpers.
+- `nara_tasks` owns deterministic and threaded engine task pools. `CoreStage::TaskUpdate` provides the explicit main-thread result integration stage with ordered sets for polling, source-change coalescing, job spawning, and result application.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains. Serializable components require explicit schema fields, duplicate Rust `TypeId` registration is rejected, and invalid schema defaults fail at registration.
 - `nara_diagnostic::DiagnosticReport` collects diagnostics without implicit logging. `emit_to_tracing` is the explicit bridge for logs.
@@ -179,11 +194,15 @@ second real adapter or stronger isolation pressure.
 - `nara_tooling_egui` is the first concrete debug/editor UI adapter. It renders `SceneEditorModel` and `SceneInspectorModel`, returns explicit editor actions and `SceneInspectorCommand` values, and keeps egui out of `nara_tooling` and runtime-facing crates.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
+- `nara_asset` owns typed importer contracts, source change coalescing, dependency-aware reload request scheduling, load generations, asset state transitions, and asset load failure/removal events.
+- Asset reload scheduling coalesces same-frame source changes by last semantic event, walks dependent source edges transitively, and combines generation checks with expected-version guards before domain apply systems mutate runtime asset state.
+- `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, spawns image reload tasks from asset reload requests, applies typed results behind stable handles, updates load states/events, and invalidates prepared image resources.
+- `nara_asset_watch` is an optional desktop watcher adapter behind the root `asset-watch` feature. It owns `notify`, validates its root against `AssetSourceRoot`, preserves in-root rename sides, and translates raw filesystem events into semantic `AssetSourceChange` values without leaking watcher types into `nara_asset`.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
 ## Next Implementation Slices
 
 1. Define the first supported Apply Changes subset and implement runtime-to-`ScenePatchDocument` diffing behind the existing guarded status API.
 2. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
-3. Extend imported artifact loading from synchronous image examples toward async task-pool-backed hot reload.
-4. Add material/sampler authoring above `ImageAsset` once sprites need per-material controls.
+3. Define the first material/sampler authoring layer above `ImageAsset` once sprites need per-material controls.
+4. Decide whether runtime UI data/layout or a second render pass should be the next render-graph forcing use case.

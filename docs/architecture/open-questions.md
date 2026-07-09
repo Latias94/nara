@@ -115,9 +115,9 @@ The next concrete implementation direction connects asset import to render resou
 
 Follow-up details still to settle:
 
-1. What exact `.meta` schema fields are required in the first slice?
-2. Should `AssetServer` expose `LoadState` immediately, or should load state live in a separate project asset database resource first?
-3. Which import profile fields belong in artifact cache keys for desktop-only Phase 1?
+1. Which import profile fields belong in artifact cache keys for desktop-only Phase 1?
+2. How should rename/move operations preserve stable IDs once the editor owns `.meta` lifecycle?
+3. What project-level diagnostics should be emitted for repeatedly failing hot reloads?
 
 Resolved in the scene/prefab serialization and asset/render seam foundations:
 
@@ -140,17 +140,39 @@ Resolved by ADR 0033:
   ID/version, import settings hash, and target/import profile when relevant.
 - Backend GPU objects are not imported artifacts; they live in backend resource caches.
 
+Resolved in the async hot reload foundation:
+
+- `AssetServer` exposes load states through `AssetStates`; domain asset storage such as
+  `Assets<ImageAsset>` records successful loads, failed first loads, failed reloads, and removals.
+- Source changes are coalesced through `AssetSourceChanges` and `SourceChangeResolver` into
+  generation-stamped `AssetReloadRequest` values.
+- Same-frame source changes use last-event-wins coalescing per logical path, and dependency
+  propagation walks dependent source edges transitively.
+- Typed import jobs use owned `ImportJobInput` values and return `ImportedAsset<T>` values through
+  domain importers.
+- Filesystem watching is optional and isolated in `nara_asset_watch`; raw watcher events are
+  translated into semantic `AssetSourceChange` values before entering `nara_asset`.
+
 ## Runtime Concurrency
 
 Accepted direction: engine-owned task pools with explicit main-thread integration. See ADR [0008-runtime-concurrency-and-task-pools.md](adr/0008-runtime-concurrency-and-task-pools.md).
 
 Follow-up details still to settle:
 
-1. Should task pools live in `nara_tasks` or inside `nara_app` initially?
-2. What exact stages tick IO/async results?
-3. How are task cancellation and asset unload handled?
-4. Do plugins access task pools through resources or app methods?
-5. Should networking/scripting use a separate runtime model later?
+1. Should task pool worker sizing become app-configurable from `nara.toml` or stay explicit
+   code-first setup only?
+2. Should networking/scripting use a separate runtime model later?
+3. What diagnostics should long-running or repeatedly failing tasks emit?
+
+Resolved in the async hot reload foundation:
+
+- Task pools live in `nara_tasks`.
+- `nara_app::CoreStage::TaskUpdate` ticks task/result integration before `PreUpdate`.
+- `TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs, ApplyAssetResults}` defines the
+  first ordering contract for background work.
+- `TaskCancellationToken` provides cooperative cancellation, and asset reload generations reject
+  stale results before world/asset state mutation.
+- Plugins access task infrastructure through ECS resources installed by `TaskPlugin`.
 
 ## Diagnostics and Logging
 
@@ -211,6 +233,14 @@ Resolved by ADR 0033:
   `PreparedImageResource`; sprites and tilemaps carry typed handles and UVs.
 - `nara_render_wgpu` owns textures, samplers, bind groups, buffers, and pipeline cache details.
 - Gameplay/domain crates store typed handles or backend-neutral descriptors, not backend handles.
+
+Resolved in the async hot reload foundation:
+
+- `nara_image::ImagePlugin` keeps stable image handles across reloads while updating asset versions
+  and prepared-resource invalidation state.
+- Image result application checks both reload generation and expected asset version before writing
+  runtime asset data or failure state.
+- Removed image sources clear both runtime image data and prepared image resources.
 
 ## Platform and Runner
 

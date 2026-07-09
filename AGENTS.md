@@ -9,6 +9,8 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_ecs` uses `bevy_ecs` as the ECS substrate. Do not reintroduce a custom ECS unless an ADR explicitly replaces ADR 0002.
 - `nara_app` owns nara's product-facing `App`, fallible `Plugin`, stage, runner, and lifecycle boundary. Do not adopt `bevy_app`.
 - Plugin setup and prerequisite failures must return `PluginError`; do not reintroduce panic-based plugin prerequisite helpers.
+- `nara_tasks` owns engine task pools, task handles, cancellation tokens, deterministic inline execution, and the threaded std worker backend. Do not expose Tokio or async-std as nara's gameplay-facing async contract.
+- `nara_app::CoreStage::TaskUpdate` is the explicit main-thread integration point for background results. Keep `TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs, ApplyAssetResults}` ordering stable unless an ADR replaces the task/update contract.
 - Keep backend crates behind adapters. Core gameplay-facing crates must not directly depend on `wgpu`, `winit`, egui, or dear-imgui.
 - `nara_winit` owns all `winit` imports and desktop event-loop integration.
 - `nara_render` owns backend-neutral render concepts, frame lifecycle, phases, `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons. Do not reintroduce a public `RenderBackend` trait until a second backend or test adapter creates real abstraction pressure.
@@ -26,7 +28,10 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_scene` must keep scene/prefab spawn two-phase: preflight first, then mutate the target `World`. Asset-aware spawn uses a scratch `AssetServer` and only writes it back after the full preflight succeeds.
 - `nara_reflect` owns `ComponentValue`, schema metadata, `ComponentFieldPath`, component preflight/apply codecs, migrations, `ComponentDecodeContext`, and `ComponentEncodeContext`. Keep its value, schema, path, codec, migration, and registry modules focused. Domain crates register their own built-in component codecs through their plugins.
 - `nara_asset` persistent references use semantic `AssetRef::Path` or `AssetRef::StableId`; `Handle<T>` and `AssetId` are runtime-only and must not serialize as project data.
-- `nara_asset` owns source asset identity, `.meta` records, importer registry metadata, imported artifact records, dependency graph data, load states, and reload events. It must not own GPU resources or depend on render backend crates.
+- `nara_asset` owns source asset identity, `.meta` records, importer registry metadata, typed import job contracts, imported artifact records, dependency graph data, load states, reload generations, source change coalescing, and reload request scheduling. It must not own GPU resources, file watchers, or depend on render backend crates.
+- `SourceChangeResolver` must keep reload scheduling generation-stamped, expected-version guarded, and dependency-aware. Same-frame source changes coalesce by logical path with the last semantic event winning; do not make `Removed` unconditionally dominate atomic-save modify sequences.
+- `nara_asset_watch` owns all `notify` imports. Filesystem watcher events must be translated into semantic `AssetSourceChange` values before asset reload logic sees them. Keep this crate optional behind the root `asset-watch` feature.
+- `nara_image::ImagePlugin` owns typed image importer registration, async image reload jobs, runtime `Assets<ImageAsset>`, and image render-resource preparation. `ImagePreparePlugin` is prepare-only and must not become a second asset loading path.
 - Texture upload, atlases, materials, UI images, and future 3D assets must flow through the asset import + render resource preparation seam in ADR 0033 instead of direct path-to-wgpu shortcuts.
 - `nara_render_wgpu` owns backend GPU resource caches. Gameplay/domain crates store typed handles or backend-neutral descriptors, never `wgpu` handles.
 - Keep render modules split by responsibility: `nara_sprite_render::{types,extract,queue}` and `nara_render_wgpu::{surface,sprite}` should stay narrow instead of growing monolithic backend or render-bridge files.

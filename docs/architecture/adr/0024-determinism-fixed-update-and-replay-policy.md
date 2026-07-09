@@ -22,10 +22,20 @@ Rules:
 ```text
 Frame:
   collect input
+  apply task results at TaskUpdate
   run zero or more fixed simulation ticks
   run presentation update
   extract/render with interpolation
 ```
+
+## Implementation Notes
+
+- `nara_app::CoreStage::TaskUpdate` is the current async result boundary. It runs after `First` and
+  before `PreUpdate`, with named sets for polling tasks, coalescing asset source changes, spawning
+  asset jobs, and applying asset results.
+- Deterministic task mode executes work inline but still applies results through the same scheduled
+  boundary. Threaded mode may complete jobs in the background, but domain apply systems use stable
+  request ordering, load generations, and expected asset versions before mutating runtime resources.
 
 ## Alternatives Considered
 
@@ -76,4 +86,3 @@ Frame:
 - How many catch-up fixed ticks are allowed per frame?
 - What is the canonical seeded RNG resource?
 - What data is required for a future replay capture?
-

@@ -27,7 +27,8 @@ flowchart TD
     Build[App::new / add_plugin / add_system] --> Startup[Startup schedules]
     Startup --> Frame[Frame loop]
     Frame --> First[First]
-    First --> PreUpdate[PreUpdate]
+    First --> TaskUpdate[TaskUpdate]
+    TaskUpdate --> PreUpdate[PreUpdate]
     PreUpdate --> FixedUpdate[FixedUpdate when due]
     FixedUpdate --> Update[Update]
     Update --> PostUpdate[PostUpdate]
@@ -42,18 +43,19 @@ Recommended stage vocabulary:
 | Area | Stage Names | Purpose |
 |---|---|---|
 | Startup | `Core`, `Platform`, `Runtime`, `Scene`, `Tooling` | One-time initialization order |
-| Frame | `First`, `PreUpdate`, `FixedUpdate`, `Update`, `PostUpdate`, `Extract`, `Render`, `Last` | Repeated runtime flow |
+| Frame | `First`, `TaskUpdate`, `PreUpdate`, `FixedUpdate`, `Update`, `PostUpdate`, `Extract`, `Prepare`, `Queue`, `Sort`, `Render`, `Cleanup`, `Last` | Repeated runtime flow |
 
 Plugin shape:
 
 ```rust
 pub trait Plugin {
-    fn build(&self, app: &mut App);
+    fn build(&self, app: &mut App) -> Result<(), PluginError>;
 }
 ```
 
-Phase 1 can keep plugin errors simple, but the design should leave room for fallible backend
-initialization in platform/render plugins.
+Plugin setup is fallible. Duplicate unique plugins, installation after finish, missing
+prerequisites, and setup failures return structured `PluginError` values instead of panic-based
+helpers.
 
 ## Alternatives Considered
 
@@ -90,6 +92,7 @@ schedule vocabulary.
 - Window, renderer, audio, input, and tooling integrations should arrive as nara plugins.
 - Headless and test runners should be first-class enough that engine systems can run without a
   window.
+- Background task results apply through the `TaskUpdate` frame stage before gameplay update stages.
 
 ## Success Metrics
 
@@ -109,4 +112,3 @@ schedule vocabulary.
 | Plugins need dependency ordering earlier than expected | Medium | Medium | Add plugin labels/dependencies only when real plugins need them |
 | Fallible backend initialization conflicts with `Plugin::build` | Medium | Medium | Reserve a later `Runner`/backend init phase rather than overloading ECS setup |
 | Fixed timestep policy becomes hard to change | Medium | Low | Keep fixed update as an app policy, not a renderer policy |
-

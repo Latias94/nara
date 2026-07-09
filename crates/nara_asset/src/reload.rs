@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::{Path, PathBuf},
 };
 
@@ -139,15 +139,10 @@ impl AssetSourceChanges {
 }
 
 fn coalesce_change_kind(
-    left: AssetSourceChangeKind,
+    _left: AssetSourceChangeKind,
     right: AssetSourceChangeKind,
 ) -> AssetSourceChangeKind {
-    use AssetSourceChangeKind::{MetaModified, Modified, Removed};
-    match (left, right) {
-        (Removed, _) | (_, Removed) => Removed,
-        (Modified, _) | (_, Modified) => Modified,
-        (MetaModified, MetaModified) => MetaModified,
-    }
+    right
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -431,7 +426,7 @@ impl SourceChangeResolver {
             requests,
         )?;
 
-        for dependent in dependencies.dependents_for_source(record.stable_id()) {
+        for dependent in transitive_dependents(record.stable_id(), dependencies) {
             if dependent == record.stable_id() {
                 continue;
             }
@@ -482,6 +477,28 @@ impl SourceChangeResolver {
         );
         Ok(())
     }
+}
+
+fn transitive_dependents(
+    source: StableAssetId,
+    dependencies: &AssetDependencyGraph,
+) -> Vec<StableAssetId> {
+    let mut visited = BTreeSet::new();
+    let mut queue = VecDeque::new();
+    for dependent in dependencies.dependents_for_source(source) {
+        queue.push_back(dependent);
+    }
+
+    while let Some(dependent) = queue.pop_front() {
+        if !visited.insert(dependent) {
+            continue;
+        }
+        for next in dependencies.dependents_for_source(dependent) {
+            queue.push_back(next);
+        }
+    }
+
+    visited.into_iter().collect()
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -552,6 +569,10 @@ mod tests {
         StableAssetId::parse_str("b73f0f16-09e8-4265-b090-b689b41c197e").unwrap()
     }
 
+    fn transitive_dependent_stable_id() -> StableAssetId {
+        StableAssetId::parse_str("d87c8f9d-0dc2-4863-8e9c-d3e6eaa8d41f").unwrap()
+    }
+
     fn image_record(path: &str, stable_id: StableAssetId) -> AssetRecord {
         AssetRecord::new(
             stable_id,
@@ -575,6 +596,24 @@ mod tests {
             vec![AssetSourceChange::new(path, AssetSourceChangeKind::Removed)]
         );
         assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn source_changes_keep_last_semantic_event_for_atomic_save_sequences() {
+        let mut changes = AssetSourceChanges::new();
+        let path = AssetPath::new("textures/player.png").unwrap();
+        changes.removed(path.clone());
+        changes.modified(path.clone());
+
+        let coalesced = changes.drain_coalesced();
+
+        assert_eq!(
+            coalesced,
+            vec![AssetSourceChange::new(
+                path,
+                AssetSourceChangeKind::Modified
+            )]
+        );
     }
 
     #[test]
@@ -657,6 +696,57 @@ mod tests {
             .map(|request| request.path().as_str().to_string())
             .collect::<Vec<_>>();
         assert_eq!(paths, vec!["textures/source.png", "textures/dependent.png"]);
+    }
+
+    #[test]
+    fn dependency_records_enqueue_transitive_dependents_once() {
+        let mut app = App::new();
+        app.insert_resource(nara_tasks::TaskPools::deterministic());
+        app.add_plugin(AssetPlugin).unwrap();
+        {
+            let mut database = app.world_mut().resource_mut::<ProjectAssetDatabase>();
+            database
+                .insert(image_record("textures/source.png", stable_id()))
+                .unwrap();
+            database
+                .insert(image_record(
+                    "textures/dependent.png",
+                    dependent_stable_id(),
+                ))
+                .unwrap();
+            database
+                .insert(image_record(
+                    "textures/transitive.png",
+                    transitive_dependent_stable_id(),
+                ))
+                .unwrap();
+        }
+        {
+            let mut graph = app.world_mut().resource_mut::<AssetDependencyGraph>();
+            graph.add_source_dependency(stable_id(), dependent_stable_id());
+            graph.add_source_dependency(dependent_stable_id(), transitive_dependent_stable_id());
+            graph.add_source_dependency(stable_id(), transitive_dependent_stable_id());
+        }
+        app.world_mut()
+            .resource_mut::<AssetSourceChanges>()
+            .modified(AssetPath::new("textures/source.png").unwrap());
+
+        app.update();
+
+        let paths = app
+            .world()
+            .resource::<AssetReloadRequests>()
+            .iter()
+            .map(|request| request.path().as_str().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            vec![
+                "textures/source.png",
+                "textures/dependent.png",
+                "textures/transitive.png"
+            ]
+        );
     }
 
     #[test]

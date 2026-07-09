@@ -93,13 +93,31 @@ Core rules:
 - Render backend seams should avoid assuming all GPU work always happens inside gameplay systems.
 - Tests should support a deterministic single-threaded configuration.
 
+## Implementation Notes
+
+- `nara_tasks` is the engine-owned task crate. It exposes `TaskPoolKind`, `TaskExecutionMode`,
+  `TaskPoolConfig`, `TaskPools`, `TaskHandle<T>`, `TaskCancellationToken`, `TaskResult<T>`, and
+  `TaskStats`.
+- `TaskExecutionMode::Deterministic` executes submitted work inline and still requires explicit
+  result polling. This keeps tests predictable without changing the main-thread integration model.
+- `TaskExecutionMode::Threaded` uses nara-owned std worker pools for IO, compute, and async-compute
+  classes. Tokio and async-std remain implementation options for future adapters, not public engine
+  contracts.
+- `nara_app::CoreStage::TaskUpdate` is the first scheduled integration point for background work.
+  `TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs, ApplyAssetResults}` defines the
+  current frame-ordering contract.
+- Background tasks own their inputs and return data through `TaskHandle<T>`. They do not borrow or
+  mutate `World`.
+- Cancellation is cooperative through `TaskCancellationToken`. Asset reload uses generations to
+  ignore stale results before mutating asset state.
+
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Main world safety | Background tasks cannot mutate `World` directly | API review |
-| Asset async path | Asset load results integrate through scheduled events/states | Future tests |
-| Deterministic tests | Single-threaded task mode exists | Future test config |
+| Main world safety | Background tasks cannot mutate `World` directly | API review and task handle API |
+| Asset async path | Asset load results integrate through scheduled events/states | Image reload tests |
+| Deterministic tests | Single-threaded task mode exists | `nara_tasks` deterministic tests |
 | Runtime independence | User code is not forced to use Tokio | Dependency/API review |
 | Render extensibility | Render backend can later move to separate thread without changing gameplay components | Design review |
 
@@ -114,11 +132,10 @@ Core rules:
 
 ## Follow-Up Questions
 
-- Should task pools live in `nara_tasks` or inside `nara_app` initially?
-- What exact stages tick IO/async results?
-- How are task cancellation and asset unload handled?
-- Do plugins get access to task pools through resources or app methods?
+- Should task pool worker sizing become app-configurable from `nara.toml` or stay explicit code-first
+  setup only?
 - Should networking/scripting use a separate runtime model later?
+- What diagnostics should long-running or repeatedly failing tasks emit?
 
 ## Citations
 

@@ -504,10 +504,7 @@ pub struct ImagePlugin;
 impl Plugin for ImagePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(AssetPlugin)?;
-        app.init_resource::<Assets<ImageAsset>>();
-        app.init_resource::<PreparedRenderResources<PreparedImageResource>>();
-        app.init_resource::<RenderPrepareInvalidations>();
-        app.init_resource::<ImagePrepareStats>();
+        app.add_plugin_if_missing(ImagePreparePlugin)?;
         app.init_resource::<ImageReloadStats>();
         app.init_resource::<PendingImageJobs>();
         app.init_resource::<ImporterRegistry>();
@@ -520,7 +517,6 @@ impl Plugin for ImagePlugin {
             CoreStage::TaskUpdate,
             apply_image_reload_results.in_set(TaskUpdateSet::ApplyAssetResults),
         );
-        app.add_systems(CoreStage::Prepare, prepare_images);
         Ok(())
     }
 }
@@ -696,6 +692,17 @@ fn apply_imported_image(
             Some(artifact_hash),
         )
     } else {
+        if let Err(error) = states.ensure_version(handle.id(), request.expected_version()) {
+            match error {
+                AssetStateError::StaleReload { .. } => {
+                    stats.stale = stats.stale.saturating_add(1);
+                }
+                _ => {
+                    stats.failed = stats.failed.saturating_add(1);
+                }
+            }
+            return;
+        }
         images.commit_loaded(
             handle,
             imported.into_value(),
@@ -722,6 +729,13 @@ fn record_image_reload_failure(
     stats: &mut ImageReloadStats,
 ) {
     let handle = Handle::<ImageAsset>::new(request.asset_id());
+    if let Err(error) = states.ensure_version(handle.id(), request.expected_version()) {
+        match error {
+            AssetStateError::StaleReload { .. } => stats.stale = stats.stale.saturating_add(1),
+            _ => stats.failed = stats.failed.saturating_add(1),
+        }
+        return;
+    }
     let result = if images.get(handle).is_some() {
         images.record_reload_failure(handle, states, events, error.to_string())
     } else {
@@ -860,9 +874,11 @@ mod tests {
 
     use nara_app::App;
     use nara_asset::{
-        AssetEventKind, AssetEvents, AssetRecord, AssetServer, AssetSourceChanges, AssetSourceKind,
-        AssetSourceRoot, AssetStates, Assets, ImportDependencyDigest, ImportJobInput,
-        ImportProfile, ImportSettingsHash, ImporterRegistry,
+        AssetEventKind, AssetEvents, AssetLoadGeneration, AssetRecord, AssetReloadRequest,
+        AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetSourceChangeKind,
+        AssetSourceChanges, AssetSourceKind, AssetSourceRoot, AssetStates, AssetVersion, Assets,
+        ImportDependencyDigest, ImportJobInput, ImportProfile, ImportSettingsHash,
+        ImporterRegistry,
     };
     use nara_tasks::TaskPools;
 
@@ -1235,6 +1251,84 @@ mod tests {
     }
 
     #[test]
+    fn stale_first_load_success_cannot_recreate_removed_image() {
+        let record = image_record("textures/player.png");
+        let mut server = AssetServer::new();
+        let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+        let mut images = Assets::<ImageAsset>::default();
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+        let expected_version = states.set_loading(handle.id());
+        images
+            .remove_with_state(handle, &mut states, &mut events)
+            .unwrap();
+        events.drain();
+        let imported = ImageImporter::default()
+            .import_job(&ImportJobInput::new(
+                record.clone(),
+                rgba_png(1, 1, &[0, 0, 255, 255]),
+                ImportDependencyDigest::empty(),
+                ImportSettingsHash::default(),
+                ImportProfile::default(),
+            ))
+            .unwrap();
+        let request = reload_request(&record, handle, expected_version);
+        let mut stats = ImageReloadStats::default();
+
+        apply_imported_image(
+            request,
+            imported,
+            &mut images,
+            &mut states,
+            &mut events,
+            &mut stats,
+        );
+
+        assert_eq!(stats.stale, 1);
+        assert!(images.get(handle).is_none());
+        assert_eq!(
+            states.state(handle.id()).unwrap().load_state(),
+            &LoadState::Removed
+        );
+        assert!(events.drain().is_empty());
+    }
+
+    #[test]
+    fn stale_first_load_failure_cannot_overwrite_newer_state() {
+        let record = image_record("textures/player.png");
+        let mut server = AssetServer::new();
+        let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+        let mut images = Assets::<ImageAsset>::default();
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+        let expected_version = states.set_loading(handle.id());
+        images
+            .remove_with_state(handle, &mut states, &mut events)
+            .unwrap();
+        events.drain();
+        let request = reload_request(&record, handle, expected_version);
+        let mut stats = ImageReloadStats::default();
+
+        record_image_reload_failure(
+            request,
+            ImageReloadError::MissingSourceRoot {
+                path: record.path().clone(),
+            },
+            &mut images,
+            &mut states,
+            &mut events,
+            &mut stats,
+        );
+
+        assert_eq!(stats.stale, 1);
+        assert_eq!(
+            states.state(handle.id()).unwrap().load_state(),
+            &LoadState::Removed
+        );
+        assert!(events.drain().is_empty());
+    }
+
+    #[test]
     fn image_plugin_removes_runtime_and_prepared_image() {
         let temp_root = unique_temp_root();
         let texture_path = temp_root.join("textures").join("player.png");
@@ -1352,6 +1446,28 @@ mod tests {
             .insert(record)
             .unwrap();
         app
+    }
+
+    fn reload_request(
+        record: &AssetRecord,
+        handle: Handle<ImageAsset>,
+        expected_version: AssetVersion,
+    ) -> AssetReloadRequest {
+        let mut requests = AssetReloadRequests::new();
+        requests.push_resolved(
+            handle.id(),
+            record,
+            AssetReloadRequestKind::LoadOrReload,
+            AssetSourceChangeKind::Modified,
+            expected_version,
+            AssetLoadGeneration::ZERO,
+            Vec::new(),
+        );
+        requests
+            .drain_for_source_kind(&AssetSourceKind::Image)
+            .into_iter()
+            .next()
+            .unwrap()
     }
 
     fn unique_temp_root() -> PathBuf {

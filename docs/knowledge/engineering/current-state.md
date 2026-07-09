@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-09T12:37:27+08:00
+timestamp: 2026-07-09T14:31:38+08:00
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-09T12:37:27+08:00
-- Last verified: Foundation hardening passed `cargo fmt --all`, workspace checks with and without serde, `cargo nextest run --workspace` with 206 tests, `winit,wgpu` backend example checks, serde scene/prefab/patch/schema examples, backend boundary searches, runtime identity leak searches, engineering memory validation, and diff hygiene.
-- Next action: Choose the next foundation slice, likely async/task execution and hot-reload scheduling, the first Apply Changes patchable subset, runtime UI data model, or the first render-graph forcing use case.
+- Snapshot timestamp: 2026-07-09T14:31:38+08:00
+- Last verified: Async hot reload foundation passed `cargo fmt --all`, workspace checks with and without serde, `cargo nextest run --workspace` with 235 tests, `winit,wgpu` backend example checks, `asset-watch` facade check, `asset_import_texture` run, backend/runtime boundary searches, runtime identity leak searches, engineering memory validation, and diff hygiene.
+- Next action: Choose the next foundation slice, likely the first Apply Changes patchable subset, runtime UI data/layout, material/sampler authoring above `ImageAsset`, or the first render-graph forcing use case.
 
 # Active Registrations
 
@@ -60,13 +60,17 @@ status: "active"
   - `nara_diagnostic` no longer logs from `DiagnosticReport::push`; logging is an explicit `emit_to_tracing` bridge.
   - `nara_render` exposes `RenderBackendStatus` / `RenderBackendState` / skipped-frame reasons, and `nara_render_wgpu` reports backend state through that resource.
   - The unused public `RenderBackend` trait was removed; backend extension remains plugin/resource/system based until another backend proves the shared contract.
+  - `nara_tasks` owns deterministic and threaded engine task pools with typed task handles, cancellation tokens, task stats, and a `TaskPlugin`.
+  - `nara_app::CoreStage::TaskUpdate` now provides ordered main-thread async integration sets: `Poll`, `CoalesceAssetChanges`, `SpawnAssetJobs`, and `ApplyAssetResults`.
+  - `nara_asset` now owns `AssetPlugin`, source-change queues, reload requests, load generations, typed importer job contracts, last-event-wins coalescing, transitive dependency reload propagation, and expected-version guarded asset result application.
+  - `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, spawns owned image import jobs, applies typed results behind stable handles, records failed first loads/reloads/removals, composes `ImagePreparePlugin`, and invalidates prepared image resources through the render prepare seam.
+  - `nara_asset_watch` is an optional desktop watcher adapter behind `asset-watch`. It owns `notify`, validates watcher roots against `AssetSourceRoot`, preserves in-root rename sides, maps `.meta` events to semantic source changes, and never mutates asset or render storage directly.
 - Pending follow-ups:
   - The egui adapter is debug/editor tooling only; long-term runtime UI remains a nara-owned engine UI design problem.
   - The first Apply Changes patchable subset remains undecided; runtime-to-`ScenePatchDocument` diffing is not implemented.
-  - Engine-owned IO/task-pool execution, file watching, async import jobs, and reload scheduling remain deferred behind the current synchronous import/reload-ready contracts.
   - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset` and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
   - Material/sampler authoring, texture atlases, compression profiles, mip generation, and 3D mesh import remain future extensions of the asset/import/render prepare seam.
-  - Importer typed payload APIs, `nara_scene` module split, shared asset-ref codec helpers, boundary-search CI, and real import-cache filesystem containment tests remain accepted residuals from review.
+  - `nara_scene` module split, shared asset-ref codec helpers, boundary-search CI, and real import-cache filesystem containment tests remain accepted residuals from review.
 - Blocked:
   - None.
 
@@ -85,3 +89,5 @@ status: "active"
 - [Editor Play Mode core implementation memory event](logs/2026-07/2026-07-08T163926Z-editor-play-mode-core-implemented.md)
 - [Foundation hardening progress](progress/2026-07-09-foundation-hardening.md)
 - [Foundation hardening verification](verification/2026-07-09-foundation-hardening.md)
+- [Async hot reload foundation progress](progress/2026-07-09-async-hot-reload-foundation.md)
+- [Async hot reload foundation verification](verification/2026-07-09-async-hot-reload-foundation.md)

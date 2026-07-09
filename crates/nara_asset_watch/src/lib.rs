@@ -136,11 +136,36 @@ impl AssetWatchTranslator {
                 let to_path = event
                     .to_path()
                     .ok_or_else(|| AssetWatchError::MissingRenameTarget(event.path.clone()))?;
-                Ok(vec![
-                    self.translate_path(root, event.path(), AssetSourceChangeKind::Removed)?,
-                    self.translate_path(root, to_path, AssetSourceChangeKind::Modified)?,
-                ])
+                self.translate_rename(root, event.path(), to_path)
             }
+        }
+    }
+
+    fn translate_rename(
+        &self,
+        root: &AssetSourceRoot,
+        from_path: &Path,
+        to_path: &Path,
+    ) -> Result<Vec<AssetSourceChange>, AssetWatchError> {
+        let mut changes = Vec::new();
+        let mut outside_error = None;
+        for result in [
+            self.translate_path(root, from_path, AssetSourceChangeKind::Removed),
+            self.translate_path(root, to_path, AssetSourceChangeKind::Modified),
+        ] {
+            match result {
+                Ok(change) => changes.push(change),
+                Err(error @ AssetWatchError::SourceOutsideRoot { .. }) => {
+                    outside_error.get_or_insert(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        if changes.is_empty() {
+            Err(outside_error.expect("rename translation should have at least one side"))
+        } else {
+            Ok(changes)
         }
     }
 
@@ -161,7 +186,10 @@ impl AssetWatchTranslator {
             .and_then(|file_name| file_name.to_str())
             .is_some_and(|file_name| file_name.ends_with(".meta"))
         {
-            AssetSourceChangeKind::MetaModified
+            match source_kind {
+                AssetSourceChangeKind::Removed => AssetSourceChangeKind::Removed,
+                _ => AssetSourceChangeKind::MetaModified,
+            }
         } else {
             source_kind
         };
@@ -261,13 +289,36 @@ impl AssetWatchPlugin {
 impl Plugin for AssetWatchPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(AssetPlugin)?;
-        if !app.world().contains_resource::<AssetSourceRoot>() {
+        let watch_root = if app.world().contains_resource::<AssetSourceRoot>() {
+            let existing_root = app
+                .world()
+                .resource::<AssetSourceRoot>()
+                .root()
+                .to_path_buf();
+            if !same_lexical_path(&existing_root, &self.root).map_err(|error| {
+                PluginError::SetupFailed {
+                    plugin: self.name(),
+                    message: error.to_string(),
+                }
+            })? {
+                return Err(PluginError::SetupFailed {
+                    plugin: self.name(),
+                    message: format!(
+                        "asset watch root '{}' does not match AssetSourceRoot '{}'",
+                        self.root.display(),
+                        existing_root.display()
+                    ),
+                });
+            }
+            existing_root
+        } else {
             app.insert_resource(AssetSourceRoot::new(self.root.clone()));
-        }
+            self.root.clone()
+        };
 
         let queue = AssetWatchEventQueue::new();
         let watcher =
-            AssetWatcher::watch_recursive(&self.root, queue.clone()).map_err(|error| {
+            AssetWatcher::watch_recursive(&watch_root, queue.clone()).map_err(|error| {
                 PluginError::SetupFailed {
                     plugin: self.name(),
                     message: error.to_string(),
@@ -377,6 +428,10 @@ fn absolute_lexical(path: &Path) -> Result<PathBuf, AssetWatchError> {
     Ok(normalize_lexical(path))
 }
 
+fn same_lexical_path(left: &Path, right: &Path) -> Result<bool, AssetWatchError> {
+    Ok(absolute_lexical(left)? == absolute_lexical(right)?)
+}
+
 fn normalize_lexical(path: impl AsRef<Path>) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.as_ref().components() {
@@ -395,6 +450,10 @@ fn normalize_lexical(path: impl AsRef<Path>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_asset::{
+        AssetRecord, AssetReloadRequestKind, AssetReloadRequests, AssetSourceKind,
+        ProjectAssetDatabase, StableAssetId,
+    };
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
@@ -463,6 +522,30 @@ mod tests {
     }
 
     #[test]
+    fn meta_remove_maps_to_source_remove_change() {
+        let root = temp_root();
+        fs::create_dir_all(root.join("textures")).unwrap();
+        let meta = root.join("textures").join("player.png.meta");
+        let translator = AssetWatchTranslator;
+
+        let changes = translator
+            .translate_event(
+                &AssetSourceRoot::new(&root),
+                &AssetWatchEvent::removed(&meta),
+            )
+            .unwrap();
+
+        assert_eq!(
+            changes,
+            vec![AssetSourceChange::new(
+                AssetPath::new("textures/player.png").unwrap(),
+                AssetSourceChangeKind::Removed
+            )]
+        );
+        remove_temp_root(&root);
+    }
+
+    #[test]
     fn remove_translates_to_removed_change_without_file_existing() {
         let root = temp_root();
         fs::create_dir_all(root.join("textures")).unwrap();
@@ -518,6 +601,56 @@ mod tests {
     }
 
     #[test]
+    fn rename_from_root_to_outside_keeps_in_root_remove() {
+        let root = temp_root();
+        fs::create_dir_all(root.join("textures")).unwrap();
+        let from = root.join("textures").join("old.png");
+        let outside = root.with_file_name("outside.png");
+        let translator = AssetWatchTranslator;
+
+        let changes = translator
+            .translate_event(
+                &AssetSourceRoot::new(&root),
+                &AssetWatchEvent::renamed(&from, &outside),
+            )
+            .unwrap();
+
+        assert_eq!(
+            changes,
+            vec![AssetSourceChange::new(
+                AssetPath::new("textures/old.png").unwrap(),
+                AssetSourceChangeKind::Removed
+            )]
+        );
+        remove_temp_root(&root);
+    }
+
+    #[test]
+    fn rename_from_outside_to_root_keeps_in_root_modify() {
+        let root = temp_root();
+        fs::create_dir_all(root.join("textures")).unwrap();
+        let outside = root.with_file_name("outside.png");
+        let to = root.join("textures").join("new.png");
+        let translator = AssetWatchTranslator;
+
+        let changes = translator
+            .translate_event(
+                &AssetSourceRoot::new(&root),
+                &AssetWatchEvent::renamed(&outside, &to),
+            )
+            .unwrap();
+
+        assert_eq!(
+            changes,
+            vec![AssetSourceChange::new(
+                AssetPath::new("textures/new.png").unwrap(),
+                AssetSourceChangeKind::Modified
+            )]
+        );
+        remove_temp_root(&root);
+    }
+
+    #[test]
     fn outside_root_path_is_rejected() {
         let root = temp_root();
         let outside = root.with_file_name("outside.png");
@@ -558,6 +691,61 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert!(queue.is_empty());
         remove_temp_root(&root);
+    }
+
+    #[test]
+    fn queued_watch_events_are_resolved_in_the_same_task_update() {
+        let root = temp_root();
+        fs::create_dir_all(root.join("textures")).unwrap();
+        let source = root.join("textures").join("player.png");
+        fs::write(&source, b"png").unwrap();
+        let record = AssetRecord::new(
+            stable_id(),
+            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        let queue = AssetWatchEventQueue::new();
+        queue.push(AssetWatchEvent::modified(&source));
+        let mut app = App::new();
+        app.insert_resource(AssetSourceRoot::new(&root));
+        app.insert_resource(queue);
+        app.add_plugin(AssetPlugin).unwrap();
+        app.world_mut()
+            .resource_mut::<ProjectAssetDatabase>()
+            .insert(record)
+            .unwrap();
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
+        );
+
+        app.update();
+
+        let requests = app.world().resource::<AssetReloadRequests>();
+        let request = requests.iter().next().unwrap();
+        assert_eq!(request.path().as_str(), "textures/player.png");
+        assert_eq!(request.request_kind(), AssetReloadRequestKind::LoadOrReload);
+        remove_temp_root(&root);
+    }
+
+    #[test]
+    fn plugin_rejects_root_that_differs_from_existing_asset_source_root() {
+        let configured_root = temp_root();
+        let watch_root = configured_root.with_file_name("nara_asset_watch_other_root");
+        fs::create_dir_all(&configured_root).unwrap();
+        let mut app = App::new();
+        app.insert_resource(AssetSourceRoot::new(&configured_root));
+
+        let Err(error) = app.add_plugin(AssetWatchPlugin::new(&watch_root)) else {
+            panic!("watch plugin should reject a root that differs from AssetSourceRoot");
+        };
+
+        assert!(matches!(error, PluginError::SetupFailed { .. }));
+        remove_temp_root(&configured_root);
+    }
+
+    fn stable_id() -> StableAssetId {
+        StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
     }
 
     fn remove_temp_root(path: &Path) {

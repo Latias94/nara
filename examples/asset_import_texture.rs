@@ -79,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>();
     assert!(prepared.get_ready(image_resource_key(texture)).is_some());
+    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
 
     let batches = app.world().resource::<SpriteBatches>();
     assert_eq!(batches.total_instances(), 1);
