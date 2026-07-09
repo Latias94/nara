@@ -25,6 +25,9 @@ struct TestAssetLink {
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestBrokenExport;
 
+#[derive(Clone, Debug, PartialEq, Component)]
+struct TestApplyFails;
+
 #[derive(Debug)]
 struct TestAsset;
 
@@ -563,6 +566,75 @@ fn unknown_stable_asset_ref_does_not_mutate_world_or_asset_server() {
 }
 
 #[test]
+fn component_apply_failure_rolls_back_spawned_entities() {
+    let registry = failing_apply_registry();
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(scene_id("ok"))
+            .with_component(position_type_id(), position_record(1)),
+        SceneEntityRecord::new(scene_id("fails"))
+            .with_component(apply_fails_type_id(), apply_fails_record(None)),
+    ]);
+    let mut world = World::new();
+    let before_entities = world.iter_entities().count();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.diagnostics.has_errors());
+    assert!(report.entity_map.is_empty());
+    assert_eq!(world.iter_entities().count(), before_entities);
+    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code.as_str() == "scene.component-apply-failed"
+            && diagnostic.context.entity_id.as_deref() == Some("fails")
+    }));
+}
+
+#[test]
+fn component_apply_failure_removes_scratch_asset_server() {
+    let registry = failing_apply_registry();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("fails")).with_component(
+        apply_fails_type_id(),
+        apply_fails_record(Some(AssetRef::path("textures/generated.png").unwrap())),
+    )]);
+    let mut world = World::new();
+    let before_entities = world.iter_entities().count();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.diagnostics.has_errors());
+    assert!(report.entity_map.is_empty());
+    assert!(world.get_resource::<AssetServer>().is_none());
+    assert_eq!(world.iter_entities().count(), before_entities);
+}
+
+#[test]
+fn component_apply_failure_restores_original_asset_server() {
+    let registry = failing_apply_registry();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("fails")).with_component(
+        apply_fails_type_id(),
+        apply_fails_record(Some(AssetRef::path("textures/generated.png").unwrap())),
+    )]);
+    let mut existing_asset_server = AssetServer::new();
+    let existing_handle = existing_asset_server
+        .reserve::<TestAsset>("textures/existing.png")
+        .unwrap();
+    let mut world = World::new();
+    world.insert_resource(existing_asset_server);
+    let before_entities = world.iter_entities().count();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.diagnostics.has_errors());
+    assert!(report.entity_map.is_empty());
+    assert_eq!(world.iter_entities().count(), before_entities);
+    let asset_server = world.resource::<AssetServer>();
+    assert_eq!(
+        asset_server.path(existing_handle.id()),
+        Some("textures/existing.png")
+    );
+    assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
+}
+
+#[test]
 fn spawns_hierarchy_records_source_and_exports_stable_document() {
     let registry = test_registry();
     let parent_id = scene_id("parent");
@@ -1032,6 +1104,47 @@ fn broken_export_registry() -> ComponentRegistry {
     registry
 }
 
+fn failing_apply_registry() -> ComponentRegistry {
+    let mut registry = test_registry();
+    registry
+        .register_component_codec_with_context::<TestApplyFails, _, _>(
+            apply_fails_type_id(),
+            ComponentSchemaVersion(1),
+            |value, context| {
+                if let Some(asset_value) = value.get("asset") {
+                    let asset_ref = read_asset_ref(asset_value, "asset")?;
+                    if let Some(result) = context.resolve_asset_ref::<TestAsset>(&asset_ref) {
+                        result.map_err(|error| {
+                            ComponentCodecError::invalid_asset_ref(
+                                "asset.value",
+                                asset_ref.to_string(),
+                                error.to_string(),
+                            )
+                        })?;
+                    }
+                }
+
+                Ok(PreparedComponent::new(|_world, _entity| {
+                    Err(ComponentCodecError::invalid_field(
+                        "apply",
+                        "intentional failure",
+                    ))
+                }))
+            },
+            |_world, _entity, _context| Ok(None),
+        )
+        .unwrap()
+        .register_component_fields(
+            &apply_fails_type_id(),
+            [ComponentFieldSchema::optional(
+                ComponentFieldPath::from_fields(["asset"]),
+                ComponentValueKind::AssetRef,
+            )],
+        )
+        .unwrap();
+    registry
+}
+
 enum PreparedTestAsset {
     Resolved(Handle<TestAsset>),
     Deferred(AssetRef),
@@ -1094,6 +1207,14 @@ fn asset_link_record(asset_ref: AssetRef) -> SceneComponentRecord {
     )
 }
 
+fn apply_fails_record(asset_ref: Option<AssetRef>) -> SceneComponentRecord {
+    let value = asset_ref
+        .as_ref()
+        .map(|asset_ref| ComponentValue::map([("asset", asset_ref_value(asset_ref))]))
+        .unwrap_or_else(|| ComponentValue::Map(BTreeMap::new()));
+    SceneComponentRecord::new(ComponentSchemaVersion(1), value)
+}
+
 fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
     match asset_ref {
         AssetRef::Path(path) => ComponentValue::map([
@@ -1150,6 +1271,10 @@ fn asset_link_type_id() -> ComponentTypeId {
 
 fn broken_export_type_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.test.BrokenExport")
+}
+
+fn apply_fails_type_id() -> ComponentTypeId {
+    ComponentTypeId::new("nara.test.ApplyFails")
 }
 
 fn position_type_id() -> ComponentTypeId {

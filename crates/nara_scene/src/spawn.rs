@@ -150,6 +150,7 @@ impl SceneSpawner {
         document: &SceneDocument,
         database: Option<&ProjectAssetDatabase>,
     ) -> SceneSpawnReport {
+        let original_asset_server = world.get_resource::<AssetServer>().cloned();
         let mut asset_server = world
             .get_resource::<AssetServer>()
             .cloned()
@@ -169,16 +170,13 @@ impl SceneSpawner {
             };
         }
 
-        if asset_server_touched {
-            world.insert_resource(asset_server);
-        }
-
         let instance_id = SceneInstanceId::from_raw(self.next_instance_id);
-        self.next_instance_id = self.next_instance_id.saturating_add(1).max(1);
 
         let mut entity_map = SceneEntityMap::default();
+        let mut spawned_entities = Vec::new();
         for entity in &preflight.entities {
             let runtime_entity = world.spawn_empty().id();
+            spawned_entities.push(runtime_entity);
             world.entity_mut(runtime_entity).insert(SceneEntitySource {
                 instance_id,
                 entity_id: entity.id.clone(),
@@ -214,7 +212,20 @@ impl SceneSpawner {
             }
         }
 
+        if diagnostics.has_errors() {
+            rollback_spawn_transaction(world, &spawned_entities, original_asset_server);
+            return SceneSpawnReport {
+                entity_map: SceneEntityMap::default(),
+                diagnostics,
+            };
+        }
+
+        if asset_server_touched {
+            world.insert_resource(asset_server);
+        }
+
         sync_children(world);
+        self.next_instance_id = self.next_instance_id.saturating_add(1).max(1);
 
         SceneSpawnReport {
             entity_map,
@@ -324,6 +335,27 @@ impl SceneSpawner {
         diagnostics.extend(report.diagnostics);
         report.diagnostics = diagnostics;
         report
+    }
+}
+
+fn rollback_spawn_transaction(
+    world: &mut World,
+    spawned_entities: &[Entity],
+    original_asset_server: Option<AssetServer>,
+) {
+    for entity in spawned_entities.iter().rev().copied() {
+        if world.get_entity(entity).is_ok() {
+            world.despawn(entity);
+        }
+    }
+
+    match original_asset_server {
+        Some(asset_server) => {
+            world.insert_resource(asset_server);
+        }
+        None => {
+            world.remove_resource::<AssetServer>();
+        }
     }
 }
 
