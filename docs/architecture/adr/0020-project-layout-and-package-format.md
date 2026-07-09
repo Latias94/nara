@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0035: Project Manifest and Runtime Settings Authority
 
 ## Context
 

@@ -4,6 +4,7 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError, TaskUpdateSet};
+use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_tasks::TaskPlugin;
 
@@ -320,6 +321,41 @@ pub struct AssetReloadRequests {
     unresolved: Vec<UnresolvedAssetSourceChange>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
+pub struct AssetReloadDiagnostics {
+    report: DiagnosticReport,
+}
+
+impl AssetReloadDiagnostics {
+    pub fn clear(&mut self) {
+        self.report = DiagnosticReport::default();
+    }
+
+    pub fn push(&mut self, diagnostic: Diagnostic) {
+        self.report.push(diagnostic);
+    }
+
+    #[must_use]
+    pub const fn report(&self) -> &DiagnosticReport {
+        &self.report
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        self.report.diagnostics()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.report.is_empty()
+    }
+
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        self.report.has_errors()
+    }
+}
+
 impl AssetReloadRequests {
     #[must_use]
     pub fn new() -> Self {
@@ -514,6 +550,7 @@ impl Plugin for AssetPlugin {
         app.init_resource::<ProjectAssetDatabase>();
         app.init_resource::<AssetSourceChanges>();
         app.init_resource::<AssetReloadRequests>();
+        app.init_resource::<AssetReloadDiagnostics>();
         app.init_resource::<AssetLoadGenerations>();
         app.configure_sets(
             CoreStage::TaskUpdate,
@@ -541,10 +578,14 @@ pub fn resolve_asset_source_changes(
     mut states: ResMut<AssetStates>,
     mut generations: ResMut<AssetLoadGenerations>,
     mut requests: ResMut<AssetReloadRequests>,
+    mut diagnostics: ResMut<AssetReloadDiagnostics>,
 ) {
+    diagnostics.clear();
     let resolver = SourceChangeResolver;
     for change in changes.drain_coalesced() {
-        let _ = resolver.resolve_change(
+        let diagnostic_path = change.path().clone();
+        let diagnostic_kind = change.kind();
+        if let Err(error) = resolver.resolve_change(
             change,
             &database,
             &dependencies,
@@ -552,7 +593,17 @@ pub fn resolve_asset_source_changes(
             &mut states,
             &mut generations,
             &mut requests,
-        );
+        ) {
+            diagnostics.push(
+                Diagnostic::error(
+                    "asset.reload-source-change-resolve-failed",
+                    format!(
+                        "failed to resolve asset source change for '{diagnostic_path}' ({diagnostic_kind:?}): {error}"
+                    ),
+                )
+                .with_asset_ref(diagnostic_path.to_string()),
+            );
+        }
     }
 }
 
@@ -661,6 +712,41 @@ mod tests {
         let requests = app.world().resource::<AssetReloadRequests>();
         assert_eq!(requests.len(), 0);
         assert_eq!(requests.unresolved().len(), 1);
+    }
+
+    #[test]
+    fn resolver_errors_are_recorded_as_reload_diagnostics() {
+        let mut app = App::new();
+        app.insert_resource(nara_tasks::TaskPools::deterministic());
+        app.add_plugin(AssetPlugin).unwrap();
+        app.world_mut()
+            .resource_mut::<ProjectAssetDatabase>()
+            .insert(image_record("textures/player.png", stable_id()))
+            .unwrap();
+        app.world_mut()
+            .resource_mut::<AssetServer>()
+            .reserve_record_id(&image_record("textures/player.png", dependent_stable_id()))
+            .unwrap();
+        app.world_mut()
+            .resource_mut::<AssetSourceChanges>()
+            .modified(AssetPath::new("textures/player.png").unwrap());
+
+        app.update();
+
+        let diagnostics = app.world().resource::<AssetReloadDiagnostics>();
+        assert!(diagnostics.has_errors());
+        assert_eq!(diagnostics.diagnostics().len(), 1);
+        let diagnostic = &diagnostics.diagnostics()[0];
+        assert_eq!(
+            diagnostic.code.as_str(),
+            "asset.reload-source-change-resolve-failed"
+        );
+        assert_eq!(
+            diagnostic.context.asset_ref.as_deref(),
+            Some("textures/player.png")
+        );
+        assert!(diagnostic.message.contains("failed to resolve"));
+        assert!(app.world().resource::<AssetReloadRequests>().is_empty());
     }
 
     #[test]

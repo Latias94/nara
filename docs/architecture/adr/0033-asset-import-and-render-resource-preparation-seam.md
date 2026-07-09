@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0037: Asset Load Request, Cache, and Lifetime Policy
 
 ## Context
 

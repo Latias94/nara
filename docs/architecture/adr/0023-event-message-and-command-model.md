@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0036: Event, Message, and Resource Queue Lifetime
 
 ## Context
 
@@ -12,6 +13,8 @@ nara needs a consistent communication model for input, physics contacts, asset l
 ## Decision
 
 nara will use ECS-native messages/events and deferred commands as the primary runtime communication model.
+ADR 0036 refines this into nara-owned channel lifetime classes: typed resource queues remain valid
+when their producer, consumer, retention, cleanup stage, and replay/diagnostic role are explicit.
 
 Rules:
 
@@ -82,4 +85,3 @@ flowchart TD
 - Do fixed-update events and frame-update events use separate channels?
 - What is the first editor command/patch data shape?
 - How should diagnostics point to a failed command?
-

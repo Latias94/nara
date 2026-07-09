@@ -361,22 +361,24 @@ Follow-up details still to settle:
 ## Project Layout
 
 Accepted direction: `nara.toml` plus conventional `assets/`, `scenes/`, `prefabs/`, `scripts/`, and `.nara/` generated cache directories. See ADR [0020-project-layout-and-package-format.md](adr/0020-project-layout-and-package-format.md).
+Settings authority is now settled by ADR [0035-project-manifest-and-runtime-settings-authority.md](adr/0035-project-manifest-and-runtime-settings-authority.md): `nara.toml` is the file-backed project authority, with code-first resource/plugin overrides for embedded apps.
 
 Follow-up details still to settle:
 
-1. What fields are required in `nara.toml`?
-2. Which directories are configurable?
+1. What exact TOML field names should the first manifest parser expose?
+2. Should project stable identity be required immediately or optional until package/export exists?
 3. What template should `nara new` generate later?
 
 ## Event, Command, Determinism, and Replay
 
 Accepted direction: ECS-native messages/events and deferred commands, plus deterministic-friendly fixed-step simulation. See ADR [0023-event-message-and-command-model.md](adr/0023-event-message-and-command-model.md) and ADR [0024-determinism-fixed-update-and-replay-policy.md](adr/0024-determinism-fixed-update-and-replay-policy.md).
+Channel lifetimes are now refined by ADR [0036-event-message-and-resource-queue-lifetime.md](adr/0036-event-message-and-resource-queue-lifetime.md): typed resource queues are acceptable when producer, consumer, retention, cleanup stage, and replay/diagnostic role are explicit.
 The next implementation slice sets the first fixed timestep default to 1/60 second with bounded catch-up, exposed through `FixedTime` and testable `run_once(Duration)`.
 
 Follow-up details still to settle:
 
-1. What exact event retention policy should nara use?
-2. Do fixed-update and frame-update events use separate channels?
+1. Should nara provide reusable `Events<T>` / `Requests<T>` wrappers with stage metadata?
+2. Which channels belong in future deterministic replay capture first?
 3. What data is required for a future replay capture?
 
 ## Runtime UI
