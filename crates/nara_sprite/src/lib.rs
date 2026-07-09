@@ -152,9 +152,10 @@ impl Plugin for SpritePlugin {
 pub fn register_sprite_components(registry: &mut ComponentRegistry) {
     let component_id = ComponentTypeId::new("nara.sprite.Sprite");
     registry
-        .register_component_codec_with_context::<Sprite, _, _>(
+        .register_component_codec_with_context_and_fields::<Sprite, _, _>(
             component_id.clone(),
             ComponentSchemaVersion(1),
+            sprite_fields(),
             |value, context| {
                 let size = read_vec2(value.field("size")?, "size")?;
                 let color = read_color(value.field("color")?, "color")?;
@@ -221,7 +222,6 @@ pub fn register_sprite_components(registry: &mut ComponentRegistry) {
                 Ok(Some(ComponentValue::map(fields)))
             },
         )
-        .and_then(|registry| registry.register_component_fields(&component_id, sprite_fields()))
         .expect("nara.sprite.Sprite component registration should be unique");
 }
 

@@ -292,9 +292,10 @@ impl Plugin for RenderPlugin {
 pub fn register_render_components(registry: &mut ComponentRegistry) {
     let component_id = ComponentTypeId::new("nara.render.Camera2d");
     registry
-        .register_serializable_component::<Camera2d, _, _>(
+        .register_serializable_component_with_fields::<Camera2d, _, _>(
             component_id.clone(),
             ComponentSchemaVersion(1),
+            camera_fields(),
             |value| {
                 Ok(Camera2d {
                     target: read_render_target(value.get("target"))?,
@@ -331,7 +332,6 @@ pub fn register_render_components(registry: &mut ComponentRegistry) {
                 ]))
             },
         )
-        .and_then(|registry| registry.register_component_fields(&component_id, camera_fields()))
         .expect("nara.render.Camera2d component registration should be unique");
 }
 

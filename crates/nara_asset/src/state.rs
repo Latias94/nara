@@ -240,8 +240,6 @@ impl Display for AssetStateError {
 impl Error for AssetStateError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum AssetEventKind {
     Added,
     Modified,
@@ -250,7 +248,6 @@ pub enum AssetEventKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AssetEvent {
     id: AssetId,
     version: AssetVersion,

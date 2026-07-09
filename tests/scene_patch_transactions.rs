@@ -253,9 +253,25 @@ fn test_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     let component_id = position_type_id();
     registry
-        .register_serializable_component::<TestPosition, _, _>(
+        .register_serializable_component_with_fields::<TestPosition, _, _>(
             component_id.clone(),
             ComponentSchemaVersion(1),
+            [
+                ComponentFieldSchema::required(
+                    ComponentFieldPath::from_fields(["x"]),
+                    ComponentValueKind::I64,
+                ),
+                ComponentFieldSchema::optional_with_default(
+                    ComponentFieldPath::from_fields(["y"]),
+                    ComponentValueKind::I64,
+                    ComponentValue::I64(0),
+                ),
+                ComponentFieldSchema::optional_with_default(
+                    ComponentFieldPath::from_fields(["asset"]),
+                    ComponentValueKind::AssetRef,
+                    ComponentValue::Null,
+                ),
+            ],
             |value| {
                 let x = value.field_i64("x")?;
                 Ok(TestPosition {
@@ -280,26 +296,6 @@ fn test_registry() -> ComponentRegistry {
                 }
                 Ok(ComponentValue::map(fields))
             },
-        )
-        .unwrap()
-        .register_component_fields(
-            &component_id,
-            [
-                ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["x"]),
-                    ComponentValueKind::I64,
-                ),
-                ComponentFieldSchema::optional_with_default(
-                    ComponentFieldPath::from_fields(["y"]),
-                    ComponentValueKind::I64,
-                    ComponentValue::I64(0),
-                ),
-                ComponentFieldSchema::optional_with_default(
-                    ComponentFieldPath::from_fields(["asset"]),
-                    ComponentValueKind::AssetRef,
-                    ComponentValue::Null,
-                ),
-            ],
         )
         .unwrap();
     registry

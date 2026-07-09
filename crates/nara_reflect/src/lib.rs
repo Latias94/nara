@@ -749,10 +749,24 @@ fn component_path_with(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentRegistryError {
     DuplicateComponentId(ComponentTypeId),
+    DuplicateComponentRustType {
+        rust_type_path: String,
+        existing_component_id: ComponentTypeId,
+        requested_component_id: ComponentTypeId,
+    },
     UnknownComponentId(ComponentTypeId),
+    MissingSerializableComponentFields {
+        component_id: ComponentTypeId,
+    },
     DuplicateComponentFieldPath {
         component_id: ComponentTypeId,
         path: ComponentFieldPath,
+    },
+    InvalidComponentFieldDefault {
+        component_id: ComponentTypeId,
+        path: ComponentFieldPath,
+        expected: ComponentValueKind,
+        actual: ComponentValueKind,
     },
     DuplicateComponentMigration {
         component_id: ComponentTypeId,
@@ -775,11 +789,31 @@ impl Display for ComponentRegistryError {
                     id.as_str()
                 )
             }
+            Self::DuplicateComponentRustType {
+                rust_type_path,
+                existing_component_id,
+                requested_component_id,
+            } => {
+                write!(
+                    formatter,
+                    "rust component type '{}' is already registered as '{}', not '{}'",
+                    rust_type_path,
+                    existing_component_id.as_str(),
+                    requested_component_id.as_str()
+                )
+            }
             Self::UnknownComponentId(id) => {
                 write!(
                     formatter,
                     "component id '{}' is not registered",
                     id.as_str()
+                )
+            }
+            Self::MissingSerializableComponentFields { component_id } => {
+                write!(
+                    formatter,
+                    "serializable component id '{}' requires explicit schema fields",
+                    component_id.as_str()
                 )
             }
             Self::DuplicateComponentFieldPath { component_id, path } => {
@@ -788,6 +822,21 @@ impl Display for ComponentRegistryError {
                     "component id '{}' registered duplicate schema field path '{}'",
                     component_id.as_str(),
                     path
+                )
+            }
+            Self::InvalidComponentFieldDefault {
+                component_id,
+                path,
+                expected,
+                actual,
+            } => {
+                write!(
+                    formatter,
+                    "component id '{}' field '{}' default has kind {:?}, expected {:?}",
+                    component_id.as_str(),
+                    path,
+                    actual,
+                    expected
                 )
             }
             Self::DuplicateComponentMigration {
@@ -1246,8 +1295,8 @@ impl ComponentRegistry {
     where
         T: Component + Reflect + GetTypeRegistration,
     {
+        self.register_component_schema::<T>(id, version, false, Vec::new())?;
         self.type_registry.register::<T>();
-        self.register_component_schema::<T>(id, version, false)?;
         Ok(self)
     }
 
@@ -1263,7 +1312,25 @@ impl ComponentRegistry {
         Decode: Fn(&ComponentValue) -> Result<T, ComponentCodecError> + Send + Sync + 'static,
         Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
     {
-        self.register_component_schema::<T>(id.clone(), version, true)?;
+        let _ = (version, decode, encode);
+        Err(ComponentRegistryError::MissingSerializableComponentFields { component_id: id })
+    }
+
+    pub fn register_serializable_component_with_fields<T, Decode, Encode>(
+        &mut self,
+        id: ComponentTypeId,
+        version: ComponentSchemaVersion,
+        fields: impl IntoIterator<Item = ComponentFieldSchema>,
+        decode: Decode,
+        encode: Encode,
+    ) -> Result<&mut Self, ComponentRegistryError>
+    where
+        T: Component,
+        Decode: Fn(&ComponentValue) -> Result<T, ComponentCodecError> + Send + Sync + 'static,
+        Encode: Fn(&T) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
+    {
+        let fields = serializable_component_fields(&id, fields)?;
+        self.register_component_schema::<T>(id.clone(), version, true, fields)?;
         let codec = FnComponentCodec {
             preflight: move |value: &ComponentValue, _context: &mut ComponentDecodeContext<'_>| {
                 let component = decode(value)?;
@@ -1298,9 +1365,33 @@ impl ComponentRegistry {
             + Sync
             + 'static,
     {
-        self.register_component_codec_with_context::<T, _, _>(
+        let _ = (version, preflight, encode);
+        Err(ComponentRegistryError::MissingSerializableComponentFields { component_id: id })
+    }
+
+    pub fn register_component_codec_with_fields<T, Preflight, Encode>(
+        &mut self,
+        id: ComponentTypeId,
+        version: ComponentSchemaVersion,
+        fields: impl IntoIterator<Item = ComponentFieldSchema>,
+        preflight: Preflight,
+        encode: Encode,
+    ) -> Result<&mut Self, ComponentRegistryError>
+    where
+        T: Component,
+        Preflight: Fn(&ComponentValue) -> Result<PreparedComponent, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+        Encode: Fn(&World, Entity) -> Result<Option<ComponentValue>, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.register_component_codec_with_context_and_fields::<T, _, _>(
             id,
             version,
+            fields,
             move |value, _context| preflight(value),
             move |world, entity, _context| encode(world, entity),
         )
@@ -1331,7 +1422,38 @@ impl ComponentRegistry {
             + Sync
             + 'static,
     {
-        self.register_component_schema::<T>(id.clone(), version, true)?;
+        let _ = (version, preflight, encode);
+        Err(ComponentRegistryError::MissingSerializableComponentFields { component_id: id })
+    }
+
+    pub fn register_component_codec_with_context_and_fields<T, Preflight, Encode>(
+        &mut self,
+        id: ComponentTypeId,
+        version: ComponentSchemaVersion,
+        fields: impl IntoIterator<Item = ComponentFieldSchema>,
+        preflight: Preflight,
+        encode: Encode,
+    ) -> Result<&mut Self, ComponentRegistryError>
+    where
+        T: Component,
+        Preflight: for<'a> Fn(
+                &ComponentValue,
+                &mut ComponentDecodeContext<'a>,
+            ) -> Result<PreparedComponent, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+        Encode: for<'a> Fn(
+                &World,
+                Entity,
+                &ComponentEncodeContext<'a>,
+            ) -> Result<Option<ComponentValue>, ComponentCodecError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let fields = serializable_component_fields(&id, fields)?;
+        self.register_component_schema::<T>(id.clone(), version, true, fields)?;
         self.codecs
             .insert(id, Box::new(FnComponentCodec { preflight, encode }));
         Ok(self)
@@ -1541,6 +1663,7 @@ impl ComponentRegistry {
         id: ComponentTypeId,
         version: ComponentSchemaVersion,
         serializable: bool,
+        fields: Vec<ComponentFieldSchema>,
     ) -> Result<(), ComponentRegistryError>
     where
         T: Component,
@@ -1548,18 +1671,39 @@ impl ComponentRegistry {
         if self.schemas.contains_key(&id) {
             return Err(ComponentRegistryError::DuplicateComponentId(id));
         }
+        let rust_type_id = TypeId::of::<T>();
+        if let Some(existing_component_id) = self.rust_type_ids.get(&rust_type_id) {
+            return Err(ComponentRegistryError::DuplicateComponentRustType {
+                rust_type_path: std::any::type_name::<T>().to_string(),
+                existing_component_id: existing_component_id.clone(),
+                requested_component_id: id,
+            });
+        }
 
         let schema = ComponentSchema {
             id: id.clone(),
             version,
             rust_type_path: std::any::type_name::<T>().to_string(),
             serializable,
-            fields: Vec::new(),
+            fields,
         };
-        self.rust_type_ids.insert(TypeId::of::<T>(), id.clone());
+        self.rust_type_ids.insert(rust_type_id, id.clone());
         self.schemas.insert(id, schema);
         Ok(())
     }
+}
+
+fn serializable_component_fields(
+    component_id: &ComponentTypeId,
+    fields: impl IntoIterator<Item = ComponentFieldSchema>,
+) -> Result<Vec<ComponentFieldSchema>, ComponentRegistryError> {
+    let fields = canonical_component_fields(component_id, fields)?;
+    if fields.is_empty() {
+        return Err(ComponentRegistryError::MissingSerializableComponentFields {
+            component_id: component_id.clone(),
+        });
+    }
+    Ok(fields)
 }
 
 fn canonical_component_fields(
@@ -1576,7 +1720,49 @@ fn canonical_component_fields(
             });
         }
     }
+    for field in &fields {
+        validate_component_field_default(component_id, field)?;
+    }
     Ok(fields)
+}
+
+fn validate_component_field_default(
+    component_id: &ComponentTypeId,
+    field: &ComponentFieldSchema,
+) -> Result<(), ComponentRegistryError> {
+    let Some(default_value) = &field.default_value else {
+        return Ok(());
+    };
+    if !field.required && matches!(default_value, ComponentValue::Null) {
+        return Ok(());
+    }
+    if component_value_matches_kind(default_value, field.value_kind) {
+        return Ok(());
+    }
+    Err(ComponentRegistryError::InvalidComponentFieldDefault {
+        component_id: component_id.clone(),
+        path: field.path.clone(),
+        expected: field.value_kind,
+        actual: default_value.kind(),
+    })
+}
+
+fn component_value_matches_kind(value: &ComponentValue, expected: ComponentValueKind) -> bool {
+    match expected {
+        ComponentValueKind::AssetRef => is_asset_ref_value(value),
+        expected => value.kind() == expected,
+    }
+}
+
+fn is_asset_ref_value(value: &ComponentValue) -> bool {
+    let ComponentValue::Map(fields) = value else {
+        return false;
+    };
+    matches!(
+        (fields.get("kind"), fields.get("value")),
+        (Some(ComponentValue::String(kind)), Some(ComponentValue::String(_)))
+            if kind == "path" || kind == "stable_id"
+    )
 }
 
 pub mod prelude {
@@ -1640,6 +1826,78 @@ mod tests {
         assert!(matches!(
             result,
             Err(ComponentRegistryError::DuplicateComponentId(duplicate)) if duplicate == id
+        ));
+    }
+
+    #[test]
+    fn rejects_duplicate_component_rust_types() {
+        let mut registry = ComponentRegistry::new();
+        let position_id = ComponentTypeId::new("nara.test.Position");
+        let alias_id = ComponentTypeId::new("nara.test.PositionAlias");
+
+        registry
+            .register_component::<Position>(position_id.clone(), ComponentSchemaVersion(1))
+            .unwrap();
+
+        let result =
+            registry.register_component::<Position>(alias_id.clone(), ComponentSchemaVersion(1));
+
+        assert!(matches!(
+            result,
+            Err(ComponentRegistryError::DuplicateComponentRustType {
+                existing_component_id,
+                requested_component_id,
+                ..
+            }) if existing_component_id == position_id && requested_component_id == alias_id
+        ));
+    }
+
+    #[test]
+    fn serializable_components_require_fields() {
+        let mut registry = ComponentRegistry::new();
+        let id = ComponentTypeId::new("nara.test.Position");
+
+        let result = registry.register_serializable_component_with_fields::<Position, _, _>(
+            id.clone(),
+            ComponentSchemaVersion(1),
+            [],
+            |_value| Ok(Position { x: 0.0, y: 0.0 }),
+            |_position| Ok(ComponentValue::Map(Default::default())),
+        );
+
+        assert!(matches!(
+            result,
+            Err(ComponentRegistryError::MissingSerializableComponentFields { component_id })
+                if component_id == id
+        ));
+    }
+
+    #[test]
+    fn rejects_component_field_default_kind_mismatch() {
+        let mut registry = ComponentRegistry::new();
+        let id = ComponentTypeId::new("nara.test.Position");
+        let path = ComponentFieldPath::from_fields(["x"]);
+
+        let result = registry.register_serializable_component_with_fields::<Position, _, _>(
+            id.clone(),
+            ComponentSchemaVersion(1),
+            [ComponentFieldSchema::optional_with_default(
+                path.clone(),
+                ComponentValueKind::F64,
+                ComponentValue::String("wrong".to_string()),
+            )],
+            |_value| Ok(Position { x: 0.0, y: 0.0 }),
+            |_position| Ok(ComponentValue::Map(Default::default())),
+        );
+
+        assert!(matches!(
+            result,
+            Err(ComponentRegistryError::InvalidComponentFieldDefault {
+                component_id,
+                path: failed_path,
+                expected: ComponentValueKind::F64,
+                actual: ComponentValueKind::String,
+            }) if component_id == id && failed_path == path
         ));
     }
 
@@ -1900,9 +2158,19 @@ mod tests {
         let mut registry = ComponentRegistry::new();
         let id = ComponentTypeId::new("nara.test.Position");
         registry
-            .register_serializable_component::<Position, _, _>(
+            .register_serializable_component_with_fields::<Position, _, _>(
                 id.clone(),
                 ComponentSchemaVersion(1),
+                [
+                    ComponentFieldSchema::required(
+                        ComponentFieldPath::from_fields(["x"]),
+                        ComponentValueKind::F64,
+                    ),
+                    ComponentFieldSchema::required(
+                        ComponentFieldPath::from_fields(["y"]),
+                        ComponentValueKind::F64,
+                    ),
+                ],
                 |value| {
                     let x = value
                         .get("x")

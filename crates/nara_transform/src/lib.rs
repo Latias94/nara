@@ -63,9 +63,10 @@ impl Plugin for TransformPlugin {
 pub fn register_transform_components(registry: &mut ComponentRegistry) {
     let component_id = ComponentTypeId::new("nara.transform.Transform2d");
     registry
-        .register_serializable_component::<Transform2d, _, _>(
+        .register_serializable_component_with_fields::<Transform2d, _, _>(
             component_id.clone(),
             ComponentSchemaVersion(1),
+            transform_fields(),
             |value| {
                 Ok(Transform2d {
                     translation: read_vec2(value.field("translation")?, "translation")?,
@@ -84,7 +85,6 @@ pub fn register_transform_components(registry: &mut ComponentRegistry) {
                 ]))
             },
         )
-        .and_then(|registry| registry.register_component_fields(&component_id, transform_fields()))
         .expect("nara.transform.Transform2d component registration should be unique");
 }
 

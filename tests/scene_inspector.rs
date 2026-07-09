@@ -196,9 +196,19 @@ fn test_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     let label_id = label_type_id();
     registry
-        .register_serializable_component::<TestLabel, _, _>(
+        .register_serializable_component_with_fields::<TestLabel, _, _>(
             label_id.clone(),
             ComponentSchemaVersion(1),
+            [
+                ComponentFieldSchema::required(
+                    ComponentFieldPath::from_fields(["text"]),
+                    ComponentValueKind::String,
+                ),
+                ComponentFieldSchema::optional(
+                    ComponentFieldPath::from_fields(["note"]),
+                    ComponentValueKind::String,
+                ),
+            ],
             |value| {
                 Ok(TestLabel {
                     text: value.field_str("text")?.to_string(),
@@ -210,20 +220,6 @@ fn test_registry() -> ComponentRegistry {
                     ComponentValue::String(label.text.clone()),
                 )]))
             },
-        )
-        .unwrap()
-        .register_component_fields(
-            &label_id,
-            [
-                ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["text"]),
-                    ComponentValueKind::String,
-                ),
-                ComponentFieldSchema::optional(
-                    ComponentFieldPath::from_fields(["note"]),
-                    ComponentValueKind::String,
-                ),
-            ],
         )
         .unwrap();
     registry

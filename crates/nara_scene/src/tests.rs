@@ -440,9 +440,13 @@ fn component_migration_runs_before_scene_preflight_without_mutating_document() {
 fn missing_component_migration_reports_unsupported_version() {
     let mut registry = ComponentRegistry::new();
     registry
-        .register_serializable_component::<TestPosition, _, _>(
+        .register_serializable_component_with_fields::<TestPosition, _, _>(
             position_type_id(),
             ComponentSchemaVersion(2),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["x2"]),
+                ComponentValueKind::I64,
+            )],
             |value| {
                 let x = value.field_i64("x2")?;
                 Ok(TestPosition {
@@ -967,9 +971,13 @@ fn scene_component_schemas_expose_scalar_fields() {
 fn test_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     registry
-        .register_serializable_component::<TestPosition, _, _>(
+        .register_serializable_component_with_fields::<TestPosition, _, _>(
             position_type_id(),
             ComponentSchemaVersion(1),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["x"]),
+                ComponentValueKind::I64,
+            )],
             |value| {
                 let x = value
                     .get("x")
@@ -987,14 +995,6 @@ fn test_registry() -> ComponentRegistry {
                 )]))
             },
         )
-        .unwrap()
-        .register_component_fields(
-            &position_type_id(),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["x"]),
-                ComponentValueKind::I64,
-            )],
-        )
         .unwrap();
     registry
 }
@@ -1002,9 +1002,13 @@ fn test_registry() -> ComponentRegistry {
 fn migrated_position_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     registry
-        .register_serializable_component::<TestPosition, _, _>(
+        .register_serializable_component_with_fields::<TestPosition, _, _>(
             position_type_id(),
             ComponentSchemaVersion(2),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["x2"]),
+                ComponentValueKind::I64,
+            )],
             |value| {
                 let x = value.field_i64("x2")?;
                 Ok(TestPosition {
@@ -1042,9 +1046,13 @@ fn migrated_position_registry() -> ComponentRegistry {
 fn test_asset_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     registry
-        .register_component_codec_with_context::<TestAssetLink, _, _>(
+        .register_component_codec_with_context_and_fields::<TestAssetLink, _, _>(
             asset_link_type_id(),
             ComponentSchemaVersion(1),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["asset"]),
+                ComponentValueKind::AssetRef,
+            )],
             |value, context| {
                 let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
                 let prepared = prepare_test_asset_handle(context, "asset.value", asset_ref)?;
@@ -1090,9 +1098,13 @@ fn test_asset_registry() -> ComponentRegistry {
 fn broken_export_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     registry
-        .register_component_codec_with_context::<TestBrokenExport, _, _>(
+        .register_component_codec_with_context_and_fields::<TestBrokenExport, _, _>(
             broken_export_type_id(),
             ComponentSchemaVersion(1),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["broken"]),
+                ComponentValueKind::String,
+            )],
             |_value, _context| {
                 Ok(PreparedComponent::new(|world, entity| {
                     let mut entity_mut = world
@@ -1111,9 +1123,13 @@ fn broken_export_registry() -> ComponentRegistry {
 fn failing_apply_registry() -> ComponentRegistry {
     let mut registry = test_registry();
     registry
-        .register_component_codec_with_context::<TestApplyFails, _, _>(
+        .register_component_codec_with_context_and_fields::<TestApplyFails, _, _>(
             apply_fails_type_id(),
             ComponentSchemaVersion(1),
+            [ComponentFieldSchema::optional(
+                ComponentFieldPath::from_fields(["asset"]),
+                ComponentValueKind::AssetRef,
+            )],
             |value, context| {
                 if let Some(asset_value) = value.get("asset") {
                     let asset_ref = read_asset_ref(asset_value, "asset")?;
@@ -1136,14 +1152,6 @@ fn failing_apply_registry() -> ComponentRegistry {
                 }))
             },
             |_world, _entity, _context| Ok(None),
-        )
-        .unwrap()
-        .register_component_fields(
-            &apply_fails_type_id(),
-            [ComponentFieldSchema::optional(
-                ComponentFieldPath::from_fields(["asset"]),
-                ComponentValueKind::AssetRef,
-            )],
         )
         .unwrap();
     registry

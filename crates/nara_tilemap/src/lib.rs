@@ -395,9 +395,10 @@ impl Plugin for TilemapPlugin {
 pub fn register_tilemap_components(registry: &mut ComponentRegistry) {
     let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
     registry
-        .register_component_codec_with_context::<Tilemap, _, _>(
+        .register_component_codec_with_context_and_fields::<Tilemap, _, _>(
             component_id.clone(),
             ComponentSchemaVersion(1),
+            tilemap_fields(),
             |value, context| {
                 let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
                 let layer = optional_i32(value, "layer")?.unwrap_or(0);
@@ -454,7 +455,6 @@ pub fn register_tilemap_components(registry: &mut ComponentRegistry) {
                 ])))
             },
         )
-        .and_then(|registry| registry.register_component_fields(&component_id, tilemap_fields()))
         .expect("nara.tilemap.Tilemap component registration should be unique");
 }
 
