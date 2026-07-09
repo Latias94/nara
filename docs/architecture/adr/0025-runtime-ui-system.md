@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility
 
 ## Context
 

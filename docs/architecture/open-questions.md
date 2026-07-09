@@ -81,10 +81,15 @@ Resolved in the scene/prefab serialization foundation:
 ## Scene and Prefab Semantics
 
 Accepted direction: scene and prefab files are dimension-neutral ECS data documents with stable scene-local entity IDs. See ADR [0006-scene-and-prefab-data-model.md](adr/0006-scene-and-prefab-data-model.md).
+Document shape evolution is separate from component value evolution. Scene, prefab, and patch
+documents migrate through explicit document-format migration chains before component migrations and
+validation. See ADR
+[0043-scene-prefab-and-patch-document-migration-policy.md](adr/0043-scene-prefab-and-patch-document-migration-policy.md).
 
 Follow-up details still to settle:
 
 1. How does hot reload cache and invalidate asset-backed prefab sources once async IO exists?
+2. What first document migration registry API should `nara_scene` expose?
 
 Resolved in the scene/prefab serialization foundation:
 
@@ -156,6 +161,10 @@ Resolved in the async hot reload foundation:
 ## Runtime Concurrency
 
 Accepted direction: engine-owned task pools with explicit main-thread integration. See ADR [0008-runtime-concurrency-and-task-pools.md](adr/0008-runtime-concurrency-and-task-pools.md).
+Runtime services such as physics, audio, text shaping, scripting, networking, and file watching use
+the same boundary: ECS data expresses intent, service/backends own native handles and threads, and
+results integrate on the main thread. See ADR
+[0042-runtime-service-and-backend-boundary.md](adr/0042-runtime-service-and-backend-boundary.md).
 
 Follow-up details still to settle:
 
@@ -197,6 +206,11 @@ Resolved in the foundation hardening slice:
 Accepted direction: split render domain, backend, sprite, tilemap, and sprite-render responsibilities. See ADR [0012-render-crate-boundaries.md](adr/0012-render-crate-boundaries.md). Render graph policy is phase-based first and graph-ready later; see ADR [0017-render-graph-policy.md](adr/0017-render-graph-policy.md).
 The next implementation slice uses main-world explicit extraction data and backend handle providers rather than a separate render world; see ADR [0032-render-backend-integration-boundary.md](adr/0032-render-backend-integration-boundary.md).
 Texture upload and material/resource growth should use the asset import + render resource preparation seam; see ADR [0033-asset-import-and-render-resource-preparation-seam.md](adr/0033-asset-import-and-render-resource-preparation-seam.md).
+Render resource lifetime and submitter ownership are now settled at the policy level. Backend GPU
+caches own native resources, avoid one-frame eager pruning as the product contract, recover from
+generation invalidation/device loss, and keep sprite/UI/text submitters separate from device/surface
+setup. See ADR
+[0040-render-resource-lifetime-and-submitter-ownership.md](adr/0040-render-resource-lifetime-and-submitter-ownership.md).
 
 Follow-up details still to settle:
 
@@ -230,6 +244,8 @@ Still open:
 1. What concrete second pass/resource use case should trigger full `RenderGraph` implementation?
 2. What reusable material asset and shader-specialization model should sit above inline 2D material
    descriptors once projects need shared material files?
+3. What exact cache eviction defaults should `nara_render_wgpu` use: grace frames, memory budget, or
+   both?
 
 Resolved by ADR 0033:
 
@@ -257,11 +273,17 @@ Resolved in the async hot reload foundation:
 
 Accepted direction: `nara_app` owns runner traits, `nara_window` owns normalized window data, and `nara_winit` is the adapter. See ADR [0013-platform-window-and-runner-boundaries.md](adr/0013-platform-window-and-runner-boundaries.md).
 The next implementation slice uses a fallible owned-app runner, backend-only raw handle providers, and optional facade features for `winit`/`wgpu`; see ADR [0032-render-backend-integration-boundary.md](adr/0032-render-backend-integration-boundary.md).
+Main-loop semantics are now settled at the policy level. Runners pass real elapsed time; nara lowers
+that into real, virtual, fixed, and render-interpolation domains with explicit pause, time scale,
+max-delta, fixed catch-up, state transition, background, and redraw policy. See ADR
+[0039-main-loop-time-pause-and-runtime-state.md](adr/0039-main-loop-time-pause-and-runtime-state.md).
 
 Follow-up details still to settle:
 
-1. How does fixed timestep interact with winit redraw requests and control-flow mode?
-2. How much raw platform event access should advanced users get?
+1. What exact public type names should nara expose for real, virtual, fixed, and interpolation
+   time?
+2. Should runtime state support stacks, independent domains, or only single typed states first?
+3. How much raw platform event access should advanced users get?
 
 ## Editor and Tooling
 
@@ -318,6 +340,14 @@ Resolved in the first runtime UI slice:
   pointer hit testing exist, but text, widgets, richer layout, and editor viewport integration are
   still missing.
 
+Resolved by ADR 0041:
+
+- Input is layered as normalized platform events, retained device state, routing decisions, action
+  maps, text/IME streams, UI focus/pointer capture, and accessibility semantics.
+- UI/editor/gameplay input conflicts should be resolved through one routing/action model rather
+  than private editor shortcut paths.
+- Text input and IME composition are separate from key/button actions.
+
 Follow-up details still to settle:
 
 1. Which accepted patch operations need specialized incremental `WorldCommand` paths before
@@ -325,10 +355,15 @@ Follow-up details still to settle:
 2. When should Apply Changes emit field-level patch operations instead of whole-component
    replacements?
 3. How should prefab-expanded entity write-back produce source-prefab override patches?
+4. What editor dogfooding milestone should switch a real panel from egui to nara UI?
 
 ## Backend and Domain Extension Seams
 
 Accepted direction: stable ECS data plus plugin/backend adapter seams. See ADR [0016-extension-seams-for-backends-and-domain-modules.md](adr/0016-extension-seams-for-backends-and-domain-modules.md).
+The shared service/backend boundary is now codified by ADR
+[0042-runtime-service-and-backend-boundary.md](adr/0042-runtime-service-and-backend-boundary.md):
+components/resources express stable intent, services own native handles and queues, and background
+work integrates through declared main-thread stages.
 
 Follow-up details still to settle:
 
@@ -340,6 +375,9 @@ Follow-up details still to settle:
 ## Coordinate, Units, and Time
 
 Accepted direction: world units, 2D Y-up, radians, fixed timestep simulation, render interpolation. 3D uses right-handed Y-up with default forward `-Z`. See ADR [0018-coordinate-units-and-time.md](adr/0018-coordinate-units-and-time.md) and ADR [0022-3d-coordinate-system.md](adr/0022-3d-coordinate-system.md).
+Runtime time semantics are refined by ADR
+[0039-main-loop-time-pause-and-runtime-state.md](adr/0039-main-loop-time-pause-and-runtime-state.md):
+real time, virtual/game time, fixed time, and render interpolation are separate domains.
 
 Follow-up details still to settle:
 
@@ -373,7 +411,10 @@ Follow-up details still to settle:
 
 Accepted direction: ECS-native messages/events and deferred commands, plus deterministic-friendly fixed-step simulation. See ADR [0023-event-message-and-command-model.md](adr/0023-event-message-and-command-model.md) and ADR [0024-determinism-fixed-update-and-replay-policy.md](adr/0024-determinism-fixed-update-and-replay-policy.md).
 Channel lifetimes are now refined by ADR [0036-event-message-and-resource-queue-lifetime.md](adr/0036-event-message-and-resource-queue-lifetime.md): typed resource queues are acceptable when producer, consumer, retention, cleanup stage, and replay/diagnostic role are explicit.
-The next implementation slice sets the first fixed timestep default to 1/60 second with bounded catch-up, exposed through `FixedTime` and testable `run_once(Duration)`.
+Main-loop and pause semantics are now refined by ADR
+[0039-main-loop-time-pause-and-runtime-state.md](adr/0039-main-loop-time-pause-and-runtime-state.md).
+The next implementation slice should expose the refined time domains and state transition stage,
+not only `FixedTime` and testable `run_once(Duration)`.
 
 Follow-up details still to settle:
 
@@ -384,6 +425,9 @@ Follow-up details still to settle:
 ## Runtime UI
 
 Accepted direction: nara builds its own runtime ECS UI. See ADR [0025-runtime-ui-system.md](adr/0025-runtime-ui-system.md).
+Input routing, action maps, text/IME, focus, pointer capture, and accessibility are now codified by
+ADR
+[0041-input-routing-actions-text-focus-and-accessibility.md](adr/0041-input-routing-actions-text-focus-and-accessibility.md).
 
 Implemented first slice:
 
@@ -402,6 +446,8 @@ Follow-up details still to settle:
 3. What text shaping/rendering libraries are acceptable?
 4. How should UI/screen-space cameras, multiple viewports, and editor overlays compose once full
    render graph pressure arrives?
+5. What is the smallest Phase 1 action-map schema that still supports rebinding and UI/gameplay
+   context priority?
 
 ## Save, Networking, Animation, Audio, Text
 
@@ -412,6 +458,8 @@ Accepted directions:
 - Animation is asset-driven and component-targeted. See ADR [0029-animation-strategy.md](adr/0029-animation-strategy.md).
 - Audio uses stable authoring components/commands with backend adapters. See ADR [0030-audio-strategy.md](adr/0030-audio-strategy.md).
 - Text/font is a dedicated engine domain. See ADR [0031-text-and-font-strategy.md](adr/0031-text-and-font-strategy.md).
+- Runtime services share a common backend boundary. See ADR
+  [0042-runtime-service-and-backend-boundary.md](adr/0042-runtime-service-and-backend-boundary.md).
 
 Follow-up details still to settle:
 
@@ -420,3 +468,16 @@ Follow-up details still to settle:
 3. What is the first sprite animation asset shape?
 4. Which audio backend should be spiked first?
 5. Which text shaping/font stack should nara use?
+
+## Facade and Prelude
+
+Accepted direction: the root `nara` facade stays small, optional backends remain feature-gated, and
+the default prelude is gameplay-first and backend-free. Backend, tooling, debug, render extraction,
+queue/batch, and GPU cache internals should live in advanced or module-specific preludes. See ADR
+[0044-root-facade-and-prelude-layering-policy.md](adr/0044-root-facade-and-prelude-layering-policy.md).
+
+Follow-up details still to settle:
+
+1. Which current `nara::prelude` exports should move to `advanced_prelude` or module preludes?
+2. Which scheduling/task/diagnostic types are common enough for gameplay prelude?
+3. Should `nara::minimal_prelude` exist, or is `nara::prelude` already the minimal gameplay surface?

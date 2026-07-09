@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0038: Scene/Prefab Authoring Identity and Provenance
+**Refined By**: ADR 0038: Scene/Prefab Authoring Identity and Provenance; ADR 0043:
+Scene, Prefab, and Patch Document Migration Policy
 
 ## Context
 

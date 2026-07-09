@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy
 
 ## Context
 

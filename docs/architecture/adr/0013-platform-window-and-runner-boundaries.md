@@ -2,6 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041:
+Input Routing, Actions, Text Input, UI Focus, and Accessibility
 
 ## Context
 
@@ -76,4 +78,3 @@ Rules:
 | Runner abstraction too abstract | Medium | Medium | Start from headless + winit only |
 | Window model misses web/mobile needs | Medium | Medium | Keep window data minimal and adapter-owned |
 | Input latency from over-normalization | Medium | Low | Preserve raw event access behind advanced diagnostics if needed |
-

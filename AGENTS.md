@@ -13,16 +13,22 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_app::CoreStage::TaskUpdate` is the explicit main-thread integration point for background results. Keep `TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs, ApplyAssetResults}` ordering stable unless an ADR replaces the task/update contract.
 - File-backed projects use `nara.toml` as the project settings authority. Runtime embedding may override settings through explicit resources/plugin configuration, but engine domains must not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
 - Transient event/message/resource queues must document producer, consumer, retention, cleanup stage, and replay/diagnostic role. Typed resource queues are allowed when their lifecycle is explicit; do not introduce an untyped global event bus.
+- Runners pass real elapsed time into `nara_app`; the app lowers it into explicit real, virtual/game, fixed, and render-interpolation time domains. Pause, time scale, max delta, fixed catch-up, runtime state transitions, background/redraw policy, and frame-transient cleanup follow ADR 0039.
+- Runtime services such as physics, audio, text shaping, scripting, networking, file watching, and future specialized backends must use the shared service boundary: ECS data expresses stable intent, services/backends own native handles and queues, and results integrate through declared main-thread stages.
 - Keep backend crates behind adapters. Core gameplay-facing crates must not directly depend on `wgpu`, `winit`, egui, or dear-imgui.
 - `nara_winit` owns all `winit` imports and desktop event-loop integration.
 - `nara_render` owns backend-neutral render concepts, frame lifecycle, phases, `RenderPassPlan`, `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons. Full render graph work waits for a concrete second-pass/resource-lifetime use case.
 - `nara_render_wgpu` owns all `wgpu` imports and GPU surface/device lifecycle.
 - `nara_render_wgpu` reports backend initialization, skipped frames, and backend errors through `RenderBackendStatus`.
+- Backend GPU resource caches own textures, buffers, samplers, bind groups, pipelines, and intermediate targets. Cache invalidation must be generation/device/budget aware; do not make one-frame-unused pruning the product contract.
+- Render submitters are domain/plugin responsibilities. Convenience plugin groups may install sprite/UI/text submitters, but `WgpuRenderPlugin` should not permanently own every renderer feature by default.
 - `nara_sprite_render` owns backend-neutral 2D extraction, queueing, sorting, and batching. GPU backends should consume `SpriteBatches`, not gameplay `Sprite` or `Tilemap` components.
 - `nara_ui` owns runtime UI authoring components, computed layout resources, and pointer interaction state. It must not depend on egui, dear-imgui, winit, or wgpu.
 - `nara_ui_render` owns backend-neutral runtime UI extraction, queueing, clipping, sorting, and batching. GPU backends should consume `UiBatches`, not gameplay/editor UI state directly.
+- Input is layered: platform adapters produce normalized input events/state; routing resolves UI focus, pointer capture, text/IME, action-map contexts, and accessibility semantics before gameplay consumes semantic actions. Do not add private editor-only shortcut paths that bypass this model.
 - `nara_scene` owns persistent `SceneDocument` / `PrefabDocument`, stable `SceneEntityId`, validation, and world spawn/export. Scene/prefab documents must not store runtime `Entity`, runtime `AssetId`, or backend handles.
 - Scene/prefab authoring edits should use `ScenePatchDocument` transactions. Patch operations serialize as `op + args`, validate against schema-aware `ComponentFieldPath`, and return inverse patches for undo.
+- Scene, prefab, and patch document shape changes require document-level migrations before component-value migrations and validation. Runtime loading must not silently rewrite source files.
 - `SceneAuthoringSession` is the first authoring/live sync boundary. It treats `SceneDocument` as truth, stores undo/redo as inverse patches, and rebuilds its managed live `World` projection instead of mutating arbitrary ECS storage directly.
 - `nara_tooling` owns UI-agnostic editor/debug models such as `WorldSnapshot` and `SceneInspectorState`. UI adapters should render tooling models and send tooling commands instead of inventing editor-only mutation paths.
 - `nara_tooling_egui` owns all `egui` imports and early egui debug/editor panels. Core runtime crates and `nara_tooling` must remain UI-toolkit agnostic.
@@ -50,6 +56,7 @@ This file provides repo-local guidance for agents working on nara.
 - Keep render modules split by responsibility: `nara_sprite_render::{types,extract,queue}`, `nara_ui_render::{types,extract,queue}`, and `nara_render_wgpu::{surface,sprite,ui}` should stay narrow instead of growing monolithic backend or render-bridge files.
 - `DiagnosticReport::push` only collects diagnostics. Use `Diagnostic::emit_to_tracing` or `DiagnosticReport::emit_to_tracing` explicitly when logs are desired.
 - The root `nara` facade must keep `winit` and `wgpu` optional; default features stay backend-free.
+- `nara::prelude` should stay gameplay-first and backend-free. Move backend/tooling/debug/render extraction, queue, batch, GPU cache, and other advanced extension types to `advanced_prelude` or module-specific preludes.
 - `repo-ref/` contains reference source trees. Treat it as read-only reference material and keep it out of git.
 
 ## Architecture Rules

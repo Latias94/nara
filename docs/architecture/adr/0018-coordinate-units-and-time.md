@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State
 
 ## Context
 
@@ -73,4 +74,3 @@ rotation: radians
 | 2D users expect pixels | Medium | High | Provide pixel-perfect camera and tile helpers |
 | UI coordinate space conflicts | Medium | Medium | Treat UI/screen coordinates as separate spaces |
 | Fixed timestep causes visual stutter | Medium | Medium | Support render interpolation |
-

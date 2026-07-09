@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0037: Asset Load Request, Cache, and Lifetime Policy
+**Refined By**: ADR 0037: Asset Load Request, Cache, and Lifetime Policy; ADR 0040:
+Render Resource Lifetime and Submitter Ownership
 
 ## Context
 
