@@ -2,6 +2,8 @@
 
 pub use nara_app as app;
 pub use nara_asset as asset;
+#[cfg(feature = "asset-watch")]
+pub use nara_asset_watch as asset_watch;
 pub use nara_audio as audio;
 pub use nara_core as core;
 pub use nara_diagnostic as diagnostic;
@@ -72,6 +74,11 @@ pub mod prelude {
         ImporterRegistryError, ImporterSelectionError, ImporterVersion, LoadState,
         MissingMetaPolicy, ProjectAssetDatabase, SourceChangeResolver, SourceExtension, SourceHash,
         StableAssetId, StableAssetIdError, TypedImporter, UnresolvedAssetSourceChange,
+    };
+    #[cfg(feature = "asset-watch")]
+    pub use nara_asset_watch::{
+        AssetWatchError, AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue,
+        AssetWatchPlugin, AssetWatchTranslator, AssetWatcher,
     };
     pub use nara_audio::{AudioClip, AudioCommand, AudioSink};
     pub use nara_core::{Color, Vec2, Vec3};

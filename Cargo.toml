@@ -11,6 +11,7 @@ resolver = "3"
 members = [
     "crates/nara_app",
     "crates/nara_asset",
+    "crates/nara_asset_watch",
     "crates/nara_audio",
     "crates/nara_core",
     "crates/nara_diagnostic",
@@ -41,6 +42,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 nara_app = { path = "crates/nara_app" }
 nara_asset = { path = "crates/nara_asset" }
+nara_asset_watch = { path = "crates/nara_asset_watch" }
 nara_audio = { path = "crates/nara_audio" }
 nara_core = { path = "crates/nara_core" }
 nara_diagnostic = { path = "crates/nara_diagnostic" }
@@ -68,6 +70,7 @@ bytemuck = { version = "1", features = ["derive"] }
 egui = "0.35.0"
 glam = { version = "0.30", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+notify = "8.2.0"
 raw-window-handle = "0.6"
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -82,6 +85,7 @@ wgpu = "=30.0.0"
 [dependencies]
 nara_app.workspace = true
 nara_asset.workspace = true
+nara_asset_watch = { workspace = true, optional = true }
 nara_audio.workspace = true
 nara_core.workspace = true
 nara_diagnostic.workspace = true
@@ -127,6 +131,7 @@ serde = [
 winit = ["dep:nara_winit"]
 wgpu = ["dep:nara_render_wgpu"]
 egui = ["dep:nara_tooling_egui"]
+asset-watch = ["dep:nara_asset_watch"]
 
 [[example]]
 name = "windowed_clear"
