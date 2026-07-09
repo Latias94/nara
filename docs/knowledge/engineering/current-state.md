@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-09T14:31:38+08:00
+timestamp: 2026-07-09T15:46:56+08:00
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-09T14:31:38+08:00
-- Last verified: Async hot reload foundation passed `cargo fmt --all`, workspace checks with and without serde, `cargo nextest run --workspace` with 235 tests, `winit,wgpu` backend example checks, `asset-watch` facade check, `asset_import_texture` run, backend/runtime boundary searches, runtime identity leak searches, engineering memory validation, and diff hygiene.
-- Next action: Choose the next foundation slice, likely the first Apply Changes patchable subset, runtime UI data/layout, material/sampler authoring above `ImageAsset`, or the first render-graph forcing use case.
+- Snapshot timestamp: 2026-07-09T15:46:56+08:00
+- Last verified: Apply Changes M1 passed `cargo fmt --all --check`, `cargo nextest run -p nara_tooling -p nara_scene -p nara_reflect` with 59 tests, `cargo check --workspace`, and targeted runtime identity leak search for Apply Changes paths.
+- Next action: Continue M2 material/sampler authoring above `ImageAsset` from `docs/plans/2026-07-09-004-feat-render-ui-apply-foundation-plan.md`.
 
 # Active Registrations
 
@@ -52,7 +52,7 @@ status: "active"
   - `nara_tooling` is split into `snapshot`, `inspector`, and `play` modules behind a small public facade.
   - `SceneEditorState` owns the first UI-agnostic Edit/Play/Paused model and starts isolated Play worlds through plain, prefab-resolved, asset-aware, and combined spawn paths.
   - Stop Play drops runtime state; mode-aware inspector commands reject persistent scene patches in Play or Paused.
-  - `SceneApplyChangesReport` is guard-only: it reports unsupported apply-back or source revision mismatch and returns no patches.
+  - Apply Changes now supports the first selected-entity / explicit-component patchable subset. `SceneApplyChangesRequest` names a `SceneEntityId` and registered component IDs; `SceneEditorState::export_apply_changes*` builds candidate `ScenePatchDocument` values from the isolated Play world without mutating the authoring session; `apply_changes*` applies through `SceneAuthoringSession`, records undo, and rejects stale revisions, runtime-only components, prefab-expanded entities, missing entities, and patch validation failures.
   - `nara_tooling_egui` provides the first concrete egui debug/editor adapter while keeping `nara_tooling` UI-toolkit agnostic.
   - Foundation hardening now requires explicit serializable component schemas, rejects duplicate runtime type registrations, checks schema default kinds, and keeps scene/prefab spawn preflight-first.
   - `nara_reflect` is split into focused value, schema, path, codec, migration, registry, and test modules behind the same public facade.
@@ -67,7 +67,7 @@ status: "active"
   - `nara_asset_watch` is an optional desktop watcher adapter behind `asset-watch`. It owns `notify`, validates watcher roots against `AssetSourceRoot`, preserves in-root rename sides, maps `.meta` events to semantic source changes, and never mutates asset or render storage directly.
 - Pending follow-ups:
   - The egui adapter is debug/editor tooling only; long-term runtime UI remains a nara-owned engine UI design problem.
-  - The first Apply Changes patchable subset remains undecided; runtime-to-`ScenePatchDocument` diffing is not implemented.
+  - Apply Changes beyond the first whole-component selected subset remains deferred: field-level diff minimization, prefab override write-back, whole-scene diffing, and edit-while-playing merge UI are not implemented.
   - Runtime UI is expected to be nara-owned; the next UI slice should reuse `ImageAsset` and render prepare contracts rather than introducing editor/debug UI dependencies into runtime UI.
   - Material/sampler authoring, texture atlases, compression profiles, mip generation, and 3D mesh import remain future extensions of the asset/import/render prepare seam.
   - `nara_scene` module split, shared asset-ref codec helpers, boundary-search CI, and real import-cache filesystem containment tests remain accepted residuals from review.
@@ -91,3 +91,5 @@ status: "active"
 - [Foundation hardening verification](verification/2026-07-09-foundation-hardening.md)
 - [Async hot reload foundation progress](progress/2026-07-09-async-hot-reload-foundation.md)
 - [Async hot reload foundation verification](verification/2026-07-09-async-hot-reload-foundation.md)
+- [Apply Changes M1 verification](verification/2026-07-09-apply-changes-m1.md)
+- [Apply Changes M1 memory event](logs/2026-07/2026-07-09T154656Z-apply-changes-m1-selected-component-patch-export.md)

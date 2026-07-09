@@ -12,8 +12,9 @@ pub use inspector::{
     SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState,
 };
 pub use play::{
-    SceneApplyChangesReport, SceneEditorMode, SceneEditorModel, SceneEditorState, ScenePlaySession,
-    ScenePlayTransitionReport,
+    SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus, SceneApplyChangesReport,
+    SceneApplyChangesRequest, SceneEditorMode, SceneEditorModel, SceneEditorState,
+    ScenePlaySession, ScenePlayTransitionReport,
 };
 pub use snapshot::WorldSnapshot;
 

@@ -22,3 +22,6 @@ This root log is an optional rollup. Prefer append-only concepts in `logs/` duri
 * **Asset/render resource seam review hardening**: Resolved review findings for one-to-one runtime asset identity binding, source-kind aware sprite/tileset preflight, path-ref database validation, prepared image removal cleanup, invalid atlas tile skips, import dependency source-hash coverage, and split wgpu sprite texture responsibilities; final verification passed with 136 tests.
 * **Plan**: Created `docs/plans/2026-07-08-005-feat-scene-patch-prefab-schema-foundation-plan.md` for validated scene patch transactions, field-level prefab overrides, component schema export, migrations, and nested prefab source resolution.
 * **Editor Play Mode core**: Implemented authoring source revisions, split tooling modules, isolated Play sessions, plain/prefab/asset-aware Start Play flows, mode-aware inspector rejection in Play/Paused, and guard-only Apply Changes diagnostics.
+
+## 2026-07-09
+* **Apply Changes M1**: Implemented selected-entity / explicit-component Apply Changes patch export and authoring-session apply. Supported changes produce `ScenePatchDocument` operations, enter normal undo history, and reject stale revisions, runtime-only components, missing entities, prefab-expanded entities, and patch validation failures with diagnostics.

@@ -281,9 +281,12 @@ Resolved in the Play Mode core slice:
   combined `SceneSpawner` paths as scene loading.
 - Mode-aware inspector commands keep direct edit-mode patch behavior but reject persistent patch
   commands in Play or Paused. Selection remains a safe UI state change.
-- `SceneApplyChangesReport` is currently a diagnostic guard only. It reports unsupported
-  apply-back when the source revision still matches and revision mismatch when the authoring
-  document changed after Play started.
+- `SceneApplyChangesRequest` names one selected `SceneEntityId` plus explicit component IDs.
+  Registered serializable components can export candidate `ScenePatchDocument` values from the
+  isolated Play world and apply them through `SceneAuthoringSession`.
+- Apply Changes records normal undo entries on success, reports supported no-op without undo, and
+  rejects stale revisions, runtime-only components, missing scene entities, prefab-expanded
+  entities, duplicate component requests, and patch validation failures with diagnostics.
 
 Resolved in the first debug UI adapter slice:
 
@@ -299,8 +302,9 @@ Follow-up details still to settle:
 1. What minimum runtime UI is required before editor dogfooding?
 2. Which accepted patch operations need specialized incremental `WorldCommand` paths before
    rebuild-style projection is too expensive?
-3. What is the first supported Apply Changes subset for Play Mode: selected entity fields,
-   selected component, or whole scene diff?
+3. When should Apply Changes emit field-level patch operations instead of whole-component
+   replacements?
+4. How should prefab-expanded entity write-back produce source-prefab override patches?
 
 ## Backend and Domain Extension Seams
 

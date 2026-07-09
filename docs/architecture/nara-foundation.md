@@ -90,7 +90,7 @@ flowchart TD
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Gameplay APIs and renderer backend internals |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers | wgpu device/surface lifecycle, private pipelines, colored/textured quad submission from `SpriteBatches`, and `RenderBackendStatus` updates |
 | `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
-| `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `ToolingPlugin` | UI-agnostic inspector/query/command models, isolated Play Mode lifecycle state, and conservative Apply Changes status guards consumed by egui, dear-imgui, future nara UI, and AI agents |
+| `nara_tooling` | `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic inspector/query/command models, isolated Play Mode lifecycle state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses, `EguiSceneEditorAction` | egui-only rendering adapter that consumes tooling models and returns tooling commands/actions; no scene/session/world ownership |
 
 ## Runtime Flow
@@ -190,7 +190,7 @@ second real adapter or stronger isolation pressure.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then applies field/reparent commands as scene patches.
 - `nara_tooling::SceneEditorState` owns the first UI-agnostic Play Mode model. It starts plain, prefab-resolved, asset-aware, and combined Play sessions by spawning a fresh isolated runtime `World` through `SceneSpawner`, exposes Play/Paused/Edit mode state, and rejects persistent inspector edits while Play or Paused is active.
-- Stop Play drops the runtime `World` and discards runtime changes by default. `SceneApplyChangesReport` currently provides only conservative diagnostics for unsupported apply-back or source revision mismatch; patch export/diffing remains deferred.
+- Stop Play drops the runtime `World` and discards runtime changes by default. Apply Changes now supports a narrow selected-entity / explicit-component subset: it encodes registered serializable Play world components into `ScenePatchDocument` operations, applies them through `SceneAuthoringSession`, records undo, and rejects stale revisions, runtime-only components, prefab-expanded entities, and failed patch validation with diagnostics.
 - `nara_tooling_egui` is the first concrete debug/editor UI adapter. It renders `SceneEditorModel` and `SceneInspectorModel`, returns explicit editor actions and `SceneInspectorCommand` values, and keeps egui out of `nara_tooling` and runtime-facing crates.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
@@ -202,7 +202,7 @@ second real adapter or stronger isolation pressure.
 
 ## Next Implementation Slices
 
-1. Define the first supported Apply Changes subset and implement runtime-to-`ScenePatchDocument` diffing behind the existing guarded status API.
-2. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
-3. Define the first material/sampler authoring layer above `ImageAsset` once sprites need per-material controls.
-4. Decide whether runtime UI data/layout or a second render pass should be the next render-graph forcing use case.
+1. Define the first material/sampler authoring layer above `ImageAsset` once sprites need per-material controls.
+2. Decide whether runtime UI data/layout or a second render pass should be the next render-graph forcing use case.
+3. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring projection.
+4. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab override write-back, and edit-while-playing merge semantics are designed.

@@ -166,18 +166,26 @@ sequenceDiagram
 
 Rules:
 
-- The current implementation exposes `SceneApplyChangesReport` as a guard only. It returns
-  diagnostics for unsupported apply-back or revision mismatch and does not produce
-  `ScenePatchDocument` values yet.
+- The current implementation supports the first narrow Apply Changes subset: one selected
+  `SceneEntityId` plus explicitly requested registered serializable component IDs.
+- `SceneEditorState::export_apply_changes*` encodes requested Play world components through
+  `ComponentRegistry` and `ComponentEncodeContext`, compares them with the authoring document, and
+  returns a candidate `ScenePatchDocument` without mutating `SceneAuthoringSession`.
+- `SceneEditorState::apply_changes*` applies exported patches through `SceneAuthoringSession` so
+  validation, revision updates, inverse patches, and undo history stay on the normal authoring
+  path.
 - Apply Changes never copies raw runtime `Entity`, `AssetId`, backend handles, task handles, GPU
   resources, timers, or transient events into scene documents.
 - Apply Changes must be component-schema-aware. Only serializable or explicitly authoring-mapped
   components can produce scene patches.
-- Apply Changes should initially support a narrow component subset. Unsupported runtime changes
-  produce diagnostics instead of best-effort serialization.
+- Unsupported runtime changes, runtime-only components, missing entities, prefab-expanded entities,
+  and duplicate component requests produce diagnostics instead of best-effort serialization.
+- Supported no-op requests return no patch and do not create undo entries.
 - Apply Changes enters undo history as normal patch transactions.
 - If the edit document changed after Play started, apply-back must detect the revision mismatch and
   either reject with diagnostics or require a merge UI. It must not silently overwrite edits.
+- Whole-scene runtime diffing, field-level diff minimization, prefab override write-back, and
+  edit-while-playing merge UI remain future work.
 
 ## Alternatives Considered
 
@@ -231,7 +239,7 @@ automatic persistence the default.
 |---|---:|---|
 | Play isolation | Play systems cannot mutate the edit preview world accidentally | Play Mode tests with distinct entity maps |
 | Stop safety | Stop Play discards runtime-only changes by default | Play/Stop integration test |
-| Explicit persistence | Apply Changes is explicit; current guard rejects unsupported write-back and revision mismatch without producing patches | Apply Changes guard tests; future apply-back tests |
+| Explicit persistence | Apply Changes is explicit; selected serializable components produce scene patches, unsupported cases reject with diagnostics | Apply Changes export/apply tests |
 | Revision safety | Apply-back detects edit document changes made after Play started | Revision mismatch test |
 | Persistence hygiene | Runtime `Entity`, `AssetId`, backend handles, and transient components never serialize into scene data | Serialization leak search and tests |
 
@@ -247,8 +255,9 @@ automatic persistence the default.
 
 ## Follow-Up Questions
 
-- What is the first supported Apply Changes subset: selected entity fields, entire selected
-  component, or whole scene diff?
+- When should Apply Changes produce field-level patch operations instead of whole-component
+  replacements?
+- How should prefab source override write-back work for selected expanded entities?
 - How should a Play world receive hot reloaded assets without mutating the edit document?
 - Should Play Mode support multiple simultaneous worlds later for multiplayer/local simulation
   debugging?
