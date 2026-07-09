@@ -10,14 +10,13 @@ use nara_ecs::{
     Res, ResMut, Resource,
     schedule::{IntoScheduleConfigs, SystemSet},
 };
-use nara_input::{ActionId, ActionOutcomes, ActionPhase, InputSet};
+use nara_input::{ActionContext, ActionId, ActionOutcomes, ActionPhase, InputSet};
 use thiserror::Error;
 
 const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.gameplay.commands");
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GameplayCommandTypeId(String);
 
 impl GameplayCommandTypeId {
@@ -39,8 +38,28 @@ impl Display for GameplayCommandTypeId {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for GameplayCommandTypeId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for GameplayCommandTypeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(id).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SceneStableId(String);
 
 impl SceneStableId {
@@ -62,15 +81,35 @@ impl Display for SceneStableId {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for SceneStableId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SceneStableId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(id).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PersistentRuntimeId(String);
 
 impl PersistentRuntimeId {
     pub fn parse_str(id: impl Into<String>) -> Result<Self, GameplayCommandIdError> {
         let id = id.into();
-        uuid::Uuid::parse_str(&id).map_err(|_| GameplayCommandIdError::InvalidUuid)?;
-        Ok(Self(id))
+        let id = uuid::Uuid::parse_str(&id).map_err(|_| GameplayCommandIdError::InvalidUuid)?;
+        Ok(Self(id.to_string()))
     }
 
     #[must_use]
@@ -85,6 +124,27 @@ impl Display for PersistentRuntimeId {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for PersistentRuntimeId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PersistentRuntimeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::parse_str(id).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum GameplayCommandIdError {
     #[error("{kind} cannot be empty")]
@@ -96,11 +156,35 @@ pub enum GameplayCommandIdError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum GameplayCommandTarget {
     Scene(SceneStableId),
     Persistent(PersistentRuntimeId),
     Named(String),
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for GameplayCommandTarget {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        enum RawTarget {
+            Scene(SceneStableId),
+            Persistent(PersistentRuntimeId),
+            Named(String),
+        }
+
+        match <RawTarget as serde::Deserialize>::deserialize(deserializer)? {
+            RawTarget::Scene(scene) => Ok(Self::Scene(scene)),
+            RawTarget::Persistent(id) => Ok(Self::Persistent(id)),
+            RawTarget::Named(name) => {
+                validate_id("named command target", &name).map_err(serde::de::Error::custom)?;
+                Ok(Self::Named(name))
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -113,7 +197,7 @@ pub enum GameplayCommandValue {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct GameplayCommandPayload {
     values: BTreeMap<String, GameplayCommandValue>,
 }
@@ -149,6 +233,29 @@ impl GameplayCommandPayload {
     }
 }
 
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for GameplayCommandPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct RawPayload {
+            #[serde(default)]
+            values: BTreeMap<String, GameplayCommandValue>,
+        }
+
+        let raw = <RawPayload as serde::Deserialize>::deserialize(deserializer)?;
+        let mut payload = Self::new();
+        for (key, value) in raw.values {
+            payload
+                .insert(key, value)
+                .map_err(serde::de::Error::custom)?;
+        }
+        Ok(payload)
+    }
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum GameplayCommandPayloadError {
     #[error("payload key cannot be empty")]
@@ -158,13 +265,47 @@ pub enum GameplayCommandPayloadError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub enum GameplayCommandSource {
     LocalAction { action: ActionId },
     Test,
     Replay { stream: String },
     Ai { agent: String },
     External { producer: String },
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for GameplayCommandSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        enum RawSource {
+            LocalAction { action: ActionId },
+            Test,
+            Replay { stream: String },
+            Ai { agent: String },
+            External { producer: String },
+        }
+
+        match <RawSource as serde::Deserialize>::deserialize(deserializer)? {
+            RawSource::LocalAction { action } => Ok(Self::LocalAction { action }),
+            RawSource::Test => Ok(Self::Test),
+            RawSource::Replay { stream } => {
+                validate_id("replay stream", &stream).map_err(serde::de::Error::custom)?;
+                Ok(Self::Replay { stream })
+            }
+            RawSource::Ai { agent } => {
+                validate_id("AI agent", &agent).map_err(serde::de::Error::custom)?;
+                Ok(Self::Ai { agent })
+            }
+            RawSource::External { producer } => {
+                validate_id("external producer", &producer).map_err(serde::de::Error::custom)?;
+                Ok(Self::External { producer })
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +360,8 @@ impl GameplayCommandEnvelope {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionCommandBinding {
     pub action: ActionId,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub context: ActionContext,
     pub phase: ActionPhase,
     pub command_type: GameplayCommandTypeId,
     pub target: Option<GameplayCommandTarget>,
@@ -230,6 +373,7 @@ impl ActionCommandBinding {
     pub fn new(action: ActionId, phase: ActionPhase, command_type: GameplayCommandTypeId) -> Self {
         Self {
             action,
+            context: ActionContext::gameplay(),
             phase,
             command_type,
             target: None,
@@ -244,20 +388,84 @@ impl ActionCommandBinding {
     }
 
     #[must_use]
+    pub fn with_context(mut self, context: ActionContext) -> Self {
+        self.context = context;
+        self
+    }
+
+    #[must_use]
     pub fn with_payload(mut self, payload: GameplayCommandPayload) -> Self {
         self.payload = payload;
         self
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Resource)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ActionCommandKey {
+    action: ActionId,
+    context: ActionContext,
+    phase: ActionPhase,
+}
+
+impl ActionCommandKey {
+    fn new(action: ActionId, context: ActionContext, phase: ActionPhase) -> Self {
+        Self {
+            action,
+            context,
+            phase,
+        }
+    }
+
+    fn from_binding(binding: &ActionCommandBinding) -> Self {
+        Self::new(
+            binding.action.clone(),
+            binding.context.clone(),
+            binding.phase,
+        )
+    }
+}
+
+#[derive(Debug, Default, Clone, Resource)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ActionCommandMap {
     bindings: Vec<ActionCommandBinding>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    bindings_by_action: BTreeMap<ActionCommandKey, Vec<usize>>,
+}
+
+impl PartialEq for ActionCommandMap {
+    fn eq(&self, other: &Self) -> bool {
+        self.bindings == other.bindings
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ActionCommandMap {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct RawActionCommandMap {
+            #[serde(default)]
+            bindings: Vec<ActionCommandBinding>,
+        }
+
+        let raw = <RawActionCommandMap as serde::Deserialize>::deserialize(deserializer)?;
+        let mut command_map = Self::default();
+        for binding in raw.bindings {
+            command_map.bind(binding);
+        }
+        Ok(command_map)
+    }
 }
 
 impl ActionCommandMap {
     pub fn bind(&mut self, binding: ActionCommandBinding) {
+        self.bindings_by_action
+            .entry(ActionCommandKey::from_binding(&binding))
+            .or_default()
+            .push(self.bindings.len());
         self.bindings.push(binding);
     }
 
@@ -273,6 +481,19 @@ impl ActionCommandMap {
     #[must_use]
     pub fn bindings(&self) -> &[ActionCommandBinding] {
         &self.bindings
+    }
+
+    pub fn matching_bindings(
+        &self,
+        action: &ActionId,
+        context: &ActionContext,
+        phase: ActionPhase,
+    ) -> impl Iterator<Item = &ActionCommandBinding> {
+        let key = ActionCommandKey::new(action.clone(), context.clone(), phase);
+        self.bindings_by_action
+            .get(&key)
+            .into_iter()
+            .flat_map(|indices| indices.iter().filter_map(|index| self.bindings.get(*index)))
     }
 }
 
@@ -325,18 +546,22 @@ impl Plugin for GameplayCommandPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.insert_resource(ActionCommandMap::default())
-            .insert_resource(GameplayCommandQueue::default())
-            .add_systems(
-                CoreStage::PreUpdate,
-                map_action_outcomes_to_commands
-                    .after(InputSet::ResolveActions)
-                    .in_set(GameplayCommandSet::MapActions),
-            )
-            .add_systems(
-                CoreStage::Last,
-                clear_gameplay_commands.in_set(GameplayCommandSet::Clear),
-            );
+        if !app.world().contains_resource::<ActionCommandMap>() {
+            app.insert_resource(ActionCommandMap::default());
+        }
+        if !app.world().contains_resource::<GameplayCommandQueue>() {
+            app.insert_resource(GameplayCommandQueue::default());
+        }
+        app.add_systems(
+            CoreStage::PreUpdate,
+            map_action_outcomes_to_commands
+                .after(InputSet::ResolveActions)
+                .in_set(GameplayCommandSet::MapActions),
+        )
+        .add_systems(
+            CoreStage::Last,
+            clear_gameplay_commands.in_set(GameplayCommandSet::Clear),
+        );
         Ok(())
     }
 }
@@ -356,11 +581,9 @@ fn map_action_outcomes_to_commands(
     };
 
     for outcome in outcomes.as_slice() {
-        for binding in command_map.bindings() {
-            if binding.action != outcome.action || binding.phase != outcome.phase {
-                continue;
-            }
-
+        for binding in
+            command_map.matching_bindings(&outcome.action, &outcome.context, outcome.phase)
+        {
             let mut command = GameplayCommandEnvelope::new(
                 binding.command_type.clone(),
                 GameplayCommandSource::LocalAction {
@@ -376,7 +599,9 @@ fn map_action_outcomes_to_commands(
 }
 
 fn clear_gameplay_commands(mut queue: ResMut<GameplayCommandQueue>) {
-    queue.clear();
+    if !queue.is_empty() {
+        queue.clear();
+    }
 }
 
 fn validate_id(kind: &'static str, id: &str) -> Result<(), GameplayCommandIdError> {
@@ -414,7 +639,7 @@ mod tests {
     use super::*;
     use nara_app::{CoreStage, FixedTime};
     use nara_ecs::Res;
-    use nara_input::{ActionBinding, ActionMap, InputPlugin, KeyCode};
+    use nara_input::{ActionBinding, ActionContext, ActionMap, InputPlugin, KeyCode};
 
     #[derive(Debug, Default, Resource)]
     struct ObservedCommands(Vec<GameplayCommandEnvelope>);
@@ -519,6 +744,87 @@ mod tests {
     }
 
     #[test]
+    fn action_bridge_filters_by_context() {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.add_plugin(GameplayCommandPlugin).unwrap();
+        app.insert_resource(ObservedCommands::default())
+            .add_systems(CoreStage::Update, observe_commands);
+
+        let menu = ActionContext::new("menu").unwrap();
+        let action = ActionId::new("confirm").unwrap();
+        app.world_mut()
+            .resource_mut::<ActionMap>()
+            .bind(ActionBinding::key(action.clone(), KeyCode::Enter).with_context(menu.clone()));
+        app.world_mut().resource_mut::<ActionCommandMap>().bind(
+            ActionCommandBinding::new(
+                action.clone(),
+                ActionPhase::Started,
+                GameplayCommandTypeId::new("gameplay.confirm").unwrap(),
+            )
+            .with_context(ActionContext::gameplay()),
+        );
+        app.world_mut().resource_mut::<ActionCommandMap>().bind(
+            ActionCommandBinding::new(
+                action,
+                ActionPhase::Started,
+                GameplayCommandTypeId::new("menu.confirm").unwrap(),
+            )
+            .with_context(menu),
+        );
+        app.world_mut()
+            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+
+        app.run_once(std::time::Duration::ZERO).unwrap();
+
+        let observed = &app.world().resource::<ObservedCommands>().0;
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].command_type.as_str(), "menu.confirm");
+    }
+
+    #[test]
+    fn action_bridge_filters_by_phase() {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.add_plugin(GameplayCommandPlugin).unwrap();
+        app.insert_resource(ObservedCommands::default())
+            .add_systems(CoreStage::Update, observe_commands);
+
+        let action = ActionId::new("cancel").unwrap();
+        app.world_mut()
+            .resource_mut::<ActionMap>()
+            .bind(ActionBinding::key(action.clone(), KeyCode::Escape));
+        app.world_mut()
+            .resource_mut::<ActionCommandMap>()
+            .bind(ActionCommandBinding::new(
+                action.clone(),
+                ActionPhase::Started,
+                GameplayCommandTypeId::new("cancel.started").unwrap(),
+            ));
+        app.world_mut()
+            .resource_mut::<ActionCommandMap>()
+            .bind(ActionCommandBinding::new(
+                action,
+                ActionPhase::Released,
+                GameplayCommandTypeId::new("cancel.released").unwrap(),
+            ));
+
+        app.world_mut()
+            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.run_once(std::time::Duration::ZERO).unwrap();
+        app.world_mut()
+            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
+            .release(KeyCode::Escape);
+        app.run_once(std::time::Duration::ZERO).unwrap();
+
+        let observed = &app.world().resource::<ObservedCommands>().0;
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].command_type.as_str(), "cancel.released");
+    }
+
+    #[test]
     fn queue_preserves_multiple_producer_order() {
         let mut queue = GameplayCommandQueue::default();
         queue.push(GameplayCommandEnvelope::new(
@@ -552,6 +858,57 @@ mod tests {
         assert_eq!(
             PersistentRuntimeId::parse_str("not-a-uuid"),
             Err(GameplayCommandIdError::InvalidUuid)
+        );
+    }
+
+    #[test]
+    fn persistent_runtime_ids_canonicalize_uuid_spellings() {
+        let canonical =
+            PersistentRuntimeId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+        let uppercase =
+            PersistentRuntimeId::parse_str("2F0D71C7-14FC-4ED4-B48B-1C61BBA8B97F").unwrap();
+        let simple = PersistentRuntimeId::parse_str("2f0d71c714fc4ed4b48b1c61bba8b97f").unwrap();
+
+        assert_eq!(canonical, uppercase);
+        assert_eq!(canonical, simple);
+        assert_eq!(canonical.as_str(), "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_defaults_action_command_binding_context_to_gameplay() {
+        let binding = serde_json::from_str::<ActionCommandBinding>(
+            r#"{
+                "action": "jump",
+                "phase": "Started",
+                "command_type": "movement.jump",
+                "target": null,
+                "payload": { "values": {} }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(binding.context, ActionContext::gameplay());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_invalid_command_identity_and_payload_keys() {
+        assert!(serde_json::from_str::<GameplayCommandTypeId>("\"\"").is_err());
+        assert!(serde_json::from_str::<SceneStableId>("\"scene\\nplayer\"").is_err());
+        assert!(serde_json::from_str::<PersistentRuntimeId>("\"not-a-uuid\"").is_err());
+
+        let invalid_payload = r#"{"values":{"bad\nkey":{"Bool":true}}}"#;
+
+        assert!(serde_json::from_str::<GameplayCommandPayload>(invalid_payload).is_err());
+        assert!(serde_json::from_str::<GameplayCommandTarget>(r#"{"Named":""}"#).is_err());
+        assert!(
+            serde_json::from_str::<GameplayCommandSource>(r#"{"Replay":{"stream":"bad\nstream"}}"#)
+                .is_err()
+        );
+        assert!(
+            serde_json::from_str::<GameplayCommandSource>(r#"{"External":{"producer":""}}"#)
+                .is_err()
         );
     }
 }

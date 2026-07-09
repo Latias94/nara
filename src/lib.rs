@@ -85,6 +85,7 @@ const SERVER_PLUGIN_IDS: &[PluginId] = &[
 
 const RUNTIME_2D_PLUGIN_IDS: &[PluginId] = &[
     HIERARCHY_PLUGIN_ID,
+    DIAGNOSTIC_PLUGIN_ID,
     TASK_PLUGIN_ID,
     ASSET_PLUGIN_ID,
     TRANSFORM_PLUGIN_ID,
@@ -525,6 +526,11 @@ mod tests {
                 .contains_resource::<nara_sprite_render::SpriteBatches>()
         );
         assert!(app.world().contains_resource::<nara_ui_render::UiBatches>());
+        let metadata = app
+            .installed_plugin_groups()
+            .find(|group| group.id == PluginGroupId::new("nara.plugins.runtime-2d"))
+            .unwrap();
+        assert!(metadata.plugins.contains(&DIAGNOSTIC_PLUGIN_ID));
     }
 
     #[test]
@@ -574,6 +580,51 @@ mod tests {
         assert!(
             !app.world()
                 .contains_resource::<nara_tooling::EditorWorkspace>()
+        );
+    }
+
+    #[derive(Debug, Default, nara_ecs::Resource)]
+    struct ObservedServerCommands(Vec<nara_gameplay::GameplayCommandEnvelope>);
+
+    fn observe_server_commands(
+        queue: nara_ecs::Res<nara_gameplay::GameplayCommandQueue>,
+        mut observed: nara_ecs::ResMut<ObservedServerCommands>,
+    ) {
+        observed.0 = queue.as_slice().to_vec();
+    }
+
+    #[test]
+    fn server_plugins_run_without_action_outcomes_and_keep_manual_commands_observable() {
+        let mut app = App::new();
+        app.add_plugins(ServerPlugins).unwrap();
+        app.insert_resource(ObservedServerCommands::default())
+            .add_systems(nara_app::CoreStage::Update, observe_server_commands);
+        app.world_mut()
+            .resource_mut::<nara_gameplay::GameplayCommandQueue>()
+            .push(nara_gameplay::GameplayCommandEnvelope::new(
+                nara_gameplay::GameplayCommandTypeId::new("server.tick").unwrap(),
+                nara_gameplay::GameplayCommandSource::External {
+                    producer: "test-server".to_owned(),
+                },
+                nara_gameplay::GameplayCommandTime::default(),
+            ));
+
+        app.run_once(std::time::Duration::ZERO).unwrap();
+
+        assert!(
+            !app.world()
+                .contains_resource::<nara_input::ActionOutcomes>()
+        );
+        assert_eq!(
+            app.world().resource::<ObservedServerCommands>().0[0]
+                .command_type
+                .as_str(),
+            "server.tick"
+        );
+        assert!(
+            app.world()
+                .resource::<nara_gameplay::GameplayCommandQueue>()
+                .is_empty()
         );
     }
 

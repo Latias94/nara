@@ -1,7 +1,7 @@
 //! Input state primitives and semantic action outcomes.
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, BTreeSet, HashSet},
     error::Error,
     fmt::{self, Display, Formatter},
     hash::Hash,
@@ -95,6 +95,19 @@ where
         self.just_pressed.clear();
         self.just_released.clear();
     }
+
+    #[must_use]
+    pub fn has_transitions(&self) -> bool {
+        !self.just_pressed.is_empty() || !self.just_released.is_empty()
+    }
+
+    pub fn just_pressed_buttons(&self) -> impl Iterator<Item = T> + '_ {
+        self.just_pressed.iter().copied()
+    }
+
+    pub fn just_released_buttons(&self) -> impl Iterator<Item = T> + '_ {
+        self.just_released.iter().copied()
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Resource)]
@@ -118,7 +131,6 @@ impl PointerState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionId(String);
 
 impl ActionId {
@@ -137,6 +149,27 @@ impl ActionId {
 impl Display for ActionId {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ActionId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ActionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(id).map_err(serde::de::Error::custom)
     }
 }
 
@@ -160,7 +193,6 @@ impl Display for ActionIdError {
 impl Error for ActionIdError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionContext(String);
 
 impl Default for ActionContext {
@@ -190,6 +222,27 @@ impl ActionContext {
 impl Display for ActionContext {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ActionContext {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ActionContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(id).map_err(serde::de::Error::custom)
     }
 }
 
@@ -235,14 +288,52 @@ impl ActionBinding {
 }
 
 #[derive(Debug, Default, Clone, Resource)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ActionMap {
     bindings: Vec<ActionBinding>,
-    disabled_contexts: HashSet<ActionContext>,
+    disabled_contexts: BTreeSet<ActionContext>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    bindings_by_input: BTreeMap<InputBinding, Vec<usize>>,
+}
+
+impl PartialEq for ActionMap {
+    fn eq(&self, other: &Self) -> bool {
+        self.bindings == other.bindings && self.disabled_contexts == other.disabled_contexts
+    }
+}
+
+impl Eq for ActionMap {}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ActionMap {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct RawActionMap {
+            #[serde(default)]
+            bindings: Vec<ActionBinding>,
+            #[serde(default)]
+            disabled_contexts: BTreeSet<ActionContext>,
+        }
+
+        let raw = <RawActionMap as serde::Deserialize>::deserialize(deserializer)?;
+        let mut action_map = Self::default();
+        for binding in raw.bindings {
+            action_map.bind(binding);
+        }
+        action_map.disabled_contexts = raw.disabled_contexts;
+        Ok(action_map)
+    }
 }
 
 impl ActionMap {
     pub fn bind(&mut self, binding: ActionBinding) {
+        self.bindings_by_input
+            .entry(binding.input)
+            .or_default()
+            .push(self.bindings.len());
         self.bindings.push(binding);
     }
 
@@ -271,9 +362,24 @@ impl ActionMap {
     pub fn bindings(&self) -> &[ActionBinding] {
         &self.bindings
     }
+
+    pub fn binding_indices_for_input(
+        &self,
+        input: InputBinding,
+    ) -> impl Iterator<Item = usize> + '_ {
+        self.bindings_by_input
+            .get(&input)
+            .into_iter()
+            .flat_map(|indices| indices.iter().copied())
+    }
+
+    #[must_use]
+    pub fn binding_at(&self, index: usize) -> Option<&ActionBinding> {
+        self.bindings.get(index)
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ActionPhase {
     Started,
@@ -308,6 +414,14 @@ pub struct ActionOutcome {
     pub value: ActionValue,
 }
 
+/// Frame-transient semantic input outcomes.
+///
+/// Producer: `resolve_action_outcomes` in `InputSet::ResolveActions`.
+/// Consumers: gameplay command mapping and gameplay systems that need local
+/// action observations before replay/server boundaries. Retention is one app
+/// frame; `InputPlugin` owns cleanup in `CoreStage::Last`. Replay and
+/// diagnostics should capture these outcomes before cleanup when they need
+/// local physical-input provenance.
 #[derive(Debug, Default, Clone, PartialEq, Resource)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionOutcomes {
@@ -346,16 +460,26 @@ impl Plugin for InputPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.insert_resource(ButtonInput::<KeyCode>::default())
-            .insert_resource(ButtonInput::<MouseButton>::default())
-            .insert_resource(ActionMap::default())
-            .insert_resource(ActionOutcomes::default())
-            .insert_resource(PointerState::default())
-            .add_systems(
-                CoreStage::PreUpdate,
-                resolve_action_outcomes.in_set(InputSet::ResolveActions),
-            )
-            .add_systems(CoreStage::Last, clear_input_transitions);
+        if !app.world().contains_resource::<ButtonInput<KeyCode>>() {
+            app.insert_resource(ButtonInput::<KeyCode>::default());
+        }
+        if !app.world().contains_resource::<ButtonInput<MouseButton>>() {
+            app.insert_resource(ButtonInput::<MouseButton>::default());
+        }
+        if !app.world().contains_resource::<ActionMap>() {
+            app.insert_resource(ActionMap::default());
+        }
+        if !app.world().contains_resource::<ActionOutcomes>() {
+            app.insert_resource(ActionOutcomes::default());
+        }
+        if !app.world().contains_resource::<PointerState>() {
+            app.insert_resource(PointerState::default());
+        }
+        app.add_systems(
+            CoreStage::PreUpdate,
+            resolve_action_outcomes.in_set(InputSet::ResolveActions),
+        )
+        .add_systems(CoreStage::Last, clear_input_transitions);
         Ok(())
     }
 }
@@ -366,8 +490,31 @@ fn resolve_action_outcomes(
     mouse: Res<ButtonInput<MouseButton>>,
     mut outcomes: ResMut<ActionOutcomes>,
 ) {
-    outcomes.clear();
-    for binding in action_map.bindings() {
+    if !outcomes.is_empty() {
+        outcomes.clear();
+    }
+    if !keyboard.has_transitions() && !mouse.has_transitions() {
+        return;
+    }
+
+    let mut candidate_indices = BTreeSet::new();
+    for key in keyboard.just_pressed_buttons() {
+        candidate_indices.extend(action_map.binding_indices_for_input(InputBinding::Key(key)));
+    }
+    for key in keyboard.just_released_buttons() {
+        candidate_indices.extend(action_map.binding_indices_for_input(InputBinding::Key(key)));
+    }
+    for button in mouse.just_pressed_buttons() {
+        candidate_indices.extend(action_map.binding_indices_for_input(InputBinding::Mouse(button)));
+    }
+    for button in mouse.just_released_buttons() {
+        candidate_indices.extend(action_map.binding_indices_for_input(InputBinding::Mouse(button)));
+    }
+
+    for binding_index in candidate_indices {
+        let Some(binding) = action_map.binding_at(binding_index) else {
+            continue;
+        };
         if !action_map.is_context_enabled(&binding.context) {
             continue;
         }
@@ -415,9 +562,15 @@ fn clear_input_transitions(
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut outcomes: ResMut<ActionOutcomes>,
 ) {
-    keyboard.clear_transitions();
-    mouse.clear_transitions();
-    outcomes.clear();
+    if keyboard.has_transitions() {
+        keyboard.clear_transitions();
+    }
+    if mouse.has_transitions() {
+        mouse.clear_transitions();
+    }
+    if !outcomes.is_empty() {
+        outcomes.clear();
+    }
 }
 
 fn validate_identifier(id: &str) -> Result<(), ActionIdError> {
@@ -521,6 +674,56 @@ mod tests {
     }
 
     #[test]
+    fn mouse_press_binding_produces_frame_transient_action_outcome() {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.insert_resource(ObservedOutcomes::default())
+            .add_systems(CoreStage::Update, observe_outcomes);
+        app.world_mut()
+            .resource_mut::<ActionMap>()
+            .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].action.as_str(), "select");
+        assert_eq!(observed[0].binding, InputBinding::Mouse(MouseButton::Left));
+        assert_eq!(observed[0].phase, ActionPhase::Started);
+        assert!(observed[0].value.digital);
+        assert!(app.world().resource::<ActionOutcomes>().is_empty());
+    }
+
+    #[test]
+    fn mouse_release_binding_produces_release_outcome() {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.insert_resource(ObservedOutcomes::default())
+            .add_systems(CoreStage::Update, observe_outcomes);
+        app.world_mut()
+            .resource_mut::<ActionMap>()
+            .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.run_once(Duration::ZERO).unwrap();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Left);
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].binding, InputBinding::Mouse(MouseButton::Left));
+        assert_eq!(observed[0].phase, ActionPhase::Released);
+        assert!(!observed[0].value.digital);
+    }
+
+    #[test]
     fn disabled_action_contexts_do_not_emit_outcomes() {
         let mut app = App::new();
         let menu = ActionContext::new("menu").unwrap();
@@ -585,5 +788,46 @@ mod tests {
             ActionId::new("bad\nid"),
             Err(ActionIdError::ContainsControl)
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_invalid_action_ids_and_contexts() {
+        assert!(serde_json::from_str::<ActionId>("\"\"").is_err());
+        assert!(serde_json::from_str::<ActionId>("\"bad\\nid\"").is_err());
+        assert!(serde_json::from_str::<ActionContext>("\"\"").is_err());
+        assert!(serde_json::from_str::<ActionContext>("\"bad\\nid\"").is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rebuilds_action_map_input_index() {
+        let action_map = serde_json::from_str::<ActionMap>(
+            r#"{
+                "bindings": [
+                    {
+                        "action": "confirm",
+                        "input": { "Key": "Enter" },
+                        "context": "gameplay"
+                    }
+                ],
+                "disabled_contexts": []
+            }"#,
+        )
+        .unwrap();
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.insert_resource(action_map)
+            .insert_resource(ObservedOutcomes::default())
+            .add_systems(CoreStage::Update, observe_outcomes);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].action.as_str(), "confirm");
     }
 }

@@ -1630,6 +1630,7 @@ dependencies = [
  "nara_ecs",
  "nara_input",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "uuid",
 ]
@@ -1657,6 +1658,7 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

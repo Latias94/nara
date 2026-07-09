@@ -1,12 +1,14 @@
 //! Structured diagnostics for runtime, tooling, and asset pipelines.
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     fmt::{self, Display, Formatter},
 };
 
 use nara_app::{App, Plugin, PluginError};
 use nara_ecs::Resource;
+
+pub const MAX_RUNTIME_DIAGNOSTICS_CAPACITY: usize = 65_536;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -359,6 +361,19 @@ impl Default for RuntimeDiagnosticsSettings {
     }
 }
 
+impl RuntimeDiagnosticsSettings {
+    #[must_use]
+    pub const fn bounded(self) -> Self {
+        Self {
+            capacity: if self.capacity > MAX_RUNTIME_DIAGNOSTICS_CAPACITY {
+                MAX_RUNTIME_DIAGNOSTICS_CAPACITY
+            } else {
+                self.capacity
+            },
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RuntimeDiagnosticFilter {
     severity: Option<DiagnosticSeverity>,
@@ -401,11 +416,64 @@ impl RuntimeDiagnosticFilter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Resource)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Resource)]
 pub struct RuntimeDiagnostics {
     settings: RuntimeDiagnosticsSettings,
-    entries: VecDeque<RuntimeDiagnosticEntry>,
+    order: VecDeque<u64>,
+    entries: HashMap<u64, RuntimeDiagnosticEntry>,
+    dedupe_index: HashMap<String, u64>,
+    next_entry_id: u64,
+    dropped_entries: u64,
+}
+
+impl PartialEq for RuntimeDiagnostics {
+    fn eq(&self, other: &Self) -> bool {
+        self.settings == other.settings
+            && self.dropped_entries == other.dropped_entries
+            && self.iter().eq(other.iter())
+    }
+}
+
+impl Eq for RuntimeDiagnostics {}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for RuntimeDiagnostics {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serde::Serialize::serialize(
+            &RuntimeDiagnosticsSerde {
+                settings: self.settings,
+                entries: self.iter().cloned().collect(),
+                dropped_entries: self.dropped_entries,
+            },
+            serializer,
+        )
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for RuntimeDiagnostics {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = <RuntimeDiagnosticsSerde as serde::Deserialize>::deserialize(deserializer)?;
+        let mut diagnostics = Self::new(raw.settings);
+        diagnostics.dropped_entries = raw.dropped_entries;
+        for entry in raw.entries {
+            diagnostics.append_entry(entry);
+        }
+        Ok(diagnostics)
+    }
+}
+
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RuntimeDiagnosticsSerde {
+    settings: RuntimeDiagnosticsSettings,
+    entries: Vec<RuntimeDiagnosticEntry>,
     dropped_entries: u64,
 }
 
@@ -418,9 +486,13 @@ impl Default for RuntimeDiagnostics {
 impl RuntimeDiagnostics {
     #[must_use]
     pub fn new(settings: RuntimeDiagnosticsSettings) -> Self {
+        let settings = settings.bounded();
         Self {
             settings,
-            entries: VecDeque::with_capacity(settings.capacity),
+            order: VecDeque::with_capacity(settings.capacity),
+            entries: HashMap::with_capacity(settings.capacity),
+            dedupe_index: HashMap::new(),
+            next_entry_id: 0,
             dropped_entries: 0,
         }
     }
@@ -436,36 +508,62 @@ impl RuntimeDiagnostics {
     }
 
     pub fn push(&mut self, entry: RuntimeDiagnosticEntry) {
-        if let Some(dedupe_key) = entry.dedupe_key.as_deref()
-            && let Some(existing) = self
-                .entries
-                .iter_mut()
-                .find(|existing| existing.dedupe_key.as_deref() == Some(dedupe_key))
-        {
-            existing.absorb_repeated(entry);
-            return;
+        if let Some(dedupe_key) = entry.dedupe_key.as_deref() {
+            let existing_id = self.dedupe_index.get(dedupe_key).copied();
+            if let Some(existing_id) = existing_id
+                && let Some(existing) = self.entries.get_mut(&existing_id)
+            {
+                existing.absorb_repeated(entry);
+                return;
+            }
+            if existing_id.is_some() {
+                self.dedupe_index.remove(dedupe_key);
+            }
         }
 
+        self.append_entry(entry);
+    }
+
+    fn append_entry(&mut self, entry: RuntimeDiagnosticEntry) {
         if self.settings.capacity == 0 {
             self.dropped_entries += 1;
             return;
         }
 
-        while self.entries.len() >= self.settings.capacity {
-            self.entries.pop_front();
-            self.dropped_entries += 1;
+        while self.order.len() >= self.settings.capacity {
+            self.evict_oldest();
         }
 
-        self.entries.push_back(entry);
+        let entry_id = self.next_entry_id;
+        self.next_entry_id = self.next_entry_id.wrapping_add(1);
+        if let Some(dedupe_key) = &entry.dedupe_key {
+            self.dedupe_index.insert(dedupe_key.clone(), entry_id);
+        }
+        self.entries.insert(entry_id, entry);
+        self.order.push_back(entry_id);
+    }
+
+    fn evict_oldest(&mut self) {
+        if let Some(entry_id) = self.order.pop_front() {
+            if let Some(entry) = self.entries.remove(&entry_id)
+                && let Some(dedupe_key) = entry.dedupe_key
+                && self.dedupe_index.get(&dedupe_key) == Some(&entry_id)
+            {
+                self.dedupe_index.remove(&dedupe_key);
+            }
+            self.dropped_entries += 1;
+        }
     }
 
     pub fn clear(&mut self) {
+        self.order.clear();
         self.entries.clear();
+        self.dedupe_index.clear();
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.order.len()
     }
 
     #[must_use]
@@ -474,20 +572,20 @@ impl RuntimeDiagnostics {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &RuntimeDiagnosticEntry> {
-        self.entries.iter()
+        self.order
+            .iter()
+            .filter_map(|entry_id| self.entries.get(entry_id))
     }
 
     pub fn iter_filtered(
         &self,
         filter: RuntimeDiagnosticFilter,
     ) -> impl Iterator<Item = &RuntimeDiagnosticEntry> {
-        self.entries
-            .iter()
-            .filter(move |entry| filter.matches(entry))
+        self.iter().filter(move |entry| filter.matches(entry))
     }
 
     pub fn emit_to_tracing(&self) {
-        for entry in &self.entries {
+        for entry in self.iter() {
             entry.emit_to_tracing();
         }
     }
@@ -665,6 +763,18 @@ mod tests {
     }
 
     #[test]
+    fn runtime_diagnostics_settings_clamp_oversized_capacity() {
+        let diagnostics = RuntimeDiagnostics::new(RuntimeDiagnosticsSettings {
+            capacity: MAX_RUNTIME_DIAGNOSTICS_CAPACITY + 1,
+        });
+
+        assert_eq!(
+            diagnostics.settings().capacity,
+            MAX_RUNTIME_DIAGNOSTICS_CAPACITY
+        );
+    }
+
+    #[test]
     fn runtime_diagnostics_dedupe_repeated_entries() {
         let mut diagnostics = RuntimeDiagnostics::new(RuntimeDiagnosticsSettings { capacity: 8 });
 
@@ -684,6 +794,31 @@ mod tests {
         assert_eq!(entries[0].repeat_count, 2);
         assert_eq!(entries[0].first_frame, Some(3));
         assert_eq!(entries[0].last_frame, Some(5));
+    }
+
+    #[test]
+    fn runtime_diagnostics_dedupe_index_drops_evicted_keys() {
+        let mut diagnostics = RuntimeDiagnostics::new(RuntimeDiagnosticsSettings { capacity: 1 });
+
+        diagnostics.push(
+            RuntimeDiagnosticEntry::warning("watch", "watch.error", "first")
+                .with_dedupe_key("watch:error"),
+        );
+        diagnostics.push(RuntimeDiagnosticEntry::info(
+            "asset",
+            "asset.changed",
+            "second",
+        ));
+        diagnostics.push(
+            RuntimeDiagnosticEntry::warning("watch", "watch.error", "third")
+                .with_dedupe_key("watch:error"),
+        );
+
+        let entries = diagnostics.iter().collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].message, "third");
+        assert_eq!(entries[0].repeat_count, 1);
+        assert_eq!(diagnostics.dropped_entries(), 2);
     }
 
     #[test]

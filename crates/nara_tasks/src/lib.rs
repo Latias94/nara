@@ -15,6 +15,8 @@ use std::{
 use nara_app::{App, CoreStage, Plugin, PluginError, TaskUpdateSet};
 use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
 
+pub const MAX_TASK_POOL_THREADS_PER_KIND: usize = 256;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TaskPoolKind {
     Io,
@@ -86,9 +88,9 @@ impl TaskPoolConfig {
     ) -> Self {
         Self {
             execution_mode: TaskExecutionMode::Threaded,
-            io_threads: io_threads.max(1),
-            compute_threads: compute_threads.max(1),
-            async_compute_threads: async_compute_threads.max(1),
+            io_threads: io_threads.clamp(1, MAX_TASK_POOL_THREADS_PER_KIND),
+            compute_threads: compute_threads.clamp(1, MAX_TASK_POOL_THREADS_PER_KIND),
+            async_compute_threads: async_compute_threads.clamp(1, MAX_TASK_POOL_THREADS_PER_KIND),
         }
     }
 
@@ -657,6 +659,28 @@ mod tests {
         }
 
         assert_eq!(handle.try_take().unwrap().into_value(), 42);
+    }
+
+    #[test]
+    fn threaded_task_config_clamps_extreme_thread_counts() {
+        let config = TaskPoolConfig::threaded(
+            usize::MAX,
+            MAX_TASK_POOL_THREADS_PER_KIND + 1,
+            MAX_TASK_POOL_THREADS_PER_KIND,
+        );
+
+        assert_eq!(
+            config.threads_for(TaskPoolKind::Io),
+            MAX_TASK_POOL_THREADS_PER_KIND
+        );
+        assert_eq!(
+            config.threads_for(TaskPoolKind::Compute),
+            MAX_TASK_POOL_THREADS_PER_KIND
+        );
+        assert_eq!(
+            config.threads_for(TaskPoolKind::AsyncCompute),
+            MAX_TASK_POOL_THREADS_PER_KIND
+        );
     }
 
     #[test]
