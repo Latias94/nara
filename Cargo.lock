@@ -1605,6 +1605,7 @@ name = "nara_diagnostic"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "nara_app",
  "nara_ecs",
  "serde",
  "tracing",

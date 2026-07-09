@@ -33,6 +33,7 @@ pub use nara_winit as winit;
 use nara_app::{App, PluginError, PluginGroup, PluginGroupId, PluginGroupMetadata, PluginId};
 
 const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.scene.hierarchy");
+const DIAGNOSTIC_PLUGIN_ID: PluginId = PluginId::new("nara.diagnostic");
 const TASK_PLUGIN_ID: PluginId = PluginId::new("nara.tasks");
 const ASSET_PLUGIN_ID: PluginId = PluginId::new("nara.asset");
 const TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.transform");
@@ -53,6 +54,7 @@ const TOOLING_PLUGIN_ID: PluginId = PluginId::new("nara.tooling");
 
 const MINIMAL_PLUGIN_IDS: &[PluginId] = &[
     HIERARCHY_PLUGIN_ID,
+    DIAGNOSTIC_PLUGIN_ID,
     TASK_PLUGIN_ID,
     ASSET_PLUGIN_ID,
     TRANSFORM_PLUGIN_ID,
@@ -114,6 +116,7 @@ impl PluginGroup for MinimalPlugins {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
+        app.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
         app.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
         app.add_plugin_if_missing(nara_asset::AssetPlugin)?;
         app.add_plugin_if_missing(nara_transform::TransformPlugin)?;
@@ -220,7 +223,11 @@ pub mod prelude {
     };
     pub use nara_audio::{AudioClip, AudioCommand, AudioSink};
     pub use nara_core::{Color, Vec2, Vec3};
-    pub use nara_diagnostic::{Diagnostic, DiagnosticCode, DiagnosticReport, DiagnosticSeverity};
+    pub use nara_diagnostic::{
+        Diagnostic, DiagnosticCode, DiagnosticReport, DiagnosticSeverity, DiagnosticsPlugin,
+        RuntimeDiagnosticContext, RuntimeDiagnosticDomain, RuntimeDiagnosticEntry,
+        RuntimeDiagnosticFilter, RuntimeDiagnostics, RuntimeDiagnosticsSettings,
+    };
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
     pub use nara_image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin, ImageSourceMetadata,
@@ -371,6 +378,10 @@ mod tests {
 
         app.add_plugins(MinimalPlugins).unwrap();
 
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+        );
         assert!(app.world().contains_resource::<nara_asset::AssetServer>());
         assert!(app.world().contains_resource::<nara_input::PointerState>());
         assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
