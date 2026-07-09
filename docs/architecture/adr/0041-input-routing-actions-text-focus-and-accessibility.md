@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0013, ADR 0025, ADR 0035, ADR 0036, ADR 0039
+**Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness
 
 ## Context
 
@@ -43,6 +44,9 @@ Rules:
 - Action maps support named actions, binding contexts, device scopes, chords/modifiers, analog
   values, dead zones, and priority/enable state over time. The first implementation may be smaller,
   but it must not collapse actions into hardcoded key checks.
+- Action maps should be able to produce semantic gameplay commands or action outcomes that can be
+  consumed by replay, AI drivers, and future server-authoritative worlds without exposing raw
+  device events.
 - UI routing happens before gameplay action delivery for inputs captured or consumed by focused UI,
   unless a context explicitly opts into global shortcuts.
 - Text input and IME composition are separate from key/button actions. Composition text, commit
@@ -114,6 +118,8 @@ AI/editor tooling structured data to inspect.
 - `nara_ui` focus and pointer capture should become engine-level state consumed by the input router.
 - Editor shortcuts and viewport tools should use the same routing/action model as runtime UI, not a
   private egui-only shortcut path.
+- Replay, AI-driver, and future server-authoritative boundaries should consume semantic gameplay
+  commands/action outcomes rather than raw device events.
 
 ## Open Questions
 
@@ -121,4 +127,3 @@ AI/editor tooling structured data to inspect.
   context priority?
 - Which platform text/IME features must be represented before the first text widget?
 - How should multi-window and multi-viewport focus compose with pointer capture?
-

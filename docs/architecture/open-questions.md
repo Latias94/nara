@@ -298,6 +298,36 @@ Follow-up details still to settle:
 2. Should runtime state support stacks, independent domains, or only single typed states first?
 3. How much raw platform event access should advanced users get?
 
+## Headless Runtime and Dedicated Server
+
+Accepted direction: headless/runtime server readiness is a profile boundary, not a networking
+implementation. See ADR
+[0056-headless-runtime-and-dedicated-server-readiness.md](adr/0056-headless-runtime-and-dedicated-server-readiness.md).
+
+Settled policy:
+
+- Server/headless profiles do not install window, render, audio-device, editor, or UI-toolkit
+  adapter plugins by default.
+- Server-authoritative gameplay should run through deterministic-friendly simulation stages and
+  consume semantic gameplay commands/action outcomes rather than raw keyboard, mouse, pointer,
+  window, or UI events.
+- Scene/save/replay/replication-facing data uses stable identities; runtime `Entity` values remain
+  local implementation handles.
+- Networking remains a future optional domain crate/plugin, not a core ECS or `nara_app` feature.
+- Server diagnostics and future metrics must be visible without editor UI or a tracing subscriber.
+
+Follow-up details still to settle:
+
+1. What exact manifest fields select `headless`, `server`, `editor`, `dev`, and `release`
+   profiles?
+2. What is the first minimal gameplay command schema for replay, AI-driver, and future server
+   authority?
+3. What persistent runtime entity ID type should bridge scene-spawned and runtime-created entities?
+4. Should plugin metadata expose profile suitability flags, or should plugin groups encode that
+   policy manually first?
+5. What minimum metrics set is useful before a real server: tick time, fixed catch-up, task queue
+   depth, diagnostic counts, asset states, or entity/component counts?
+
 ## Editor and Tooling
 
 Accepted direction: the editor is a client of runtime APIs and should dogfood nara runtime/rendering concepts; UI toolkit dogfooding is phased. See ADR [0015-editor-tooling-and-dogfooding-boundary.md](adr/0015-editor-tooling-and-dogfooding-boundary.md).

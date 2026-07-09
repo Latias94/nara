@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0045: Component Schema Capability Metadata
+**Refined By**: ADR 0045: Component Schema Capability Metadata; ADR 0056: Headless Runtime and
+Dedicated Server Readiness
 
 ## Context
 

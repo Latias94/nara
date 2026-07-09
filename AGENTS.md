@@ -10,6 +10,7 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_app` owns nara's product-facing `App`, fallible `Plugin`, stage, runner, and lifecycle boundary. Do not adopt `bevy_app`.
 - Plugin setup and prerequisite failures must return `PluginError`; do not reintroduce panic-based plugin prerequisite helpers.
 - Plugins should expose stable IDs, declared capabilities, requirements/conflicts, and inspectable group membership. Default plugin groups are explicit product bundles; `MinimalPlugins` must stay headless and minimal.
+- Headless/server profiles must not install window, render, audio-device, editor, or UI-toolkit adapter plugins by default. Server-ready gameplay should run through deterministic-friendly simulation stages and consume semantic gameplay commands rather than raw keyboard/mouse/window input.
 - `nara_tasks` owns engine task pools, task handles, cancellation tokens, deterministic inline execution, and the threaded std worker backend. Do not expose Tokio or async-std as nara's gameplay-facing async contract.
 - `nara_app::CoreStage::TaskUpdate` is the explicit main-thread integration point for background results. Keep `TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs, ApplyAssetResults}` ordering stable unless an ADR replaces the task/update contract.
 - File-backed projects use `nara.toml` as the project settings authority. Runtime embedding may override settings through explicit resources/plugin configuration, but engine domains must not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
@@ -27,6 +28,7 @@ This file provides repo-local guidance for agents working on nara.
 - `nara_ui` owns runtime UI authoring components, computed layout resources, and pointer interaction state. It must not depend on egui, dear-imgui, winit, or wgpu.
 - `nara_ui_render` owns backend-neutral runtime UI extraction, queueing, clipping, sorting, and batching. GPU backends should consume `UiBatches`, not gameplay/editor UI state directly.
 - Input is layered: platform adapters produce normalized input events/state; routing resolves UI focus, pointer capture, text/IME, action-map contexts, and accessibility semantics before gameplay consumes semantic actions. Do not add private editor-only shortcut paths that bypass this model.
+- Client physical input should eventually lower into gameplay commands/action outcomes before crossing replay, networking, AI-driver, or server-authoritative boundaries.
 - `nara_scene` owns persistent `SceneDocument` / `PrefabDocument`, stable `SceneEntityId`, validation, and world spawn/export. Scene/prefab documents must not store runtime `Entity`, runtime `AssetId`, or backend handles.
 - Scene/prefab authoring edits should use `ScenePatchDocument` transactions. Patch operations serialize as `op + args`, validate against schema-aware `ComponentFieldPath`, and return inverse patches for undo.
 - Scene, prefab, and patch document shape changes require document-level migrations before component-value migrations and validation. Runtime loading must not silently rewrite source files.
@@ -73,6 +75,7 @@ This file provides repo-local guidance for agents working on nara.
 - Keep `docs/architecture/nara-foundation.md` aligned with implemented crate boundaries.
 - Use `docs/knowledge/engineering/` for session memory, subagent findings, verification, and handoff state.
 - Runtime diagnostics should be inspectable structured data first. Domain diagnostics may remain rich locally, but runtime problems that matter to tools should bridge into the ADR 0048 observability bus instead of relying on logs or private queues only.
+- Server diagnostics and future metrics are first-class runtime outputs and must be observable without editor UI, windowing, rendering, or a tracing subscriber.
 - Task pool changes must preserve main-thread integration, cooperative cancellation, deterministic testability, and ADR 0052 backpressure/diagnostics vocabulary.
 - Prefer fearless refactoring before compatibility layers. This project is pre-1.0; remove obsolete scaffolding instead of preserving it.
 - Keep scene/prefab/save data independent from runtime `bevy_ecs::Entity` values, runtime `AssetId`, and backend-native handles.

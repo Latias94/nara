@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041:
-Input Routing, Actions, Text Input, UI Focus, and Accessibility
+Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0056: Headless Runtime and
+Dedicated Server Readiness
 
 ## Context
 
@@ -35,8 +36,9 @@ The manifest contract is:
 - `[window]` owns default primary-window settings for file-backed desktop launches.
 - `[input]` owns named input action map files or inline action-map settings once ADRs define the
   input-action model.
-- `[profiles.<name>]` provides platform/build/profile overrides. Overrides patch manifest values;
-  they do not replace the manifest authority.
+- `[profiles.<name>]` provides platform/build/profile overrides, including future `headless`,
+  `server`, `editor`, `dev`, and `release` profiles. Overrides patch manifest values; they do not
+  replace the manifest authority.
 
 Manifest parsing and validation should produce structured diagnostics. It should not create GPU
 resources, platform windows, task threads, or asset values directly. Instead, startup code lowers the
@@ -56,6 +58,7 @@ flowchart TD
     Runtime --> App[nara_app]
     Tasks --> TaskPlugin[nara_tasks]
     Window --> Winit[nara_winit / nara_window]
+    Validate --> Profile[plugin groups / profile policy]
 ```
 
 ## Rules

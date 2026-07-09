@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0010, ADR 0035, ADR 0040, ADR 0044
+**Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness
 
 ## Context
 
@@ -62,6 +63,8 @@ Initial group vocabulary:
 | `CorePlugins` | App scheduling, diagnostics, tasks, core runtime resources |
 | `AssetPlugins` | Asset server, import registry, reload scheduling, optional watch adapter by feature |
 | `Runtime2dPlugins` | Transform, render-domain basics, image/material, sprite, tilemap, runtime UI authoring |
+| `HeadlessRuntimePlugins` | Core runtime plus asset/scene/gameplay-domain systems that can run without window, render, audio-device, editor, or UI toolkit adapters |
+| `ServerPlugins` | Dedicated-server-ready headless composition with deterministic-friendly gameplay stages, diagnostics/metrics, and no networking transport unless an optional networking crate is explicitly added |
 | `DesktopWindowPlugins` | `nara_window` plus desktop `nara_winit` adapter |
 | `DesktopWgpuPlugins` | Desktop window integration plus wgpu backend and explicitly chosen submitters |
 | `ToolingPlugins` | UI-agnostic tooling models and optional adapter groups |

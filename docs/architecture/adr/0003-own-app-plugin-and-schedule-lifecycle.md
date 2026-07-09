@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness
 
 ## Context
 

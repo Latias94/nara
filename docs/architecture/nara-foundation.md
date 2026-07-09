@@ -251,6 +251,12 @@ second real adapter or stronger isolation pressure.
   membership. Default plugin groups are explicit product bundles, and `MinimalPlugins` stays
   headless/minimal. See ADR
   [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md).
+- Headless runtime and dedicated-server readiness are first-class profile constraints. Server
+  profiles exclude window/render/audio-device/editor/UI-toolkit adapters by default, run
+  deterministic-friendly gameplay through declared simulation stages, consume semantic gameplay
+  commands instead of raw device input, keep networking optional, and expose diagnostics/metrics
+  without editor UI. See ADR
+  [0056](adr/0056-headless-runtime-and-dedicated-server-readiness.md).
 - Editor workspace state belongs in `nara_tooling`: open document slots, active document, selection
   sets, dirty/saved revisions, external reload conflicts, per-document undo/redo, and workspace
   commands are implemented as UI-toolkit-agnostic `EditorWorkspace` state and reports. See ADR
@@ -293,24 +299,29 @@ second real adapter or stronger isolation pressure.
 5. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
    widget state, keyboard/gamepad focus, action-map routing, and editor dogfooding once the runtime
    model is stable.
-6. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
+6. Define the gameplay command/action output boundary before replay, AI drivers, or future server
+   authority depend on raw input state.
+7. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
    composition, 3D depth/prepass, or transient resource lifetime creates pressure beyond
    `RenderPassPlan`.
-7. Build file-backed `nara_project` manifest loading and effective runtime settings lowering.
-8. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
+8. Build file-backed `nara_project` manifest loading and effective runtime settings lowering,
+   including headless/server/editor/dev/release profile resolution.
+9. Define headless/server plugin groups and smoke tests before any networking or dedicated server
+   crate exists.
+10. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
-9. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
+11. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
    override write-back, and edit-while-playing merge semantics are designed.
-10. Design reusable material assets and custom shader specialization after inline
+12. Design reusable material assets and custom shader specialization after inline
    `Material2dDescriptor` has enough runtime/UI pressure.
-11. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
+13. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
     or widening file-backed editor workflows.
-15. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
+14. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
     formats again.
-16. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
+15. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
     jobs.
-17. Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
-18. Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
+16. Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
+17. Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
     pressure.
-19. Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
+18. Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
     GitHub Actions.

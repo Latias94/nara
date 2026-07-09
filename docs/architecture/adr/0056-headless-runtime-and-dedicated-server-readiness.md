@@ -1,0 +1,168 @@
+# ADR 0056: Headless Runtime and Dedicated Server Readiness
+
+**Status**: Accepted
+**Date**: 2026-07-09
+**Refines**: ADR 0003, ADR 0024, ADR 0027, ADR 0028, ADR 0035, ADR 0041, ADR 0042,
+ADR 0046, ADR 0048
+
+## Context
+
+nara does not need networking or a production dedicated server in Phase 1, but server readiness
+affects decisions that are already being made: plugin groups, project profiles, input semantics,
+stable entity identity, diagnostics, and which systems are allowed to run without a window.
+
+If the desktop/game-client profile becomes the implicit default for all runtime work, a later
+dedicated server will require expensive untangling. The server does not need rendering, windows,
+audio playback, editor panels, or raw keyboard/mouse input. It does need deterministic-friendly
+simulation, scene/save/replication identity, command-oriented gameplay input, bounded tasks, and
+machine-readable diagnostics.
+
+This ADR does not add networking. It defines the runtime boundary that keeps networking and
+dedicated server work possible without forcing it into core.
+
+## Decision
+
+nara treats headless runtime and dedicated-server readiness as first-class profile constraints.
+
+```mermaid
+flowchart TD
+    Manifest[nara.toml / code-first config] --> Profile[effective runtime profile]
+    Profile --> Core[CorePlugins / App / ECS / Tasks / Diagnostics]
+    Profile --> Assets[optional asset + scene loading]
+    Profile --> Gameplay[deterministic-friendly gameplay plugins]
+    Profile -.excluded.-> Window[window plugins]
+    Profile -.excluded.-> Render[render backend + submitters]
+    Profile -.excluded.-> Audio[audio device backend]
+    Profile -.excluded.-> Editor[editor/tooling UI adapters]
+    Gameplay --> Fixed[fixed simulation]
+    Fixed --> State[stable state + diagnostics + metrics]
+```
+
+Rules:
+
+- A server profile must not install window, render, audio-device, editor, or UI-toolkit adapter
+  plugins by default.
+- A server profile may install core runtime, tasks, diagnostics, asset identity/loading,
+  scene/prefab spawning, deterministic-friendly gameplay, and domain services that explicitly
+  support headless operation.
+- `MinimalPlugins` remains a small headless foundation, but it is not the whole server product
+  profile. Future `HeadlessRuntimePlugins` or `ServerPlugins` may compose the richer server-ready
+  bundle explicitly.
+- File-backed projects lower `nara.toml` profiles such as `headless`, `server`, `editor`, `dev`,
+  and `release` into ordinary resources and plugin groups. Code-first embedding may construct the
+  same resources manually.
+- Server-authoritative gameplay systems should run in fixed or explicitly declared simulation
+  stages and should avoid presentation-only `Update`/render assumptions.
+- Client physical input eventually lowers into semantic gameplay commands or action outcomes before
+  it crosses replay, networking, AI-agent, or server-authoritative boundaries. Server gameplay
+  systems should not depend on raw keyboard, mouse, pointer, window, or UI events.
+- Scene loading, save data, replay, and future replication use stable identity bridges such as
+  `SceneEntityId`, persistent runtime IDs, asset refs, component type IDs, and future network IDs.
+  Runtime `Entity` values are local implementation handles and must not appear in persistent,
+  replay, or replication data.
+- Networking remains a future optional domain crate/plugin, for example `nara_net`. Core crates may
+  define schema, command, identity, time, and diagnostics seams, but sockets, protocols, transport
+  sessions, and replication algorithms do not move into core ECS or `nara_app`.
+- Server diagnostics and metrics are first-class outputs. They flow through structured runtime
+  diagnostics and future metrics snapshots, not only through editor UI or ad hoc log lines.
+- Headless asset and project loading follows the same untrusted-input, asset-root containment,
+  import-cache, and migration policies as desktop/editor profiles. Importers must not require GPU
+  resources unless they are render-backend preparation systems.
+
+## Input and Command Boundary
+
+```mermaid
+sequenceDiagram
+    participant Device as Client device input
+    participant Input as nara_input routing/action map
+    participant Client as Client gameplay presentation
+    participant Command as Gameplay command stream
+    participant Server as Headless/server world
+    participant Replay as Replay/diagnostics capture
+
+    Device->>Input: normalized raw events
+    Input->>Client: local UI/gameplay action outcomes
+    Input->>Command: semantic commands
+    Command->>Replay: record command with tick/context
+    Command->>Server: apply at declared simulation boundary
+    Server-->>Replay: state/diagnostics/metrics observations
+```
+
+The command boundary is intentionally semantic, not transport-specific. A local single-player game,
+a replay harness, an AI test driver, and a future network client can all produce the same command
+shape without making gameplay systems know about physical devices.
+
+## Alternatives Considered
+
+### Option A: Ignore dedicated server until networking exists
+
+**Pros**: Simplest near-term scope.
+
+**Cons**: Plugin groups, input APIs, persistent identity, diagnostics, and runtime profiles would
+likely encode desktop-client assumptions that are expensive to remove later.
+
+**Decision**: Rejected.
+
+### Option B: Treat the server as a separate binary with private runtime rules
+
+**Pros**: Keeps client runtime simpler and lets a server evolve independently.
+
+**Cons**: Splits `App`/schedule semantics, duplicates diagnostics and manifest lowering, and makes
+client/server simulation drift likely.
+
+**Decision**: Rejected.
+
+### Option C: First-class headless/server profile readiness without networking implementation
+
+**Pros**: Preserves scope while forcing the important seams to stay clean: plugin composition,
+input command boundaries, stable identity, diagnostics, and deterministic-friendly simulation.
+
+**Cons**: Adds policy that will not be fully exercised until networking/replay/server tooling
+exists.
+
+**Decision**: Chosen.
+
+## Success Metrics
+
+| Metric | Target | Measurement |
+|---|---:|---|
+| Headless profile isolation | Server/headless plugin groups compile without `winit`, `wgpu`, egui, or audio-device adapters | Feature/dependency search |
+| Deterministic-friendly simulation | Server-ready gameplay systems can run from fixed simulation stages without render/window resources | Headless smoke tests |
+| Input abstraction | Gameplay command/action data can be produced without raw keyboard/mouse/window events | Input/action-map tests |
+| Stable identity | Scene/save/replay/replication-facing data avoids runtime `Entity` values | Serialization and boundary tests |
+| Optional networking | No core crate depends on networking transports or protocol crates | Dependency review |
+| Operations visibility | Server diagnostics/metrics can be queried without editor UI or tracing subscriber | Runtime diagnostics tests |
+
+## Risks and Mitigations
+
+| Risk | Severity | Likelihood | Mitigation |
+|---|---|---:|---|
+| Server policy over-constrains single-player ergonomics | Medium | Medium | Keep raw input observations available locally, but recommend commands for scalable gameplay boundaries. |
+| "Deterministic-friendly" is mistaken for full lockstep determinism | High | Medium | Keep ADR 0024 wording: fixed-step friendly, no Phase 1 cross-platform lockstep guarantee. |
+| Plugin groups become confusing | Medium | Medium | Keep product bundles explicit: minimal, runtime 2D, desktop wgpu, editor, headless, server. |
+| Gameplay systems accidentally require render/window resources | High | Medium | Add headless smoke tests and plugin capability checks before server work begins. |
+| Metrics becomes another diagnostics queue | Medium | Medium | Treat metrics as structured observation data with retention/export policy, aligned with ADR 0048. |
+
+## Consequences
+
+- Future manifest work should include profile names or profile kinds that can lower into headless,
+  server, desktop, editor, dev, and release runtime settings without changing domain crates.
+- Future plugin group work should distinguish `MinimalPlugins`, `HeadlessRuntimePlugins`,
+  `ServerPlugins`, `Runtime2dPlugins`, `DesktopWgpuPlugins`, and editor/tooling groups.
+- Input action-map work should reserve a gameplay command output layer, not only retained
+  `ButtonInput` state and UI routing decisions.
+- Save/replay/replication work should converge on a shared stable identity vocabulary instead of
+  inventing incompatible IDs per domain.
+- Runtime diagnostics and future metrics must be usable from CLI/headless processes and not require
+  editor UI.
+
+## Open Questions
+
+- What exact type owns persistent runtime entity identity distinct from `SceneEntityId` and future
+  network IDs?
+- What is the first minimal gameplay command schema: typed Rust events, schema-registered command
+  values, or action outcomes plus payloads?
+- Should plugin metadata expose profile suitability such as `headless_safe`, `client_only`, or
+  `server_ready`, or should groups encode that policy manually first?
+- Which metrics should exist before a real server: tick time, fixed catch-up, task queue depth,
+  diagnostic counts, asset load states, or entity/component counts?

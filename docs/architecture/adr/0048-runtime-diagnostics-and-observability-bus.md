@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0009, ADR 0036, ADR 0042
-**Refined By**: ADR 0052: Task Backpressure, Cancellation, and Long-Running Diagnostics
+**Refined By**: ADR 0052: Task Backpressure, Cancellation, and Long-Running Diagnostics; ADR 0056:
+Headless Runtime and Dedicated Server Readiness
 
 ## Context
 
