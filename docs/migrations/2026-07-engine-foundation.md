@@ -26,8 +26,8 @@ Every implementation unit that changes a public API, persistent shape, cache con
 
 | Migration ID | Unit | Commit | Kind | Affected contract | Required action |
 |---|---|---|---|---|---|
-| U2-1 | U2 | `feat(app): contain plugin lifecycle failures` | `rust-api` | `App` mutation/update, `Plugin`, cleanup, group, and runner signatures | Propagate setup/update errors, use narrow cleanup/group contexts, and let runners borrow the app. |
-| U2-2 | U2 | `feat(app): contain plugin lifecycle failures` | `rust-api` | Built-in `register_*_components` helpers | Handle `ComponentRegistryError`; plugin installation now reports contextual registration failure. |
+| U2-1 | U2 | `2867235` | `rust-api` | `App` mutation/update, `Plugin`, cleanup, group, and runner signatures | Propagate setup/update errors, use narrow cleanup/group contexts, and let runners borrow the app. |
+| U2-2 | U2 | `2867235` | `rust-api` | Built-in `register_*_components` helpers | Handle `ComponentRegistryError`; plugin installation now reports contextual registration failure. |
 
 ## Entry Contract
 

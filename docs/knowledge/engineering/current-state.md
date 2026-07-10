@@ -3,16 +3,16 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-10T10:30:00+08:00
+timestamp: 2026-07-10T13:14:35+08:00
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-10T10:30:00+08:00
-- Last verified: Pre-refactor `cargo nextest run --workspace` passed 335 tests; the implementation-ready foundation plan, mature-engine audit, dependency graph, and engineering-memory bundle passed document consistency, `git diff --check`, and memory validation.
-- Next action: Complete M1 runtime safety units on `refactor/engine-foundation-contracts`, beginning with ADR governance and plugin lifecycle.
+- Snapshot timestamp: 2026-07-10T13:14:35+08:00
+- Last verified: U2 plugin failure containment commit `2867235`; final `cargo nextest run --workspace` passed 361/361, all-features/all-targets and backend examples compiled, nara_app Clippy passed with warnings denied, and two independent reviews had no remaining finding.
+- Next action: Implement U25 capability-oriented filesystem substrate, the remaining Wave B unit; U3 fixed time and U5 bounded tasks are also open after U2 verification.
 
 # Active Registrations
 
@@ -61,7 +61,13 @@ status: "active"
   - `nara_tooling_egui` provides the first concrete egui debug/editor adapter while keeping `nara_tooling` UI-toolkit agnostic.
   - Foundation hardening now requires explicit serializable component schemas, rejects duplicate runtime type registrations, checks schema default kinds, and keeps scene/prefab spawn preflight-first.
   - `nara_reflect` is split into focused value, schema, path, codec, migration, registry, and test modules behind the same public facade.
-  - `nara_app` plugin installation is fallible through `PluginError`; duplicate unique plugins are rejected, and plugin groups use `add_plugin_if_missing`.
+  - `nara_app` plugin lifecycle is terminal and cleanup-safe: preflight rejection is retryable,
+    committed build/finish errors and unwind panics poison the app, the first error is preserved,
+    cleanup is reverse/fallible/once-only, groups use a composition-only builder, runners borrow the
+    app for explicit shutdown, and every mutable/run entry point rejects a poisoned app.
+  - Built-in component plugins preflight stable ID/Rust type conflicts and return contextual
+    registration errors; the old setup `expect` paths, `try_update`, infallible mutation entry points,
+    consuming runner contract, and unrestricted group/cleanup hooks are removed in `2867235`.
   - `nara_diagnostic` no longer logs from `DiagnosticReport::push`; logging is an explicit `emit_to_tracing` bridge.
   - `nara_render` exposes `RenderBackendStatus` / `RenderBackendState` / skipped-frame reasons, and `nara_render_wgpu` reports backend state through that resource.
   - The unused public `RenderBackend` trait was removed; backend extension remains plugin/resource/system based until another backend proves the shared contract.
@@ -80,6 +86,9 @@ status: "active"
 
 # Citations
 
+- [Engine foundation M1 runtime safety](progress/2026-07-10-engine-foundation-m1-runtime-safety.md)
+- [ADR 0010 plugin lifecycle](../../architecture/adr/0010-plugin-lifecycle-dependencies-and-failure.md)
+- [Engine foundation migration guide](../../migrations/2026-07-engine-foundation.md)
 - [Scene/prefab serialization progress](progress/2026-07-08T084957Z-scene-prefab-serialization-foundation.md)
 - [Scene/prefab serialization final verification](verification/2026-07-08T091921Z-scene-prefab-serialization-foundation-final.md)
 - [Next architecture priority](decisions/2026-07-08T093608Z-next-priority-asset-import-render-resource-seam.md)
