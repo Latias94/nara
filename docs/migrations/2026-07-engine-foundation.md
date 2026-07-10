@@ -28,6 +28,9 @@ Every implementation unit that changes a public API, persistent shape, cache con
 |---|---|---|---|---|---|
 | U2-1 | U2 | `2867235` | `rust-api` | `App` mutation/update, `Plugin`, cleanup, group, and runner signatures | Propagate setup/update errors, use narrow cleanup/group contexts, and let runners borrow the app. |
 | U2-2 | U2 | `2867235` | `rust-api` | Built-in `register_*_components` helpers | Handle `ComponentRegistryError`; plugin installation now reports contextual registration failure. |
+| U3-1 | U3 | `a4167e4` | `rust-api/behavior` | Runtime/fixed/render time construction, mutation, and frame semantics | Use validated constructors/setters, handle time-frame errors, and replace bulk fixed-step observations with per-tick clock state. |
+| U5-1 | U5 | `e77da64` | `rust-api` | Task pool configuration, submission, terminal results, test execution, and shutdown | Configure bounded threaded pools, handle explicit spawn/terminal outcomes, and use the test-only inline driver where deterministic execution is required. |
+| U5-2 | U5 | `e77da64` | `persistent-shape` | `nara.toml` runtime plugin-plan spelling and task pool schema | Rewrite flat task fields into per-pool/shutdown tables and use only the canonical `runtime-2d` value. |
 
 ## Entry Contract
 
@@ -148,6 +151,215 @@ helpers directly. Plugin users receive a contextual `PluginError` automatically.
 
 **Verification anchors**: component registry read-only validation test, built-in duplicate conflict
 tests, and a stale search for registration `expect` calls.
+
+## U3-1: Validated Time Configuration and Per-Tick Fixed Clock
+
+**Removed contract**:
+
+- Public mutable fields on `RuntimeTimeSettings` and infallible `with_time_scale` /
+  `with_max_delta` builders that silently normalized invalid values.
+- Infallible `FixedTime::new` and `FixedTime::with_max_steps_per_frame` constructors.
+- `FixedTime::accumulated` / `FixedTime::overstep` and `RenderTime::overstep`, whose bulk
+  frame-level model did not identify the current authoritative tick.
+- Bulk deduction of all due fixed steps before `CoreStage::FixedUpdate`, including saturating
+  overflow behavior and tracker cleanup that did not define a completed-frame boundary.
+
+**Canonical replacement or deletion rationale**: time configuration is validated before use.
+`RuntimeTimeSettings::new`, fallible builders, and setters return `TimeSettingsError`; `FixedTime`
+uses fallible construction/setters and exposes catch-up policy, bounded debt, remainder, per-tick
+delta/elapsed/tick, and discarded-time observations. `RenderTime::remainder` is the interpolation
+remainder. `App::run_once` reports `TimeFrameError` through `AppRunError`, plans all clock changes
+before committing them, advances `FixedTime` once immediately before each fixed schedule, and clears
+ECS trackers only after the complete frame succeeds. The old model is deleted because it could not
+represent zero/one/many-step frames or preserve atomic failure semantics.
+
+**Before**:
+
+```rust
+let settings = RuntimeTimeSettings::default().with_time_scale(-1.0);
+let fixed = FixedTime::new(Duration::ZERO).with_max_steps_per_frame(0);
+let pending = fixed.accumulated();
+let alpha_source = render_time.overstep;
+```
+
+**After**:
+
+```rust
+let settings = RuntimeTimeSettings::default().with_time_scale(0.5)?;
+let fixed = FixedTime::new(Duration::from_millis(16))?
+    .with_max_steps_per_frame(5)?
+    .with_max_debt_steps(120)?
+    .with_catch_up_policy(FixedCatchUpPolicy::DiscardExcess);
+let authoritative_tick = fixed.tick();
+let interpolation_remainder = render_time.remainder;
+```
+
+**Affected examples and fixtures**: root prelude exports, project manifest/profile lowering, server
+composition, project tests, and headless server setup use the validated canonical values.
+
+**User action**: replace direct time-setting field mutation with getters/setters; propagate
+`TimeSettingsError`; replace `accumulated`/`overstep` observations with the specific `remainder`,
+`debt`, `tick`, `delta`, or `elapsed` observation required by the caller; handle `AppRunError::Time`.
+
+**Source action**: `none` for code-first users. `nara.toml` runtime values are validated during
+profile resolution; invalid zero, non-finite, sub-nanosecond, or overflowing values must be edited.
+
+**Cache action**: `keep`.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert `a4167e4` together with its project/facade callers. Do not restore silent
+normalization, saturating clocks, or a second bulk-step API.
+
+**Verification anchors**: `nara_app` zero/one/many-step, pause/scale, discard/preserve debt,
+overflow atomicity, Startup timing, fixed-set flush, removed-component, and tracker-boundary tests;
+`cargo nextest run -p nara_app --locked` passes 52 tests.
+
+## U5-1: Bounded Threaded Task Admission and Typed Terminals
+
+**Removed contract**:
+
+- `TaskExecutionMode`, including production/project `Deterministic` and `Threaded` mode switches.
+- `TaskResult<T>` and `TaskResultState`.
+- `TaskPoolConfig::deterministic`, `TaskPools::deterministic`,
+  `TaskPlugin::deterministic`, `TaskPoolConfig::execution_mode`, and
+  `TaskPoolConfig::threads_for`.
+- Infallible thread-count-only configuration and `TaskPools::spawn(kind, closure) -> TaskHandle<T>`.
+- Implicit unbounded submission, caller-thread fallback after closure, and unbounded worker join.
+
+**Canonical replacement or deletion rationale**: production uses one bounded threaded state machine.
+`TaskKindConfig` defines non-zero workers and pending capacity per kind; `TaskShutdownPolicy` defines
+finite drain/cancel/join limits; `TaskPoolConfig` validates per-kind and aggregate limits.
+`TaskPools::spawn` accepts a `TaskSpawnRequest` carrying admission tick, domain key, and overload
+policy, then returns `TaskSpawnOutcome::{Accepted, Coalesced, Rejected}`. Handles yield one
+`TaskTerminal::{Completed, Cancelled, Failed}` and first terminal wins every cancellation/result
+race. `TaskPools::inline_for_tests` plus `run_pending_for_tests` drives the same bounded state machine
+only in tests. The removed execution-mode API conflated deterministic application order with
+caller-thread execution and was unsafe for real servers.
+
+**Before**:
+
+```rust
+let pools = TaskPools::deterministic();
+let mut handle = pools.spawn(TaskPoolKind::Compute, |_| 42_u32);
+let result: TaskResult<u32> = handle.try_take().unwrap();
+assert_eq!(result.into_value(), 42);
+```
+
+**After**:
+
+```rust
+let workers = ItemLimit::new(1).unwrap();
+let config = TaskPoolConfig::threaded(workers, workers, workers)?;
+let pools = TaskPools::try_new(config)?;
+let request = TaskSpawnRequest::new(17, TaskDomainKey::new(7));
+let mut handle = pools
+    .spawn(TaskPoolKind::Compute, request, |_| 42_u32)
+    .into_handle()
+    .expect("the task should be admitted");
+if let Some(TaskTerminal::Completed(value)) = handle.try_take() {
+    assert_eq!(value, 42);
+}
+```
+
+**Affected examples and fixtures**: image reload integration, project settings lowering, root
+facade/server composition, headless server example, task/image/project tests, and crate preludes now
+use only bounded typed outcomes.
+
+**User action**: replace execution-mode branching with a validated `TaskPoolConfig`; supply a stable
+`TaskDomainKey` and admission tick on every submission; handle rejection/coalescing and every
+terminal variant; use `OrderedTaskResults` when application must be completion-order independent;
+call `inline_for_tests` explicitly in deterministic tests.
+
+**Source action**: `none` for Rust code-first configuration.
+
+**Cache action**: `keep`.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert `e77da64` together with all domain integration and server/project callers. Do
+not restore unbounded channels, caller-thread fallback, or a production inline mode.
+
+**Verification anchors**: `nara_tasks` queue-full/coalesce/panic/drop-panic/cancellation-race/ID-
+exhaustion/partial-worker-start/shutdown tests; `nara_image` per-asset ordered-prefix and last-good
+tests; root blocked-worker server tick test.
+
+## U5-2: Canonical Version-1 Runtime and Task Project Settings
+
+**Removed contract**:
+
+- `ProjectTaskExecutionMode` and the flat `[tasks]` fields `mode`, `io_threads`,
+  `compute_threads`, and `async_compute_threads`.
+- The non-canonical `plugin_plan = "runtime2d"` serde alias.
+- Effective task settings that could be parsed but did not configure the installed `TaskPlugin`.
+
+**Canonical replacement or deletion rationale**: the unreleased project shape remains schema
+version 1 and now expresses actual bounded runtime policy. `[tasks.io]`, `[tasks.compute]`, and
+`[tasks.async_compute]` each contain `workers` and `pending_capacity`; `[tasks.shutdown]` contains
+finite `drain_timeout_ms`, `cancel_timeout_ms`, and `join_timeout_ms`. Runtime settings add explicit
+fixed catch-up/debt policy. `apply_project_settings` installs validated diagnostics, time, and task
+configuration before the selected product bundle. The old shape is rejected rather than retained as
+a second version-1 reader.
+
+**Before**:
+
+```toml
+[runtime]
+plugin_plan = "runtime2d"
+
+[tasks]
+mode = "deterministic"
+io_threads = 0
+compute_threads = 0
+async_compute_threads = 0
+```
+
+**After**:
+
+```toml
+[runtime]
+plugin_plan = "runtime-2d"
+catch_up_policy = "discard-excess"
+max_fixed_debt_steps = 120
+
+[tasks.io]
+workers = 2
+pending_capacity = 64
+
+[tasks.compute]
+workers = 4
+pending_capacity = 128
+
+[tasks.async_compute]
+workers = 2
+pending_capacity = 64
+
+[tasks.shutdown]
+drain_timeout_ms = 250
+cancel_timeout_ms = 250
+join_timeout_ms = 250
+```
+
+**Affected examples and fixtures**: `examples/headless_server.rs`, root project application tests,
+project profile tests, and `crates/nara_project/tests/fixtures/complete_v1.toml` use the canonical
+shape.
+
+**User action**: manually rewrite experimental `nara.toml` files to the nested tables above; choose
+non-zero values within the documented per-pool/aggregate limits; replace `runtime2d` with
+`runtime-2d`. Server plans always use real threaded pools and `PreserveDebt`.
+
+**Source action**: `manual-rewrite`. Runtime auto-rewrite is intentionally unsupported.
+
+**Cache action**: `keep`.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: restore the project file backup and revert `e77da64` with the old parser/callers. Do
+not add aliases or parallel schema-version types.
+
+**Verification anchors**: the complete version-1 fixture, obsolete flat-schema/alias rejection,
+duration/fixed-cap/task-limit/profile merge tests, root configuration equality test, and stale-symbol
+searches.
 
 ## Persistent Format Matrix
 

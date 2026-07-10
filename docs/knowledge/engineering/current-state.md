@@ -71,7 +71,8 @@ status: "active"
   - `nara_diagnostic` no longer logs from `DiagnosticReport::push`; logging is an explicit `emit_to_tracing` bridge.
   - `nara_render` exposes `RenderBackendStatus` / `RenderBackendState` / skipped-frame reasons, and `nara_render_wgpu` reports backend state through that resource.
   - The unused public `RenderBackend` trait was removed; backend extension remains plugin/resource/system based until another backend proves the shared contract.
-  - `nara_tasks` owns deterministic and threaded engine task pools with typed task handles, cancellation tokens, task stats, and a `TaskPlugin`.
+  - `nara_tasks` owns bounded threaded engine task pools, typed terminal handles, cancellation tokens,
+    ordered integration helpers, finite shutdown, and an explicitly test-only inline driver.
   - `nara_app::CoreStage::TaskUpdate` now provides ordered main-thread async integration sets: `Poll`, `CoalesceAssetChanges`, `SpawnAssetJobs`, and `ApplyAssetResults`.
   - `nara_asset` now owns `AssetPlugin`, source-change queues, reload requests, load generations, typed importer job contracts, last-event-wins coalescing, transitive dependency reload propagation, and expected-version guarded asset result application.
   - `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, spawns owned image import jobs, applies typed results behind stable handles, records failed first loads/reloads/removals, composes `ImagePreparePlugin`, and invalidates prepared image resources through the render prepare seam.
