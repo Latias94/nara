@@ -1,12 +1,14 @@
 use std::{error::Error, time::Duration};
 
-use nara::prelude::*;
+use nara::{ecs::schedule::IntoScheduleConfigs, prelude::*};
 
 #[derive(Debug, Default, Resource)]
-struct ObservedCommands(usize);
+struct ObservedCommands(Vec<GameplayCommandKey>);
 
-fn observe_commands(queue: Res<GameplayCommandQueue>, mut observed: ResMut<ObservedCommands>) {
-    observed.0 = queue.as_slice().len();
+fn observe_commands(batch: Res<GameplayCommandBatch>, mut observed: ResMut<ObservedCommands>) {
+    observed
+        .0
+        .extend(batch.iter().map(|command| command.key().clone()));
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -33,25 +35,30 @@ name = "Headless Example"
     let mut app = App::new();
     apply_project_settings(&mut app, settings)?
         .insert_resource(ObservedCommands::default())?
-        .add_systems(CoreStage::FixedUpdate, observe_commands)?;
+        .add_systems(
+            CoreStage::FixedUpdate,
+            observe_commands.in_set(GameplayCommandSet::Consume),
+        )?;
 
-    let command = GameplayCommandEnvelope::new(
-        GameplayCommandTypeId::new("server.tick")?,
-        GameplayCommandSource::Test,
-        GameplayCommandTime {
-            frame: 0,
-            fixed_tick: Some(0),
-        },
+    let command = GameplayCommandSubmission::new(
+        GameplayCommandTick::new(1).expect("the first authoritative tick is non-zero"),
+        GameplayCommandIngressSource::external("example-server")?,
+        GameplayCommandSourceSequence::new(1).expect("the first source sequence is non-zero"),
+        GameplayCommandDraft::new(GameplayCommandTypeId::new("server.tick")?),
     );
     app.world_mut()?
         .resource_mut::<GameplayCommandQueue>()
-        .push(command);
+        .submit(command)?;
 
     let outcome = app.run_once(Duration::from_secs_f64(1.0 / 60.0))?;
 
     assert_eq!(outcome.exit, None);
-    assert_eq!(app.world().resource::<ObservedCommands>().0, 1);
-    assert!(app.world().resource::<GameplayCommandQueue>().is_empty());
+    assert_eq!(app.world().resource::<ObservedCommands>().0.len(), 1);
+    assert_eq!(
+        app.world().resource::<ObservedCommands>().0[0].tick().get(),
+        1
+    );
+    assert!(app.world().resource::<GameplayCommandQueue>().is_idle());
     assert!(!app.world().contains_resource::<nara::input::PointerState>());
     assert!(
         !app.world()

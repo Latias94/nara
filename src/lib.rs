@@ -172,7 +172,7 @@ impl PluginGroup for HeadlessRuntimePlugins {
 
     fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
         group.add_plugins(MinimalPlugins)?;
-        group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
+        group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin::default())?;
         Ok(())
     }
 }
@@ -222,7 +222,7 @@ impl PluginGroup for ServerPlugins {
         group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
         group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
         group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
-        group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
+        group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin::default())?;
         Ok(())
     }
 }
@@ -407,11 +407,16 @@ pub mod prelude {
     };
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
     pub use nara_gameplay::{
-        ActionCommandBinding, ActionCommandMap, GameplayCommandEnvelope, GameplayCommandIdError,
-        GameplayCommandPayload, GameplayCommandPayloadError, GameplayCommandPlugin,
-        GameplayCommandQueue, GameplayCommandSet, GameplayCommandSource, GameplayCommandTarget,
-        GameplayCommandTime, GameplayCommandTypeId, GameplayCommandValue, PersistentRuntimeId,
-        SceneStableId,
+        ActionCommandBinding, ActionCommandMap, ActionCommandMapError, GameplayCommandBatch,
+        GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandIdError,
+        GameplayCommandIngressSource, GameplayCommandKey, GameplayCommandLifecycleError,
+        GameplayCommandLimitKind, GameplayCommandPayload, GameplayCommandPayloadError,
+        GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandQueueSettings,
+        GameplayCommandQueueStats, GameplayCommandRejection, GameplayCommandSet,
+        GameplayCommandSettingsError, GameplayCommandSource, GameplayCommandSourceId,
+        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
+        GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
+        MAX_ACTION_COMMAND_BINDINGS, PersistentRuntimeId, SceneStableId,
     };
     pub use nara_image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin, ImageSourceMetadata,
@@ -586,6 +591,7 @@ pub mod backend_prelude {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_ecs::schedule::IntoScheduleConfigs;
 
     #[test]
     fn minimal_plugins_install_only_headless_core_resources() {
@@ -776,6 +782,19 @@ mod tests {
             nara_app::FixedCatchUpPolicy::PreserveDebt
         );
         assert!(!app.world().contains_resource::<nara_input::PointerState>());
+        assert!(
+            !app.world()
+                .contains_resource::<nara_input::ButtonInput<nara_input::KeyCode>>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<nara_input::ButtonInput<nara_input::MouseButton>>()
+        );
+        assert!(!app.world().contains_resource::<nara_input::ActionMap>());
+        assert!(
+            !app.world()
+                .contains_resource::<nara_input::ActionOutcomes>()
+        );
         assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
         assert!(
@@ -785,33 +804,41 @@ mod tests {
     }
 
     #[derive(Debug, Default, nara_ecs::Resource)]
-    struct ObservedServerCommands(Vec<nara_gameplay::GameplayCommandEnvelope>);
+    struct ObservedServerCommands(Vec<(u64, Vec<nara_gameplay::GameplayCommandEnvelope>)>);
 
     fn observe_server_commands(
-        queue: nara_ecs::Res<nara_gameplay::GameplayCommandQueue>,
+        batch: nara_ecs::Res<nara_gameplay::GameplayCommandBatch>,
+        fixed_time: nara_ecs::Res<nara_app::FixedTime>,
         mut observed: nara_ecs::ResMut<ObservedServerCommands>,
     ) {
-        observed.0 = queue.as_slice().to_vec();
+        observed
+            .0
+            .push((fixed_time.tick(), batch.commands().to_vec()));
     }
 
     #[test]
-    fn server_plugins_run_without_action_outcomes_and_keep_manual_commands_observable() {
+    fn server_plugins_retain_manual_commands_until_their_authoritative_tick() {
         let mut app = App::new();
         app.add_plugins(ServerPlugins).unwrap();
         app.insert_resource(ObservedServerCommands::default())
             .expect("server observation resource should install")
-            .add_systems(nara_app::CoreStage::Update, observe_server_commands)
+            .add_systems(
+                nara_app::CoreStage::FixedUpdate,
+                observe_server_commands.in_set(nara_gameplay::GameplayCommandSet::Consume),
+            )
             .expect("server observation system should install");
         app.world_mut()
             .expect("a configured app should allow world mutation")
             .resource_mut::<nara_gameplay::GameplayCommandQueue>()
-            .push(nara_gameplay::GameplayCommandEnvelope::new(
-                nara_gameplay::GameplayCommandTypeId::new("server.tick").unwrap(),
-                nara_gameplay::GameplayCommandSource::External {
-                    producer: "test-server".to_owned(),
-                },
-                nara_gameplay::GameplayCommandTime::default(),
-            ));
+            .submit(nara_gameplay::GameplayCommandSubmission::new(
+                nara_gameplay::GameplayCommandTick::new(1).unwrap(),
+                nara_gameplay::GameplayCommandIngressSource::external("test-server").unwrap(),
+                nara_gameplay::GameplayCommandSourceSequence::new(1).unwrap(),
+                nara_gameplay::GameplayCommandDraft::new(
+                    nara_gameplay::GameplayCommandTypeId::new("server.tick").unwrap(),
+                ),
+            ))
+            .unwrap();
 
         app.run_once(std::time::Duration::ZERO).unwrap();
 
@@ -819,17 +846,153 @@ mod tests {
             !app.world()
                 .contains_resource::<nara_input::ActionOutcomes>()
         );
+        assert!(
+            app.world()
+                .resource::<ObservedServerCommands>()
+                .0
+                .is_empty()
+        );
         assert_eq!(
-            app.world().resource::<ObservedServerCommands>().0[0]
-                .command_type
+            app.world()
+                .resource::<nara_gameplay::GameplayCommandQueue>()
+                .stats()
+                .pending_commands,
+            1
+        );
+
+        app.run_once(nara_app::FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        assert_eq!(
+            app.world().resource::<ObservedServerCommands>().0[0].1[0]
+                .command_type()
                 .as_str(),
             "server.tick"
         );
         assert!(
             app.world()
                 .resource::<nara_gameplay::GameplayCommandQueue>()
-                .is_empty()
+                .is_idle()
         );
+    }
+
+    fn run_server_command_stream(
+        reverse_arrival: bool,
+    ) -> Vec<(u64, Vec<nara_gameplay::GameplayCommandEnvelope>)> {
+        let mut app = App::new();
+        app.add_plugins(ServerPlugins).unwrap();
+        app.insert_resource(ObservedServerCommands::default())
+            .unwrap()
+            .add_systems(
+                nara_app::CoreStage::FixedUpdate,
+                observe_server_commands.in_set(nara_gameplay::GameplayCommandSet::Consume),
+            )
+            .unwrap();
+
+        let mut submissions = vec![
+            nara_gameplay::GameplayCommandSubmission::new(
+                nara_gameplay::GameplayCommandTick::new(1).unwrap(),
+                nara_gameplay::GameplayCommandIngressSource::external("peer-b").unwrap(),
+                nara_gameplay::GameplayCommandSourceSequence::new(2).unwrap(),
+                nara_gameplay::GameplayCommandDraft::new(
+                    nara_gameplay::GameplayCommandTypeId::new("move.b").unwrap(),
+                ),
+            ),
+            nara_gameplay::GameplayCommandSubmission::new(
+                nara_gameplay::GameplayCommandTick::new(1).unwrap(),
+                nara_gameplay::GameplayCommandIngressSource::external("peer-a").unwrap(),
+                nara_gameplay::GameplayCommandSourceSequence::new(3).unwrap(),
+                nara_gameplay::GameplayCommandDraft::new(
+                    nara_gameplay::GameplayCommandTypeId::new("move.a").unwrap(),
+                ),
+            ),
+            nara_gameplay::GameplayCommandSubmission::new(
+                nara_gameplay::GameplayCommandTick::new(2).unwrap(),
+                nara_gameplay::GameplayCommandIngressSource::external("peer-a").unwrap(),
+                nara_gameplay::GameplayCommandSourceSequence::new(1).unwrap(),
+                nara_gameplay::GameplayCommandDraft::new(
+                    nara_gameplay::GameplayCommandTypeId::new("move.next").unwrap(),
+                ),
+            ),
+        ];
+        if reverse_arrival {
+            submissions.reverse();
+        }
+        {
+            let mut queue = app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<nara_gameplay::GameplayCommandQueue>();
+            for submission in submissions {
+                queue.submit(submission).unwrap();
+            }
+        }
+
+        app.run_once(nara_app::FixedTime::DEFAULT_TIMESTEP * 2)
+            .unwrap();
+        assert!(!app.world().contains_resource::<nara_input::PointerState>());
+        assert!(
+            !app.world()
+                .contains_resource::<nara_input::ButtonInput<nara_input::KeyCode>>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<nara_input::ButtonInput<nara_input::MouseButton>>()
+        );
+        assert!(!app.world().contains_resource::<nara_input::ActionMap>());
+        assert!(
+            !app.world()
+                .contains_resource::<nara_input::ActionOutcomes>()
+        );
+        assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
+        app.world().resource::<ObservedServerCommands>().0.clone()
+    }
+
+    #[test]
+    fn server_plugins_admit_the_same_command_stream_in_canonical_order() {
+        let forward = run_server_command_stream(false);
+        let reverse = run_server_command_stream(true);
+        assert_eq!(forward, reverse);
+        assert_eq!(forward.len(), 2);
+        assert_eq!(forward[0].0, 1);
+        assert_eq!(forward[1].0, 2);
+        assert_eq!(forward[0].1.len(), 2);
+        assert_eq!(forward[1].1.len(), 1);
+        assert_eq!(
+            forward[0]
+                .1
+                .iter()
+                .map(|command| { (command.source().clone(), command.source_sequence().get(),) })
+                .collect::<Vec<_>>(),
+            [
+                (
+                    nara_gameplay::GameplayCommandSource::external("peer-a").unwrap(),
+                    3,
+                ),
+                (
+                    nara_gameplay::GameplayCommandSource::external("peer-b").unwrap(),
+                    2,
+                ),
+            ]
+        );
+        assert_eq!(
+            (
+                forward[1].1[0].source().clone(),
+                forward[1].1[0].source_sequence().get(),
+            ),
+            (
+                nara_gameplay::GameplayCommandSource::external("peer-a").unwrap(),
+                1,
+            )
+        );
+        assert_eq!(
+            forward[0]
+                .1
+                .iter()
+                .map(|command| command.command_type().as_str())
+                .collect::<Vec<_>>(),
+            ["move.a", "move.b"]
+        );
+        assert_eq!(forward[1].1[0].command_type().as_str(), "move.next");
     }
 
     #[test]

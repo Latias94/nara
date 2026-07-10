@@ -1,541 +1,76 @@
-//! Gameplay command envelopes and semantic action-to-command bridging.
+//! Bounded authoritative gameplay command ingress and action mapping.
 
-use std::{
-    collections::BTreeMap,
-    fmt::{self, Display, Formatter},
+mod action;
+mod command;
+mod queue;
+
+pub use action::{
+    ActionCommandBinding, ActionCommandMap, ActionCommandMapError, MAX_ACTION_COMMAND_BINDINGS,
+};
+pub use command::{
+    GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandIdError,
+    GameplayCommandIngressSource, GameplayCommandKey, GameplayCommandPayload,
+    GameplayCommandPayloadError, GameplayCommandSource, GameplayCommandSourceId,
+    GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
+    GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
+    MAX_GAMEPLAY_COMMAND_ID_BYTES, MAX_GAMEPLAY_COMMAND_PAYLOAD_BYTES,
+    MAX_GAMEPLAY_COMMAND_PAYLOAD_ITEMS, MAX_GAMEPLAY_COMMAND_PAYLOAD_KEY_BYTES,
+    MAX_GAMEPLAY_COMMAND_STRING_BYTES, PersistentRuntimeId, SceneStableId,
+};
+pub use queue::{
+    GameplayCommandBatch, GameplayCommandLifecycleError, GameplayCommandLimitKind,
+    GameplayCommandQueue, GameplayCommandQueueSettings, GameplayCommandQueueStats,
+    GameplayCommandRejection, GameplayCommandSettingsError, MAX_GAMEPLAY_COMMAND_BYTES,
+    MAX_GAMEPLAY_COMMAND_FUTURE_TICKS, MAX_GAMEPLAY_COMMAND_RETAINED_BYTES,
+    MAX_GAMEPLAY_COMMAND_RETAINED_COMMANDS,
 };
 
-use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
+use nara_app::{App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError};
 use nara_ecs::{
-    Res, ResMut, Resource,
+    Res, ResMut,
     schedule::{IntoScheduleConfigs, SystemSet},
 };
-use nara_input::{ActionContext, ActionId, ActionOutcomes, ActionPhase, InputSet};
-use thiserror::Error;
+use nara_input::{ActionOutcomes, InputSet};
 
 const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.gameplay.commands");
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct GameplayCommandTypeId(String);
-
-impl GameplayCommandTypeId {
-    pub fn new(id: impl Into<String>) -> Result<Self, GameplayCommandIdError> {
-        let id = id.into();
-        validate_id("command type id", &id)?;
-        Ok(Self(id))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for GameplayCommandTypeId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for GameplayCommandTypeId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for GameplayCommandTypeId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(id).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SceneStableId(String);
-
-impl SceneStableId {
-    pub fn new(id: impl Into<String>) -> Result<Self, GameplayCommandIdError> {
-        let id = id.into();
-        validate_id("scene stable id", &id)?;
-        Ok(Self(id))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for SceneStableId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for SceneStableId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for SceneStableId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(id).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PersistentRuntimeId(String);
-
-impl PersistentRuntimeId {
-    pub fn parse_str(id: impl Into<String>) -> Result<Self, GameplayCommandIdError> {
-        let id = id.into();
-        let id = uuid::Uuid::parse_str(&id).map_err(|_| GameplayCommandIdError::InvalidUuid)?;
-        Ok(Self(id.to_string()))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for PersistentRuntimeId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for PersistentRuntimeId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for PersistentRuntimeId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::parse_str(id).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum GameplayCommandIdError {
-    #[error("{kind} cannot be empty")]
-    Empty { kind: &'static str },
-    #[error("{kind} cannot contain control characters")]
-    ContainsControl { kind: &'static str },
-    #[error("persistent runtime id must be a UUID")]
-    InvalidUuid,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub enum GameplayCommandTarget {
-    Scene(SceneStableId),
-    Persistent(PersistentRuntimeId),
-    Named(String),
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for GameplayCommandTarget {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        enum RawTarget {
-            Scene(SceneStableId),
-            Persistent(PersistentRuntimeId),
-            Named(String),
-        }
-
-        match <RawTarget as serde::Deserialize>::deserialize(deserializer)? {
-            RawTarget::Scene(scene) => Ok(Self::Scene(scene)),
-            RawTarget::Persistent(id) => Ok(Self::Persistent(id)),
-            RawTarget::Named(name) => {
-                validate_id("named command target", &name).map_err(serde::de::Error::custom)?;
-                Ok(Self::Named(name))
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum GameplayCommandValue {
-    Bool(bool),
-    I64(i64),
-    F64(f64),
-    String(String),
-}
-
-#[derive(Debug, Default, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct GameplayCommandPayload {
-    values: BTreeMap<String, GameplayCommandValue>,
-}
-
-impl GameplayCommandPayload {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn insert(
-        &mut self,
-        key: impl Into<String>,
-        value: GameplayCommandValue,
-    ) -> Result<Option<GameplayCommandValue>, GameplayCommandPayloadError> {
-        let key = key.into();
-        validate_payload_key(&key)?;
-        Ok(self.values.insert(key, value))
-    }
-
-    #[must_use]
-    pub fn get(&self, key: &str) -> Option<&GameplayCommandValue> {
-        self.values.get(key)
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &GameplayCommandValue)> {
-        self.values.iter()
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for GameplayCommandPayload {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        struct RawPayload {
-            #[serde(default)]
-            values: BTreeMap<String, GameplayCommandValue>,
-        }
-
-        let raw = <RawPayload as serde::Deserialize>::deserialize(deserializer)?;
-        let mut payload = Self::new();
-        for (key, value) in raw.values {
-            payload
-                .insert(key, value)
-                .map_err(serde::de::Error::custom)?;
-        }
-        Ok(payload)
-    }
-}
-
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum GameplayCommandPayloadError {
-    #[error("payload key cannot be empty")]
-    EmptyKey,
-    #[error("payload key cannot contain control characters")]
-    ContainsControl,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub enum GameplayCommandSource {
-    LocalAction { action: ActionId },
-    Test,
-    Replay { stream: String },
-    Ai { agent: String },
-    External { producer: String },
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for GameplayCommandSource {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        enum RawSource {
-            LocalAction { action: ActionId },
-            Test,
-            Replay { stream: String },
-            Ai { agent: String },
-            External { producer: String },
-        }
-
-        match <RawSource as serde::Deserialize>::deserialize(deserializer)? {
-            RawSource::LocalAction { action } => Ok(Self::LocalAction { action }),
-            RawSource::Test => Ok(Self::Test),
-            RawSource::Replay { stream } => {
-                validate_id("replay stream", &stream).map_err(serde::de::Error::custom)?;
-                Ok(Self::Replay { stream })
-            }
-            RawSource::Ai { agent } => {
-                validate_id("AI agent", &agent).map_err(serde::de::Error::custom)?;
-                Ok(Self::Ai { agent })
-            }
-            RawSource::External { producer } => {
-                validate_id("external producer", &producer).map_err(serde::de::Error::custom)?;
-                Ok(Self::External { producer })
-            }
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GameplayCommandTime {
-    pub frame: u64,
-    pub fixed_tick: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GameplayCommandEnvelope {
-    pub sequence: u64,
-    pub command_type: GameplayCommandTypeId,
-    pub source: GameplayCommandSource,
-    pub time: GameplayCommandTime,
-    pub target: Option<GameplayCommandTarget>,
-    pub payload: GameplayCommandPayload,
-}
-
-impl GameplayCommandEnvelope {
-    #[must_use]
-    pub fn new(
-        command_type: GameplayCommandTypeId,
-        source: GameplayCommandSource,
-        time: GameplayCommandTime,
-    ) -> Self {
-        Self {
-            sequence: 0,
-            command_type,
-            source,
-            time,
-            target: None,
-            payload: GameplayCommandPayload::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_target(mut self, target: GameplayCommandTarget) -> Self {
-        self.target = Some(target);
-        self
-    }
-
-    #[must_use]
-    pub fn with_payload(mut self, payload: GameplayCommandPayload) -> Self {
-        self.payload = payload;
-        self
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ActionCommandBinding {
-    pub action: ActionId,
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub context: ActionContext,
-    pub phase: ActionPhase,
-    pub command_type: GameplayCommandTypeId,
-    pub target: Option<GameplayCommandTarget>,
-    pub payload: GameplayCommandPayload,
-}
-
-impl ActionCommandBinding {
-    #[must_use]
-    pub fn new(action: ActionId, phase: ActionPhase, command_type: GameplayCommandTypeId) -> Self {
-        Self {
-            action,
-            context: ActionContext::gameplay(),
-            phase,
-            command_type,
-            target: None,
-            payload: GameplayCommandPayload::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_target(mut self, target: GameplayCommandTarget) -> Self {
-        self.target = Some(target);
-        self
-    }
-
-    #[must_use]
-    pub fn with_context(mut self, context: ActionContext) -> Self {
-        self.context = context;
-        self
-    }
-
-    #[must_use]
-    pub fn with_payload(mut self, payload: GameplayCommandPayload) -> Self {
-        self.payload = payload;
-        self
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct ActionCommandKey {
-    action: ActionId,
-    context: ActionContext,
-    phase: ActionPhase,
-}
-
-impl ActionCommandKey {
-    fn new(action: ActionId, context: ActionContext, phase: ActionPhase) -> Self {
-        Self {
-            action,
-            context,
-            phase,
-        }
-    }
-
-    fn from_binding(binding: &ActionCommandBinding) -> Self {
-        Self::new(
-            binding.action.clone(),
-            binding.context.clone(),
-            binding.phase,
-        )
-    }
-}
-
-#[derive(Debug, Default, Clone, Resource)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct ActionCommandMap {
-    bindings: Vec<ActionCommandBinding>,
-    #[cfg_attr(feature = "serde", serde(skip))]
-    bindings_by_action: BTreeMap<ActionCommandKey, Vec<usize>>,
-}
-
-impl PartialEq for ActionCommandMap {
-    fn eq(&self, other: &Self) -> bool {
-        self.bindings == other.bindings
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for ActionCommandMap {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        struct RawActionCommandMap {
-            #[serde(default)]
-            bindings: Vec<ActionCommandBinding>,
-        }
-
-        let raw = <RawActionCommandMap as serde::Deserialize>::deserialize(deserializer)?;
-        let mut command_map = Self::default();
-        for binding in raw.bindings {
-            command_map.bind(binding);
-        }
-        Ok(command_map)
-    }
-}
-
-impl ActionCommandMap {
-    pub fn bind(&mut self, binding: ActionCommandBinding) {
-        self.bindings_by_action
-            .entry(ActionCommandKey::from_binding(&binding))
-            .or_default()
-            .push(self.bindings.len());
-        self.bindings.push(binding);
-    }
-
-    pub fn bind_action(
-        &mut self,
-        action: ActionId,
-        phase: ActionPhase,
-        command_type: GameplayCommandTypeId,
-    ) {
-        self.bind(ActionCommandBinding::new(action, phase, command_type));
-    }
-
-    #[must_use]
-    pub fn bindings(&self) -> &[ActionCommandBinding] {
-        &self.bindings
-    }
-
-    pub fn matching_bindings(
-        &self,
-        action: &ActionId,
-        context: &ActionContext,
-        phase: ActionPhase,
-    ) -> impl Iterator<Item = &ActionCommandBinding> {
-        let key = ActionCommandKey::new(action.clone(), context.clone(), phase);
-        self.bindings_by_action
-            .get(&key)
-            .into_iter()
-            .flat_map(|indices| indices.iter().filter_map(|index| self.bindings.get(*index)))
-    }
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Resource)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct GameplayCommandQueue {
-    next_sequence: u64,
-    commands: Vec<GameplayCommandEnvelope>,
-}
-
-impl GameplayCommandQueue {
-    pub fn push(&mut self, mut command: GameplayCommandEnvelope) -> u64 {
-        self.next_sequence = self.next_sequence.saturating_add(1);
-        command.sequence = self.next_sequence;
-        let sequence = command.sequence;
-        self.commands.push(command);
-        sequence
-    }
-
-    pub fn clear(&mut self) {
-        self.commands.clear();
-    }
-
-    #[must_use]
-    pub fn as_slice(&self) -> &[GameplayCommandEnvelope] {
-        &self.commands
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.commands.is_empty()
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum GameplayCommandSet {
-    MapActions,
-    Clear,
+    /// Lower local semantic action outcomes into commands for the next open tick.
+    MapLocalActions,
+    /// Close and admit the current authoritative tick.
+    Admit,
+    /// Read the immutable current-tick batch during simulation.
+    Consume,
+    /// Capture the immutable batch for replay or debugging after simulation.
+    Capture,
+    /// Retire the batch and release its retained budget.
+    Acknowledge,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct GameplayCommandPlugin;
+#[derive(Debug, Clone, Copy)]
+pub struct GameplayCommandPlugin {
+    settings: GameplayCommandQueueSettings,
+}
+
+impl Default for GameplayCommandPlugin {
+    fn default() -> Self {
+        Self::new(GameplayCommandQueueSettings::default())
+    }
+}
+
+impl GameplayCommandPlugin {
+    #[must_use]
+    pub const fn new(settings: GameplayCommandQueueSettings) -> Self {
+        Self { settings }
+    }
+
+    #[must_use]
+    pub const fn settings(self) -> GameplayCommandQueueSettings {
+        self.settings
+    }
+}
 
 impl Plugin for GameplayCommandPlugin {
     fn metadata(&self) -> nara_app::PluginMetadata {
@@ -550,17 +85,39 @@ impl Plugin for GameplayCommandPlugin {
             app.insert_resource(ActionCommandMap::default())?;
         }
         if !app.world().contains_resource::<GameplayCommandQueue>() {
-            app.insert_resource(GameplayCommandQueue::default())?;
+            app.insert_resource(GameplayCommandQueue::new(self.settings))?;
         }
-        app.add_systems(
+        if !app.world().contains_resource::<GameplayCommandBatch>() {
+            app.insert_resource(GameplayCommandBatch::new())?;
+        }
+
+        app.configure_sets(
+            CoreStage::FixedUpdate,
+            (
+                GameplayCommandSet::Admit.in_set(FixedUpdateSet::Prepare),
+                GameplayCommandSet::Consume
+                    .in_set(FixedUpdateSet::Simulate)
+                    .run_if(gameplay_command_batch_is_current),
+                GameplayCommandSet::Capture
+                    .in_set(FixedUpdateSet::Finalize)
+                    .run_if(gameplay_command_batch_is_current),
+                GameplayCommandSet::Acknowledge.in_set(FixedUpdateSet::Finalize),
+            )
+                .chain(),
+        )?
+        .add_systems(
             CoreStage::PreUpdate,
             map_action_outcomes_to_commands
                 .after(InputSet::ResolveActions)
-                .in_set(GameplayCommandSet::MapActions),
+                .in_set(GameplayCommandSet::MapLocalActions),
         )?
         .add_systems(
-            CoreStage::Last,
-            clear_gameplay_commands.in_set(GameplayCommandSet::Clear),
+            CoreStage::FixedUpdate,
+            admit_gameplay_commands.in_set(GameplayCommandSet::Admit),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            acknowledge_gameplay_commands.in_set(GameplayCommandSet::Acknowledge),
         )?;
         Ok(())
     }
@@ -569,112 +126,169 @@ impl Plugin for GameplayCommandPlugin {
 fn map_action_outcomes_to_commands(
     command_map: Res<ActionCommandMap>,
     outcomes: Option<Res<ActionOutcomes>>,
-    real_time: Res<RealTime>,
     mut queue: ResMut<GameplayCommandQueue>,
 ) {
     let Some(outcomes) = outcomes else {
         return;
-    };
-    let time = GameplayCommandTime {
-        frame: real_time.frame,
-        fixed_tick: None,
     };
 
     for outcome in outcomes.as_slice() {
         for binding in
             command_map.matching_bindings(&outcome.action, &outcome.context, outcome.phase)
         {
-            let mut command = GameplayCommandEnvelope::new(
-                binding.command_type.clone(),
-                GameplayCommandSource::LocalAction {
-                    action: outcome.action.clone(),
-                },
-                time,
-            );
-            command.target = binding.target.clone();
-            command.payload = binding.payload.clone();
-            queue.push(command);
+            let _ = queue.submit_local_for_next_tick(binding.command().clone());
         }
     }
 }
 
-fn clear_gameplay_commands(mut queue: ResMut<GameplayCommandQueue>) {
-    if !queue.is_empty() {
-        queue.clear();
-    }
+fn admit_gameplay_commands(
+    fixed_time: Res<FixedTime>,
+    mut queue: ResMut<GameplayCommandQueue>,
+    mut batch: ResMut<GameplayCommandBatch>,
+) {
+    let _ = queue.admit_fixed_tick(fixed_time.tick(), &mut batch);
 }
 
-fn validate_id(kind: &'static str, id: &str) -> Result<(), GameplayCommandIdError> {
-    if id.is_empty() {
-        return Err(GameplayCommandIdError::Empty { kind });
-    }
-    if id.chars().any(|character| character.is_control()) {
-        return Err(GameplayCommandIdError::ContainsControl { kind });
-    }
-    Ok(())
+fn gameplay_command_batch_is_current(
+    fixed_time: Res<FixedTime>,
+    batch: Res<GameplayCommandBatch>,
+) -> bool {
+    batch
+        .active_tick()
+        .is_some_and(|tick| tick.get() == fixed_time.tick())
 }
 
-fn validate_payload_key(key: &str) -> Result<(), GameplayCommandPayloadError> {
-    if key.is_empty() {
-        return Err(GameplayCommandPayloadError::EmptyKey);
-    }
-    if key.chars().any(|character| character.is_control()) {
-        return Err(GameplayCommandPayloadError::ContainsControl);
-    }
-    Ok(())
+fn acknowledge_gameplay_commands(
+    fixed_time: Res<FixedTime>,
+    mut queue: ResMut<GameplayCommandQueue>,
+    mut batch: ResMut<GameplayCommandBatch>,
+) {
+    let _ = queue.acknowledge_fixed_tick(fixed_time.tick(), &mut batch);
 }
 
 pub mod prelude {
     pub use crate::{
-        ActionCommandBinding, ActionCommandMap, GameplayCommandEnvelope, GameplayCommandIdError,
-        GameplayCommandPayload, GameplayCommandPayloadError, GameplayCommandPlugin,
-        GameplayCommandQueue, GameplayCommandSet, GameplayCommandSource, GameplayCommandTarget,
-        GameplayCommandTime, GameplayCommandTypeId, GameplayCommandValue, PersistentRuntimeId,
-        SceneStableId,
+        ActionCommandBinding, ActionCommandMap, ActionCommandMapError, GameplayCommandBatch,
+        GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandIdError,
+        GameplayCommandIngressSource, GameplayCommandKey, GameplayCommandLifecycleError,
+        GameplayCommandLimitKind, GameplayCommandPayload, GameplayCommandPayloadError,
+        GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandQueueSettings,
+        GameplayCommandQueueStats, GameplayCommandRejection, GameplayCommandSet,
+        GameplayCommandSettingsError, GameplayCommandSource, GameplayCommandSourceId,
+        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
+        GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
+        MAX_ACTION_COMMAND_BINDINGS, PersistentRuntimeId, SceneStableId,
     };
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{num::NonZeroU64, time::Duration};
+
     use super::*;
-    use nara_app::{CoreStage, FixedTime};
-    use nara_ecs::Res;
-    use nara_input::{ActionBinding, ActionContext, ActionMap, InputPlugin, KeyCode};
+    use nara_app::CoreStage;
+    use nara_core::{ByteLimit, ItemLimit};
+    use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+    use nara_input::{
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionPhase, InputPlugin, KeyCode,
+    };
 
     #[derive(Debug, Default, Resource)]
-    struct ObservedCommands(Vec<GameplayCommandEnvelope>);
+    struct CommandsByTick(Vec<(u64, Vec<GameplayCommandEnvelope>)>);
 
-    fn observe_commands(queue: Res<GameplayCommandQueue>, mut observed: ResMut<ObservedCommands>) {
-        observed.0 = queue.as_slice().to_vec();
+    #[derive(Debug, Default, Resource)]
+    struct BatchLifecycle(Vec<(String, Option<u64>, usize)>);
+
+    fn capture_consumed_commands(
+        batch: Res<GameplayCommandBatch>,
+        fixed_time: Res<FixedTime>,
+        mut observed: ResMut<CommandsByTick>,
+    ) {
+        observed
+            .0
+            .push((fixed_time.tick(), batch.commands().to_vec()));
+    }
+
+    fn record_consume(batch: Res<GameplayCommandBatch>, mut lifecycle: ResMut<BatchLifecycle>) {
+        lifecycle.0.push((
+            "consume".to_owned(),
+            batch.active_tick().map(GameplayCommandTick::get),
+            batch.len(),
+        ));
+    }
+
+    fn record_capture(batch: Res<GameplayCommandBatch>, mut lifecycle: ResMut<BatchLifecycle>) {
+        lifecycle.0.push((
+            "capture".to_owned(),
+            batch.active_tick().map(GameplayCommandTick::get),
+            batch.len(),
+        ));
+    }
+
+    fn record_after_ack(batch: Res<GameplayCommandBatch>, mut lifecycle: ResMut<BatchLifecycle>) {
+        lifecycle.0.push((
+            "after_ack".to_owned(),
+            batch.active_tick().map(GameplayCommandTick::get),
+            batch.len(),
+        ));
+    }
+
+    fn command(command_type: &str) -> GameplayCommandDraft {
+        GameplayCommandDraft::new(GameplayCommandTypeId::new(command_type).unwrap())
+    }
+
+    fn tick(value: u64) -> GameplayCommandTick {
+        GameplayCommandTick::new(value).unwrap()
+    }
+
+    fn sequence(value: u64) -> GameplayCommandSourceSequence {
+        GameplayCommandSourceSequence::new(value).unwrap()
+    }
+
+    fn submission(
+        tick_value: u64,
+        source: GameplayCommandIngressSource,
+        sequence_value: u64,
+        command_type: &str,
+    ) -> GameplayCommandSubmission {
+        GameplayCommandSubmission::new(
+            tick(tick_value),
+            source,
+            sequence(sequence_value),
+            command(command_type),
+        )
+    }
+
+    fn settings(
+        retained_commands: usize,
+        retained_bytes: usize,
+        command_bytes: usize,
+        payload_items: usize,
+        payload_bytes: usize,
+        future_ticks: u64,
+    ) -> GameplayCommandQueueSettings {
+        GameplayCommandQueueSettings::new(
+            ItemLimit::new(retained_commands).unwrap(),
+            ByteLimit::new(retained_bytes).unwrap(),
+            ByteLimit::new(command_bytes).unwrap(),
+            ItemLimit::new(payload_items).unwrap(),
+            ByteLimit::new(payload_bytes).unwrap(),
+            NonZeroU64::new(future_ticks).unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
-    fn test_code_can_push_command_without_input_or_transport() {
-        let mut queue = GameplayCommandQueue::default();
-        let command = GameplayCommandEnvelope::new(
-            GameplayCommandTypeId::new("jump").unwrap(),
-            GameplayCommandSource::Test,
-            GameplayCommandTime {
-                frame: 7,
-                fixed_tick: Some(3),
-            },
-        );
-
-        let sequence = queue.push(command);
-
-        assert_eq!(sequence, 1);
-        assert_eq!(queue.as_slice()[0].sequence, 1);
-        assert_eq!(queue.as_slice()[0].source, GameplayCommandSource::Test);
-    }
-
-    #[test]
-    fn action_outcomes_map_to_commands_before_fixed_update() {
+    fn local_action_survives_zero_tick_frame_and_is_consumed_once_across_three_ticks() {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
-        app.add_plugin(GameplayCommandPlugin).unwrap();
-        app.insert_resource(ObservedCommands::default())
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.insert_resource(CommandsByTick::default())
             .unwrap()
-            .add_systems(CoreStage::FixedUpdate, observe_commands)
+            .add_systems(
+                CoreStage::FixedUpdate,
+                capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+            )
             .unwrap();
 
         let action = ActionId::new("jump").unwrap();
@@ -689,38 +303,126 @@ mod tests {
                 action,
                 ActionPhase::Started,
                 GameplayCommandTypeId::new("player.jump").unwrap(),
-            ));
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .press(KeyCode::Space);
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
-
-        let observed = &app.world().resource::<ObservedCommands>().0;
-        assert_eq!(observed.len(), 1);
-        assert_eq!(observed[0].sequence, 1);
-        assert_eq!(observed[0].command_type.as_str(), "player.jump");
-        assert_eq!(observed[0].time.frame, 1);
+        app.run_once(Duration::ZERO).unwrap();
         assert_eq!(
-            observed[0].source,
-            GameplayCommandSource::LocalAction {
-                action: ActionId::new("jump").unwrap()
-            }
+            app.world()
+                .resource::<GameplayCommandQueue>()
+                .stats()
+                .pending_commands,
+            1
         );
-        assert!(app.world().resource::<GameplayCommandQueue>().is_empty());
+        app.run_once(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
+
+        let observed = &app.world().resource::<CommandsByTick>().0;
+        assert_eq!(observed.len(), 3);
+        assert_eq!(observed[0].0, 1);
+        assert_eq!(observed[0].1.len(), 1);
+        assert_eq!(observed[0].1[0].command_type().as_str(), "player.jump");
+        assert_eq!(
+            observed[0].1[0].source(),
+            &GameplayCommandSource::LocalAction
+        );
+        assert!(observed[1].1.is_empty());
+        assert!(observed[2].1.is_empty());
+        assert!(app.world().resource::<GameplayCommandQueue>().is_idle());
+        assert_eq!(
+            app.world().resource::<GameplayCommandBatch>().active_tick(),
+            None
+        );
     }
 
     #[test]
-    fn action_bridge_preserves_target_and_payload() {
+    fn multiple_zero_tick_frames_preserve_one_local_source_sequence() {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
-        app.add_plugin(GameplayCommandPlugin).unwrap();
-        app.insert_resource(ObservedCommands::default())
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.insert_resource(CommandsByTick::default())
             .unwrap()
-            .add_systems(CoreStage::Update, observe_commands)
+            .add_systems(
+                CoreStage::FixedUpdate,
+                capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+            )
             .unwrap();
 
+        let action = ActionId::new("interact").unwrap();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionMap>()
+            .bind(ActionBinding::key(action.clone(), KeyCode::Enter));
+        {
+            let mut command_map = app.world_mut().unwrap().resource_mut::<ActionCommandMap>();
+            command_map
+                .bind(ActionCommandBinding::new(
+                    action.clone(),
+                    ActionPhase::Started,
+                    GameplayCommandTypeId::new("interact.started").unwrap(),
+                ))
+                .unwrap();
+            command_map
+                .bind(ActionCommandBinding::new(
+                    action,
+                    ActionPhase::Released,
+                    GameplayCommandTypeId::new("interact.released").unwrap(),
+                ))
+                .unwrap();
+        }
+
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.run_once(Duration::ZERO).unwrap();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
+            .release(KeyCode::Enter);
+        app.run_once(Duration::ZERO).unwrap();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.run_once(Duration::ZERO).unwrap();
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        let commands = &app.world().resource::<CommandsByTick>().0[0].1;
+        assert_eq!(commands.len(), 3);
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| command.source_sequence().get())
+                .collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| command.command_type().as_str())
+                .collect::<Vec<_>>(),
+            ["interact.started", "interact.released", "interact.started"]
+        );
+    }
+
+    #[test]
+    fn action_bridge_preserves_target_payload_and_context() {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.insert_resource(CommandsByTick::default())
+            .unwrap()
+            .add_systems(
+                CoreStage::FixedUpdate,
+                capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+            )
+            .unwrap();
+
+        let context = ActionContext::new("menu").unwrap();
         let action = ActionId::new("select").unwrap();
         let mut payload = GameplayCommandPayload::new();
         payload
@@ -730,47 +432,7 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
-            .bind(ActionBinding::key(action.clone(), KeyCode::Enter));
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionCommandMap>()
-            .bind(
-                ActionCommandBinding::new(
-                    action,
-                    ActionPhase::Started,
-                    GameplayCommandTypeId::new("ui.select").unwrap(),
-                )
-                .with_target(target.clone())
-                .with_payload(payload.clone()),
-            );
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter);
-
-        app.run_once(std::time::Duration::ZERO).unwrap();
-
-        let command = &app.world().resource::<ObservedCommands>().0[0];
-        assert_eq!(command.target, Some(target));
-        assert_eq!(command.payload, payload);
-    }
-
-    #[test]
-    fn action_bridge_filters_by_context() {
-        let mut app = App::new();
-        app.add_plugin(InputPlugin).unwrap();
-        app.add_plugin(GameplayCommandPlugin).unwrap();
-        app.insert_resource(ObservedCommands::default())
-            .unwrap()
-            .add_systems(CoreStage::Update, observe_commands)
-            .unwrap();
-
-        let menu = ActionContext::new("menu").unwrap();
-        let action = ActionId::new("confirm").unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionMap>()
-            .bind(ActionBinding::key(action.clone(), KeyCode::Enter).with_context(menu.clone()));
+            .bind(ActionBinding::key(action.clone(), KeyCode::Enter).with_context(context.clone()));
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionCommandMap>()
@@ -778,41 +440,48 @@ mod tests {
                 ActionCommandBinding::new(
                     action.clone(),
                     ActionPhase::Started,
-                    GameplayCommandTypeId::new("gameplay.confirm").unwrap(),
+                    GameplayCommandTypeId::new("ui.select").unwrap(),
                 )
-                .with_context(ActionContext::gameplay()),
-            );
+                .with_context(context)
+                .with_target(target.clone())
+                .with_payload(payload.clone()),
+            )
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionCommandMap>()
-            .bind(
-                ActionCommandBinding::new(
-                    action,
-                    ActionPhase::Started,
-                    GameplayCommandTypeId::new("menu.confirm").unwrap(),
-                )
-                .with_context(menu),
-            );
+            .bind(ActionCommandBinding::new(
+                action,
+                ActionPhase::Started,
+                GameplayCommandTypeId::new("gameplay.should_not_match").unwrap(),
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
 
-        app.run_once(std::time::Duration::ZERO).unwrap();
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
-        let observed = &app.world().resource::<ObservedCommands>().0;
-        assert_eq!(observed.len(), 1);
-        assert_eq!(observed[0].command_type.as_str(), "menu.confirm");
+        let commands = &app.world().resource::<CommandsByTick>().0[0].1;
+        assert_eq!(commands.len(), 1);
+        let envelope = &commands[0];
+        assert_eq!(envelope.command_type().as_str(), "ui.select");
+        assert_eq!(envelope.target(), Some(&target));
+        assert_eq!(envelope.payload(), &payload);
     }
 
     #[test]
     fn action_bridge_filters_by_phase() {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
-        app.add_plugin(GameplayCommandPlugin).unwrap();
-        app.insert_resource(ObservedCommands::default())
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.insert_resource(CommandsByTick::default())
             .unwrap()
-            .add_systems(CoreStage::Update, observe_commands)
+            .add_systems(
+                CoreStage::FixedUpdate,
+                capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+            )
             .unwrap();
 
         let action = ActionId::new("cancel").unwrap();
@@ -824,120 +493,1051 @@ mod tests {
             .unwrap()
             .resource_mut::<ActionCommandMap>()
             .bind(ActionCommandBinding::new(
-                action.clone(),
-                ActionPhase::Started,
-                GameplayCommandTypeId::new("cancel.started").unwrap(),
-            ));
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ActionCommandMap>()
-            .bind(ActionCommandBinding::new(
                 action,
                 ActionPhase::Released,
                 GameplayCommandTypeId::new("cancel.released").unwrap(),
-            ));
-
+            ))
+            .unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .press(KeyCode::Escape);
-        app.run_once(std::time::Duration::ZERO).unwrap();
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .release(KeyCode::Escape);
-        app.run_once(std::time::Duration::ZERO).unwrap();
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
-        let observed = &app.world().resource::<ObservedCommands>().0;
-        assert_eq!(observed.len(), 1);
-        assert_eq!(observed[0].command_type.as_str(), "cancel.released");
+        let observed = &app.world().resource::<CommandsByTick>().0;
+        assert!(observed[0].1.is_empty());
+        assert_eq!(observed[1].1.len(), 1);
+        assert_eq!(observed[1].1[0].command_type().as_str(), "cancel.released");
     }
 
     #[test]
-    fn queue_preserves_multiple_producer_order() {
-        let mut queue = GameplayCommandQueue::default();
-        queue.push(GameplayCommandEnvelope::new(
-            GameplayCommandTypeId::new("first").unwrap(),
-            GameplayCommandSource::Test,
-            GameplayCommandTime::default(),
-        ));
-        queue.push(GameplayCommandEnvelope::new(
-            GameplayCommandTypeId::new("second").unwrap(),
-            GameplayCommandSource::External {
-                producer: "driver".to_owned(),
-            },
-            GameplayCommandTime::default(),
-        ));
+    fn action_command_map_rejects_the_first_binding_past_its_hard_limit() {
+        let binding = ActionCommandBinding::new(
+            ActionId::new("bounded").unwrap(),
+            ActionPhase::Started,
+            GameplayCommandTypeId::new("bounded.command").unwrap(),
+        );
+        let mut command_map = ActionCommandMap::default();
+        for _ in 0..MAX_ACTION_COMMAND_BINDINGS {
+            command_map.bind(binding.clone()).unwrap();
+        }
+        let before = command_map.bindings().len();
 
         assert_eq!(
-            queue
-                .as_slice()
+            command_map.bind(binding),
+            Err(ActionCommandMapError::BindingLimit {
+                requested: MAX_ACTION_COMMAND_BINDINGS + 1,
+                maximum: MAX_ACTION_COMMAND_BINDINGS,
+            })
+        );
+        assert_eq!(command_map.bindings().len(), before);
+    }
+
+    #[test]
+    fn admitted_order_is_independent_of_arrival_order() {
+        let mut external_payload = GameplayCommandPayload::new();
+        external_payload
+            .insert("axis", GameplayCommandValue::I64(2))
+            .unwrap();
+        let submissions = [
+            GameplayCommandSubmission::new(
+                tick(1),
+                GameplayCommandIngressSource::external("server-b").unwrap(),
+                sequence(2),
+                command("external.b")
+                    .with_target(GameplayCommandTarget::named("player-b").unwrap())
+                    .with_payload(external_payload),
+            ),
+            submission(
+                1,
+                GameplayCommandIngressSource::test("driver").unwrap(),
+                2,
+                "test.second",
+            ),
+            submission(
+                1,
+                GameplayCommandIngressSource::ai("agent-a").unwrap(),
+                1,
+                "ai",
+            ),
+            submission(
+                1,
+                GameplayCommandIngressSource::external("server-a").unwrap(),
+                1,
+                "external.a",
+            ),
+            submission(
+                1,
+                GameplayCommandIngressSource::replay("stream-a").unwrap(),
+                1,
+                "replay",
+            ),
+            submission(
+                1,
+                GameplayCommandIngressSource::test("driver").unwrap(),
+                1,
+                "test.first",
+            ),
+        ];
+        let mut forward = GameplayCommandQueue::default();
+        let mut reverse = GameplayCommandQueue::default();
+        forward
+            .submit_local_for_next_tick(command("local"))
+            .unwrap();
+        for item in &submissions {
+            forward.submit(item.clone()).unwrap();
+        }
+        for item in submissions.iter().rev() {
+            reverse.submit(item.clone()).unwrap();
+        }
+        reverse
+            .submit_local_for_next_tick(command("local"))
+            .unwrap();
+        let mut forward_batch = GameplayCommandBatch::new();
+        let mut reverse_batch = GameplayCommandBatch::new();
+        forward.admit_tick(tick(1), &mut forward_batch).unwrap();
+        reverse.admit_tick(tick(1), &mut reverse_batch).unwrap();
+
+        assert_eq!(forward_batch.commands(), reverse_batch.commands());
+
+        let forward_keys = forward_batch
+            .iter()
+            .map(|envelope| envelope.key().clone())
+            .collect::<Vec<_>>();
+        let reverse_keys = reverse_batch
+            .iter()
+            .map(|envelope| envelope.key().clone())
+            .collect::<Vec<_>>();
+        assert_eq!(forward_keys, reverse_keys);
+        assert_eq!(
+            forward_keys
                 .iter()
-                .map(|command| command.command_type.as_str())
+                .map(|key| (key.source().clone(), key.source_sequence().get()))
                 .collect::<Vec<_>>(),
-            vec!["first", "second"]
+            [
+                (GameplayCommandSource::LocalAction, 1),
+                (GameplayCommandSource::test("driver").unwrap(), 1),
+                (GameplayCommandSource::test("driver").unwrap(), 2),
+                (GameplayCommandSource::replay("stream-a").unwrap(), 1),
+                (GameplayCommandSource::ai("agent-a").unwrap(), 1),
+                (GameplayCommandSource::external("server-a").unwrap(), 1),
+                (GameplayCommandSource::external("server-b").unwrap(), 2),
+            ]
         );
-        assert_eq!(queue.as_slice()[0].sequence, 1);
-        assert_eq!(queue.as_slice()[1].sequence, 2);
     }
 
     #[test]
-    fn persistent_runtime_ids_validate_uuid_shape() {
-        assert!(PersistentRuntimeId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").is_ok());
+    fn duplicate_key_is_rejected_without_replacing_the_first_command() {
+        let mut queue = GameplayCommandQueue::default();
+        let source = GameplayCommandIngressSource::external("server").unwrap();
+        queue
+            .submit(submission(1, source.clone(), 1, "first"))
+            .unwrap();
+        let before = queue.stats();
+
         assert_eq!(
-            PersistentRuntimeId::parse_str("not-a-uuid"),
-            Err(GameplayCommandIdError::InvalidUuid)
+            queue.submit(submission(1, source, 1, "replacement")),
+            Err(GameplayCommandRejection::Duplicate)
+        );
+        let after = queue.stats();
+        assert_eq!(after.retained_commands, before.retained_commands);
+        assert_eq!(after.retained_bytes, before.retained_bytes);
+
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+        assert_eq!(batch.commands()[0].command_type().as_str(), "first");
+    }
+
+    #[test]
+    fn source_sequence_may_be_reused_on_a_different_tick() {
+        let mut queue = GameplayCommandQueue::default();
+        let source = GameplayCommandIngressSource::replay("stream").unwrap();
+        queue
+            .submit(submission(1, source.clone(), 7, "tick.one"))
+            .unwrap();
+        queue.submit(submission(2, source, 7, "tick.two")).unwrap();
+
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+        assert_eq!(batch.commands()[0].source_sequence().get(), 7);
+        queue.acknowledge_tick(tick(1), &mut batch).unwrap();
+        queue.admit_tick(tick(2), &mut batch).unwrap();
+        assert_eq!(batch.commands()[0].source_sequence().get(), 7);
+        assert_eq!(batch.commands()[0].command_type().as_str(), "tick.two");
+    }
+
+    #[test]
+    fn late_and_future_window_rejections_use_closed_tick_watermark() {
+        let mut queue = GameplayCommandQueue::new(settings(8, 4_096, 1_024, 8, 512, 2));
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+        let before_late = queue.stats();
+
+        assert!(matches!(
+            queue.submit(submission(
+                1,
+                GameplayCommandIngressSource::test("late").unwrap(),
+                1,
+                "late"
+            )),
+            Err(GameplayCommandRejection::Late { .. })
+        ));
+        let after_late = queue.stats();
+        assert_eq!(after_late.pending_commands, before_late.pending_commands);
+        assert_eq!(after_late.active_commands, before_late.active_commands);
+        assert_eq!(after_late.retained_commands, before_late.retained_commands);
+        assert_eq!(after_late.pending_bytes, before_late.pending_bytes);
+        assert_eq!(after_late.active_bytes, before_late.active_bytes);
+        assert_eq!(after_late.retained_bytes, before_late.retained_bytes);
+        assert_eq!(
+            after_late.closed_through_tick,
+            before_late.closed_through_tick
+        );
+        assert_eq!(
+            after_late.acknowledged_through_tick,
+            before_late.acknowledged_through_tick
+        );
+        assert_eq!(after_late.furthest_pending_tick, None);
+        assert!(
+            queue
+                .submit(submission(
+                    3,
+                    GameplayCommandIngressSource::test("boundary").unwrap(),
+                    1,
+                    "boundary"
+                ))
+                .is_ok()
+        );
+        let before_future = queue.stats();
+        assert!(matches!(
+            queue.submit(submission(
+                4,
+                GameplayCommandIngressSource::test("future").unwrap(),
+                1,
+                "future"
+            )),
+            Err(GameplayCommandRejection::TooFarFuture { .. })
+        ));
+        let after_future = queue.stats();
+        assert_eq!(
+            after_future.pending_commands,
+            before_future.pending_commands
+        );
+        assert_eq!(after_future.active_commands, before_future.active_commands);
+        assert_eq!(
+            after_future.retained_commands,
+            before_future.retained_commands
+        );
+        assert_eq!(after_future.pending_bytes, before_future.pending_bytes);
+        assert_eq!(after_future.active_bytes, before_future.active_bytes);
+        assert_eq!(after_future.retained_bytes, before_future.retained_bytes);
+        assert_eq!(
+            after_future.closed_through_tick,
+            before_future.closed_through_tick
+        );
+        assert_eq!(
+            after_future.acknowledged_through_tick,
+            before_future.acknowledged_through_tick
+        );
+        assert_eq!(after_future.furthest_pending_tick, Some(3));
+    }
+
+    #[test]
+    fn active_and_pending_commands_share_the_retained_item_budget() {
+        let mut queue = GameplayCommandQueue::new(settings(2, 4_096, 1_024, 8, 512, 4));
+        queue
+            .submit(submission(
+                1,
+                GameplayCommandIngressSource::test("tick-one").unwrap(),
+                1,
+                "one",
+            ))
+            .unwrap();
+        queue
+            .submit(submission(
+                2,
+                GameplayCommandIngressSource::test("tick-two").unwrap(),
+                1,
+                "two",
+            ))
+            .unwrap();
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+
+        assert_eq!(queue.stats().active_commands, 1);
+        assert_eq!(queue.stats().pending_commands, 1);
+        assert!(matches!(
+            queue.submit(submission(
+                2,
+                GameplayCommandIngressSource::test("another").unwrap(),
+                1,
+                "full"
+            )),
+            Err(GameplayCommandRejection::RetainedItemLimit { .. })
+        ));
+
+        queue.acknowledge_tick(tick(1), &mut batch).unwrap();
+        assert!(
+            queue
+                .submit(submission(
+                    2,
+                    GameplayCommandIngressSource::test("another").unwrap(),
+                    1,
+                    "after-ack"
+                ))
+                .is_ok()
         );
     }
 
     #[test]
-    fn persistent_runtime_ids_canonicalize_uuid_spellings() {
-        let canonical =
-            PersistentRuntimeId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
-        let uppercase =
-            PersistentRuntimeId::parse_str("2F0D71C7-14FC-4ED4-B48B-1C61BBA8B97F").unwrap();
-        let simple = PersistentRuntimeId::parse_str("2f0d71c714fc4ed4b48b1c61bba8b97f").unwrap();
+    fn active_and_pending_commands_share_the_retained_byte_budget() {
+        let first = submission(
+            1,
+            GameplayCommandIngressSource::test("one").unwrap(),
+            1,
+            "one",
+        );
+        let second = submission(
+            2,
+            GameplayCommandIngressSource::test("two").unwrap(),
+            1,
+            "two",
+        );
+        let replacement = submission(
+            2,
+            GameplayCommandIngressSource::test("new").unwrap(),
+            1,
+            "new",
+        );
+        let command_bytes = first.logical_bytes().unwrap();
+        assert_eq!(second.logical_bytes(), Some(command_bytes));
+        assert_eq!(replacement.logical_bytes(), Some(command_bytes));
+        let mut queue =
+            GameplayCommandQueue::new(settings(3, command_bytes * 2, command_bytes, 1, 1, 4));
+        queue.submit(first).unwrap();
+        queue.submit(second).unwrap();
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
 
-        assert_eq!(canonical, uppercase);
-        assert_eq!(canonical, simple);
-        assert_eq!(canonical.as_str(), "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+        assert_eq!(queue.stats().active_bytes, command_bytes);
+        assert_eq!(queue.stats().pending_bytes, command_bytes);
+        assert!(matches!(
+            queue.submit(replacement.clone()),
+            Err(GameplayCommandRejection::RetainedByteLimit { .. })
+        ));
+
+        queue.acknowledge_tick(tick(1), &mut batch).unwrap();
+        queue.submit(replacement).unwrap();
+    }
+
+    #[test]
+    fn acknowledging_one_tick_retains_future_commands() {
+        let mut queue = GameplayCommandQueue::default();
+        queue
+            .submit(submission(
+                1,
+                GameplayCommandIngressSource::test("driver").unwrap(),
+                1,
+                "one",
+            ))
+            .unwrap();
+        queue
+            .submit(submission(
+                2,
+                GameplayCommandIngressSource::test("driver").unwrap(),
+                1,
+                "two",
+            ))
+            .unwrap();
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+        queue.acknowledge_tick(tick(1), &mut batch).unwrap();
+        assert_eq!(queue.stats().pending_commands, 1);
+
+        queue.admit_tick(tick(2), &mut batch).unwrap();
+        assert_eq!(batch.commands().len(), 1);
+        assert_eq!(batch.commands()[0].command_type().as_str(), "two");
+    }
+
+    #[test]
+    fn payload_nonfinite_and_replacement_overflow_are_atomic() {
+        let mut payload = GameplayCommandPayload::new();
+        payload
+            .insert("value", GameplayCommandValue::I64(7))
+            .unwrap();
+        let before = payload.clone();
+        for (key, value) in [
+            ("nan", f64::NAN),
+            ("positive_infinity", f64::INFINITY),
+            ("negative_infinity", f64::NEG_INFINITY),
+        ] {
+            assert_eq!(
+                payload.insert(key, GameplayCommandValue::F64(value)),
+                Err(GameplayCommandPayloadError::NonFiniteFloat)
+            );
+            assert_eq!(payload, before);
+        }
+
+        let oversized = "x".repeat(MAX_GAMEPLAY_COMMAND_STRING_BYTES + 1);
+        assert!(matches!(
+            payload.insert("value", GameplayCommandValue::String(oversized)),
+            Err(GameplayCommandPayloadError::StringTooLong { .. })
+        ));
+        assert_eq!(payload, before);
+    }
+
+    #[test]
+    fn configured_payload_limits_accept_the_boundary_and_reject_without_retention() {
+        let mut one_field = GameplayCommandPayload::new();
+        one_field
+            .insert("a", GameplayCommandValue::String("x".to_owned()))
+            .unwrap();
+        let payload_bytes = one_field.logical_bytes();
+        let accepted = GameplayCommandSubmission::new(
+            tick(1),
+            GameplayCommandIngressSource::test("driver").unwrap(),
+            sequence(1),
+            command("payload").with_payload(one_field.clone()),
+        );
+        let mut exact = GameplayCommandQueue::new(settings(2, 4_096, 1_024, 1, payload_bytes, 2));
+        exact.submit(accepted).unwrap();
+
+        let mut two_fields = one_field;
+        two_fields
+            .insert("b", GameplayCommandValue::Bool(true))
+            .unwrap();
+        let oversized = GameplayCommandSubmission::new(
+            tick(1),
+            GameplayCommandIngressSource::test("other").unwrap(),
+            sequence(1),
+            command("payload").with_payload(two_fields.clone()),
+        );
+        let mut item_limited =
+            GameplayCommandQueue::new(settings(2, 4_096, 1_024, 1, two_fields.logical_bytes(), 2));
+        assert!(matches!(
+            item_limited.submit(oversized.clone()),
+            Err(GameplayCommandRejection::PayloadItemLimit { .. })
+        ));
+        assert_eq!(item_limited.stats().retained_commands, 0);
+
+        let mut byte_limited =
+            GameplayCommandQueue::new(settings(2, 4_096, 1_024, 4, payload_bytes, 2));
+        assert!(matches!(
+            byte_limited.submit(oversized),
+            Err(GameplayCommandRejection::PayloadByteLimit { .. })
+        ));
+        assert_eq!(byte_limited.stats().retained_bytes, 0);
+    }
+
+    #[test]
+    fn per_command_byte_limit_rejects_before_queue_retention() {
+        let candidate = submission(
+            1,
+            GameplayCommandIngressSource::test("driver").unwrap(),
+            1,
+            "oversized",
+        );
+        let logical_bytes = candidate.logical_bytes().unwrap();
+        let mut queue =
+            GameplayCommandQueue::new(settings(1, logical_bytes, logical_bytes - 1, 1, 1, 2));
+
+        assert_eq!(
+            queue.submit(candidate),
+            Err(GameplayCommandRejection::CommandByteLimit {
+                requested: logical_bytes,
+                maximum: logical_bytes - 1,
+            })
+        );
+        let stats = queue.stats();
+        assert_eq!(stats.pending_commands, 0);
+        assert_eq!(stats.active_commands, 0);
+        assert_eq!(stats.retained_commands, 0);
+        assert_eq!(stats.retained_bytes, 0);
+        assert_eq!(stats.rejected_invalid, 1);
+    }
+
+    #[test]
+    fn queue_settings_reject_every_hard_ceiling_and_cross_limit_invariant() {
+        let defaults = GameplayCommandQueueSettings::default();
+        let cases = [
+            (
+                GameplayCommandQueueSettings::new(
+                    ItemLimit::new(MAX_GAMEPLAY_COMMAND_RETAINED_COMMANDS + 1).unwrap(),
+                    defaults.retained_bytes(),
+                    defaults.command_bytes(),
+                    defaults.payload_items(),
+                    defaults.payload_bytes(),
+                    defaults.future_ticks(),
+                ),
+                GameplayCommandLimitKind::RetainedCommands,
+                MAX_GAMEPLAY_COMMAND_RETAINED_COMMANDS,
+            ),
+            (
+                GameplayCommandQueueSettings::new(
+                    defaults.retained_commands(),
+                    ByteLimit::new(MAX_GAMEPLAY_COMMAND_RETAINED_BYTES + 1).unwrap(),
+                    defaults.command_bytes(),
+                    defaults.payload_items(),
+                    defaults.payload_bytes(),
+                    defaults.future_ticks(),
+                ),
+                GameplayCommandLimitKind::RetainedBytes,
+                MAX_GAMEPLAY_COMMAND_RETAINED_BYTES,
+            ),
+            (
+                GameplayCommandQueueSettings::new(
+                    defaults.retained_commands(),
+                    defaults.retained_bytes(),
+                    ByteLimit::new(MAX_GAMEPLAY_COMMAND_BYTES + 1).unwrap(),
+                    defaults.payload_items(),
+                    defaults.payload_bytes(),
+                    defaults.future_ticks(),
+                ),
+                GameplayCommandLimitKind::CommandBytes,
+                MAX_GAMEPLAY_COMMAND_BYTES,
+            ),
+            (
+                GameplayCommandQueueSettings::new(
+                    defaults.retained_commands(),
+                    defaults.retained_bytes(),
+                    defaults.command_bytes(),
+                    ItemLimit::new(MAX_GAMEPLAY_COMMAND_PAYLOAD_ITEMS + 1).unwrap(),
+                    defaults.payload_bytes(),
+                    defaults.future_ticks(),
+                ),
+                GameplayCommandLimitKind::PayloadItems,
+                MAX_GAMEPLAY_COMMAND_PAYLOAD_ITEMS,
+            ),
+            (
+                GameplayCommandQueueSettings::new(
+                    defaults.retained_commands(),
+                    defaults.retained_bytes(),
+                    defaults.command_bytes(),
+                    defaults.payload_items(),
+                    ByteLimit::new(MAX_GAMEPLAY_COMMAND_PAYLOAD_BYTES + 1).unwrap(),
+                    defaults.future_ticks(),
+                ),
+                GameplayCommandLimitKind::PayloadBytes,
+                MAX_GAMEPLAY_COMMAND_PAYLOAD_BYTES,
+            ),
+            (
+                GameplayCommandQueueSettings::new(
+                    defaults.retained_commands(),
+                    defaults.retained_bytes(),
+                    defaults.command_bytes(),
+                    defaults.payload_items(),
+                    defaults.payload_bytes(),
+                    NonZeroU64::new(MAX_GAMEPLAY_COMMAND_FUTURE_TICKS + 1).unwrap(),
+                ),
+                GameplayCommandLimitKind::FutureTicks,
+                usize::try_from(MAX_GAMEPLAY_COMMAND_FUTURE_TICKS).unwrap(),
+            ),
+        ];
+
+        for (result, kind, maximum) in cases {
+            assert!(matches!(
+                result,
+                Err(GameplayCommandSettingsError::LimitTooLarge {
+                    kind: actual_kind,
+                    maximum: actual_maximum,
+                    ..
+                }) if actual_kind == kind && actual_maximum == maximum
+            ));
+        }
+
+        assert_eq!(
+            GameplayCommandQueueSettings::new(
+                ItemLimit::new(1).unwrap(),
+                ByteLimit::new(10).unwrap(),
+                ByteLimit::new(11).unwrap(),
+                ItemLimit::new(1).unwrap(),
+                ByteLimit::new(1).unwrap(),
+                NonZeroU64::new(1).unwrap(),
+            ),
+            Err(GameplayCommandSettingsError::CommandExceedsRetainedBytes)
+        );
+        assert_eq!(
+            GameplayCommandQueueSettings::new(
+                ItemLimit::new(1).unwrap(),
+                ByteLimit::new(100).unwrap(),
+                ByteLimit::new(10).unwrap(),
+                ItemLimit::new(1).unwrap(),
+                ByteLimit::new(11).unwrap(),
+                NonZeroU64::new(1).unwrap(),
+            ),
+            Err(GameplayCommandSettingsError::PayloadExceedsCommandBytes)
+        );
+    }
+
+    #[test]
+    fn queue_byte_limit_accepts_exact_boundary_and_rejects_one_more() {
+        let first = submission(
+            1,
+            GameplayCommandIngressSource::test("driver").unwrap(),
+            1,
+            "first",
+        );
+        let exact_bytes = first.logical_bytes().unwrap();
+        let mut queue = GameplayCommandQueue::new(settings(2, exact_bytes, exact_bytes, 1, 1, 2));
+        queue.submit(first).unwrap();
+        let before = queue.stats();
+
+        assert!(matches!(
+            queue.submit(submission(
+                2,
+                GameplayCommandIngressSource::test("driver").unwrap(),
+                1,
+                "x"
+            )),
+            Err(GameplayCommandRejection::RetainedByteLimit { .. })
+        ));
+        let after = queue.stats();
+        assert_eq!(after.retained_commands, before.retained_commands);
+        assert_eq!(after.retained_bytes, before.retained_bytes);
+    }
+
+    #[test]
+    fn tick_and_local_sequence_overflow_are_typed_rejections() {
+        let mut queue = GameplayCommandQueue::default();
+        queue.set_watermarks_for_test(u64::MAX);
+        assert_eq!(
+            queue.submit_local_for_next_tick(command("overflow")),
+            Err(GameplayCommandRejection::TickExhausted)
+        );
+
+        let mut queue = GameplayCommandQueue::default();
+        queue.set_local_sequence_for_test(u64::MAX);
+        assert_eq!(
+            queue.submit_local_for_next_tick(command("overflow")),
+            Err(GameplayCommandRejection::SourceSequenceExhausted)
+        );
+    }
+
+    #[test]
+    fn lifecycle_faults_fail_closed_and_hide_an_ambiguous_batch() {
+        let mut queue = GameplayCommandQueue::default();
+        queue
+            .submit(submission(
+                1,
+                GameplayCommandIngressSource::test("driver").unwrap(),
+                1,
+                "one",
+            ))
+            .unwrap();
+        let mut batch = GameplayCommandBatch::new();
+        let before = queue.stats();
+
+        assert_eq!(
+            queue.admit_fixed_tick(2, &mut batch),
+            Err(GameplayCommandLifecycleError::UnexpectedTick {
+                expected: 1,
+                actual: 2,
+            })
+        );
+        assert_eq!(queue.stats().retained_commands, before.retained_commands);
+        assert_eq!(queue.stats().closed_through_tick, 0);
+        assert_eq!(batch.active_tick(), None);
+        assert_eq!(
+            queue.submit(submission(
+                1,
+                GameplayCommandIngressSource::test("another").unwrap(),
+                1,
+                "blocked",
+            )),
+            Err(GameplayCommandRejection::LifecycleFaulted)
+        );
+        assert_eq!(queue.stats().rejected_lifecycle, 1);
+        assert_eq!(queue.stats().rejected_invalid, 0);
+        assert_eq!(
+            queue.admit_fixed_tick(1, &mut batch),
+            Err(GameplayCommandLifecycleError::Poisoned)
+        );
+        assert_eq!(
+            queue.last_lifecycle_error(),
+            Some(&GameplayCommandLifecycleError::UnexpectedTick {
+                expected: 1,
+                actual: 2,
+            })
+        );
+
+        let mut active_queue = GameplayCommandQueue::default();
+        active_queue
+            .submit(submission(
+                1,
+                GameplayCommandIngressSource::test("driver").unwrap(),
+                1,
+                "one",
+            ))
+            .unwrap();
+        let mut active_batch = GameplayCommandBatch::new();
+        active_queue.admit_fixed_tick(1, &mut active_batch).unwrap();
+        let active = active_queue.stats();
+        assert_eq!(active_batch.len(), 1);
+        assert_eq!(
+            active_queue.admit_fixed_tick(2, &mut active_batch),
+            Err(GameplayCommandLifecycleError::BatchAlreadyActive)
+        );
+        assert_eq!(
+            active_queue.stats().retained_commands,
+            active.retained_commands
+        );
+        assert_eq!(active_queue.stats().active_commands, 0);
+        assert_eq!(
+            active_queue.stats().quarantined_commands,
+            active.active_commands
+        );
+        assert_eq!(active_queue.quarantined_commands().len(), 1);
+        assert_eq!(
+            active_queue.quarantined_commands()[0]
+                .command_type()
+                .as_str(),
+            "one"
+        );
+        assert_eq!(active_batch.active_tick(), None);
+        assert!(active_batch.commands().is_empty());
+        assert_eq!(
+            active_queue.acknowledge_fixed_tick(2, &mut active_batch),
+            Err(GameplayCommandLifecycleError::Poisoned)
+        );
+        assert_eq!(active_batch.active_tick(), None);
+        assert!(active_batch.commands().is_empty());
+        assert_eq!(active_queue.stats().acknowledged_through_tick, 0);
+        assert_eq!(
+            active_queue.last_lifecycle_error(),
+            Some(&GameplayCommandLifecycleError::BatchAlreadyActive)
+        );
+    }
+
+    #[test]
+    fn fixed_schedule_hides_a_stale_active_batch_from_consumers() {
+        let mut app = App::new();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.insert_resource(CommandsByTick::default())
+            .unwrap()
+            .insert_resource(BatchLifecycle::default())
+            .unwrap()
+            .add_systems(
+                CoreStage::FixedUpdate,
+                capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+            )
+            .unwrap()
+            .add_systems(
+                CoreStage::FixedUpdate,
+                record_capture.in_set(GameplayCommandSet::Capture),
+            )
+            .unwrap();
+
+        let mut stale_batch = app
+            .world_mut()
+            .unwrap()
+            .remove_resource::<GameplayCommandBatch>()
+            .unwrap();
+        {
+            let mut queue = app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<GameplayCommandQueue>();
+            queue
+                .submit(submission(
+                    1,
+                    GameplayCommandIngressSource::test("driver").unwrap(),
+                    1,
+                    "stale",
+                ))
+                .unwrap();
+            queue.admit_tick(tick(1), &mut stale_batch).unwrap();
+        }
+        assert_eq!(stale_batch.len(), 1);
+        app.world_mut().unwrap().insert_resource(stale_batch);
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        assert!(app.world().resource::<CommandsByTick>().0.is_empty());
+        assert!(app.world().resource::<BatchLifecycle>().0.is_empty());
+        assert_eq!(
+            app.world().resource::<GameplayCommandBatch>().active_tick(),
+            None
+        );
+        let stats = app.world().resource::<GameplayCommandQueue>().stats();
+        assert_eq!(stats.active_commands, 0);
+        assert_eq!(stats.quarantined_commands, 1);
+        assert_eq!(stats.retained_commands, 1);
+        assert_eq!(stats.lifecycle_faults, 2);
+        assert_eq!(
+            app.world()
+                .resource::<GameplayCommandQueue>()
+                .quarantined_commands()[0]
+                .command_type()
+                .as_str(),
+            "stale"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<GameplayCommandQueue>()
+                .last_lifecycle_error(),
+            Some(&GameplayCommandLifecycleError::BatchAlreadyActive)
+        );
+    }
+
+    #[test]
+    fn capture_runs_before_engine_acknowledgement() {
+        let mut app = App::new();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.insert_resource(BatchLifecycle::default())
+            .unwrap()
+            .add_systems(
+                CoreStage::FixedUpdate,
+                record_consume.in_set(GameplayCommandSet::Consume),
+            )
+            .unwrap()
+            .add_systems(
+                CoreStage::FixedUpdate,
+                record_capture.in_set(GameplayCommandSet::Capture),
+            )
+            .unwrap()
+            .add_systems(
+                CoreStage::FixedUpdate,
+                record_after_ack.after(GameplayCommandSet::Acknowledge),
+            )
+            .unwrap();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<GameplayCommandQueue>()
+            .submit(submission(
+                1,
+                GameplayCommandIngressSource::test("driver").unwrap(),
+                1,
+                "once",
+            ))
+            .unwrap();
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        assert_eq!(
+            app.world().resource::<BatchLifecycle>().0,
+            [
+                ("consume".to_owned(), Some(1), 1),
+                ("capture".to_owned(), Some(1), 1),
+                ("after_ack".to_owned(), None, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn persistent_runtime_ids_are_canonical_uuid_values() {
+        assert!(PersistentRuntimeId::parse_str("not-a-uuid").is_err());
+        let id = PersistentRuntimeId::parse_str("A1B2C3D4-E5F6-47A8-90AB-1234567890CD").unwrap();
+        assert_eq!(id.as_str(), "a1b2c3d4-e5f6-47a8-90ab-1234567890cd");
+    }
+
+    #[test]
+    fn zero_and_invalid_identity_values_are_rejected_before_retention() {
+        assert_eq!(GameplayCommandTick::new(0), None);
+        assert_eq!(GameplayCommandSourceSequence::new(0), None);
+        assert!(GameplayCommandSource::external("").is_err());
+        assert!(GameplayCommandTarget::named("bad\nname").is_err());
+        assert!(GameplayCommandTypeId::new("x".repeat(MAX_GAMEPLAY_COMMAND_ID_BYTES + 1)).is_err());
     }
 
     #[cfg(feature = "serde")]
     #[test]
-    fn serde_defaults_action_command_binding_context_to_gameplay() {
-        let binding = serde_json::from_str::<ActionCommandBinding>(
-            r#"{
-                "action": "jump",
-                "phase": "Started",
-                "command_type": "movement.jump",
+    fn submission_roundtrips_and_reserved_or_obsolete_shapes_are_rejected() {
+        let submission = submission(
+            1,
+            GameplayCommandIngressSource::replay("stream").unwrap(),
+            9,
+            "player.jump",
+        );
+        let encoded = serde_json::to_string(&submission).unwrap();
+        assert_eq!(
+            serde_json::from_str::<GameplayCommandSubmission>(&encoded).unwrap(),
+            submission
+        );
+
+        let obsolete = r#"{
+            "sequence": 1,
+            "command_type": "player.jump",
+            "source": "LocalAction",
+            "time": { "frame": 1, "fixed_tick": null },
+            "target": null,
+            "payload": {}
+        }"#;
+        assert!(serde_json::from_str::<GameplayCommandSubmission>(obsolete).is_err());
+
+        let forged_local = r#"{
+            "tick": 1,
+            "source": "LocalAction",
+            "source_sequence": 1,
+            "command": { "command_type": "player.jump" }
+        }"#;
+        assert!(serde_json::from_str::<GameplayCommandSubmission>(forged_local).is_err());
+
+        let unknown_source_field = r#"{
+            "tick": 1,
+            "source": { "Replay": { "stream": "stream", "unexpected": true } },
+            "source_sequence": 1,
+            "command": { "command_type": "player.jump" }
+        }"#;
+        assert!(serde_json::from_str::<GameplayCommandSubmission>(unknown_source_field).is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn invalid_submission_identity_and_payload_shapes_are_rejected() {
+        let invalid_values = [
+            serde_json::json!({
+                "tick": 0,
+                "source": { "Test": { "driver": "driver" } },
+                "source_sequence": 1,
+                "command": { "command_type": "command" }
+            }),
+            serde_json::json!({
+                "tick": 1,
+                "source": { "External": { "producer": "" } },
+                "source_sequence": 1,
+                "command": { "command_type": "command" }
+            }),
+            serde_json::json!({
+                "tick": 1,
+                "source": { "Ai": { "agent": "agent" } },
+                "source_sequence": 0,
+                "command": { "command_type": "command" }
+            }),
+            serde_json::json!({
+                "tick": 1,
+                "source": { "Replay": { "stream": "stream" } },
+                "source_sequence": 1,
+                "command": { "command_type": "bad\ncommand" }
+            }),
+        ];
+        for value in invalid_values {
+            assert!(serde_json::from_value::<GameplayCommandSubmission>(value).is_err());
+        }
+
+        let oversized_source = serde_json::json!({
+            "tick": 1,
+            "source": {
+                "External": { "producer": "x".repeat(MAX_GAMEPLAY_COMMAND_ID_BYTES + 1) }
+            },
+            "source_sequence": 1,
+            "command": { "command_type": "command" }
+        });
+        assert!(serde_json::from_value::<GameplayCommandSubmission>(oversized_source).is_err());
+
+        let oversized_string = serde_json::json!({
+            "tick": 1,
+            "source": { "Test": { "driver": "driver" } },
+            "source_sequence": 1,
+            "command": {
+                "command_type": "command",
+                "payload": {
+                    "value": { "String": "x".repeat(MAX_GAMEPLAY_COMMAND_STRING_BYTES + 1) }
+                }
+            }
+        });
+        assert!(serde_json::from_value::<GameplayCommandSubmission>(oversized_string).is_err());
+
+        let mut oversized_key_payload = serde_json::Map::new();
+        oversized_key_payload.insert(
+            "x".repeat(MAX_GAMEPLAY_COMMAND_PAYLOAD_KEY_BYTES + 1),
+            serde_json::json!({ "Bool": true }),
+        );
+        let oversized_key = serde_json::json!({
+            "tick": 1,
+            "source": { "Test": { "driver": "driver" } },
+            "source_sequence": 1,
+            "command": {
+                "command_type": "command",
+                "payload": oversized_key_payload
+            }
+        });
+        assert!(serde_json::from_value::<GameplayCommandSubmission>(oversized_key).is_err());
+
+        let duplicate_payload_key = r#"{
+            "tick": 1,
+            "source": { "Test": { "driver": "driver" } },
+            "source_sequence": 1,
+            "command": {
+                "command_type": "command",
+                "payload": {
+                    "duplicate": { "I64": 1 },
+                    "duplicate": { "I64": 2 }
+                }
+            }
+        }"#;
+        assert!(serde_json::from_str::<GameplayCommandSubmission>(duplicate_payload_key).is_err());
+
+        let invalid_payload_key = r#"{
+            "tick": 1,
+            "source": { "Test": { "driver": "driver" } },
+            "source_sequence": 1,
+            "command": {
+                "command_type": "command",
+                "payload": { "\n": { "Bool": true } }
+            }
+        }"#;
+        assert!(serde_json::from_str::<GameplayCommandSubmission>(invalid_payload_key).is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn admitted_envelope_serializes_the_canonical_replay_shape() {
+        let mut queue = GameplayCommandQueue::default();
+        queue
+            .submit(submission(
+                1,
+                GameplayCommandIngressSource::replay("stream").unwrap(),
+                9,
+                "player.jump",
+            ))
+            .unwrap();
+        let mut batch = GameplayCommandBatch::new();
+        queue.admit_tick(tick(1), &mut batch).unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&batch.commands()[0]).unwrap(),
+            serde_json::json!({
+                "tick": 1,
+                "source": { "Replay": { "stream": "stream" } },
+                "source_sequence": 9,
+                "command": {
+                    "command_type": "player.jump",
+                    "target": null,
+                    "payload": {}
+                }
+            })
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn action_command_binding_defaults_context_to_gameplay() {
+        let json = r#"{
+            "action": "jump",
+            "phase": "Started",
+            "command": {
+                "command_type": "player.jump",
                 "target": null,
-                "payload": { "values": {} }
-            }"#,
-        )
-        .unwrap();
+                "payload": {}
+            }
+        }"#;
 
-        assert_eq!(binding.context, ActionContext::gameplay());
-    }
+        let binding: ActionCommandBinding = serde_json::from_str(json).unwrap();
+        assert_eq!(binding.context(), &ActionContext::gameplay());
 
-    #[cfg(feature = "serde")]
-    #[test]
-    fn serde_rejects_invalid_command_identity_and_payload_keys() {
-        assert!(serde_json::from_str::<GameplayCommandTypeId>("\"\"").is_err());
-        assert!(serde_json::from_str::<SceneStableId>("\"scene\\nplayer\"").is_err());
-        assert!(serde_json::from_str::<PersistentRuntimeId>("\"not-a-uuid\"").is_err());
-
-        let invalid_payload = r#"{"values":{"bad\nkey":{"Bool":true}}}"#;
-
-        assert!(serde_json::from_str::<GameplayCommandPayload>(invalid_payload).is_err());
-        assert!(serde_json::from_str::<GameplayCommandTarget>(r#"{"Named":""}"#).is_err());
         assert!(
-            serde_json::from_str::<GameplayCommandSource>(r#"{"Replay":{"stream":"bad\nstream"}}"#)
+            serde_json::from_str::<ActionCommandMap>(r#"{ "bindings": [], "unexpected": true }"#)
                 .is_err()
         );
-        assert!(
-            serde_json::from_str::<GameplayCommandSource>(r#"{"External":{"producer":""}}"#)
-                .is_err()
-        );
+
+        let oversized = serde_json::json!({
+            "bindings": vec![binding; MAX_ACTION_COMMAND_BINDINGS + 1],
+        });
+        assert!(serde_json::from_value::<ActionCommandMap>(oversized).is_err());
     }
 }
