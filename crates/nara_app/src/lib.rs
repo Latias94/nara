@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::{self, Display, Formatter},
+    num::NonZeroU32,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::Arc,
     time::Duration,
@@ -75,6 +76,16 @@ pub enum TaskUpdateSet {
     CoalesceAssetChanges,
     SpawnAssetJobs,
     ApplyAssetResults,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
+pub enum FixedUpdateSet {
+    /// Admit tick-scoped inputs and prepare simulation data.
+    Prepare,
+    /// Run authoritative fixed-step simulation.
+    Simulate,
+    /// Publish tick-scoped outcomes after simulation commands are flushed.
+    Finalize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -468,7 +479,7 @@ impl PluginError {
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq)]
 pub enum AppRunError {
     #[error("plugin lifecycle failed: {error}")]
     Plugin {
@@ -477,6 +488,8 @@ pub enum AppRunError {
     },
     #[error("app runner failed: {message}")]
     Runner { message: String },
+    #[error("time frame planning failed: {error}")]
+    Time { error: TimeFrameError },
     #[error("app shutdown reported plugin cleanup failures")]
     Shutdown {
         prior: Option<Box<AppRunError>>,
@@ -501,10 +514,15 @@ impl AppRunError {
     }
 
     #[must_use]
+    pub const fn time(error: TimeFrameError) -> Self {
+        Self::Time { error }
+    }
+
+    #[must_use]
     pub const fn plugin_error(&self) -> Option<&PluginError> {
         match self {
             Self::Plugin { error, .. } => Some(error),
-            Self::Runner { .. } | Self::Shutdown { .. } => None,
+            Self::Runner { .. } | Self::Time { .. } | Self::Shutdown { .. } => None,
         }
     }
 
@@ -513,7 +531,7 @@ impl AppRunError {
         match self {
             Self::Plugin { report, .. } => report.as_deref(),
             Self::Shutdown { report, .. } => Some(report.as_ref()),
-            Self::Runner { .. } => None,
+            Self::Runner { .. } | Self::Time { .. } => None,
         }
     }
 }
@@ -521,6 +539,18 @@ impl AppRunError {
 impl From<PluginError> for AppRunError {
     fn from(error: PluginError) -> Self {
         Self::plugin(error, None)
+    }
+}
+
+impl From<TimeFrameError> for AppRunError {
+    fn from(error: TimeFrameError) -> Self {
+        Self::time(error)
+    }
+}
+
+impl From<FixedTimeError> for AppRunError {
+    fn from(error: FixedTimeError) -> Self {
+        Self::time(TimeFrameError::Fixed(error))
     }
 }
 
@@ -551,10 +581,23 @@ impl Default for RealTime {
 }
 
 impl RealTime {
-    pub fn advance(&mut self, delta: Duration) {
-        self.delta = delta;
-        self.elapsed = self.elapsed.checked_add(delta).unwrap_or(Duration::MAX);
-        self.frame += 1;
+    fn plan_advance(&self, delta: Duration) -> Result<Self, TimeFrameError> {
+        let elapsed =
+            self.elapsed
+                .checked_add(delta)
+                .ok_or(TimeFrameError::RealElapsedOverflow {
+                    elapsed: self.elapsed,
+                    delta,
+                })?;
+        let frame = self
+            .frame
+            .checked_add(1)
+            .ok_or(TimeFrameError::RealFrameOverflow { frame: self.frame })?;
+        Ok(Self {
+            delta,
+            elapsed,
+            frame,
+        })
     }
 
     #[must_use]
@@ -586,10 +629,23 @@ impl Default for VirtualTime {
 }
 
 impl VirtualTime {
-    pub fn advance(&mut self, delta: Duration) {
-        self.delta = delta;
-        self.elapsed = self.elapsed.checked_add(delta).unwrap_or(Duration::MAX);
-        self.frame += 1;
+    fn plan_advance(&self, delta: Duration) -> Result<Self, TimeFrameError> {
+        let elapsed =
+            self.elapsed
+                .checked_add(delta)
+                .ok_or(TimeFrameError::VirtualElapsedOverflow {
+                    elapsed: self.elapsed,
+                    delta,
+                })?;
+        let frame = self
+            .frame
+            .checked_add(1)
+            .ok_or(TimeFrameError::VirtualFrameOverflow { frame: self.frame })?;
+        Ok(Self {
+            delta,
+            elapsed,
+            frame,
+        })
     }
 
     #[must_use]
@@ -603,11 +659,104 @@ impl VirtualTime {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
+pub enum TimeSettingsError {
+    #[error("time scale must be finite and non-negative, got {value}")]
+    InvalidTimeScale { value: f32 },
+    #[error("maximum real frame delta must be non-zero")]
+    ZeroMaxDelta,
+    #[error("fixed timestep must be non-zero")]
+    ZeroFixedTimestep,
+    #[error("maximum fixed steps per frame must be non-zero")]
+    ZeroMaxFixedStepsPerFrame,
+    #[error("maximum fixed debt steps must be non-zero")]
+    ZeroMaxFixedDebtSteps,
+    #[error("fixed clock settings cannot change during a fixed frame")]
+    FixedFrameActive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum FixedTimeError {
+    #[error(
+        "fixed catch-up would queue {pending_steps} ticks, exceeding per-frame work {max_steps_per_frame} plus debt limit {max_debt_steps}"
+    )]
+    CatchUpDebtExceeded {
+        pending_steps: u128,
+        max_steps_per_frame: u32,
+        max_debt_steps: u32,
+    },
+    #[error("fixed pending time overflowed while adding {incoming:?} to {pending:?}")]
+    PendingDurationOverflow {
+        pending: Duration,
+        incoming: Duration,
+    },
+    #[error("fixed tick {tick} cannot advance by {attempted_steps} steps")]
+    TickOverflow { tick: u64, attempted_steps: u32 },
+    #[error(
+        "fixed elapsed time {elapsed:?} cannot advance by {attempted_steps} steps of {timestep:?}"
+    )]
+    ElapsedOverflow {
+        elapsed: Duration,
+        timestep: Duration,
+        attempted_steps: u32,
+    },
+}
+
+/// Identifies a retained resource required to plan and complete an app frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeFrameResource {
+    RuntimeTimeSettings,
+    RealTime,
+    VirtualTime,
+    FixedTime,
+    RenderTime,
+    RuntimeFrameStatus,
+    AppExitRequests,
+}
+
+impl Display for TimeFrameResource {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::RuntimeTimeSettings => "RuntimeTimeSettings",
+            Self::RealTime => "RealTime",
+            Self::VirtualTime => "VirtualTime",
+            Self::FixedTime => "FixedTime",
+            Self::RenderTime => "RenderTime",
+            Self::RuntimeFrameStatus => "RuntimeFrameStatus",
+            Self::AppExitRequests => "AppExitRequests",
+        })
+    }
+}
+
+/// A failure to build an atomic clock plan for one app frame.
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
+pub enum TimeFrameError {
+    #[error("required frame resource is missing: {resource}")]
+    MissingResource { resource: TimeFrameResource },
+    #[error("real elapsed time {elapsed:?} cannot advance by {delta:?}")]
+    RealElapsedOverflow { elapsed: Duration, delta: Duration },
+    #[error("real frame counter cannot advance beyond {frame}")]
+    RealFrameOverflow { frame: u64 },
+    #[error(
+        "virtual delta cannot represent real delta {clamped_real_delta:?} scaled by {time_scale}"
+    )]
+    VirtualDeltaOverflow {
+        clamped_real_delta: Duration,
+        time_scale: f32,
+    },
+    #[error("virtual elapsed time {elapsed:?} cannot advance by {delta:?}")]
+    VirtualElapsedOverflow { elapsed: Duration, delta: Duration },
+    #[error("virtual frame counter cannot advance beyond {frame}")]
+    VirtualFrameOverflow { frame: u64 },
+    #[error(transparent)]
+    Fixed(#[from] FixedTimeError),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Resource)]
 pub struct RuntimeTimeSettings {
-    pub paused: bool,
-    pub time_scale: f32,
-    pub max_delta: Duration,
+    paused: bool,
+    time_scale: f32,
+    max_delta: Duration,
 }
 
 impl Default for RuntimeTimeSettings {
@@ -621,87 +770,162 @@ impl Default for RuntimeTimeSettings {
 }
 
 impl RuntimeTimeSettings {
+    pub fn new(
+        paused: bool,
+        time_scale: f32,
+        max_delta: Duration,
+    ) -> Result<Self, TimeSettingsError> {
+        Self::default()
+            .with_paused(paused)
+            .with_time_scale(time_scale)?
+            .with_max_delta(max_delta)
+    }
+
+    #[must_use]
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
+
+    #[must_use]
+    pub fn time_scale(&self) -> f32 {
+        self.time_scale
+    }
+
+    #[must_use]
+    pub fn max_delta(&self) -> Duration {
+        self.max_delta
+    }
+
     #[must_use]
     pub fn with_paused(mut self, paused: bool) -> Self {
         self.paused = paused;
         self
     }
 
-    #[must_use]
-    pub fn with_time_scale(mut self, time_scale: f32) -> Self {
+    pub fn with_time_scale(mut self, time_scale: f32) -> Result<Self, TimeSettingsError> {
+        self.set_time_scale(time_scale)?;
+        Ok(self)
+    }
+
+    pub fn with_max_delta(mut self, max_delta: Duration) -> Result<Self, TimeSettingsError> {
+        self.set_max_delta(max_delta)?;
+        Ok(self)
+    }
+
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+    }
+
+    pub fn set_time_scale(&mut self, time_scale: f32) -> Result<(), TimeSettingsError> {
+        if !time_scale.is_finite() || time_scale < 0.0 {
+            return Err(TimeSettingsError::InvalidTimeScale { value: time_scale });
+        }
         self.time_scale = time_scale;
-        self
+        Ok(())
     }
 
-    #[must_use]
-    pub fn with_max_delta(mut self, max_delta: Duration) -> Self {
+    pub fn set_max_delta(&mut self, max_delta: Duration) -> Result<(), TimeSettingsError> {
+        if max_delta.is_zero() {
+            return Err(TimeSettingsError::ZeroMaxDelta);
+        }
         self.max_delta = max_delta;
-        self
+        Ok(())
     }
 
-    fn virtual_delta(&self, real_delta: Duration) -> (Duration, bool) {
+    fn fixed_time_enabled(&self) -> bool {
+        !self.paused && self.time_scale > 0.0
+    }
+
+    fn plan_virtual_delta(&self, real_delta: Duration) -> Result<(Duration, bool), TimeFrameError> {
         let clamped = real_delta.min(self.max_delta);
         let was_clamped = clamped != real_delta;
         if self.paused {
-            return (Duration::ZERO, was_clamped);
+            return Ok((Duration::ZERO, was_clamped));
         }
-        let scale = if self.time_scale.is_finite() {
-            self.time_scale.max(0.0)
-        } else {
-            0.0
-        };
-        (
-            Duration::from_secs_f64(clamped.as_secs_f64() * f64::from(scale)),
-            was_clamped,
-        )
+        let scaled_seconds = clamped.as_secs_f64() * f64::from(self.time_scale);
+        let virtual_delta = Duration::try_from_secs_f64(scaled_seconds).map_err(|_| {
+            TimeFrameError::VirtualDeltaOverflow {
+                clamped_real_delta: clamped,
+                time_scale: self.time_scale,
+            }
+        })?;
+        Ok((virtual_delta, was_clamped))
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Resource)]
 pub struct RenderTime {
+    /// Fraction of the current fixed timestep represented by [`Self::remainder`].
     pub interpolation_alpha: f32,
-    pub overstep: Duration,
+    /// Sub-tick virtual time left after fixed work and catch-up policy complete.
+    pub remainder: Duration,
 }
 
 impl Default for RenderTime {
     fn default() -> Self {
         Self {
             interpolation_alpha: 0.0,
-            overstep: Duration::ZERO,
+            remainder: Duration::ZERO,
         }
     }
 }
 
 impl RenderTime {
     fn update_from_fixed(&mut self, fixed: &FixedTime) {
-        self.overstep = fixed.overstep;
-        self.interpolation_alpha = if fixed.timestep.is_zero() {
-            0.0
-        } else {
-            (fixed.overstep.as_secs_f64() / fixed.timestep.as_secs_f64()) as f32
-        };
+        self.remainder = fixed.remainder;
+        let alpha = fixed.remainder.as_secs_f64() / fixed.timestep.as_secs_f64();
+        self.interpolation_alpha = (alpha as f32).min(f32::from_bits(1.0f32.to_bits() - 1));
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum FixedCatchUpPolicy {
+    /// Drop whole pending ticks beyond the per-frame work cap.
+    #[default]
+    DiscardExcess,
+    /// Keep whole pending ticks for later frames, up to the configured debt limit.
+    PreserveDebt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
 pub struct FixedTime {
     timestep: Duration,
-    max_steps_per_frame: u32,
-    accumulated: Duration,
-    overstep: Duration,
+    max_steps_per_frame: NonZeroU32,
+    max_debt_steps: NonZeroU32,
+    catch_up_policy: FixedCatchUpPolicy,
+    pending: Duration,
+    remainder: Duration,
+    debt: Duration,
+    delta: Duration,
+    elapsed: Duration,
+    tick: u64,
     steps_this_frame: u32,
     capped_this_frame: bool,
+    discarded_this_frame: Duration,
+    advance_enabled: bool,
+    frame_active: bool,
 }
 
 impl Default for FixedTime {
     fn default() -> Self {
         Self {
             timestep: Self::DEFAULT_TIMESTEP,
-            max_steps_per_frame: Self::DEFAULT_MAX_STEPS_PER_FRAME,
-            accumulated: Duration::ZERO,
-            overstep: Duration::ZERO,
+            max_steps_per_frame: NonZeroU32::new(Self::DEFAULT_MAX_STEPS_PER_FRAME)
+                .expect("the default fixed-step cap is non-zero"),
+            max_debt_steps: NonZeroU32::new(Self::DEFAULT_MAX_DEBT_STEPS)
+                .expect("the default fixed debt cap is non-zero"),
+            catch_up_policy: FixedCatchUpPolicy::default(),
+            pending: Duration::ZERO,
+            remainder: Duration::ZERO,
+            debt: Duration::ZERO,
+            delta: Duration::ZERO,
+            elapsed: Duration::ZERO,
+            tick: 0,
             steps_this_frame: 0,
             capped_this_frame: false,
+            discarded_this_frame: Duration::ZERO,
+            advance_enabled: true,
+            frame_active: false,
         }
     }
 }
@@ -709,18 +933,30 @@ impl Default for FixedTime {
 impl FixedTime {
     pub const DEFAULT_TIMESTEP: Duration = Duration::from_nanos(16_666_667);
     pub const DEFAULT_MAX_STEPS_PER_FRAME: u32 = 5;
+    pub const DEFAULT_MAX_DEBT_STEPS: u32 = 120;
 
-    #[must_use]
-    pub fn new(timestep: Duration) -> Self {
-        Self {
-            timestep,
-            ..Self::default()
-        }
+    pub fn new(timestep: Duration) -> Result<Self, TimeSettingsError> {
+        let mut fixed = Self::default();
+        fixed.set_timestep(timestep)?;
+        Ok(fixed)
+    }
+
+    pub fn with_max_steps_per_frame(
+        mut self,
+        max_steps_per_frame: u32,
+    ) -> Result<Self, TimeSettingsError> {
+        self.set_max_steps_per_frame(max_steps_per_frame)?;
+        Ok(self)
+    }
+
+    pub fn with_max_debt_steps(mut self, max_debt_steps: u32) -> Result<Self, TimeSettingsError> {
+        self.set_max_debt_steps(max_debt_steps)?;
+        Ok(self)
     }
 
     #[must_use]
-    pub fn with_max_steps_per_frame(mut self, max_steps_per_frame: u32) -> Self {
-        self.max_steps_per_frame = max_steps_per_frame;
+    pub fn with_catch_up_policy(mut self, catch_up_policy: FixedCatchUpPolicy) -> Self {
+        self.catch_up_policy = catch_up_policy;
         self
     }
 
@@ -731,17 +967,42 @@ impl FixedTime {
 
     #[must_use]
     pub fn max_steps_per_frame(&self) -> u32 {
-        self.max_steps_per_frame
+        self.max_steps_per_frame.get()
     }
 
     #[must_use]
-    pub fn accumulated(&self) -> Duration {
-        self.accumulated
+    pub fn max_debt_steps(&self) -> u32 {
+        self.max_debt_steps.get()
     }
 
     #[must_use]
-    pub fn overstep(&self) -> Duration {
-        self.overstep
+    pub fn catch_up_policy(&self) -> FixedCatchUpPolicy {
+        self.catch_up_policy
+    }
+
+    #[must_use]
+    pub fn remainder(&self) -> Duration {
+        self.remainder
+    }
+
+    #[must_use]
+    pub fn debt(&self) -> Duration {
+        self.debt
+    }
+
+    #[must_use]
+    pub fn delta(&self) -> Duration {
+        self.delta
+    }
+
+    #[must_use]
+    pub fn elapsed(&self) -> Duration {
+        self.elapsed
+    }
+
+    #[must_use]
+    pub fn tick(&self) -> u64 {
+        self.tick
     }
 
     #[must_use]
@@ -754,21 +1015,243 @@ impl FixedTime {
         self.capped_this_frame
     }
 
-    fn begin_frame(&mut self, delta: Duration) -> u32 {
-        self.accumulated = self.accumulated.checked_add(delta).unwrap_or(Duration::MAX);
+    #[must_use]
+    pub fn discarded_this_frame(&self) -> Duration {
+        self.discarded_this_frame
+    }
 
-        let mut steps = 0;
-        while self.accumulated >= self.timestep && steps < self.max_steps_per_frame {
-            self.accumulated -= self.timestep;
-            steps += 1;
+    pub fn set_timestep(&mut self, timestep: Duration) -> Result<(), TimeSettingsError> {
+        self.ensure_frame_inactive()?;
+        if timestep.is_zero() {
+            return Err(TimeSettingsError::ZeroFixedTimestep);
+        }
+        self.timestep = timestep;
+        self.update_pending_parts();
+        Ok(())
+    }
+
+    pub fn set_max_steps_per_frame(
+        &mut self,
+        max_steps_per_frame: u32,
+    ) -> Result<(), TimeSettingsError> {
+        self.ensure_frame_inactive()?;
+        self.max_steps_per_frame = NonZeroU32::new(max_steps_per_frame)
+            .ok_or(TimeSettingsError::ZeroMaxFixedStepsPerFrame)?;
+        Ok(())
+    }
+
+    pub fn set_max_debt_steps(&mut self, max_debt_steps: u32) -> Result<(), TimeSettingsError> {
+        self.ensure_frame_inactive()?;
+        self.max_debt_steps =
+            NonZeroU32::new(max_debt_steps).ok_or(TimeSettingsError::ZeroMaxFixedDebtSteps)?;
+        Ok(())
+    }
+
+    pub fn set_catch_up_policy(
+        &mut self,
+        catch_up_policy: FixedCatchUpPolicy,
+    ) -> Result<(), TimeSettingsError> {
+        self.ensure_frame_inactive()?;
+        self.catch_up_policy = catch_up_policy;
+        Ok(())
+    }
+
+    fn ensure_frame_inactive(&self) -> Result<(), TimeSettingsError> {
+        if self.frame_active {
+            Err(TimeSettingsError::FixedFrameActive)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn plan_frame(
+        &self,
+        delta: Duration,
+        advance_enabled: bool,
+    ) -> Result<FixedFramePlan, FixedTimeError> {
+        let pending = if advance_enabled {
+            self.pending
+                .checked_add(delta)
+                .ok_or(FixedTimeError::PendingDurationOverflow {
+                    pending: self.pending,
+                    incoming: delta,
+                })?
+        } else {
+            self.pending
+        };
+
+        let pending_steps = if advance_enabled {
+            pending.as_nanos() / self.timestep.as_nanos()
+        } else {
+            0
+        };
+        if advance_enabled && self.catch_up_policy == FixedCatchUpPolicy::PreserveDebt {
+            let maximum_pending_steps =
+                u128::from(self.max_steps_per_frame.get()) + u128::from(self.max_debt_steps.get());
+            if pending_steps > maximum_pending_steps {
+                return Err(FixedTimeError::CatchUpDebtExceeded {
+                    pending_steps,
+                    max_steps_per_frame: self.max_steps_per_frame.get(),
+                    max_debt_steps: self.max_debt_steps.get(),
+                });
+            }
         }
 
-        self.steps_this_frame = steps;
-        self.overstep = self.accumulated;
-        self.capped_this_frame =
-            self.accumulated >= self.timestep && steps >= self.max_steps_per_frame;
-        steps
+        let steps_to_run = pending_steps.min(u128::from(self.max_steps_per_frame.get())) as u32;
+        if self.tick.checked_add(u64::from(steps_to_run)).is_none() {
+            return Err(FixedTimeError::TickOverflow {
+                tick: self.tick,
+                attempted_steps: steps_to_run,
+            });
+        }
+        let elapsed_delta =
+            self.timestep
+                .checked_mul(steps_to_run)
+                .ok_or(FixedTimeError::ElapsedOverflow {
+                    elapsed: self.elapsed,
+                    timestep: self.timestep,
+                    attempted_steps: steps_to_run,
+                })?;
+        if self.elapsed.checked_add(elapsed_delta).is_none() {
+            return Err(FixedTimeError::ElapsedOverflow {
+                elapsed: self.elapsed,
+                timestep: self.timestep,
+                attempted_steps: steps_to_run,
+            });
+        }
+
+        Ok(FixedFramePlan {
+            pending,
+            advance_enabled,
+            steps_to_run,
+        })
     }
+
+    fn begin_frame(&mut self, plan: FixedFramePlan) {
+        self.pending = plan.pending;
+        self.advance_enabled = plan.advance_enabled;
+        self.frame_active = true;
+        self.delta = Duration::ZERO;
+        self.steps_this_frame = 0;
+        self.capped_this_frame = false;
+        self.discarded_this_frame = Duration::ZERO;
+        self.update_pending_parts();
+    }
+
+    fn advance_tick(&mut self) {
+        self.pending = self
+            .pending
+            .checked_sub(self.timestep)
+            .expect("fixed pending time is preflighted for the frame");
+        self.delta = self.timestep;
+        self.elapsed = self
+            .elapsed
+            .checked_add(self.timestep)
+            .expect("fixed elapsed advance is preflighted for the frame");
+        self.tick = self
+            .tick
+            .checked_add(1)
+            .expect("fixed tick advance is preflighted for the frame");
+        self.steps_this_frame += 1;
+        self.update_pending_parts();
+    }
+
+    fn finish_frame(&mut self) {
+        self.update_pending_parts();
+        self.capped_this_frame = self.advance_enabled
+            && !self.debt.is_zero()
+            && self.steps_this_frame >= self.max_steps_per_frame.get();
+        if self.capped_this_frame && self.catch_up_policy == FixedCatchUpPolicy::DiscardExcess {
+            self.discarded_this_frame = self.debt;
+            self.pending = self.remainder;
+            self.debt = Duration::ZERO;
+        }
+        self.frame_active = false;
+    }
+
+    fn update_pending_parts(&mut self) {
+        self.remainder = duration_remainder(self.pending, self.timestep);
+        self.debt = self.pending.saturating_sub(self.remainder);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FixedFramePlan {
+    pending: Duration,
+    advance_enabled: bool,
+    steps_to_run: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TimeFramePlan {
+    real_time: RealTime,
+    virtual_time: VirtualTime,
+    fixed_time: FixedTime,
+    real_delta: Duration,
+    virtual_delta: Duration,
+    real_delta_clamped: bool,
+    fixed_steps_to_run: u32,
+}
+
+impl TimeFramePlan {
+    fn from_world(world: &World, real_delta: Duration) -> Result<Self, TimeFrameError> {
+        let settings = *required_frame_resource::<RuntimeTimeSettings>(
+            world,
+            TimeFrameResource::RuntimeTimeSettings,
+        )?;
+        let real_time = required_frame_resource::<RealTime>(world, TimeFrameResource::RealTime)?
+            .plan_advance(real_delta)?;
+        let (virtual_delta, real_delta_clamped) = settings.plan_virtual_delta(real_delta)?;
+        let virtual_time =
+            required_frame_resource::<VirtualTime>(world, TimeFrameResource::VirtualTime)?
+                .plan_advance(virtual_delta)?;
+        let mut fixed_time =
+            *required_frame_resource::<FixedTime>(world, TimeFrameResource::FixedTime)?;
+        required_frame_resource::<RenderTime>(world, TimeFrameResource::RenderTime)?;
+        required_frame_resource::<RuntimeFrameStatus>(
+            world,
+            TimeFrameResource::RuntimeFrameStatus,
+        )?;
+        required_frame_resource::<AppExitRequests>(world, TimeFrameResource::AppExitRequests)?;
+        let fixed_frame = fixed_time
+            .plan_frame(virtual_delta, settings.fixed_time_enabled())
+            .map_err(TimeFrameError::Fixed)?;
+        fixed_time.begin_frame(fixed_frame);
+
+        Ok(Self {
+            real_time,
+            virtual_time,
+            fixed_time,
+            real_delta,
+            virtual_delta,
+            real_delta_clamped,
+            fixed_steps_to_run: fixed_frame.steps_to_run,
+        })
+    }
+
+    fn commit(self, world: &mut World) {
+        *world.resource_mut::<RealTime>() = self.real_time;
+        *world.resource_mut::<VirtualTime>() = self.virtual_time;
+        *world.resource_mut::<FixedTime>() = self.fixed_time;
+    }
+}
+
+fn required_frame_resource<T: Resource>(
+    world: &World,
+    resource: TimeFrameResource,
+) -> Result<&T, TimeFrameError> {
+    world
+        .get_resource::<T>()
+        .ok_or(TimeFrameError::MissingResource { resource })
+}
+
+fn duration_remainder(duration: Duration, divisor: Duration) -> Duration {
+    let remainder_nanos = duration.as_nanos() % divisor.as_nanos();
+    let seconds = u64::try_from(remainder_nanos / 1_000_000_000)
+        .expect("a duration remainder always fits in Duration");
+    let nanoseconds = u32::try_from(remainder_nanos % 1_000_000_000)
+        .expect("subsecond nanoseconds always fit in u32");
+    Duration::new(seconds, nanoseconds)
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
@@ -779,7 +1262,11 @@ pub struct RuntimeFrameStatus {
     pub real_delta_clamped: bool,
     pub fixed_steps: u32,
     pub fixed_steps_capped: bool,
-    pub fixed_overstep: Duration,
+    pub fixed_tick: u64,
+    pub fixed_elapsed: Duration,
+    pub fixed_remainder: Duration,
+    pub fixed_debt: Duration,
+    pub fixed_discarded: Duration,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -868,10 +1355,21 @@ impl App {
             .into_iter()
             .map(|stage| (stage, Schedule::new(stage)))
             .collect();
-        let schedules = CoreStage::ALL
+        let mut schedules: BTreeMap<_, _> = CoreStage::ALL
             .into_iter()
             .map(|stage| (stage, Schedule::new(stage)))
             .collect();
+        schedules
+            .get_mut(&CoreStage::FixedUpdate)
+            .expect("the fixed-update schedule is created above")
+            .configure_sets(
+                (
+                    FixedUpdateSet::Prepare,
+                    FixedUpdateSet::Simulate,
+                    FixedUpdateSet::Finalize,
+                )
+                    .chain(),
+            );
 
         Self {
             world,
@@ -1400,6 +1898,11 @@ impl App {
         }
     }
 
+    /// Runs one frame using real elapsed time supplied by the runner.
+    ///
+    /// Startup is a committed one-time lifecycle phase. The frame clock plan is built from the
+    /// resources left by startup; a planning failure does not roll startup back or run it again,
+    /// but it commits no clock state, runs no core schedule, and does not clear frame trackers.
     pub fn run_once(&mut self, real_delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
         if let Err(error) = self.finish_plugins() {
             return Err(AppRunError::plugin(
@@ -1417,45 +1920,49 @@ impl App {
             self.started = true;
         }
 
-        self.world.resource_mut::<RealTime>().advance(real_delta);
-        let settings = *self.world.resource::<RuntimeTimeSettings>();
-        let (virtual_delta, real_delta_clamped) = settings.virtual_delta(real_delta);
-        self.world
-            .resource_mut::<VirtualTime>()
-            .advance(virtual_delta);
-        let fixed_steps = self
-            .world
-            .resource_mut::<FixedTime>()
-            .begin_frame(virtual_delta);
-        let fixed = *self.world.resource::<FixedTime>();
-        self.world
-            .resource_mut::<RenderTime>()
-            .update_from_fixed(&fixed);
+        let time_frame_plan = TimeFramePlan::from_world(&self.world, real_delta)?;
+        time_frame_plan.commit(&mut self.world);
+        let mut fixed_time = time_frame_plan.fixed_time;
+        let mut frame_status = None;
 
         for stage in CoreStage::ALL {
             if let Some(schedule) = self.schedules.get_mut(&stage) {
                 if stage == CoreStage::FixedUpdate {
-                    for _ in 0..fixed_steps {
+                    for _ in 0..time_frame_plan.fixed_steps_to_run {
+                        fixed_time.advance_tick();
+                        *self.world.resource_mut::<FixedTime>() = fixed_time;
                         schedule.run(&mut self.world);
                     }
+                    fixed_time.finish_frame();
+                    *self.world.resource_mut::<FixedTime>() = fixed_time;
+                    self.world
+                        .resource_mut::<RenderTime>()
+                        .update_from_fixed(&fixed_time);
+                    let status = RuntimeFrameStatus {
+                        frame: self.world.resource::<RealTime>().frame,
+                        real_delta: time_frame_plan.real_delta,
+                        virtual_delta: time_frame_plan.virtual_delta,
+                        real_delta_clamped: time_frame_plan.real_delta_clamped,
+                        fixed_steps: fixed_time.steps_this_frame(),
+                        fixed_steps_capped: fixed_time.capped_this_frame(),
+                        fixed_tick: fixed_time.tick(),
+                        fixed_elapsed: fixed_time.elapsed(),
+                        fixed_remainder: fixed_time.remainder(),
+                        fixed_debt: fixed_time.debt(),
+                        fixed_discarded: fixed_time.discarded_this_frame(),
+                    };
+                    *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+                    frame_status = Some(status);
                 } else {
                     schedule.run(&mut self.world);
                 }
             }
         }
 
-        let fixed = *self.world.resource::<FixedTime>();
-        let status = RuntimeFrameStatus {
-            frame: self.world.resource::<RealTime>().frame,
-            real_delta,
-            virtual_delta,
-            real_delta_clamped,
-            fixed_steps,
-            fixed_steps_capped: fixed.capped_this_frame(),
-            fixed_overstep: fixed.overstep(),
-        };
+        let status = frame_status.expect("the fixed-update stage always exists");
         *self.world.resource_mut::<RuntimeFrameStatus>() = status;
         let exit = self.world.resource_mut::<AppExitRequests>().take();
+        self.world.clear_trackers();
         Ok(AppFrameOutcome { exit, status })
     }
 
@@ -1484,7 +1991,9 @@ fn default_runner(app: &mut App) -> Result<AppExit, AppRunError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_ecs::{Commands, Component, ResMut, Resource};
+    use nara_ecs::{
+        Commands, Component, DetectChanges, Query, RemovedComponents, Res, ResMut, Resource,
+    };
     use std::sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -1493,8 +2002,37 @@ mod tests {
     #[derive(Debug, Default, Resource)]
     struct Frames(u32);
 
+    #[derive(Debug, Default, Resource)]
+    struct StartupRuns(u32);
+
+    #[derive(Debug, Default, Resource)]
+    struct FixedObservations(Vec<(u64, Duration, Duration)>);
+
+    #[derive(Debug, Default, Resource)]
+    struct FrameStatusObservations(Vec<(u64, u32, u64, Duration, f32)>);
+
+    #[derive(Debug, Default, Resource)]
+    struct RemovalCount(u32);
+
     #[derive(Debug, Component)]
     struct Spawned;
+
+    #[derive(Debug, Component)]
+    struct FixedPrepared;
+
+    #[derive(Debug, Component)]
+    struct FixedSimulated;
+
+    #[derive(Debug, Component)]
+    struct Tracked;
+
+    type TimeStateSnapshot = (
+        RealTime,
+        VirtualTime,
+        FixedTime,
+        RenderTime,
+        RuntimeFrameStatus,
+    );
 
     #[derive(Debug, Default, Resource)]
     struct Order(Vec<&'static str>);
@@ -1951,6 +2489,130 @@ mod tests {
         frames.0 += 1;
     }
 
+    fn pause_on_startup(
+        mut settings: ResMut<RuntimeTimeSettings>,
+        mut startup_runs: ResMut<StartupRuns>,
+    ) {
+        settings.set_paused(true);
+        startup_runs.0 += 1;
+    }
+
+    fn set_timestep_on_startup(
+        mut fixed_time: ResMut<FixedTime>,
+        mut startup_runs: ResMut<StartupRuns>,
+    ) {
+        fixed_time
+            .set_timestep(FixedTime::DEFAULT_TIMESTEP * 2)
+            .unwrap();
+        startup_runs.0 += 1;
+    }
+
+    fn configure_preserve_debt_on_startup(
+        mut fixed_time: ResMut<FixedTime>,
+        mut startup_runs: ResMut<StartupRuns>,
+    ) {
+        fixed_time.set_max_steps_per_frame(2).unwrap();
+        fixed_time.set_max_debt_steps(2).unwrap();
+        fixed_time
+            .set_catch_up_policy(FixedCatchUpPolicy::PreserveDebt)
+            .unwrap();
+        startup_runs.0 += 1;
+    }
+
+    fn remove_fixed_time_on_startup(world: &mut World) {
+        world.resource_mut::<StartupRuns>().0 += 1;
+        world.remove_resource::<FixedTime>();
+    }
+
+    fn observe_fixed_time(fixed_time: Res<FixedTime>, mut observations: ResMut<FixedObservations>) {
+        observations
+            .0
+            .push((fixed_time.tick(), fixed_time.delta(), fixed_time.elapsed()));
+    }
+
+    fn fixed_prepare(mut commands: Commands, mut order: ResMut<Order>) {
+        order.0.push("fixed_prepare");
+        commands.spawn(FixedPrepared);
+    }
+
+    fn fixed_simulate(
+        prepared: Query<&FixedPrepared>,
+        mut commands: Commands,
+        mut order: ResMut<Order>,
+    ) {
+        assert_eq!(prepared.iter().count(), 1);
+        order.0.push("fixed_simulate");
+        commands.spawn(FixedSimulated);
+    }
+
+    fn fixed_finalize(simulated: Query<&FixedSimulated>, mut order: ResMut<Order>) {
+        assert_eq!(simulated.iter().count(), 1);
+        order.0.push("fixed_finalize");
+    }
+
+    fn observe_frame_status(
+        real_time: Res<RealTime>,
+        status: Res<RuntimeFrameStatus>,
+        render_time: Res<RenderTime>,
+        mut observations: ResMut<FrameStatusObservations>,
+    ) {
+        observations.0.push((
+            real_time.frame,
+            status.fixed_steps,
+            status.fixed_tick,
+            status.fixed_remainder,
+            render_time.interpolation_alpha,
+        ));
+    }
+
+    fn record_removals(
+        mut removed: RemovedComponents<Tracked>,
+        mut removal_count: ResMut<RemovalCount>,
+    ) {
+        removal_count.0 += u32::try_from(removed.read().count()).unwrap();
+    }
+
+    fn time_state(app: &App) -> TimeStateSnapshot {
+        (
+            *app.world().resource::<RealTime>(),
+            *app.world().resource::<VirtualTime>(),
+            *app.world().resource::<FixedTime>(),
+            *app.world().resource::<RenderTime>(),
+            *app.world().resource::<RuntimeFrameStatus>(),
+        )
+    }
+
+    fn assert_time_frame_error_is_atomic(
+        app: &mut App,
+        real_delta: Duration,
+        expected: TimeFrameError,
+    ) {
+        let tracked = app.world_mut().unwrap().spawn(Tracked).id();
+        let before = time_state(app);
+        assert!(
+            app.world()
+                .entity(tracked)
+                .get_ref::<Tracked>()
+                .unwrap()
+                .is_changed()
+        );
+
+        assert_eq!(
+            app.run_once(real_delta).unwrap_err(),
+            AppRunError::Time { error: expected }
+        );
+
+        assert_eq!(time_state(app), before);
+        assert!(app.started);
+        assert!(
+            app.world()
+                .entity(tracked)
+                .get_ref::<Tracked>()
+                .unwrap()
+                .is_changed()
+        );
+    }
+
     fn push_first(mut order: ResMut<Order>) {
         order.0.push("first");
     }
@@ -2062,6 +2724,97 @@ mod tests {
     }
 
     #[test]
+    fn fixed_clock_advances_before_each_fixed_schedule_iteration() {
+        let mut app = App::new();
+        app.insert_resource(FixedObservations::default()).unwrap();
+        app.add_systems(CoreStage::FixedUpdate, observe_fixed_time)
+            .unwrap();
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
+
+        let step = FixedTime::DEFAULT_TIMESTEP;
+        assert_eq!(
+            app.world().resource::<FixedObservations>().0,
+            [(1, step, step), (2, step, step * 2), (3, step, step * 3),]
+        );
+    }
+
+    #[test]
+    fn fixed_sets_flush_deferred_commands_at_declared_boundaries() {
+        let mut app = App::new();
+        app.insert_resource(Order::default()).unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            fixed_finalize.in_set(FixedUpdateSet::Finalize),
+        )
+        .unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            fixed_simulate.in_set(FixedUpdateSet::Simulate),
+        )
+        .unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            fixed_prepare.in_set(FixedUpdateSet::Prepare),
+        )
+        .unwrap();
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        assert_eq!(
+            app.world().resource::<Order>().0,
+            ["fixed_prepare", "fixed_simulate", "fixed_finalize"]
+        );
+    }
+
+    #[test]
+    fn current_fixed_status_is_visible_to_variable_update() {
+        let mut app = App::new();
+        app.insert_resource(FrameStatusObservations::default())
+            .unwrap();
+        app.add_systems(CoreStage::Update, observe_frame_status)
+            .unwrap();
+
+        let step = FixedTime::DEFAULT_TIMESTEP;
+        app.run_once(step * 3 + step / 2).unwrap();
+
+        let observations = &app.world().resource::<FrameStatusObservations>().0;
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].0, 1);
+        assert_eq!(observations[0].1, 3);
+        assert_eq!(observations[0].2, 3);
+        assert_eq!(observations[0].3, step / 2);
+        assert!(observations[0].4 < 1.0);
+    }
+
+    #[test]
+    fn completed_frame_retains_removals_for_systems_then_clears_world_trackers() {
+        let mut app = App::new();
+        app.insert_resource(RemovalCount::default()).unwrap();
+        let (changed_entity, removed_entity) = {
+            let world = app.world_mut().unwrap();
+            let changed_entity = world.spawn(Tracked).id();
+            let removed_entity = world.spawn(Tracked).id();
+            world.entity_mut(removed_entity).remove::<Tracked>();
+            (changed_entity, removed_entity)
+        };
+        app.add_systems(CoreStage::Last, record_removals).unwrap();
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(app.world().resource::<RemovalCount>().0, 1);
+        assert!(
+            !app.world()
+                .entity(changed_entity)
+                .get_ref::<Tracked>()
+                .unwrap()
+                .is_changed()
+        );
+        assert!(app.world().removed::<Tracked>().next().is_none());
+        assert!(app.world().get_entity(removed_entity).is_ok());
+    }
+
+    #[test]
     fn paused_frame_advances_real_time_but_not_virtual_or_fixed_time() {
         let mut app = App::new();
         app.insert_resource(Frames::default()).unwrap();
@@ -2082,10 +2835,10 @@ mod tests {
     }
 
     #[test]
-    fn time_scale_changes_virtual_delta_and_fixed_accumulation() {
+    fn time_scale_changes_virtual_delta_and_fixed_ticks() {
         let mut app = App::new();
         app.insert_resource(Frames::default()).unwrap();
-        app.insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5))
+        app.insert_resource(RuntimeTimeSettings::default().with_time_scale(0.5).unwrap())
             .unwrap();
         app.add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
@@ -2104,7 +2857,9 @@ mod tests {
     fn max_delta_clamps_large_real_elapsed_time() {
         let mut app = App::new();
         app.insert_resource(
-            RuntimeTimeSettings::default().with_max_delta(Duration::from_millis(1)),
+            RuntimeTimeSettings::default()
+                .with_max_delta(Duration::from_millis(1))
+                .unwrap(),
         )
         .unwrap();
 
@@ -2122,6 +2877,42 @@ mod tests {
     }
 
     #[test]
+    fn time_settings_reject_invalid_values_at_construction() {
+        assert!(matches!(
+            RuntimeTimeSettings::default().with_time_scale(f32::NAN),
+            Err(TimeSettingsError::InvalidTimeScale { .. })
+        ));
+        assert!(matches!(
+            RuntimeTimeSettings::default().with_time_scale(f32::INFINITY),
+            Err(TimeSettingsError::InvalidTimeScale { .. })
+        ));
+        assert!(matches!(
+            RuntimeTimeSettings::default().with_time_scale(-0.25),
+            Err(TimeSettingsError::InvalidTimeScale { .. })
+        ));
+        assert_eq!(
+            RuntimeTimeSettings::default()
+                .with_max_delta(Duration::ZERO)
+                .unwrap_err(),
+            TimeSettingsError::ZeroMaxDelta
+        );
+        assert_eq!(
+            FixedTime::new(Duration::ZERO).unwrap_err(),
+            TimeSettingsError::ZeroFixedTimestep
+        );
+        assert_eq!(
+            FixedTime::default()
+                .with_max_steps_per_frame(0)
+                .unwrap_err(),
+            TimeSettingsError::ZeroMaxFixedStepsPerFrame
+        );
+        assert_eq!(
+            FixedTime::default().with_max_debt_steps(0).unwrap_err(),
+            TimeSettingsError::ZeroMaxFixedDebtSteps
+        );
+    }
+
+    #[test]
     fn fixed_update_does_not_run_until_accumulator_is_due() {
         let mut app = App::new();
         app.insert_resource(Frames::default()).unwrap();
@@ -2135,25 +2926,414 @@ mod tests {
     }
 
     #[test]
-    fn fixed_update_limits_catch_up_ticks() {
+    fn desktop_catch_up_discards_excess_ticks_and_keeps_only_remainder() {
         let mut app = App::new();
         app.insert_resource(Frames::default()).unwrap();
-        app.insert_resource(FixedTime::default().with_max_steps_per_frame(2))
+        app.insert_resource(FixedTime::default().with_max_steps_per_frame(2).unwrap())
             .unwrap();
         app.add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP * 5).unwrap();
+        let step = FixedTime::DEFAULT_TIMESTEP;
+        app.run_once(step * 5 + step / 2).unwrap();
 
         assert_eq!(app.world().resource::<Frames>().0, 2);
-        assert_eq!(app.world().resource::<FixedTime>().steps_this_frame(), 2);
-        assert!(app.world().resource::<FixedTime>().accumulated() >= FixedTime::DEFAULT_TIMESTEP);
-        assert!(app.world().resource::<FixedTime>().capped_this_frame());
-        assert!(
-            app.world()
-                .resource::<RuntimeFrameStatus>()
-                .fixed_steps_capped
+        let fixed = app.world().resource::<FixedTime>();
+        assert_eq!(fixed.steps_this_frame(), 2);
+        assert_eq!(fixed.debt(), Duration::ZERO);
+        assert_eq!(fixed.remainder(), step / 2);
+        assert_eq!(fixed.discarded_this_frame(), step * 3);
+        assert!(fixed.capped_this_frame());
+        let render = app.world().resource::<RenderTime>();
+        assert_eq!(render.remainder, step / 2);
+        assert!(render.interpolation_alpha < 1.0);
+        assert!((render.interpolation_alpha - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn preserve_debt_catch_up_runs_bounded_work_across_frames() {
+        let mut app = App::new();
+        app.insert_resource(Frames::default()).unwrap();
+        app.insert_resource(
+            FixedTime::default()
+                .with_max_steps_per_frame(2)
+                .unwrap()
+                .with_catch_up_policy(FixedCatchUpPolicy::PreserveDebt),
+        )
+        .unwrap();
+        app.add_systems(CoreStage::FixedUpdate, count_frame)
+            .unwrap();
+
+        let step = FixedTime::DEFAULT_TIMESTEP;
+        app.run_once(step * 5 + step / 2).unwrap();
+
+        let fixed = app.world().resource::<FixedTime>();
+        assert_eq!(fixed.tick(), 2);
+        assert_eq!(fixed.debt(), step * 3);
+        assert_eq!(fixed.remainder(), step / 2);
+        assert_eq!(fixed.discarded_this_frame(), Duration::ZERO);
+        let alpha = app.world().resource::<RenderTime>().interpolation_alpha;
+        assert!((alpha - 0.5).abs() < f32::EPSILON);
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let fixed = app.world().resource::<FixedTime>();
+        assert_eq!(fixed.tick(), 4);
+        assert_eq!(fixed.debt(), step);
+        assert_eq!(fixed.remainder(), step / 2);
+        assert_eq!(app.world().resource::<Frames>().0, 4);
+    }
+
+    #[test]
+    fn preserve_debt_rejects_overload_before_advancing_the_frame() {
+        let mut app = App::new();
+        app.insert_resource(Frames::default()).unwrap();
+        app.insert_resource(
+            FixedTime::default()
+                .with_max_steps_per_frame(2)
+                .unwrap()
+                .with_max_debt_steps(2)
+                .unwrap()
+                .with_catch_up_policy(FixedCatchUpPolicy::PreserveDebt),
+        )
+        .unwrap();
+        app.add_systems(CoreStage::FixedUpdate, count_frame)
+            .unwrap();
+
+        let step = FixedTime::DEFAULT_TIMESTEP;
+        let error = app.run_once(step * 5).unwrap_err();
+
+        assert_eq!(
+            error,
+            AppRunError::Time {
+                error: TimeFrameError::Fixed(FixedTimeError::CatchUpDebtExceeded {
+                    pending_steps: 5,
+                    max_steps_per_frame: 2,
+                    max_debt_steps: 2,
+                }),
+            }
         );
+        assert_eq!(app.world().resource::<RealTime>().frame, 0);
+        assert_eq!(app.world().resource::<FixedTime>().tick(), 0);
+        assert_eq!(app.world().resource::<FixedTime>().debt(), Duration::ZERO);
+        assert_eq!(app.world().resource::<Frames>().0, 0);
+
+        app.run_once(step * 4).unwrap();
+        assert_eq!(app.world().resource::<FixedTime>().tick(), 2);
+        assert_eq!(app.world().resource::<FixedTime>().debt(), step * 2);
+    }
+
+    #[test]
+    fn startup_pause_applies_to_the_first_frame() {
+        let mut app = App::new();
+        app.insert_resource(StartupRuns::default()).unwrap();
+        app.insert_resource(Frames::default()).unwrap();
+        app.add_startup_systems(StartupStage::Core, pause_on_startup)
+            .unwrap();
+        app.add_systems(CoreStage::FixedUpdate, count_frame)
+            .unwrap();
+        let step = FixedTime::DEFAULT_TIMESTEP;
+
+        app.run_once(step).unwrap();
+
+        assert_eq!(app.world().resource::<StartupRuns>().0, 1);
+        assert_eq!(app.world().resource::<Frames>().0, 0);
+        assert_eq!(app.world().resource::<VirtualTime>().delta, Duration::ZERO);
+        assert_eq!(app.world().resource::<FixedTime>().tick(), 0);
+    }
+
+    #[test]
+    fn startup_timestep_applies_to_the_first_frame() {
+        let mut app = App::new();
+        app.insert_resource(StartupRuns::default()).unwrap();
+        app.insert_resource(Frames::default()).unwrap();
+        app.add_startup_systems(StartupStage::Core, set_timestep_on_startup)
+            .unwrap();
+        app.add_systems(CoreStage::FixedUpdate, count_frame)
+            .unwrap();
+        let step = FixedTime::DEFAULT_TIMESTEP;
+
+        app.run_once(step * 2).unwrap();
+
+        let fixed_time = app.world().resource::<FixedTime>();
+        assert_eq!(app.world().resource::<StartupRuns>().0, 1);
+        assert_eq!(app.world().resource::<Frames>().0, 1);
+        assert_eq!(fixed_time.timestep(), step * 2);
+        assert_eq!(fixed_time.delta(), step * 2);
+        assert_eq!(fixed_time.tick(), 1);
+    }
+
+    #[test]
+    fn startup_time_overload_is_committed_but_does_not_start_a_frame() {
+        let mut app = App::new();
+        app.insert_resource(StartupRuns::default()).unwrap();
+        app.insert_resource(Frames::default()).unwrap();
+        app.add_startup_systems(StartupStage::Core, configure_preserve_debt_on_startup)
+            .unwrap();
+        app.add_systems(CoreStage::Update, count_frame).unwrap();
+        let step = FixedTime::DEFAULT_TIMESTEP;
+
+        assert_eq!(
+            app.run_once(step * 5).unwrap_err(),
+            AppRunError::Time {
+                error: TimeFrameError::Fixed(FixedTimeError::CatchUpDebtExceeded {
+                    pending_steps: 5,
+                    max_steps_per_frame: 2,
+                    max_debt_steps: 2,
+                }),
+            }
+        );
+
+        assert!(app.started);
+        assert_eq!(app.world().resource::<StartupRuns>().0, 1);
+        assert_eq!(app.world().resource::<Frames>().0, 0);
+        assert_eq!(*app.world().resource::<RealTime>(), RealTime::default());
+        assert_eq!(
+            *app.world().resource::<VirtualTime>(),
+            VirtualTime::default()
+        );
+        let fixed_time = app.world().resource::<FixedTime>();
+        assert_eq!(fixed_time.tick(), 0);
+        assert_eq!(fixed_time.elapsed(), Duration::ZERO);
+        assert_eq!(fixed_time.debt(), Duration::ZERO);
+        assert!(app.world().resource_ref::<StartupRuns>().is_changed());
+
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<FixedTime>()
+            .set_max_debt_steps(3)
+            .unwrap();
+        app.run_once(step * 5).unwrap();
+
+        assert_eq!(app.world().resource::<StartupRuns>().0, 1);
+        assert_eq!(app.world().resource::<Frames>().0, 1);
+    }
+
+    #[test]
+    fn missing_startup_time_resource_is_structured_and_retryable() {
+        let mut app = App::new();
+        app.insert_resource(StartupRuns::default()).unwrap();
+        app.insert_resource(Frames::default()).unwrap();
+        app.add_startup_systems(StartupStage::Core, remove_fixed_time_on_startup)
+            .unwrap();
+        app.add_systems(CoreStage::Update, count_frame).unwrap();
+
+        assert_eq!(
+            app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap_err(),
+            AppRunError::Time {
+                error: TimeFrameError::MissingResource {
+                    resource: TimeFrameResource::FixedTime,
+                },
+            }
+        );
+        assert!(app.started);
+        assert_eq!(app.world().resource::<StartupRuns>().0, 1);
+        assert_eq!(app.world().resource::<Frames>().0, 0);
+        assert_eq!(*app.world().resource::<RealTime>(), RealTime::default());
+        assert_eq!(
+            *app.world().resource::<VirtualTime>(),
+            VirtualTime::default()
+        );
+
+        app.insert_resource(FixedTime::default()).unwrap();
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        assert_eq!(app.world().resource::<StartupRuns>().0, 1);
+        assert_eq!(app.world().resource::<Frames>().0, 1);
+    }
+
+    #[test]
+    fn time_frame_plan_rejects_every_clock_overflow_without_state_changes() {
+        let mut scaled_delta_app = App::new();
+        scaled_delta_app.run_once(Duration::ZERO).unwrap();
+        scaled_delta_app
+            .insert_resource(
+                RuntimeTimeSettings::default()
+                    .with_max_delta(Duration::from_secs(1))
+                    .unwrap()
+                    .with_time_scale(f32::MAX)
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_time_frame_error_is_atomic(
+            &mut scaled_delta_app,
+            Duration::from_secs(1),
+            TimeFrameError::VirtualDeltaOverflow {
+                clamped_real_delta: Duration::from_secs(1),
+                time_scale: f32::MAX,
+            },
+        );
+
+        let mut real_elapsed_app = App::new();
+        real_elapsed_app.run_once(Duration::ZERO).unwrap();
+        *real_elapsed_app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<RealTime>() = RealTime {
+            elapsed: Duration::MAX,
+            ..RealTime::default()
+        };
+        assert_time_frame_error_is_atomic(
+            &mut real_elapsed_app,
+            Duration::from_nanos(1),
+            TimeFrameError::RealElapsedOverflow {
+                elapsed: Duration::MAX,
+                delta: Duration::from_nanos(1),
+            },
+        );
+
+        let mut real_frame_app = App::new();
+        real_frame_app.run_once(Duration::ZERO).unwrap();
+        *real_frame_app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<RealTime>() = RealTime {
+            frame: u64::MAX,
+            ..RealTime::default()
+        };
+        assert_time_frame_error_is_atomic(
+            &mut real_frame_app,
+            Duration::ZERO,
+            TimeFrameError::RealFrameOverflow { frame: u64::MAX },
+        );
+
+        let mut virtual_elapsed_app = App::new();
+        virtual_elapsed_app.run_once(Duration::ZERO).unwrap();
+        *virtual_elapsed_app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<VirtualTime>() = VirtualTime {
+            elapsed: Duration::MAX,
+            ..VirtualTime::default()
+        };
+        assert_time_frame_error_is_atomic(
+            &mut virtual_elapsed_app,
+            Duration::from_nanos(1),
+            TimeFrameError::VirtualElapsedOverflow {
+                elapsed: Duration::MAX,
+                delta: Duration::from_nanos(1),
+            },
+        );
+
+        let mut virtual_frame_app = App::new();
+        virtual_frame_app.run_once(Duration::ZERO).unwrap();
+        *virtual_frame_app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<VirtualTime>() = VirtualTime {
+            frame: u64::MAX,
+            ..VirtualTime::default()
+        };
+        assert_time_frame_error_is_atomic(
+            &mut virtual_frame_app,
+            Duration::ZERO,
+            TimeFrameError::VirtualFrameOverflow { frame: u64::MAX },
+        );
+
+        let mut fixed_pending_app = App::new();
+        fixed_pending_app.run_once(Duration::ZERO).unwrap();
+        {
+            let mut fixed = fixed_pending_app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<FixedTime>();
+            fixed.pending = Duration::MAX;
+            fixed.update_pending_parts();
+        }
+        assert_time_frame_error_is_atomic(
+            &mut fixed_pending_app,
+            FixedTime::DEFAULT_TIMESTEP,
+            TimeFrameError::Fixed(FixedTimeError::PendingDurationOverflow {
+                pending: Duration::MAX,
+                incoming: FixedTime::DEFAULT_TIMESTEP,
+            }),
+        );
+    }
+
+    #[test]
+    fn fixed_clock_rejects_tick_or_elapsed_overflow_before_schedules_run() {
+        let step = FixedTime::DEFAULT_TIMESTEP;
+
+        let mut tick_app = App::new();
+        tick_app.insert_resource(Frames::default()).unwrap();
+        let tick_clock = FixedTime {
+            tick: u64::MAX - 1,
+            ..FixedTime::default()
+        };
+        tick_app.insert_resource(tick_clock).unwrap();
+        tick_app
+            .add_systems(CoreStage::FixedUpdate, count_frame)
+            .unwrap();
+        assert_eq!(
+            tick_app.run_once(step * 2).unwrap_err(),
+            AppRunError::Time {
+                error: TimeFrameError::Fixed(FixedTimeError::TickOverflow {
+                    tick: u64::MAX - 1,
+                    attempted_steps: 2,
+                }),
+            }
+        );
+        assert_eq!(tick_app.world().resource::<Frames>().0, 0);
+        assert_eq!(tick_app.world().resource::<RealTime>().frame, 0);
+
+        let mut elapsed_app = App::new();
+        elapsed_app.insert_resource(Frames::default()).unwrap();
+        let elapsed_clock = FixedTime {
+            elapsed: Duration::MAX - step,
+            ..FixedTime::default()
+        };
+        elapsed_app.insert_resource(elapsed_clock).unwrap();
+        elapsed_app
+            .add_systems(CoreStage::FixedUpdate, count_frame)
+            .unwrap();
+        assert_eq!(
+            elapsed_app.run_once(step * 2).unwrap_err(),
+            AppRunError::Time {
+                error: TimeFrameError::Fixed(FixedTimeError::ElapsedOverflow {
+                    elapsed: Duration::MAX - step,
+                    timestep: step,
+                    attempted_steps: 2,
+                }),
+            }
+        );
+        assert_eq!(elapsed_app.world().resource::<Frames>().0, 0);
+        assert_eq!(elapsed_app.world().resource::<RealTime>().frame, 0);
+    }
+
+    #[test]
+    fn paused_and_zero_scale_frames_preserve_debt_without_running_ticks() {
+        let mut app = App::new();
+        app.insert_resource(Frames::default()).unwrap();
+        app.insert_resource(
+            FixedTime::default()
+                .with_max_steps_per_frame(2)
+                .unwrap()
+                .with_catch_up_policy(FixedCatchUpPolicy::PreserveDebt),
+        )
+        .unwrap();
+        app.add_systems(CoreStage::FixedUpdate, count_frame)
+            .unwrap();
+
+        let step = FixedTime::DEFAULT_TIMESTEP;
+        app.run_once(step * 5).unwrap();
+        assert_eq!(app.world().resource::<FixedTime>().debt(), step * 3);
+
+        app.insert_resource(RuntimeTimeSettings::default().with_paused(true))
+            .unwrap();
+        app.run_once(Duration::ZERO).unwrap();
+        assert_eq!(app.world().resource::<FixedTime>().tick(), 2);
+        assert_eq!(app.world().resource::<FixedTime>().debt(), step * 3);
+
+        app.insert_resource(RuntimeTimeSettings::default().with_time_scale(0.0).unwrap())
+            .unwrap();
+        app.run_once(Duration::ZERO).unwrap();
+        assert_eq!(app.world().resource::<FixedTime>().tick(), 2);
+        assert_eq!(app.world().resource::<FixedTime>().debt(), step * 3);
+
+        app.insert_resource(RuntimeTimeSettings::default()).unwrap();
+        app.run_once(Duration::ZERO).unwrap();
+        assert_eq!(app.world().resource::<FixedTime>().tick(), 4);
+        assert_eq!(app.world().resource::<FixedTime>().debt(), step);
     }
 
     #[test]

@@ -55,8 +55,9 @@ The product contract is:
   window housekeeping, asset IO observation, and backend liveness.
 - **Virtual time** is scaled and pausable game time. Gameplay `Update` systems that should obey
   pause read virtual time.
-- **Fixed time** is the authoritative simulation tick domain. Physics and deterministic gameplay
-  run in fixed schedules using the configured fixed step and bounded catch-up.
+- **Fixed time** is the authoritative simulation tick domain. `FixedTime` exposes the current
+  monotonic tick, per-tick delta, elapsed duration, whole-tick debt, and sub-tick remainder. It
+  advances immediately before each fixed schedule run.
 - **Render interpolation** uses fixed overstep/interpolation data and must not mutate simulation
   state.
 - `run_once(delta)` receives real elapsed time. It must not silently mean virtual or fixed delta.
@@ -66,8 +67,18 @@ The product contract is:
 - Pause is a scheduler/time policy, not a hidden freeze of the `World`. Real-time services, input
   collection, task result integration, diagnostics, window event processing, asset reload
   scheduling, render backend health, and tooling observation continue unless explicitly disabled.
-- Fixed simulation does not catch up without bound. When catch-up exceeds the configured maximum,
-  nara records a diagnostic/status observation rather than spending unlimited frame time.
+- Fixed simulation does not catch up without bound. `DiscardExcess` runs the per-frame cap, discards
+  remaining whole ticks, and retains only the interpolation remainder. `PreserveDebt` retains whole
+  ticks up to `max_debt_steps`; exceeding that bound rejects the frame before any clock or Core
+  schedule mutation. Paused or zero-scale frames neither add virtual time nor consume existing debt.
+- Startup is a separate once-only committed lifecycle phase. On the first run it completes before
+  frame planning, may configure time resources, and is not rolled back if the subsequent frame is
+  rejected. A retry does not rerun Startup; it plans from the committed Startup state.
+- Fixed schedules declare `Prepare`, `Simulate`, and `Finalize` sets with deferred-command flushes
+  between them. The fixed status and interpolation data are published before variable update,
+  extraction, and rendering.
+- A successfully completed frame consumes exit requests and then calls `World::clear_trackers()`
+  exactly once after `Last`, establishing Bevy removal/change tracker retention at the app boundary.
 - Runtime state is ordinary typed ECS state plus an explicit transition queue/stage. State
   transitions may run `OnExit`, transition, and `OnEnter` schedules, but they must not be coupled to
   a Godot-style scene tree or object lifecycle.
@@ -124,7 +135,8 @@ remains compatible with headless tests and platform adapters.
 |---|---:|---|
 | Time clarity | Real, virtual, fixed, and interpolation time have distinct resources/API docs | API review |
 | Pause semantics | Pausing virtual time does not stop task polling, diagnostics, or backend health updates | Unit/integration tests |
-| Fixed catch-up bounded | Large real deltas never run unbounded fixed ticks | Unit test |
+| Fixed catch-up bounded | Discard/preserve policies bound work and debt while interpolation stays in `[0, 1)` | Unit tests |
+| ECS frame boundary | Removed/change trackers rotate once after every successful frame | Unit tests |
 | State transitions | `OnEnter` / `OnExit`-style schedules can be driven without scene-tree lifecycle hooks | Schedule tests |
 | Runner portability | Headless and winit runners both call the same app runtime tick contract | Runner tests |
 
@@ -139,16 +151,15 @@ remains compatible with headless tests and platform adapters.
 
 ## Consequences
 
-- Future `Time` APIs should make real, virtual, fixed, and interpolation meanings explicit.
-- `FixedTime` should remain deterministic-friendly and bounded by runtime settings.
+- `RealTime`, `VirtualTime`, `FixedTime`, and `RenderTime` are separate resources with explicit
+  meanings.
+- Invalid, zero, non-finite, overflowed, or debt-exceeding time configuration/state returns a
+  structured error instead of being clamped into a different policy.
 - `WindowEvents` and input event queues need defined cleanup stages instead of caller-owned
   clearing.
 - Project manifest runtime settings in ADR 0035 must eventually lower into these resources.
 
 ## Open Questions
 
-- What exact public type names should nara expose for real, virtual, and fixed time?
 - Should runtime state support stacks, independent state domains, or only single typed states in the
   first implementation?
-- Which schedule labels should be in the default prelude versus an advanced scheduling prelude?
-

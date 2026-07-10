@@ -16,6 +16,11 @@ nara will support **deterministic-friendly fixed-step simulation**, but will not
 Rules:
 
 - Fixed update is the authoritative simulation path for physics and deterministic gameplay.
+- The fixed clock advances one tick at a time immediately before each fixed schedule run. Systems
+  observe a monotonic tick, one-timestep delta, and elapsed fixed time for that tick.
+- Catch-up separates whole-tick debt from the sub-tick interpolation remainder. Desktop policy may
+  discard excess whole ticks; server policy preserves debt up to a hard cap and fails structurally
+  rather than silently dropping authoritative time.
 - Variable frame update is for input collection, UI, animation interpolation, rendering, and non-authoritative presentation.
 - Randomness used by deterministic systems should come from explicit seeded RNG resources.
 - Background async tasks do not mutate simulation state directly; they apply results at scheduled boundaries.
@@ -35,9 +40,12 @@ Frame:
 - `nara_app::CoreStage::TaskUpdate` is the current async result boundary. It runs after `First` and
   before `PreUpdate`, with named sets for polling tasks, coalescing asset source changes, spawning
   asset jobs, and applying asset results.
-- Deterministic task mode executes work inline but still applies results through the same scheduled
-  boundary. Threaded mode may complete jobs in the background, but domain apply systems use stable
-  request ordering, load generations, and expected asset versions before mutating runtime resources.
+- Production and server task pools are threaded. Tests may explicitly drive the same bounded queue
+  inline. Worker completion never mutates `World` directly.
+- Typed domain apply systems use stable task order keys, generations, and expected versions.
+  Ordered-prefix streams defer later terminals until prior work is terminal when cross-frame
+  completion-order independence is required; ready-snapshot sorting alone promises only local
+  ordering at one integration boundary.
 
 ## Alternatives Considered
 
@@ -69,9 +77,9 @@ Frame:
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Fixed simulation | Physics and deterministic gameplay use fixed update | Future tests |
+| Fixed simulation | Systems observe one monotonic clock advance per fixed schedule | `nara_app` tests |
 | Seeded RNG | Deterministic systems can use explicit seeded RNG | API review |
-| Async safety | Async results apply at schedule boundaries | Code review |
+| Async safety | Typed async results apply at declared boundaries under an explicit ordering policy | Task/domain tests |
 | Replay readiness | Input/event capture can be added without replacing schedules | Design review |
 
 ## Risks and Mitigations
@@ -84,7 +92,5 @@ Frame:
 
 ## Follow-Up Questions
 
-- What fixed timestep accumulator behavior should nara use?
-- How many catch-up fixed ticks are allowed per frame?
 - What is the canonical seeded RNG resource?
 - What data is required for a future replay capture?
