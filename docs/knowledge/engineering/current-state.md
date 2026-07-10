@@ -3,20 +3,20 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Short durable summary of the active engineering state."
 tags: ["engineering-memory"]
-timestamp: 2026-07-09T17:48:07+08:00
+timestamp: 2026-07-10T10:30:00+08:00
 status: "active"
 ---
 
 # Current State
 
 - Goal: Build nara Phase 1 runtime foundation as a Rust-native, ECS-first game engine.
-- Snapshot timestamp: 2026-07-09T17:48:07+08:00
-- Last verified: Full render/UI/apply foundation Verification Contract passed: fmt, workspace checks with and without serde, `cargo nextest run --workspace` with 267 tests, three winit+wgpu examples, `asset_import_texture`, `asset-watch`, dependency boundary searches, runtime identity leak search, stale-contract search, engineering memory validation, and `git diff --check`.
-- Next action: Commit and push the U9/U10 documentation, facade, and integration-test cleanup to `origin/main`.
+- Snapshot timestamp: 2026-07-10T10:30:00+08:00
+- Last verified: Pre-refactor `cargo nextest run --workspace` passed 335 tests; the implementation-ready foundation plan, mature-engine audit, dependency graph, and engineering-memory bundle passed document consistency, `git diff --check`, and memory validation.
+- Next action: Complete M1 runtime safety units on `refactor/engine-foundation-contracts`, beginning with ADR governance and plugin lifecycle.
 
 # Active Registrations
 
-- None.
+- `registry/engine-foundation-contract-completion-codex-root.md`: active; plan `docs/plans/2026-07-10-001-refactor-engine-foundation-contracts-plan.md`; branch `refactor/engine-foundation-contracts`.
 
 # Integrated Summary
 

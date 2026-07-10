@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Amended**: 2026-07-10 for the unreleased canonical-version reset policy
 **Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0043, ADR 0045
 **Refined By**: ADR 0055: Feature Matrix, Boundary Checks, and Compatibility Fixtures
 
@@ -11,18 +12,26 @@ Scene, prefab, and patch documents have format versions.
 Asset metadata and import artifact records do not yet share a file envelope.
 Component schema migration exists, and document migration policy exists, but persistent files still lack one consistent header contract and long-term golden fixtures.
 
-Without a shared envelope and fixture strategy, every file format will invent version names, generator metadata, unknown-field behavior, and migration tests separately.
-Patch migration is especially sensitive because schema field paths can change across component migrations.
+Without a shared envelope and fixture strategy, every file format will invent version names,
+generator metadata, unknown-field behavior, and compatibility tests separately. Patch migration is
+especially sensitive because schema field paths can change across component migrations. However,
+nara is unreleased: preserving draft envelopes as historical versions would create a compatibility
+promise before any format is fit to become that promise.
 
 ## Decision
 
-Every nara-owned persistent project file uses a small envelope and participates in golden fixture testing once it is file-backed.
+Every nara-owned persistent project file uses a small envelope and participates in golden fixture
+testing once it is file-backed. Corrected draft formats reset to canonical version 1; migration is
+conditional on an explicit compatibility ADR rather than automatic for every prototype.
 
 ```mermaid
 flowchart TD
     File[Persistent file] --> Env[Envelope: kind/version/min/generator]
-    Env --> FileMig[File migration chain]
-    FileMig --> PatchMig[Patch/path migration if needed]
+    Env --> Version{Compatibility matrix}
+    Version -->|canonical v1| PatchMig[Patch/path migration if needed]
+    Version -->|ADR-retained older version| FileMig[Pure file migration chain]
+    Version -->|prototype or unknown| Reject[Structured rejection]
+    FileMig --> PatchMig
     PatchMig --> CompMig[Component value migration]
     CompMig --> Validate[Current schema validation]
     Validate --> Golden[Golden fixture roundtrip]
@@ -31,13 +40,19 @@ flowchart TD
 Rules:
 
 - Persistent files include at least `kind`, `format_version`, `engine_min_version`, and `generator`.
+- The corrected unreleased shape for each kind is canonical `format_version = 1`. Superseded draft
+  readers, structs, and fixtures are removed, and corrected Rust APIs use unsuffixed names.
 - Scene, prefab, scene patch, asset meta, import artifact record, component schema catalog, and future project manifest files each have a distinct `kind`.
 - Unknown future versions fail with structured diagnostics.
-- Known older versions migrate through explicit pure migration chains before validation.
+- Prototype versions/shapes fail with structured diagnostics rather than using a hidden fallback.
+- A non-v1 version is readable only when the format's compatibility matrix links an ADR that names
+  its support window, owner, pure migration chain, fixtures, and removal trigger.
 - Runtime load may migrate in memory but must not rewrite source files silently.
 - Patch migration runs before patch validation/apply and must rewrite operation payloads and field paths through registered migration data.
 - Component field path migrations are part of schema migration review when a field is renamed, moved, split, or merged.
-- Golden fixtures live under `tests/fixtures/format-vN/` or an equivalent crate-local fixture directory and cover load, migrate, validate, and canonical reserialize behavior.
+- Canonical fixtures live under `tests/fixtures/format-v1/` or an equivalent format-owner
+  directory and cover load, validate, and canonical reserialize behavior. ADR-retained versions add
+  migration input/output fixtures under their declared version.
 - Golden fixtures test codes and structural output, not unstable prose text.
 
 ## Alternatives Considered
@@ -62,16 +77,27 @@ Rules:
 
 **Pros**: Gives tools one way to identify persistent files while preserving per-format migration logic.
 
-**Cons**: Requires updating existing file structs and adding fixtures.
+**Cons**: If applied unconditionally, it preserves every prototype mistake as a supported version.
 
-**Decision**: Chosen.
+**Decision**: Chosen only for ADR-retained compatibility versions.
+
+### Option D: Shared envelope with a pre-release canonical reset
+
+**Pros**: Establishes one correct version-1 contract and one tooling envelope without carrying
+prototype readers or version-suffixed Rust APIs.
+
+**Cons**: Experimental project sources must be rewritten explicitly during the foundation refactor.
+
+**Decision**: Chosen for the current unreleased foundation.
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
 | File identification | Every persistent file has `kind` and `format_version` | Fixture tests |
-| Safe migration | Known old versions migrate through pure chains | Golden migration tests |
+| Canonical contract | Corrected version-1 files load and reserialize canonically | Golden tests |
+| Prototype removal | Removed draft shapes/readers/fixtures are absent and reject strictly | Negative fixtures and stale searches |
+| Safe retained migration | Every non-v1 readable version has an ADR-backed pure chain | Golden migration tests and ledger |
 | Future safety | Future versions fail with structured diagnostics | Unit tests |
 | Patch compatibility | Field path changes can migrate patch operations | Patch migration tests |
 | Stable fixtures | Current canonical output matches golden fixtures | Snapshot/golden tests |
@@ -81,18 +107,16 @@ Rules:
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Fixture churn slows refactors | Medium | Medium | Keep fixtures small and semantic; update through intentional migration commits. |
-| Envelope changes break hand-authored files | Medium | Medium | Provide clear diagnostics and migration examples. |
+| Canonical reset breaks experimental hand-authored files | Medium | High | Update repository sources together, provide explicit rewrite notes, and reject ambiguously rather than silently reinterpret. |
+| Version 1 is reused while an old reader survives | High | Low | Delete stale readers/fixtures and enforce unknown/required-field rejection plus stale-symbol searches. |
 | Patch migration loses undo semantics | High | Medium | Store active undo entries in current-version inverse patch format and test migration separately. |
 | Import artifact records become over-specified | Medium | Low | Envelope identifies records; cache-key internals remain importer-owned. |
 
 ## Consequences
 
-- Existing document structs should converge on envelope fields before their persisted shape changes again.
+- Existing document structs should converge on one canonical version-1 envelope before their
+  persisted shape changes again; prototype alternatives are deleted in the same unit.
 - `AssetMeta` and `ImportArtifactRecord` need format-version headers, not only cache-key versions.
 - Component schema migrations must include field-path migration data when patch documents can reference renamed fields.
-
-## Open Questions
-
-- Should envelope field names be snake_case in both JSON and RON?
-- Should `engine_min_version` be a semver string or a structured version object?
-- Should golden fixtures live in a workspace-level `tests/fixtures` tree or per-crate fixture trees?
+- Runtime readers never perform source write-back. Any source rewrite and cache rebuild/quarantine is
+  recorded in the migration guide.

@@ -1,12 +1,18 @@
 # nara Foundation Architecture
 
-**Status**: Accepted; initial runtime slice implemented
+**Status**: Accepted; implementation varies by ADR
 **Created**: 2026-07-08
 **Scope**: Phase 1 runtime foundation with seams for Phase 2 tooling and Phase 3 editor.
 
 ## Problem
 
 nara needs a Rust-native engine foundation that supports code-first game authoring, strict ECS data flow, and future AI-generated game logic. The repository started as a single hello-world package, so the first decision is not implementation detail but module shape: what should be stable enough for users and agents to build against, and what should stay hidden behind narrow seams.
+
+## Governance
+
+This document summarizes the selected architecture; it is not evidence that every selected contract is complete. ADR decision status and implementation status are separate. The canonical decision catalogue and evidence rules live in `adr/README.md`, per-ADR implementation state lives in `adr/implementation-status.md`, and only unresolved trigger-based questions live in `open-questions.md`.
+
+nara is unreleased. Incorrect prototype APIs and draft persistent shapes are removed rather than wrapped: the corrected Rust API takes the canonical unsuffixed name, the corrected persistent shape becomes canonical version 1 after in-repository sources are updated, and the deliberate break is recorded in `../migrations/2026-07-engine-foundation.md`.
 
 ## Goals
 
@@ -244,8 +250,10 @@ second real adapter or stronger isolation pressure.
 - Runtime services use one backend boundary: ECS data expresses stable intent, services own native
   handles/threads/queues, and results integrate through declared main-thread stages. See ADR
   [0042](adr/0042-runtime-service-and-backend-boundary.md).
-- Scene, prefab, and patch documents need document-level migration chains before component-value
-  migrations and validation. Runtime loading must not rewrite source files silently. See ADR
+- Scene, prefab, and patch documents decode a strict document envelope before component-value
+  migration and validation. Unreleased draft shapes are deleted in favor of canonical version 1;
+  migration chains exist only for ADR-retained compatibility windows. Runtime loading must not
+  rewrite source files silently. See ADR
   [0043](adr/0043-scene-prefab-and-patch-document-migration-policy.md).
 - The root facade uses layered preludes. `nara::prelude` is gameplay-first and backend-free;
   backend/tooling/debug/render internals move to advanced or module-specific preludes. See ADR
@@ -277,9 +285,10 @@ second real adapter or stronger isolation pressure.
 - Asset roots require filesystem containment policy beyond logical path validation. Symlinks,
   Windows junctions, import cache paths, and package trust modes are part of asset safety. See ADR
   [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md).
-- Persistent files use a common envelope plus per-kind migrations and golden fixtures. Scene,
-  prefab, patch, asset metadata, import artifacts, and schema catalogs should all carry kind,
-  format version, minimum engine version, and generator metadata. See ADR
+- Persistent files use a common envelope, a strict per-kind compatibility matrix, and canonical
+  golden fixtures. Scene, prefab, patch, asset metadata, import artifacts, and schema catalogs
+  carry kind, format version, minimum engine version, and generator metadata. Corrected unreleased
+  shapes reset to canonical version 1; only ADR-retained versions get migration chains. See ADR
   [0051](adr/0051-persistent-file-envelope-migration-and-golden-fixtures.md).
 - Task pools need bounded queues, explicit spawn outcomes, coalescing, cancellation, age metrics,
   and long-running diagnostics before asset/import/editor workloads scale. See ADR
@@ -296,8 +305,9 @@ second real adapter or stronger isolation pressure.
 
 ## Next Implementation Slices
 
-1. Define document-level migration chains and golden fixtures for scene, prefab, patch, asset
-   metadata, import artifact, and schema catalog files before changing persisted shapes again.
+1. Establish canonical version-1 envelopes and golden fixtures for scene, prefab, patch, asset
+   metadata, import artifact, and schema catalog files; delete prototype readers and add migration
+   chains only for explicit future compatibility windows.
 2. Add task backpressure, cancellation reporting, task age metrics, and long-running diagnostics
    before asset import/editor workloads scale.
 3. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
