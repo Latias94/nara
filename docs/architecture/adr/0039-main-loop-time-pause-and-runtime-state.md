@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0013, ADR 0018, ADR 0024, ADR 0035, ADR 0036
+**Refined By**: ADR 0057: Authoritative Fixed-Tick and Command Ingress
 
 ## Context
 

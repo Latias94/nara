@@ -4,7 +4,8 @@
 **Date**: 2026-07-09
 **Refines**: ADR 0003, ADR 0024, ADR 0027, ADR 0028, ADR 0035, ADR 0041, ADR 0042,
 ADR 0046, ADR 0048
-**Refined By**: ADR 0068: Global Resource Budgets, Metrics, and Diagnostic Privacy
+**Refined By**: ADR 0057: Authoritative Fixed-Tick and Command Ingress; ADR 0068: Global Resource
+Budgets, Metrics, and Diagnostic Privacy
 
 ## Context
 
