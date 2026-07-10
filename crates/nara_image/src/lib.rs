@@ -1,13 +1,14 @@
 //! Backend-neutral image assets and PNG-first importing.
 
 use std::{
+    collections::BTreeMap,
     error::Error,
     fmt::{self, Display, Formatter},
 };
 
-use nara_app::{App, CoreStage, Plugin, PluginError, TaskUpdateSet};
+use nara_app::{App, CoreStage, Plugin, PluginError, RealTime, TaskUpdateSet};
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetLoadGenerations, AssetPath,
+    ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetId, AssetLoadGenerations, AssetPath,
     AssetPlugin, AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests, AssetSourceKind,
     AssetSourceRoot, AssetStateError, AssetStates, Assets, Handle, ImportArtifactDigest,
     ImportArtifactPathError, ImportArtifactRecord, ImportError, ImportJobInput, ImportRequest,
@@ -20,7 +21,13 @@ use nara_render::{
     PreparedRenderResources, RenderPrepareApplyResult, RenderPrepareInvalidationReason,
     RenderPrepareInvalidations, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
 };
-use nara_tasks::{TaskHandle, TaskPoolKind, TaskPools};
+use nara_tasks::{
+    OrderedTaskResults, TaskCancellation, TaskCancellationReason, TaskCoalesceKey, TaskDomainKey,
+    TaskFailure, TaskHandle, TaskOrderKey, TaskOverloadPolicy, TaskPoolKind, TaskPools,
+    TaskRejection, TaskSpawnOutcome, TaskSpawnRequest, TaskTerminal,
+};
+
+const IMAGE_RELOAD_TASK_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x6e61_7261_696d_6167);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -389,9 +396,30 @@ pub struct ImagePrepareStats {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageReloadError {
-    MissingSourceRoot { path: AssetPath },
-    ReadSource { path: AssetPath, message: String },
+    MissingSourceRoot {
+        path: AssetPath,
+    },
+    ReadSource {
+        path: AssetPath,
+        message: String,
+    },
     Import(ImportError),
+    TaskRejected {
+        path: AssetPath,
+        rejection: TaskRejection,
+    },
+    TaskCancelled {
+        path: AssetPath,
+        cancellation: TaskCancellation,
+    },
+    TaskFailed {
+        path: AssetPath,
+        failure: TaskFailure,
+    },
+    TaskTracking {
+        path: AssetPath,
+        message: String,
+    },
 }
 
 impl Display for ImageReloadError {
@@ -407,6 +435,32 @@ impl Display for ImageReloadError {
                 write!(formatter, "failed to read image source '{path}': {message}")
             }
             Self::Import(error) => Display::fmt(error, formatter),
+            Self::TaskRejected { path, rejection } => {
+                write!(
+                    formatter,
+                    "image reload task for '{path}' was rejected: {:?}",
+                    rejection.reason
+                )
+            }
+            Self::TaskCancelled { path, cancellation } => {
+                write!(
+                    formatter,
+                    "image reload task for '{path}' was cancelled: {:?}",
+                    cancellation.reason
+                )
+            }
+            Self::TaskFailed { path, failure } => {
+                write!(
+                    formatter,
+                    "image reload task for '{path}' failed: {failure:?}"
+                )
+            }
+            Self::TaskTracking { path, message } => {
+                write!(
+                    formatter,
+                    "image reload task for '{path}' could not be tracked: {message}"
+                )
+            }
         }
     }
 }
@@ -416,6 +470,7 @@ impl Error for ImageReloadError {}
 #[derive(Debug, Default, Resource)]
 pub struct ImageReloadStats {
     pub spawned: u32,
+    pub rejected: u32,
     pub applied: u32,
     pub failed: u32,
     pub stale: u32,
@@ -424,14 +479,107 @@ pub struct ImageReloadStats {
     pub pending: u32,
 }
 
-struct PendingImageImportJob {
-    request: AssetReloadRequest,
-    handle: TaskHandle<Result<ImportedAsset<ImageAsset>, ImageReloadError>>,
+type ImageImportTaskResult = Result<ImportedAsset<ImageAsset>, ImageReloadError>;
+
+#[derive(Default)]
+struct PendingImageImportStream {
+    ordered: OrderedTaskResults<ImageImportTaskResult>,
+    requests: BTreeMap<TaskOrderKey, AssetReloadRequest>,
+}
+
+impl PendingImageImportStream {
+    fn push(
+        &mut self,
+        request: AssetReloadRequest,
+        handle: TaskHandle<ImageImportTaskResult>,
+    ) -> Result<(), Box<(AssetReloadRequest, TaskHandle<ImageImportTaskResult>)>> {
+        let order_key = handle.order_key();
+        match self.ordered.push(handle) {
+            Ok(()) => {
+                self.requests.insert(order_key, request);
+                Ok(())
+            }
+            Err(handle) => Err(Box::new((request, handle))),
+        }
+    }
+
+    fn drain_ready_prefix(&mut self) -> Vec<ReadyImageImportJob> {
+        self.ordered
+            .drain_ready_prefix()
+            .into_iter()
+            .filter_map(|ordered| {
+                let request = self.requests.remove(&ordered.order_key)?;
+                Some(ReadyImageImportJob {
+                    request,
+                    order_key: Some(ordered.order_key),
+                    outcome: ReadyImageImportOutcome::Terminal(Box::new(ordered.terminal)),
+                })
+            })
+            .collect()
+    }
+
+    fn len(&self) -> usize {
+        self.ordered.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.ordered.is_empty()
+    }
 }
 
 #[derive(Default, Resource)]
 struct PendingImageJobs {
-    imports: Vec<PendingImageImportJob>,
+    imports: BTreeMap<AssetId, PendingImageImportStream>,
+}
+
+impl PendingImageJobs {
+    fn len(&self) -> usize {
+        self.imports
+            .values()
+            .map(PendingImageImportStream::len)
+            .sum()
+    }
+}
+
+enum ReadyImageImportOutcome {
+    Terminal(Box<TaskTerminal<ImageImportTaskResult>>),
+    Rejected(TaskRejection),
+    TrackingFailure(String),
+}
+
+struct ReadyImageImportJob {
+    request: AssetReloadRequest,
+    order_key: Option<TaskOrderKey>,
+    outcome: ReadyImageImportOutcome,
+}
+
+impl ReadyImageImportJob {
+    fn sort_key(&self) -> (u64, u64, u64, u64) {
+        let (admission_tick, domain_key, task_id) = self.order_key.map_or_else(
+            || match &self.outcome {
+                ReadyImageImportOutcome::Rejected(rejection) => (
+                    rejection.admission_tick,
+                    rejection.domain_key.raw(),
+                    u64::MAX,
+                ),
+                ReadyImageImportOutcome::Terminal(_)
+                | ReadyImageImportOutcome::TrackingFailure(_) => (u64::MAX, u64::MAX, u64::MAX),
+            },
+            |key| {
+                (
+                    key.admission_tick(),
+                    key.domain_key().raw(),
+                    key.task_id().raw(),
+                )
+            },
+        );
+        (admission_tick, domain_key, task_id, self.request.id().raw())
+    }
+}
+
+#[derive(Default, Resource)]
+struct ReadyImageJobs {
+    imports: Vec<ReadyImageImportJob>,
     removals: Vec<AssetReloadRequest>,
 }
 
@@ -451,8 +599,13 @@ impl Plugin for ImagePlugin {
         app.add_plugin_if_missing(ImagePreparePlugin)?;
         app.init_resource::<ImageReloadStats>()?;
         app.init_resource::<PendingImageJobs>()?;
+        app.init_resource::<ReadyImageJobs>()?;
         app.init_resource::<ImporterRegistry>()?;
         register_image_importer(app)?;
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            poll_image_reload_results.in_set(TaskUpdateSet::Poll),
+        )?;
         app.add_systems(
             CoreStage::TaskUpdate,
             spawn_image_reload_jobs.in_set(TaskUpdateSet::SpawnAssetJobs),
@@ -510,19 +663,26 @@ fn spawn_image_reload_jobs(
     mut requests: ResMut<AssetReloadRequests>,
     source_root: Option<Res<AssetSourceRoot>>,
     task_pools: Res<TaskPools>,
+    real_time: Res<RealTime>,
     mut pending: ResMut<PendingImageJobs>,
+    mut ready: ResMut<ReadyImageJobs>,
     mut stats: ResMut<ImageReloadStats>,
 ) {
     for request in requests.drain_for_source_kind(&AssetSourceKind::Image) {
         match request.request_kind() {
-            AssetReloadRequestKind::Remove => pending.removals.push(request),
+            AssetReloadRequestKind::Remove => ready.removals.push(request),
             AssetReloadRequestKind::LoadOrReload => {
                 let source_path = source_root
                     .as_ref()
                     .map(|source_root| source_root.source_path(request.path()));
                 let record = request.record();
                 let logical_path = request.path().clone();
-                let handle = task_pools.spawn(TaskPoolKind::Io, move |_| {
+                let asset_id = request.asset_id();
+                let spawn_request =
+                    TaskSpawnRequest::new(real_time.frame, IMAGE_RELOAD_TASK_DOMAIN).with_overload(
+                        TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(asset_id.raw())),
+                    );
+                let outcome = task_pools.spawn(TaskPoolKind::Io, spawn_request, move |_| {
                     let source_path =
                         source_path.ok_or_else(|| ImageReloadError::MissingSourceRoot {
                             path: logical_path.clone(),
@@ -544,25 +704,75 @@ fn spawn_image_reload_jobs(
                         .import_job(&input)
                         .map_err(ImageReloadError::Import)
                 });
-                pending
-                    .imports
-                    .push(PendingImageImportJob { request, handle });
-                stats.spawned = stats.spawned.saturating_add(1);
+                match outcome {
+                    TaskSpawnOutcome::Accepted(handle)
+                    | TaskSpawnOutcome::Coalesced { handle, .. } => {
+                        let stream = pending.imports.entry(asset_id).or_default();
+                        if let Err(untracked) = stream.push(request, handle) {
+                            let (request, mut handle) = *untracked;
+                            handle.cancel();
+                            let order_key = handle.order_key();
+                            let _ = handle.try_take();
+                            ready.imports.push(ReadyImageImportJob {
+                                request,
+                                order_key: Some(order_key),
+                                outcome: ReadyImageImportOutcome::TrackingFailure(
+                                    "duplicate task order key".to_owned(),
+                                ),
+                            });
+                        } else {
+                            stats.spawned = stats.spawned.saturating_add(1);
+                        }
+                    }
+                    TaskSpawnOutcome::Rejected(rejection) => {
+                        stats.rejected = stats.rejected.saturating_add(1);
+                        ready.imports.push(ReadyImageImportJob {
+                            request,
+                            order_key: rejection.task.map(|task| task.order_key()),
+                            outcome: ReadyImageImportOutcome::Rejected(rejection),
+                        });
+                    }
+                }
             }
         }
     }
-    stats.pending = pending.imports.len().min(u32::MAX as usize) as u32;
+    stats.pending = pending.len().min(u32::MAX as usize) as u32;
+}
+
+fn poll_image_reload_results(
+    mut pending: ResMut<PendingImageJobs>,
+    mut ready: ResMut<ReadyImageJobs>,
+    mut stats: ResMut<ImageReloadStats>,
+) {
+    let asset_ids = pending.imports.keys().copied().collect::<Vec<_>>();
+    for asset_id in asset_ids {
+        let finished = pending
+            .imports
+            .get_mut(&asset_id)
+            .map(PendingImageImportStream::drain_ready_prefix)
+            .unwrap_or_default();
+        ready.imports.extend(finished);
+        if pending
+            .imports
+            .get(&asset_id)
+            .is_some_and(PendingImageImportStream::is_empty)
+        {
+            pending.imports.remove(&asset_id);
+        }
+    }
+    stats.pending = pending.len().min(u32::MAX as usize) as u32;
 }
 
 fn apply_image_reload_results(
-    mut pending: ResMut<PendingImageJobs>,
+    mut ready: ResMut<ReadyImageJobs>,
+    pending: Res<PendingImageJobs>,
     mut images: ResMut<Assets<ImageAsset>>,
     mut states: ResMut<AssetStates>,
     mut events: ResMut<AssetEvents>,
     generations: Res<AssetLoadGenerations>,
     mut stats: ResMut<ImageReloadStats>,
 ) {
-    let mut removals = std::mem::take(&mut pending.removals);
+    let mut removals = std::mem::take(&mut ready.removals);
     removals.sort_by_key(AssetReloadRequest::id);
     for request in removals {
         if !generations.is_current(request.asset_id(), request.generation()) {
@@ -576,21 +786,33 @@ fn apply_image_reload_results(
         }
     }
 
-    let mut unfinished = Vec::new();
-    let mut finished = Vec::new();
-    for mut job in pending.imports.drain(..) {
-        if let Some(result) = job.handle.try_take() {
-            finished.push((job.request, result));
-        } else {
-            unfinished.push(job);
-        }
-    }
-    pending.imports = unfinished;
-    finished.sort_by_key(|(request, _)| request.id());
+    let mut finished = std::mem::take(&mut ready.imports);
+    finished.sort_by_key(ReadyImageImportJob::sort_key);
 
-    for (request, result) in finished {
-        if result.is_cancelled() {
+    for job in finished {
+        let request = job.request;
+        let coalesced = matches!(
+            &job.outcome,
+            ReadyImageImportOutcome::Terminal(terminal)
+                if matches!(
+                    terminal.as_ref(),
+                    TaskTerminal::Cancelled(TaskCancellation {
+                        reason: TaskCancellationReason::Coalesced { .. },
+                        ..
+                    })
+                )
+        );
+        if matches!(
+            &job.outcome,
+            ReadyImageImportOutcome::Terminal(terminal)
+                if matches!(terminal.as_ref(), TaskTerminal::Cancelled(_))
+        ) {
             stats.cancelled = stats.cancelled.saturating_add(1);
+        }
+        if coalesced {
+            if !generations.is_current(request.asset_id(), request.generation()) {
+                stats.stale = stats.stale.saturating_add(1);
+            }
             continue;
         }
         if !generations.is_current(request.asset_id(), request.generation()) {
@@ -598,27 +820,73 @@ fn apply_image_reload_results(
             continue;
         }
 
-        match result.into_value() {
-            Ok(imported) => apply_imported_image(
-                request,
-                imported,
-                &mut images,
-                &mut states,
-                &mut events,
-                &mut stats,
-            ),
-            Err(error) => record_image_reload_failure(
-                request,
-                error,
-                &mut images,
-                &mut states,
-                &mut events,
-                &mut stats,
-            ),
+        match job.outcome {
+            ReadyImageImportOutcome::Terminal(terminal) => match *terminal {
+                TaskTerminal::Completed(Ok(imported)) => apply_imported_image(
+                    request,
+                    imported,
+                    &mut images,
+                    &mut states,
+                    &mut events,
+                    &mut stats,
+                ),
+                TaskTerminal::Completed(Err(error)) => record_image_reload_failure(
+                    request,
+                    error,
+                    &mut images,
+                    &mut states,
+                    &mut events,
+                    &mut stats,
+                ),
+                TaskTerminal::Cancelled(cancellation) => {
+                    let path = request.path().clone();
+                    record_image_reload_failure(
+                        request,
+                        ImageReloadError::TaskCancelled { path, cancellation },
+                        &mut images,
+                        &mut states,
+                        &mut events,
+                        &mut stats,
+                    );
+                }
+                TaskTerminal::Failed(failure) => {
+                    let path = request.path().clone();
+                    record_image_reload_failure(
+                        request,
+                        ImageReloadError::TaskFailed { path, failure },
+                        &mut images,
+                        &mut states,
+                        &mut events,
+                        &mut stats,
+                    );
+                }
+            },
+            ReadyImageImportOutcome::Rejected(rejection) => {
+                let path = request.path().clone();
+                record_image_reload_failure(
+                    request,
+                    ImageReloadError::TaskRejected { path, rejection },
+                    &mut images,
+                    &mut states,
+                    &mut events,
+                    &mut stats,
+                );
+            }
+            ReadyImageImportOutcome::TrackingFailure(message) => {
+                let path = request.path().clone();
+                record_image_reload_failure(
+                    request,
+                    ImageReloadError::TaskTracking { path, message },
+                    &mut images,
+                    &mut states,
+                    &mut events,
+                    &mut stats,
+                );
+            }
         }
     }
 
-    stats.pending = pending.imports.len().min(u32::MAX as usize) as u32;
+    stats.pending = pending.len().min(u32::MAX as usize) as u32;
 }
 
 fn apply_imported_image(
@@ -800,7 +1068,9 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
-        time::{SystemTime, UNIX_EPOCH},
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
 
     use nara_app::App;
@@ -811,18 +1081,37 @@ mod tests {
         ImportDependencyDigest, ImportJobInput, ImportProfile, ImportSettingsHash,
         ImporterRegistry,
     };
-    use nara_tasks::TaskPools;
+    use nara_core::ItemLimit;
+    use nara_tasks::{TaskKindConfig, TaskPoolConfig, TaskPools, TaskShutdownPolicy};
 
     fn stable_id() -> StableAssetId {
         StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
     }
 
     fn image_record(path: &str) -> AssetRecord {
+        image_record_with_id(path, stable_id())
+    }
+
+    fn image_record_with_id(path: &str, stable_id: StableAssetId) -> AssetRecord {
         AssetRecord::new(
-            stable_id(),
+            stable_id,
             AssetPath::new(path).unwrap(),
             AssetSourceKind::Image,
         )
+    }
+
+    fn bounded_task_config(io_workers: usize, io_pending: usize) -> TaskPoolConfig {
+        let one = ItemLimit::ONE;
+        TaskPoolConfig::new(
+            TaskKindConfig::new(
+                ItemLimit::new(io_workers).unwrap(),
+                ItemLimit::new(io_pending).unwrap(),
+            ),
+            TaskKindConfig::new(one, ItemLimit::new(4).unwrap()),
+            TaskKindConfig::new(one, ItemLimit::new(4).unwrap()),
+            TaskShutdownPolicy::default(),
+        )
+        .unwrap()
     }
 
     fn request<'a>(record: &'a AssetRecord, source_bytes: &'a [u8]) -> ImportRequest<'a> {
@@ -1102,7 +1391,7 @@ mod tests {
             .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .modified(record.path().clone());
-        app.update().unwrap();
+        drive_image_jobs(&mut app);
 
         let first_hash = app
             .world()
@@ -1128,7 +1417,7 @@ mod tests {
             .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .modified(record.path().clone());
-        app.update().unwrap();
+        drive_image_jobs(&mut app);
 
         let image = app
             .world()
@@ -1170,7 +1459,7 @@ mod tests {
             .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .modified(record.path().clone());
-        app.update().unwrap();
+        drive_image_jobs(&mut app);
 
         assert!(
             app.world()
@@ -1194,6 +1483,464 @@ mod tests {
         );
 
         remove_temp_root(&temp_root);
+    }
+
+    #[test]
+    fn ordered_image_stream_waits_for_earlier_task_before_reverse_completion_apply() {
+        let record = image_record("textures/player.png");
+        let task_pools = TaskPools::try_new(bounded_task_config(2, 8)).unwrap();
+        let mut app = app_with_image_plugin_pools(Path::new("."), [record.clone()], task_pools);
+        let (handle, request) = reserve_loading_request(&mut app, &record);
+        let first_imported = ImageImporter::default()
+            .import_job(&ImportJobInput::new(
+                record.clone(),
+                rgba_png(1, 1, &[255, 0, 0, 255]),
+                ImportDependencyDigest::empty(),
+                ImportSettingsHash::default(),
+                ImportProfile::default(),
+            ))
+            .unwrap();
+        let first_hash = first_imported.value().source().source_hash();
+        let second_imported = ImageImporter::default()
+            .import_job(&ImportJobInput::new(
+                record.clone(),
+                rgba_png(1, 1, &[0, 255, 0, 255]),
+                ImportDependencyDigest::empty(),
+                ImportSettingsHash::default(),
+                ImportProfile::default(),
+            ))
+            .unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+
+        let first = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN),
+            move |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(first_imported)
+            },
+        ));
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let second = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN),
+            move |_| Ok(second_imported),
+        ));
+        wait_for_task(&second);
+        track_image_task(&mut app, request.clone(), first);
+        track_image_task(&mut app, request, second);
+
+        app.update().unwrap();
+
+        assert!(
+            app.world()
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .is_none()
+        );
+        assert_eq!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(handle.id())
+                .unwrap()
+                .load_state(),
+            &LoadState::Loading
+        );
+
+        release_tx.send(()).unwrap();
+        wait_for_completed_tasks(&app, 2);
+        app.update().unwrap();
+
+        assert_eq!(
+            app.world()
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .unwrap()
+                .source()
+                .source_hash(),
+            first_hash
+        );
+        assert_eq!(app.world().resource::<ImageReloadStats>().applied, 1);
+        assert_eq!(app.world().resource::<ImageReloadStats>().stale, 1);
+    }
+
+    #[test]
+    fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
+        let first_record = image_record_with_id(
+            "textures/a.png",
+            StableAssetId::parse_str("933965e8-6d5a-4a72-9bda-65af6bc52296").unwrap(),
+        );
+        let second_record = image_record("textures/b.png");
+        let first_asset = AssetId::from_raw(20);
+        let second_asset = AssetId::from_raw(10);
+        let first_request =
+            reload_request(&first_record, Handle::new(first_asset), AssetVersion::ZERO);
+        let second_request = reload_request(
+            &second_record,
+            Handle::new(second_asset),
+            AssetVersion::ZERO,
+        );
+        let mut pools = TaskPools::try_new(bounded_task_config(4, 8)).unwrap();
+        let (first_started_tx, first_started_rx) = mpsc::channel();
+        let (first_release_tx, first_release_rx) = mpsc::channel();
+
+        let first = accepted_image_handle(pools.spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(20, IMAGE_RELOAD_TASK_DOMAIN),
+            move |_| {
+                first_started_tx.send(()).unwrap();
+                first_release_rx.recv().unwrap();
+                Err(ImageReloadError::MissingSourceRoot {
+                    path: first_record.path().clone(),
+                })
+            },
+        ));
+        let first_key = first.order_key();
+        first_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        let first_later = accepted_image_handle(pools.spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(20, IMAGE_RELOAD_TASK_DOMAIN),
+            |_| {
+                Err(ImageReloadError::MissingSourceRoot {
+                    path: AssetPath::new("textures/a.png").unwrap(),
+                })
+            },
+        ));
+        let first_later_key = first_later.order_key();
+        let unrelated = accepted_image_handle(pools.spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(10, IMAGE_RELOAD_TASK_DOMAIN),
+            move |_| {
+                Err(ImageReloadError::MissingSourceRoot {
+                    path: second_record.path().clone(),
+                })
+            },
+        ));
+        let unrelated_key = unrelated.order_key();
+
+        let mut pending = PendingImageJobs::default();
+        pending
+            .imports
+            .entry(first_asset)
+            .or_default()
+            .push(first_request.clone(), first)
+            .unwrap();
+        pending
+            .imports
+            .entry(first_asset)
+            .or_default()
+            .push(first_request.clone(), first_later)
+            .unwrap();
+        pending
+            .imports
+            .entry(second_asset)
+            .or_default()
+            .push(second_request.clone(), unrelated)
+            .unwrap();
+
+        wait_for_io_completions(&pools, 2);
+        let first_snapshot = drain_ready_image_jobs(&mut pending);
+        assert_eq!(
+            first_snapshot
+                .iter()
+                .filter_map(|job| job.order_key)
+                .collect::<Vec<_>>(),
+            vec![unrelated_key],
+            "an unrelated asset must not wait behind another asset's ordered prefix"
+        );
+        assert_eq!(pending.imports[&first_asset].len(), 2);
+
+        let second_later = accepted_image_handle(pools.spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(30, IMAGE_RELOAD_TASK_DOMAIN),
+            |_| {
+                Err(ImageReloadError::MissingSourceRoot {
+                    path: AssetPath::new("textures/b.png").unwrap(),
+                })
+            },
+        ));
+        let second_later_key = second_later.order_key();
+        pending
+            .imports
+            .entry(second_asset)
+            .or_default()
+            .push(second_request, second_later)
+            .unwrap();
+        wait_for_io_completions(&pools, 3);
+
+        first_release_tx.send(()).unwrap();
+        wait_for_io_completions(&pools, 4);
+        let mut second_snapshot = drain_ready_image_jobs(&mut pending);
+        assert_eq!(
+            second_snapshot
+                .iter()
+                .filter_map(|job| job.order_key)
+                .collect::<Vec<_>>(),
+            vec![second_later_key, first_key, first_later_key],
+            "the test must begin in AssetId order rather than task order"
+        );
+        second_snapshot.sort_by_key(ReadyImageImportJob::sort_key);
+        assert_eq!(
+            second_snapshot
+                .iter()
+                .filter_map(|job| job.order_key)
+                .collect::<Vec<_>>(),
+            vec![first_key, first_later_key, second_later_key]
+        );
+        assert!(
+            pending
+                .imports
+                .values()
+                .all(PendingImageImportStream::is_empty)
+        );
+
+        let _ = pools.shutdown();
+    }
+
+    #[test]
+    fn queue_rejection_records_failure_and_never_leaves_loading_state() {
+        let temp_root = unique_temp_root();
+        let first_record = image_record_with_id("textures/a.png", stable_id());
+        let second_record = image_record_with_id(
+            "textures/b.png",
+            StableAssetId::parse_str("933965e8-6d5a-4a72-9bda-65af6bc52296").unwrap(),
+        );
+        for record in [&first_record, &second_record] {
+            let path = temp_root.join(record.path().as_str());
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, rgba_png(1, 1, &[255, 255, 255, 255])).unwrap();
+        }
+        let mut app = app_with_image_plugin_config(
+            &temp_root,
+            [first_record.clone(), second_record.clone()],
+            bounded_task_config(1, 1),
+        );
+        let first_handle = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<AssetServer>()
+            .reserve_record::<ImageAsset>(&first_record)
+            .unwrap();
+        let second_handle = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<AssetServer>()
+            .reserve_record::<ImageAsset>(&second_record)
+            .unwrap();
+        {
+            let mut changes = app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<AssetSourceChanges>();
+            changes.modified(first_record.path().clone());
+            changes.modified(second_record.path().clone());
+        }
+
+        app.update().unwrap();
+
+        assert_eq!(app.world().resource::<ImageReloadStats>().rejected, 1);
+        assert_eq!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(first_handle.id())
+                .unwrap()
+                .load_state(),
+            &LoadState::Loading
+        );
+        assert!(matches!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(second_handle.id())
+                .unwrap()
+                .load_state(),
+            LoadState::Failed { .. }
+        ));
+
+        let report = app.world().resource::<TaskPools>().run_pending_for_tests();
+        assert_eq!(report.executed, 1);
+        app.update().unwrap();
+
+        assert_eq!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(first_handle.id())
+                .unwrap()
+                .load_state(),
+            &LoadState::Loaded
+        );
+        assert!(matches!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(second_handle.id())
+                .unwrap()
+                .load_state(),
+            LoadState::Failed { .. }
+        ));
+        assert_eq!(app.world().resource::<ImageReloadStats>().pending, 0);
+
+        remove_temp_root(&temp_root);
+    }
+
+    #[test]
+    fn panicked_image_reload_preserves_last_good_and_records_structured_failure() {
+        let record = image_record("textures/player.png");
+        let mut app = app_with_image_plugin(Path::new("."), record.clone());
+        let (handle, request, last_good_hash) =
+            reserve_loaded_image_request(&mut app, &record, &[255, 0, 0, 255]);
+        let task = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN),
+            |_| -> ImageImportTaskResult { panic!("image task panic") },
+        ));
+        track_image_task(&mut app, request, task);
+
+        let report = app.world().resource::<TaskPools>().run_pending_for_tests();
+        assert_eq!(report.executed, 1);
+        app.update().unwrap();
+
+        assert!(matches!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(handle.id())
+                .unwrap()
+                .load_state(),
+            LoadState::Failed { message } if message.contains("Panicked")
+        ));
+        assert_eq!(
+            app.world()
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .unwrap()
+                .source()
+                .source_hash(),
+            last_good_hash
+        );
+        assert!(
+            app.world()
+                .resource::<AssetEvents>()
+                .iter()
+                .any(|event| event.kind() == AssetEventKind::ReloadFailed)
+        );
+    }
+
+    #[test]
+    fn requested_task_cancellation_records_structured_load_failure() {
+        let record = image_record("textures/player.png");
+        let mut app = app_with_image_plugin(Path::new("."), record.clone());
+        let (handle, request) = reserve_loading_request(&mut app, &record);
+        let task = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN),
+            |_| -> ImageImportTaskResult {
+                unreachable!("cancelled pending task must not execute")
+            },
+        ));
+        assert!(task.cancel());
+        track_image_task(&mut app, request, task);
+
+        app.update().unwrap();
+
+        assert!(matches!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(handle.id())
+                .unwrap()
+                .load_state(),
+            LoadState::Failed { message } if message.contains("Requested")
+        ));
+        assert_eq!(app.world().resource::<ImageReloadStats>().cancelled, 1);
+        let report = app.world().resource::<TaskPools>().run_pending_for_tests();
+        assert_eq!(report.executed, 0);
+    }
+
+    #[test]
+    fn same_generation_coalesce_keeps_loading_until_replacement_is_ready() {
+        let record = image_record("textures/player.png");
+        let mut app = app_with_image_plugin_config(
+            Path::new("."),
+            [record.clone()],
+            bounded_task_config(1, 2),
+        );
+        let (handle, request) = reserve_loading_request(&mut app, &record);
+        let first_imported = ImageImporter::default()
+            .import_job(&ImportJobInput::new(
+                record.clone(),
+                rgba_png(1, 1, &[255, 0, 0, 255]),
+                ImportDependencyDigest::empty(),
+                ImportSettingsHash::default(),
+                ImportProfile::default(),
+            ))
+            .unwrap();
+        let replacement_imported = ImageImporter::default()
+            .import_job(&ImportJobInput::new(
+                record.clone(),
+                rgba_png(1, 1, &[0, 255, 0, 255]),
+                ImportDependencyDigest::empty(),
+                ImportSettingsHash::default(),
+                ImportProfile::default(),
+            ))
+            .unwrap();
+        let replacement_hash = replacement_imported.value().source().source_hash();
+        let spawn_request = TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN).with_overload(
+            TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(handle.id().raw())),
+        );
+        let first = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+            TaskPoolKind::Io,
+            spawn_request,
+            move |_| Ok(first_imported),
+        ));
+        track_image_task(&mut app, request.clone(), first);
+        let replacement_outcome =
+            app.world()
+                .resource::<TaskPools>()
+                .spawn(TaskPoolKind::Io, spawn_request, move |_| {
+                    Ok(replacement_imported)
+                });
+        assert!(matches!(
+            &replacement_outcome,
+            TaskSpawnOutcome::Coalesced { .. }
+        ));
+        let replacement = accepted_image_handle(replacement_outcome);
+        track_image_task(&mut app, request, replacement);
+
+        app.update().unwrap();
+
+        assert_eq!(
+            app.world()
+                .resource::<AssetStates>()
+                .state(handle.id())
+                .unwrap()
+                .load_state(),
+            &LoadState::Loading
+        );
+        assert_eq!(app.world().resource::<ImageReloadStats>().cancelled, 1);
+        assert_eq!(app.world().resource::<ImageReloadStats>().failed, 0);
+        assert!(
+            !app.world()
+                .resource::<AssetEvents>()
+                .iter()
+                .any(|event| event.kind() == AssetEventKind::LoadFailed)
+        );
+
+        let report = app.world().resource::<TaskPools>().run_pending_for_tests();
+        assert_eq!(report.executed, 1);
+        app.update().unwrap();
+
+        assert_eq!(
+            app.world()
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .unwrap()
+                .source()
+                .source_hash(),
+            replacement_hash
+        );
+        assert_eq!(app.world().resource::<ImageReloadStats>().applied, 1);
+        assert_eq!(app.world().resource::<ImageReloadStats>().pending, 0);
     }
 
     #[test]
@@ -1292,7 +2039,7 @@ mod tests {
             .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .modified(record.path().clone());
-        app.update().unwrap();
+        drive_image_jobs(&mut app);
         app.world_mut()
             .unwrap()
             .resource_mut::<RenderPrepareInvalidations>()
@@ -1383,18 +2130,211 @@ mod tests {
     }
 
     fn app_with_image_plugin(asset_root: &Path, record: AssetRecord) -> App {
+        app_with_image_plugin_config(asset_root, [record], TaskPoolConfig::default())
+    }
+
+    fn app_with_image_plugin_config(
+        asset_root: &Path,
+        records: impl IntoIterator<Item = AssetRecord>,
+        task_config: TaskPoolConfig,
+    ) -> App {
+        app_with_image_plugin_pools(
+            asset_root,
+            records,
+            TaskPools::inline_for_tests(task_config).unwrap(),
+        )
+    }
+
+    fn app_with_image_plugin_pools(
+        asset_root: &Path,
+        records: impl IntoIterator<Item = AssetRecord>,
+        task_pools: TaskPools,
+    ) -> App {
         let mut app = App::new();
-        app.insert_resource(TaskPools::deterministic()).unwrap();
+        app.insert_resource(task_pools).unwrap();
         app.insert_resource(AssetSourceRoot::new(asset_root))
             .unwrap();
         app.add_plugin(nara_render::RenderPlugin).unwrap();
         app.add_plugin(ImagePlugin).unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<nara_asset::ProjectAssetDatabase>()
-            .insert(record)
-            .unwrap();
+        {
+            let mut database = app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<nara_asset::ProjectAssetDatabase>();
+            for record in records {
+                database.insert(record).unwrap();
+            }
+        }
         app
+    }
+
+    fn drive_image_jobs(app: &mut App) {
+        app.update().unwrap();
+        let _ = app.world().resource::<TaskPools>().run_pending_for_tests();
+        app.update().unwrap();
+    }
+
+    fn accepted_image_handle(
+        outcome: TaskSpawnOutcome<ImageImportTaskResult>,
+    ) -> TaskHandle<ImageImportTaskResult> {
+        match outcome {
+            TaskSpawnOutcome::Accepted(handle) | TaskSpawnOutcome::Coalesced { handle, .. } => {
+                handle
+            }
+            TaskSpawnOutcome::Rejected(rejection) => {
+                panic!("expected accepted image task, got {rejection:?}")
+            }
+        }
+    }
+
+    fn track_image_task(
+        app: &mut App,
+        request: AssetReloadRequest,
+        handle: TaskHandle<ImageImportTaskResult>,
+    ) {
+        let asset_id = request.asset_id();
+        let tracked = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<PendingImageJobs>()
+            .imports
+            .entry(asset_id)
+            .or_default()
+            .push(request, handle);
+        assert!(tracked.is_ok());
+    }
+
+    fn reserve_loading_request(
+        app: &mut App,
+        record: &AssetRecord,
+    ) -> (Handle<ImageAsset>, AssetReloadRequest) {
+        let handle = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<AssetServer>()
+            .reserve_record::<ImageAsset>(record)
+            .unwrap();
+        let expected_version = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<AssetStates>()
+            .set_loading(handle.id());
+        (handle, reload_request(record, handle, expected_version))
+    }
+
+    fn reserve_loaded_image_request(
+        app: &mut App,
+        record: &AssetRecord,
+        pixels: &[u8],
+    ) -> (Handle<ImageAsset>, AssetReloadRequest, SourceHash) {
+        let imported = ImageImporter::default()
+            .import_job(&ImportJobInput::new(
+                record.clone(),
+                rgba_png(1, 1, pixels),
+                ImportDependencyDigest::empty(),
+                ImportSettingsHash::default(),
+                ImportProfile::default(),
+            ))
+            .unwrap();
+        let last_good_hash = imported.value().source().source_hash();
+        let artifact_hash = imported.artifact().key().digest();
+        let handle = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<AssetServer>()
+            .reserve_record::<ImageAsset>(record)
+            .unwrap();
+        let mut images = app
+            .world_mut()
+            .unwrap()
+            .remove_resource::<Assets<ImageAsset>>()
+            .unwrap();
+        let mut states = app
+            .world_mut()
+            .unwrap()
+            .remove_resource::<AssetStates>()
+            .unwrap();
+        let mut events = app
+            .world_mut()
+            .unwrap()
+            .remove_resource::<AssetEvents>()
+            .unwrap();
+        images
+            .commit_loaded(
+                handle,
+                imported.into_value(),
+                &mut states,
+                &mut events,
+                Some(last_good_hash),
+                Some(artifact_hash),
+            )
+            .unwrap();
+        events.drain();
+        let expected_version = states.set_loading(handle.id());
+        app.world_mut().unwrap().insert_resource(images);
+        app.world_mut().unwrap().insert_resource(states);
+        app.world_mut().unwrap().insert_resource(events);
+        (
+            handle,
+            reload_request(record, handle, expected_version),
+            last_good_hash,
+        )
+    }
+
+    fn wait_for_completed_tasks(app: &App, expected: u64) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app
+            .world()
+            .resource::<TaskPools>()
+            .stats()
+            .for_kind(TaskPoolKind::Io)
+            .completed
+            < expected
+            && Instant::now() < deadline
+        {
+            thread::yield_now();
+        }
+        assert!(
+            app.world()
+                .resource::<TaskPools>()
+                .stats()
+                .for_kind(TaskPoolKind::Io)
+                .completed
+                >= expected,
+            "image tasks did not complete before the test deadline"
+        );
+    }
+
+    fn wait_for_task<T>(handle: &TaskHandle<T>) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !handle.is_finished() && Instant::now() < deadline {
+            thread::yield_now();
+        }
+        assert!(
+            handle.is_finished(),
+            "task did not finish before the test deadline"
+        );
+    }
+
+    fn wait_for_io_completions(pools: &TaskPools, expected: u64) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while pools.stats().for_kind(TaskPoolKind::Io).completed < expected
+            && Instant::now() < deadline
+        {
+            thread::yield_now();
+        }
+        assert!(
+            pools.stats().for_kind(TaskPoolKind::Io).completed >= expected,
+            "image tasks did not complete before the test deadline"
+        );
+    }
+
+    fn drain_ready_image_jobs(pending: &mut PendingImageJobs) -> Vec<ReadyImageImportJob> {
+        pending
+            .imports
+            .values_mut()
+            .flat_map(PendingImageImportStream::drain_ready_prefix)
+            .collect()
     }
 
     fn reload_request(

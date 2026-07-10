@@ -35,10 +35,7 @@ name = "Headless Example"
         .resolve_profile(Some("server"))?;
 
     let mut app = App::new();
-    add_project_plugin_plan(&mut app, settings.plugin_plan)?;
-    app.insert_resource(settings.runtime.runtime_time_settings())?
-        .insert_resource(settings.runtime.fixed_time())?
-        .insert_resource(settings)?
+    apply_project_settings(&mut app, settings)?
         .insert_resource(ObservedCommands::default())?
         .add_systems(CoreStage::FixedUpdate, observe_commands)?;
 

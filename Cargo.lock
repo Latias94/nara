@@ -1528,6 +1528,7 @@ dependencies = [
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_fs",
  "nara_gameplay",
  "nara_image",
  "nara_input",
@@ -1600,6 +1601,7 @@ version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1619,6 +1621,16 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "serde",
+]
+
+[[package]]
+name = "nara_fs"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rustix 1.1.4",
+ "thiserror 2.0.18",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1643,6 +1655,7 @@ dependencies = [
  "image",
  "nara_app",
  "nara_asset",
+ "nara_core",
  "nara_ecs",
  "nara_render",
  "nara_tasks",
@@ -1678,6 +1691,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "nara_app",
+ "nara_core",
  "nara_diagnostic",
  "nara_ecs",
  "nara_tasks",
@@ -1791,6 +1805,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "nara_app",
+ "nara_core",
  "nara_ecs",
 ]
 

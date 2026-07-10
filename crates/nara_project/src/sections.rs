@@ -1,9 +1,15 @@
 use std::time::Duration;
 
+use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
+use nara_core::{ItemLimit, TimeLimit};
 use nara_diagnostic::{
     Diagnostic, DiagnosticReport, MAX_RUNTIME_DIAGNOSTICS_CAPACITY, RuntimeDiagnosticsSettings,
 };
-use nara_tasks::TaskPoolConfig;
+use nara_tasks::{
+    MAX_TASK_POOL_PENDING_PER_KIND, MAX_TASK_POOL_PENDING_TOTAL, MAX_TASK_POOL_THREADS_PER_KIND,
+    MAX_TASK_POOL_THREADS_TOTAL, MAX_TASK_SHUTDOWN_PHASE_TIMEOUT, MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT,
+    TaskKindConfig, TaskPoolConfig, TaskPoolKind, TaskShutdownPolicy,
+};
 use nara_window::{PresentMode, WindowMode};
 use serde::Deserialize;
 
@@ -15,8 +21,8 @@ use crate::effective::{
 use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
 use crate::validation::{
-    validate_max_thread_count, validate_path_field, validate_positive_seconds,
-    validate_thread_count,
+    duration_from_positive_seconds, validate_duration_seconds, validate_fixed_step_limits,
+    validate_path_field,
 };
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -76,6 +82,10 @@ pub struct ProjectRuntimeManifest {
     pub fixed_timestep_seconds: f64,
     #[serde(default = "default_max_fixed_steps_per_frame")]
     pub max_fixed_steps_per_frame: u32,
+    #[serde(default = "default_max_fixed_debt_steps")]
+    pub max_fixed_debt_steps: u32,
+    #[serde(default)]
+    pub catch_up_policy: ProjectFixedCatchUpPolicy,
     #[serde(default)]
     pub plugin_plan: ProjectPluginPlan,
 }
@@ -88,6 +98,8 @@ impl Default for ProjectRuntimeManifest {
             max_delta_seconds: default_max_delta_seconds(),
             fixed_timestep_seconds: default_fixed_timestep_seconds(),
             max_fixed_steps_per_frame: default_max_fixed_steps_per_frame(),
+            max_fixed_debt_steps: default_max_fixed_debt_steps(),
+            catch_up_policy: ProjectFixedCatchUpPolicy::default(),
             plugin_plan: ProjectPluginPlan::default(),
         }
     }
@@ -104,120 +116,339 @@ impl ProjectRuntimeManifest {
                 .with_field_path(format!("{prefix}.time_scale")),
             );
         }
-        validate_positive_seconds(
+        validate_duration_seconds(
             diagnostics,
             &format!("{prefix}.max_delta_seconds"),
             self.max_delta_seconds,
         );
-        validate_positive_seconds(
+        validate_duration_seconds(
             diagnostics,
             &format!("{prefix}.fixed_timestep_seconds"),
             self.fixed_timestep_seconds,
         );
-        if self.max_fixed_steps_per_frame == 0 {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.runtime.invalid-max-fixed-steps",
-                    "runtime.max_fixed_steps_per_frame must be greater than zero",
-                )
-                .with_field_path(format!("{prefix}.max_fixed_steps_per_frame")),
-            );
-        }
+        validate_fixed_step_limits(
+            diagnostics,
+            prefix,
+            Some(self.max_fixed_steps_per_frame),
+            Some(self.max_fixed_debt_steps),
+        );
     }
 
-    pub(crate) fn lower(self) -> EffectiveRuntimeSettings {
-        EffectiveRuntimeSettings {
-            paused: self.paused,
-            time_scale: self.time_scale,
-            max_delta: Duration::from_secs_f64(self.max_delta_seconds),
-            fixed_timestep: Duration::from_secs_f64(self.fixed_timestep_seconds),
-            max_fixed_steps_per_frame: self.max_fixed_steps_per_frame,
-        }
+    pub(crate) fn lower(self) -> Result<EffectiveRuntimeSettings, ProjectProfileError> {
+        let max_delta = duration_from_positive_seconds(self.max_delta_seconds).ok_or(
+            ProjectProfileError::InvalidRuntimeDuration {
+                field: "runtime.max_delta_seconds",
+            },
+        )?;
+        let fixed_timestep = duration_from_positive_seconds(self.fixed_timestep_seconds).ok_or(
+            ProjectProfileError::InvalidRuntimeDuration {
+                field: "runtime.fixed_timestep_seconds",
+            },
+        )?;
+        let runtime_time = RuntimeTimeSettings::new(self.paused, self.time_scale, max_delta)
+            .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
+        let fixed_time = FixedTime::new(fixed_timestep)
+            .map_err(ProjectProfileError::InvalidRuntimeSettings)?
+            .with_max_steps_per_frame(self.max_fixed_steps_per_frame)
+            .map_err(ProjectProfileError::InvalidRuntimeSettings)?
+            .with_max_debt_steps(self.max_fixed_debt_steps)
+            .map_err(ProjectProfileError::InvalidRuntimeSettings)?
+            .with_catch_up_policy(self.catch_up_policy.into());
+        Ok(EffectiveRuntimeSettings::new(runtime_time, fixed_time))
     }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ProjectTaskExecutionMode {
-    Deterministic,
+pub enum ProjectFixedCatchUpPolicy {
     #[default]
-    Threaded,
+    DiscardExcess,
+    PreserveDebt,
+}
+
+impl From<ProjectFixedCatchUpPolicy> for FixedCatchUpPolicy {
+    fn from(value: ProjectFixedCatchUpPolicy) -> Self {
+        match value {
+            ProjectFixedCatchUpPolicy::DiscardExcess => Self::DiscardExcess,
+            ProjectFixedCatchUpPolicy::PreserveDebt => Self::PreserveDebt,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectTaskPoolManifest {
+    pub workers: u32,
+    pub pending_capacity: u32,
+}
+
+impl ProjectTaskPoolManifest {
+    fn from_config(config: TaskKindConfig) -> Self {
+        Self {
+            workers: u32::try_from(config.workers().get()).unwrap_or(u32::MAX),
+            pending_capacity: u32::try_from(config.pending().get()).unwrap_or(u32::MAX),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectTaskShutdownManifest {
+    pub drain_timeout_ms: u64,
+    pub cancel_timeout_ms: u64,
+    pub join_timeout_ms: u64,
+}
+
+impl ProjectTaskShutdownManifest {
+    fn from_policy(policy: TaskShutdownPolicy) -> Self {
+        Self {
+            drain_timeout_ms: duration_millis_u64(policy.drain_timeout().get()),
+            cancel_timeout_ms: duration_millis_u64(policy.cancel_timeout().get()),
+            join_timeout_ms: duration_millis_u64(policy.join_timeout().get()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTasksManifest {
-    #[serde(default)]
-    pub mode: ProjectTaskExecutionMode,
-    #[serde(default = "default_io_threads")]
-    pub io_threads: usize,
-    #[serde(default = "default_compute_threads")]
-    pub compute_threads: usize,
-    #[serde(default = "default_async_compute_threads")]
-    pub async_compute_threads: usize,
+    #[serde(default = "default_io_task_pool")]
+    pub io: ProjectTaskPoolManifest,
+    #[serde(default = "default_compute_task_pool")]
+    pub compute: ProjectTaskPoolManifest,
+    #[serde(default = "default_async_compute_task_pool")]
+    pub async_compute: ProjectTaskPoolManifest,
+    #[serde(default = "default_task_shutdown")]
+    pub shutdown: ProjectTaskShutdownManifest,
 }
 
 impl Default for ProjectTasksManifest {
     fn default() -> Self {
-        Self {
-            mode: ProjectTaskExecutionMode::default(),
-            io_threads: default_io_threads(),
-            compute_threads: default_compute_threads(),
-            async_compute_threads: default_async_compute_threads(),
-        }
+        Self::from_config(TaskPoolConfig::default())
     }
 }
 
 impl ProjectTasksManifest {
-    pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
-        if matches!(self.mode, ProjectTaskExecutionMode::Threaded) {
-            validate_thread_count(
-                diagnostics,
-                &format!("{prefix}.io_threads"),
-                self.io_threads,
-            );
-            validate_thread_count(
-                diagnostics,
-                &format!("{prefix}.compute_threads"),
-                self.compute_threads,
-            );
-            validate_thread_count(
-                diagnostics,
-                &format!("{prefix}.async_compute_threads"),
-                self.async_compute_threads,
-            );
+    pub(crate) fn from_config(config: TaskPoolConfig) -> Self {
+        Self {
+            io: ProjectTaskPoolManifest::from_config(config.kind(TaskPoolKind::Io)),
+            compute: ProjectTaskPoolManifest::from_config(config.kind(TaskPoolKind::Compute)),
+            async_compute: ProjectTaskPoolManifest::from_config(
+                config.kind(TaskPoolKind::AsyncCompute),
+            ),
+            shutdown: ProjectTaskShutdownManifest::from_policy(config.shutdown_policy()),
         }
-        validate_max_thread_count(
+    }
+
+    pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+        validate_task_pool(diagnostics, &format!("{prefix}.io"), self.io);
+        validate_task_pool(diagnostics, &format!("{prefix}.compute"), self.compute);
+        validate_task_pool(
             diagnostics,
-            &format!("{prefix}.io_threads"),
-            self.io_threads,
+            &format!("{prefix}.async_compute"),
+            self.async_compute,
         );
-        validate_max_thread_count(
-            diagnostics,
-            &format!("{prefix}.compute_threads"),
-            self.compute_threads,
+        validate_task_aggregates(diagnostics, prefix, self);
+        validate_task_shutdown(diagnostics, &format!("{prefix}.shutdown"), self.shutdown);
+    }
+
+    pub(crate) fn lower(self) -> Result<EffectiveTaskSettings, ProjectProfileError> {
+        let pool_config = TaskPoolConfig::new(
+            lower_task_pool("tasks.io", self.io)?,
+            lower_task_pool("tasks.compute", self.compute)?,
+            lower_task_pool("tasks.async_compute", self.async_compute)?,
+            lower_task_shutdown(self.shutdown)?,
+        )
+        .map_err(ProjectProfileError::InvalidTaskSettings)?;
+        Ok(EffectiveTaskSettings { pool_config })
+    }
+}
+
+fn default_io_task_pool() -> ProjectTaskPoolManifest {
+    ProjectTaskPoolManifest::from_config(TaskPoolConfig::default().kind(TaskPoolKind::Io))
+}
+
+fn default_compute_task_pool() -> ProjectTaskPoolManifest {
+    ProjectTaskPoolManifest::from_config(TaskPoolConfig::default().kind(TaskPoolKind::Compute))
+}
+
+fn default_async_compute_task_pool() -> ProjectTaskPoolManifest {
+    ProjectTaskPoolManifest::from_config(TaskPoolConfig::default().kind(TaskPoolKind::AsyncCompute))
+}
+
+fn default_task_shutdown() -> ProjectTaskShutdownManifest {
+    ProjectTaskShutdownManifest::from_policy(TaskPoolConfig::default().shutdown_policy())
+}
+
+fn validate_task_pool(
+    diagnostics: &mut DiagnosticReport,
+    prefix: &str,
+    pool: ProjectTaskPoolManifest,
+) {
+    if pool.workers == 0 {
+        diagnostics.push(
+            Diagnostic::error(
+                "project.tasks.invalid-workers",
+                "task pool workers must be greater than zero",
+            )
+            .with_field_path(format!("{prefix}.workers")),
         );
-        validate_max_thread_count(
-            diagnostics,
-            &format!("{prefix}.async_compute_threads"),
-            self.async_compute_threads,
+    }
+    if usize::try_from(pool.workers)
+        .map_or(true, |workers| workers > MAX_TASK_POOL_THREADS_PER_KIND)
+    {
+        diagnostics.push(
+            Diagnostic::error(
+                "project.tasks.workers-too-large",
+                format!("task pool workers must be <= {MAX_TASK_POOL_THREADS_PER_KIND}"),
+            )
+            .with_field_path(format!("{prefix}.workers")),
+        );
+    }
+    if pool.pending_capacity == 0 {
+        diagnostics.push(
+            Diagnostic::error(
+                "project.tasks.invalid-pending-capacity",
+                "task pool pending_capacity must be greater than zero",
+            )
+            .with_field_path(format!("{prefix}.pending_capacity")),
+        );
+    }
+    if usize::try_from(pool.pending_capacity)
+        .map_or(true, |pending| pending > MAX_TASK_POOL_PENDING_PER_KIND)
+    {
+        diagnostics.push(
+            Diagnostic::error(
+                "project.tasks.pending-capacity-too-large",
+                format!("task pool pending_capacity must be <= {MAX_TASK_POOL_PENDING_PER_KIND}"),
+            )
+            .with_field_path(format!("{prefix}.pending_capacity")),
+        );
+    }
+}
+
+fn validate_task_aggregates(
+    diagnostics: &mut DiagnosticReport,
+    prefix: &str,
+    tasks: &ProjectTasksManifest,
+) {
+    let total_workers = u64::from(tasks.io.workers)
+        + u64::from(tasks.compute.workers)
+        + u64::from(tasks.async_compute.workers);
+    let max_workers = u64::try_from(MAX_TASK_POOL_THREADS_TOTAL).unwrap_or(u64::MAX);
+    if total_workers > max_workers {
+        diagnostics.push(
+            Diagnostic::error(
+                "project.tasks.total-workers-too-large",
+                format!("task pools request {total_workers} workers, maximum is {max_workers}"),
+            )
+            .with_field_path(prefix),
         );
     }
 
-    pub(crate) fn lower(self) -> EffectiveTaskSettings {
-        let pool_config = match self.mode {
-            ProjectTaskExecutionMode::Deterministic => TaskPoolConfig::deterministic(),
-            ProjectTaskExecutionMode::Threaded => TaskPoolConfig::threaded(
-                self.io_threads,
-                self.compute_threads,
-                self.async_compute_threads,
-            ),
-        };
-        EffectiveTaskSettings {
-            mode: self.mode,
-            pool_config,
+    let total_pending = u64::from(tasks.io.pending_capacity)
+        + u64::from(tasks.compute.pending_capacity)
+        + u64::from(tasks.async_compute.pending_capacity);
+    let max_pending = u64::try_from(MAX_TASK_POOL_PENDING_TOTAL).unwrap_or(u64::MAX);
+    if total_pending > max_pending {
+        diagnostics.push(
+            Diagnostic::error(
+                "project.tasks.total-pending-too-large",
+                format!(
+                    "task pools request {total_pending} pending tasks, maximum is {max_pending}"
+                ),
+            )
+            .with_field_path(prefix),
+        );
+    }
+}
+
+fn validate_task_shutdown(
+    diagnostics: &mut DiagnosticReport,
+    prefix: &str,
+    shutdown: ProjectTaskShutdownManifest,
+) {
+    for (field, milliseconds) in [
+        ("drain_timeout_ms", shutdown.drain_timeout_ms),
+        ("cancel_timeout_ms", shutdown.cancel_timeout_ms),
+        ("join_timeout_ms", shutdown.join_timeout_ms),
+    ] {
+        let field_path = format!("{prefix}.{field}");
+        if milliseconds == 0 {
+            diagnostics.push(
+                Diagnostic::error(
+                    "project.tasks.invalid-shutdown-timeout",
+                    "task shutdown timeouts must be greater than zero",
+                )
+                .with_field_path(&field_path),
+            );
+        }
+        if u128::from(milliseconds) > MAX_TASK_SHUTDOWN_PHASE_TIMEOUT.as_millis() {
+            diagnostics.push(
+                Diagnostic::error(
+                    "project.tasks.shutdown-timeout-too-large",
+                    format!(
+                        "task shutdown timeout must be <= {} ms",
+                        MAX_TASK_SHUTDOWN_PHASE_TIMEOUT.as_millis()
+                    ),
+                )
+                .with_field_path(field_path),
+            );
         }
     }
+
+    let total_milliseconds = u128::from(shutdown.drain_timeout_ms)
+        + u128::from(shutdown.cancel_timeout_ms)
+        + u128::from(shutdown.join_timeout_ms);
+    if total_milliseconds > MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT.as_millis() {
+        diagnostics.push(
+            Diagnostic::error(
+                "project.tasks.shutdown-total-too-large",
+                format!(
+                    "task shutdown timeouts total {total_milliseconds} ms, maximum is {} ms",
+                    MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT.as_millis()
+                ),
+            )
+            .with_field_path(prefix),
+        );
+    }
+}
+
+fn lower_task_pool(
+    field: &'static str,
+    pool: ProjectTaskPoolManifest,
+) -> Result<TaskKindConfig, ProjectProfileError> {
+    let workers = usize::try_from(pool.workers)
+        .ok()
+        .and_then(ItemLimit::new)
+        .ok_or(ProjectProfileError::InvalidTaskLimit { field })?;
+    let pending = usize::try_from(pool.pending_capacity)
+        .ok()
+        .and_then(ItemLimit::new)
+        .ok_or(ProjectProfileError::InvalidTaskLimit { field })?;
+    Ok(TaskKindConfig::new(workers, pending))
+}
+
+fn lower_task_shutdown(
+    shutdown: ProjectTaskShutdownManifest,
+) -> Result<TaskShutdownPolicy, ProjectProfileError> {
+    Ok(TaskShutdownPolicy::new(
+        lower_timeout("tasks.shutdown.drain_timeout_ms", shutdown.drain_timeout_ms)?,
+        lower_timeout(
+            "tasks.shutdown.cancel_timeout_ms",
+            shutdown.cancel_timeout_ms,
+        )?,
+        lower_timeout("tasks.shutdown.join_timeout_ms", shutdown.join_timeout_ms)?,
+    ))
+}
+
+fn lower_timeout(field: &'static str, milliseconds: u64) -> Result<TimeLimit, ProjectProfileError> {
+    TimeLimit::new(Duration::from_millis(milliseconds))
+        .ok_or(ProjectProfileError::InvalidTaskLimit { field })
+}
+
+fn duration_millis_u64(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -431,7 +662,7 @@ pub enum ProjectPluginPlan {
     HeadlessRuntime,
     #[serde(rename = "server")]
     Server,
-    #[serde(rename = "runtime-2d", alias = "runtime2d")]
+    #[serde(rename = "runtime-2d")]
     Runtime2d,
     #[serde(rename = "desktop-window")]
     DesktopWindow,

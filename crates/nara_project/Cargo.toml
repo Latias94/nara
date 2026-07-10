@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 nara_app.workspace = true
+nara_core.workspace = true
 nara_diagnostic.workspace = true
 nara_ecs.workspace = true
 nara_tasks.workspace = true

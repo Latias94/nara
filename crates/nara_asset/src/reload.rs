@@ -677,8 +677,10 @@ mod tests {
     #[test]
     fn asset_plugin_resolves_manual_changes_into_generation_requests() {
         let mut app = App::new();
-        app.insert_resource(nara_tasks::TaskPools::deterministic())
-            .unwrap();
+        app.insert_resource(
+            nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
+        )
+        .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         app.world_mut()
             .unwrap()
@@ -711,8 +713,10 @@ mod tests {
     #[test]
     fn resolver_records_unresolved_changes_instead_of_guessing() {
         let mut app = App::new();
-        app.insert_resource(nara_tasks::TaskPools::deterministic())
-            .unwrap();
+        app.insert_resource(
+            nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
+        )
+        .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         app.world_mut()
             .unwrap()
@@ -729,8 +733,10 @@ mod tests {
     #[test]
     fn resolver_errors_are_recorded_as_reload_diagnostics() {
         let mut app = App::new();
-        app.insert_resource(nara_tasks::TaskPools::deterministic())
-            .unwrap();
+        app.insert_resource(
+            nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
+        )
+        .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         app.world_mut()
             .unwrap()
@@ -768,8 +774,10 @@ mod tests {
     #[test]
     fn dependency_records_enqueue_dependent_assets() {
         let mut app = App::new();
-        app.insert_resource(nara_tasks::TaskPools::deterministic())
-            .unwrap();
+        app.insert_resource(
+            nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
+        )
+        .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         {
             let mut database = app
@@ -809,8 +817,10 @@ mod tests {
     #[test]
     fn dependency_records_enqueue_transitive_dependents_once() {
         let mut app = App::new();
-        app.insert_resource(nara_tasks::TaskPools::deterministic())
-            .unwrap();
+        app.insert_resource(
+            nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
+        )
+        .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         {
             let mut database = app

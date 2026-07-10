@@ -93,10 +93,11 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0047](0047-editor-workspace-and-scene-document-state.md): Editor Workspace and Scene Document State
 - [ADR 0048](0048-runtime-diagnostics-and-observability-bus.md): Runtime Diagnostics and Observability Bus
 - [ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md): Untrusted Project Input and Parse Budget Policy
-- [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md): Asset Root, Symlink, Junction, and Package Trust Policy
+- [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md): Asset Root, Link, Mount, and Package Trust Policy
 - [ADR 0051](0051-persistent-file-envelope-migration-and-golden-fixtures.md): Persistent File Envelope, Migration, and Golden Fixtures
 - [ADR 0052](0052-task-backpressure-cancellation-and-long-running-diagnostics.md): Task Backpressure, Cancellation, and Long-Running Diagnostics
 - [ADR 0053](0053-visibility-culling-and-tilemap-render-cache.md): Visibility, Culling, and Tilemap Render Cache
 - [ADR 0054](0054-gpu-upload-budget-and-buffer-allocation-policy.md): GPU Upload Budget and Buffer Allocation Policy
 - [ADR 0055](0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md): Feature Matrix, Boundary Checks, and Compatibility Fixtures
 - [ADR 0056](0056-headless-runtime-and-dedicated-server-readiness.md): Headless Runtime and Dedicated Server Readiness
+- [ADR 0070](0070-capability-oriented-filesystem-substrate.md): Capability-Oriented Filesystem Substrate

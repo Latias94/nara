@@ -58,7 +58,8 @@ Core rules:
 - Background tasks do not hold direct mutable references into the main `World`.
 - Asset loading and import work report results through asset state transitions/events.
 - The engine owns task pools; nara does not expose Tokio as the user-facing runtime contract.
-- Headless deterministic mode must be possible.
+- Headless/server execution uses real bounded workers without blocking a simulation tick; domains
+  choose explicit ordered main-thread integration when completion order must not affect state.
 - Render threading is a future optimization, not a Phase 1 requirement.
 
 ## Alternatives Considered
@@ -93,18 +94,21 @@ Core rules:
 - `nara_app` should define where task results are ticked/applied, likely in fixed stages.
 - Asset and scene loading APIs should model pending/loading/ready/failed states.
 - Render backend seams should avoid assuming all GPU work always happens inside gameplay systems.
-- Tests should support a deterministic single-threaded configuration.
+- Tests should support an explicitly test-only inline driver that exercises the same admission,
+  queue, cancellation, and terminal state machine as threaded execution.
 
 ## Implementation Notes
 
-- `nara_tasks` is the engine-owned task crate. It exposes `TaskPoolKind`, `TaskExecutionMode`,
-  `TaskPoolConfig`, `TaskPools`, `TaskHandle<T>`, `TaskCancellationToken`, `TaskResult<T>`, and
-  `TaskStats`.
-- `TaskExecutionMode::Deterministic` executes submitted work inline and still requires explicit
-  result polling. This keeps tests predictable without changing the main-thread integration model.
-- `TaskExecutionMode::Threaded` uses nara-owned std worker pools for IO, compute, and async-compute
-  classes. Tokio and async-std remain implementation options for future adapters, not public engine
-  contracts.
+- `nara_tasks` exposes bounded `TaskPools`, per-kind `TaskPoolConfig`, monotonic `TaskId`, explicit
+  `TaskDomainKey`/`TaskOrderKey`, typed `TaskHandle<T>` terminals, cancellation tokens, and pressure
+  statistics. Production/project configuration is threaded only.
+- `TaskPools::inline_for_tests` plus `run_pending_for_tests` is an explicit test harness. It admits
+  work through the same bounded queue and terminal state machine; it is not a server/project mode.
+- The std worker backend owns IO, compute, and async-compute workers. Tokio and async-std remain
+  possible private adapters, not gameplay-facing contracts.
+- Each domain polls typed handles and applies terminals at its declared main-thread stage. Domains
+  that require completion-order independence use an ordered-prefix stream; domains that accept
+  asynchronous availability may sort a ready snapshot. No type-erased global result bus exists.
 - `nara_app::CoreStage::TaskUpdate` is the first scheduled integration point for background work.
   `TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs, ApplyAssetResults}` defines the
   current frame-ordering contract.
@@ -119,7 +123,7 @@ Core rules:
 |---|---:|---|
 | Main world safety | Background tasks cannot mutate `World` directly | API review and task handle API |
 | Asset async path | Asset load results integrate through scheduled events/states | Image reload tests |
-| Deterministic tests | Single-threaded task mode exists | `nara_tasks` deterministic tests |
+| Deterministic tests | Explicit inline driver exercises the production admission state machine | `nara_tasks` tests |
 | Runtime independence | User code is not forced to use Tokio | Dependency/API review |
 | Render extensibility | Render backend can later move to separate thread without changing gameplay components | Design review |
 
@@ -130,14 +134,13 @@ Core rules:
 | Task pools overcomplicate Phase 1 | Medium | Medium | Define interfaces now; implement minimal single-thread executor first if needed |
 | Async tasks outlive assets/world state | High | Medium | Use handles, generations, cancellation tokens, and scheduled apply points |
 | Render thread design conflicts with wgpu constraints | High | Medium | Start single-threaded; validate wgpu ownership before enabling separate render thread |
-| Tests become nondeterministic | Medium | Medium | Provide deterministic task ticking and single-thread pool configuration |
+| Tests become nondeterministic | Medium | Medium | Use the explicit inline driver and ordered typed integration streams |
 
 ## Follow-Up Questions
 
-- Should task pool worker sizing become app-configurable from `nara.toml` or stay explicit code-first
-  setup only?
 - Should networking/scripting use a separate runtime model later?
-- What diagnostics should long-running or repeatedly failing tasks emit?
+- Should latency-sensitive networking/scripting work add priority classes, or use separate bounded
+  pools after real workloads demonstrate the need?
 
 ## Citations
 

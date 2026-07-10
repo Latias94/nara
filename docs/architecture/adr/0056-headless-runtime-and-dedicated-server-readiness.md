@@ -45,9 +45,13 @@ Rules:
 - A server profile may install core runtime, tasks, diagnostics, asset identity/loading,
   scene/prefab spawning, deterministic-friendly gameplay, and domain services that explicitly
   support headless operation.
+- Server task pools are real bounded threaded workers. Deterministic-friendly behavior comes from
+  stable admission/application ordering and fixed simulation boundaries, not caller-thread or inline
+  execution.
+- Server fixed time uses `PreserveDebt` with a configured hard debt limit. Exceeding the limit is a
+  structural frame failure; server policy never silently switches to `DiscardExcess`.
 - `MinimalPlugins` remains a small headless foundation, but it is not the whole server product
-  profile. Future `HeadlessRuntimePlugins` or `ServerPlugins` may compose the richer server-ready
-  bundle explicitly.
+  profile. `HeadlessRuntimePlugins` and `ServerPlugins` compose the richer products explicitly.
 - File-backed projects lower `nara.toml` profiles such as `headless`, `server`, `editor`, `dev`,
   and `release` into ordinary resources and plugin groups. Code-first embedding may construct the
   same resources manually.
@@ -128,6 +132,7 @@ exists.
 |---|---:|---|
 | Headless profile isolation | Server/headless plugin groups compile without `winit`, `wgpu`, egui, or audio-device adapters | Feature/dependency search |
 | Deterministic-friendly simulation | Server-ready gameplay systems can run from fixed simulation stages without render/window resources | Headless smoke tests |
+| Non-blocking background work | A blocked worker does not execute on or block the fixed-tick caller | Task/server integration tests |
 | Input abstraction | Gameplay command/action data can be produced without raw keyboard/mouse/window events | Input/action-map tests |
 | Stable identity | Scene/save/replay/replication-facing data avoids runtime `Entity` values | Serialization and boundary tests |
 | Optional networking | No core crate depends on networking transports or protocol crates | Dependency review |
@@ -145,10 +150,10 @@ exists.
 
 ## Consequences
 
-- Future manifest work should include profile names or profile kinds that can lower into headless,
-  server, desktop, editor, dev, and release runtime settings without changing domain crates.
-- Future plugin group work should distinguish `MinimalPlugins`, `HeadlessRuntimePlugins`,
-  `ServerPlugins`, `Runtime2dPlugins`, `DesktopWgpuPlugins`, and editor/tooling groups.
+- Manifest profiles lower headless, server, editor, dev, release, and custom settings without adding
+  side effects to `nara_project`; the root facade applies them before plugin installation.
+- Product bundles distinguish `MinimalPlugins`, `HeadlessRuntimePlugins`, `ServerPlugins`,
+  `Runtime2dPlugins`, `DesktopWgpuPlugins`, and tooling groups.
 - Input action-map work should reserve a gameplay command output layer, not only retained
   `ButtonInput` state and UI routing decisions.
 - Save/replay/replication work should converge on a shared stable identity vocabulary instead of

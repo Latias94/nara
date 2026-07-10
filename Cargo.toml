@@ -16,6 +16,7 @@ members = [
     "crates/nara_core",
     "crates/nara_diagnostic",
     "crates/nara_ecs",
+    "crates/nara_fs",
     "crates/nara_image",
     "crates/nara_input",
     "crates/nara_gameplay",
@@ -52,6 +53,7 @@ nara_audio = { path = "crates/nara_audio" }
 nara_core = { path = "crates/nara_core" }
 nara_diagnostic = { path = "crates/nara_diagnostic" }
 nara_ecs = { path = "crates/nara_ecs" }
+nara_fs = { path = "crates/nara_fs" }
 nara_image = { path = "crates/nara_image" }
 nara_input = { path = "crates/nara_input" }
 nara_gameplay = { path = "crates/nara_gameplay" }
@@ -92,6 +94,8 @@ uuid = "1.23.4"
 winit = "=0.30.12"
 pollster = "0.4"
 wgpu = "=30.0.0"
+rustix = "1.1.4"
+windows-sys = "0.61.2"
 
 [dependencies]
 nara_app.workspace = true
@@ -101,6 +105,7 @@ nara_audio.workspace = true
 nara_core.workspace = true
 nara_diagnostic.workspace = true
 nara_ecs.workspace = true
+nara_fs.workspace = true
 nara_image.workspace = true
 nara_input.workspace = true
 nara_gameplay.workspace = true

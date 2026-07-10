@@ -30,9 +30,12 @@ The manifest contract is:
 - `[paths]` owns logical project roots such as assets, scenes, prefabs, scripts, and generated
   `.nara/import-cache`.
 - `[startup]` owns the default startup scene or entry point when a project is launched from files.
-- `[runtime]` owns fixed timestep defaults and pause/background policy defaults.
-- `[tasks]` owns task-pool sizing policy. Programmatic `TaskPlugin` configuration remains valid for
-  embedded apps and tests.
+- `[runtime]` owns pause, time scale, maximum frame delta, fixed timestep, per-frame fixed work,
+  bounded debt, catch-up policy, and product plugin plan.
+- `[tasks.io]`, `[tasks.compute]`, and `[tasks.async_compute]` own non-zero worker/pending limits;
+  `[tasks.shutdown]` owns bounded drain/cancel/join timeouts. Production settings are threaded.
+  Programmatic `TaskPlugin` configuration remains valid for embedded apps, while the inline driver
+  remains test-only.
 - `[window]` owns default primary-window settings for file-backed desktop launches.
 - `[input]` owns named input action map files or inline action-map settings once ADRs define the
   input-action model.
@@ -43,6 +46,11 @@ The manifest contract is:
 Manifest parsing and validation should produce structured diagnostics. It should not create GPU
 resources, platform windows, task threads, or asset values directly. Instead, startup code lowers the
 validated manifest into normal nara resources and plugin configuration.
+
+`EffectiveProjectSettings` contains validated domain values. The root facade's
+`apply_project_settings` inserts effective/time resources, installs configured diagnostics and task
+plugins, and only then installs the selected product bundle. `nara_project` itself remains
+side-effect-free.
 
 ```mermaid
 flowchart TD
@@ -110,6 +118,7 @@ library-style embedded apps.
 | Code-first compatibility | Minimal examples can still configure `App` without `nara.toml` | Example check |
 | Deterministic profiles | Same manifest plus profile name yields same effective settings | Unit test |
 | Diagnostic quality | Invalid required fields report structured diagnostics | Unit test |
+| Applied task policy | Manifest worker/queue/shutdown values equal installed `TaskPools::config()` | Facade integration test |
 
 ## Risks and Mitigations
 
@@ -125,12 +134,11 @@ library-style embedded apps.
 - ADR 0020 remains the layout decision; this ADR defines the settings authority inside that layout.
 - Future `nara_project` or manifest code should be a pure validation/lowering layer, not a hidden
   runtime service.
-- Open questions about required `nara.toml` fields and configurable directories are settled at the
-  policy level; implementation still needs the concrete schema structs and parser.
+- Invalid duration quantization/overflow, zero/non-finite values, per-kind limits, aggregate task
+  limits, and shutdown timeout limits are rejected before lowering.
 
 ## Open Questions
 
-- What exact TOML names should the first implementation expose for every field?
 - Should project stable identity be required immediately or optional until packaging/export exists?
 - Should profile overlays live inline in `nara.toml` only, or may they be split into profile files
   later while preserving one effective manifest authority?

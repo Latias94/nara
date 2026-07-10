@@ -1,0 +1,33 @@
+schema_version = 1
+
+[project]
+name = "Complete Fixture"
+stable_id = "complete-fixture"
+version = "0.1.0"
+
+[runtime]
+paused = false
+time_scale = 0.75
+max_delta_seconds = 0.2
+fixed_timestep_seconds = 0.01
+max_fixed_steps_per_frame = 4
+max_fixed_debt_steps = 20
+catch_up_policy = "preserve-debt"
+plugin_plan = "runtime-2d"
+
+[tasks.io]
+workers = 2
+pending_capacity = 64
+
+[tasks.compute]
+workers = 3
+pending_capacity = 65
+
+[tasks.async_compute]
+workers = 4
+pending_capacity = 66
+
+[tasks.shutdown]
+drain_timeout_ms = 400
+cancel_timeout_ms = 300
+join_timeout_ms = 200

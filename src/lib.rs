@@ -8,6 +8,7 @@ pub use nara_audio as audio;
 pub use nara_core as core;
 pub use nara_diagnostic as diagnostic;
 pub use nara_ecs as ecs;
+pub use nara_fs as fs;
 pub use nara_gameplay as gameplay;
 pub use nara_image as image;
 pub use nara_input as input;
@@ -33,7 +34,8 @@ pub use nara_window as window;
 pub use nara_winit as winit;
 
 use nara_app::{
-    App, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginGroupMetadata, PluginId,
+    App, Plugin, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginGroupMetadata,
+    PluginId,
 };
 
 const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.scene.hierarchy");
@@ -43,6 +45,7 @@ const ASSET_PLUGIN_ID: PluginId = PluginId::new("nara.asset");
 const TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.transform");
 const INPUT_PLUGIN_ID: PluginId = PluginId::new("nara.input");
 const GAMEPLAY_COMMAND_PLUGIN_ID: PluginId = PluginId::new("nara.gameplay.commands");
+const SERVER_TIME_POLICY_PLUGIN_ID: PluginId = PluginId::new("nara.server-time-policy");
 const SPRITE_PLUGIN_ID: PluginId = PluginId::new("nara.sprite");
 const TILEMAP_PLUGIN_ID: PluginId = PluginId::new("nara.tilemap");
 const RENDER_PLUGIN_ID: PluginId = PluginId::new("nara.render");
@@ -77,6 +80,7 @@ const HEADLESS_RUNTIME_PLUGIN_IDS: &[PluginId] = &[
 ];
 
 const SERVER_PLUGIN_IDS: &[PluginId] = &[
+    SERVER_TIME_POLICY_PLUGIN_ID,
     HIERARCHY_PLUGIN_ID,
     DIAGNOSTIC_PLUGIN_ID,
     TASK_PLUGIN_ID,
@@ -180,15 +184,42 @@ impl PluginGroup for HeadlessRuntimePlugins {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ServerPlugins;
 
+#[derive(Debug, Default, Clone, Copy)]
+struct ServerTimePolicyPlugin;
+
+impl Plugin for ServerTimePolicyPlugin {
+    fn metadata(&self) -> nara_app::PluginMetadata {
+        nara_app::PluginMetadata::new(SERVER_TIME_POLICY_PLUGIN_ID, nara_app::PluginCategory::Core)
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let Some(mut fixed_time) = app.world_mut()?.get_resource_mut::<nara_app::FixedTime>()
+        else {
+            return Err(PluginError::SetupFailed {
+                plugin: SERVER_TIME_POLICY_PLUGIN_ID,
+                message: "server time policy requires FixedTime".to_owned(),
+            });
+        };
+        fixed_time
+            .set_catch_up_policy(nara_app::FixedCatchUpPolicy::PreserveDebt)
+            .map_err(|error| PluginError::SetupFailed {
+                plugin: SERVER_TIME_POLICY_PLUGIN_ID,
+                message: error.to_string(),
+            })?;
+        Ok(())
+    }
+}
+
 impl PluginGroup for ServerPlugins {
     fn metadata(&self) -> PluginGroupMetadata {
         PluginGroupMetadata::new(PluginGroupId::new("nara.plugins.server"), SERVER_PLUGIN_IDS)
     }
 
     fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugin_if_missing(ServerTimePolicyPlugin)?;
         group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
         group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
-        group.add_plugin_if_missing(nara_tasks::TaskPlugin::deterministic())?;
+        group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
         group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
         group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
         group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
@@ -294,6 +325,25 @@ pub fn add_project_plugin_plan(
     }
 }
 
+/// Applies validated project settings before installing the selected product bundle.
+pub fn apply_project_settings(
+    app: &mut App,
+    settings: nara_project::EffectiveProjectSettings,
+) -> Result<&mut App, PluginError> {
+    let plan = settings.plugin_plan;
+    let runtime_time = settings.runtime.runtime_time_settings();
+    let fixed_time = settings.runtime.fixed_time();
+    let task_config = settings.tasks.pool_config;
+    let diagnostics = settings.diagnostics.runtime;
+
+    app.insert_resource(settings)?;
+    app.insert_resource(runtime_time)?;
+    app.insert_resource(fixed_time)?;
+    app.add_plugin(nara_diagnostic::DiagnosticsPlugin::new(diagnostics))?;
+    app.add_plugin(nara_tasks::TaskPlugin::new(task_config))?;
+    add_project_plugin_plan(app, plan)
+}
+
 #[cfg(feature = "wgpu")]
 fn add_desktop_wgpu_plugin_plan(app: &mut App) -> Result<&mut App, PluginError> {
     app.add_plugins(DesktopWgpuPlugins)
@@ -312,12 +362,14 @@ pub mod prelude {
     pub use crate::DesktopWgpuPlugins;
     pub use crate::{
         DesktopWindowPlugins, HeadlessRuntimePlugins, MinimalPlugins, Runtime2dPlugins,
-        ServerPlugins, add_project_plugin_plan,
+        ServerPlugins, add_project_plugin_plan, apply_project_settings,
     };
     pub use nara_app::{
-        App, AppExit, AppExitRequests, AppFrameOutcome, AppRunError, CoreStage, FixedTime, Plugin,
-        PluginCleanupContext, PluginError, PluginGroup, PluginGroupBuilder, RealTime, RenderTime,
-        RuntimeFrameStatus, RuntimeTimeSettings, StartupStage, VirtualTime,
+        App, AppExit, AppExitRequests, AppFrameOutcome, AppRunError, CoreStage, FixedCatchUpPolicy,
+        FixedTime, FixedTimeError, FixedUpdateSet, Plugin, PluginCleanupContext, PluginError,
+        PluginGroup, PluginGroupBuilder, RealTime, RenderTime, RuntimeFrameStatus,
+        RuntimeTimeSettings, StartupStage, TimeFrameError, TimeFrameResource, TimeSettingsError,
+        VirtualTime,
     };
     pub use nara_asset::{
         Asset, AssetId, AssetPath, AssetPathError, AssetPlugin, AssetRef, AssetRefError,
@@ -354,11 +406,11 @@ pub mod prelude {
         EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveProjectInfo,
         EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
         EffectiveStartupSettings, EffectiveTaskSettings, EffectiveWindowSettings,
-        ProjectDiagnosticsManifest, ProjectInfo, ProjectInputManifest, ProjectManifest,
-        ProjectManifestLoad, ProjectPath, ProjectPathError, ProjectPathsManifest,
+        ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
+        ProjectManifest, ProjectManifestLoad, ProjectPath, ProjectPathError, ProjectPathsManifest,
         ProjectPluginPlan, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
-        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskExecutionMode,
-        ProjectTasksManifest, ProjectWindowManifest,
+        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
+        ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectWindowManifest,
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentCodec, ComponentCodecError, ComponentDecodeContext,
@@ -429,6 +481,18 @@ pub mod advanced_prelude {
         AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue, AssetWatchPlugin,
         AssetWatchQueueItem, AssetWatchTranslator, AssetWatcher,
     };
+    pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
+    pub use nara_fs::{
+        CapabilityGeneration, CapabilityReader, CapabilityRights, CapabilitySessionId,
+        ConflictProtection, ContentDigest, DigestLimit, DirectoryCapability,
+        DirectoryEntryObservation, DirectorySyncReceipt, DirectorySyncTier, DurabilityProgress,
+        ExpectedTarget, FileCapability, FileIdentity, FileKind, FileLock, FileSyncReceipt,
+        FileSyncTier, FsError, FsOperation, HostCapabilityOptions, LockGuarantee, LockMode,
+        LockScope, ParentAuthorizationTier, PathValidationError, PlatformCapabilityMatrix,
+        ProofStatus, PublicationAtomicity, PublicationIdentityEvidence, RelativeComponent,
+        RelativePath, ReplaceReceipt, ReplaceSourceBinding, ResolutionTier, StageStatus,
+        TemporaryFile, TrustMode, platform_capability_matrix,
+    };
     pub use nara_image::{
         ImageImportError, ImageImportedAsset, ImageImporter, ImagePreparePlugin, ImagePrepareStats,
         ImageReloadError, ImageReloadStats, PreparedImageResource, image_descriptor_hash,
@@ -448,8 +512,12 @@ pub mod advanced_prelude {
         SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
     };
     pub use nara_tasks::{
-        TaskCancellationToken, TaskExecutionMode, TaskHandle, TaskId, TaskPoolKind, TaskPoolStats,
-        TaskPools, TaskResult, TaskResultState, TaskStats,
+        OrderedTaskResults, OrderedTaskTerminal, TaskCancellation, TaskCancellationReason,
+        TaskCancellationToken, TaskCoalesceKey, TaskConfigError, TaskDescriptor, TaskDomainKey,
+        TaskFailure, TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey,
+        TaskOverloadPolicy, TaskPoolError, TaskPoolKind, TaskPoolShutdownReport, TaskPoolStats,
+        TaskPools, TaskRejectReason, TaskRejection, TaskShutdownPolicy, TaskShutdownReport,
+        TaskSpawnOutcome, TaskSpawnRequest, TaskStats, TaskTerminal, TaskTerminalState,
     };
     pub use nara_ui_render::{
         ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, QueuedUiItem, QueuedUiItems,
@@ -570,12 +638,20 @@ mod tests {
                 .contains_resource::<nara_gameplay::GameplayCommandQueue>()
         );
         assert!(app.world().contains_resource::<nara_asset::AssetServer>());
-        assert_eq!(
+        assert!(
             app.world()
                 .resource::<nara_tasks::TaskPools>()
                 .config()
-                .execution_mode(),
-            nara_tasks::TaskExecutionMode::Deterministic
+                .kind(nara_tasks::TaskPoolKind::Io)
+                .workers()
+                .get()
+                > 0
+        );
+        assert_eq!(
+            app.world()
+                .resource::<nara_app::FixedTime>()
+                .catch_up_policy(),
+            nara_app::FixedCatchUpPolicy::PreserveDebt
         );
         assert!(!app.world().contains_resource::<nara_input::PointerState>());
         assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
@@ -637,20 +713,80 @@ mod tests {
     #[test]
     fn server_plugins_preserve_explicit_task_plugin_configuration() {
         let mut app = App::new();
-        app.add_plugin(nara_tasks::TaskPlugin::new(
-            nara_tasks::TaskPoolConfig::threaded(1, 1, 1),
-        ))
-        .unwrap();
+        let one = nara_core::ItemLimit::new(1).unwrap();
+        let config = nara_tasks::TaskPoolConfig::threaded(one, one, one).unwrap();
+        app.add_plugin(nara_tasks::TaskPlugin::new(config)).unwrap();
 
         app.add_plugins(ServerPlugins).unwrap();
 
         assert_eq!(
-            app.world()
-                .resource::<nara_tasks::TaskPools>()
-                .config()
-                .execution_mode(),
-            nara_tasks::TaskExecutionMode::Threaded
+            *app.world().resource::<nara_tasks::TaskPools>().config(),
+            config
         );
+    }
+
+    #[test]
+    fn server_tick_does_not_wait_for_a_running_worker() {
+        let mut app = App::new();
+        let one = nara_core::ItemLimit::new(1).unwrap();
+        let config = nara_tasks::TaskPoolConfig::threaded(one, one, one).unwrap();
+        app.add_plugin(nara_tasks::TaskPlugin::new(config)).unwrap();
+        app.add_plugins(ServerPlugins).unwrap();
+
+        let (started_sender, started_receiver) = std::sync::mpsc::sync_channel(0);
+        let (release_sender, release_receiver) = std::sync::mpsc::sync_channel(1);
+        let mut handle = app
+            .world()
+            .resource::<nara_tasks::TaskPools>()
+            .spawn(
+                nara_tasks::TaskPoolKind::Io,
+                nara_tasks::TaskSpawnRequest::new(
+                    0,
+                    nara_tasks::TaskDomainKey::new(0x5345_5256_4552),
+                ),
+                move |_| {
+                    started_sender.send(()).unwrap();
+                    release_receiver.recv().unwrap();
+                },
+            )
+            .into_handle()
+            .unwrap();
+        started_receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("the server worker should start the blocking task");
+
+        let (watchdog_cancel_sender, watchdog_cancel_receiver) = std::sync::mpsc::channel();
+        let watchdog_release_sender = release_sender.clone();
+        let watchdog_fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let watchdog_fired_in_thread = watchdog_fired.clone();
+        let watchdog = std::thread::spawn(move || {
+            if watchdog_cancel_receiver
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .is_err()
+            {
+                watchdog_fired_in_thread.store(true, std::sync::atomic::Ordering::Release);
+                let _ = watchdog_release_sender.send(());
+            }
+        });
+
+        app.run_once(std::time::Duration::ZERO).unwrap();
+
+        watchdog_cancel_sender.send(()).unwrap();
+        release_sender.send(()).unwrap();
+        watchdog.join().unwrap();
+        assert!(
+            !watchdog_fired.load(std::sync::atomic::Ordering::Acquire),
+            "the main server tick waited for a running background task"
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while handle.try_take().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the released server task should reach a terminal state"
+            );
+            std::thread::yield_now();
+        }
     }
 
     #[test]
@@ -667,5 +803,67 @@ mod tests {
             app.world()
                 .contains_resource::<nara_gameplay::GameplayCommandQueue>()
         );
+        assert_eq!(
+            app.world()
+                .resource::<nara_app::FixedTime>()
+                .catch_up_policy(),
+            nara_app::FixedCatchUpPolicy::PreserveDebt
+        );
+    }
+
+    #[test]
+    fn project_settings_configure_time_and_task_plugins_before_the_bundle() {
+        let load = nara_project::ProjectManifest::parse_toml_str(
+            r#"
+schema_version = 1
+
+[project]
+name = "Configured Server"
+
+[runtime]
+plugin_plan = "server"
+catch_up_policy = "discard-excess"
+max_fixed_debt_steps = 9
+
+[tasks.io]
+workers = 1
+pending_capacity = 3
+
+[tasks.compute]
+workers = 1
+pending_capacity = 4
+
+[tasks.async_compute]
+workers = 1
+pending_capacity = 5
+
+[tasks.shutdown]
+drain_timeout_ms = 20
+cancel_timeout_ms = 20
+join_timeout_ms = 20
+"#,
+        );
+        assert!(!load.has_errors(), "{:?}", load.diagnostics.diagnostics());
+        let settings = load.manifest.unwrap().resolve_profile(None).unwrap();
+        let expected_tasks = settings.tasks.pool_config;
+
+        let mut app = App::new();
+        apply_project_settings(&mut app, settings).unwrap();
+
+        assert_eq!(
+            *app.world().resource::<nara_tasks::TaskPools>().config(),
+            expected_tasks
+        );
+        assert_eq!(
+            app.world()
+                .resource::<nara_app::FixedTime>()
+                .catch_up_policy(),
+            nara_app::FixedCatchUpPolicy::PreserveDebt
+        );
+        assert!(
+            app.world()
+                .contains_resource::<nara_project::EffectiveProjectSettings>()
+        );
+        assert!(!app.world().contains_resource::<nara_input::PointerState>());
     }
 }

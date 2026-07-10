@@ -200,7 +200,7 @@ impl ProjectManifest {
 
         for (name, profile) in &self.profiles {
             validate_profile_name(&mut diagnostics, name);
-            profile.validate_into(&mut diagnostics, &format!("profiles.{name}"));
+            profile.validate_into(&mut diagnostics, &format!("profiles.{name}"), &self.tasks);
         }
 
         diagnostics
@@ -239,6 +239,7 @@ impl ProjectManifest {
         settings.apply_profile_kind_defaults(profile_kind);
         overlay.apply_to(&mut settings)?;
         settings.enforce_profile_kind_invariants(profile_kind);
+        settings.enforce_product_invariants();
         Ok(settings)
     }
 }

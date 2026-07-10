@@ -48,6 +48,7 @@ flowchart TD
     App --> Tasks[nara_tasks: task pools + handles]
     App --> Project[nara_project: nara.toml validation + settings lowering]
     Facade --> Core[nara_core: color + math primitives]
+    Facade --> FS[nara_fs: host-issued filesystem capabilities]
     Facade --> Transform[nara_transform: spatial components]
     Facade --> Reflect[nara_reflect: component schema + value codec registry]
     Facade --> Diagnostic[nara_diagnostic: structured diagnostics + context]
@@ -78,10 +79,11 @@ flowchart TD
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
 | `nara` | Facade and layered preludes | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs |
-| `nara_app` | `App`, `Plugin`, terminal plugin lifecycle/failure reports, plugin metadata and constrained groups, `StartupStage`, `CoreStage`, real/virtual/fixed time resources, runtime state transition hooks | Preflight versus committed hook containment, reverse once-only cleanup, borrowing runner policy, explicit pause/time-scale/background policy, bounded fixed-step catch-up |
-| `nara_project` | `ProjectManifest`, profile overlays, `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority for file-backed apps: paths, startup scene, task defaults, window defaults, input-map sources, diagnostics capacity, and headless/server/editor/dev/release profile resolution |
-| `nara_tasks` | `TaskPools`, `TaskPoolConfig`, `TaskPoolKind`, `TaskExecutionMode`, `TaskHandle<T>`, `TaskCancellationToken`, `TaskStats` | Engine-owned deterministic inline executor and std worker-pool backend for IO/compute/async-compute jobs |
-| `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
+| `nara_app` | `App`, `Plugin`, terminal plugin lifecycle/failure reports, `StartupStage`, `CoreStage`, `FixedUpdateSet`, validated real/virtual/fixed/render time resources and frame outcomes | Preflight versus committed hook containment, reverse once-only cleanup, borrowing runner policy, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary |
+| `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
+| `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker pools with pending-only coalescing, panic isolation, first-terminal cancellation, finite drain/cancel/join, and an explicitly test-only inline driver |
+| `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars | Core primitives and unit-safe values that do not own domain overload policy |
+| `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; unsupported platform primitives remain explicit |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry modules for Bevy-reflect-backed component metadata, asset-aware scene preflight, schema/capability export, and migrations |
@@ -207,9 +209,11 @@ second real adapter or stronger isolation pressure.
   component registration conflicts are checked during preflight and return contextual
   `PluginError` values rather than panic.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
-- `nara_project` implements the first manifest authority: TOML parsing, unknown-field rejection, logical project path validation, file-size budget guard for `nara.toml`, profile overlays, inferred `server` profile defaults, `ProjectPluginPlan`, and side-effect-free `EffectiveProjectSettings` lowering into runtime time, task, window, input, and diagnostics value objects.
+- `nara_project` validates quantized durations, fixed debt policy, per-kind/aggregate worker and queue limits, and shutdown timeouts before lowering. `apply_project_settings` installs configured diagnostics/tasks and validated time resources before the selected product bundle; `nara_project` itself remains side-effect-free.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
-- `nara_tasks` owns deterministic and threaded engine task pools. `CoreStage::TaskUpdate` provides the explicit main-thread result integration stage with ordered sets for polling, source-change coalescing, job spawning, and result application.
+- `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
+- `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age stats, and finite shutdown reports. `CoreStage::TaskUpdate` provides ordered poll/coalesce/spawn/apply boundaries; `inline_for_tests` drives the same queue state machine only in tests.
+- `nara_fs` accepts host-opened handles rather than ambient paths. Windows strict traversal is handle-bound; Linux uses `openat2`; unsupported mount, reparse, filesystem, replacement-source, directory enumeration, unlink, or rename guarantees fail closed and remain visible in the capability matrix.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains. Serializable components require explicit schema fields, duplicate Rust `TypeId` registration is rejected, and invalid schema defaults fail at registration.
 - `nara_diagnostic::DiagnosticReport` collects diagnostics without implicit logging. `emit_to_tracing` is the explicit bridge for logs.
@@ -228,13 +232,13 @@ second real adapter or stronger isolation pressure.
 - Asset reload scheduling coalesces same-frame source changes by last semantic event, walks dependent source edges transitively, and combines generation checks with expected-version guards before domain apply systems mutate runtime asset state.
 - Asset source-change scheduling failures are structured diagnostics rather than discarded errors. Asset reload policy preserves last-good typed values on failed reload, records failed first loads without inventing values, and keeps GPU objects in backend caches rather than imported artifacts.
 - Scene/prefab authoring identity is provenance-aware. Scene-local entities patch the scene, prefab source entities patch the prefab source, prefab anchors patch the scene instance, and prefab-expanded projections must write back only through explicit override or convert-to-local flows.
-- `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, spawns image reload tasks from asset reload requests, applies typed image content behind stable handles, updates load states/events, and invalidates prepared image resources. Sampler, alpha, and tint policy live in `nara_material`, not in image assets.
+- `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, admits bounded reload tasks, polls typed terminals, orders each asset stream across frames, sorts ready streams by task key, preserves last-good values on failure, and never leaves rejection/panic/cancellation silently loading. Sampler, alpha, and tint policy live in `nara_material`, not in image assets.
 - `nara_sprite_render` sorts and batches by `SpriteMaterialKey`, which contains image render resource key plus sampler, alpha mode, and tint. `nara_render_wgpu` caches GPU image textures by prepared image snapshot and caches sampler bind groups by material key.
 - `nara_asset_watch` is an optional desktop watcher adapter behind the root `asset-watch` feature. It owns `notify`, validates its root against `AssetSourceRoot`, preserves in-root rename sides, and translates raw filesystem events into semantic `AssetSourceChange` values without leaking watcher types into `nara_asset`.
 - `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit events.
 - `nara_input::ActionMap` resolves retained key/mouse state into frame-transient `ActionOutcomes` in `InputSet::ResolveActions`, with action IDs, contexts, key/mouse bindings, started/released phases, and deterministic binding order.
 - `nara_gameplay` owns semantic gameplay commands through `GameplayCommandQueue`, `GameplayCommandEnvelope`, `GameplayCommandTarget`, `GameplayCommandPayload`, and `ActionCommandMap`. `GameplayCommandPlugin` maps action outcomes into commands before fixed gameplay systems and clears commands at the frame cleanup boundary; command data avoids networking transports and runtime `Entity` handles.
-- `HeadlessRuntimePlugins` and `ServerPlugins` are concrete root facade bundles. `HeadlessRuntimePlugins` composes `MinimalPlugins` plus gameplay commands for local headless drivers; `ServerPlugins` installs diagnostics, deterministic task pools, asset/scene/transform foundations, and gameplay commands without window/render/audio/editor/toolkit or raw input resources by default.
+- `HeadlessRuntimePlugins` and `ServerPlugins` are concrete root facade bundles. `HeadlessRuntimePlugins` composes `MinimalPlugins` plus gameplay commands for local headless drivers; `ServerPlugins` installs bounded threaded tasks, preserve-debt fixed time, diagnostics, asset/scene/transform foundations, and gameplay commands without window/render/audio/editor/toolkit or raw input resources by default.
 - `nara_ui` owns the first runtime ECS UI foundation: `UiRoot`, `UiNode`, `UiPanel`, material-aware image/color panel data, computed top-left logical-pixel layouts, and target/view-aware pointer hover/capture/focus state. Computed layout and interaction resources are runtime-only.
 - `nara_ui_render` extracts runtime UI panels from computed layouts, queues UI-owned color/image material keys through the same `nara_image` prepare and `nara_material` sampler/alpha/tint path as sprites, clips panels, and emits `UiBatches` for the UI render phase.
 - `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path according to `RenderPassPlan`; pass order is no longer an implicit backend-only draw-loop rule. The backend owns texture/bind-group cache lifetime, uses grace-frame eviction, and keys pipelines by render target format plus `AlphaMode2d`.
@@ -242,10 +246,6 @@ second real adapter or stronger isolation pressure.
 
 ## Settled Policy Contracts Pending Full Implementation
 
-- Main-loop semantics are explicit: runners pass real elapsed time; nara lowers it into real,
-  virtual/game, fixed, and render-interpolation domains with pause, time scale, max delta, fixed
-  catch-up, runtime state transitions, background policy, and frame-transient cleanup. See ADR
-  [0039](adr/0039-main-loop-time-pause-and-runtime-state.md).
 - Render resource lifetime is a product contract even before a full render graph. Backend caches own
   GPU textures, buffers, samplers, bind groups, pipelines, and intermediate targets; invalidation is
   generation/device/budget aware; submitters are owned by domain plugins or plugin groups. See ADR
@@ -288,17 +288,15 @@ second real adapter or stronger isolation pressure.
 - File-backed project data is untrusted input. Scene, prefab, patch, component value, image,
   metadata, and artifact loaders need parse/decode budgets before mutating runtime or project state.
   See ADR [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md).
-- Asset roots require filesystem containment policy beyond logical path validation. Symlinks,
-  Windows junctions, import cache paths, and package trust modes are part of asset safety. See ADR
-  [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md).
+- Asset roots require handle-bound authority beyond logical path validation. Symlinks, mounts,
+  Windows reparse points, hard links, live-object identity, replacement, and durability proof tiers
+  are part of asset/editor safety. See ADR [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md)
+  and [0070](adr/0070-capability-oriented-filesystem-substrate.md).
 - Persistent files use a common envelope, a strict per-kind compatibility matrix, and canonical
   golden fixtures. Scene, prefab, patch, asset metadata, import artifacts, and schema catalogs
   carry kind, format version, minimum engine version, and generator metadata. Corrected unreleased
   shapes reset to canonical version 1; only ADR-retained versions get migration chains. See ADR
   [0051](adr/0051-persistent-file-envelope-migration-and-golden-fixtures.md).
-- Task pools need bounded queues, explicit spawn outcomes, coalescing, cancellation, age metrics,
-  and long-running diagnostics before asset/import/editor workloads scale. See ADR
-  [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md).
 - Large 2D maps require visibility, camera culling, and backend-neutral tilemap chunk caches instead
   of full cell expansion every frame. See ADR
   [0053](adr/0053-visibility-culling-and-tilemap-render-cache.md).
@@ -314,8 +312,8 @@ second real adapter or stronger isolation pressure.
 1. Establish canonical version-1 envelopes and golden fixtures for scene, prefab, patch, asset
    metadata, import artifact, and schema catalog files; delete prototype readers and add migration
    chains only for explicit future compatibility windows.
-2. Add task backpressure, cancellation reporting, task age metrics, and long-running diagnostics
-   before asset import/editor workloads scale.
+2. Complete diagnostic privacy/pressure snapshots and bridge typed task shutdown/overload outcomes
+   without moving policy into the diagnostics crate.
 3. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
    buffers, buffer/pipeline stats, and device-loss recovery for all GPU resource classes.
 4. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,

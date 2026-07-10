@@ -1,9 +1,8 @@
-use std::time::Duration;
-
+use nara_app::TimeSettingsError;
 use nara_diagnostic::{
     Diagnostic, DiagnosticReport, MAX_RUNTIME_DIAGNOSTICS_CAPACITY, RuntimeDiagnosticsSettings,
 };
-use nara_tasks::TaskPoolConfig;
+use nara_tasks::TaskConfigError;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -14,11 +13,12 @@ use crate::effective::{
 };
 use crate::path::{ProjectPath, ProjectPathError};
 use crate::sections::{
-    ProjectPluginPlan, ProjectPresentMode, ProjectTaskExecutionMode, ProjectWindowMode,
+    ProjectFixedCatchUpPolicy, ProjectPluginPlan, ProjectPresentMode, ProjectTaskPoolManifest,
+    ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectWindowMode,
 };
 use crate::validation::{
-    validate_optional_max_thread_count, validate_optional_path_field, validate_path_field,
-    validate_positive_seconds,
+    duration_from_positive_seconds, validate_duration_seconds, validate_fixed_step_limits,
+    validate_optional_path_field, validate_path_field,
 };
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -41,7 +41,12 @@ pub struct ProjectProfileOverlay {
 }
 
 impl ProjectProfileOverlay {
-    pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+    pub(crate) fn validate_into(
+        &self,
+        diagnostics: &mut DiagnosticReport,
+        prefix: &str,
+        base_tasks: &ProjectTasksManifest,
+    ) {
         self.paths
             .validate_into(diagnostics, &format!("{prefix}.paths"));
         self.startup
@@ -49,7 +54,7 @@ impl ProjectProfileOverlay {
         self.runtime
             .validate_into(diagnostics, &format!("{prefix}.runtime"));
         self.tasks
-            .validate_into(diagnostics, &format!("{prefix}.tasks"));
+            .validate_into(diagnostics, &format!("{prefix}.tasks"), base_tasks);
         self.window
             .validate_into(diagnostics, &format!("{prefix}.window"));
         self.input
@@ -64,11 +69,11 @@ impl ProjectProfileOverlay {
     ) -> Result<(), ProjectProfileError> {
         self.paths.apply_to(&mut settings.paths)?;
         self.startup.apply_to(&mut settings.startup)?;
-        self.runtime.apply_to(&mut settings.runtime);
+        self.runtime.apply_to(&mut settings.runtime)?;
         if let Some(plugin_plan) = self.runtime.plugin_plan {
             settings.plugin_plan = plugin_plan;
         }
-        self.tasks.apply_to(&mut settings.tasks);
+        self.tasks.apply_to(&mut settings.tasks)?;
         self.window.apply_to(&mut settings.window);
         self.input.apply_to(&mut settings.input)?;
         self.diagnostics.apply_to(&mut settings.diagnostics);
@@ -198,6 +203,10 @@ pub struct ProjectRuntimePatch {
     #[serde(default)]
     pub max_fixed_steps_per_frame: Option<u32>,
     #[serde(default)]
+    pub max_fixed_debt_steps: Option<u32>,
+    #[serde(default)]
+    pub catch_up_policy: Option<ProjectFixedCatchUpPolicy>,
+    #[serde(default)]
     pub plugin_plan: Option<ProjectPluginPlan>,
 }
 
@@ -215,42 +224,71 @@ impl ProjectRuntimePatch {
             );
         }
         if let Some(seconds) = self.max_delta_seconds {
-            validate_positive_seconds(diagnostics, &format!("{prefix}.max_delta_seconds"), seconds);
+            validate_duration_seconds(diagnostics, &format!("{prefix}.max_delta_seconds"), seconds);
         }
         if let Some(seconds) = self.fixed_timestep_seconds {
-            validate_positive_seconds(
+            validate_duration_seconds(
                 diagnostics,
                 &format!("{prefix}.fixed_timestep_seconds"),
                 seconds,
             );
         }
-        if matches!(self.max_fixed_steps_per_frame, Some(0)) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.runtime.invalid-max-fixed-steps",
-                    "runtime.max_fixed_steps_per_frame must be greater than zero",
-                )
-                .with_field_path(format!("{prefix}.max_fixed_steps_per_frame")),
-            );
-        }
+        validate_fixed_step_limits(
+            diagnostics,
+            prefix,
+            self.max_fixed_steps_per_frame,
+            self.max_fixed_debt_steps,
+        );
     }
 
-    fn apply_to(&self, runtime: &mut EffectiveRuntimeSettings) {
+    fn apply_to(&self, runtime: &mut EffectiveRuntimeSettings) -> Result<(), ProjectProfileError> {
+        let mut runtime_time = runtime.runtime_time_settings();
+        let mut fixed_time = runtime.fixed_time();
         if let Some(paused) = self.paused {
-            runtime.paused = paused;
+            runtime_time.set_paused(paused);
         }
         if let Some(time_scale) = self.time_scale {
-            runtime.time_scale = time_scale;
+            runtime_time
+                .set_time_scale(time_scale)
+                .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
         }
         if let Some(seconds) = self.max_delta_seconds {
-            runtime.max_delta = Duration::from_secs_f64(seconds);
+            let max_delta = duration_from_positive_seconds(seconds).ok_or(
+                ProjectProfileError::InvalidRuntimeDuration {
+                    field: "profiles.runtime.max_delta_seconds",
+                },
+            )?;
+            runtime_time
+                .set_max_delta(max_delta)
+                .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
         }
         if let Some(seconds) = self.fixed_timestep_seconds {
-            runtime.fixed_timestep = Duration::from_secs_f64(seconds);
+            let timestep = duration_from_positive_seconds(seconds).ok_or(
+                ProjectProfileError::InvalidRuntimeDuration {
+                    field: "profiles.runtime.fixed_timestep_seconds",
+                },
+            )?;
+            fixed_time
+                .set_timestep(timestep)
+                .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
         }
         if let Some(max_steps) = self.max_fixed_steps_per_frame {
-            runtime.max_fixed_steps_per_frame = max_steps;
+            fixed_time
+                .set_max_steps_per_frame(max_steps)
+                .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
         }
+        if let Some(max_debt_steps) = self.max_fixed_debt_steps {
+            fixed_time
+                .set_max_debt_steps(max_debt_steps)
+                .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
+        }
+        if let Some(catch_up_policy) = self.catch_up_policy {
+            fixed_time
+                .set_catch_up_policy(catch_up_policy.into())
+                .map_err(ProjectProfileError::InvalidRuntimeSettings)?;
+        }
+        runtime.replace(runtime_time, fixed_time);
+        Ok(())
     }
 }
 
@@ -258,62 +296,82 @@ impl ProjectRuntimePatch {
 #[serde(deny_unknown_fields)]
 pub struct ProjectTasksPatch {
     #[serde(default)]
-    pub mode: Option<ProjectTaskExecutionMode>,
+    pub io: ProjectTaskPoolPatch,
     #[serde(default)]
-    pub io_threads: Option<usize>,
+    pub compute: ProjectTaskPoolPatch,
     #[serde(default)]
-    pub compute_threads: Option<usize>,
+    pub async_compute: ProjectTaskPoolPatch,
     #[serde(default)]
-    pub async_compute_threads: Option<usize>,
+    pub shutdown: ProjectTaskShutdownPatch,
 }
 
 impl ProjectTasksPatch {
-    fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
-        validate_optional_max_thread_count(
-            diagnostics,
-            &format!("{prefix}.io_threads"),
-            self.io_threads,
-        );
-        validate_optional_max_thread_count(
-            diagnostics,
-            &format!("{prefix}.compute_threads"),
-            self.compute_threads,
-        );
-        validate_optional_max_thread_count(
-            diagnostics,
-            &format!("{prefix}.async_compute_threads"),
-            self.async_compute_threads,
-        );
+    fn validate_into(
+        &self,
+        diagnostics: &mut DiagnosticReport,
+        prefix: &str,
+        base: &ProjectTasksManifest,
+    ) {
+        self.merged_with(*base).validate_into(diagnostics, prefix);
     }
 
-    fn apply_to(&self, tasks: &mut EffectiveTaskSettings) {
-        if let Some(mode) = self.mode {
-            tasks.mode = mode;
-        }
-        let mut io_threads = tasks.pool_config.threads_for(nara_tasks::TaskPoolKind::Io);
-        let mut compute_threads = tasks
-            .pool_config
-            .threads_for(nara_tasks::TaskPoolKind::Compute);
-        let mut async_compute_threads = tasks
-            .pool_config
-            .threads_for(nara_tasks::TaskPoolKind::AsyncCompute);
+    fn apply_to(&self, tasks: &mut EffectiveTaskSettings) -> Result<(), ProjectProfileError> {
+        let base = ProjectTasksManifest::from_config(tasks.pool_config);
+        *tasks = self.merged_with(base).lower()?;
+        Ok(())
+    }
 
-        if let Some(value) = self.io_threads {
-            io_threads = value;
-        }
-        if let Some(value) = self.compute_threads {
-            compute_threads = value;
-        }
-        if let Some(value) = self.async_compute_threads {
-            async_compute_threads = value;
-        }
+    fn merged_with(&self, mut tasks: ProjectTasksManifest) -> ProjectTasksManifest {
+        self.io.apply_to(&mut tasks.io);
+        self.compute.apply_to(&mut tasks.compute);
+        self.async_compute.apply_to(&mut tasks.async_compute);
+        self.shutdown.apply_to(&mut tasks.shutdown);
+        tasks
+    }
+}
 
-        tasks.pool_config = match tasks.mode {
-            ProjectTaskExecutionMode::Deterministic => TaskPoolConfig::deterministic(),
-            ProjectTaskExecutionMode::Threaded => {
-                TaskPoolConfig::threaded(io_threads, compute_threads, async_compute_threads)
-            }
-        };
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectTaskPoolPatch {
+    #[serde(default)]
+    pub workers: Option<u32>,
+    #[serde(default)]
+    pub pending_capacity: Option<u32>,
+}
+
+impl ProjectTaskPoolPatch {
+    fn apply_to(&self, pool: &mut ProjectTaskPoolManifest) {
+        if let Some(workers) = self.workers {
+            pool.workers = workers;
+        }
+        if let Some(pending_capacity) = self.pending_capacity {
+            pool.pending_capacity = pending_capacity;
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectTaskShutdownPatch {
+    #[serde(default)]
+    pub drain_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub cancel_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub join_timeout_ms: Option<u64>,
+}
+
+impl ProjectTaskShutdownPatch {
+    fn apply_to(&self, shutdown: &mut ProjectTaskShutdownManifest) {
+        if let Some(drain_timeout_ms) = self.drain_timeout_ms {
+            shutdown.drain_timeout_ms = drain_timeout_ms;
+        }
+        if let Some(cancel_timeout_ms) = self.cancel_timeout_ms {
+            shutdown.cancel_timeout_ms = cancel_timeout_ms;
+        }
+        if let Some(join_timeout_ms) = self.join_timeout_ms {
+            shutdown.join_timeout_ms = join_timeout_ms;
+        }
     }
 }
 
@@ -488,7 +546,7 @@ impl ProjectDiagnosticsPatch {
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq)]
 pub enum ProjectProfileError {
     #[error("project manifest is invalid")]
     InvalidManifest { diagnostics: DiagnosticReport },
@@ -499,4 +557,12 @@ pub enum ProjectProfileError {
     },
     #[error("invalid project path: {0}")]
     InvalidProjectPath(ProjectPathError),
+    #[error("runtime field '{field}' cannot be represented as a non-zero duration")]
+    InvalidRuntimeDuration { field: &'static str },
+    #[error("invalid runtime settings: {0}")]
+    InvalidRuntimeSettings(TimeSettingsError),
+    #[error("task field '{field}' must be non-zero and representable")]
+    InvalidTaskLimit { field: &'static str },
+    #[error("invalid task settings: {0}")]
+    InvalidTaskSettings(TaskConfigError),
 }

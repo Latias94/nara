@@ -31,19 +31,11 @@ pub(crate) const fn default_fixed_timestep_seconds() -> f64 {
 }
 
 pub(crate) const fn default_max_fixed_steps_per_frame() -> u32 {
-    5
+    nara_app::FixedTime::DEFAULT_MAX_STEPS_PER_FRAME
 }
 
-pub(crate) const fn default_io_threads() -> usize {
-    2
-}
-
-pub(crate) fn default_compute_threads() -> usize {
-    std::thread::available_parallelism().map_or(1, usize::from)
-}
-
-pub(crate) fn default_async_compute_threads() -> usize {
-    (default_compute_threads() / 2).max(1)
+pub(crate) const fn default_max_fixed_debt_steps() -> u32 {
+    nara_app::FixedTime::DEFAULT_MAX_DEBT_STEPS
 }
 
 pub(crate) const fn default_window_enabled() -> bool {

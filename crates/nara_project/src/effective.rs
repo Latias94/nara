@@ -1,6 +1,4 @@
-use std::time::Duration;
-
-use nara_app::{FixedTime, RuntimeTimeSettings};
+use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
 use nara_diagnostic::RuntimeDiagnosticsSettings;
 use nara_ecs::Resource;
 use nara_tasks::TaskPoolConfig;
@@ -11,7 +9,6 @@ use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
 use crate::sections::{
     ProjectPathsManifest, ProjectPluginPlan, ProjectProfileKind, ProjectStartupManifest,
-    ProjectTaskExecutionMode,
 };
 
 #[derive(Debug, Clone, PartialEq, Resource)]
@@ -31,7 +28,7 @@ pub struct EffectiveProjectSettings {
 
 impl EffectiveProjectSettings {
     pub(crate) fn from_manifest(manifest: &ProjectManifest) -> Result<Self, ProjectProfileError> {
-        Ok(Self {
+        let mut settings = Self {
             schema_version: manifest.schema_version,
             project: EffectiveProjectInfo {
                 name: manifest.project.name.clone(),
@@ -42,12 +39,14 @@ impl EffectiveProjectSettings {
             plugin_plan: manifest.runtime.plugin_plan,
             paths: EffectiveProjectPaths::from_manifest(manifest.paths.clone())?,
             startup: EffectiveStartupSettings::from_manifest(manifest.startup.clone())?,
-            runtime: manifest.runtime.lower(),
-            tasks: manifest.tasks.lower(),
+            runtime: manifest.runtime.lower()?,
+            tasks: manifest.tasks.lower()?,
             window: manifest.window.clone().lower(),
             input: manifest.input.clone().lower()?,
             diagnostics: manifest.diagnostics.lower(),
-        })
+        };
+        settings.enforce_product_invariants();
+        Ok(settings)
     }
 
     pub(crate) fn apply_profile_kind_defaults(&mut self, kind: ProjectProfileKind) {
@@ -59,8 +58,8 @@ impl EffectiveProjectSettings {
             ProjectProfileKind::Server => {
                 self.plugin_plan = ProjectPluginPlan::Server;
                 self.window.enabled = false;
-                self.tasks.mode = ProjectTaskExecutionMode::Deterministic;
-                self.tasks.pool_config = TaskPoolConfig::deterministic();
+                self.runtime
+                    .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
             }
             ProjectProfileKind::Editor => {
                 self.plugin_plan = ProjectPluginPlan::Tooling;
@@ -78,13 +77,21 @@ impl EffectiveProjectSettings {
             ProjectProfileKind::Server => {
                 self.plugin_plan = ProjectPluginPlan::Server;
                 self.window.enabled = false;
-                self.tasks.mode = ProjectTaskExecutionMode::Deterministic;
-                self.tasks.pool_config = TaskPoolConfig::deterministic();
+                self.runtime
+                    .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
             }
             ProjectProfileKind::Editor
             | ProjectProfileKind::Dev
             | ProjectProfileKind::Release
             | ProjectProfileKind::Custom => {}
+        }
+    }
+
+    pub(crate) fn enforce_product_invariants(&mut self) {
+        if self.plugin_plan == ProjectPluginPlan::Server {
+            self.window.enabled = false;
+            self.runtime
+                .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
         }
     }
 }
@@ -143,31 +150,40 @@ impl EffectiveStartupSettings {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EffectiveRuntimeSettings {
-    pub paused: bool,
-    pub time_scale: f32,
-    pub max_delta: Duration,
-    pub fixed_timestep: Duration,
-    pub max_fixed_steps_per_frame: u32,
+    runtime_time: RuntimeTimeSettings,
+    fixed_time: FixedTime,
 }
 
 impl EffectiveRuntimeSettings {
-    #[must_use]
-    pub fn runtime_time_settings(&self) -> RuntimeTimeSettings {
-        RuntimeTimeSettings::default()
-            .with_paused(self.paused)
-            .with_time_scale(self.time_scale)
-            .with_max_delta(self.max_delta)
+    pub(crate) const fn new(runtime_time: RuntimeTimeSettings, fixed_time: FixedTime) -> Self {
+        Self {
+            runtime_time,
+            fixed_time,
+        }
     }
 
     #[must_use]
-    pub fn fixed_time(&self) -> FixedTime {
-        FixedTime::new(self.fixed_timestep).with_max_steps_per_frame(self.max_fixed_steps_per_frame)
+    pub const fn runtime_time_settings(&self) -> RuntimeTimeSettings {
+        self.runtime_time
+    }
+
+    #[must_use]
+    pub const fn fixed_time(&self) -> FixedTime {
+        self.fixed_time
+    }
+
+    pub(crate) fn replace(&mut self, runtime_time: RuntimeTimeSettings, fixed_time: FixedTime) {
+        self.runtime_time = runtime_time;
+        self.fixed_time = fixed_time;
+    }
+
+    pub(crate) fn force_catch_up_policy(&mut self, policy: FixedCatchUpPolicy) {
+        self.fixed_time = self.fixed_time.with_catch_up_policy(policy);
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EffectiveTaskSettings {
-    pub mode: ProjectTaskExecutionMode,
     pub pool_config: TaskPoolConfig,
 }
 

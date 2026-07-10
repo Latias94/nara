@@ -1,6 +1,9 @@
 //! Shared engine primitives that are independent from ECS and rendering.
 
+pub mod limits;
+
 pub use glam::{Mat3, Vec2, Vec3};
+pub use limits::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

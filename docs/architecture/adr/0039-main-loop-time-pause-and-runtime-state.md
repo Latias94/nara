@@ -64,6 +64,9 @@ The product contract is:
 - `time_scale`, pause state, maximum frame delta, fixed step duration, maximum fixed steps per
   frame, and background policy come from effective runtime settings. File-backed projects lower
   these from `nara.toml`; embedded apps may configure equivalent resources directly.
+- File-backed project input may request at most 256 fixed steps per app frame and retain at most
+  16,384 whole fixed ticks of debt. Base manifests and profile overlays reject larger values rather
+  than clamping them into a different runtime policy.
 - Pause is a scheduler/time policy, not a hidden freeze of the `World`. Real-time services, input
   collection, task result integration, diagnostics, window event processing, asset reload
   scheduling, render backend health, and tooling observation continue unless explicitly disabled.
@@ -157,7 +160,8 @@ remains compatible with headless tests and platform adapters.
   structured error instead of being clamped into a different policy.
 - `WindowEvents` and input event queues need defined cleanup stages instead of caller-owned
   clearing.
-- Project manifest runtime settings in ADR 0035 must eventually lower into these resources.
+- Project manifest runtime settings in ADR 0035 lower into validated time resources before the
+  selected product plugin bundle is installed.
 
 ## Open Questions
 

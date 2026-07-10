@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
-use nara_tasks::MAX_TASK_POOL_THREADS_PER_KIND;
 
 use crate::path::ProjectPath;
+use crate::{MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME};
 
 pub(crate) fn validate_profile_name(diagnostics: &mut DiagnosticReport, name: &str) {
     if name.is_empty() {
@@ -53,7 +55,16 @@ pub(crate) fn validate_optional_path_field(
     }
 }
 
-pub(crate) fn validate_positive_seconds(
+pub(crate) fn duration_from_positive_seconds(value: f64) -> Option<Duration> {
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    Duration::try_from_secs_f64(value)
+        .ok()
+        .filter(|duration| !duration.is_zero())
+}
+
+pub(crate) fn validate_duration_seconds(
     diagnostics: &mut DiagnosticReport,
     field_path: &str,
     value: f64,
@@ -66,48 +77,55 @@ pub(crate) fn validate_positive_seconds(
             )
             .with_field_path(field_path),
         );
-    }
-}
-
-pub(crate) fn validate_thread_count(
-    diagnostics: &mut DiagnosticReport,
-    field_path: &str,
-    value: usize,
-) {
-    if value == 0 {
+    } else if duration_from_positive_seconds(value).is_none() {
         diagnostics.push(
             Diagnostic::error(
-                "project.tasks.invalid-thread-count",
-                format!("{field_path} must be greater than zero in threaded mode"),
-            )
-            .with_field_path(field_path),
-        );
-    }
-    validate_max_thread_count(diagnostics, field_path, value);
-}
-
-pub(crate) fn validate_max_thread_count(
-    diagnostics: &mut DiagnosticReport,
-    field_path: &str,
-    value: usize,
-) {
-    if value > MAX_TASK_POOL_THREADS_PER_KIND {
-        diagnostics.push(
-            Diagnostic::error(
-                "project.tasks.thread-count-too-large",
-                format!("{field_path} must be <= {MAX_TASK_POOL_THREADS_PER_KIND}"),
+                "project.runtime.unrepresentable-duration",
+                format!(
+                    "{field_path} must fit in Duration and remain non-zero at nanosecond precision"
+                ),
             )
             .with_field_path(field_path),
         );
     }
 }
 
-pub(crate) fn validate_optional_max_thread_count(
+pub(crate) fn validate_fixed_step_limits(
     diagnostics: &mut DiagnosticReport,
-    field_path: &str,
-    value: Option<usize>,
+    prefix: &str,
+    max_steps_per_frame: Option<u32>,
+    max_debt_steps: Option<u32>,
 ) {
-    if let Some(value) = value {
-        validate_max_thread_count(diagnostics, field_path, value);
+    for (field, value, maximum, zero_code, oversized_code) in [
+        (
+            "max_fixed_steps_per_frame",
+            max_steps_per_frame,
+            MAX_PROJECT_FIXED_STEPS_PER_FRAME,
+            "project.runtime.invalid-max-fixed-steps",
+            "project.runtime.max-fixed-steps-too-large",
+        ),
+        (
+            "max_fixed_debt_steps",
+            max_debt_steps,
+            MAX_PROJECT_FIXED_DEBT_STEPS,
+            "project.runtime.invalid-max-fixed-debt",
+            "project.runtime.max-fixed-debt-too-large",
+        ),
+    ] {
+        let Some(value) = value else {
+            continue;
+        };
+        let field_path = format!("{prefix}.{field}");
+        if value == 0 {
+            diagnostics.push(
+                Diagnostic::error(zero_code, format!("{field_path} must be greater than zero"))
+                    .with_field_path(field_path),
+            );
+        } else if value > maximum {
+            diagnostics.push(
+                Diagnostic::error(oversized_code, format!("{field_path} must be <= {maximum}"))
+                    .with_field_path(field_path),
+            );
+        }
     }
 }
