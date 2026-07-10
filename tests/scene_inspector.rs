@@ -1,4 +1,4 @@
-use nara::{prelude::*, tooling_prelude::*};
+use nara::{diagnostic::DiagnosticValueRef, prelude::*, tooling_prelude::*};
 
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestLabel {
@@ -134,17 +134,14 @@ fn inspector_selection_rejects_missing_entities_without_losing_selection() {
 
     assert!(!report.applied);
     assert!(report.diagnostics.has_errors());
+    let diagnostic = report.diagnostics.iter().next().unwrap();
     assert_eq!(
-        report.diagnostics.diagnostics()[0].code.as_str(),
+        diagnostic.code().as_str(),
         "tooling.inspector-missing-entity"
     );
-    assert_eq!(
-        report.diagnostics.diagnostics()[0]
-            .context
-            .entity_id
-            .as_deref(),
-        Some("missing")
-    );
+    let entity = diagnostic_field(diagnostic, "entity");
+    assert_eq!(entity.class(), DiagnosticFieldClass::Public);
+    assert_eq!(entity.value(), DiagnosticValueRef::Identifier("missing"));
     assert_eq!(report.selected_entity.as_ref(), Some(&player));
     assert_eq!(inspector.selected_entity(), Some(&player));
 }
@@ -239,6 +236,14 @@ fn field<'a>(fields: &'a [SceneInspectorFieldView], path: &str) -> &'a SceneInsp
     fields
         .iter()
         .find(|field| field.path.to_string() == path)
+        .unwrap()
+}
+
+fn diagnostic_field<'a>(diagnostic: &'a Diagnostic, key: &str) -> &'a DiagnosticField {
+    diagnostic
+        .fields()
+        .iter()
+        .find(|field| field.key().as_str() == key)
         .unwrap()
 }
 

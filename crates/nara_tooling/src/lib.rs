@@ -1,5 +1,6 @@
 //! Tooling-facing runtime inspection seam.
 
+mod diagnostic;
 mod inspector;
 mod play;
 mod snapshot;

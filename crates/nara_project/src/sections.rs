@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
-use nara_core::{ItemLimit, TimeLimit};
+use nara_core::{ByteLimit, ItemLimit, TimeLimit};
 use nara_diagnostic::{
-    Diagnostic, DiagnosticReport, MAX_RUNTIME_DIAGNOSTICS_CAPACITY, RuntimeDiagnosticsSettings,
+    DiagnosticReport, MAX_RUNTIME_DIAGNOSTIC_ENTRIES, RuntimeDiagnosticsSettings,
 };
 use nara_tasks::{
     MAX_TASK_POOL_PENDING_PER_KIND, MAX_TASK_POOL_PENDING_TOTAL, MAX_TASK_POOL_THREADS_PER_KIND,
@@ -21,9 +21,13 @@ use crate::effective::{
 use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
 use crate::validation::{
-    duration_from_positive_seconds, validate_duration_seconds, validate_fixed_step_limits,
-    validate_path_field,
+    duration_from_positive_seconds, error, validate_duration_seconds, validate_fixed_step_limits,
+    validate_path_field, with_field_path, with_public_bool, with_public_u64,
 };
+
+// The manifest keeps entry capacity configurable while reserving enough space for
+// roughly 256 bytes per entry at the engine's maximum capacity.
+const PROJECT_RUNTIME_DIAGNOSTIC_BYTE_LIMIT: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -108,13 +112,17 @@ impl Default for ProjectRuntimeManifest {
 impl ProjectRuntimeManifest {
     pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
         if !self.time_scale.is_finite() || self.time_scale < 0.0 {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.runtime.invalid-time-scale",
-                    "runtime.time_scale must be finite and >= 0",
-                )
-                .with_field_path(format!("{prefix}.time_scale")),
+            let diagnostic = error(
+                "project.runtime.invalid-time-scale",
+                "Runtime time scale must be finite and non-negative",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.time_scale"));
+            let diagnostic = with_public_bool(diagnostic, "finite", self.time_scale.is_finite());
+            diagnostics.push(with_public_bool(
+                diagnostic,
+                "non_negative",
+                self.time_scale >= 0.0,
+            ));
         }
         validate_duration_seconds(
             diagnostics,
@@ -286,44 +294,58 @@ fn validate_task_pool(
     pool: ProjectTaskPoolManifest,
 ) {
     if pool.workers == 0 {
-        diagnostics.push(
-            Diagnostic::error(
-                "project.tasks.invalid-workers",
-                "task pool workers must be greater than zero",
-            )
-            .with_field_path(format!("{prefix}.workers")),
+        let diagnostic = error(
+            "project.tasks.invalid-workers",
+            "Task pool worker count must be greater than zero",
         );
+        let diagnostic = with_field_path(diagnostic, &format!("{prefix}.workers"));
+        diagnostics.push(with_public_u64(
+            diagnostic,
+            "actual",
+            u64::from(pool.workers),
+        ));
     }
     if usize::try_from(pool.workers)
         .map_or(true, |workers| workers > MAX_TASK_POOL_THREADS_PER_KIND)
     {
-        diagnostics.push(
-            Diagnostic::error(
-                "project.tasks.workers-too-large",
-                format!("task pool workers must be <= {MAX_TASK_POOL_THREADS_PER_KIND}"),
-            )
-            .with_field_path(format!("{prefix}.workers")),
+        let diagnostic = error(
+            "project.tasks.workers-too-large",
+            "Task pool worker count exceeds its per-kind hard limit",
         );
+        let diagnostic = with_field_path(diagnostic, &format!("{prefix}.workers"));
+        let diagnostic = with_public_u64(diagnostic, "actual", u64::from(pool.workers));
+        diagnostics.push(with_public_u64(
+            diagnostic,
+            "limit",
+            u64::try_from(MAX_TASK_POOL_THREADS_PER_KIND).unwrap_or(u64::MAX),
+        ));
     }
     if pool.pending_capacity == 0 {
-        diagnostics.push(
-            Diagnostic::error(
-                "project.tasks.invalid-pending-capacity",
-                "task pool pending_capacity must be greater than zero",
-            )
-            .with_field_path(format!("{prefix}.pending_capacity")),
+        let diagnostic = error(
+            "project.tasks.invalid-pending-capacity",
+            "Task pool pending capacity must be greater than zero",
         );
+        let diagnostic = with_field_path(diagnostic, &format!("{prefix}.pending_capacity"));
+        diagnostics.push(with_public_u64(
+            diagnostic,
+            "actual",
+            u64::from(pool.pending_capacity),
+        ));
     }
     if usize::try_from(pool.pending_capacity)
         .map_or(true, |pending| pending > MAX_TASK_POOL_PENDING_PER_KIND)
     {
-        diagnostics.push(
-            Diagnostic::error(
-                "project.tasks.pending-capacity-too-large",
-                format!("task pool pending_capacity must be <= {MAX_TASK_POOL_PENDING_PER_KIND}"),
-            )
-            .with_field_path(format!("{prefix}.pending_capacity")),
+        let diagnostic = error(
+            "project.tasks.pending-capacity-too-large",
+            "Task pool pending capacity exceeds its per-kind hard limit",
         );
+        let diagnostic = with_field_path(diagnostic, &format!("{prefix}.pending_capacity"));
+        let diagnostic = with_public_u64(diagnostic, "actual", u64::from(pool.pending_capacity));
+        diagnostics.push(with_public_u64(
+            diagnostic,
+            "limit",
+            u64::try_from(MAX_TASK_POOL_PENDING_PER_KIND).unwrap_or(u64::MAX),
+        ));
     }
 }
 
@@ -337,13 +359,13 @@ fn validate_task_aggregates(
         + u64::from(tasks.async_compute.workers);
     let max_workers = u64::try_from(MAX_TASK_POOL_THREADS_TOTAL).unwrap_or(u64::MAX);
     if total_workers > max_workers {
-        diagnostics.push(
-            Diagnostic::error(
-                "project.tasks.total-workers-too-large",
-                format!("task pools request {total_workers} workers, maximum is {max_workers}"),
-            )
-            .with_field_path(prefix),
+        let diagnostic = error(
+            "project.tasks.total-workers-too-large",
+            "Combined task pool worker count exceeds its hard limit",
         );
+        let diagnostic = with_field_path(diagnostic, prefix);
+        let diagnostic = with_public_u64(diagnostic, "actual", total_workers);
+        diagnostics.push(with_public_u64(diagnostic, "limit", max_workers));
     }
 
     let total_pending = u64::from(tasks.io.pending_capacity)
@@ -351,15 +373,13 @@ fn validate_task_aggregates(
         + u64::from(tasks.async_compute.pending_capacity);
     let max_pending = u64::try_from(MAX_TASK_POOL_PENDING_TOTAL).unwrap_or(u64::MAX);
     if total_pending > max_pending {
-        diagnostics.push(
-            Diagnostic::error(
-                "project.tasks.total-pending-too-large",
-                format!(
-                    "task pools request {total_pending} pending tasks, maximum is {max_pending}"
-                ),
-            )
-            .with_field_path(prefix),
+        let diagnostic = error(
+            "project.tasks.total-pending-too-large",
+            "Combined task pool pending capacity exceeds its hard limit",
         );
+        let diagnostic = with_field_path(diagnostic, prefix);
+        let diagnostic = with_public_u64(diagnostic, "actual", total_pending);
+        diagnostics.push(with_public_u64(diagnostic, "limit", max_pending));
     }
 }
 
@@ -375,25 +395,25 @@ fn validate_task_shutdown(
     ] {
         let field_path = format!("{prefix}.{field}");
         if milliseconds == 0 {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.tasks.invalid-shutdown-timeout",
-                    "task shutdown timeouts must be greater than zero",
-                )
-                .with_field_path(&field_path),
+            let diagnostic = error(
+                "project.tasks.invalid-shutdown-timeout",
+                "Task shutdown timeout must be greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &field_path);
+            diagnostics.push(with_public_u64(diagnostic, "actual", milliseconds));
         }
         if u128::from(milliseconds) > MAX_TASK_SHUTDOWN_PHASE_TIMEOUT.as_millis() {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.tasks.shutdown-timeout-too-large",
-                    format!(
-                        "task shutdown timeout must be <= {} ms",
-                        MAX_TASK_SHUTDOWN_PHASE_TIMEOUT.as_millis()
-                    ),
-                )
-                .with_field_path(field_path),
+            let diagnostic = error(
+                "project.tasks.shutdown-timeout-too-large",
+                "Task shutdown timeout exceeds its phase hard limit",
             );
+            let diagnostic = with_field_path(diagnostic, &field_path);
+            let diagnostic = with_public_u64(diagnostic, "actual", milliseconds);
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "limit",
+                u64::try_from(MAX_TASK_SHUTDOWN_PHASE_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
+            ));
         }
     }
 
@@ -401,16 +421,23 @@ fn validate_task_shutdown(
         + u128::from(shutdown.cancel_timeout_ms)
         + u128::from(shutdown.join_timeout_ms);
     if total_milliseconds > MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT.as_millis() {
-        diagnostics.push(
-            Diagnostic::error(
-                "project.tasks.shutdown-total-too-large",
-                format!(
-                    "task shutdown timeouts total {total_milliseconds} ms, maximum is {} ms",
-                    MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT.as_millis()
-                ),
-            )
-            .with_field_path(prefix),
+        let diagnostic = error(
+            "project.tasks.shutdown-total-too-large",
+            "Combined task shutdown timeout exceeds its hard limit",
         );
+        let diagnostic = with_field_path(diagnostic, prefix);
+        let actual = u64::try_from(total_milliseconds).unwrap_or(u64::MAX);
+        let diagnostic = with_public_u64(diagnostic, "actual", actual);
+        let diagnostic = with_public_bool(
+            diagnostic,
+            "actual_saturated",
+            total_milliseconds > u128::from(u64::MAX),
+        );
+        diagnostics.push(with_public_u64(
+            diagnostic,
+            "limit",
+            u64::try_from(MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
+        ));
     }
 }
 
@@ -490,37 +517,43 @@ impl Default for ProjectWindowManifest {
 impl ProjectWindowManifest {
     pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
         if self.title.trim().is_empty() {
-            diagnostics.push(
-                Diagnostic::error("project.window.empty-title", "window.title cannot be empty")
-                    .with_field_path(format!("{prefix}.title")),
-            );
+            diagnostics.push(with_field_path(
+                error("project.window.empty-title", "Window title cannot be empty"),
+                &format!("{prefix}.title"),
+            ));
         }
         if self.width == 0 {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.window.invalid-width",
-                    "window.width must be greater than zero",
-                )
-                .with_field_path(format!("{prefix}.width")),
+            let diagnostic = error(
+                "project.window.invalid-width",
+                "Window width must be greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.width"));
+            diagnostics.push(with_public_u64(diagnostic, "actual", u64::from(self.width)));
         }
         if self.height == 0 {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.window.invalid-height",
-                    "window.height must be greater than zero",
-                )
-                .with_field_path(format!("{prefix}.height")),
+            let diagnostic = error(
+                "project.window.invalid-height",
+                "Window height must be greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.height"));
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "actual",
+                u64::from(self.height),
+            ));
         }
         if !self.scale_factor.is_finite() || self.scale_factor <= 0.0 {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.window.invalid-scale-factor",
-                    "window.scale_factor must be finite and greater than zero",
-                )
-                .with_field_path(format!("{prefix}.scale_factor")),
+            let diagnostic = error(
+                "project.window.invalid-scale-factor",
+                "Window scale factor must be finite and greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.scale_factor"));
+            let diagnostic = with_public_bool(diagnostic, "finite", self.scale_factor.is_finite());
+            diagnostics.push(with_public_bool(
+                diagnostic,
+                "positive",
+                self.scale_factor > 0.0,
+            ));
         }
     }
 
@@ -623,34 +656,52 @@ impl Default for ProjectDiagnosticsManifest {
 impl ProjectDiagnosticsManifest {
     pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
         if self.runtime_capacity == 0 {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.diagnostics.invalid-runtime-capacity",
-                    "diagnostics.runtime_capacity must be greater than zero",
-                )
-                .with_field_path(format!("{prefix}.runtime_capacity")),
+            let diagnostic = error(
+                "project.diagnostics.invalid-runtime-capacity",
+                "Runtime diagnostic capacity must be greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.runtime_capacity"));
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "actual",
+                u64::try_from(self.runtime_capacity).unwrap_or(u64::MAX),
+            ));
         }
-        if self.runtime_capacity > MAX_RUNTIME_DIAGNOSTICS_CAPACITY {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.diagnostics.runtime-capacity-too-large",
-                    format!(
-                        "diagnostics.runtime_capacity must be <= {MAX_RUNTIME_DIAGNOSTICS_CAPACITY}"
-                    ),
-                )
-                .with_field_path(format!("{prefix}.runtime_capacity")),
+        if self.runtime_capacity > MAX_RUNTIME_DIAGNOSTIC_ENTRIES {
+            let diagnostic = error(
+                "project.diagnostics.runtime-capacity-too-large",
+                "Runtime diagnostic capacity exceeds its hard limit",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.runtime_capacity"));
+            let diagnostic = with_public_u64(
+                diagnostic,
+                "actual",
+                u64::try_from(self.runtime_capacity).unwrap_or(u64::MAX),
+            );
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "limit",
+                u64::try_from(MAX_RUNTIME_DIAGNOSTIC_ENTRIES).unwrap_or(u64::MAX),
+            ));
         }
     }
 
-    pub(crate) const fn lower(self) -> EffectiveDiagnosticsSettings {
-        EffectiveDiagnosticsSettings {
-            runtime: RuntimeDiagnosticsSettings {
-                capacity: self.runtime_capacity,
-            },
-        }
+    pub(crate) fn lower(self) -> Result<EffectiveDiagnosticsSettings, ProjectProfileError> {
+        Ok(EffectiveDiagnosticsSettings {
+            runtime: runtime_diagnostics_settings(self.runtime_capacity)?,
+        })
     }
+}
+
+pub(crate) fn runtime_diagnostics_settings(
+    capacity: usize,
+) -> Result<RuntimeDiagnosticsSettings, ProjectProfileError> {
+    let entry_limit =
+        ItemLimit::new(capacity).ok_or(ProjectProfileError::InvalidDiagnosticCapacity)?;
+    let byte_limit = ByteLimit::new(PROJECT_RUNTIME_DIAGNOSTIC_BYTE_LIMIT)
+        .ok_or(ProjectProfileError::InvalidDiagnosticCapacity)?;
+    RuntimeDiagnosticsSettings::new(entry_limit, byte_limit)
+        .map_err(ProjectProfileError::InvalidDiagnosticSettings)
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]

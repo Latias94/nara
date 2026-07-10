@@ -69,6 +69,14 @@ This file provides repo-local guidance for agents working on nara.
 - Large tilemaps should move toward ADR 0053 visibility/culling/chunk cache semantics instead of expanding all cells every frame when scale pressure appears.
 - Keep render modules split by responsibility: `nara_sprite_render::{types,extract,queue}`, `nara_ui_render::{types,extract,queue}`, and `nara_render_wgpu::{surface,sprite,ui}` should stay narrow instead of growing monolithic backend or render-bridge files.
 - `DiagnosticReport::push` only collects diagnostics. Use `Diagnostic::emit_to_tracing` or `DiagnosticReport::emit_to_tracing` explicitly when logs are desired.
+- Diagnostic code/domain/producer/field keys and summaries are engine-owned static identities/text.
+  Dynamic values enter diagnostics only through classified fields: validated public identifiers or
+  project-relative paths, numeric/boolean values, or value-free sensitive/secret redaction markers.
+  Do not stringify errors, paths, environment values, URLs, component payloads, or credentials into
+  summaries, identities, tracing fields, serialization, or dedupe keys.
+- `DiagnosticReport` severity is sticky across bounded rejection and eviction. Merge reports through
+  its bounded report merge API so observed severity and drop/truncation accounting are preserved;
+  never rebuild a report by copying only retained entries.
 - The root `nara` facade must keep `winit` and `wgpu` optional; default features stay backend-free.
 - `nara::prelude` should stay gameplay-first and backend-free. Move backend/tooling/debug/render extraction, queue, batch, GPU cache, and other advanced extension types to `advanced_prelude` or module-specific preludes.
 - `repo-ref/` contains reference source trees. Treat it as read-only reference material and keep it out of git.

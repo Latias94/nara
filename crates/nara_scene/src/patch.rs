@@ -9,6 +9,10 @@ use nara_reflect::{
 
 use crate::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    diagnostics::{
+        error as diagnostic_error, with_capability, with_component_field_path,
+        with_component_field_path_error, with_public_locator, with_public_u64,
+    },
     document::validate_scene_entity_id,
 };
 
@@ -41,9 +45,16 @@ impl ScenePatchDocument {
         document: &mut SceneDocument,
         registry: &ComponentRegistry,
     ) -> ScenePatchReport {
-        self.apply_to_scene_with_validator(document, registry, |document, registry| {
-            document.validate_authoring(registry)
-        })
+        self.apply_to_scene_with_validator(
+            document,
+            registry,
+            |document, registry, operation_index| match operation_index {
+                Some(operation_index) => {
+                    document.validate_authoring_for_patch(registry, operation_index)
+                }
+                None => document.validate_authoring(registry),
+            },
+        )
     }
 
     pub fn apply_to_scene_with_asset_database(
@@ -52,26 +63,39 @@ impl ScenePatchDocument {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
-        self.apply_to_scene_with_validator(document, registry, |document, registry| {
-            document.validate_authoring_with_asset_database(registry, database)
-        })
+        self.apply_to_scene_with_validator(
+            document,
+            registry,
+            |document, registry, operation_index| match operation_index {
+                Some(operation_index) => document.validate_authoring_for_patch_with_asset_database(
+                    registry,
+                    database,
+                    operation_index,
+                ),
+                None => document.validate_authoring_with_asset_database(registry, database),
+            },
+        )
     }
 
     fn apply_to_scene_with_validator(
         &self,
         document: &mut SceneDocument,
         registry: &ComponentRegistry,
-        mut validate: impl FnMut(&SceneDocument, &ComponentRegistry) -> DiagnosticReport,
+        mut validate: impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
     ) -> ScenePatchReport {
         if self.format_version != Self::CURRENT_FORMAT_VERSION {
             let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(Diagnostic::error(
-                "scene.patch-unsupported-format-version",
-                format!(
-                    "scene patch format version {} is unsupported; expected {}",
-                    self.format_version,
-                    Self::CURRENT_FORMAT_VERSION
+            diagnostics.push(with_public_u64(
+                with_public_u64(
+                    diagnostic_error(
+                        "scene.patch-unsupported-format-version",
+                        "Scene patch format version is unsupported",
+                    ),
+                    "actual-version",
+                    u64::from(self.format_version),
                 ),
+                "expected-version",
+                u64::from(Self::CURRENT_FORMAT_VERSION),
             ));
             return ScenePatchReport {
                 applied: false,
@@ -80,7 +104,7 @@ impl ScenePatchDocument {
             };
         }
 
-        let source_validation = validate(document, registry);
+        let source_validation = validate(document, registry, None);
         if source_validation.has_errors() {
             return ScenePatchReport {
                 applied: false,
@@ -107,12 +131,12 @@ impl ScenePatchDocument {
             };
 
             scratch.canonicalize();
-            let validation = validate(&scratch, registry);
+            let validation = validate(&scratch, registry, Some(operation_index));
             if validation.has_errors() {
                 return ScenePatchReport {
                     applied: false,
                     inverse: None,
-                    diagnostics: diagnostics_with_operation_index(operation_index, validation),
+                    diagnostics: validation,
                 };
             }
 
@@ -207,6 +231,36 @@ pub struct ScenePatchReport {
     pub diagnostics: DiagnosticReport,
 }
 
+#[derive(Clone, Copy)]
+struct FieldPatchTarget<'a> {
+    registry: &'a ComponentRegistry,
+    entity: &'a SceneEntityId,
+    component: &'a ComponentTypeId,
+    component_version: &'a ComponentSchemaVersion,
+    path: &'a ComponentFieldPath,
+    operation_index: usize,
+}
+
+impl<'a> FieldPatchTarget<'a> {
+    fn new(
+        registry: &'a ComponentRegistry,
+        entity: &'a SceneEntityId,
+        component: &'a ComponentTypeId,
+        component_version: &'a ComponentSchemaVersion,
+        path: &'a ComponentFieldPath,
+        operation_index: usize,
+    ) -> Self {
+        Self {
+            registry,
+            entity,
+            component,
+            component_version,
+            path,
+            operation_index,
+        }
+    }
+}
+
 fn apply_operation(
     document: &mut SceneDocument,
     registry: &ComponentRegistry,
@@ -239,13 +293,15 @@ fn apply_operation(
             value,
         } => set_field(
             document,
-            registry,
-            entity,
-            component,
-            component_version,
-            path,
+            FieldPatchTarget::new(
+                registry,
+                entity,
+                component,
+                component_version,
+                path,
+                operation_index,
+            ),
             value.clone(),
-            operation_index,
         ),
         ScenePatchOperation::RemoveField {
             entity,
@@ -272,13 +328,15 @@ fn apply_operation(
             asset_ref,
         } => set_asset_ref_field(
             document,
-            registry,
-            entity,
-            component,
-            component_version,
-            path,
+            FieldPatchTarget::new(
+                registry,
+                entity,
+                component,
+                component_version,
+                path,
+                operation_index,
+            ),
             asset_ref,
-            operation_index,
         ),
     }
 }
@@ -427,14 +485,17 @@ fn replace_component(
 
 fn set_field(
     document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    entity: &SceneEntityId,
-    component: &ComponentTypeId,
-    component_version: &ComponentSchemaVersion,
-    path: &ComponentFieldPath,
+    target: FieldPatchTarget<'_>,
     value: ComponentValue,
-    operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    let FieldPatchTarget {
+        registry,
+        entity,
+        component,
+        component_version,
+        path,
+        operation_index,
+    } = target;
     let field_schema = field_schema(
         registry,
         component,
@@ -467,13 +528,16 @@ fn set_field(
         .value
         .set_path(path, value)
         .map_err(|error| {
-            patch_diagnostic(
-                operation_index,
-                "scene.patch-invalid-field-path",
-                error.to_string(),
-                Some(entity),
-                Some(component),
-                Some(path),
+            with_component_field_path_error(
+                patch_diagnostic(
+                    operation_index,
+                    "scene.patch-invalid-field-path",
+                    "Patch field path cannot be applied",
+                    Some(entity),
+                    Some(component),
+                    Some(path),
+                ),
+                &error,
             )
         })?;
 
@@ -532,13 +596,16 @@ fn remove_field(
 
     let component_record = component_mut(document, entity, component, operation_index)?;
     let previous = component_record.value.remove_path(path).map_err(|error| {
-        patch_diagnostic(
-            operation_index,
-            "scene.patch-invalid-field-path",
-            error.to_string(),
-            Some(entity),
-            Some(component),
-            Some(path),
+        with_component_field_path_error(
+            patch_diagnostic(
+                operation_index,
+                "scene.patch-invalid-field-path",
+                "Patch field path cannot be removed",
+                Some(entity),
+                Some(component),
+                Some(path),
+            ),
+            &error,
         )
     })?;
 
@@ -557,17 +624,17 @@ fn reparent_entity(
     parent: Option<&SceneEntityId>,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    if let Some(parent) = parent {
-        if find_entity(document, parent).is_none() {
-            return Err(patch_diagnostic(
-                operation_index,
-                "scene.patch-missing-parent",
-                "patch reparents to an entity that does not exist",
-                Some(entity),
-                None,
-                None,
-            ));
-        }
+    if let Some(parent) = parent
+        && find_entity(document, parent).is_none()
+    {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-missing-parent",
+            "patch reparents to an entity that does not exist",
+            Some(entity),
+            None,
+            None,
+        ));
     }
     let record = entity_mut(document, entity, operation_index)?;
     let previous = record.parent.clone();
@@ -580,14 +647,17 @@ fn reparent_entity(
 
 fn set_asset_ref_field(
     document: &mut SceneDocument,
-    registry: &ComponentRegistry,
-    entity: &SceneEntityId,
-    component: &ComponentTypeId,
-    component_version: &ComponentSchemaVersion,
-    path: &ComponentFieldPath,
+    target: FieldPatchTarget<'_>,
     asset_ref: &AssetRef,
-    operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    let FieldPatchTarget {
+        registry,
+        entity,
+        component,
+        component_version,
+        path,
+        operation_index,
+    } = target;
     let field_schema = field_schema(
         registry,
         component,
@@ -622,16 +692,7 @@ fn set_asset_ref_field(
             Some(path),
         ));
     }
-    set_field(
-        document,
-        registry,
-        entity,
-        component,
-        component_version,
-        path,
-        asset_ref_value(asset_ref),
-        operation_index,
-    )
+    set_field(document, target, asset_ref_value(asset_ref))
 }
 
 fn find_entity(document: &SceneDocument, id: &SceneEntityId) -> Option<usize> {
@@ -695,16 +756,21 @@ fn field_schema<'a>(
     };
 
     if component_schema.version != *component_version {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-stale-component-schema-version",
-            format!(
-                "patch targets component schema version {}; expected {}",
-                component_version.0, component_schema.version.0
+        return Err(with_public_u64(
+            with_public_u64(
+                patch_diagnostic(
+                    operation_index,
+                    "scene.patch-stale-component-schema-version",
+                    "Patch component schema version is stale",
+                    Some(entity),
+                    Some(component),
+                    Some(path),
+                ),
+                "actual-version",
+                u64::from(component_version.0),
             ),
-            Some(entity),
-            Some(component),
-            Some(path),
+            "expected-version",
+            u64::from(component_schema.version.0),
         ));
     }
 
@@ -736,13 +802,16 @@ fn require_field_capability(
         return Ok(());
     }
 
-    Err(patch_diagnostic(
-        operation_index,
-        "scene.patch-field-capability-missing",
-        format!("patch field operation requires {capability:?} capability"),
-        Some(entity),
-        Some(component),
-        Some(path),
+    Err(with_capability(
+        patch_diagnostic(
+            operation_index,
+            "scene.patch-field-capability-missing",
+            "Patch field operation requires a missing capability",
+            Some(entity),
+            Some(component),
+            Some(path),
+        ),
+        capability,
     ))
 }
 
@@ -786,10 +855,11 @@ fn subtree_ids(document: &SceneDocument, root: &SceneEntityId) -> BTreeSet<Scene
     while changed {
         changed = false;
         for entity in &document.entities {
-            if let Some(parent) = &entity.parent {
-                if subtree.contains(parent) && subtree.insert(entity.id.clone()) {
-                    changed = true;
-                }
+            if let Some(parent) = &entity.parent
+                && subtree.contains(parent)
+                && subtree.insert(entity.id.clone())
+            {
+                changed = true;
             }
         }
     }
@@ -812,34 +882,27 @@ fn subtree_depth(records: &[SceneEntityRecord], id: &SceneEntityId) -> usize {
     depth
 }
 
-fn diagnostics_with_operation_index(
-    operation_index: usize,
-    diagnostics: DiagnosticReport,
-) -> DiagnosticReport {
-    let mut report = DiagnosticReport::default();
-    for diagnostic in diagnostics.into_diagnostics() {
-        report.push(diagnostic.with_operation_index(operation_index));
-    }
-    report
-}
-
 fn patch_diagnostic(
     operation_index: usize,
-    code: impl Into<String>,
-    message: impl Into<String>,
+    code: &'static str,
+    summary: &'static str,
     entity: Option<&SceneEntityId>,
     component: Option<&ComponentTypeId>,
     path: Option<&ComponentFieldPath>,
 ) -> Diagnostic {
-    let mut diagnostic = Diagnostic::error(code, message).with_operation_index(operation_index);
+    let mut diagnostic = with_public_u64(
+        diagnostic_error(code, summary),
+        "operation-index",
+        u64::try_from(operation_index).unwrap_or(u64::MAX),
+    );
     if let Some(entity) = entity {
-        diagnostic = diagnostic.with_entity_id(entity.as_str());
+        diagnostic = with_public_locator(diagnostic, "entity-id", entity.as_str());
     }
     if let Some(component) = component {
-        diagnostic = diagnostic.with_component_id(component.as_str());
+        diagnostic = with_public_locator(diagnostic, "component-id", component.as_str());
     }
     if let Some(path) = path {
-        diagnostic = diagnostic.with_field_path(path.to_string());
+        diagnostic = with_component_field_path(diagnostic, "field-path", "field-path-depth", path);
     }
     diagnostic
 }

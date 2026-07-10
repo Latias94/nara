@@ -5,12 +5,13 @@ use nara_asset::{
     AssetId, AssetPath, AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,
     ProjectAssetDatabase, StableAssetId,
 };
+use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticValueRef};
 use nara_ecs::{Component, World};
 use nara_reflect::bevy_reflect;
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PreparedComponent, Reflect,
+    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldPathError,
+    ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistry, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent, Reflect,
 };
 #[derive(Clone, Debug, PartialEq, Component, Reflect)]
 struct TestPosition {
@@ -30,6 +31,246 @@ struct TestApplyFails;
 
 #[derive(Debug)]
 struct TestAsset;
+
+fn diagnostic_has_text_field(diagnostic: &Diagnostic, key: &str, expected: &str) -> bool {
+    diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == key
+            && matches!(
+                field.value(),
+                DiagnosticValueRef::Identifier(value)
+                    | DiagnosticValueRef::Display(value)
+                    | DiagnosticValueRef::ProjectRelative(value)
+                    if value == expected
+            )
+    })
+}
+
+fn diagnostic_has_u64_field(diagnostic: &Diagnostic, key: &str, expected: u64) -> bool {
+    diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == key
+            && matches!(field.value(), DiagnosticValueRef::Unsigned(value) if value == expected)
+    })
+}
+
+fn diagnostic_has_redacted_field(diagnostic: &Diagnostic, key: &str) -> bool {
+    diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == key && matches!(field.value(), DiagnosticValueRef::Redacted)
+    })
+}
+
+fn diagnostic_has_field_class(
+    diagnostic: &Diagnostic,
+    key: &str,
+    expected: DiagnosticFieldClass,
+) -> bool {
+    diagnostic
+        .fields()
+        .iter()
+        .any(|field| field.key().as_str() == key && field.class() == expected)
+}
+
+#[test]
+fn scene_diagnostics_redact_legacy_codec_text_and_sensitive_locators() {
+    let canary = "password=scene-private-value C:\\private\\scene.ron";
+    let diagnostic = crate::diagnostics::with_codec_error(
+        crate::diagnostics::with_public_locator(
+            crate::diagnostics::error("scene.test-private-error", "Scene test operation failed"),
+            "component-id",
+            "password",
+        ),
+        &ComponentCodecError::Message(canary.to_string()),
+    );
+
+    assert!(diagnostic_has_redacted_field(&diagnostic, "component-id"));
+    assert!(diagnostic_has_redacted_field(&diagnostic, "codec-detail"));
+    assert!(diagnostic_has_field_class(
+        &diagnostic,
+        "component-id",
+        DiagnosticFieldClass::Sensitive,
+    ));
+    assert!(diagnostic_has_field_class(
+        &diagnostic,
+        "codec-detail",
+        DiagnosticFieldClass::Secret,
+    ));
+    assert!(!format!("{diagnostic:?}").contains(canary));
+}
+
+#[test]
+fn component_field_paths_lower_from_structure_with_explicit_bounds() {
+    let root = ComponentFieldPath::empty();
+    let root_diagnostic = crate::diagnostics::with_component_field_path(
+        crate::diagnostics::error(
+            "scene.test-root-field-path",
+            "Scene test root field path was observed",
+        ),
+        "field-path",
+        "field-path-depth",
+        &root,
+    );
+    assert!(diagnostic_has_text_field(
+        &root_diagnostic,
+        "field-path",
+        "root",
+    ));
+    assert!(diagnostic_has_field_class(
+        &root_diagnostic,
+        "field-path",
+        DiagnosticFieldClass::Public,
+    ));
+    assert!(diagnostic_has_u64_field(
+        &root_diagnostic,
+        "field-path-depth",
+        0,
+    ));
+
+    let indexed = ComponentFieldPath::new([
+        ComponentFieldPathSegment::field("items"),
+        ComponentFieldPathSegment::index(7),
+    ]);
+    let indexed_diagnostic = crate::diagnostics::with_component_field_path(
+        crate::diagnostics::error(
+            "scene.test-indexed-field-path",
+            "Scene test indexed field path was observed",
+        ),
+        "field-path",
+        "field-path-depth",
+        &indexed,
+    );
+    assert!(diagnostic_has_text_field(
+        &indexed_diagnostic,
+        "field-path",
+        "f_items/i_7",
+    ));
+    assert!(diagnostic_has_field_class(
+        &indexed_diagnostic,
+        "field-path",
+        DiagnosticFieldClass::Public,
+    ));
+    assert!(diagnostic_has_u64_field(
+        &indexed_diagnostic,
+        "field-path-depth",
+        2,
+    ));
+
+    let oversized_segment = "x".repeat(512);
+    let oversized = ComponentFieldPath::from_fields([oversized_segment.clone()]);
+    let oversized_diagnostic = crate::diagnostics::with_component_field_path(
+        crate::diagnostics::error(
+            "scene.test-oversized-field-path",
+            "Scene test field path exceeded its public bound",
+        ),
+        "field-path",
+        "field-path-depth",
+        &oversized,
+    );
+    assert!(diagnostic_has_field_class(
+        &oversized_diagnostic,
+        "field-path",
+        DiagnosticFieldClass::Sensitive,
+    ));
+    assert!(diagnostic_has_u64_field(
+        &oversized_diagnostic,
+        "field-path-depth",
+        1,
+    ));
+    assert!(!format!("{oversized_diagnostic:?}").contains(&oversized_segment));
+
+    let sensitive = ComponentFieldPath::from_fields(["password"]);
+    let sensitive_diagnostic = crate::diagnostics::with_component_field_path(
+        crate::diagnostics::error(
+            "scene.test-sensitive-field-path",
+            "Scene test field path required redaction",
+        ),
+        "field-path",
+        "field-path-depth",
+        &sensitive,
+    );
+    assert!(diagnostic_has_field_class(
+        &sensitive_diagnostic,
+        "field-path",
+        DiagnosticFieldClass::Sensitive,
+    ));
+    assert!(!format!("{sensitive_diagnostic:?}").contains("password"));
+}
+
+#[test]
+fn component_field_path_errors_publish_stable_reason_and_numeric_bounds() {
+    let path = ComponentFieldPath::new([
+        ComponentFieldPathSegment::field("items"),
+        ComponentFieldPathSegment::index(7),
+    ]);
+    let diagnostic = crate::diagnostics::with_component_field_path_error(
+        crate::diagnostics::error(
+            "scene.test-field-path-error",
+            "Scene test field path operation failed",
+        ),
+        &ComponentFieldPathError::IndexOutOfBounds {
+            path,
+            index: 7,
+            len: 2,
+        },
+    );
+
+    assert!(diagnostic_has_text_field(
+        &diagnostic,
+        "path-error-kind",
+        "index-out-of-bounds",
+    ));
+    assert!(diagnostic_has_text_field(
+        &diagnostic,
+        "error-field-path",
+        "f_items/i_7",
+    ));
+    assert!(diagnostic_has_u64_field(
+        &diagnostic,
+        "error-field-path-depth",
+        2,
+    ));
+    assert!(diagnostic_has_u64_field(&diagnostic, "path-error-index", 7,));
+    assert!(diagnostic_has_u64_field(
+        &diagnostic,
+        "path-error-length",
+        2,
+    ));
+}
+
+#[test]
+fn scene_diagnostic_asset_refs_keep_semantic_classification() {
+    let path_diagnostic = crate::diagnostics::with_asset_ref(
+        crate::diagnostics::error(
+            "scene.test-asset-path",
+            "Scene test asset path was observed",
+        ),
+        "asset-ref",
+        &AssetRef::path("textures/player.png").unwrap(),
+    );
+    assert!(diagnostic_has_field_class(
+        &path_diagnostic,
+        "asset-ref",
+        DiagnosticFieldClass::ProjectRelative,
+    ));
+
+    let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+    let stable_diagnostic = crate::diagnostics::with_asset_ref(
+        crate::diagnostics::error(
+            "scene.test-asset-stable-id",
+            "Scene test stable asset ID was observed",
+        ),
+        "asset-ref",
+        &AssetRef::StableId(stable_id),
+    );
+    assert!(diagnostic_has_field_class(
+        &stable_diagnostic,
+        "asset-ref",
+        DiagnosticFieldClass::Public,
+    ));
+    assert!(diagnostic_has_text_field(
+        &stable_diagnostic,
+        "asset-ref",
+        &stable_id.to_string(),
+    ));
+}
 
 #[test]
 fn syncs_parent_child_links() {
@@ -87,9 +328,8 @@ fn validation_reports_duplicate_missing_parent_cycle_and_unknown_component() {
 
     let report = document.validate(&registry);
     let codes = report
-        .diagnostics()
         .iter()
-        .map(|diagnostic| diagnostic.code.as_str())
+        .map(|diagnostic| diagnostic.code().as_str())
         .collect::<Vec<_>>();
 
     assert!(codes.contains(&"scene.duplicate-entity-id"));
@@ -112,9 +352,8 @@ fn validates_document_format_version() {
     assert!(report.has_errors());
     assert!(
         report
-            .diagnostics()
             .iter()
-            .any(|diagnostic| diagnostic.code.as_str() == "scene.unsupported-format-version")
+            .any(|diagnostic| diagnostic.code().as_str() == "scene.unsupported-format-version")
     );
 }
 
@@ -145,10 +384,16 @@ fn unsupported_prefab_instance_prevents_world_mutation() {
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.prefab-instance-unsupported"
-            && diagnostic.context.field_path.as_deref() == Some("prefab.source")
-            && diagnostic.context.asset_ref.as_deref() == Some("prefabs/enemy.ron")
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-instance-unsupported"
+            && diagnostic_has_field_class(diagnostic, "entity-id", DiagnosticFieldClass::Public)
+            && diagnostic_has_text_field(diagnostic, "field-path", "prefab.source")
+            && diagnostic_has_field_class(
+                diagnostic,
+                "asset-ref",
+                DiagnosticFieldClass::ProjectRelative,
+            )
+            && diagnostic_has_text_field(diagnostic, "asset-ref", "prefabs/enemy.ron")
     }));
 }
 
@@ -310,24 +555,18 @@ fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
     let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
 
     assert!(expansion.document.is_none());
-    assert!(
-        expansion
-            .diagnostics
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| {
-                diagnostic.code.as_str() == "scene.prefab-source-missing"
-                    && diagnostic.context.entity_id.as_deref() == Some("enemy")
-                    && diagnostic.context.asset_ref.as_deref() == Some("prefabs/missing.ron")
-            })
-    );
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-source-missing"
+            && diagnostic_has_text_field(diagnostic, "entity-id", "enemy")
+            && diagnostic_has_text_field(diagnostic, "asset-ref", "prefabs/missing.ron")
+    }));
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(report.entity_map.is_empty());
 }
 
 #[test]
-fn prefab_source_cycle_reports_chain_without_expanded_document() {
+fn prefab_source_cycle_reports_typed_edge_without_concatenated_chain() {
     let registry = test_registry();
     let a = AssetRef::path("prefabs/a.ron").unwrap();
     let b = AssetRef::path("prefabs/b.ron").unwrap();
@@ -342,19 +581,58 @@ fn prefab_source_cycle_reports_chain_without_expanded_document() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(expansion.document.is_none());
-    assert!(
-        expansion
-            .diagnostics
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| {
-                diagnostic.code.as_str() == "scene.prefab-cycle"
-                    && diagnostic.context.asset_ref.as_deref() == Some("prefabs/a.ron")
-                    && diagnostic
-                        .message
-                        .contains("prefabs/a.ron -> prefabs/b.ron -> prefabs/a.ron")
-            })
-    );
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-cycle"
+            && diagnostic_has_text_field(diagnostic, "cycle-from", "prefabs/b.ron")
+            && diagnostic_has_text_field(diagnostic, "cycle-to", "prefabs/a.ron")
+            && diagnostic_has_field_class(
+                diagnostic,
+                "cycle-from",
+                DiagnosticFieldClass::ProjectRelative,
+            )
+            && diagnostic_has_field_class(
+                diagnostic,
+                "cycle-to",
+                DiagnosticFieldClass::ProjectRelative,
+            )
+            && diagnostic_has_u64_field(diagnostic, "cycle-start-index", 0)
+            && diagnostic_has_u64_field(diagnostic, "cycle-depth", 3)
+            && diagnostic.summary().as_str() == "Prefab source cycle was detected"
+            && !diagnostic
+                .fields()
+                .iter()
+                .any(|field| field.key().as_str() == "asset-ref")
+    }));
+}
+
+#[test]
+fn prefab_source_cycle_reports_middle_cycle_start_for_multi_edge_chain() {
+    let registry = test_registry();
+    let a = AssetRef::path("prefabs/a.ron").unwrap();
+    let b = AssetRef::path("prefabs/b.ron").unwrap();
+    let c = AssetRef::path("prefabs/c.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(
+            a.clone(),
+            PrefabDocument::new([prefab_anchor("b", b.clone())]),
+        )
+        .with_prefab(
+            b.clone(),
+            PrefabDocument::new([prefab_anchor("c", c.clone())]),
+        )
+        .with_prefab(c, PrefabDocument::new([prefab_anchor("b", b)]));
+    let document = SceneDocument::new([prefab_anchor("root", a)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(expansion.document.is_none());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-cycle"
+            && diagnostic_has_text_field(diagnostic, "cycle-from", "prefabs/c.ron")
+            && diagnostic_has_text_field(diagnostic, "cycle-to", "prefabs/b.ron")
+            && diagnostic_has_u64_field(diagnostic, "cycle-start-index", 1)
+            && diagnostic_has_u64_field(diagnostic, "cycle-depth", 3)
+    }));
 }
 
 #[test]
@@ -375,16 +653,11 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
     );
 
     assert!(expansion.document.is_none());
-    assert!(
-        expansion
-            .diagnostics
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| {
-                diagnostic.code.as_str() == "scene.prefab-depth-exceeded"
-                    && diagnostic.context.entity_id.as_deref() == Some("weapon")
-            })
-    );
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-depth-exceeded"
+            && diagnostic_has_text_field(diagnostic, "entity-id", "weapon")
+            && diagnostic_has_u64_field(diagnostic, "maximum-depth", 1)
+    }));
 }
 
 #[test]
@@ -473,9 +746,9 @@ fn missing_component_migration_reports_unsupported_version() {
     let report = document.validate(&registry);
 
     assert!(report.has_errors());
-    assert!(report.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.unsupported-component-version"
-            && diagnostic.context.component_id.as_deref() == Some(position_type_id().as_str())
+    assert!(report.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.unsupported-component-version"
+            && diagnostic_has_text_field(diagnostic, "component-id", position_type_id().as_str())
     }));
 }
 
@@ -530,7 +803,7 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
 }
 
 #[test]
-fn unknown_stable_asset_ref_does_not_mutate_world_or_asset_server() {
+fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() {
     let registry = test_asset_registry();
     let known_stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
     let unknown_stable_id = stable_id("b73f0f16-09e8-4265-b090-b689b41c197e");
@@ -550,8 +823,6 @@ fn unknown_stable_asset_ref_does_not_mutate_world_or_asset_server() {
     let before_entities = world.iter_entities().count();
 
     let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
-    let expected_asset_ref = format!("stable_id:{unknown_stable_id}");
-
     assert!(report.diagnostics.has_errors());
     assert!(report.entity_map.is_empty());
     assert_eq!(world.iter_entities().count(), before_entities);
@@ -561,22 +832,25 @@ fn unknown_stable_asset_ref_does_not_mutate_world_or_asset_server() {
         Some("textures/existing.png")
     );
     assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.invalid-component-payload"
-            && diagnostic.context.entity_id.as_deref() == Some("player")
-            && diagnostic.context.component_id.as_deref() == Some(expected_component_id.as_str())
-            && diagnostic.context.field_path.as_deref() == Some("asset.value")
-            && diagnostic.context.asset_ref.as_deref() == Some(expected_asset_ref.as_str())
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.invalid-component-payload"
+            && diagnostic_has_text_field(diagnostic, "entity-id", "player")
+            && diagnostic_has_text_field(diagnostic, "component-id", expected_component_id.as_str())
+            && diagnostic_has_text_field(diagnostic, "field-path", "asset.value")
+            && diagnostic_has_redacted_field(diagnostic, "asset-ref")
+            && diagnostic_has_field_class(diagnostic, "asset-ref", DiagnosticFieldClass::Sensitive)
     }));
+    assert!(!format!("{:?}", report.diagnostics).contains(&unknown_stable_id.to_string()));
 }
 
 #[test]
-fn component_apply_failure_rolls_back_spawned_entities() {
+fn component_apply_failure_in_multi_component_entity_reports_component_and_rolls_back() {
     let registry = failing_apply_registry();
     let document = SceneDocument::new([
         SceneEntityRecord::new(scene_id("ok"))
             .with_component(position_type_id(), position_record(1)),
         SceneEntityRecord::new(scene_id("fails"))
+            .with_component(position_type_id(), position_record(2))
             .with_component(apply_fails_type_id(), apply_fails_record(None)),
     ]);
     let mut world = World::new();
@@ -587,9 +861,11 @@ fn component_apply_failure_rolls_back_spawned_entities() {
     assert!(report.diagnostics.has_errors());
     assert!(report.entity_map.is_empty());
     assert_eq!(world.iter_entities().count(), before_entities);
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.component-apply-failed"
-            && diagnostic.context.entity_id.as_deref() == Some("fails")
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.component-apply-failed"
+            && diagnostic_has_text_field(diagnostic, "entity-id", "fails")
+            && diagnostic_has_text_field(diagnostic, "component-id", apply_fails_type_id().as_str())
+            && diagnostic_has_redacted_field(diagnostic, "codec-detail")
     }));
 }
 
@@ -813,10 +1089,55 @@ fn unknown_prefab_patch_target_prevents_world_mutation() {
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.patch-missing-entity"
-            && diagnostic.context.operation_index == Some(0)
-            && diagnostic.context.entity_id.as_deref() == Some("missing")
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-missing-entity"
+            && diagnostic_has_u64_field(diagnostic, "operation-index", 0)
+            && diagnostic_has_text_field(diagnostic, "entity-id", "missing")
+    }));
+}
+
+#[test]
+fn patch_validation_failure_preserves_sticky_pressure_stats_and_operation_context() {
+    let registry = test_registry();
+    let components = (0..300_u32)
+        .map(|index| {
+            (
+                ComponentTypeId::new(format!("nara.test.Unknown{index:03}")),
+                SceneComponentRecord::new(ComponentSchemaVersion(1), ComponentValue::Null),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let invalid_entity = SceneEntityRecord {
+        id: scene_id("invalid"),
+        parent: None,
+        components,
+        prefab: None,
+    };
+    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+        entity: invalid_entity,
+    }]);
+    let mut document = SceneDocument::default();
+
+    let report = patch.apply_to_scene(&mut document, &registry);
+
+    assert!(!report.applied);
+    assert!(document.entities.is_empty());
+    assert!(report.diagnostics.has_errors());
+    let stats = report.diagnostics.stats();
+    assert_eq!(stats.observed_errors(), 300);
+    assert_eq!(stats.observed_warnings(), 0);
+    assert_eq!(stats.observed_info(), 0);
+    assert_eq!(stats.published_entries(), 300);
+    assert_eq!(stats.rejected_entries(), 0);
+    assert_eq!(stats.dropped_fields(), 0);
+    assert_eq!(stats.truncated_fields(), 0);
+    assert_eq!(stats.truncated_text_bytes(), 0);
+    assert!(stats.evicted_entries() > 0);
+    assert!(stats.evicted_bytes() > 0);
+    assert!(!report.diagnostics.is_retained_empty());
+    assert!(report.diagnostics.iter().all(|diagnostic| {
+        diagnostic.code().as_str() == "scene.unknown-component"
+            && diagnostic_has_u64_field(diagnostic, "operation-index", 0)
     }));
 }
 
@@ -845,9 +1166,8 @@ fn export_drops_parent_that_is_not_in_document() {
     assert!(
         export
             .diagnostics
-            .diagnostics()
             .iter()
-            .any(|diagnostic| diagnostic.code.as_str() == "scene.export-parent-skipped")
+            .any(|diagnostic| diagnostic.code().as_str() == "scene.export-parent-skipped")
     );
 }
 
@@ -869,13 +1189,15 @@ fn export_component_encode_failure_is_an_error() {
     assert!(
         export
             .diagnostics
-            .diagnostics()
             .iter()
             .any(
-                |diagnostic| diagnostic.code.as_str() == "scene.export-component-failed"
-                    && diagnostic.context.entity_id.as_deref() == Some("broken")
-                    && diagnostic.context.component_id.as_deref()
-                        == Some(broken_export_type_id().as_str())
+                |diagnostic| diagnostic.code().as_str() == "scene.export-component-failed"
+                    && diagnostic_has_text_field(diagnostic, "entity-id", "broken")
+                    && diagnostic_has_text_field(
+                        diagnostic,
+                        "component-id",
+                        broken_export_type_id().as_str(),
+                    )
             )
     );
 }

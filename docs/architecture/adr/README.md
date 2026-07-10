@@ -100,4 +100,5 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0054](0054-gpu-upload-budget-and-buffer-allocation-policy.md): GPU Upload Budget and Buffer Allocation Policy
 - [ADR 0055](0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md): Feature Matrix, Boundary Checks, and Compatibility Fixtures
 - [ADR 0056](0056-headless-runtime-and-dedicated-server-readiness.md): Headless Runtime and Dedicated Server Readiness
+- [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md): Global Resource Budgets, Metrics, and Diagnostic Privacy
 - [ADR 0070](0070-capability-oriented-filesystem-substrate.md): Capability-Oriented Filesystem Substrate

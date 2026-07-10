@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0006, ADR 0007, ADR 0009, ADR 0011, ADR 0043
+**Refined By**: ADR 0068: Global Resource Budgets, Metrics, and Diagnostic Privacy
 
 ## Context
 
@@ -95,4 +96,3 @@ Rules:
 - Which crate owns the shared `ProjectInputBudget` type?
 - Should budget profiles be named `dev`, `editor`, `package`, and `headless`, or derive from project profiles later?
 - Which image formats can report dimensions without full decode in the selected decoder stack?
-

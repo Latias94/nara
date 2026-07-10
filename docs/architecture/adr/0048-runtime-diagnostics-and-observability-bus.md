@@ -3,99 +3,134 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0009, ADR 0036, ADR 0042
-**Refined By**: ADR 0052: Task Backpressure, Cancellation, and Long-Running Diagnostics; ADR 0056:
-Headless Runtime and Dedicated Server Readiness
+**Refined By**: ADR 0052: Task Backpressure, Cancellation, and Long-Running Diagnostics;
+ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0068: Global Resource Budgets,
+Metrics, and Diagnostic Privacy
 
 ## Context
 
-`DiagnosticReport` is the right model for validation, import, and patch operations that return a bounded report to a caller.
-Runtime failures have a different shape.
-Asset watchers, reload jobs, task pools, render backends, window adapters, and runtime services can emit problems over many frames and from multiple threads.
-If every domain keeps a private diagnostics resource, editor Problems panels, CLI status, AI repair loops, and tracing bridges must learn every domain-specific queue.
+`DiagnosticReport` serves one bounded validation, import, or patch operation. Runtime failures have
+a different lifetime: asset watchers, task pools, render backends, window adapters, and services can
+report observations across frames and threads. If each domain exposes only a private queue, headless
+operators and editor tools cannot inspect one ordered timeline. If tracing becomes the source of
+truth, behavior depends on a subscriber and retained history cannot be queried deterministically.
 
 ## Decision
 
-nara will add a runtime diagnostics and observability bus as an engine-level observation surface.
-Domain diagnostics remain typed at their source, but they can publish normalized entries into the shared bus.
+`nara_diagnostic` owns `RuntimeDiagnostics`, the engine-level bounded runtime observation resource.
+Producer domains retain their typed errors and local status resources. Composition bridges lower
+stabilized producer outcomes into `RuntimeDiagnosticDraft`; those bridges are U31 work and are not
+implemented by this core decision.
 
 ```mermaid
 flowchart TD
-    Watch[Asset watcher] --> Domain[Domain diagnostics]
-    Reload[Reload jobs] --> Domain
-    Tasks[Task pools] --> Domain
-    Render[Render backend] --> Domain
-    Window[Window adapter] --> Domain
-    Domain --> Bus[RuntimeDiagnostics ring buffer]
-    Bus --> Editor[Editor Problems panel]
-    Bus --> Cli[CLI / debug overlay]
-    Bus --> Agent[AI repair context]
-    Bus --> Trace[explicit tracing bridge]
+    Domain[Typed producer outcome] --> Bridge[Composition bridge - U31]
+    Bridge --> Draft[RuntimeDiagnosticDraft]
+    Draft --> Publish[publish with frame]
+    Publish --> Bus[RuntimeDiagnostics]
+    Bus --> Headless[Headless/server inspection]
+    Bus --> Editor[Editor/CLI filters]
+    Bus -->|entry or cursor, explicit| Trace[tracing]
+    Domain --> Local[Domain-local rich state]
 ```
 
 Rules:
 
-- `RuntimeDiagnostics` is observational data, not gameplay control flow.
-- The bus stores bounded entries in a ring buffer with deterministic drop policy.
-- Entries carry code, severity, message, source domain, frame index, stage/set when known, task ID when known, window ID when known, backend name when known, asset/source path context when safe, and optional scene/component/field context.
-- Dedupe is explicit and key-based. Repeated entries can increment a counter and update first/last frame instead of flooding the buffer.
-- Domains may keep specialized diagnostics resources when they need richer local state. Those resources should expose a bridge into the shared bus.
-- Logging is not the source of truth. A tracing bridge emits selected diagnostics from the bus or domain resources by explicit system or API call.
-- Tooling reads the bus through stable filters: severity, domain, code, frame range, and related object context.
-- The bus is cleared or retained by policy, not by arbitrary consumers. Editor Problems may retain history across frames; transient runtime overlays may show only recent entries.
+- The bus is observational data. Gameplay and overload policy cannot branch on diagnostics.
+- Publication is the only entry path. A draft carries a validated producer, domain, code, severity,
+  static safe summary, classified fields, and `None`, `Code`, or `CodeAndFields` dedupe policy.
+- Dedupe identity always includes producer, domain, code, and severity. `CodeAndFields` adds sorted
+  retained public/project-relative fields including their field class and concrete value variant.
+  Sensitive and secret fields never participate, and the internal key is never serialized.
+- Publication returns a typed published, deduplicated, or rejected outcome. Sequence exhaustion and
+  entries larger than the total retained-byte budget fail structurally; sequence values never wrap.
+  Single-entry byte validation occurs before dedupe lookup or mutation.
+- Repeat, publish, reject, eviction, expiry, and truncation counters saturate rather than wrap.
+- Entry count and retained bytes evict the oldest sequence deterministically. Sequence order,
+  entry lookup, and dedupe lookup use separate bounded order and hash indexes so hot dedupe does not
+  scan retained history.
+- Frame-window cleanup expires by last-observed frame in the named
+  `DiagnosticCleanupSet::Retention` during `CoreStage::First`, before runtime producers. A producer
+  publishing directly in `First` must declare `.after(DiagnosticCleanupSet::Retention)`. Manual
+  retention still obeys count and byte limits. Frame-window resources maintain a sorted expiry
+  index and remove only entries whose expiry key is due; steady frames do not scan retained
+  history. Diagnostic sequence order may temporarily contain tombstones after expiry, but compacts
+  only after tombstones exceed live entries, giving an amortized cleanup cost and a hard
+  two-times-live bound between operations.
+- Consumers can iterate, filter, or obtain a bounded serialization-only snapshot. There is no public
+  arbitrary `clear` API.
+- A tracing sink emits one safe entry or only entries after a caller-owned cursor. The bus does not
+  offer an emit-entire-history loop that repeats retained events on every frame, and field values are
+  not logged.
+- `DiagnosticsPlugin` installs both `RuntimeDiagnostics` and the separate numeric
+  `RuntimePressureSnapshots` resource in headless applications. It does not install a tracing
+  subscriber or take ownership of the process-global panic hook.
+
+## Resolved Questions
+
+- **Ownership:** The bus lives in `nara_diagnostic`, not `nara_app`. `nara_app` supplies lifecycle,
+  frame time, and the `First` schedule ordering point only.
+- **Configuration:** Diagnostic settings are validated values owned by `nara_diagnostic`. A host or
+  validated project-profile lowering may select them, but project content does not mutate the bus
+  directly and cannot bypass hard limits.
+- **Replay:** Diagnostics are excluded from the first deterministic gameplay replay contract. An
+  explicit tooling capture may serialize bounded snapshots later, but replay behavior cannot depend
+  on them.
+- **Producer integration:** Asset, watcher, task, window, render, project, and editor bridges remain
+  U31. Until those bridges land, this ADR's shared core is intentionally implementation-partial.
 
 ## Alternatives Considered
 
-### Option A: Domain-specific diagnostics only
+### Option A: Domain-specific queues only
 
-**Pros**: Simple for each subsystem and keeps local context rich.
+**Pros**: Each subsystem retains its richest state.
 
-**Cons**: Tools must integrate many APIs, diagnostics disappear into private resources, and cross-domain timelines are hard to reconstruct.
+**Cons**: Tools must integrate many APIs and cannot form one stable timeline.
 
-**Decision**: Rejected as the engine-wide observability model.
+**Decision**: Rejected as the engine-wide observation surface. Rich domain state remains useful
+behind bridges.
 
-### Option B: Use `tracing` as the runtime diagnostics bus
+### Option B: Use tracing as the bus
 
-**Pros**: Mature ecosystem and good subscriber support.
+**Pros**: Mature sink ecosystem.
 
-**Cons**: Logs are not stable data for editor UI, tests, replay, or AI agents; filtering structured engine context becomes subscriber-dependent.
+**Cons**: Subscriber-dependent, difficult to query, easy to duplicate, and not an enforceable
+privacy or retention boundary.
 
-**Decision**: Rejected as the source of truth. `tracing` remains an output bridge.
+**Decision**: Rejected as the source of truth.
 
-### Option C: Shared bounded diagnostics bus plus domain-specific sources
+### Option C: Bounded shared bus with late producer bridges
 
-**Pros**: Gives tools one observation surface while preserving typed domain state and explicit logging.
+**Pros**: Gives every runtime profile a stable observation resource without making foundation
+errors depend upward.
 
-**Cons**: Requires a normalized entry schema, dedupe policy, and retention tests.
+**Cons**: Requires explicit lowering at each composition boundary.
 
 **Decision**: Chosen.
+
+## Consequences
+
+- Runtime tools have one headless-safe diagnostic resource and stable filters.
+- Domain crates keep typed error ownership; `nara_diagnostic` does not become an error-string sink.
+- U31 must add and verify each producer bridge after its typed outcomes stabilize.
+- Metrics and pressure values remain outside the event buffer under ADR 0068.
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Shared visibility | Asset/watch/task/render/window diagnostics can appear in one bus | Integration tests |
-| Bounded memory | Diagnostic storage has configured entry limits and deterministic drop behavior | Unit tests |
-| Dedupe | Repeated identical runtime failures aggregate without flooding | Unit tests |
-| Tooling compatibility | Editor/debug models can query by severity, domain, and code | Tooling tests |
-| Logging split | Diagnostics can be inspected without a tracing subscriber | Unit tests |
+| Bounded storage | Count and retained-byte limits hold under load | Eviction tests |
+| Dedupe | Repeated events aggregate without cross-domain collisions | Dedupe tests |
+| Retention | Manual and frame-window behavior is deterministic | Cleanup tests |
+| Headless inspection | Both observation resources work without UI/tracing | Plugin integration test |
+| Logging split | Cursor emission never repeats an unchanged history | Thread-local subscriber test |
+| Producer coverage | All named runtime domains bridge typed outcomes | U31 integration tests |
 
 ## Risks and Mitigations
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| The bus becomes a second event system | High | Medium | Keep entries observational and prohibit gameplay systems from depending on diagnostics for normal behavior. |
-| Context schema becomes too wide | Medium | Medium | Use optional context fields and stable domain-specific extension payloads only when justified. |
-| High-frequency diagnostics hide real failures | High | Medium | Require dedupe keys, severity filters, and per-domain rate counters. |
-| Sensitive paths leak into reports | Medium | Medium | Store project-relative safe paths by default and gate absolute paths behind tooling/debug policy. |
-
-## Consequences
-
-- `nara_diagnostic` should grow runtime diagnostic entry types or a sibling runtime diagnostics module.
-- `nara_asset_watch`, asset reload, render backend status, task pools, and window adapters should bridge their runtime diagnostics into the bus.
-- Editor Problems panels should prefer the shared bus and link back to domain details when available.
-
-## Open Questions
-
-- Should the bus live in `nara_diagnostic` or `nara_app`?
-- Should diagnostic retention be configured through `nara.toml` once project settings are implemented?
-- Which domains need replay capture of diagnostics in the first deterministic replay slice?
+| The bus becomes gameplay control flow | High | Medium | Expose observations and outcomes only; no policy callback or `should_reject` API. |
+| High-frequency failures hide useful entries | High | Medium | Count/byte eviction, explicit dedupe, and saturating drop statistics. |
+| Consumers replay retained history into logs | Medium | Medium | Entry-level sink and caller-owned monotonic cursor only. |
+| Producer bridges leak source detail | High | Medium | ADR 0068 classification is mandatory and bridge tests use secret canaries. |

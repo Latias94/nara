@@ -1,12 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use nara_asset::AssetRefExportPolicy;
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, World};
 use nara_reflect::{ComponentCapability, ComponentEncodeContext, ComponentRegistry};
 
 use crate::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+    diagnostics::{
+        error as diagnostic_error, warning as diagnostic_warning, with_codec_error,
+        with_public_locator,
+    },
     hierarchy::Parent,
 };
 
@@ -64,13 +68,14 @@ pub fn export_scene_with_options(
             .and_then(|parent| id_by_entity.get(&parent.0).cloned());
 
         if world.get::<Parent>(entity).is_some() && parent.is_none() {
-            diagnostics.push(
-                Diagnostic::warning(
+            diagnostics.push(with_public_locator(
+                diagnostic_warning(
                     "scene.export-parent-skipped",
-                    "parent entity is not exported with this scene",
-                )
-                .with_entity_id(id.as_str()),
-            );
+                    "Parent entity is not exported with this scene",
+                ),
+                "entity-id",
+                id.as_str(),
+            ));
         }
 
         let mut components = BTreeMap::new();
@@ -91,11 +96,23 @@ pub fn export_scene_with_options(
                     );
                 }
                 Ok(None) => {}
-                Err(error) => diagnostics.push(
-                    Diagnostic::error("scene.export-component-failed", error.to_string())
-                        .with_entity_id(id.as_str())
-                        .with_component_id(schema.id.as_str()),
-                ),
+                Err(error) => {
+                    diagnostics.push(with_codec_error(
+                        with_public_locator(
+                            with_public_locator(
+                                diagnostic_error(
+                                    "scene.export-component-failed",
+                                    "Component export failed",
+                                ),
+                                "entity-id",
+                                id.as_str(),
+                            ),
+                            "component-id",
+                            schema.id.as_str(),
+                        ),
+                        &error,
+                    ));
+                }
             }
         }
 
@@ -116,17 +133,18 @@ pub fn export_scene_with_options(
         .map(|record| record.id.clone())
         .collect::<BTreeSet<_>>();
     for record in &mut records {
-        if let Some(parent) = &record.parent {
-            if !exported_ids.contains(parent) {
-                diagnostics.push(
-                    Diagnostic::warning(
-                        "scene.export-parent-skipped",
-                        "parent entity is not exported with this scene",
-                    )
-                    .with_entity_id(record.id.as_str()),
-                );
-                record.parent = None;
-            }
+        if let Some(parent) = &record.parent
+            && !exported_ids.contains(parent)
+        {
+            diagnostics.push(with_public_locator(
+                diagnostic_warning(
+                    "scene.export-parent-skipped",
+                    "Parent entity is not exported with this scene",
+                ),
+                "entity-id",
+                record.id.as_str(),
+            ));
+            record.parent = None;
         }
     }
 

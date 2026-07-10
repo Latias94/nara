@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
@@ -8,6 +8,7 @@ use nara_scene::{
     ScenePatchDocument, ScenePatchReport,
 };
 
+use crate::diagnostic;
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
 use crate::play::{
     SceneApplyChangesReport, SceneEditorModel, SceneEditorState, ScenePlayTransitionReport,
@@ -26,6 +27,24 @@ impl EditorDocumentId {
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorkspaceDocumentContext {
+    active: Option<EditorDocumentId>,
+    requested: Option<EditorDocumentId>,
+    target: Option<EditorDocumentId>,
+}
+
+impl WorkspaceDocumentContext {
+    #[must_use]
+    fn new(active: Option<EditorDocumentId>, requested: Option<EditorDocumentId>) -> Self {
+        Self {
+            active,
+            requested,
+            target: requested.or(active),
+        }
     }
 }
 
@@ -167,15 +186,16 @@ impl EditorWorkspace {
     }
 
     fn close_scene(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
-        let Some(document) = self.resolve_document(document) else {
+        let context = WorkspaceDocumentContext::new(self.active_document, document);
+        let Some(document) = context.target else {
             return workspace_error_report(
-                self.active_document,
+                context,
                 "tooling.workspace-no-active-document",
                 "workspace command requires an active document",
             );
         };
         if self.scenes.remove(&document).is_none() {
-            return workspace_document_error_report(self.active_document, document);
+            return workspace_document_error_report(context, document);
         }
         if self.active_document == Some(document) {
             self.active_document = self.scenes.keys().next().copied();
@@ -193,15 +213,16 @@ impl EditorWorkspace {
         &mut self,
         document: Option<EditorDocumentId>,
     ) -> EditorWorkspaceCommandReport {
-        let Some(document) = self.resolve_document(document) else {
+        let context = WorkspaceDocumentContext::new(self.active_document, document);
+        let Some(document) = context.target else {
             return workspace_error_report(
-                self.active_document,
+                context,
                 "tooling.workspace-no-active-document",
                 "workspace has no active document",
             );
         };
         if !self.scenes.contains_key(&document) {
-            return workspace_document_error_report(self.active_document, document);
+            return workspace_document_error_report(context, document);
         }
         self.active_document = Some(document);
         EditorWorkspaceCommandReport {
@@ -219,23 +240,20 @@ impl EditorWorkspace {
         entity: Option<SceneEntityId>,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
-        if let Some(entity) = &entity {
-            if !document_has_entity(slot.session.document(), entity) {
-                return workspace_entity_error_report(
-                    active_document,
-                    document,
-                    "tooling.workspace-missing-entity",
-                    "workspace selection targets an entity that is not in the scene document",
-                    entity,
-                );
-            }
+        if let Some(entity) = &entity
+            && !document_has_entity(slot.session.document(), entity)
+        {
+            return workspace_entity_error_report(
+                context,
+                document,
+                "tooling.workspace-missing-entity",
+                "workspace selection targets an entity that is not in the scene document",
+                entity,
+            );
         }
         slot.selection.select_entity(entity);
         slot.sync_editor_selection();
@@ -249,12 +267,9 @@ impl EditorWorkspace {
         command: SceneInspectorCommand,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         slot.sync_editor_selection();
         let inspector_report =
@@ -269,7 +284,7 @@ impl EditorWorkspace {
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = inspector_report.applied;
         report.inspector_report = Some(inspector_report.clone());
-        report.diagnostics.extend(inspector_report.diagnostics);
+        let _ = report.diagnostics.extend(inspector_report.diagnostics);
         report
     }
 
@@ -280,12 +295,9 @@ impl EditorWorkspace {
         patch: ScenePatchDocument,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         let patch_report = slot.session.apply_patch(&patch, registry);
         if patch_report.applied {
@@ -295,7 +307,7 @@ impl EditorWorkspace {
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = patch_report.applied;
         report.patch_report = Some(patch_report.clone());
-        report.diagnostics.extend(patch_report.diagnostics);
+        let _ = report.diagnostics.extend(patch_report.diagnostics);
         report
     }
 
@@ -305,12 +317,9 @@ impl EditorWorkspace {
         document: Option<EditorDocumentId>,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         let patch_report = slot.session.undo(registry);
         if patch_report.applied {
@@ -320,7 +329,7 @@ impl EditorWorkspace {
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = patch_report.applied;
         report.patch_report = Some(patch_report.clone());
-        report.diagnostics.extend(patch_report.diagnostics);
+        let _ = report.diagnostics.extend(patch_report.diagnostics);
         report
     }
 
@@ -330,12 +339,9 @@ impl EditorWorkspace {
         document: Option<EditorDocumentId>,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         let patch_report = slot.session.redo(registry);
         if patch_report.applied {
@@ -345,18 +351,15 @@ impl EditorWorkspace {
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = patch_report.applied;
         report.patch_report = Some(patch_report.clone());
-        report.diagnostics.extend(patch_report.diagnostics);
+        let _ = report.diagnostics.extend(patch_report.diagnostics);
         report
     }
 
     fn mark_saved(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         slot.mark_saved();
         report_for_slot(document, active_document, slot)
@@ -367,12 +370,9 @@ impl EditorWorkspace {
         document: Option<EditorDocumentId>,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         slot.external_reload = if slot.is_dirty() {
             EditorExternalReloadState::Conflict
@@ -388,17 +388,14 @@ impl EditorWorkspace {
         scene: SceneDocument,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         if slot.is_dirty() {
             slot.external_reload = EditorExternalReloadState::Conflict;
             return workspace_error_report(
-                active_document,
+                context,
                 "tooling.workspace-reload-conflict",
                 "external scene reload cannot replace a dirty editor document",
             );
@@ -417,69 +414,57 @@ impl EditorWorkspace {
         document: Option<EditorDocumentId>,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         let play_report = slot.editor.start_play(&slot.session, registry);
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = play_report.applied;
         report.play_report = Some(play_report.clone());
-        report.diagnostics.extend(play_report.diagnostics);
+        let _ = report.diagnostics.extend(play_report.diagnostics);
         report
     }
 
     fn pause_play(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         let play_report = slot.editor.pause_play();
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = play_report.applied;
         report.play_report = Some(play_report.clone());
-        report.diagnostics.extend(play_report.diagnostics);
+        let _ = report.diagnostics.extend(play_report.diagnostics);
         report
     }
 
     fn resume_play(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         let play_report = slot.editor.resume_play();
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = play_report.applied;
         report.play_report = Some(play_report.clone());
-        report.diagnostics.extend(play_report.diagnostics);
+        let _ = report.diagnostics.extend(play_report.diagnostics);
         report
     }
 
     fn stop_play(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         let play_report = slot.editor.stop_play();
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = play_report.applied;
         report.play_report = Some(play_report.clone());
-        report.diagnostics.extend(play_report.diagnostics);
+        let _ = report.diagnostics.extend(play_report.diagnostics);
         report
     }
 
@@ -488,18 +473,15 @@ impl EditorWorkspace {
         document: Option<EditorDocumentId>,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_error_report(
-                active_document,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
+            return workspace_resolution_error_report(context);
         };
         let apply_changes_report = slot.editor.apply_changes_status(&slot.session);
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = apply_changes_report.applied;
         report.apply_changes_report = Some(apply_changes_report.clone());
-        report.diagnostics.extend(apply_changes_report.diagnostics);
+        let _ = report.diagnostics.extend(apply_changes_report.diagnostics);
         report
     }
 
@@ -655,7 +637,6 @@ impl EditorSelectionSet {
         self.top_entity.as_ref()
     }
 
-    #[must_use]
     pub fn entities(&self) -> impl Iterator<Item = &SceneEntityId> {
         self.entities.iter()
     }
@@ -811,57 +792,97 @@ fn report_for_slot(
 }
 
 fn workspace_error_report(
-    active_document: Option<EditorDocumentId>,
-    code: impl Into<String>,
-    message: impl Into<String>,
+    context: WorkspaceDocumentContext,
+    code: &'static str,
+    summary: &'static str,
 ) -> EditorWorkspaceCommandReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(code, message));
+    diagnostics.push(with_workspace_document_context(
+        diagnostic::error(code, summary),
+        context,
+    ));
     EditorWorkspaceCommandReport {
         applied: false,
-        active_document,
+        document: context.target,
+        active_document: context.active,
         diagnostics,
         ..EditorWorkspaceCommandReport::default()
     }
 }
 
 fn workspace_document_error_report(
-    active_document: Option<EditorDocumentId>,
+    context: WorkspaceDocumentContext,
     document: EditorDocumentId,
 ) -> EditorWorkspaceCommandReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(
-        "tooling.workspace-missing-document",
-        format!(
-            "workspace command targets document {} which is not open",
-            document.raw()
+    diagnostics.push(diagnostic::with_public_u64(
+        with_workspace_document_context(
+            diagnostic::error(
+                "tooling.workspace-missing-document",
+                "workspace command targets a document that is not open",
+            ),
+            context,
         ),
+        "missing_document",
+        document.raw(),
     ));
     EditorWorkspaceCommandReport {
         applied: false,
         document: Some(document),
-        active_document,
+        active_document: context.active,
         diagnostics,
         ..EditorWorkspaceCommandReport::default()
     }
 }
 
 fn workspace_entity_error_report(
-    active_document: Option<EditorDocumentId>,
+    context: WorkspaceDocumentContext,
     document: EditorDocumentId,
-    code: impl Into<String>,
-    message: impl Into<String>,
+    code: &'static str,
+    summary: &'static str,
     entity: &SceneEntityId,
 ) -> EditorWorkspaceCommandReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(code, message).with_entity_id(entity.as_str()));
+    diagnostics.push(diagnostic::with_entity(
+        with_workspace_document_context(diagnostic::error(code, summary), context),
+        entity,
+    ));
     EditorWorkspaceCommandReport {
         applied: false,
         document: Some(document),
-        active_document,
+        active_document: context.active,
         diagnostics,
         ..EditorWorkspaceCommandReport::default()
     }
+}
+
+fn workspace_resolution_error_report(
+    context: WorkspaceDocumentContext,
+) -> EditorWorkspaceCommandReport {
+    match context.target {
+        Some(document) => workspace_document_error_report(context, document),
+        None => workspace_error_report(
+            context,
+            "tooling.workspace-no-active-document",
+            "workspace command requires an active document",
+        ),
+    }
+}
+
+fn with_workspace_document_context(
+    mut entry: nara_diagnostic::Diagnostic,
+    context: WorkspaceDocumentContext,
+) -> nara_diagnostic::Diagnostic {
+    if let Some(active) = context.active {
+        entry = diagnostic::with_public_u64(entry, "active_document", active.raw());
+    }
+    if let Some(requested) = context.requested {
+        entry = diagnostic::with_public_u64(entry, "requested_document", requested.raw());
+    }
+    if let Some(target) = context.target {
+        entry = diagnostic::with_public_u64(entry, "target_document", target.raw());
+    }
+    entry
 }
 
 fn document_has_entity(document: &SceneDocument, entity: &SceneEntityId) -> bool {
@@ -872,6 +893,7 @@ fn document_has_entity(document: &SceneDocument, entity: &SceneEntityId) -> bool
 mod tests {
     use super::*;
     use nara_app::App;
+    use nara_diagnostic::DiagnosticValueRef;
     use nara_reflect::ComponentRegistry;
     use nara_scene::{SceneEntityRecord, ScenePatchOperation};
 
@@ -936,14 +958,116 @@ mod tests {
 
         assert!(!report.applied);
         assert!(report.diagnostics.has_errors());
-        assert!(
-            report
-                .diagnostics
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.code.as_str() == "tooling.workspace-missing-entity")
+        let diagnostic = report
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code().as_str() == "tooling.workspace-missing-entity")
+            .unwrap();
+        assert_eq!(
+            diagnostic_field_value(diagnostic, "target_document"),
+            DiagnosticValueRef::Unsigned(document.raw())
+        );
+        assert_eq!(
+            diagnostic_field_value(diagnostic, "entity"),
+            DiagnosticValueRef::Identifier("missing")
         );
         assert!(workspace.scene(document).unwrap().selection().is_empty());
+    }
+
+    #[test]
+    fn missing_requested_document_does_not_fall_back_to_active_document() {
+        let mut workspace = EditorWorkspace::new();
+        let registry = ComponentRegistry::default();
+        let active = open_scene(
+            &mut workspace,
+            "active-a",
+            scene_with_entity(entity_id("hero")),
+        );
+        let requested = EditorDocumentId::from_raw(active.raw().saturating_add(100));
+
+        let report = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::SelectEntity {
+                document: Some(requested),
+                entity: Some(entity_id("target-b")),
+            },
+        );
+
+        assert!(!report.applied);
+        assert_eq!(report.active_document, Some(active));
+        assert_eq!(report.document, Some(requested));
+        let entry = report
+            .diagnostics
+            .iter()
+            .find(|entry| entry.code().as_str() == "tooling.workspace-missing-document")
+            .unwrap();
+        assert_eq!(
+            diagnostic_field_value(entry, "active_document"),
+            DiagnosticValueRef::Unsigned(active.raw())
+        );
+        assert_eq!(
+            diagnostic_field_value(entry, "requested_document"),
+            DiagnosticValueRef::Unsigned(requested.raw())
+        );
+        assert_eq!(
+            diagnostic_field_value(entry, "target_document"),
+            DiagnosticValueRef::Unsigned(requested.raw())
+        );
+        assert_eq!(
+            diagnostic_field_value(entry, "missing_document"),
+            DiagnosticValueRef::Unsigned(requested.raw())
+        );
+    }
+
+    #[test]
+    fn requested_document_remains_target_when_another_document_is_active() {
+        let mut workspace = EditorWorkspace::new();
+        let registry = ComponentRegistry::default();
+        let active = open_scene(
+            &mut workspace,
+            "active-a",
+            scene_with_entity(entity_id("hero-a")),
+        );
+        let requested = open_scene(
+            &mut workspace,
+            "target-b",
+            scene_with_entity(entity_id("hero-b")),
+        );
+        workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::SetActiveScene {
+                document: Some(active),
+            },
+        );
+
+        let report = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::SelectEntity {
+                document: Some(requested),
+                entity: Some(entity_id("missing-in-b")),
+            },
+        );
+
+        assert!(!report.applied);
+        assert_eq!(report.active_document, Some(active));
+        assert_eq!(report.document, Some(requested));
+        let entry = report
+            .diagnostics
+            .iter()
+            .find(|entry| entry.code().as_str() == "tooling.workspace-missing-entity")
+            .unwrap();
+        assert_eq!(
+            diagnostic_field_value(entry, "active_document"),
+            DiagnosticValueRef::Unsigned(active.raw())
+        );
+        assert_eq!(
+            diagnostic_field_value(entry, "requested_document"),
+            DiagnosticValueRef::Unsigned(requested.raw())
+        );
+        assert_eq!(
+            diagnostic_field_value(entry, "target_document"),
+            DiagnosticValueRef::Unsigned(requested.raw())
+        );
     }
 
     #[test]
@@ -1043,6 +1167,18 @@ mod tests {
         app.add_plugin(ToolingPlugin).unwrap();
 
         assert!(app.world().contains_resource::<EditorWorkspace>());
+    }
+
+    fn diagnostic_field_value<'a>(
+        entry: &'a nara_diagnostic::Diagnostic,
+        key: &str,
+    ) -> DiagnosticValueRef<'a> {
+        entry
+            .fields()
+            .iter()
+            .find(|field| field.key().as_str() == key)
+            .unwrap()
+            .value()
     }
 
     fn open_scene(

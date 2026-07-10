@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
+use std::{collections::BTreeMap, fmt, fs::File, io::Read, path::Path};
 
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use serde::Deserialize;
@@ -11,13 +11,26 @@ use crate::sections::{
     ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest, ProjectTasksManifest,
     ProjectWindowManifest,
 };
-use crate::validation::{validate_path_field, validate_profile_name};
+use crate::validation::{
+    error, validate_path_field, validate_profile_name, with_field_path, with_profile_identifier,
+    with_public_i64, with_public_identifier, with_public_u64, with_secret, with_sensitive,
+};
 use crate::{CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ProjectManifestLoad {
     pub manifest: Option<ProjectManifest>,
     pub diagnostics: DiagnosticReport,
+}
+
+impl fmt::Debug for ProjectManifestLoad {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProjectManifestLoad")
+            .field("manifest_present", &self.manifest.is_some())
+            .field("diagnostics", &self.diagnostics)
+            .finish()
+    }
 }
 
 impl ProjectManifestLoad {
@@ -46,34 +59,38 @@ impl ProjectManifestLoad {
 
 #[derive(Debug, Error)]
 pub enum ProjectManifestFileError {
-    #[error("failed to read project manifest metadata: {0}")]
-    Metadata(std::io::Error),
+    #[error("failed to read project manifest metadata")]
+    Metadata(#[source] std::io::Error),
     #[error("project manifest is too large: {actual_bytes} bytes > {limit_bytes} bytes")]
     TooLarge { actual_bytes: u64, limit_bytes: u64 },
-    #[error("failed to read project manifest: {0}")]
-    Read(std::io::Error),
+    #[error("failed to read project manifest")]
+    Read(#[source] std::io::Error),
 }
 
 impl ProjectManifestFileError {
     #[must_use]
     pub fn to_diagnostic(&self) -> Diagnostic {
         match self {
-            Self::Metadata(error) => Diagnostic::error(
+            Self::Metadata(io_error) => io_error_diagnostic(
                 "project.manifest.metadata",
-                format!("failed to read project manifest metadata: {error}"),
+                "Project manifest metadata could not be read",
+                io_error,
             ),
             Self::TooLarge {
                 actual_bytes,
                 limit_bytes,
-            } => Diagnostic::error(
-                "project.manifest.too-large",
-                format!(
-                    "project manifest is too large: {actual_bytes} bytes > {limit_bytes} bytes"
-                ),
-            ),
-            Self::Read(error) => Diagnostic::error(
+            } => {
+                let diagnostic = error(
+                    "project.manifest.too-large",
+                    "Project manifest exceeds its byte limit",
+                );
+                let diagnostic = with_public_u64(diagnostic, "actual", *actual_bytes);
+                with_public_u64(diagnostic, "limit", *limit_bytes)
+            }
+            Self::Read(io_error) => io_error_diagnostic(
                 "project.manifest.read",
-                format!("failed to read project manifest: {error}"),
+                "Project manifest content could not be read",
+                io_error,
             ),
         }
     }
@@ -107,12 +124,19 @@ impl ProjectManifest {
     pub fn parse_toml_str(source: &str) -> ProjectManifestLoad {
         match toml::from_str::<Self>(source) {
             Ok(manifest) => ProjectManifestLoad::ok(manifest),
-            Err(error) => {
+            Err(parse_error) => {
                 let mut diagnostics = DiagnosticReport::default();
-                diagnostics.push(Diagnostic::error(
+                let diagnostic = error(
                     "project.manifest.parse",
-                    format!("failed to parse nara.toml: {error}"),
-                ));
+                    "Project manifest syntax or structure is invalid",
+                );
+                let diagnostic = with_secret(diagnostic, "manifest_content");
+                let (line, column) = parse_error
+                    .span()
+                    .map_or((0, 0), |span| source_location(source, span.start));
+                let diagnostic = with_public_u64(diagnostic, "line", line);
+                let diagnostic = with_public_u64(diagnostic, "column", column);
+                diagnostics.push(diagnostic);
                 ProjectManifestLoad::failed(diagnostics)
             }
         }
@@ -143,23 +167,24 @@ impl ProjectManifest {
         let mut diagnostics = DiagnosticReport::default();
 
         if self.schema_version != CURRENT_PROJECT_SCHEMA_VERSION {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.manifest.unsupported-schema",
-                    format!(
-                        "unsupported project schema version {}, expected {}",
-                        self.schema_version, CURRENT_PROJECT_SCHEMA_VERSION
-                    ),
-                )
-                .with_field_path("schema_version"),
+            let diagnostic = error(
+                "project.manifest.unsupported-schema",
+                "Project manifest schema version is unsupported",
             );
+            let diagnostic = with_field_path(diagnostic, "schema_version");
+            let diagnostic = with_public_u64(diagnostic, "actual", u64::from(self.schema_version));
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "expected",
+                u64::from(CURRENT_PROJECT_SCHEMA_VERSION),
+            ));
         }
 
         if self.project.name.trim().is_empty() {
-            diagnostics.push(
-                Diagnostic::error("project.name.empty", "project.name cannot be empty")
-                    .with_field_path("project.name"),
-            );
+            diagnostics.push(with_field_path(
+                error("project.name.empty", "Project name cannot be empty"),
+                "project.name",
+            ));
         }
 
         if self
@@ -168,13 +193,13 @@ impl ProjectManifest {
             .chars()
             .any(|character| character.is_control())
         {
-            diagnostics.push(
-                Diagnostic::error(
+            diagnostics.push(with_field_path(
+                error(
                     "project.name.control-character",
-                    "project.name cannot contain control characters",
-                )
-                .with_field_path("project.name"),
-            );
+                    "Project name cannot contain control characters",
+                ),
+                "project.name",
+            ));
         }
 
         validate_path_field(&mut diagnostics, "paths.assets", &self.paths.assets);
@@ -199,8 +224,13 @@ impl ProjectManifest {
             .validate_into(&mut diagnostics, "diagnostics");
 
         for (name, profile) in &self.profiles {
-            validate_profile_name(&mut diagnostics, name);
-            profile.validate_into(&mut diagnostics, &format!("profiles.{name}"), &self.tasks);
+            let valid_name = validate_profile_name(&mut diagnostics, name);
+            let prefix = if valid_name {
+                format!("profiles.{name}")
+            } else {
+                "profiles.redacted".to_owned()
+            };
+            profile.validate_into(&mut diagnostics, &prefix, &self.tasks);
         }
 
         diagnostics
@@ -212,7 +242,9 @@ impl ProjectManifest {
     ) -> Result<EffectiveProjectSettings, ProjectProfileError> {
         let diagnostics = self.validate();
         if diagnostics.has_errors() {
-            return Err(ProjectProfileError::InvalidManifest { diagnostics });
+            return Err(ProjectProfileError::InvalidManifest {
+                diagnostics: Box::new(diagnostics),
+            });
         }
 
         let mut settings = EffectiveProjectSettings::from_manifest(self)?;
@@ -221,16 +253,18 @@ impl ProjectManifest {
         };
         let Some(overlay) = self.profiles.get(profile_name) else {
             let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.profile.unknown",
-                    format!("unknown project profile '{profile_name}'"),
-                )
-                .with_field_path(format!("profiles.{profile_name}")),
+            let diagnostic = error(
+                "project.profile.unknown",
+                "Requested project profile does not exist",
             );
+            let diagnostic = with_profile_identifier(diagnostic, "profile", profile_name);
+            diagnostics.push(with_field_path(
+                diagnostic,
+                &format!("profiles.{profile_name}"),
+            ));
             return Err(ProjectProfileError::UnknownProfile {
                 profile: profile_name.to_owned(),
-                diagnostics,
+                diagnostics: Box::new(diagnostics),
             });
         };
 
@@ -242,6 +276,55 @@ impl ProjectManifest {
         settings.enforce_product_invariants();
         Ok(settings)
     }
+}
+
+fn io_error_diagnostic(
+    code: &'static str,
+    summary: &'static str,
+    io_error: &std::io::Error,
+) -> Diagnostic {
+    let diagnostic = error(code, summary);
+    let diagnostic = with_public_identifier(
+        diagnostic,
+        "io_kind",
+        io_error_kind_identifier(io_error.kind()),
+    );
+    let diagnostic = if let Some(os_code) = io_error.raw_os_error() {
+        with_public_i64(diagnostic, "os_code", i64::from(os_code))
+    } else {
+        diagnostic
+    };
+    with_sensitive(diagnostic, "manifest_path")
+}
+
+fn io_error_kind_identifier(kind: std::io::ErrorKind) -> &'static str {
+    match kind {
+        std::io::ErrorKind::NotFound => "not-found",
+        std::io::ErrorKind::PermissionDenied => "permission-denied",
+        std::io::ErrorKind::AlreadyExists => "already-exists",
+        std::io::ErrorKind::InvalidInput => "invalid-input",
+        std::io::ErrorKind::InvalidData => "invalid-data",
+        std::io::ErrorKind::TimedOut => "timed-out",
+        std::io::ErrorKind::Interrupted => "interrupted",
+        std::io::ErrorKind::UnexpectedEof => "unexpected-eof",
+        std::io::ErrorKind::OutOfMemory => "out-of-memory",
+        _ => "other",
+    }
+}
+
+fn source_location(source: &str, byte_offset: usize) -> (u64, u64) {
+    let mut bounded_offset = byte_offset.min(source.len());
+    while bounded_offset > 0 && !source.is_char_boundary(bounded_offset) {
+        bounded_offset -= 1;
+    }
+    let prefix = &source[..bounded_offset];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    let column = prefix[line_start..].chars().count() + 1;
+    (
+        u64::try_from(line).unwrap_or(u64::MAX),
+        u64::try_from(column).unwrap_or(u64::MAX),
+    )
 }
 
 fn read_manifest_to_string(

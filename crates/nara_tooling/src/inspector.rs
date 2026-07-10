@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use nara_asset::{AssetRef, ProjectAssetDatabase};
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Entity;
 use nara_reflect::{
     ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
@@ -13,7 +13,7 @@ use nara_scene::{
     SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
 };
 
-use crate::snapshot::WorldSnapshot;
+use crate::{diagnostic, snapshot::WorldSnapshot};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SceneInspectorState {
@@ -135,15 +135,15 @@ impl SceneInspectorState {
         document: &SceneDocument,
         entity: Option<SceneEntityId>,
     ) -> SceneInspectorCommandReport {
-        if let Some(entity) = &entity {
-            if !document_has_entity(document, entity) {
-                return inspector_entity_error_report(
-                    "tooling.inspector-missing-entity",
-                    "inspector selection targets an entity that is not in the authoring document",
-                    entity,
-                )
-                .with_entity_selection(self.selected_entity.clone());
-            }
+        if let Some(entity) = &entity
+            && !document_has_entity(document, entity)
+        {
+            return inspector_entity_error_report(
+                "tooling.inspector-missing-entity",
+                "inspector selection targets an entity that is not in the authoring document",
+                entity,
+            )
+            .with_entity_selection(self.selected_entity.clone());
         }
 
         self.selected_entity = entity;
@@ -351,13 +351,13 @@ fn build_inspector_model(
     let selected_entity_view = selected_entity.and_then(|id| {
         let entity = document.entities.iter().find(|entity| entity.id == *id);
         if entity.is_none() {
-            diagnostics.push(
-                Diagnostic::warning(
+            diagnostics.push(diagnostic::with_entity(
+                diagnostic::warning(
                     "tooling.inspector-selected-entity-missing",
                     "selected entity is no longer present in the authoring document",
-                )
-                .with_entity_id(id.as_str()),
-            );
+                ),
+                id,
+            ));
         }
         entity.map(|entity| build_entity_view(entity, registry, &mut diagnostics))
     });
@@ -404,14 +404,16 @@ fn build_component_view(
 ) -> SceneInspectorComponentView {
     let schema = registry.schema(component_id);
     if schema.is_none() {
-        diagnostics.push(
-            Diagnostic::warning(
-                "tooling.inspector-unknown-component",
-                "inspector cannot find schema for a component on the selected entity",
-            )
-            .with_entity_id(entity_id.as_str())
-            .with_component_id(component_id.as_str()),
-        );
+        diagnostics.push(diagnostic::with_component(
+            diagnostic::with_entity(
+                diagnostic::warning(
+                    "tooling.inspector-unknown-component",
+                    "inspector cannot find schema for a component on the selected entity",
+                ),
+                entity_id,
+            ),
+            component_id,
+        ));
     }
 
     SceneInspectorComponentView {
@@ -476,11 +478,11 @@ fn document_has_entity(document: &SceneDocument, entity: &SceneEntityId) -> bool
 }
 
 fn inspector_error_report(
-    code: impl Into<String>,
-    message: impl Into<String>,
+    code: &'static str,
+    summary: &'static str,
 ) -> SceneInspectorCommandReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(code, message));
+    diagnostics.push(diagnostic::error(code, summary));
     SceneInspectorCommandReport {
         applied: false,
         selected_entity: None,
@@ -491,12 +493,15 @@ fn inspector_error_report(
 }
 
 fn inspector_entity_error_report(
-    code: impl Into<String>,
-    message: impl Into<String>,
+    code: &'static str,
+    summary: &'static str,
     entity: &SceneEntityId,
 ) -> SceneInspectorCommandReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(code, message).with_entity_id(entity.as_str()));
+    diagnostics.push(diagnostic::with_entity(
+        diagnostic::error(code, summary),
+        entity,
+    ));
     SceneInspectorCommandReport {
         applied: false,
         selected_entity: None,

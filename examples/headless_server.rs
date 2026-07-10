@@ -22,11 +22,7 @@ name = "Headless Example"
     );
 
     if load.has_errors() {
-        return Err(format!(
-            "invalid manifest diagnostics: {:?}",
-            load.diagnostics.diagnostics()
-        )
-        .into());
+        return Err(format!("invalid manifest diagnostics: {:?}", load.diagnostics).into());
     }
 
     let settings = load

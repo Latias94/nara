@@ -15,8 +15,9 @@ use nara_reflect::{
 use crate::{
     PrefabInstance,
     validation::{
-        preflight_authoring_scene, preflight_authoring_scene_with_context, preflight_scene,
-        preflight_scene_with_context,
+        preflight_authoring_scene, preflight_authoring_scene_for_patch,
+        preflight_authoring_scene_with_context, preflight_authoring_scene_with_context_for_patch,
+        preflight_scene, preflight_scene_with_context,
     },
 };
 
@@ -101,6 +102,14 @@ impl SceneDocument {
         preflight_authoring_scene(self, registry).diagnostics
     }
 
+    pub(crate) fn validate_authoring_for_patch(
+        &self,
+        registry: &ComponentRegistry,
+        operation_index: usize,
+    ) -> DiagnosticReport {
+        preflight_authoring_scene_for_patch(self, registry, operation_index).diagnostics
+    }
+
     pub(crate) fn validate_authoring_with_asset_database(
         &self,
         registry: &ComponentRegistry,
@@ -108,6 +117,22 @@ impl SceneDocument {
     ) -> DiagnosticReport {
         let mut context = ComponentDecodeContext::new().with_project_asset_database(database);
         preflight_authoring_scene_with_context(self, registry, &mut context).diagnostics
+    }
+
+    pub(crate) fn validate_authoring_for_patch_with_asset_database(
+        &self,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+        operation_index: usize,
+    ) -> DiagnosticReport {
+        let mut context = ComponentDecodeContext::new().with_project_asset_database(database);
+        preflight_authoring_scene_with_context_for_patch(
+            self,
+            registry,
+            &mut context,
+            operation_index,
+        )
+        .diagnostics
     }
 }
 

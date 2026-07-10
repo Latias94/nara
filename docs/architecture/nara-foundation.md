@@ -51,7 +51,7 @@ flowchart TD
     Facade --> FS[nara_fs: host-issued filesystem capabilities]
     Facade --> Transform[nara_transform: spatial components]
     Facade --> Reflect[nara_reflect: component schema + value codec registry]
-    Facade --> Diagnostic[nara_diagnostic: structured diagnostics + context]
+    Facade --> Diagnostic[nara_diagnostic: classified diagnostics + pressure snapshots]
     App --> Asset[nara_asset: AssetServer + Handle + AssetRef + reload scheduling]
     AssetWatch[nara_asset_watch: optional filesystem watcher adapter] --> Asset
     App --> Scene[nara_scene: runtime hierarchy + scene documents]
@@ -87,7 +87,7 @@ flowchart TD
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry modules for Bevy-reflect-backed component metadata, asset-aware scene preflight, schema/capability export, and migrations |
-| `nara_diagnostic` | `Diagnostic`, `DiagnosticReport`, severity and code model | Structured diagnostics consumed by runtime, tools, and AI agents; tracing output is an explicit bridge |
+| `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, hot reload scheduling, dependency graph, reload generations |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, semantic watch event queue, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation |
@@ -216,8 +216,16 @@ second real adapter or stronger isolation pressure.
 - `nara_fs` accepts host-opened handles rather than ambient paths. Windows strict traversal is handle-bound; Linux uses `openat2`; unsupported mount, reparse, filesystem, replacement-source, directory enumeration, unlink, or rename guarantees fail closed and remain visible in the capability matrix.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains. Serializable components require explicit schema fields, duplicate Rust `TypeId` registration is rejected, and invalid schema defaults fail at registration.
-- `nara_diagnostic::DiagnosticReport` collects diagnostics without implicit logging. `emit_to_tracing` is the explicit bridge for logs.
-- `nara_diagnostic::RuntimeDiagnostics` is the shared runtime observation bus. It provides bounded retention, dedupe by key, severity/domain/code filtering, dropped-entry counters, runtime context fields, and explicit tracing emission through `DiagnosticsPlugin`.
+- `nara_diagnostic::DiagnosticReport` collects static safe summaries plus explicitly classified
+  fields without implicit logging. Error and warning observations remain sticky even when bounded
+  storage rejects or evicts an entry; report merges preserve source accounting and reapply target
+  limits.
+- `nara_diagnostic::RuntimeDiagnostics` is the shared bounded runtime observation bus. Validated
+  drafts carry source-owned static producer/domain/code identity, classified fields, and explicit
+  dedupe policy. Count, byte, field, and frame-window limits have inspectable saturating statistics;
+  `DiagnosticsPlugin` performs retention in `CoreStage::First`, while tracing is an explicit
+  cursor-based sink. `RuntimePressureSnapshots` is a separate bounded numeric resource and never
+  decides producer admission, defer, coalesce, or eviction policy.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and `RenderPassPlan`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource and consumes the explicit pass plan for clear/world/UI/gizmo order.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
@@ -312,8 +320,9 @@ second real adapter or stronger isolation pressure.
 1. Establish canonical version-1 envelopes and golden fixtures for scene, prefab, patch, asset
    metadata, import artifact, and schema catalog files; delete prototype readers and add migration
    chains only for explicit future compatibility windows.
-2. Complete diagnostic privacy/pressure snapshots and bridge typed task shutdown/overload outcomes
-   without moving policy into the diagnostics crate.
+2. Add U31 composition bridges for stabilized task, asset, watcher, window, render, project, and
+   editor outcomes, plus their numeric pressure snapshots, without moving producer policy into the
+   diagnostics crate.
 3. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
    buffers, buffer/pipeline stats, and device-loss recovery for all GPU resource classes.
 4. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,

@@ -327,7 +327,7 @@ fn mode_aware_inspector_rejects_persistent_play_edits_and_models_play_snapshot()
     assert!(!rejected.applied);
     assert!(rejected.patch.is_none());
     assert_eq!(
-        rejected.diagnostics.diagnostics()[0].code.as_str(),
+        rejected.diagnostics.iter().next().unwrap().code().as_str(),
         "tooling.inspector-persistent-command-in-play-mode"
     );
     assert_eq!(document_label(session.document(), &player), "Hero");
@@ -406,7 +406,7 @@ fn apply_changes_exports_selected_component_and_keeps_revision_guards() {
     let mismatch = editor.apply_changes_status(&session);
     assert!(!mismatch.applied);
     assert_eq!(
-        mismatch.diagnostics.diagnostics()[0].code.as_str(),
+        mismatch.diagnostics.iter().next().unwrap().code().as_str(),
         "tooling.apply-changes-revision-mismatch"
     );
 
@@ -415,7 +415,13 @@ fn apply_changes_exports_selected_component_and_keeps_revision_guards() {
     assert_eq!(document_label(session.document(), &player), "Player");
     let still_mismatch = editor.apply_changes_status(&session);
     assert_eq!(
-        still_mismatch.diagnostics.diagnostics()[0].code.as_str(),
+        still_mismatch
+            .diagnostics
+            .iter()
+            .next()
+            .unwrap()
+            .code()
+            .as_str(),
         "tooling.apply-changes-revision-mismatch"
     );
 
@@ -424,14 +430,17 @@ fn apply_changes_exports_selected_component_and_keeps_revision_guards() {
     assert_eq!(document_label(session.document(), &player), "Player");
     let no_play = editor.apply_changes_status(&session);
     assert_eq!(
-        no_play.diagnostics.diagnostics()[0].code.as_str(),
+        no_play.diagnostics.iter().next().unwrap().code().as_str(),
         "tooling.apply-changes-not-in-play-mode"
     );
 }
 
 fn assert_invalid_transition(report: ScenePlayTransitionReport, code: &str) {
     assert!(!report.applied);
-    assert_eq!(report.diagnostics.diagnostics()[0].code.as_str(), code);
+    assert_eq!(
+        report.diagnostics.iter().next().unwrap().code().as_str(),
+        code
+    );
 }
 
 fn scene_registry() -> ComponentRegistry {

@@ -179,11 +179,11 @@ fn empty_undo_redo_report_non_applied_info_diagnostics() {
     assert!(!undo.diagnostics.has_errors());
     assert!(!redo.diagnostics.has_errors());
     assert_eq!(
-        undo.diagnostics.diagnostics()[0].code.as_str(),
+        undo.diagnostics.iter().next().unwrap().code().as_str(),
         "scene.undo-empty"
     );
     assert_eq!(
-        redo.diagnostics.diagnostics()[0].code.as_str(),
+        redo.diagnostics.iter().next().unwrap().code().as_str(),
         "scene.redo-empty"
     );
     assert_eq!(session.revision(), revision);

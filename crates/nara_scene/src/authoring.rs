@@ -1,13 +1,13 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use nara_asset::ProjectAssetDatabase;
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, World};
 use nara_reflect::ComponentRegistry;
 
 use crate::{
     PrefabSourceResolver, SceneDocument, SceneEntityMap, ScenePatchDocument, ScenePatchReport,
-    SceneSpawnReport, SceneSpawner, hierarchy::sync_children,
+    SceneSpawnReport, SceneSpawner, diagnostics::info as diagnostic_info, hierarchy::sync_children,
 };
 
 static NEXT_AUTHORING_SOURCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -331,9 +331,9 @@ fn next_authoring_source_id() -> SceneAuthoringSourceId {
     SceneAuthoringSourceId(NEXT_AUTHORING_SOURCE_ID.fetch_add(1, Ordering::Relaxed))
 }
 
-fn history_miss_report(code: impl Into<String>, message: impl Into<String>) -> ScenePatchReport {
+fn history_miss_report(code: &'static str, summary: &'static str) -> ScenePatchReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::info(code, message));
+    diagnostics.push(diagnostic_info(code, summary));
     ScenePatchReport {
         applied: false,
         inverse: None,

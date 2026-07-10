@@ -6,7 +6,8 @@ use nara_asset::{AssetRefExportPolicy, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
 use nara_reflect::{
-    ComponentCapability, ComponentEncodeContext, ComponentRegistry, ComponentTypeId,
+    ComponentCapability, ComponentCodecError, ComponentEncodeContext, ComponentMigrationError,
+    ComponentRegistry, ComponentTypeId,
 };
 use nara_scene::{
     PrefabSourceResolver, SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord,
@@ -14,6 +15,7 @@ use nara_scene::{
     ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner,
 };
 
+use crate::diagnostic;
 use crate::inspector::{
     SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorModel, SceneInspectorState,
 };
@@ -420,11 +422,15 @@ impl SceneEditorState {
         registry: &ComponentRegistry,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
+        let target_entity = command.target_entity().cloned();
         if self.mode().is_edit() || matches!(command, SceneInspectorCommand::SelectEntity { .. }) {
             return self.inspector.apply_command(session, registry, command);
         }
 
-        persistent_inspector_command_rejected(self.inspector.selected_entity().cloned())
+        persistent_inspector_command_rejected(
+            self.inspector.selected_entity().cloned(),
+            target_entity.as_ref(),
+        )
     }
 
     pub fn apply_inspector_command_with_asset_database(
@@ -434,13 +440,17 @@ impl SceneEditorState {
         database: &ProjectAssetDatabase,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
+        let target_entity = command.target_entity().cloned();
         if self.mode().is_edit() || matches!(command, SceneInspectorCommand::SelectEntity { .. }) {
             return self
                 .inspector
                 .apply_command_with_asset_database(session, registry, database, command);
         }
 
-        persistent_inspector_command_rejected(self.inspector.selected_entity().cloned())
+        persistent_inspector_command_rejected(
+            self.inspector.selected_entity().cloned(),
+            target_entity.as_ref(),
+        )
     }
 
     #[must_use]
@@ -666,14 +676,14 @@ impl SceneEditorState {
                 let component_report = rejected_component_report(
                     &request.entity,
                     component,
-                    Diagnostic::error(
+                    component_error(
                         "tooling.apply-changes-duplicate-component",
                         "Apply Changes request contains the same component more than once",
-                    )
-                    .with_entity_id(request.entity.as_str())
-                    .with_component_id(component.as_str()),
+                        &request.entity,
+                        component,
+                    ),
                 );
-                diagnostics.extend(component_report.diagnostics.clone());
+                let _ = diagnostics.extend(component_report.diagnostics.clone());
                 component_reports.push(component_report);
                 continue;
             }
@@ -686,7 +696,7 @@ impl SceneEditorState {
                 component,
                 context,
             );
-            diagnostics.extend(component_change.report.diagnostics.clone());
+            let _ = diagnostics.extend(component_change.report.diagnostics.clone());
             if let Some(operation) = component_change.operation {
                 operations.push(operation);
             }
@@ -761,7 +771,7 @@ impl SceneEditorState {
         }
         report.applied = applied;
         report.current_revision = session.revision();
-        report.diagnostics.extend(patch_report.diagnostics.clone());
+        let _ = report.diagnostics.extend(patch_report.diagnostics.clone());
         report.patch_report = Some(patch_report);
         report
     }
@@ -769,11 +779,15 @@ impl SceneEditorState {
 
 fn transition_error_report(
     mode: SceneEditorMode,
-    code: impl Into<String>,
-    message: impl Into<String>,
+    code: &'static str,
+    summary: &'static str,
 ) -> ScenePlayTransitionReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(code, message));
+    let mut entry = diagnostic::error(code, summary);
+    if let Some(source_revision) = mode.source_revision() {
+        entry = diagnostic::with_public_u64(entry, "source_revision", source_revision.generation());
+    }
+    diagnostics.push(entry);
     ScenePlayTransitionReport {
         applied: false,
         mode,
@@ -785,12 +799,17 @@ fn transition_error_report(
 
 fn persistent_inspector_command_rejected(
     selected_entity: Option<nara_scene::SceneEntityId>,
+    target_entity: Option<&SceneEntityId>,
 ) -> SceneInspectorCommandReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(
+    let entry = diagnostic::error(
         "tooling.inspector-persistent-command-in-play-mode",
         "persistent inspector commands are only allowed in Edit mode",
-    ));
+    );
+    diagnostics.push(match target_entity {
+        Some(entity) => diagnostic::with_entity(entry, entity),
+        None => entry,
+    });
 
     SceneInspectorCommandReport {
         applied: false,
@@ -804,11 +823,16 @@ fn persistent_inspector_command_rejected(
 fn apply_changes_error_report(
     source_revision: Option<SceneAuthoringRevision>,
     current_revision: SceneAuthoringRevision,
-    code: impl Into<String>,
-    message: impl Into<String>,
+    code: &'static str,
+    summary: &'static str,
 ) -> SceneApplyChangesReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(code, message));
+    diagnostics.push(apply_changes_diagnostic(
+        code,
+        summary,
+        source_revision,
+        current_revision,
+    ));
     SceneApplyChangesReport {
         applied: false,
         supported: false,
@@ -824,12 +848,15 @@ fn apply_changes_error_report(
 fn apply_changes_entity_error_report(
     source_revision: Option<SceneAuthoringRevision>,
     current_revision: SceneAuthoringRevision,
-    code: impl Into<String>,
-    message: impl Into<String>,
+    code: &'static str,
+    summary: &'static str,
     entity: &SceneEntityId,
 ) -> SceneApplyChangesReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(Diagnostic::error(code, message).with_entity_id(entity.as_str()));
+    diagnostics.push(diagnostic::with_entity(
+        apply_changes_diagnostic(code, summary, source_revision, current_revision),
+        entity,
+    ));
     SceneApplyChangesReport {
         applied: false,
         supported: false,
@@ -860,12 +887,12 @@ fn export_component_change(
             report: rejected_component_report(
                 &document_entity.id,
                 component,
-                Diagnostic::error(
+                component_error(
                     "tooling.apply-changes-unknown-component",
                     "Apply Changes targets a component that is not registered",
-                )
-                .with_entity_id(document_entity.id.as_str())
-                .with_component_id(component.as_str()),
+                    &document_entity.id,
+                    component,
+                ),
             ),
             operation: None,
         };
@@ -878,12 +905,12 @@ fn export_component_change(
             report: rejected_component_report(
                 &document_entity.id,
                 component,
-                Diagnostic::error(
+                component_error(
                     "tooling.apply-changes-component-not-editable",
                     "Apply Changes targets a component without scene/edit capabilities",
-                )
-                .with_entity_id(document_entity.id.as_str())
-                .with_component_id(component.as_str()),
+                    &document_entity.id,
+                    component,
+                ),
             ),
             operation: None,
         };
@@ -896,12 +923,12 @@ fn export_component_change(
             report: rejected_component_report(
                 &document_entity.id,
                 component,
-                Diagnostic::error(
+                component_error(
                     "tooling.apply-changes-missing-component-codec",
                     "Apply Changes targets a component without an encode codec",
-                )
-                .with_entity_id(document_entity.id.as_str())
-                .with_component_id(component.as_str()),
+                    &document_entity.id,
+                    component,
+                ),
             ),
             operation: None,
         };
@@ -914,12 +941,15 @@ fn export_component_change(
                 report: rejected_component_report(
                     &document_entity.id,
                     component,
-                    Diagnostic::error(
-                        "tooling.apply-changes-component-encode-failed",
-                        format!("Apply Changes could not encode the runtime component: {error}"),
-                    )
-                    .with_entity_id(document_entity.id.as_str())
-                    .with_component_id(component.as_str()),
+                    with_codec_error(
+                        component_error(
+                            "tooling.apply-changes-component-encode-failed",
+                            "Apply Changes could not encode the runtime component",
+                            &document_entity.id,
+                            component,
+                        ),
+                        &error,
+                    ),
                 ),
                 operation: None,
             };
@@ -938,14 +968,15 @@ fn export_component_change(
                     report: rejected_component_report(
                         &document_entity.id,
                         component,
-                        Diagnostic::error(
-                            "tooling.apply-changes-document-component-migration-failed",
-                            format!(
-                                "Apply Changes could not canonicalize the document component: {error}"
+                        with_migration_error(
+                            component_error(
+                                "tooling.apply-changes-document-component-migration-failed",
+                                "Apply Changes could not canonicalize the document component",
+                                &document_entity.id,
+                                component,
                             ),
-                        )
-                        .with_entity_id(document_entity.id.as_str())
-                        .with_component_id(component.as_str()),
+                            &error,
+                        ),
                     ),
                     operation: None,
                 };
@@ -998,10 +1029,10 @@ fn export_component_change(
 fn rejected_component_report(
     entity: &SceneEntityId,
     component: &ComponentTypeId,
-    diagnostic: Diagnostic,
+    entry: Diagnostic,
 ) -> SceneApplyChangesComponentReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(diagnostic);
+    diagnostics.push(diagnostic::with_public_u64(entry, "operation_count", 0));
     SceneApplyChangesComponentReport {
         entity: entity.clone(),
         component: component.clone(),
@@ -1011,14 +1042,143 @@ fn rejected_component_report(
     }
 }
 
+fn component_error(
+    code: &'static str,
+    summary: &'static str,
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+) -> Diagnostic {
+    diagnostic::with_component(
+        diagnostic::with_entity(diagnostic::error(code, summary), entity),
+        component,
+    )
+}
+
+fn with_codec_error(entry: Diagnostic, error: &ComponentCodecError) -> Diagnostic {
+    match error {
+        ComponentCodecError::MissingField { field } => diagnostic::with_public_identifier(
+            diagnostic::with_public_identifier(entry, "codec_reason", "missing_field"),
+            "field",
+            field,
+        ),
+        ComponentCodecError::InvalidField { field, .. } => diagnostic::with_secret(
+            diagnostic::with_public_identifier(
+                diagnostic::with_public_identifier(entry, "codec_reason", "invalid_field"),
+                "field",
+                field,
+            ),
+            "expected",
+        ),
+        ComponentCodecError::InvalidAssetRef { field, .. } => diagnostic::with_secret(
+            diagnostic::with_sensitive(
+                diagnostic::with_public_identifier(
+                    diagnostic::with_public_identifier(entry, "codec_reason", "invalid_asset_ref"),
+                    "field",
+                    field,
+                ),
+                "asset_ref",
+            ),
+            "message",
+        ),
+        ComponentCodecError::EntityMissing => {
+            diagnostic::with_public_identifier(entry, "codec_reason", "entity_missing")
+        }
+        ComponentCodecError::Message(_) => diagnostic::with_secret(
+            diagnostic::with_public_identifier(entry, "codec_reason", "message"),
+            "message",
+        ),
+    }
+}
+
+fn with_migration_error(entry: Diagnostic, error: &ComponentMigrationError) -> Diagnostic {
+    match error {
+        ComponentMigrationError::UnknownComponentId { component_id } => {
+            migration_error_base(entry, "unknown_component", component_id)
+        }
+        ComponentMigrationError::UnsupportedVersion {
+            component_id,
+            from_version,
+            target_version,
+        } => diagnostic::with_public_u64(
+            diagnostic::with_public_u64(
+                migration_error_base(entry, "unsupported_version", component_id),
+                "from_version",
+                u64::from(from_version.0),
+            ),
+            "target_version",
+            u64::from(target_version.0),
+        ),
+        ComponentMigrationError::MissingMigration {
+            component_id,
+            from_version,
+            target_version,
+        } => diagnostic::with_public_u64(
+            diagnostic::with_public_u64(
+                migration_error_base(entry, "missing_migration", component_id),
+                "from_version",
+                u64::from(from_version.0),
+            ),
+            "target_version",
+            u64::from(target_version.0),
+        ),
+        ComponentMigrationError::MigrationFailed {
+            component_id,
+            from_version,
+            to_version,
+            error,
+        } => with_codec_error(
+            diagnostic::with_public_u64(
+                diagnostic::with_public_u64(
+                    migration_error_base(entry, "migration_failed", component_id),
+                    "from_version",
+                    u64::from(from_version.0),
+                ),
+                "to_version",
+                u64::from(to_version.0),
+            ),
+            error,
+        ),
+    }
+}
+
+fn migration_error_base(
+    entry: Diagnostic,
+    reason: &'static str,
+    component: &ComponentTypeId,
+) -> Diagnostic {
+    diagnostic::with_public_identifier(
+        diagnostic::with_public_identifier(entry, "migration_reason", reason),
+        "migration_component",
+        component.as_str(),
+    )
+}
+
+fn apply_changes_diagnostic(
+    code: &'static str,
+    summary: &'static str,
+    source_revision: Option<SceneAuthoringRevision>,
+    current_revision: SceneAuthoringRevision,
+) -> Diagnostic {
+    let mut entry = diagnostic::with_public_u64(
+        diagnostic::error(code, summary),
+        "current_revision",
+        current_revision.generation(),
+    );
+    if let Some(source_revision) = source_revision {
+        entry = diagnostic::with_public_u64(entry, "source_revision", source_revision.generation());
+    }
+    entry
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use nara_asset::AssetRef;
+    use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
     use nara_ecs::Component;
     use nara_reflect::{
-        ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentSchemaVersion,
-        ComponentValue, ComponentValueKind, PreparedComponent, Reflect, bevy_reflect,
+        ComponentFieldPath, ComponentFieldSchema, ComponentSchemaVersion, ComponentValue,
+        ComponentValueKind, PreparedComponent, Reflect, bevy_reflect,
     };
     use nara_scene::{
         InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabInstance, SceneEntityRecord,
@@ -1035,6 +1195,277 @@ mod tests {
     #[derive(Clone, Debug, PartialEq, Component)]
     struct MigratingPosition {
         x: i32,
+    }
+
+    #[test]
+    fn rejected_persistent_command_reports_target_instead_of_selection() {
+        let registry = test_registry();
+        let selected = scene_id("selected-a");
+        let target = scene_id("target-b");
+        let mut session = SceneAuthoringSession::new(SceneDocument::new([
+            SceneEntityRecord::new(selected.clone()),
+            SceneEntityRecord::new(target.clone()),
+        ]));
+        let mut editor = SceneEditorState::new();
+        editor.inspector_mut().select_entity(Some(selected.clone()));
+        assert!(editor.start_play(&session, &registry).applied);
+
+        let report = editor.apply_inspector_command(
+            &mut session,
+            &registry,
+            SceneInspectorCommand::Reparent {
+                entity: target.clone(),
+                parent: None,
+            },
+        );
+
+        assert!(!report.applied);
+        assert_eq!(report.selected_entity, Some(selected));
+        let entry = report
+            .diagnostics
+            .iter()
+            .find(|entry| {
+                entry.code().as_str() == "tooling.inspector-persistent-command-in-play-mode"
+            })
+            .unwrap();
+        let entity = entry
+            .fields()
+            .iter()
+            .find(|field| field.key().as_str() == "entity")
+            .unwrap();
+        assert_eq!(
+            entity.value(),
+            DiagnosticValueRef::Identifier(target.as_str())
+        );
+    }
+
+    #[test]
+    fn codec_error_variants_lower_to_safe_reasons_and_redacted_payloads() {
+        let missing = with_codec_error(
+            diagnostic::error("tooling.test", "component codec operation failed"),
+            &ComponentCodecError::MissingField {
+                field: "position_x".to_string(),
+            },
+        );
+        assert_eq!(
+            diagnostic_field_value(&missing, "codec_reason"),
+            DiagnosticValueRef::Identifier("missing_field")
+        );
+        assert_eq!(
+            diagnostic_field_value(&missing, "field"),
+            DiagnosticValueRef::Identifier("position_x")
+        );
+        assert_eq!(
+            diagnostic_field(&missing, "field").class(),
+            DiagnosticFieldClass::Public
+        );
+
+        let invalid_locator = "api_key";
+        let invalid_missing = with_codec_error(
+            diagnostic::error("tooling.test", "component codec operation failed"),
+            &ComponentCodecError::MissingField {
+                field: invalid_locator.to_string(),
+            },
+        );
+        assert_eq!(
+            diagnostic_field(&invalid_missing, "field").class(),
+            DiagnosticFieldClass::Sensitive
+        );
+        assert_eq!(
+            diagnostic_field_value(&invalid_missing, "field"),
+            DiagnosticValueRef::Redacted
+        );
+        assert!(!format!("{invalid_missing:?}").contains(invalid_locator));
+
+        let bearer_canary = "Bearer expected-token";
+        let invalid = with_codec_error(
+            diagnostic::error("tooling.test", "component codec operation failed"),
+            &ComponentCodecError::InvalidField {
+                field: "rotation".to_string(),
+                expected: bearer_canary.to_string(),
+            },
+        );
+        assert_eq!(
+            diagnostic_field_value(&invalid, "codec_reason"),
+            DiagnosticValueRef::Identifier("invalid_field")
+        );
+        assert_eq!(
+            diagnostic_field_value(&invalid, "field"),
+            DiagnosticValueRef::Identifier("rotation")
+        );
+        assert_eq!(
+            diagnostic_field(&invalid, "expected").class(),
+            DiagnosticFieldClass::Secret
+        );
+        assert_eq!(
+            diagnostic_field_value(&invalid, "expected"),
+            DiagnosticValueRef::Redacted
+        );
+        assert!(!format!("{invalid:?}").contains(bearer_canary));
+
+        let asset_field = "image";
+        let asset_ref = "assets/private.png";
+        let asset_message_canary = "credential opaque lookup message";
+        let invalid_asset = with_codec_error(
+            diagnostic::error("tooling.test", "component codec operation failed"),
+            &ComponentCodecError::InvalidAssetRef {
+                field: asset_field.to_string(),
+                asset_ref: asset_ref.to_string(),
+                message: asset_message_canary.to_string(),
+            },
+        );
+        assert_eq!(
+            diagnostic_field_value(&invalid_asset, "codec_reason"),
+            DiagnosticValueRef::Identifier("invalid_asset_ref")
+        );
+        assert_eq!(
+            diagnostic_field(&invalid_asset, "field").class(),
+            DiagnosticFieldClass::Public
+        );
+        assert_eq!(
+            diagnostic_field_value(&invalid_asset, "field"),
+            DiagnosticValueRef::Identifier(asset_field)
+        );
+        assert_eq!(
+            diagnostic_field(&invalid_asset, "asset_ref").class(),
+            DiagnosticFieldClass::Sensitive
+        );
+        assert_eq!(
+            diagnostic_field_value(&invalid_asset, "asset_ref"),
+            DiagnosticValueRef::Redacted
+        );
+        assert_eq!(
+            diagnostic_field(&invalid_asset, "message").class(),
+            DiagnosticFieldClass::Secret
+        );
+        assert_eq!(
+            diagnostic_field_value(&invalid_asset, "message"),
+            DiagnosticValueRef::Redacted
+        );
+        let invalid_asset_debug = format!("{invalid_asset:?}");
+        assert!(!invalid_asset_debug.contains(asset_ref));
+        assert!(!invalid_asset_debug.contains(asset_message_canary));
+
+        let message_canary = "credential password message";
+        let message = with_codec_error(
+            diagnostic::error("tooling.test", "component codec operation failed"),
+            &ComponentCodecError::Message(message_canary.to_string()),
+        );
+        assert_eq!(
+            diagnostic_field_value(&message, "codec_reason"),
+            DiagnosticValueRef::Identifier("message")
+        );
+        assert_eq!(
+            diagnostic_field(&message, "message").class(),
+            DiagnosticFieldClass::Secret
+        );
+        assert_eq!(
+            diagnostic_field_value(&message, "message"),
+            DiagnosticValueRef::Redacted
+        );
+        assert!(!format!("{message:?}").contains(message_canary));
+
+        let entity_missing = with_codec_error(
+            diagnostic::error("tooling.test", "component codec operation failed"),
+            &ComponentCodecError::EntityMissing,
+        );
+        assert_eq!(
+            diagnostic_field_value(&entity_missing, "codec_reason"),
+            DiagnosticValueRef::Identifier("entity_missing")
+        );
+    }
+
+    #[test]
+    fn migration_error_variants_keep_versions_and_redact_nested_credentials() {
+        let canary = "password=credential-canary";
+        let component = ComponentTypeId::new("test.component");
+        let variants = [
+            (
+                ComponentMigrationError::UnknownComponentId {
+                    component_id: component.clone(),
+                },
+                "unknown_component",
+            ),
+            (
+                ComponentMigrationError::UnsupportedVersion {
+                    component_id: component.clone(),
+                    from_version: ComponentSchemaVersion(3),
+                    target_version: ComponentSchemaVersion(7),
+                },
+                "unsupported_version",
+            ),
+            (
+                ComponentMigrationError::MissingMigration {
+                    component_id: component.clone(),
+                    from_version: ComponentSchemaVersion(3),
+                    target_version: ComponentSchemaVersion(7),
+                },
+                "missing_migration",
+            ),
+            (
+                ComponentMigrationError::MigrationFailed {
+                    component_id: component,
+                    from_version: ComponentSchemaVersion(3),
+                    to_version: ComponentSchemaVersion(4),
+                    error: ComponentCodecError::Message(canary.to_string()),
+                },
+                "migration_failed",
+            ),
+        ];
+
+        for (error, expected_reason) in variants {
+            let entry = with_migration_error(
+                diagnostic::error("tooling.test", "component migration failed"),
+                &error,
+            );
+            assert_eq!(
+                diagnostic_field_value(&entry, "migration_reason"),
+                DiagnosticValueRef::Identifier(expected_reason)
+            );
+            assert!(!format!("{entry:?}").contains(canary));
+            if expected_reason == "migration_failed" {
+                assert_eq!(
+                    diagnostic_field(&entry, "message").class(),
+                    DiagnosticFieldClass::Secret
+                );
+                assert_eq!(
+                    diagnostic_field_value(&entry, "message"),
+                    DiagnosticValueRef::Redacted
+                );
+            }
+        }
+
+        let versioned = with_migration_error(
+            diagnostic::error("tooling.test", "component migration failed"),
+            &ComponentMigrationError::UnsupportedVersion {
+                component_id: ComponentTypeId::new("test.component"),
+                from_version: ComponentSchemaVersion(3),
+                target_version: ComponentSchemaVersion(7),
+            },
+        );
+        assert_eq!(
+            diagnostic_field_value(&versioned, "from_version"),
+            DiagnosticValueRef::Unsigned(3)
+        );
+        assert_eq!(
+            diagnostic_field_value(&versioned, "target_version"),
+            DiagnosticValueRef::Unsigned(7)
+        );
+    }
+
+    fn diagnostic_field_value<'a>(entry: &'a Diagnostic, key: &str) -> DiagnosticValueRef<'a> {
+        diagnostic_field(entry, key).value()
+    }
+
+    fn diagnostic_field<'a>(
+        entry: &'a Diagnostic,
+        key: &str,
+    ) -> &'a nara_diagnostic::DiagnosticField {
+        entry
+            .fields()
+            .iter()
+            .find(|field| field.key().as_str() == key)
+            .unwrap()
     }
 
     #[test]
@@ -1099,9 +1530,23 @@ mod tests {
         );
         assert!(!stale.supported);
         assert!(!stale.applied);
-        assert!(stale.diagnostics.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code.as_str() == "tooling.apply-changes-revision-mismatch"
-        }));
+        let diagnostic = stale
+            .diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code().as_str() == "tooling.apply-changes-revision-mismatch"
+            })
+            .unwrap();
+        assert_eq!(diagnostic.fields()[0].key().as_str(), "current_revision");
+        assert_eq!(
+            diagnostic.fields()[0].value(),
+            DiagnosticValueRef::Unsigned(stale.current_revision.generation())
+        );
+        assert_eq!(diagnostic.fields()[1].key().as_str(), "source_revision");
+        assert_eq!(
+            diagnostic.fields()[1].value(),
+            DiagnosticValueRef::Unsigned(stale.source_revision.unwrap().generation())
+        );
         assert_eq!(session.history_status().undo_depth, 1);
 
         let undo = session.undo(&registry);
@@ -1301,8 +1746,8 @@ mod tests {
         assert!(!report.supported);
         assert!(!report.applied);
         assert!(report.patch.is_none());
-        assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code.as_str() == "tooling.apply-changes-not-in-play-mode"
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "tooling.apply-changes-not-in-play-mode"
         }));
     }
 
@@ -1324,8 +1769,8 @@ mod tests {
         assert!(!report.supported);
         assert!(!report.applied);
         assert!(report.patch.is_none());
-        assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code.as_str() == "tooling.apply-changes-revision-mismatch"
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "tooling.apply-changes-revision-mismatch"
         }));
         assert_eq!(document_name_value(&session, &id), "Edited");
     }
@@ -1347,8 +1792,8 @@ mod tests {
 
         assert!(!report.supported);
         assert!(!report.applied);
-        assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code.as_str() == "tooling.apply-changes-missing-scene-entity"
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "tooling.apply-changes-missing-scene-entity"
         }));
     }
 
@@ -1380,8 +1825,8 @@ mod tests {
             report.components[0].status,
             SceneApplyChangesComponentStatus::Rejected
         );
-        assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code.as_str() == "tooling.apply-changes-component-not-editable"
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "tooling.apply-changes-component-not-editable"
         }));
         assert_eq!(document_name_value(&session, &id), "Hero");
         assert_eq!(session.history_status().undo_depth, 0);
@@ -1418,8 +1863,8 @@ mod tests {
         assert!(!report.supported);
         assert!(!report.applied);
         assert!(report.patch.is_none());
-        assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code.as_str() == "tooling.apply-changes-prefab-expanded-entity"
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "tooling.apply-changes-prefab-expanded-entity"
         }));
     }
 

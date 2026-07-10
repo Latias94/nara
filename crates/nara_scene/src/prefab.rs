@@ -1,8 +1,14 @@
 use nara_asset::{AssetRef, ProjectAssetDatabase};
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_diagnostic::DiagnosticReport;
 use nara_reflect::ComponentRegistry;
 
-use crate::{SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument};
+use crate::{
+    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+    diagnostics::{
+        error as diagnostic_error, usize_to_u64, with_asset_ref, with_public_locator,
+        with_public_u64,
+    },
+};
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -334,44 +340,87 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         output: &mut Vec<SceneEntityRecord>,
     ) {
         if self.stack.len() >= self.options.max_depth {
-            self.diagnostics.push(
-                Diagnostic::error(
-                    "scene.prefab-depth-exceeded",
-                    format!(
-                        "prefab expansion exceeded max depth {}",
-                        self.options.max_depth
+            self.diagnostics.push(with_asset_ref(
+                with_public_u64(
+                    with_public_u64(
+                        with_public_locator(
+                            with_public_locator(
+                                diagnostic_error(
+                                    "scene.prefab-depth-exceeded",
+                                    "Prefab expansion depth limit was exceeded",
+                                ),
+                                "entity-id",
+                                anchor_id.as_str(),
+                            ),
+                            "field-path",
+                            "prefab.source",
+                        ),
+                        "current-depth",
+                        usize_to_u64(self.stack.len()),
                     ),
-                )
-                .with_entity_id(anchor_id.as_str())
-                .with_field_path("prefab.source")
-                .with_asset_ref(instance.source.to_string()),
-            );
+                    "maximum-depth",
+                    usize_to_u64(self.options.max_depth),
+                ),
+                "asset-ref",
+                &instance.source,
+            ));
             return;
         }
 
-        if self.stack.contains(&instance.source) {
-            self.diagnostics.push(
-                Diagnostic::error(
-                    "scene.prefab-cycle",
-                    prefab_cycle_message(&self.stack, &instance.source),
-                )
-                .with_entity_id(anchor_id.as_str())
-                .with_field_path("prefab.source")
-                .with_asset_ref(instance.source.to_string()),
+        if let Some((cycle_start_index, cycle_from)) = self
+            .stack
+            .iter()
+            .position(|source| source == &instance.source)
+            .zip(self.stack.last())
+        {
+            let diagnostic = with_public_u64(
+                with_public_u64(
+                    with_public_locator(
+                        with_public_locator(
+                            diagnostic_error(
+                                "scene.prefab-cycle",
+                                "Prefab source cycle was detected",
+                            ),
+                            "entity-id",
+                            anchor_id.as_str(),
+                        ),
+                        "field-path",
+                        "prefab.source",
+                    ),
+                    "cycle-start-index",
+                    usize_to_u64(cycle_start_index),
+                ),
+                "cycle-depth",
+                usize_to_u64(
+                    self.stack
+                        .len()
+                        .saturating_sub(cycle_start_index)
+                        .saturating_add(1),
+                ),
             );
+            let diagnostic = with_asset_ref(diagnostic, "cycle-from", cycle_from);
+            self.diagnostics
+                .push(with_asset_ref(diagnostic, "cycle-to", &instance.source));
             return;
         }
 
         let Some(prefab) = self.resolver.resolve_prefab(&instance.source) else {
-            self.diagnostics.push(
-                Diagnostic::error(
-                    "scene.prefab-source-missing",
-                    "prefab source resolver could not find the requested source",
-                )
-                .with_entity_id(anchor_id.as_str())
-                .with_field_path("prefab.source")
-                .with_asset_ref(instance.source.to_string()),
-            );
+            self.diagnostics.push(with_asset_ref(
+                with_public_locator(
+                    with_public_locator(
+                        diagnostic_error(
+                            "scene.prefab-source-missing",
+                            "Prefab source could not be resolved",
+                        ),
+                        "entity-id",
+                        anchor_id.as_str(),
+                    ),
+                    "field-path",
+                    "prefab.source",
+                ),
+                "asset-ref",
+                &instance.source,
+            ));
             return;
         };
 
@@ -395,7 +444,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return;
         }
 
-        let diagnostics_before = self.diagnostics.diagnostics().len();
+        let diagnostics_before = self.diagnostics.stats().published_entries();
         let mut expanded_source = SceneDocument {
             format_version: source_document.format_version,
             entities: Vec::new(),
@@ -403,12 +452,12 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         self.expand_entities(&source_document.entities, &mut expanded_source.entities);
         expanded_source.canonicalize();
 
-        if self.diagnostics.diagnostics().len() == diagnostics_before {
+        if self.diagnostics.stats().published_entries() == diagnostics_before {
             let validation = self.validate_document(&expanded_source);
             self.diagnostics.extend(validation);
         }
 
-        if self.diagnostics.diagnostics().len() == diagnostics_before {
+        if self.diagnostics.stats().published_entries() == diagnostics_before {
             for entity in namespace_prefab_entities(anchor_id, expanded_source.entities) {
                 output.push(entity);
             }
@@ -447,10 +496,4 @@ fn namespace_prefab_entities(
 fn namespace_scene_entity_id(anchor_id: &SceneEntityId, local_id: &SceneEntityId) -> SceneEntityId {
     SceneEntityId::new(format!("{}/{}", anchor_id.as_str(), local_id.as_str()))
         .expect("namespacing two valid scene entity ids should produce a valid scene entity id")
-}
-
-fn prefab_cycle_message(stack: &[AssetRef], source: &AssetRef) -> String {
-    let mut chain = stack.iter().map(ToString::to_string).collect::<Vec<_>>();
-    chain.push(source.to_string());
-    format!("prefab source cycle detected: {}", chain.join(" -> "))
 }

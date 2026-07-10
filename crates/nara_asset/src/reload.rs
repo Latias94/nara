@@ -4,7 +4,10 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError, TaskUpdateSet};
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
+    PublicDiagnosticIdentifier, SafeSummary,
+};
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_tasks::TaskPlugin;
 
@@ -341,8 +344,8 @@ impl AssetReloadDiagnostics {
     }
 
     #[must_use]
-    pub fn diagnostics(&self) -> &[Diagnostic] {
-        self.report.diagnostics()
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &Diagnostic> {
+        self.report.iter()
     }
 
     #[must_use]
@@ -601,17 +604,80 @@ pub fn resolve_asset_source_changes(
             &mut generations,
             &mut requests,
         ) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "asset.reload-source-change-resolve-failed",
-                    format!(
-                        "failed to resolve asset source change for '{diagnostic_path}' ({diagnostic_kind:?}): {error}"
-                    ),
-                )
-                .with_asset_ref(diagnostic_path.to_string()),
-            );
+            diagnostics.push(source_change_resolution_failure_diagnostic(
+                &diagnostic_path,
+                diagnostic_kind,
+                &error,
+            ));
         }
     }
+}
+
+fn source_change_resolution_failure_diagnostic(
+    path: &AssetPath,
+    change_kind: AssetSourceChangeKind,
+    error: &AssetError,
+) -> Diagnostic {
+    let diagnostic = Diagnostic::error(
+        DiagnosticCode::new("asset.reload-source-change-resolve-failed")
+            .expect("asset diagnostic code literals must be valid"),
+        SafeSummary::new("Asset source change resolution failed")
+            .expect("asset diagnostic summaries must be safe literals"),
+    );
+    let path_key = diagnostic_field_key("asset-path");
+    let path_field = DiagnosticField::project_relative(path_key, path.as_str())
+        .unwrap_or_else(|_| DiagnosticField::sensitive(path_key));
+    let diagnostic = with_diagnostic_field(diagnostic, path_field);
+    let diagnostic = with_diagnostic_field(
+        diagnostic,
+        DiagnosticField::public_identifier(
+            diagnostic_field_key("change-kind"),
+            PublicDiagnosticIdentifier::new(source_change_kind_identifier(change_kind))
+                .expect("asset source change kind identifiers must be valid"),
+        ),
+    );
+    let diagnostic = with_diagnostic_field(
+        diagnostic,
+        DiagnosticField::public_identifier(
+            diagnostic_field_key("reason"),
+            PublicDiagnosticIdentifier::new(asset_error_identifier(error))
+                .expect("asset error identifiers must be valid"),
+        ),
+    );
+    with_diagnostic_field(
+        diagnostic,
+        DiagnosticField::sensitive(diagnostic_field_key("error-detail")),
+    )
+}
+
+fn source_change_kind_identifier(kind: AssetSourceChangeKind) -> &'static str {
+    match kind {
+        AssetSourceChangeKind::MetaModified => "meta-modified",
+        AssetSourceChangeKind::Modified => "modified",
+        AssetSourceChangeKind::Removed => "removed",
+    }
+}
+
+fn asset_error_identifier(error: &AssetError) -> &'static str {
+    match error {
+        AssetError::IdSpaceExhausted => "id-space-exhausted",
+        AssetError::InvalidPath(_) => "invalid-path",
+        AssetError::ConflictingAssetIdentity { .. } => "conflicting-asset-identity",
+        AssetError::PathAlreadyBound { .. } => "path-already-bound",
+        AssetError::StableIdAlreadyBound { .. } => "stable-id-already-bound",
+        AssetError::AssetIdAlreadyBoundToPath { .. } => "asset-id-already-bound-to-path",
+        AssetError::AssetIdAlreadyBoundToStableId { .. } => "asset-id-already-bound-to-stable-id",
+    }
+}
+
+fn diagnostic_field_key(value: &'static str) -> DiagnosticFieldKey {
+    DiagnosticFieldKey::new(value).expect("asset diagnostic field key literals must be valid")
+}
+
+fn with_diagnostic_field(diagnostic: Diagnostic, field: DiagnosticField) -> Diagnostic {
+    diagnostic
+        .try_with_field(field)
+        .expect("asset diagnostics must use unique fields within the hard field limit")
 }
 
 #[cfg(test)]
@@ -757,17 +823,46 @@ mod tests {
 
         let diagnostics = app.world().resource::<AssetReloadDiagnostics>();
         assert!(diagnostics.has_errors());
-        assert_eq!(diagnostics.diagnostics().len(), 1);
-        let diagnostic = &diagnostics.diagnostics()[0];
+        assert_eq!(diagnostics.iter().len(), 1);
+        let diagnostic = diagnostics.iter().next().unwrap();
         assert_eq!(
-            diagnostic.code.as_str(),
+            diagnostic.code().as_str(),
             "asset.reload-source-change-resolve-failed"
         );
         assert_eq!(
-            diagnostic.context.asset_ref.as_deref(),
-            Some("textures/player.png")
+            diagnostic.summary().as_str(),
+            "Asset source change resolution failed"
         );
-        assert!(diagnostic.message.contains("failed to resolve"));
+        let field = |key: &str| {
+            diagnostic
+                .fields()
+                .iter()
+                .find(|field| field.key().as_str() == key)
+                .unwrap()
+        };
+        assert_eq!(
+            field("asset-path").value(),
+            nara_diagnostic::DiagnosticValueRef::ProjectRelative("textures/player.png")
+        );
+        assert_eq!(
+            field("change-kind").value(),
+            nara_diagnostic::DiagnosticValueRef::Identifier("modified")
+        );
+        assert_eq!(
+            field("reason").value(),
+            nara_diagnostic::DiagnosticValueRef::Identifier("asset-id-already-bound-to-stable-id")
+        );
+        assert_eq!(
+            field("error-detail").class(),
+            nara_diagnostic::DiagnosticFieldClass::Sensitive
+        );
+        assert_eq!(
+            field("error-detail").value(),
+            nara_diagnostic::DiagnosticValueRef::Redacted
+        );
+        let diagnostic_debug = format!("{diagnostic:?}");
+        assert!(!diagnostic_debug.contains(&stable_id().to_string()));
+        assert!(!diagnostic_debug.contains(&dependent_stable_id().to_string()));
         assert!(app.world().resource::<AssetReloadRequests>().is_empty());
     }
 

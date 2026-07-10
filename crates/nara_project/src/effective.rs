@@ -43,7 +43,7 @@ impl EffectiveProjectSettings {
             tasks: manifest.tasks.lower()?,
             window: manifest.window.clone().lower(),
             input: manifest.input.clone().lower()?,
-            diagnostics: manifest.diagnostics.lower(),
+            diagnostics: manifest.diagnostics.lower()?,
         };
         settings.enforce_product_invariants();
         Ok(settings)

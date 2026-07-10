@@ -1,7 +1,7 @@
+use std::fmt;
+
 use nara_app::TimeSettingsError;
-use nara_diagnostic::{
-    Diagnostic, DiagnosticReport, MAX_RUNTIME_DIAGNOSTICS_CAPACITY, RuntimeDiagnosticsSettings,
-};
+use nara_diagnostic::{DiagnosticReport, DiagnosticSettingsError, MAX_RUNTIME_DIAGNOSTIC_ENTRIES};
 use nara_tasks::TaskConfigError;
 use serde::Deserialize;
 use thiserror::Error;
@@ -15,10 +15,12 @@ use crate::path::{ProjectPath, ProjectPathError};
 use crate::sections::{
     ProjectFixedCatchUpPolicy, ProjectPluginPlan, ProjectPresentMode, ProjectTaskPoolManifest,
     ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectWindowMode,
+    runtime_diagnostics_settings,
 };
 use crate::validation::{
-    duration_from_positive_seconds, validate_duration_seconds, validate_fixed_step_limits,
-    validate_optional_path_field, validate_path_field,
+    duration_from_positive_seconds, error, validate_duration_seconds, validate_fixed_step_limits,
+    validate_optional_path_field, validate_path_field, with_field_path, with_public_bool,
+    with_public_u64,
 };
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -76,7 +78,7 @@ impl ProjectProfileOverlay {
         self.tasks.apply_to(&mut settings.tasks)?;
         self.window.apply_to(&mut settings.window);
         self.input.apply_to(&mut settings.input)?;
-        self.diagnostics.apply_to(&mut settings.diagnostics);
+        self.diagnostics.apply_to(&mut settings.diagnostics)?;
         Ok(())
     }
 }
@@ -165,13 +167,13 @@ impl ProjectStartupPatch {
             validate_path_field(diagnostics, &format!("{prefix}.default_scene"), scene);
         }
         if self.clear_default_scene && self.default_scene.is_some() {
-            diagnostics.push(
-                Diagnostic::error(
+            diagnostics.push(with_field_path(
+                error(
                     "project.startup.conflicting-default-scene-patch",
-                    "startup patch cannot both clear and set default_scene",
-                )
-                .with_field_path(format!("{prefix}.default_scene")),
-            );
+                    "Startup patch cannot both clear and set the default scene",
+                ),
+                &format!("{prefix}.default_scene"),
+            ));
         }
     }
 
@@ -215,13 +217,17 @@ impl ProjectRuntimePatch {
         if let Some(time_scale) = self.time_scale
             && (!time_scale.is_finite() || time_scale < 0.0)
         {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.runtime.invalid-time-scale",
-                    "runtime.time_scale must be finite and >= 0",
-                )
-                .with_field_path(format!("{prefix}.time_scale")),
+            let diagnostic = error(
+                "project.runtime.invalid-time-scale",
+                "Runtime time scale must be finite and non-negative",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.time_scale"));
+            let diagnostic = with_public_bool(diagnostic, "finite", time_scale.is_finite());
+            diagnostics.push(with_public_bool(
+                diagnostic,
+                "non_negative",
+                time_scale >= 0.0,
+            ));
         }
         if let Some(seconds) = self.max_delta_seconds {
             validate_duration_seconds(diagnostics, &format!("{prefix}.max_delta_seconds"), seconds);
@@ -403,39 +409,37 @@ impl ProjectWindowPatch {
             .as_ref()
             .is_some_and(|title| title.trim().is_empty())
         {
-            diagnostics.push(
-                Diagnostic::error("project.window.empty-title", "window.title cannot be empty")
-                    .with_field_path(format!("{prefix}.title")),
-            );
+            diagnostics.push(with_field_path(
+                error("project.window.empty-title", "Window title cannot be empty"),
+                &format!("{prefix}.title"),
+            ));
         }
         if matches!(self.width, Some(0)) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.window.invalid-width",
-                    "window.width must be greater than zero",
-                )
-                .with_field_path(format!("{prefix}.width")),
+            let diagnostic = error(
+                "project.window.invalid-width",
+                "Window width must be greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.width"));
+            diagnostics.push(with_public_u64(diagnostic, "actual", 0));
         }
         if matches!(self.height, Some(0)) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.window.invalid-height",
-                    "window.height must be greater than zero",
-                )
-                .with_field_path(format!("{prefix}.height")),
+            let diagnostic = error(
+                "project.window.invalid-height",
+                "Window height must be greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.height"));
+            diagnostics.push(with_public_u64(diagnostic, "actual", 0));
         }
         if let Some(scale_factor) = self.scale_factor
             && (!scale_factor.is_finite() || scale_factor <= 0.0)
         {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.window.invalid-scale-factor",
-                    "window.scale_factor must be finite and greater than zero",
-                )
-                .with_field_path(format!("{prefix}.scale_factor")),
+            let diagnostic = error(
+                "project.window.invalid-scale-factor",
+                "Window scale factor must be finite and greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.scale_factor"));
+            let diagnostic = with_public_bool(diagnostic, "finite", scale_factor.is_finite());
+            diagnostics.push(with_public_bool(diagnostic, "positive", scale_factor > 0.0));
         }
     }
 
@@ -482,13 +486,13 @@ impl ProjectInputPatch {
             validate_path_field(diagnostics, &format!("{prefix}.action_map"), action_map);
         }
         if self.clear_action_map && self.action_map.is_some() {
-            diagnostics.push(
-                Diagnostic::error(
+            diagnostics.push(with_field_path(
+                error(
                     "project.input.conflicting-action-map-patch",
-                    "input patch cannot both clear and set action_map",
-                )
-                .with_field_path(format!("{prefix}.action_map")),
-            );
+                    "Input patch cannot both clear and set the action map",
+                ),
+                &format!("{prefix}.action_map"),
+            ));
         }
     }
 
@@ -516,44 +520,53 @@ pub struct ProjectDiagnosticsPatch {
 impl ProjectDiagnosticsPatch {
     fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
         if matches!(self.runtime_capacity, Some(0)) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.diagnostics.invalid-runtime-capacity",
-                    "diagnostics.runtime_capacity must be greater than zero",
-                )
-                .with_field_path(format!("{prefix}.runtime_capacity")),
+            let diagnostic = error(
+                "project.diagnostics.invalid-runtime-capacity",
+                "Runtime diagnostic capacity must be greater than zero",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.runtime_capacity"));
+            diagnostics.push(with_public_u64(diagnostic, "actual", 0));
         }
         if let Some(capacity) = self.runtime_capacity
-            && capacity > MAX_RUNTIME_DIAGNOSTICS_CAPACITY
+            && capacity > MAX_RUNTIME_DIAGNOSTIC_ENTRIES
         {
-            diagnostics.push(
-                Diagnostic::error(
-                    "project.diagnostics.runtime-capacity-too-large",
-                    format!(
-                        "diagnostics.runtime_capacity must be <= {MAX_RUNTIME_DIAGNOSTICS_CAPACITY}"
-                    ),
-                )
-                .with_field_path(format!("{prefix}.runtime_capacity")),
+            let diagnostic = error(
+                "project.diagnostics.runtime-capacity-too-large",
+                "Runtime diagnostic capacity exceeds its hard limit",
             );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.runtime_capacity"));
+            let diagnostic = with_public_u64(
+                diagnostic,
+                "actual",
+                u64::try_from(capacity).unwrap_or(u64::MAX),
+            );
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "limit",
+                u64::try_from(MAX_RUNTIME_DIAGNOSTIC_ENTRIES).unwrap_or(u64::MAX),
+            ));
         }
     }
 
-    fn apply_to(&self, diagnostics: &mut EffectiveDiagnosticsSettings) {
+    fn apply_to(
+        &self,
+        diagnostics: &mut EffectiveDiagnosticsSettings,
+    ) -> Result<(), ProjectProfileError> {
         if let Some(capacity) = self.runtime_capacity {
-            diagnostics.runtime = RuntimeDiagnosticsSettings { capacity };
+            diagnostics.runtime = runtime_diagnostics_settings(capacity)?;
         }
+        Ok(())
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq)]
+#[derive(Error, Clone, PartialEq)]
 pub enum ProjectProfileError {
     #[error("project manifest is invalid")]
-    InvalidManifest { diagnostics: DiagnosticReport },
-    #[error("unknown project profile '{profile}'")]
+    InvalidManifest { diagnostics: Box<DiagnosticReport> },
+    #[error("unknown project profile")]
     UnknownProfile {
         profile: String,
-        diagnostics: DiagnosticReport,
+        diagnostics: Box<DiagnosticReport>,
     },
     #[error("invalid project path: {0}")]
     InvalidProjectPath(ProjectPathError),
@@ -565,4 +578,49 @@ pub enum ProjectProfileError {
     InvalidTaskLimit { field: &'static str },
     #[error("invalid task settings: {0}")]
     InvalidTaskSettings(TaskConfigError),
+    #[error("diagnostic capacity must be non-zero and representable")]
+    InvalidDiagnosticCapacity,
+    #[error("invalid diagnostic settings: {0}")]
+    InvalidDiagnosticSettings(DiagnosticSettingsError),
+}
+
+impl fmt::Debug for ProjectProfileError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidManifest { diagnostics } => formatter
+                .debug_struct("InvalidManifest")
+                .field("diagnostics", diagnostics)
+                .finish(),
+            Self::UnknownProfile { diagnostics, .. } => formatter
+                .debug_struct("UnknownProfile")
+                .field("profile", &"[REDACTED]")
+                .field("diagnostics", diagnostics)
+                .finish(),
+            Self::InvalidProjectPath(error) => formatter
+                .debug_tuple("InvalidProjectPath")
+                .field(error)
+                .finish(),
+            Self::InvalidRuntimeDuration { field } => formatter
+                .debug_struct("InvalidRuntimeDuration")
+                .field("field", field)
+                .finish(),
+            Self::InvalidRuntimeSettings(error) => formatter
+                .debug_tuple("InvalidRuntimeSettings")
+                .field(error)
+                .finish(),
+            Self::InvalidTaskLimit { field } => formatter
+                .debug_struct("InvalidTaskLimit")
+                .field("field", field)
+                .finish(),
+            Self::InvalidTaskSettings(error) => formatter
+                .debug_tuple("InvalidTaskSettings")
+                .field(error)
+                .finish(),
+            Self::InvalidDiagnosticCapacity => formatter.write_str("InvalidDiagnosticCapacity"),
+            Self::InvalidDiagnosticSettings(error) => formatter
+                .debug_tuple("InvalidDiagnosticSettings")
+                .field(error)
+                .finish(),
+        }
+    }
 }

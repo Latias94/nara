@@ -1,6 +1,8 @@
 use super::*;
 use nara_app::{FixedCatchUpPolicy, FixedTime};
-use nara_diagnostic::MAX_RUNTIME_DIAGNOSTICS_CAPACITY;
+use nara_diagnostic::{
+    Diagnostic, DiagnosticFieldClass, DiagnosticValueRef, MAX_RUNTIME_DIAGNOSTIC_ENTRIES,
+};
 use nara_tasks::{
     MAX_TASK_POOL_PENDING_PER_KIND, MAX_TASK_POOL_PENDING_TOTAL, MAX_TASK_POOL_THREADS_PER_KIND,
     MAX_TASK_POOL_THREADS_TOTAL, MAX_TASK_SHUTDOWN_PHASE_TIMEOUT, TaskPoolKind,
@@ -17,10 +19,28 @@ const COMPLETE_MANIFEST: &str = include_str!("../tests/fixtures/complete_v1.toml
 
 fn diagnostic_codes(load: &ProjectManifestLoad) -> Vec<&str> {
     load.diagnostics
-        .diagnostics()
         .iter()
-        .map(|diagnostic| diagnostic.code.as_str())
+        .map(|diagnostic| diagnostic.code().as_str())
         .collect()
+}
+
+fn diagnostic_identifier<'a>(diagnostic: &'a Diagnostic, key: &str) -> Option<&'a str> {
+    diagnostic
+        .fields()
+        .iter()
+        .find(|field| field.key().as_str() == key)
+        .and_then(|field| match field.value() {
+            DiagnosticValueRef::Identifier(value) => Some(value),
+            _ => None,
+        })
+}
+
+fn diagnostic_field_class(diagnostic: &Diagnostic, key: &str) -> Option<DiagnosticFieldClass> {
+    diagnostic
+        .fields()
+        .iter()
+        .find(|field| field.key().as_str() == key)
+        .map(|field| field.class())
 }
 
 #[test]
@@ -53,7 +73,7 @@ fn minimal_manifest_parses_and_resolves_validated_defaults() {
 #[test]
 fn complete_v1_fixture_lowers_every_runtime_and_task_field() {
     let load = ProjectManifest::parse_toml_str(COMPLETE_MANIFEST);
-    assert!(!load.has_errors(), "{:?}", load.diagnostics.diagnostics());
+    assert!(!load.has_errors(), "{:?}", load.diagnostics);
     let settings = load.manifest.unwrap().resolve_profile(None).unwrap();
 
     assert_eq!(settings.plugin_plan, ProjectPluginPlan::Runtime2d);
@@ -102,9 +122,40 @@ name = "Bad"
     assert!(load.manifest.is_none());
     assert!(load.has_errors());
     assert_eq!(
-        load.diagnostics.diagnostics()[0].code.as_str(),
+        load.diagnostics.iter().next().unwrap().code().as_str(),
         "project.manifest.parse"
     );
+}
+
+#[test]
+fn parse_diagnostics_redact_manifest_content_and_keep_numeric_location() {
+    let canary = "Bearer project-parse-canary";
+    let source = format!(
+        r#"
+schema_version = 1
+unexpected = "{canary}"
+
+[project]
+name = "Private Project"
+"#
+    );
+
+    let load = ProjectManifest::parse_toml_str(&source);
+    let diagnostic = load.diagnostics.iter().next().unwrap();
+    let rendered = format!("{load:?}");
+
+    assert_eq!(diagnostic.code().as_str(), "project.manifest.parse");
+    assert_eq!(
+        diagnostic_field_class(diagnostic, "manifest_content"),
+        Some(DiagnosticFieldClass::Secret)
+    );
+    assert!(diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == "line" && matches!(field.value(), DiagnosticValueRef::Unsigned(_))
+    }));
+    assert!(diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == "column" && matches!(field.value(), DiagnosticValueRef::Unsigned(_))
+    }));
+    assert!(!rendered.contains(canary));
 }
 
 #[test]
@@ -122,11 +173,104 @@ assets = "../assets"
     );
 
     assert!(load.has_errors());
-    let diagnostics = load.diagnostics.diagnostics();
+    let diagnostics = &load.diagnostics;
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "project.path.invalid"
-            && diagnostic.context.field_path.as_deref() == Some("paths.assets")
+        diagnostic.code().as_str() == "project.path.invalid"
+            && diagnostic_identifier(diagnostic, "field") == Some("paths.assets")
     }));
+}
+
+#[test]
+fn invalid_project_path_diagnostic_never_retains_the_raw_path() {
+    let raw_path = "C:/private/password-vault/assets";
+    let load = ProjectManifest::parse_toml_str(&format!(
+        r#"
+schema_version = 1
+
+[project]
+name = "Private Paths"
+
+[paths]
+assets = "{raw_path}"
+"#
+    ));
+    let diagnostic = load
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "project.path.invalid")
+        .unwrap();
+
+    assert_eq!(
+        diagnostic_field_class(diagnostic, "path"),
+        Some(DiagnosticFieldClass::Sensitive)
+    );
+    let rendered = format!("{load:?}");
+    assert!(rendered.contains("manifest_present: true"));
+    assert!(!rendered.contains(raw_path));
+}
+
+#[test]
+fn invalid_profile_name_is_redacted_before_overlay_field_paths_are_built() {
+    let profile_canary = "credential/profile-canary";
+    let load = ProjectManifest::parse_toml_str(&format!(
+        r#"
+schema_version = 1
+
+[project]
+name = "Private Profile"
+
+[profiles."{profile_canary}".window]
+width = 0
+"#
+    ));
+    let invalid_name = load
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "project.profile.invalid-name")
+        .unwrap();
+    let invalid_width = load
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "project.window.invalid-width")
+        .unwrap();
+
+    assert_eq!(
+        diagnostic_field_class(invalid_name, "profile"),
+        Some(DiagnosticFieldClass::Sensitive)
+    );
+    assert_eq!(
+        diagnostic_identifier(invalid_width, "field"),
+        Some("profiles.redacted.window.width")
+    );
+    assert!(!format!("{:?}", load.diagnostics).contains(profile_canary));
+}
+
+#[test]
+fn diagnostic_identity_limits_do_not_reject_domain_valid_profile_names() {
+    let profile_name = "a".repeat(128);
+    let load = ProjectManifest::parse_toml_str(&format!(
+        r#"
+schema_version = 1
+
+[project]
+name = "Long Profile"
+
+[profiles."{profile_name}".window]
+width = 0
+"#
+    ));
+    let codes = diagnostic_codes(&load);
+    let invalid_width = load
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "project.window.invalid-width")
+        .unwrap();
+
+    assert!(!codes.contains(&"project.profile.invalid-name"));
+    assert_eq!(
+        diagnostic_field_class(invalid_width, "field"),
+        Some(DiagnosticFieldClass::Sensitive)
+    );
 }
 
 #[test]
@@ -195,13 +339,14 @@ max_fixed_steps_per_frame = {too_many_steps}
 max_fixed_debt_steps = {too_much_debt}
 "#
     ));
-    assert!(base.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "project.runtime.max-fixed-steps-too-large"
-            && diagnostic.context.field_path.as_deref() == Some("runtime.max_fixed_steps_per_frame")
+    assert!(base.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.runtime.max-fixed-steps-too-large"
+            && diagnostic_identifier(diagnostic, "field")
+                == Some("runtime.max_fixed_steps_per_frame")
     }));
-    assert!(base.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "project.runtime.max-fixed-debt-too-large"
-            && diagnostic.context.field_path.as_deref() == Some("runtime.max_fixed_debt_steps")
+    assert!(base.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.runtime.max-fixed-debt-too-large"
+            && diagnostic_identifier(diagnostic, "field") == Some("runtime.max_fixed_debt_steps")
     }));
 
     let profile = ProjectManifest::parse_toml_str(&format!(
@@ -216,14 +361,14 @@ max_fixed_steps_per_frame = {too_many_steps}
 max_fixed_debt_steps = {too_much_debt}
 "#
     ));
-    assert!(profile.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "project.runtime.max-fixed-steps-too-large"
-            && diagnostic.context.field_path.as_deref()
+    assert!(profile.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.runtime.max-fixed-steps-too-large"
+            && diagnostic_identifier(diagnostic, "field")
                 == Some("profiles.dev.runtime.max_fixed_steps_per_frame")
     }));
-    assert!(profile.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "project.runtime.max-fixed-debt-too-large"
-            && diagnostic.context.field_path.as_deref()
+    assert!(profile.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.runtime.max-fixed-debt-too-large"
+            && diagnostic_identifier(diagnostic, "field")
                 == Some("profiles.dev.runtime.max_fixed_debt_steps")
     }));
 
@@ -239,11 +384,7 @@ max_fixed_steps_per_frame = {MAX_PROJECT_FIXED_STEPS_PER_FRAME}
 max_fixed_debt_steps = {MAX_PROJECT_FIXED_DEBT_STEPS}
 "#
     ));
-    assert!(
-        !boundary.has_errors(),
-        "{:?}",
-        boundary.diagnostics.diagnostics()
-    );
+    assert!(!boundary.has_errors(), "{:?}", boundary.diagnostics);
     let settings = boundary.manifest.unwrap().resolve_profile(None).unwrap();
     assert_eq!(
         settings.runtime.fixed_time().max_steps_per_frame(),
@@ -402,7 +543,7 @@ action_map = "input/dev.actions.ron"
 runtime_capacity = 32
 "#,
     );
-    assert!(!load.has_errors(), "{:?}", load.diagnostics.diagnostics());
+    assert!(!load.has_errors(), "{:?}", load.diagnostics);
     let settings = load.manifest.unwrap().resolve_profile(Some("dev")).unwrap();
 
     assert_eq!(settings.plugin_plan, ProjectPluginPlan::HeadlessRuntime);
@@ -428,7 +569,8 @@ runtime_capacity = 32
         settings.input.action_map.as_ref().unwrap().as_str(),
         "input/dev.actions.ron"
     );
-    assert_eq!(settings.diagnostics.runtime.capacity, 32);
+    assert_eq!(settings.diagnostics.runtime.entry_limit().get(), 32);
+    assert_eq!(settings.diagnostics.runtime.byte_limit().get(), 1024 * 1024);
 
     let task_config = settings.tasks.pool_config;
     for (kind, workers, pending) in [
@@ -686,7 +828,7 @@ name = "Oversized Diagnostics"
 [diagnostics]
 runtime_capacity = {}
 "#,
-        MAX_RUNTIME_DIAGNOSTICS_CAPACITY + 1
+        MAX_RUNTIME_DIAGNOSTIC_ENTRIES + 1
     ));
 
     assert!(diagnostic_codes(&load).contains(&"project.diagnostics.runtime-capacity-too-large"));
@@ -711,9 +853,9 @@ enabled = true
     );
 
     assert!(load.has_errors());
-    assert!(load.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "project.window.invalid-width"
-            && diagnostic.context.field_path.as_deref() == Some("window.width")
+    assert!(load.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.window.invalid-width"
+            && diagnostic_identifier(diagnostic, "field") == Some("window.width")
     }));
 }
 
@@ -733,10 +875,34 @@ fn resolving_unknown_profile_returns_diagnostic_error() {
         panic!("expected unknown profile error");
     };
     assert_eq!(profile, "missing");
+    let diagnostic = diagnostics.iter().next().unwrap();
+    assert_eq!(diagnostic.code().as_str(), "project.profile.unknown");
     assert_eq!(
-        diagnostics.diagnostics()[0].code.as_str(),
-        "project.profile.unknown"
+        diagnostic_identifier(diagnostic, "profile"),
+        Some("missing")
     );
+    assert_eq!(
+        diagnostic_identifier(diagnostic, "field"),
+        Some("profiles.missing")
+    );
+}
+
+#[test]
+fn unknown_profile_error_debug_redacts_sensitive_profile_name() {
+    let manifest = ProjectManifest::parse_toml_str(MINIMAL_MANIFEST)
+        .manifest
+        .unwrap();
+    let profile_canary = "credential://private-profile-canary";
+    let error = manifest.resolve_profile(Some(profile_canary)).unwrap_err();
+
+    let ProjectProfileError::UnknownProfile { profile, .. } = &error else {
+        panic!("expected unknown profile error");
+    };
+    assert_eq!(profile, profile_canary);
+    assert_eq!(error.to_string(), "unknown project profile");
+    let rendered = format!("{error:?}");
+    assert!(rendered.contains("[REDACTED]"));
+    assert!(!rendered.contains(profile_canary));
 }
 
 #[test]
@@ -757,9 +923,34 @@ fn file_loader_enforces_manifest_size_budget() {
 
     assert!(load.manifest.is_none());
     assert_eq!(
-        load.diagnostics.diagnostics()[0].code.as_str(),
+        load.diagnostics.iter().next().unwrap().code().as_str(),
         "project.manifest.too-large"
     );
 
     fs::remove_dir_all(&temp_root).unwrap();
+}
+
+#[test]
+fn file_loader_diagnostic_redacts_native_manifest_path() {
+    let missing_path = std::env::temp_dir()
+        .join(format!(
+            "nara_password_path_canary_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+        .join("nara.toml");
+
+    let load = ProjectManifest::parse_toml_file(&missing_path);
+    let diagnostic = load.diagnostics.iter().next().unwrap();
+
+    assert_eq!(diagnostic.code().as_str(), "project.manifest.read");
+    assert_eq!(
+        diagnostic_field_class(diagnostic, "manifest_path"),
+        Some(DiagnosticFieldClass::Sensitive)
+    );
+    let path_text = missing_path.to_string_lossy();
+    assert!(!format!("{:?}", load.diagnostics).contains(path_text.as_ref()));
 }

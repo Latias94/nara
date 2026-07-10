@@ -2,11 +2,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentMigrationError, ComponentRegistry,
+    ComponentDecodeContext, ComponentMigrationError, ComponentRegistry, ComponentTypeId,
     PreparedComponent,
 };
 
-use crate::{SceneDocument, SceneEntityId, SceneEntityRecord, document::validate_scene_entity_id};
+use crate::{
+    SceneDocument, SceneEntityId, SceneEntityRecord,
+    diagnostics::{
+        error as diagnostic_error, push_with_operation_index, with_asset_ref, with_codec_error,
+        with_migration_error, with_public_locator, with_public_u64,
+    },
+    document::validate_scene_entity_id,
+};
 
 pub(crate) struct PreparedScene {
     pub(crate) entities: Vec<PreparedSceneEntity>,
@@ -16,7 +23,12 @@ pub(crate) struct PreparedScene {
 pub(crate) struct PreparedSceneEntity {
     pub(crate) id: SceneEntityId,
     pub(crate) parent: Option<SceneEntityId>,
-    pub(crate) components: Vec<PreparedComponent>,
+    pub(crate) components: Vec<PreparedSceneComponent>,
+}
+
+pub(crate) struct PreparedSceneComponent {
+    pub(crate) id: ComponentTypeId,
+    pub(crate) prepared: PreparedComponent,
 }
 
 pub(crate) fn preflight_scene(
@@ -35,12 +47,27 @@ pub(crate) fn preflight_authoring_scene(
     preflight_authoring_scene_with_context(document, registry, &mut context)
 }
 
+pub(crate) fn preflight_authoring_scene_for_patch(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    operation_index: usize,
+) -> PreparedScene {
+    let mut context = ComponentDecodeContext::new();
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        &mut context,
+        true,
+        Some(operation_index),
+    )
+}
+
 pub(crate) fn preflight_scene_with_context(
     document: &SceneDocument,
     registry: &ComponentRegistry,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
-    preflight_scene_with_context_options(document, registry, context, false)
+    preflight_scene_with_context_options(document, registry, context, false, None)
 }
 
 pub(crate) fn preflight_authoring_scene_with_context(
@@ -48,7 +75,16 @@ pub(crate) fn preflight_authoring_scene_with_context(
     registry: &ComponentRegistry,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
-    preflight_scene_with_context_options(document, registry, context, true)
+    preflight_scene_with_context_options(document, registry, context, true, None)
+}
+
+pub(crate) fn preflight_authoring_scene_with_context_for_patch(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    context: &mut ComponentDecodeContext<'_>,
+    operation_index: usize,
+) -> PreparedScene {
+    preflight_scene_with_context_options(document, registry, context, true, Some(operation_index))
 }
 
 fn preflight_scene_with_context_options(
@@ -56,33 +92,52 @@ fn preflight_scene_with_context_options(
     registry: &ComponentRegistry,
     context: &mut ComponentDecodeContext<'_>,
     allow_prefab_instances: bool,
+    operation_index: Option<usize>,
 ) -> PreparedScene {
     let mut diagnostics = DiagnosticReport::default();
     let mut seen = BTreeSet::<SceneEntityId>::new();
     let mut ids = BTreeSet::<SceneEntityId>::new();
 
     if document.format_version != SceneDocument::CURRENT_FORMAT_VERSION {
-        diagnostics.push(Diagnostic::error(
-            "scene.unsupported-format-version",
-            format!(
-                "scene format version {} is unsupported; expected {}",
-                document.format_version,
-                SceneDocument::CURRENT_FORMAT_VERSION
+        push_with_operation_index(
+            &mut diagnostics,
+            with_public_u64(
+                with_public_u64(
+                    diagnostic_error(
+                        "scene.unsupported-format-version",
+                        "Scene format version is unsupported",
+                    ),
+                    "actual-version",
+                    u64::from(document.format_version),
+                ),
+                "expected-version",
+                u64::from(SceneDocument::CURRENT_FORMAT_VERSION),
             ),
-        ));
+            operation_index,
+        );
     }
 
     for entity in &document.entities {
-        if let Err(error) = validate_scene_entity_id(entity.id.as_str()) {
-            diagnostics.push(
-                Diagnostic::error("scene.invalid-entity-id", error.to_string())
-                    .with_entity_id(entity.id.as_str()),
+        if validate_scene_entity_id(entity.id.as_str()).is_err() {
+            push_with_operation_index(
+                &mut diagnostics,
+                with_public_locator(
+                    diagnostic_error("scene.invalid-entity-id", "Scene entity ID is invalid"),
+                    "entity-id",
+                    entity.id.as_str(),
+                ),
+                operation_index,
             );
         }
         if !seen.insert(entity.id.clone()) {
-            diagnostics.push(
-                Diagnostic::error("scene.duplicate-entity-id", "duplicate scene entity id")
-                    .with_entity_id(entity.id.as_str()),
+            push_with_operation_index(
+                &mut diagnostics,
+                with_public_locator(
+                    diagnostic_error("scene.duplicate-entity-id", "Scene entity ID is duplicated"),
+                    "entity-id",
+                    entity.id.as_str(),
+                ),
+                operation_index,
             );
         }
         ids.insert(entity.id.clone());
@@ -90,60 +145,106 @@ fn preflight_scene_with_context_options(
 
     for entity in &document.entities {
         if let Some(parent) = &entity.parent {
-            if let Err(error) = validate_scene_entity_id(parent.as_str()) {
-                diagnostics.push(
-                    Diagnostic::error("scene.invalid-parent-id", error.to_string())
-                        .with_entity_id(entity.id.as_str())
-                        .with_field_path("parent"),
+            if validate_scene_entity_id(parent.as_str()).is_err() {
+                push_with_operation_index(
+                    &mut diagnostics,
+                    with_public_locator(
+                        with_public_locator(
+                            diagnostic_error(
+                                "scene.invalid-parent-id",
+                                "Scene parent ID is invalid",
+                            ),
+                            "entity-id",
+                            entity.id.as_str(),
+                        ),
+                        "field-path",
+                        "parent",
+                    ),
+                    operation_index,
                 );
             }
             if !ids.contains(parent) {
-                diagnostics.push(
-                    Diagnostic::error("scene.missing-parent", "parent entity id does not exist")
-                        .with_entity_id(entity.id.as_str()),
+                push_with_operation_index(
+                    &mut diagnostics,
+                    with_public_locator(
+                        diagnostic_error(
+                            "scene.missing-parent",
+                            "Scene parent entity does not exist",
+                        ),
+                        "entity-id",
+                        entity.id.as_str(),
+                    ),
+                    operation_index,
                 );
             }
         }
         if let Some(prefab) = &entity.prefab
             && !allow_prefab_instances
         {
-            diagnostics.push(
-                Diagnostic::error(
-                    "scene.prefab-instance-unsupported",
-                    "prefab instances must be expanded with a PrefabSourceResolver before scene spawn",
-                )
-                .with_entity_id(entity.id.as_str())
-                .with_field_path("prefab.source")
-                .with_asset_ref(prefab.source.to_string()),
+            push_with_operation_index(
+                &mut diagnostics,
+                with_asset_ref(
+                    with_public_locator(
+                        with_public_locator(
+                            diagnostic_error(
+                                "scene.prefab-instance-unsupported",
+                                "Prefab instances require expansion before scene spawn",
+                            ),
+                            "entity-id",
+                            entity.id.as_str(),
+                        ),
+                        "field-path",
+                        "prefab.source",
+                    ),
+                    "asset-ref",
+                    &prefab.source,
+                ),
+                operation_index,
             );
         }
     }
 
-    detect_parent_cycles(document, &mut diagnostics);
+    detect_parent_cycles(document, &mut diagnostics, operation_index);
 
     let mut prepared_entities = Vec::new();
     for entity in sorted_entities(document) {
         let mut prepared_components = Vec::new();
         for (component_id, component) in &entity.components {
             let Some(schema) = registry.schema(component_id) else {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "scene.unknown-component",
-                        "component type is not registered",
-                    )
-                    .with_entity_id(entity.id.as_str())
-                    .with_component_id(component_id.as_str()),
+                push_with_operation_index(
+                    &mut diagnostics,
+                    with_public_locator(
+                        with_public_locator(
+                            diagnostic_error(
+                                "scene.unknown-component",
+                                "Component type is not registered",
+                            ),
+                            "entity-id",
+                            entity.id.as_str(),
+                        ),
+                        "component-id",
+                        component_id.as_str(),
+                    ),
+                    operation_index,
                 );
                 continue;
             };
             if !schema.has_capability(nara_reflect::ComponentCapability::Scene) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "scene.component-not-scene-capable",
-                        "component is registered but not scene-capable",
-                    )
-                    .with_entity_id(entity.id.as_str())
-                    .with_component_id(component_id.as_str()),
+                push_with_operation_index(
+                    &mut diagnostics,
+                    with_public_locator(
+                        with_public_locator(
+                            diagnostic_error(
+                                "scene.component-not-scene-capable",
+                                "Component is not scene-capable",
+                            ),
+                            "entity-id",
+                            entity.id.as_str(),
+                        ),
+                        "component-id",
+                        component_id.as_str(),
+                    ),
+                    operation_index,
                 );
                 continue;
             }
@@ -154,50 +255,74 @@ fn preflight_scene_with_context_options(
             ) {
                 Ok(migrated) => migrated,
                 Err(error) => {
-                    diagnostics.push(component_migration_diagnostic(
-                        entity.id.as_str(),
-                        component_id.as_str(),
-                        &error,
-                    ));
+                    push_with_operation_index(
+                        &mut diagnostics,
+                        component_migration_diagnostic(
+                            entity.id.as_str(),
+                            component_id.as_str(),
+                            &error,
+                        ),
+                        operation_index,
+                    );
                     continue;
                 }
             };
             if migrated.version != schema.version {
-                diagnostics.push(component_migration_diagnostic(
-                    entity.id.as_str(),
-                    component_id.as_str(),
-                    &ComponentMigrationError::UnsupportedVersion {
-                        component_id: component_id.clone(),
-                        from_version: migrated.version,
-                        target_version: schema.version,
-                    },
-                ));
+                push_with_operation_index(
+                    &mut diagnostics,
+                    component_migration_diagnostic(
+                        entity.id.as_str(),
+                        component_id.as_str(),
+                        &ComponentMigrationError::UnsupportedVersion {
+                            component_id: component_id.clone(),
+                            from_version: migrated.version,
+                            target_version: schema.version,
+                        },
+                    ),
+                    operation_index,
+                );
                 continue;
             }
 
             match registry.preflight_component_with_context(component_id, &migrated.value, context)
             {
-                Some(Ok(prepared)) => prepared_components.push(prepared),
+                Some(Ok(prepared)) => prepared_components.push(PreparedSceneComponent {
+                    id: component_id.clone(),
+                    prepared,
+                }),
                 Some(Err(error)) => {
-                    let mut diagnostic =
-                        Diagnostic::error("scene.invalid-component-payload", error.to_string())
-                            .with_entity_id(entity.id.as_str())
-                            .with_component_id(component_id.as_str());
-                    if let Some(field_path) = codec_error_field_path(&error) {
-                        diagnostic = diagnostic.with_field_path(field_path);
-                    }
-                    if let Some(asset_ref) = codec_error_asset_ref(&error) {
-                        diagnostic = diagnostic.with_asset_ref(asset_ref);
-                    }
-                    diagnostics.push(diagnostic);
+                    let diagnostic = with_codec_error(
+                        with_public_locator(
+                            with_public_locator(
+                                diagnostic_error(
+                                    "scene.invalid-component-payload",
+                                    "Component payload is invalid",
+                                ),
+                                "entity-id",
+                                entity.id.as_str(),
+                            ),
+                            "component-id",
+                            component_id.as_str(),
+                        ),
+                        &error,
+                    );
+                    push_with_operation_index(&mut diagnostics, diagnostic, operation_index);
                 }
-                None => diagnostics.push(
-                    Diagnostic::error(
-                        "scene.missing-component-codec",
-                        "component has no scene codec",
-                    )
-                    .with_entity_id(entity.id.as_str())
-                    .with_component_id(component_id.as_str()),
+                None => push_with_operation_index(
+                    &mut diagnostics,
+                    with_public_locator(
+                        with_public_locator(
+                            diagnostic_error(
+                                "scene.missing-component-codec",
+                                "Component has no scene codec",
+                            ),
+                            "entity-id",
+                            entity.id.as_str(),
+                        ),
+                        "component-id",
+                        component_id.as_str(),
+                    ),
+                    operation_index,
                 ),
             }
         }
@@ -221,45 +346,38 @@ fn component_migration_diagnostic(
     error: &ComponentMigrationError,
 ) -> Diagnostic {
     match error {
-        ComponentMigrationError::MigrationFailed { error, .. } => {
-            let mut diagnostic =
-                Diagnostic::error("scene.component-migration-failed", error.to_string())
-                    .with_entity_id(entity_id)
-                    .with_component_id(component_id);
-            if let Some(field_path) = codec_error_field_path(error) {
-                diagnostic = diagnostic.with_field_path(field_path);
-            }
-            if let Some(asset_ref) = codec_error_asset_ref(error) {
-                diagnostic = diagnostic.with_asset_ref(asset_ref);
-            }
-            diagnostic
-        }
+        ComponentMigrationError::MigrationFailed { .. } => with_migration_error(
+            with_public_locator(
+                with_public_locator(
+                    diagnostic_error(
+                        "scene.component-migration-failed",
+                        "Component migration failed",
+                    ),
+                    "entity-id",
+                    entity_id,
+                ),
+                "component-id",
+                component_id,
+            ),
+            error,
+        ),
         ComponentMigrationError::UnknownComponentId { .. }
         | ComponentMigrationError::UnsupportedVersion { .. }
-        | ComponentMigrationError::MissingMigration { .. } => {
-            Diagnostic::error("scene.unsupported-component-version", error.to_string())
-                .with_entity_id(entity_id)
-                .with_component_id(component_id)
-        }
-    }
-}
-
-fn codec_error_field_path(error: &ComponentCodecError) -> Option<&str> {
-    match error {
-        ComponentCodecError::MissingField { field }
-        | ComponentCodecError::InvalidField { field, .. }
-        | ComponentCodecError::InvalidAssetRef { field, .. } => Some(field.as_str()),
-        ComponentCodecError::EntityMissing | ComponentCodecError::Message(_) => None,
-    }
-}
-
-fn codec_error_asset_ref(error: &ComponentCodecError) -> Option<&str> {
-    match error {
-        ComponentCodecError::InvalidAssetRef { asset_ref, .. } => Some(asset_ref.as_str()),
-        ComponentCodecError::MissingField { .. }
-        | ComponentCodecError::InvalidField { .. }
-        | ComponentCodecError::EntityMissing
-        | ComponentCodecError::Message(_) => None,
+        | ComponentMigrationError::MissingMigration { .. } => with_migration_error(
+            with_public_locator(
+                with_public_locator(
+                    diagnostic_error(
+                        "scene.unsupported-component-version",
+                        "Component version is unsupported",
+                    ),
+                    "entity-id",
+                    entity_id,
+                ),
+                "component-id",
+                component_id,
+            ),
+            error,
+        ),
     }
 }
 
@@ -269,7 +387,11 @@ fn sorted_entities(document: &SceneDocument) -> Vec<&SceneEntityRecord> {
     entities
 }
 
-fn detect_parent_cycles(document: &SceneDocument, diagnostics: &mut DiagnosticReport) {
+fn detect_parent_cycles(
+    document: &SceneDocument,
+    diagnostics: &mut DiagnosticReport,
+    operation_index: Option<usize>,
+) {
     let parents = document
         .entities
         .iter()
@@ -281,12 +403,17 @@ fn detect_parent_cycles(document: &SceneDocument, diagnostics: &mut DiagnosticRe
         let mut current = Some(entity.id.clone());
         while let Some(id) = current {
             if !visiting.insert(id.clone()) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "scene.parent-cycle",
-                        "scene hierarchy contains a parent cycle",
-                    )
-                    .with_entity_id(entity.id.as_str()),
+                push_with_operation_index(
+                    diagnostics,
+                    with_public_locator(
+                        diagnostic_error(
+                            "scene.parent-cycle",
+                            "Scene hierarchy contains a parent cycle",
+                        ),
+                        "entity-id",
+                        entity.id.as_str(),
+                    ),
+                    operation_index,
                 );
                 break;
             }

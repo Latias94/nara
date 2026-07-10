@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
 
 use nara_asset::{AssetServer, ProjectAssetDatabase};
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Component, Entity, World};
 use nara_reflect::{ComponentDecodeContext, ComponentRegistry};
 
 use crate::{
     PrefabDocument, PrefabExpansionReport, PrefabSourceResolver, SceneDocument, SceneEntityId,
     ScenePatchDocument,
+    diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     hierarchy::{Parent, sync_children},
     validation::preflight_scene_with_context,
 };
@@ -187,28 +188,44 @@ impl SceneSpawner {
         let mut diagnostics = preflight.diagnostics;
         for entity in preflight.entities {
             let Some(runtime_entity) = entity_map.get(&entity.id) else {
-                diagnostics.push(
-                    Diagnostic::error("scene.internal-missing-entity", "missing spawned entity")
-                        .with_entity_id(entity.id.as_str()),
-                );
+                diagnostics.push(with_public_locator(
+                    diagnostic_error(
+                        "scene.internal-missing-entity",
+                        "Spawned scene entity is missing",
+                    ),
+                    "entity-id",
+                    entity.id.as_str(),
+                ));
                 continue;
             };
 
             for component in entity.components {
-                if let Err(error) = component.apply(world, runtime_entity) {
-                    diagnostics.push(
-                        Diagnostic::error("scene.component-apply-failed", error.to_string())
-                            .with_entity_id(entity.id.as_str()),
-                    );
+                let component_id = component.id;
+                if let Err(error) = component.prepared.apply(world, runtime_entity) {
+                    diagnostics.push(with_codec_error(
+                        with_public_locator(
+                            with_public_locator(
+                                diagnostic_error(
+                                    "scene.component-apply-failed",
+                                    "Component apply failed",
+                                ),
+                                "entity-id",
+                                entity.id.as_str(),
+                            ),
+                            "component-id",
+                            component_id.as_str(),
+                        ),
+                        &error,
+                    ));
                 }
             }
 
-            if let Some(parent_id) = entity.parent {
-                if let Some(parent_entity) = entity_map.get(&parent_id) {
-                    world
-                        .entity_mut(runtime_entity)
-                        .insert(Parent(parent_entity));
-                }
+            if let Some(parent_id) = entity.parent
+                && let Some(parent_entity) = entity_map.get(&parent_id)
+            {
+                world
+                    .entity_mut(runtime_entity)
+                    .insert(Parent(parent_entity));
             }
         }
 

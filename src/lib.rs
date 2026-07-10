@@ -251,6 +251,10 @@ impl PluginGroup for Runtime2dPlugins {
     }
 }
 
+/// Additive desktop window adapters for an app that already has its runtime core.
+///
+/// This group intentionally reports and installs only window/platform plugins. Use
+/// [`add_project_plugin_plan`] for the complete `desktop-window` product plan.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DesktopWindowPlugins;
 
@@ -293,6 +297,10 @@ impl PluginGroup for DesktopWgpuPlugins {
     }
 }
 
+/// Additive editor tooling adapters for an app that already has its runtime core.
+///
+/// This group intentionally reports and installs only tooling plugins. Use
+/// [`add_project_plugin_plan`] for the complete `tooling` product plan.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ToolingPlugins;
 
@@ -310,6 +318,7 @@ impl PluginGroup for ToolingPlugins {
     }
 }
 
+/// Installs a complete product plan, composing the core runtime with any additive adapters.
 pub fn add_project_plugin_plan(
     app: &mut App,
     plan: nara_project::ProjectPluginPlan,
@@ -319,9 +328,15 @@ pub fn add_project_plugin_plan(
         nara_project::ProjectPluginPlan::HeadlessRuntime => app.add_plugins(HeadlessRuntimePlugins),
         nara_project::ProjectPluginPlan::Server => app.add_plugins(ServerPlugins),
         nara_project::ProjectPluginPlan::Runtime2d => app.add_plugins(Runtime2dPlugins),
-        nara_project::ProjectPluginPlan::DesktopWindow => app.add_plugins(DesktopWindowPlugins),
+        nara_project::ProjectPluginPlan::DesktopWindow => {
+            app.add_plugins(MinimalPlugins)?;
+            app.add_plugins(DesktopWindowPlugins)
+        }
         nara_project::ProjectPluginPlan::DesktopWgpu => add_desktop_wgpu_plugin_plan(app),
-        nara_project::ProjectPluginPlan::Tooling => app.add_plugins(ToolingPlugins),
+        nara_project::ProjectPluginPlan::Tooling => {
+            app.add_plugins(MinimalPlugins)?;
+            app.add_plugins(ToolingPlugins)
+        }
     }
 }
 
@@ -339,7 +354,10 @@ pub fn apply_project_settings(
     app.insert_resource(settings)?;
     app.insert_resource(runtime_time)?;
     app.insert_resource(fixed_time)?;
-    app.add_plugin(nara_diagnostic::DiagnosticsPlugin::new(diagnostics))?;
+    app.add_plugin(nara_diagnostic::DiagnosticsPlugin::new(
+        diagnostics,
+        nara_diagnostic::RuntimePressureSettings::default(),
+    ))?;
     app.add_plugin(nara_tasks::TaskPlugin::new(task_config))?;
     add_project_plugin_plan(app, plan)
 }
@@ -378,9 +396,14 @@ pub mod prelude {
     pub use nara_audio::{AudioClip, AudioCommand, AudioSink};
     pub use nara_core::{Color, Vec2, Vec3};
     pub use nara_diagnostic::{
-        Diagnostic, DiagnosticCode, DiagnosticReport, DiagnosticSeverity, DiagnosticsPlugin,
-        RuntimeDiagnosticContext, RuntimeDiagnosticDomain, RuntimeDiagnosticEntry,
-        RuntimeDiagnosticFilter, RuntimeDiagnostics, RuntimeDiagnosticsSettings,
+        Diagnostic, DiagnosticBuildError, DiagnosticCode, DiagnosticDedupePolicy, DiagnosticDomain,
+        DiagnosticField, DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer,
+        DiagnosticReport, DiagnosticReportSettings, DiagnosticSeverity, DiagnosticsPlugin,
+        PressureMeasurement, PressureMetricId, PressureMetricKind, PressureSourceId, PressureUnit,
+        PublicDiagnosticIdentifier, RuntimeDiagnosticDraft, RuntimeDiagnosticEntry,
+        RuntimeDiagnosticFilter, RuntimeDiagnosticRetention, RuntimeDiagnostics,
+        RuntimeDiagnosticsSettings, RuntimePressureSettings, RuntimePressureSnapshotDraft,
+        RuntimePressureSnapshots, SafeDisplayText, SafeSummary,
     };
     pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
     pub use nara_gameplay::{
@@ -574,6 +597,10 @@ mod tests {
             app.world()
                 .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
         );
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
+        );
         assert!(app.world().contains_resource::<nara_asset::AssetServer>());
         assert!(app.world().contains_resource::<nara_input::PointerState>());
         assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
@@ -582,6 +609,93 @@ mod tests {
                 .contains_resource::<nara_sprite_render::SpriteBatches>()
         );
         assert!(!app.world().contains_resource::<nara_ui_render::UiBatches>());
+        assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
+    }
+
+    #[test]
+    fn desktop_window_plugins_remain_an_additive_adapter_group() {
+        let mut app = App::new();
+
+        app.add_plugins(DesktopWindowPlugins).unwrap();
+
+        assert!(app.world().contains_resource::<nara_window::WindowEvents>());
+        assert!(
+            !app.world()
+                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+        );
+        assert!(!app.world().contains_resource::<nara_tasks::TaskPools>());
+        let metadata = app
+            .installed_plugin_groups()
+            .find(|group| group.id == PluginGroupId::new("nara.plugins.desktop-window"))
+            .unwrap();
+        assert_eq!(metadata.plugins, DESKTOP_WINDOW_PLUGIN_IDS);
+        assert!(!metadata.plugins.contains(&DIAGNOSTIC_PLUGIN_ID));
+    }
+
+    #[test]
+    fn tooling_plugins_remain_an_additive_adapter_group() {
+        let mut app = App::new();
+
+        app.add_plugins(ToolingPlugins).unwrap();
+
+        assert!(
+            app.world()
+                .contains_resource::<nara_tooling::EditorWorkspace>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+        );
+        assert!(!app.world().contains_resource::<nara_tasks::TaskPools>());
+        let metadata = app
+            .installed_plugin_groups()
+            .find(|group| group.id == PluginGroupId::new("nara.plugins.tooling"))
+            .unwrap();
+        assert_eq!(metadata.plugins, TOOLING_PLUGIN_IDS);
+        assert!(!metadata.plugins.contains(&DIAGNOSTIC_PLUGIN_ID));
+    }
+
+    #[test]
+    fn desktop_window_project_plan_composes_core_with_additive_window_adapters() {
+        let mut app = App::new();
+
+        add_project_plugin_plan(&mut app, nara_project::ProjectPluginPlan::DesktopWindow).unwrap();
+
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
+        );
+        assert!(app.world().contains_resource::<nara_tasks::TaskPools>());
+        assert!(app.world().contains_resource::<nara_asset::AssetServer>());
+        assert!(app.world().contains_resource::<nara_input::PointerState>());
+        assert!(app.world().contains_resource::<nara_window::WindowEvents>());
+    }
+
+    #[test]
+    fn tooling_project_plan_composes_core_with_additive_tooling_adapters() {
+        let mut app = App::new();
+
+        add_project_plugin_plan(&mut app, nara_project::ProjectPluginPlan::Tooling).unwrap();
+
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
+        );
+        assert!(app.world().contains_resource::<nara_tasks::TaskPools>());
+        assert!(app.world().contains_resource::<nara_asset::AssetServer>());
+        assert!(app.world().contains_resource::<nara_input::PointerState>());
+        assert!(
+            app.world()
+                .contains_resource::<nara_tooling::EditorWorkspace>()
+        );
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
     }
 
@@ -616,6 +730,10 @@ mod tests {
         );
         assert!(
             app.world()
+                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
+        );
+        assert!(
+            app.world()
                 .contains_resource::<nara_gameplay::GameplayCommandQueue>()
         );
         assert!(app.world().contains_resource::<nara_input::PointerState>());
@@ -632,6 +750,10 @@ mod tests {
         assert!(
             app.world()
                 .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
+        );
+        assert!(
+            app.world()
+                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
         );
         assert!(
             app.world()
@@ -843,7 +965,7 @@ cancel_timeout_ms = 20
 join_timeout_ms = 20
 "#,
         );
-        assert!(!load.has_errors(), "{:?}", load.diagnostics.diagnostics());
+        assert!(!load.has_errors(), "{:?}", load.diagnostics);
         let settings = load.manifest.unwrap().resolve_profile(None).unwrap();
         let expected_tasks = settings.tasks.pool_config;
 

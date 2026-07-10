@@ -56,17 +56,19 @@ fn main() {
     );
     let invalid_report = invalid.validate_with_asset_database(&registry, &asset_database);
     let diagnostic = invalid_report
-        .diagnostics()
         .iter()
-        .find(|diagnostic| diagnostic.code.as_str() == "scene.invalid-component-payload")
+        .find(|diagnostic| diagnostic.code().as_str() == "scene.invalid-component-payload")
         .expect("invalid fixture should produce a repairable component diagnostic");
-    assert_eq!(diagnostic.context.entity_id.as_deref(), Some("player"));
     assert_eq!(
-        diagnostic.context.component_id.as_deref(),
+        diagnostic_identifier(diagnostic, "entity-id"),
+        Some("player")
+    );
+    assert_eq!(
+        diagnostic_identifier(diagnostic, "component-id"),
         Some("nara.transform.Transform2d")
     );
     assert_eq!(
-        diagnostic.context.field_path.as_deref(),
+        diagnostic_identifier(diagnostic, "field-path"),
         Some("translation.x")
     );
 
@@ -100,6 +102,17 @@ fn main() {
     assert!(stable_json.contains(PLAYER_TEXTURE_ID));
     assert!(stable_json.contains(TILESET_ID));
     assert!(!stable_json.contains("AssetId"));
+}
+
+fn diagnostic_identifier<'a>(diagnostic: &'a Diagnostic, key: &str) -> Option<&'a str> {
+    diagnostic
+        .fields()
+        .iter()
+        .find(|field| field.key().as_str() == key)
+        .and_then(|field| match field.value() {
+            nara::diagnostic::DiagnosticValueRef::Identifier(value) => Some(value),
+            _ => None,
+        })
 }
 
 fn sample_scene() -> SceneDocument {

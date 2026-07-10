@@ -1,4 +1,5 @@
 use nara::{
+    diagnostic::DiagnosticValueRef,
     prelude::*,
     scene::{ScenePatchDocument, ScenePatchOperation},
 };
@@ -7,6 +8,29 @@ use nara::{
 struct TestPosition {
     x: i32,
     y: Option<i32>,
+}
+
+fn diagnostic_has_field(
+    diagnostic: &Diagnostic,
+    key: &str,
+    class: DiagnosticFieldClass,
+    value: DiagnosticValueRef<'_>,
+) -> bool {
+    diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == key && field.class() == class && field.value() == value
+    })
+}
+
+fn assert_diagnostic_field(
+    diagnostic: &Diagnostic,
+    key: &str,
+    class: DiagnosticFieldClass,
+    value: DiagnosticValueRef<'_>,
+) {
+    assert!(
+        diagnostic_has_field(diagnostic, key, class, value),
+        "missing diagnostic field {key}"
+    );
 }
 
 #[test]
@@ -78,14 +102,31 @@ fn invalid_patch_operation_leaves_document_unchanged_with_operation_context() {
     assert!(!report.applied);
     assert!(report.inverse.is_none());
     assert_eq!(scene, original);
-    let diagnostic = report.diagnostics.diagnostics().first().unwrap();
-    assert_eq!(diagnostic.context.operation_index, Some(1));
-    assert_eq!(diagnostic.context.entity_id.as_deref(), Some("player"));
-    assert_eq!(
-        diagnostic.context.component_id.as_deref(),
-        Some(position_type_id().as_str())
+    let diagnostic = report.diagnostics.iter().next().unwrap();
+    assert_diagnostic_field(
+        diagnostic,
+        "operation-index",
+        DiagnosticFieldClass::Public,
+        DiagnosticValueRef::Unsigned(1),
     );
-    assert_eq!(diagnostic.context.field_path.as_deref(), Some("missing"));
+    assert_diagnostic_field(
+        diagnostic,
+        "entity-id",
+        DiagnosticFieldClass::Public,
+        DiagnosticValueRef::Identifier("player"),
+    );
+    assert_diagnostic_field(
+        diagnostic,
+        "component-id",
+        DiagnosticFieldClass::Public,
+        DiagnosticValueRef::Identifier(position_type_id().as_str()),
+    );
+    assert_diagnostic_field(
+        diagnostic,
+        "field-path",
+        DiagnosticFieldClass::Public,
+        DiagnosticValueRef::Identifier("f_missing"),
+    );
 }
 
 #[test]
@@ -124,8 +165,8 @@ fn unsupported_patch_format_version_fails_before_mutating_document() {
 
     assert!(!report.applied);
     assert_eq!(scene, original);
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.patch-unsupported-format-version"
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-unsupported-format-version"
     }));
 }
 
@@ -148,12 +189,32 @@ fn stale_patch_component_schema_version_fails_before_mutating_document() {
 
     assert!(!report.applied);
     assert_eq!(scene, original);
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.patch-stale-component-schema-version"
-            && diagnostic.context.operation_index == Some(0)
-            && diagnostic.context.entity_id.as_deref() == Some("player")
-            && diagnostic.context.component_id.as_deref() == Some(position_type_id().as_str())
-            && diagnostic.context.field_path.as_deref() == Some("x")
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-stale-component-schema-version"
+            && diagnostic_has_field(
+                diagnostic,
+                "operation-index",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(0),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "entity-id",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("player"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "component-id",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier(position_type_id().as_str()),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "field-path",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("f_x"),
+            )
     }));
 }
 
@@ -176,10 +237,20 @@ fn set_field_without_edit_capability_fails_before_mutating_document() {
 
     assert!(!report.applied);
     assert_eq!(scene, original);
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.patch-field-capability-missing"
-            && diagnostic.context.operation_index == Some(0)
-            && diagnostic.context.field_path.as_deref() == Some("x")
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-field-capability-missing"
+            && diagnostic_has_field(
+                diagnostic,
+                "operation-index",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(0),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "field-path",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("f_x"),
+            )
     }));
 }
 
@@ -232,9 +303,14 @@ fn remove_required_field_fails_before_mutating_document() {
 
     assert!(!report.applied);
     assert_eq!(scene, original);
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.patch-required-field-removal"
-            && diagnostic.context.operation_index == Some(0)
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-required-field-removal"
+            && diagnostic_has_field(
+                diagnostic,
+                "operation-index",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(0),
+            )
     }));
 }
 

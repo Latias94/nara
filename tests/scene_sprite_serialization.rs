@@ -1,8 +1,19 @@
-use nara::advanced_prelude::*;
+use nara::{advanced_prelude::*, diagnostic::DiagnosticValueRef};
 
 const PLAYER_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const TILESET_STABLE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
 const UNKNOWN_STABLE_ID: &str = "4bf6d3ff-f6c6-47fb-9a39-4ab27598094f";
+
+fn diagnostic_has_field(
+    diagnostic: &Diagnostic,
+    key: &str,
+    class: DiagnosticFieldClass,
+    value: DiagnosticValueRef<'_>,
+) -> bool {
+    diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == key && field.class() == class && field.value() == value
+    })
+}
 
 #[test]
 fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
@@ -67,18 +78,36 @@ fn unknown_sprite_stable_asset_id_fails_without_world_mutation() {
     let before = world.iter_entities().count();
 
     let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
-    let expected_asset_ref = format!("stable_id:{UNKNOWN_STABLE_ID}");
-
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
     assert!(report.entity_map.is_empty());
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.invalid-component-payload"
-            && diagnostic.context.entity_id.as_deref() == Some("player")
-            && diagnostic.context.component_id.as_deref() == Some("nara.sprite.Sprite")
-            && diagnostic.context.field_path.as_deref() == Some("material.image.value")
-            && diagnostic.context.asset_ref.as_deref() == Some(expected_asset_ref.as_str())
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.invalid-component-payload"
+            && diagnostic_has_field(
+                diagnostic,
+                "entity-id",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("player"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "component-id",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("nara.sprite.Sprite"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "field-path",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("material.image.value"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "asset-ref",
+                DiagnosticFieldClass::Sensitive,
+                DiagnosticValueRef::Redacted,
+            )
     }));
 }
 
@@ -117,12 +146,32 @@ fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutat
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
     assert!(report.entity_map.is_empty());
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.invalid-component-payload"
-            && diagnostic.context.entity_id.as_deref() == Some("player")
-            && diagnostic.context.component_id.as_deref() == Some("nara.sprite.Sprite")
-            && diagnostic.context.field_path.as_deref() == Some("material.image.value")
-            && diagnostic.context.asset_ref.as_deref() == Some("textures/missing.png")
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.invalid-component-payload"
+            && diagnostic_has_field(
+                diagnostic,
+                "entity-id",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("player"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "component-id",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("nara.sprite.Sprite"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "field-path",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("material.image.value"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "asset-ref",
+                DiagnosticFieldClass::Sensitive,
+                DiagnosticValueRef::Redacted,
+            )
     }));
 }
 
@@ -202,19 +251,42 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
     let report = spawn_prefab_with_patch_and_asset_database(
         &mut world, &registry, &prefab, &patch, &database,
     );
-    let expected_asset_ref = format!("stable_id:{UNKNOWN_STABLE_ID}");
-
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
     assert!(report.entity_map.is_empty());
-    assert!(report.diagnostics.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code.as_str() == "scene.invalid-component-payload"
-            && diagnostic.context.operation_index == Some(0)
-            && diagnostic.context.entity_id.as_deref() == Some("player")
-            && diagnostic.context.component_id.as_deref() == Some("nara.sprite.Sprite")
-            && diagnostic.context.field_path.as_deref() == Some("material.image.value")
-            && diagnostic.context.asset_ref.as_deref() == Some(expected_asset_ref.as_str())
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.invalid-component-payload"
+            && diagnostic_has_field(
+                diagnostic,
+                "operation-index",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(0),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "entity-id",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("player"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "component-id",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("nara.sprite.Sprite"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "field-path",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("material.image.value"),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "asset-ref",
+                DiagnosticFieldClass::Sensitive,
+                DiagnosticValueRef::Redacted,
+            )
     }));
 }
 

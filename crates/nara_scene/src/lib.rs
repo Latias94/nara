@@ -1,6 +1,7 @@
 //! Scene runtime hierarchy components and persistent scene document data.
 
 mod authoring;
+mod diagnostics;
 mod document;
 mod export;
 mod format;
