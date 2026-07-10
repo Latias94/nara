@@ -2,8 +2,8 @@ use nara::{prelude::*, scene::register_scene_components, sprite::register_sprite
 
 fn main() {
     let mut registry = ComponentRegistry::new();
-    register_scene_components(&mut registry);
-    register_sprite_components(&mut registry);
+    register_scene_components(&mut registry).expect("scene components should register once");
+    register_sprite_components(&mut registry).expect("sprite components should register once");
 
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let enemy_prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))

@@ -570,7 +570,7 @@ impl Plugin for TaskPlugin {
                 TaskUpdateSet::ApplyAssetResults,
             )
                 .chain(),
-        );
+        )?;
 
         if !app.world().contains_resource::<TaskPools>() {
             let pools = TaskPools::try_new(self.config.clone()).map_err(|error| {
@@ -579,7 +579,7 @@ impl Plugin for TaskPlugin {
                     message: error.to_string(),
                 }
             })?;
-            app.insert_resource(pools);
+            app.insert_resource(pools)?;
         }
         Ok(())
     }
@@ -714,15 +714,20 @@ mod tests {
             .resource::<TaskPools>()
             .spawn(TaskPoolKind::Compute, |_| 5_u32);
         app.insert_resource(PendingTask { handle })
+            .unwrap()
             .insert_resource(AppliedResults::default())
+            .unwrap()
             .insert_resource(ObservedInUpdate::default())
+            .unwrap()
             .add_systems(
                 CoreStage::TaskUpdate,
                 apply_task_result.in_set(TaskUpdateSet::ApplyAssetResults),
             )
-            .add_systems(CoreStage::Update, observe_update);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_update)
+            .unwrap();
 
-        app.update();
+        app.update().unwrap();
 
         assert_eq!(app.world().resource::<ObservedInUpdate>().0, vec![5]);
     }

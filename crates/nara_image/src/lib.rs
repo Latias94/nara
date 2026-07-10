@@ -449,18 +449,18 @@ impl Plugin for ImagePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(AssetPlugin)?;
         app.add_plugin_if_missing(ImagePreparePlugin)?;
-        app.init_resource::<ImageReloadStats>();
-        app.init_resource::<PendingImageJobs>();
-        app.init_resource::<ImporterRegistry>();
+        app.init_resource::<ImageReloadStats>()?;
+        app.init_resource::<PendingImageJobs>()?;
+        app.init_resource::<ImporterRegistry>()?;
         register_image_importer(app)?;
         app.add_systems(
             CoreStage::TaskUpdate,
             spawn_image_reload_jobs.in_set(TaskUpdateSet::SpawnAssetJobs),
-        );
+        )?;
         app.add_systems(
             CoreStage::TaskUpdate,
             apply_image_reload_results.in_set(TaskUpdateSet::ApplyAssetResults),
-        );
+        )?;
         Ok(())
     }
 }
@@ -477,12 +477,12 @@ impl Plugin for ImagePreparePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<Assets<ImageAsset>>();
-        app.init_resource::<AssetStates>();
-        app.init_resource::<PreparedRenderResources<PreparedImageResource>>();
-        app.init_resource::<RenderPrepareInvalidations>();
-        app.init_resource::<ImagePrepareStats>();
-        app.add_systems(CoreStage::Prepare, prepare_images);
+        app.init_resource::<Assets<ImageAsset>>()?;
+        app.init_resource::<AssetStates>()?;
+        app.init_resource::<PreparedRenderResources<PreparedImageResource>>()?;
+        app.init_resource::<RenderPrepareInvalidations>()?;
+        app.init_resource::<ImagePrepareStats>()?;
+        app.add_systems(CoreStage::Prepare, prepare_images)?;
         Ok(())
     }
 }
@@ -490,7 +490,7 @@ impl Plugin for ImagePreparePlugin {
 fn register_image_importer(app: &mut App) -> Result<(), PluginError> {
     let importer = ImageImporter::default();
     let id = Importer::descriptor(&importer).id().clone();
-    let mut registry = app.world_mut().resource_mut::<ImporterRegistry>();
+    let mut registry = app.world_mut()?.resource_mut::<ImporterRegistry>();
     if registry.importer(&id).is_some() {
         return Ok(());
     }
@@ -948,7 +948,7 @@ mod tests {
     fn prepare_system_writes_backend_neutral_image_resource() {
         let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
 
-        app.update();
+        app.update().unwrap();
 
         let prepared = app
             .world()
@@ -962,8 +962,9 @@ mod tests {
     #[test]
     fn prepare_system_invalidates_when_image_descriptor_changes() {
         let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
-        app.update();
+        app.update().unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<RenderPrepareInvalidations>()
             .drain();
         let old_snapshot = app
@@ -982,9 +983,14 @@ mod tests {
             .unwrap();
         let mut images = app
             .world_mut()
+            .unwrap()
             .remove_resource::<Assets<ImageAsset>>()
             .unwrap();
-        let mut states = app.world_mut().remove_resource::<AssetStates>().unwrap();
+        let mut states = app
+            .world_mut()
+            .unwrap()
+            .remove_resource::<AssetStates>()
+            .unwrap();
         let expected_version = states.version(handle.id()).unwrap();
         let source_hash = changed.image().source().source_hash();
         let artifact_hash = changed.artifact().key().digest();
@@ -999,10 +1005,10 @@ mod tests {
                 Some(artifact_hash),
             )
             .unwrap();
-        app.world_mut().insert_resource(images);
-        app.world_mut().insert_resource(states);
+        app.world_mut().unwrap().insert_resource(images);
+        app.world_mut().unwrap().insert_resource(states);
 
-        app.update();
+        app.update().unwrap();
 
         let prepared = app
             .world()
@@ -1029,8 +1035,9 @@ mod tests {
     #[test]
     fn prepare_system_removes_prepared_resources_for_removed_images() {
         let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
-        app.update();
+        app.update().unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<RenderPrepareInvalidations>()
             .drain();
         assert!(
@@ -1042,16 +1049,21 @@ mod tests {
 
         let mut images = app
             .world_mut()
+            .unwrap()
             .remove_resource::<Assets<ImageAsset>>()
             .unwrap();
-        let mut states = app.world_mut().remove_resource::<AssetStates>().unwrap();
+        let mut states = app
+            .world_mut()
+            .unwrap()
+            .remove_resource::<AssetStates>()
+            .unwrap();
         images
             .remove_with_state(handle, &mut states, &mut AssetEvents::default())
             .unwrap();
-        app.world_mut().insert_resource(images);
-        app.world_mut().insert_resource(states);
+        app.world_mut().unwrap().insert_resource(images);
+        app.world_mut().unwrap().insert_resource(states);
 
-        app.update();
+        app.update().unwrap();
 
         assert!(
             app.world()
@@ -1081,14 +1093,16 @@ mod tests {
         let mut app = app_with_image_plugin(&temp_root, record.clone());
         let handle = app
             .world_mut()
+            .unwrap()
             .resource_mut::<AssetServer>()
             .reserve_record::<ImageAsset>(&record)
             .unwrap();
 
         app.world_mut()
+            .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .modified(record.path().clone());
-        app.update();
+        app.update().unwrap();
 
         let first_hash = app
             .world()
@@ -1106,13 +1120,15 @@ mod tests {
         );
 
         app.world_mut()
+            .unwrap()
             .resource_mut::<RenderPrepareInvalidations>()
             .drain();
         fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .modified(record.path().clone());
-        app.update();
+        app.update().unwrap();
 
         let image = app
             .world()
@@ -1145,14 +1161,16 @@ mod tests {
         let mut app = app_with_image_plugin(&temp_root, record.clone());
         let handle = app
             .world_mut()
+            .unwrap()
             .resource_mut::<AssetServer>()
             .reserve_record::<ImageAsset>(&record)
             .unwrap();
 
         app.world_mut()
+            .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .modified(record.path().clone());
-        app.update();
+        app.update().unwrap();
 
         assert!(
             app.world()
@@ -1266,21 +1284,25 @@ mod tests {
         let mut app = app_with_image_plugin(&temp_root, record.clone());
         let handle = app
             .world_mut()
+            .unwrap()
             .resource_mut::<AssetServer>()
             .reserve_record::<ImageAsset>(&record)
             .unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .modified(record.path().clone());
-        app.update();
+        app.update().unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<RenderPrepareInvalidations>()
             .drain();
 
         app.world_mut()
+            .unwrap()
             .resource_mut::<AssetSourceChanges>()
             .removed(record.path().clone());
-        app.update();
+        app.update().unwrap();
 
         assert!(
             app.world()
@@ -1355,18 +1377,20 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(nara_render::RenderPlugin).unwrap();
         app.add_plugin(ImagePreparePlugin).unwrap();
-        app.world_mut().insert_resource(images);
-        app.world_mut().insert_resource(states);
+        app.world_mut().unwrap().insert_resource(images);
+        app.world_mut().unwrap().insert_resource(states);
         (app, handle)
     }
 
     fn app_with_image_plugin(asset_root: &Path, record: AssetRecord) -> App {
         let mut app = App::new();
-        app.insert_resource(TaskPools::deterministic());
-        app.insert_resource(AssetSourceRoot::new(asset_root));
+        app.insert_resource(TaskPools::deterministic()).unwrap();
+        app.insert_resource(AssetSourceRoot::new(asset_root))
+            .unwrap();
         app.add_plugin(nara_render::RenderPlugin).unwrap();
         app.add_plugin(ImagePlugin).unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<nara_asset::ProjectAssetDatabase>()
             .insert(record)
             .unwrap();

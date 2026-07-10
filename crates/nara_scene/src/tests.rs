@@ -941,7 +941,7 @@ fn patch_json_rejects_unknown_document_and_operation_fields() {
 #[test]
 fn scene_component_schemas_expose_scalar_fields() {
     let mut registry = ComponentRegistry::new();
-    register_scene_components(&mut registry);
+    register_scene_components(&mut registry).expect("component registration should succeed");
 
     let name_schema = registry
         .schema(&ComponentTypeId::new("nara.scene.Name"))

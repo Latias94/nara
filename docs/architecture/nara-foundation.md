@@ -78,7 +78,7 @@ flowchart TD
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
 | `nara` | Facade and layered preludes | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs |
-| `nara_app` | `App`, `Plugin`, `PluginError`, plugin metadata/groups, `StartupStage`, `CoreStage`, real/virtual/fixed time resources, runtime state transition hooks | Fallible plugin installation, inspectable plugin capabilities/groups, runner policy, explicit pause/time-scale/background policy, bounded fixed-step catch-up |
+| `nara_app` | `App`, `Plugin`, terminal plugin lifecycle/failure reports, plugin metadata and constrained groups, `StartupStage`, `CoreStage`, real/virtual/fixed time resources, runtime state transition hooks | Preflight versus committed hook containment, reverse once-only cleanup, borrowing runner policy, explicit pause/time-scale/background policy, bounded fixed-step catch-up |
 | `nara_project` | `ProjectManifest`, profile overlays, `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority for file-backed apps: paths, startup scene, task defaults, window defaults, input-map sources, diagnostics capacity, and headless/server/editor/dev/release profile resolution |
 | `nara_tasks` | `TaskPools`, `TaskPoolConfig`, `TaskPoolKind`, `TaskExecutionMode`, `TaskHandle<T>`, `TaskCancellationToken`, `TaskStats` | Engine-owned deterministic inline executor and std worker-pool backend for IO/compute/async-compute jobs |
 | `nara_core` | `Color`, math re-exports | Core primitives that do not need ECS derives |
@@ -199,7 +199,13 @@ second real adapter or stronger isolation pressure.
 
 ## Implemented Authoring Foundations
 
-- `nara_app::Plugin::build` is fallible. Plugin prerequisites use `add_plugin_if_missing` or structured `PluginError` values instead of panic helpers.
+- `nara_app` owns an explicit terminal plugin lifecycle. Read-only preflight rejection is retryable;
+  build/finish entry is committed, and error or unwind panic poisons the app, preserves the first
+  error, aggregates reverse once-only cleanup failures, and prevents schedule execution. Plugin
+  groups receive a composition-only builder, cleanup receives a world-only context, runners borrow
+  the app so shutdown remains observable, and mutable app entry points are fallible. Built-in
+  component registration conflicts are checked during preflight and return contextual
+  `PluginError` values rather than panic.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
 - `nara_project` implements the first manifest authority: TOML parsing, unknown-field rejection, logical project path validation, file-size budget guard for `nara.toml`, profile overlays, inferred `server` profile defaults, `ProjectPluginPlan`, and side-effect-free `EffectiveProjectSettings` lowering into runtime time, task, window, input, and diagnostics value objects.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.

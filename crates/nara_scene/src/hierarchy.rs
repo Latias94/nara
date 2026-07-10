@@ -2,8 +2,8 @@ use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_ecs::{Bundle, Component, Entity, World};
 use nara_reflect::{
     ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, Reflect,
-    bevy_reflect,
+    ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, Reflect, bevy_reflect,
 };
 
 pub use nara_transform::Transform2d;
@@ -104,56 +104,97 @@ impl Plugin for HierarchyPlugin {
         )
     }
 
+    fn preflight(&self, app: &App) -> Result<(), PluginError> {
+        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
+            return Ok(());
+        };
+
+        let name_id = ComponentTypeId::new("nara.scene.Name");
+        registry
+            .validate_component_registration::<Name>(&name_id)
+            .map_err(|error| {
+                PluginError::component_registration(self.plugin_id(), name_id.as_str(), error)
+            })?;
+
+        let visibility_id = ComponentTypeId::new("nara.scene.Visibility");
+        registry
+            .validate_component_registration::<Visibility>(&visibility_id)
+            .map_err(|error| {
+                PluginError::component_registration(self.plugin_id(), visibility_id.as_str(), error)
+            })
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<ComponentRegistry>();
-        register_scene_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
-        app.add_systems(CoreStage::PostUpdate, sync_children);
+        app.init_resource::<ComponentRegistry>()?;
+        let registry = &mut app.world_mut()?.resource_mut::<ComponentRegistry>();
+        let name_id = ComponentTypeId::new("nara.scene.Name");
+        register_name_component(registry).map_err(|error| {
+            PluginError::component_registration(self.plugin_id(), name_id.as_str(), error)
+        })?;
+        let visibility_id = ComponentTypeId::new("nara.scene.Visibility");
+        register_visibility_component(registry).map_err(|error| {
+            PluginError::component_registration(self.plugin_id(), visibility_id.as_str(), error)
+        })?;
+        app.add_systems(CoreStage::PostUpdate, sync_children)?;
         Ok(())
     }
 }
 
-pub fn register_scene_components(registry: &mut ComponentRegistry) {
-    let name_id = ComponentTypeId::new("nara.scene.Name");
-    registry
-        .register_scene_component_with_fields::<Name, _, _>(
-            name_id.clone(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::empty(),
-                ComponentValueKind::String,
-            )],
-            |value| {
-                Ok(Name::new(value.as_str().ok_or_else(|| {
-                    ComponentCodecError::invalid_field("Name", "string")
-                })?))
-            },
-            |name| Ok(ComponentValue::String(name.as_str().to_string())),
-        )
-        .expect("nara.scene.Name component registration should be unique");
+pub fn register_scene_components(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    registry.validate_component_registration::<Name>(&ComponentTypeId::new("nara.scene.Name"))?;
+    registry.validate_component_registration::<Visibility>(&ComponentTypeId::new(
+        "nara.scene.Visibility",
+    ))?;
+    register_name_component(registry)?;
+    register_visibility_component(registry)
+}
 
+fn register_name_component(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+    let name_id = ComponentTypeId::new("nara.scene.Name");
+    registry.register_scene_component_with_fields::<Name, _, _>(
+        name_id.clone(),
+        ComponentSchemaVersion(1),
+        [ComponentFieldSchema::required(
+            ComponentFieldPath::empty(),
+            ComponentValueKind::String,
+        )],
+        |value| {
+            Ok(Name::new(value.as_str().ok_or_else(|| {
+                ComponentCodecError::invalid_field("Name", "string")
+            })?))
+        },
+        |name| Ok(ComponentValue::String(name.as_str().to_string())),
+    )?;
+    Ok(())
+}
+
+fn register_visibility_component(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
     let visibility_id = ComponentTypeId::new("nara.scene.Visibility");
-    registry
-        .register_scene_component_with_fields::<Visibility, _, _>(
-            visibility_id.clone(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::empty(),
-                ComponentValueKind::String,
-            )],
-            |value| match value.as_str() {
-                Some("visible") => Ok(Visibility::Visible),
-                Some("hidden") => Ok(Visibility::Hidden),
-                _ => Err(ComponentCodecError::invalid_field(
-                    "Visibility",
-                    "'visible' or 'hidden'",
-                )),
-            },
-            |visibility| {
-                Ok(ComponentValue::String(match visibility {
-                    Visibility::Visible => "visible".to_string(),
-                    Visibility::Hidden => "hidden".to_string(),
-                }))
-            },
-        )
-        .expect("nara.scene.Visibility component registration should be unique");
+    registry.register_scene_component_with_fields::<Visibility, _, _>(
+        visibility_id.clone(),
+        ComponentSchemaVersion(1),
+        [ComponentFieldSchema::required(
+            ComponentFieldPath::empty(),
+            ComponentValueKind::String,
+        )],
+        |value| match value.as_str() {
+            Some("visible") => Ok(Visibility::Visible),
+            Some("hidden") => Ok(Visibility::Hidden),
+            _ => Err(ComponentCodecError::invalid_field(
+                "Visibility",
+                "'visible' or 'hidden'",
+            )),
+        },
+        |visibility| {
+            Ok(ComponentValue::String(match visibility {
+                Visibility::Visible => "visible".to_string(),
+                Visibility::Hidden => "hidden".to_string(),
+            }))
+        },
+    )?;
+    Ok(())
 }

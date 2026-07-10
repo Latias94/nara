@@ -461,25 +461,25 @@ impl Plugin for InputPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         if !app.world().contains_resource::<ButtonInput<KeyCode>>() {
-            app.insert_resource(ButtonInput::<KeyCode>::default());
+            app.insert_resource(ButtonInput::<KeyCode>::default())?;
         }
         if !app.world().contains_resource::<ButtonInput<MouseButton>>() {
-            app.insert_resource(ButtonInput::<MouseButton>::default());
+            app.insert_resource(ButtonInput::<MouseButton>::default())?;
         }
         if !app.world().contains_resource::<ActionMap>() {
-            app.insert_resource(ActionMap::default());
+            app.insert_resource(ActionMap::default())?;
         }
         if !app.world().contains_resource::<ActionOutcomes>() {
-            app.insert_resource(ActionOutcomes::default());
+            app.insert_resource(ActionOutcomes::default())?;
         }
         if !app.world().contains_resource::<PointerState>() {
-            app.insert_resource(PointerState::default());
+            app.insert_resource(PointerState::default())?;
         }
         app.add_systems(
             CoreStage::PreUpdate,
             resolve_action_outcomes.in_set(InputSet::ResolveActions),
-        )
-        .add_systems(CoreStage::Last, clear_input_transitions);
+        )?
+        .add_systems(CoreStage::Last, clear_input_transitions)?;
         Ok(())
     }
 }
@@ -629,11 +629,15 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.insert_resource(ObservedOutcomes::default())
-            .add_systems(CoreStage::Update, observe_outcomes);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_outcomes)
+            .unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind_key(ActionId::new("jump").unwrap(), KeyCode::Space);
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Space);
 
@@ -653,15 +657,20 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.insert_resource(ObservedOutcomes::default())
-            .add_systems(CoreStage::Update, observe_outcomes);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_outcomes)
+            .unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind_key(ActionId::new("jump").unwrap(), KeyCode::Space);
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Space);
         app.run_once(Duration::ZERO).unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
             .release(KeyCode::Space);
 
@@ -678,11 +687,15 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.insert_resource(ObservedOutcomes::default())
-            .add_systems(CoreStage::Update, observe_outcomes);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_outcomes)
+            .unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
 
@@ -702,15 +715,20 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.insert_resource(ObservedOutcomes::default())
-            .add_systems(CoreStage::Update, observe_outcomes);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_outcomes)
+            .unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
         app.run_once(Duration::ZERO).unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<MouseButton>>()
             .release(MouseButton::Left);
 
@@ -729,15 +747,19 @@ mod tests {
         let menu = ActionContext::new("menu").unwrap();
         app.add_plugin(InputPlugin).unwrap();
         app.insert_resource(ObservedOutcomes::default())
-            .add_systems(CoreStage::Update, observe_outcomes);
-        app.world_mut().resource_mut::<ActionMap>().bind(
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_outcomes)
+            .unwrap();
+        app.world_mut().unwrap().resource_mut::<ActionMap>().bind(
             ActionBinding::key(ActionId::new("confirm").unwrap(), KeyCode::Enter)
                 .with_context(menu.clone()),
         );
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .disable_context(menu);
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
 
@@ -751,18 +773,24 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.insert_resource(ObservedOutcomes::default())
-            .add_systems(CoreStage::Update, observe_outcomes);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_outcomes)
+            .unwrap();
         let action = ActionId::new("move-up").unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind_key(action.clone(), KeyCode::Character('w'));
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind_key(action, KeyCode::ArrowUp);
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Character('w'));
 
@@ -818,9 +846,13 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.insert_resource(action_map)
+            .unwrap()
             .insert_resource(ObservedOutcomes::default())
-            .add_systems(CoreStage::Update, observe_outcomes);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_outcomes)
+            .unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
 

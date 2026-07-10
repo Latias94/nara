@@ -41,6 +41,7 @@ fn extraction_clears_stale_sprites_and_uses_identity_transform() {
     let mut app = App::new();
     app.add_plugin(SpriteRenderPlugin).unwrap();
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<ExtractedSprites>()
         .push(ExtractedSprite {
             entity: Entity::PLACEHOLDER,
@@ -57,6 +58,7 @@ fn extraction_clears_stale_sprites_and_uses_identity_transform() {
             sort_key: 0,
         });
     app.world_mut()
+        .expect("app should allow world mutation")
         .spawn(Sprite::from_color(Vec2::new(16.0, 8.0), Color::WHITE));
 
     app.run_once(Duration::ZERO).unwrap();
@@ -99,13 +101,15 @@ fn tilemap_cells_lower_to_world_positions() {
         TileCoord::new(1, -1),
         TileCell::new(TileIndex::new(3)).with_color(Color::rgb(0.5, 0.25, 1.0)),
     );
-    app.world_mut().spawn((
-        tilemap,
-        Transform2d {
-            translation: Vec2::new(5.0, 5.0),
-            ..Transform2d::default()
-        },
-    ));
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            tilemap,
+            Transform2d {
+                translation: Vec2::new(5.0, 5.0),
+                ..Transform2d::default()
+            },
+        ));
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -128,14 +132,18 @@ fn tilemap_cells_lower_to_world_positions() {
 fn queueing_records_missing_texture_assets() {
     let mut app = App::new();
     app.add_plugin(SpriteRenderPlugin).unwrap();
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
-        ..Camera2d::default()
-    });
-    app.world_mut().spawn(Sprite::from_texture(
-        Handle::new(AssetId::from_raw(7)),
-        Vec2::new(10.0, 10.0),
-    ));
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+            ..Camera2d::default()
+        });
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Sprite::from_texture(
+            Handle::new(AssetId::from_raw(7)),
+            Vec2::new(10.0, 10.0),
+        ));
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -152,14 +160,18 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
     let mut app = App::new();
     app.add_plugin(SpriteRenderPlugin).unwrap();
     insert_loaded_image(&mut app, image);
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
-        ..Camera2d::default()
-    });
-    app.world_mut().spawn(
-        Sprite::from_texture(image, Vec2::new(10.0, 10.0))
-            .with_texture_region(TextureRegion::new(Vec2::new(0.25, 0.0), Vec2::splat(0.5))),
-    );
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+            ..Camera2d::default()
+        });
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(
+            Sprite::from_texture(image, Vec2::new(10.0, 10.0))
+                .with_texture_region(TextureRegion::new(Vec2::new(0.25, 0.0), Vec2::splat(0.5))),
+        );
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -310,16 +322,21 @@ fn same_image_with_different_samplers_splits_batches() {
     let mut app = App::new();
     app.add_plugin(SpriteRenderPlugin).unwrap();
     insert_loaded_image(&mut app, image);
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
-        ..Camera2d::default()
-    });
     app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+            ..Camera2d::default()
+        });
+    app.world_mut()
+        .expect("app should allow world mutation")
         .spawn(Sprite::from_texture(image, Vec2::new(10.0, 10.0)));
-    app.world_mut().spawn(
-        Sprite::from_texture(image, Vec2::new(10.0, 10.0))
-            .with_sampler(SamplerDescriptor::NEAREST_CLAMP),
-    );
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(
+            Sprite::from_texture(image, Vec2::new(10.0, 10.0))
+                .with_sampler(SamplerDescriptor::NEAREST_CLAMP),
+        );
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -409,18 +426,22 @@ fn app_pipeline_extracts_tilemaps_into_batches() {
     let target = RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(9)));
     let mut app = App::new();
     app.add_plugin(SpriteRenderPlugin).unwrap();
-    app.world_mut().spawn(Camera2d {
-        target,
-        viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
-        viewport_height: 100.0,
-        ..Camera2d::default()
-    });
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            target,
+            viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+            viewport_height: 100.0,
+            ..Camera2d::default()
+        });
     let mut tilemap = Tilemap::new(Vec2::new(10.0, 10.0));
     tilemap.set_cell(
         TileCoord::new(0, 0),
         TileCell::new(TileIndex::new(1)).with_color(Color::rgb(1.0, 0.0, 0.0)),
     );
-    app.world_mut().spawn(tilemap);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(tilemap);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -447,10 +468,14 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
 
     let mut app = App::new();
     app.add_plugin(SpriteRenderPlugin).unwrap();
-    app.world_mut().insert_resource(tilesets);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .insert_resource(tilesets);
     let mut tilemap = Tilemap::new(Vec2::new(16.0, 16.0)).with_tileset(tileset);
     tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(5)));
-    app.world_mut().spawn(tilemap);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(tilemap);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -481,10 +506,14 @@ fn tilemap_extraction_skips_out_of_range_atlas_tiles() {
 
     let mut app = App::new();
     app.add_plugin(SpriteRenderPlugin).unwrap();
-    app.world_mut().insert_resource(tilesets);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .insert_resource(tilesets);
     let mut tilemap = Tilemap::new(Vec2::new(16.0, 16.0)).with_tileset(tileset);
     tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(8)));
-    app.world_mut().spawn(tilemap);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(tilemap);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -539,8 +568,12 @@ fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {
             Some(import_hash),
         )
         .unwrap();
-    app.world_mut().insert_resource(images);
-    app.world_mut().insert_resource(states);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .insert_resource(images);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .insert_resource(states);
 }
 
 fn test_image() -> ImageAsset {

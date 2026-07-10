@@ -36,8 +36,8 @@ impl Plugin for ToolingPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<EditorWorkspace>();
-        app.add_systems(CoreStage::Last, || {});
+        app.init_resource::<EditorWorkspace>()?;
+        app.add_systems(CoreStage::Last, || {})?;
         Ok(())
     }
 }

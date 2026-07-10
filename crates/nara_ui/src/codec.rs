@@ -5,110 +5,129 @@ use nara_image::ImageAsset;
 use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PreparedComponent,
+    ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PreparedComponent,
 };
 use nara_render::RenderTarget;
 
 use crate::{UiNode, UiPanel, UiPanelMaterial, UiRoot, UiStyle, UiVal};
 
-pub fn register_ui_components(registry: &mut ComponentRegistry) {
+pub fn register_ui_components(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    registry.validate_component_registration::<UiRoot>(&ComponentTypeId::new("nara.ui.UiRoot"))?;
+    registry.validate_component_registration::<UiNode>(&ComponentTypeId::new("nara.ui.UiNode"))?;
+    registry
+        .validate_component_registration::<UiPanel>(&ComponentTypeId::new("nara.ui.UiPanel"))?;
+    register_ui_root_component(registry)?;
+    register_ui_node_component(registry)?;
+    register_ui_panel_component(registry)
+}
+
+pub(crate) fn register_ui_root_component(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
     let root_id = ComponentTypeId::new("nara.ui.UiRoot");
-    registry
-        .register_scene_component_with_fields::<UiRoot, _, _>(
-            root_id.clone(),
-            ComponentSchemaVersion(1),
-            ui_root_fields(),
-            |value| {
-                Ok(UiRoot {
-                    target: read_render_target(value.get("target"))?,
-                    order: optional_i32(value, "order")?.unwrap_or(0),
-                })
-            },
-            |root| {
-                Ok(ComponentValue::map([
-                    ("target", render_target_value(root.target)?),
-                    ("order", ComponentValue::I64(i64::from(root.order))),
-                ]))
-            },
-        )
-        .expect("nara.ui.UiRoot component registration should be unique");
+    registry.register_scene_component_with_fields::<UiRoot, _, _>(
+        root_id.clone(),
+        ComponentSchemaVersion(1),
+        ui_root_fields(),
+        |value| {
+            Ok(UiRoot {
+                target: read_render_target(value.get("target"))?,
+                order: optional_i32(value, "order")?.unwrap_or(0),
+            })
+        },
+        |root| {
+            Ok(ComponentValue::map([
+                ("target", render_target_value(root.target)?),
+                ("order", ComponentValue::I64(i64::from(root.order))),
+            ]))
+        },
+    )?;
+    Ok(())
+}
 
+pub(crate) fn register_ui_node_component(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
     let node_id = ComponentTypeId::new("nara.ui.UiNode");
-    registry
-        .register_scene_component_with_fields::<UiNode, _, _>(
-            node_id.clone(),
-            ComponentSchemaVersion(1),
-            ui_node_fields(),
-            |value| {
-                Ok(UiNode {
-                    style: read_style(value.get("style"))?,
-                    z_index: optional_i32(value, "z_index")?.unwrap_or(0),
-                    visible: optional_bool(value, "visible")?.unwrap_or(true),
-                    focusable: optional_bool(value, "focusable")?.unwrap_or(false),
-                    clip: optional_bool(value, "clip")?.unwrap_or(false),
-                })
-            },
-            |node| {
-                Ok(ComponentValue::map([
-                    ("style", style_value(node.style)?),
-                    ("z_index", ComponentValue::I64(i64::from(node.z_index))),
-                    ("visible", ComponentValue::Bool(node.visible)),
-                    ("focusable", ComponentValue::Bool(node.focusable)),
-                    ("clip", ComponentValue::Bool(node.clip)),
-                ]))
-            },
-        )
-        .expect("nara.ui.UiNode component registration should be unique");
+    registry.register_scene_component_with_fields::<UiNode, _, _>(
+        node_id.clone(),
+        ComponentSchemaVersion(1),
+        ui_node_fields(),
+        |value| {
+            Ok(UiNode {
+                style: read_style(value.get("style"))?,
+                z_index: optional_i32(value, "z_index")?.unwrap_or(0),
+                visible: optional_bool(value, "visible")?.unwrap_or(true),
+                focusable: optional_bool(value, "focusable")?.unwrap_or(false),
+                clip: optional_bool(value, "clip")?.unwrap_or(false),
+            })
+        },
+        |node| {
+            Ok(ComponentValue::map([
+                ("style", style_value(node.style)?),
+                ("z_index", ComponentValue::I64(i64::from(node.z_index))),
+                ("visible", ComponentValue::Bool(node.visible)),
+                ("focusable", ComponentValue::Bool(node.focusable)),
+                ("clip", ComponentValue::Bool(node.clip)),
+            ]))
+        },
+    )?;
+    Ok(())
+}
 
+pub(crate) fn register_ui_panel_component(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
     let panel_id = ComponentTypeId::new("nara.ui.UiPanel");
-    registry
-        .register_component_codec_with_context_and_fields::<UiPanel, _, _>(
-            panel_id.clone(),
-            ComponentSchemaVersion(1),
-            ui_panel_fields(),
-            |value, context| {
-                let material = read_panel_material(value.field("material")?, context)?;
-                Ok(PreparedComponent::new(move |world, entity| {
-                    let material = resolve_prepared_material(world, material)?;
-                    let mut entity_mut = world
-                        .get_entity_mut(entity)
-                        .map_err(|_| ComponentCodecError::EntityMissing)?;
-                    entity_mut.insert(UiPanel { material });
-                    Ok(())
-                }))
-            },
-            |world, entity, context| {
-                let Some(panel) = world.get::<UiPanel>(entity) else {
-                    return Ok(None);
-                };
-                let image = match panel.material.image {
-                    Some(handle) => Some(asset_ref_value(
-                        &AssetRef::from_handle_with_policy(
-                            world.get_resource::<AssetServer>().ok_or_else(|| {
-                                ComponentCodecError::Message(
-                                    "AssetServer resource is missing".to_string(),
-                                )
-                            })?,
-                            handle,
-                            context.asset_ref_export_policy(),
-                        )
-                        .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
-                    )?),
-                    None => None,
-                };
-                Ok(Some(ComponentValue::map([(
-                    "material",
-                    material_value(
-                        image.unwrap_or(ComponentValue::Null),
-                        panel.material.sampler,
-                        panel.material.alpha_mode,
-                        panel.material.tint,
-                    )?,
-                )])))
-            },
-        )
-        .expect("nara.ui.UiPanel component registration should be unique");
+    registry.register_component_codec_with_context_and_fields::<UiPanel, _, _>(
+        panel_id.clone(),
+        ComponentSchemaVersion(1),
+        ui_panel_fields(),
+        |value, context| {
+            let material = read_panel_material(value.field("material")?, context)?;
+            Ok(PreparedComponent::new(move |world, entity| {
+                let material = resolve_prepared_material(world, material)?;
+                let mut entity_mut = world
+                    .get_entity_mut(entity)
+                    .map_err(|_| ComponentCodecError::EntityMissing)?;
+                entity_mut.insert(UiPanel { material });
+                Ok(())
+            }))
+        },
+        |world, entity, context| {
+            let Some(panel) = world.get::<UiPanel>(entity) else {
+                return Ok(None);
+            };
+            let image = match panel.material.image {
+                Some(handle) => Some(asset_ref_value(
+                    &AssetRef::from_handle_with_policy(
+                        world.get_resource::<AssetServer>().ok_or_else(|| {
+                            ComponentCodecError::Message(
+                                "AssetServer resource is missing".to_string(),
+                            )
+                        })?,
+                        handle,
+                        context.asset_ref_export_policy(),
+                    )
+                    .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
+                )?),
+                None => None,
+            };
+            Ok(Some(ComponentValue::map([(
+                "material",
+                material_value(
+                    image.unwrap_or(ComponentValue::Null),
+                    panel.material.sampler,
+                    panel.material.alpha_mode,
+                    panel.material.tint,
+                )?,
+            )])))
+        },
+    )?;
+    Ok(())
 }
 
 fn ui_root_fields() -> [ComponentFieldSchema; 2] {

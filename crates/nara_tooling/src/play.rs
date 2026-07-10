@@ -1469,8 +1469,9 @@ mod tests {
 
     fn test_registry() -> ComponentRegistry {
         let mut registry = ComponentRegistry::new();
-        register_scene_components(&mut registry);
-        register_transform_components(&mut registry);
+        register_scene_components(&mut registry).expect("component registration should succeed");
+        register_transform_components(&mut registry)
+            .expect("component registration should succeed");
         registry
     }
 

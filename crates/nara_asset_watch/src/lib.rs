@@ -482,12 +482,12 @@ impl Plugin for AssetWatchPlugin {
             }
             existing_root
         } else {
-            app.insert_resource(AssetSourceRoot::new(self.root.clone()));
+            app.insert_resource(AssetSourceRoot::new(self.root.clone()))?;
             self.root.clone()
         };
 
         let queue = AssetWatchEventQueue::new();
-        app.init_resource::<AssetWatchDiagnostics>();
+        app.init_resource::<AssetWatchDiagnostics>()?;
         let watcher =
             AssetWatcher::watch_recursive(&watch_root, queue.clone()).map_err(|error| {
                 PluginError::SetupFailed {
@@ -495,12 +495,12 @@ impl Plugin for AssetWatchPlugin {
                     message: error.to_string(),
                 }
             })?;
-        app.insert_resource(queue);
-        app.insert_resource(watcher);
+        app.insert_resource(queue)?;
+        app.insert_resource(watcher)?;
         app.add_systems(
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
-        );
+        )?;
         Ok(())
     }
 }
@@ -897,20 +897,23 @@ mod tests {
         let queue = AssetWatchEventQueue::new();
         queue.push(AssetWatchEvent::modified(&source)).unwrap();
         let mut app = App::new();
-        app.insert_resource(AssetSourceRoot::new(&root));
-        app.insert_resource(queue);
-        app.insert_resource(AssetWatchDiagnostics::default());
+        app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+        app.insert_resource(queue).unwrap();
+        app.insert_resource(AssetWatchDiagnostics::default())
+            .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ProjectAssetDatabase>()
             .insert(record)
             .unwrap();
         app.add_systems(
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
-        );
+        )
+        .unwrap();
 
-        app.update();
+        app.update().unwrap();
 
         let requests = app.world().resource::<AssetReloadRequests>();
         let request = requests.iter().next().unwrap();
@@ -928,16 +931,18 @@ mod tests {
             .push_error(AssetWatchError::Notify("backend failed".to_string()))
             .unwrap();
         let mut app = App::new();
-        app.insert_resource(AssetSourceRoot::new(&root));
-        app.insert_resource(queue);
-        app.insert_resource(AssetWatchDiagnostics::default());
+        app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+        app.insert_resource(queue).unwrap();
+        app.insert_resource(AssetWatchDiagnostics::default())
+            .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         app.add_systems(
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
-        );
+        )
+        .unwrap();
 
-        app.update();
+        app.update().unwrap();
 
         let diagnostics = app.world().resource::<AssetWatchDiagnostics>();
         assert_eq!(diagnostics.len(), 1);
@@ -956,16 +961,18 @@ mod tests {
         let queue = AssetWatchEventQueue::new();
         queue.push(AssetWatchEvent::modified(&outside)).unwrap();
         let mut app = App::new();
-        app.insert_resource(AssetSourceRoot::new(&root));
-        app.insert_resource(queue);
-        app.insert_resource(AssetWatchDiagnostics::default());
+        app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+        app.insert_resource(queue).unwrap();
+        app.insert_resource(AssetWatchDiagnostics::default())
+            .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         app.add_systems(
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
-        );
+        )
+        .unwrap();
 
-        app.update();
+        app.update().unwrap();
 
         assert!(app.world().resource::<AssetSourceChanges>().is_empty());
         let diagnostics = app.world().resource::<AssetWatchDiagnostics>();
@@ -994,16 +1001,18 @@ mod tests {
             .push_error(AssetWatchError::Notify("second".to_string()))
             .unwrap();
         let mut app = App::new();
-        app.insert_resource(AssetSourceRoot::new(&root));
-        app.insert_resource(queue);
-        app.insert_resource(AssetWatchDiagnostics::default());
+        app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+        app.insert_resource(queue).unwrap();
+        app.insert_resource(AssetWatchDiagnostics::default())
+            .unwrap();
         app.add_plugin(AssetPlugin).unwrap();
         app.add_systems(
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
-        );
+        )
+        .unwrap();
 
-        app.update();
+        app.update().unwrap();
 
         assert_eq!(app.world().resource::<AssetWatchDiagnostics>().len(), 2);
         remove_temp_root(&root);
@@ -1015,7 +1024,8 @@ mod tests {
         let watch_root = configured_root.with_file_name("nara_asset_watch_other_root");
         fs::create_dir_all(&configured_root).unwrap();
         let mut app = App::new();
-        app.insert_resource(AssetSourceRoot::new(&configured_root));
+        app.insert_resource(AssetSourceRoot::new(&configured_root))
+            .unwrap();
 
         let Err(error) = app.add_plugin(AssetWatchPlugin::new(&watch_root)) else {
             panic!("watch plugin should reject a root that differs from AssetSourceRoot");

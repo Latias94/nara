@@ -26,7 +26,8 @@ Every implementation unit that changes a public API, persistent shape, cache con
 
 | Migration ID | Unit | Commit | Kind | Affected contract | Required action |
 |---|---|---|---|---|---|
-| _Added by the owning unit_ | - | - | `rust-api`, `persistent-format`, `cache`, or `behavior` | - | - |
+| U2-1 | U2 | `feat(app): contain plugin lifecycle failures` | `rust-api` | `App` mutation/update, `Plugin`, cleanup, group, and runner signatures | Propagate setup/update errors, use narrow cleanup/group contexts, and let runners borrow the app. |
+| U2-2 | U2 | `feat(app): contain plugin lifecycle failures` | `rust-api` | Built-in `register_*_components` helpers | Handle `ComponentRegistryError`; plugin installation now reports contextual registration failure. |
 
 ## Entry Contract
 
@@ -42,6 +43,111 @@ Each migration entry contains:
 8. **Compatibility window**: normally `none (unreleased canonical replacement)`; otherwise link the authorizing ADR.
 9. **Rollback**: how to recover source data or revert the code commit without relying on a compatibility shim.
 10. **Verification anchors**: tests, fixtures, examples, and stale-symbol searches proving the replacement is complete.
+
+## U2-1: Terminal Plugin Lifecycle and Fallible App Mutation
+
+**Removed contract**:
+
+- `App::try_update()` plus panic-based `App::update() -> AppFrameOutcome`.
+- Infallible mutable entry points such as `world_mut`, `insert_resource`, `init_resource`,
+  `add_startup_systems`, `add_systems`, `configure_sets`, and `set_runner`.
+- `Plugin::cleanup(&mut App) -> ()` and unrestricted `PluginGroup::build(&mut App)`.
+- `RunnerFn = FnOnce(App)`, which hid cleanup failures inside runner-owned `Drop`.
+- The implicit `plugins_finished: bool` behavior that allowed committed failures to be retried.
+
+**Canonical replacement or deletion rationale**: `App` exposes one explicit terminal plugin state
+machine. Mutable entry points and `update` return `Result`; `Plugin::preflight` is the only
+pre-mutation retry boundary; cleanup uses `PluginCleanupContext` and `PluginCleanupError`; groups use
+`PluginGroupBuilder`; runners borrow `&mut App`; failure details use `PluginFailureReport`. The old
+paths are deleted because they could run a partially initialized app or lose cleanup ownership.
+
+**Before**:
+
+```rust
+app.insert_resource(GameState::default())
+    .add_systems(CoreStage::Update, update_game);
+app.update();
+
+fn cleanup(&self, app: &mut App) {
+    app.world_mut().remove_resource::<Backend>();
+}
+```
+
+**After**:
+
+```rust
+app.insert_resource(GameState::default())?;
+app.add_systems(CoreStage::Update, update_game)?;
+app.update()?;
+
+fn cleanup(
+    &self,
+    context: &mut PluginCleanupContext<'_>,
+) -> Result<(), PluginError> {
+    context.world_mut().remove_resource::<Backend>();
+    Ok(())
+}
+```
+
+**Affected examples and fixtures**: root facade plugin groups, all repository examples, plugin crate
+tests, window/wgpu examples, asset import examples, and headless/server examples now use only the
+fallible canonical API.
+
+**User action**: update downstream plugin/app code to propagate or explicitly handle every returned
+error; replace group access to `App` with `PluginGroupBuilder`; change runners to borrow `&mut App`.
+
+**Source action**: `none`.
+
+**Cache action**: `keep`.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the U2 commit and its callers together. Do not restore the boolean lifecycle or
+add deprecated wrappers.
+
+**Verification anchors**: `nara_app` lifecycle tests; focused plugin-crate nextest runs; all-target
+facade check; searches for `try_update`, ignored update results, old cleanup/group signatures, and
+unhandled mutable app calls.
+
+## U2-2: Fallible Built-In Component Registration
+
+**Removed contract**: built-in `register_*_components(&mut ComponentRegistry) -> ()` helpers that
+called `expect` when a component ID or Rust type was already registered.
+
+**Canonical replacement or deletion rationale**: registration helpers return
+`Result<(), ComponentRegistryError>`. Built-in plugins use read-only
+`ComponentRegistry::validate_component_registration` during preflight and map commit-time failures
+to `PluginError::ComponentRegistrationFailed` with stable plugin and component context. A duplicate
+is project/setup data, not a reason to panic the process.
+
+**Before**:
+
+```rust
+register_transform_components(&mut registry);
+```
+
+**After**:
+
+```rust
+register_transform_components(&mut registry)?;
+```
+
+**Affected examples and fixtures**: scene/prefab/schema examples and transform, render, sprite,
+hierarchy, tilemap, and runtime UI codec tests.
+
+**User action**: handle or propagate the returned `ComponentRegistryError` when calling registration
+helpers directly. Plugin users receive a contextual `PluginError` automatically.
+
+**Source action**: `none`.
+
+**Cache action**: `keep`.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the U2 registration commit and callers together; do not restore `expect`.
+
+**Verification anchors**: component registry read-only validation test, built-in duplicate conflict
+tests, and a stale search for registration `expect` calls.
 
 ## Persistent Format Matrix
 

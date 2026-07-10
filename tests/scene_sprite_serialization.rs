@@ -221,7 +221,8 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
 #[test]
 fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
     let mut registry = component_registry();
-    nara::tilemap::register_tilemap_components(&mut registry);
+    nara::tilemap::register_tilemap_components(&mut registry)
+        .expect("tilemap components should register once");
     let database = asset_database_with_kind(
         TILESET_STABLE_ID,
         "tilesets/basic.tileset.ron",
@@ -250,8 +251,10 @@ fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
 
 fn component_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
-    nara::scene::register_scene_components(&mut registry);
-    nara::sprite::register_sprite_components(&mut registry);
+    nara::scene::register_scene_components(&mut registry)
+        .expect("scene components should register once");
+    nara::sprite::register_sprite_components(&mut registry)
+        .expect("sprite components should register once");
     registry
 }
 

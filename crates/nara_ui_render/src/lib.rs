@@ -38,16 +38,16 @@ impl Plugin for UiRenderPlugin {
         app.add_plugin_if_missing(UiPlugin)?;
         app.add_plugin_if_missing(RenderPlugin)?;
         app.add_plugin_if_missing(nara_image::ImagePreparePlugin)?;
-        app.init_resource::<ExtractedUiItems>();
-        app.init_resource::<QueuedUiItems>();
-        app.init_resource::<UiBatches>();
-        app.init_resource::<UiRenderStats>();
+        app.init_resource::<ExtractedUiItems>()?;
+        app.init_resource::<QueuedUiItems>()?;
+        app.init_resource::<UiBatches>()?;
+        app.init_resource::<UiRenderStats>()?;
         app.add_systems(
             CoreStage::Extract,
             extract_ui.after(nara_ui::compute_ui_layouts),
-        );
-        app.add_systems(CoreStage::Queue, queue_ui);
-        app.add_systems(CoreStage::Sort, sort_and_batch_ui);
+        )?;
+        app.add_systems(CoreStage::Queue, queue_ui)?;
+        app.add_systems(CoreStage::Sort, sort_and_batch_ui)?;
         Ok(())
     }
 }

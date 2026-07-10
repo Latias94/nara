@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     app.add_plugins(Runtime2dPlugins)?;
     {
-        let world = app.world_mut();
+        let world = app.world_mut()?;
         world.insert_resource(asset_server);
         world.insert_resource(images);
         world.insert_resource(states);
@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
     }
 
-    app.update();
+    app.update()?;
 
     let prepared = app
         .world()

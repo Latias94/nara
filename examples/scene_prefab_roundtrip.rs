@@ -1,6 +1,10 @@
 use nara::{
-    prelude::*, render::register_render_components, scene::register_scene_components,
-    sprite::register_sprite_components, tilemap::register_tilemap_components,
+    advanced_prelude::{AssetRecord, AssetSourceKind, ProjectAssetDatabase},
+    prelude::*,
+    render::register_render_components,
+    scene::register_scene_components,
+    sprite::register_sprite_components,
+    tilemap::register_tilemap_components,
     transform::register_transform_components,
 };
 
@@ -9,11 +13,12 @@ const TILESET_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
 
 fn main() {
     let mut registry = ComponentRegistry::new();
-    register_scene_components(&mut registry);
-    register_transform_components(&mut registry);
-    register_render_components(&mut registry);
-    register_sprite_components(&mut registry);
-    register_tilemap_components(&mut registry);
+    register_scene_components(&mut registry).expect("scene components should register once");
+    register_transform_components(&mut registry)
+        .expect("transform components should register once");
+    register_render_components(&mut registry).expect("render components should register once");
+    register_sprite_components(&mut registry).expect("sprite components should register once");
+    register_tilemap_components(&mut registry).expect("tilemap components should register once");
 
     let scene = sample_scene();
     let asset_database = sample_asset_database();

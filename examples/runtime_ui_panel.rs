@@ -14,8 +14,8 @@ fn main() -> Result<(), AppRunError> {
         })?
         .add_plugin(WinitPlugin::default())?
         .add_plugin(WgpuRenderPlugin)?
-        .add_startup_systems(StartupStage::Scene, setup_scene);
-    app.world_mut().insert_resource(AssetServer::new());
+        .add_startup_systems(StartupStage::Scene, setup_scene)?;
+    app.world_mut()?.insert_resource(AssetServer::new());
 
     app.run()?;
     Ok(())

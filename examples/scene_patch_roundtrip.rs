@@ -5,9 +5,10 @@ use nara::{
 
 fn main() {
     let mut registry = ComponentRegistry::new();
-    register_scene_components(&mut registry);
-    register_transform_components(&mut registry);
-    register_sprite_components(&mut registry);
+    register_scene_components(&mut registry).expect("scene components should register once");
+    register_transform_components(&mut registry)
+        .expect("transform components should register once");
+    register_sprite_components(&mut registry).expect("sprite components should register once");
 
     let player = scene_id("player");
     let enemy = scene_id("enemy");

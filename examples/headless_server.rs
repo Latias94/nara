@@ -36,11 +36,11 @@ name = "Headless Example"
 
     let mut app = App::new();
     add_project_plugin_plan(&mut app, settings.plugin_plan)?;
-    app.insert_resource(settings.runtime.runtime_time_settings())
-        .insert_resource(settings.runtime.fixed_time())
-        .insert_resource(settings)
-        .insert_resource(ObservedCommands::default())
-        .add_systems(CoreStage::FixedUpdate, observe_commands);
+    app.insert_resource(settings.runtime.runtime_time_settings())?
+        .insert_resource(settings.runtime.fixed_time())?
+        .insert_resource(settings)?
+        .insert_resource(ObservedCommands::default())?
+        .add_systems(CoreStage::FixedUpdate, observe_commands)?;
 
     let command = GameplayCommandEnvelope::new(
         GameplayCommandTypeId::new("server.tick")?,
@@ -50,7 +50,7 @@ name = "Headless Example"
             fixed_tick: Some(0),
         },
     );
-    app.world_mut()
+    app.world_mut()?
         .resource_mut::<GameplayCommandQueue>()
         .push(command);
 

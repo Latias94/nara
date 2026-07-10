@@ -80,6 +80,35 @@ fn rejects_duplicate_component_rust_types() {
 }
 
 #[test]
+fn component_registration_validation_is_read_only_and_matches_commit_checks() {
+    let mut registry = ComponentRegistry::new();
+    let position_id = ComponentTypeId::new("nara.test.Position");
+    let alias_id = ComponentTypeId::new("nara.test.PositionAlias");
+
+    registry
+        .validate_component_registration::<Position>(&position_id)
+        .unwrap();
+    assert!(registry.schema(&position_id).is_none());
+
+    registry
+        .register_component::<Position>(position_id.clone(), ComponentSchemaVersion(1))
+        .unwrap();
+    assert!(matches!(
+        registry.validate_component_registration::<Velocity>(&position_id),
+        Err(ComponentRegistryError::DuplicateComponentId(duplicate)) if duplicate == position_id
+    ));
+    assert!(matches!(
+        registry.validate_component_registration::<Position>(&alias_id),
+        Err(ComponentRegistryError::DuplicateComponentRustType {
+            existing_component_id,
+            requested_component_id,
+            ..
+        }) if existing_component_id == position_id && requested_component_id == alias_id
+    ));
+    assert_eq!(registry.schemas().count(), 1);
+}
+
+#[test]
 fn scene_components_require_fields() {
     let mut registry = ComponentRegistry::new();
     let id = ComponentTypeId::new("nara.test.Position");

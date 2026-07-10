@@ -340,15 +340,15 @@ impl Plugin for WindowPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<WindowEvents>();
-        app.init_resource::<WindowCloseRequests>();
-        app.init_resource::<backend::BackendWindowHandles>();
-        app.insert_resource(PrimaryWindowId::default());
+        app.init_resource::<WindowEvents>()?;
+        app.init_resource::<WindowCloseRequests>()?;
+        app.init_resource::<backend::BackendWindowHandles>()?;
+        app.insert_resource(PrimaryWindowId::default())?;
 
         if let Some(window) = &self.primary_window {
             let primary_id = window.id;
-            app.insert_resource(PrimaryWindowId(primary_id));
-            app.world_mut().spawn((window.clone(), PrimaryWindow));
+            app.insert_resource(PrimaryWindowId(primary_id))?;
+            app.world_mut()?.spawn((window.clone(), PrimaryWindow));
         }
         app.add_systems(
             CoreStage::Last,
@@ -357,7 +357,7 @@ impl Plugin for WindowPlugin {
                 clear_window_frame_events,
             )
                 .chain(),
-        );
+        )?;
         Ok(())
     }
 }
@@ -509,7 +509,7 @@ mod tests {
                 .is_empty()
         );
 
-        let world = app.world_mut();
+        let world = app.world_mut().expect("app should allow world mutation");
         let mut query = world.query::<(&Window, &PrimaryWindow)>();
         let windows = query.iter(world).collect::<Vec<_>>();
 
@@ -577,9 +577,10 @@ mod tests {
     fn close_request_can_be_cancelled_before_last_stage_exit_request() {
         let mut app = App::new();
         app.add_plugin(WindowPlugin::default()).unwrap();
-        app.add_systems(CoreStage::Update, cancel_primary_close);
+        app.add_systems(CoreStage::Update, cancel_primary_close)
+            .expect("app should accept systems");
         push_window_event(
-            app.world_mut(),
+            app.world_mut().expect("app should allow world mutation"),
             WindowEvent::CloseRequested {
                 window_id: WindowId::PRIMARY,
             },
@@ -601,7 +602,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(WindowPlugin::default()).unwrap();
         push_window_event(
-            app.world_mut(),
+            app.world_mut().expect("app should allow world mutation"),
             WindowEvent::CloseRequested {
                 window_id: WindowId::PRIMARY,
             },

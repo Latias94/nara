@@ -1,13 +1,13 @@
 use nara::prelude::*;
 
-fn main() {
+fn main() -> Result<(), AppRunError> {
     let mut app = App::new();
-    app.add_plugins(Runtime2dPlugins)
-        .expect("2D runtime plugins should install once")
-        .add_startup_systems(StartupStage::Scene, setup_scene)
-        .add_systems(CoreStage::Update, move_sprites);
+    app.add_plugins(Runtime2dPlugins)?
+        .add_startup_systems(StartupStage::Scene, setup_scene)?
+        .add_systems(CoreStage::Update, move_sprites)?;
 
-    app.update();
+    app.update()?;
+    Ok(())
 }
 
 fn setup_scene(mut commands: Commands) {

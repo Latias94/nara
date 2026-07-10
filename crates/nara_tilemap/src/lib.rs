@@ -10,8 +10,8 @@ use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PreparedComponent,
+    ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PreparedComponent,
 };
 
 pub const DEFAULT_TILE_SIZE: Vec2 = Vec2::new(16.0, 16.0);
@@ -465,78 +465,95 @@ impl Plugin for TilemapPlugin {
         )
     }
 
+    fn preflight(&self, app: &App) -> Result<(), PluginError> {
+        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
+            return Ok(());
+        };
+        let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
+        registry
+            .validate_component_registration::<Tilemap>(&component_id)
+            .map_err(|error| {
+                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+            })
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<Assets<TileSet>>();
-        app.init_resource::<ComponentRegistry>();
-        register_tilemap_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
+        app.init_resource::<Assets<TileSet>>()?;
+        app.init_resource::<ComponentRegistry>()?;
+        let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
+        register_tilemap_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+            .map_err(|error| {
+                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+            })?;
         Ok(())
     }
 }
 
-pub fn register_tilemap_components(registry: &mut ComponentRegistry) {
+pub fn register_tilemap_components(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
     let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
-    registry
-        .register_component_codec_with_context_and_fields::<Tilemap, _, _>(
-            component_id.clone(),
-            ComponentSchemaVersion(1),
-            tilemap_fields(),
-            |value, context| {
-                let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
-                let layer = optional_i32(value, "layer")?.unwrap_or(0);
-                let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
-                let tileset_ref = read_optional_asset_ref(value.get("tileset"), "tileset")?;
-                let tileset = prepare_optional_tileset(context, tileset_ref)?;
-                let cells = read_cells(value.get("cells"))?;
+    registry.register_component_codec_with_context_and_fields::<Tilemap, _, _>(
+        component_id.clone(),
+        ComponentSchemaVersion(1),
+        tilemap_fields(),
+        |value, context| {
+            let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
+            let layer = optional_i32(value, "layer")?.unwrap_or(0);
+            let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
+            let tileset_ref = read_optional_asset_ref(value.get("tileset"), "tileset")?;
+            let tileset = prepare_optional_tileset(context, tileset_ref)?;
+            let cells = read_cells(value.get("cells"))?;
 
-                Ok(PreparedComponent::new(move |world, entity| {
-                    let tileset = resolve_prepared_tileset(world, tileset)?;
-                    let mut tilemap = Tilemap::new(tile_size)
-                        .with_layer(layer)
-                        .with_sort_key(sort_key);
-                    if let Some(tileset) = tileset {
-                        tilemap = tilemap.with_tileset(tileset);
-                    }
-                    for (coord, cell) in cells {
-                        tilemap.set_cell(coord, cell);
-                    }
+            Ok(PreparedComponent::new(move |world, entity| {
+                let tileset = resolve_prepared_tileset(world, tileset)?;
+                let mut tilemap = Tilemap::new(tile_size)
+                    .with_layer(layer)
+                    .with_sort_key(sort_key);
+                if let Some(tileset) = tileset {
+                    tilemap = tilemap.with_tileset(tileset);
+                }
+                for (coord, cell) in cells {
+                    tilemap.set_cell(coord, cell);
+                }
 
-                    let mut entity_mut = world
-                        .get_entity_mut(entity)
-                        .map_err(|_| ComponentCodecError::EntityMissing)?;
-                    entity_mut.insert(tilemap);
-                    Ok(())
-                }))
-            },
-            |world, entity, context| {
-                let Some(tilemap) = world.get::<Tilemap>(entity) else {
-                    return Ok(None);
-                };
-                let tileset = match tilemap.tileset {
-                    Some(handle) => Some(asset_ref_value(
-                        &AssetRef::from_handle_with_policy(
-                            world.get_resource::<AssetServer>().ok_or_else(|| {
-                                ComponentCodecError::Message(
-                                    "AssetServer resource is missing".to_string(),
-                                )
-                            })?,
-                            handle,
-                            context.asset_ref_export_policy(),
-                        )
-                        .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
-                    )?),
-                    None => None,
-                };
+                let mut entity_mut = world
+                    .get_entity_mut(entity)
+                    .map_err(|_| ComponentCodecError::EntityMissing)?;
+                entity_mut.insert(tilemap);
+                Ok(())
+            }))
+        },
+        |world, entity, context| {
+            let Some(tilemap) = world.get::<Tilemap>(entity) else {
+                return Ok(None);
+            };
+            let tileset = match tilemap.tileset {
+                Some(handle) => Some(asset_ref_value(
+                    &AssetRef::from_handle_with_policy(
+                        world.get_resource::<AssetServer>().ok_or_else(|| {
+                            ComponentCodecError::Message(
+                                "AssetServer resource is missing".to_string(),
+                            )
+                        })?,
+                        handle,
+                        context.asset_ref_export_policy(),
+                    )
+                    .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
+                )?),
+                None => None,
+            };
 
-                Ok(Some(ComponentValue::map([
-                    ("tile_size", vec2_value(tilemap.tile_size)?),
-                    ("layer", ComponentValue::I64(i64::from(tilemap.layer.index))),
-                    ("sort_key", ComponentValue::I64(i64::from(tilemap.sort_key))),
-                    ("tileset", tileset.unwrap_or(ComponentValue::Null)),
-                    ("cells", cells_value(tilemap)?),
-                ])))
-            },
-        )
-        .expect("nara.tilemap.Tilemap component registration should be unique");
+            Ok(Some(ComponentValue::map([
+                ("tile_size", vec2_value(tilemap.tile_size)?),
+                ("layer", ComponentValue::I64(i64::from(tilemap.layer.index))),
+                ("sort_key", ComponentValue::I64(i64::from(tilemap.sort_key))),
+                ("tileset", tileset.unwrap_or(ComponentValue::Null)),
+                ("cells", cells_value(tilemap)?),
+            ])))
+        },
+    )?;
+    Ok(())
 }
 
 fn tilemap_fields() -> [ComponentFieldSchema; 6] {
@@ -979,7 +996,8 @@ mod tests {
             let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
                 .with_project_asset_database(&database);
             let mut registry = ComponentRegistry::new();
-            register_tilemap_components(&mut registry);
+            register_tilemap_components(&mut registry)
+                .expect("component registration should succeed");
 
             let prepared = registry
                 .preflight_component_with_context(
@@ -1015,7 +1033,7 @@ mod tests {
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
         let mut registry = ComponentRegistry::new();
-        register_tilemap_components(&mut registry);
+        register_tilemap_components(&mut registry).expect("component registration should succeed");
 
         let result = registry
             .preflight_component_with_context(
@@ -1052,7 +1070,7 @@ mod tests {
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
         let mut registry = ComponentRegistry::new();
-        register_tilemap_components(&mut registry);
+        register_tilemap_components(&mut registry).expect("component registration should succeed");
 
         let result = registry
             .preflight_component_with_context(
@@ -1075,7 +1093,7 @@ mod tests {
         let database = test_database(stable_id, "tilesets/terrain.ron");
         let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
         let mut registry = ComponentRegistry::new();
-        register_tilemap_components(&mut registry);
+        register_tilemap_components(&mut registry).expect("component registration should succeed");
 
         let result = registry
             .preflight_component_with_context(
@@ -1095,7 +1113,7 @@ mod tests {
     #[test]
     fn tilemap_schema_exposes_authoring_fields() {
         let mut registry = ComponentRegistry::new();
-        register_tilemap_components(&mut registry);
+        register_tilemap_components(&mut registry).expect("component registration should succeed");
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.tilemap.Tilemap"))

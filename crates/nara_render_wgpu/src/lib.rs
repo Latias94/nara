@@ -16,7 +16,7 @@ use crate::sprite::{
 use crate::surface::{WgpuSurfaceState, configure_surface, create_surface, surface_extent};
 use crate::texture::WgpuSpriteTextureCache;
 use crate::ui::{create_ui_batch_buffers, ui_batch_draw_stats};
-use nara_app::{App, CoreStage, Plugin, PluginError};
+use nara_app::{App, CoreStage, Plugin, PluginCleanupContext, PluginError};
 use nara_asset::Assets;
 use nara_ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_image::{ImageAsset, PreparedImageResource};
@@ -58,22 +58,23 @@ impl Plugin for WgpuRenderPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_plugin_if_missing(nara_render::RenderPlugin)?;
-        app.init_resource::<WgpuRenderBackend>();
-        app.init_resource::<RenderBackendStatus>();
-        app.world_mut()
+        app.init_resource::<WgpuRenderBackend>()?;
+        app.init_resource::<RenderBackendStatus>()?;
+        app.world_mut()?
             .resource_mut::<RenderBackendStatus>()
             .mark_state(WGPU_RENDER_BACKEND, RenderBackendState::Uninitialized);
         app.add_systems(
             CoreStage::Render,
             render_clear_passes.after(begin_render_frame),
-        );
+        )?;
         Ok(())
     }
 
-    fn cleanup(&self, app: &mut App) {
-        if let Some(mut backend) = app.world_mut().get_resource_mut::<WgpuRenderBackend>() {
+    fn cleanup(&self, context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
+        if let Some(mut backend) = context.world_mut().get_resource_mut::<WgpuRenderBackend>() {
             backend.clear_gpu_resources();
         }
+        Ok(())
     }
 }
 

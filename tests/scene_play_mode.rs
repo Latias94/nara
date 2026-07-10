@@ -463,7 +463,8 @@ fn scene_registry() -> ComponentRegistry {
 
 fn sprite_registry() -> ComponentRegistry {
     let mut registry = scene_registry();
-    nara::sprite::register_sprite_components(&mut registry);
+    nara::sprite::register_sprite_components(&mut registry)
+        .expect("sprite components should register once");
     registry
 }
 

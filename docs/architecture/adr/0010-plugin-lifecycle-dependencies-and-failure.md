@@ -1,93 +1,150 @@
-# ADR 0010: Plugin Lifecycle, Dependencies, and Failure
+# ADR 0010: Plugin Lifecycle, Dependencies, and Failure Containment
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-07-10
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
 
 ## Context
 
-nara owns its app/plugin lifecycle. Here, "plugin" means a Bevy-style Rust engine module or capability package, not a Zed-style WASM extension. Plugins install core systems, assets, render backends, window adapters, audio, tooling, and editor integration. Some plugin actions are pure registration; others may fail due to GPU/device/window/filesystem conditions.
+nara owns its application and plugin lifecycle. Plugins are trusted Rust engine modules that install
+systems, resources, codecs, services, and backend adapters. They are not sandboxed project
+extensions. A plugin hook may fail or panic after mutating the world or schedules, so treating every
+failure as retryable can run a partially configured application. The previous `plugins_finished`
+boolean also allowed a failed `finish` pass to discard cleanup hooks and report success on the next
+call.
+
+The lifecycle must preserve the first committed failure, prevent schedule execution after that
+failure, and retain enough ownership to clean every committed plugin exactly once. Expected setup
+conflicts must remain ordinary structured errors rather than panics.
 
 ## Decision
 
-nara plugins use a staged lifecycle:
+`App` uses the following explicit lifecycle:
 
 ```text
-build      fallible registration of systems/resources/types and cheap dependency installation
-configure  optional validation and dependency checks
-finish     fallible initialization for backends/adapters
-cleanup    optional transfer/removal of temporary setup state
+Configuring -> Finishing -> Ready -> Cleaning -> Cleaned
+      |            |                    ^
+      +------------+----> Poisoned -----+
+                           |     ^
+                           +-----+
+                    cleanup returns to Poisoned
 ```
 
-Phase 1 implements `build`, `finish`, and `cleanup`. `build` is already fallible so dependency
-installation and expected setup failures do not need panic paths, while expensive backend/device
-work still belongs in runners, backend systems, or a later initialization phase.
+`Poisoned` is terminal for build, finish, mutation, and run entry points. Read-only inspection and
+explicit cleanup remain available. Cleanup of a poisoned app returns to `Poisoned`, with
+`cleanup_complete = true`; it never makes the app runnable again.
 
-Rules:
+### Hook Classification
 
-- Plugins are Rust-side engine modules compiled into the application or editor.
-- WASM scripting/extensions are a separate topic and should not be conflated with `Plugin`.
-- Unique plugins are rejected if added twice through `App::add_plugin`; prerequisite groups can use
-  `App::add_plugin_if_missing`.
-- Plugin dependencies should become declared metadata before the surface stabilizes; until then,
-  dependent plugin groups install cheap prerequisites through fallible app APIs.
-- `build` should not do expensive backend/device work.
-- Fallible initialization belongs in `finish` or runner/backend initialization.
-- Plugin errors should be diagnostics-aware.
+- `metadata` and `preflight(&App)` execute before a plugin is committed. `preflight` only receives a
+  shared app reference. Its ordinary `Err`, or an isolated panic in either pre-mutation hook, is
+  retryable and does not create a failure report.
+- `build(&mut App)` and `finish(&mut App)` are committed on entry. Their `Err` or unwind panic
+  poisons the app, records the first failure, and triggers cleanup after the outermost active hook
+  returns.
+- nara does not currently expose a prepared-but-uncommitted token. A future preparation API may be
+  retryable only if its type owns a registered teardown action and proves that no world, schedule,
+  service, or external mutation was committed. Adding such a token requires an ADR revision and a
+  real consumer. Arbitrary mutable hooks never receive that classification.
+- Hook panics are isolated with `catch_unwind` and converted to stable `PluginError` values. This
+  containment applies only to `panic = "unwind"`; aborting builds cannot run Rust cleanup code and
+  make no in-process recovery guarantee.
+
+The first committed failure is immutable. Later cleanup errors and cleanup panics are appended to
+`PluginFailureReport::cleanup_failures`; they never replace the primary error and never stop later
+cleanup hooks.
+
+### Installation and Dependency Rules
+
+- A plugin is retained for cleanup before its `build` hook is entered. Successful nested dependency
+  builds are ordered before the dependent plugin for finish, and cleanup uses the reverse order.
+- Stable plugin and plugin-group installation stacks reject recursive dependency cycles with the
+  complete stable-ID chain instead of recursing indefinitely.
+- Unique plugin IDs and group IDs are rejected before mutation. Declared prerequisites,
+  capabilities, and conflicts are checked before custom preflight; a conflict declared by either
+  the new or an installed plugin rejects the pair independent of installation order.
+- `PluginGroup::build` receives `PluginGroupBuilder`, not `&mut App`. A group may only compose
+  plugins or other groups; it cannot create unowned world or schedule mutations. Group build is
+  committed on entry because members may already have installed when a later member fails.
+- Built-in component plugins inspect an existing `ComponentRegistry` during preflight with the same
+  stable-ID and Rust-type uniqueness checks used at commit. Registration remains fallible and maps
+  `ComponentRegistryError` to a plugin/component-contextual `PluginError`; no recoverable
+  registration path uses `expect`.
+
+### Mutation and Cleanup Ownership
+
+- Public mutable app entry points return `Result` and return the preserved primary plugin error when
+  the app is poisoned. `App::update` is the only zero-delta convenience update and is fallible;
+  the panic-based update path and `try_update` split are removed.
+- `Plugin::cleanup` is fallible and receives a narrow `PluginCleanupContext` rather than `&mut App`.
+  Cleanup can access the world to release owned resources but cannot add plugins, schedules, or a
+  runner.
+- Cleanup is reverse-order, best-effort, panic-isolated, and once-only. A hook is marked attempted
+  before invocation, so a cleanup panic cannot cause a second call during `Drop`.
+- Lifecycle-control reentry from committed build or finish hooks is rejected. Nested plugin/group
+  installation remains supported and is the only intentional committed-hook nesting.
+- `Drop` performs best-effort cleanup without unwinding, including when another panic is already
+  unwinding. Callers that need cleanup evidence use `App::cleanup_plugins` or `App::run`.
+
+### Runner Ownership
+
+`RunnerFn` borrows `&mut App`; it does not consume the app. `App::run` therefore regains control when
+the runner exits and performs explicit cleanup. If running and cleanup both fail,
+`AppRunError::Shutdown` preserves the prior run error and the separate plugin failure report. A
+finish failure is returned with its inspectable report before any runner executes.
 
 ## Alternatives Considered
 
-### Option A: Single `build(&mut App)` only
+### Single fallible `build(&mut App)` with no terminal state
 
-**Pros**: Simple and Bevy-like.
+Rejected. An error cannot prove that arbitrary earlier mutations were rolled back, and retrying or
+running would expose a partially configured app.
 
-**Cons**: Backend initialization and dependency errors become ad hoc.
+### Roll back arbitrary world and schedule mutation
 
-**Decision**: Good Phase 1 implementation, but not enough as the long-term lifecycle.
+Rejected. Native resources and external services are not generally cloneable or transactional.
+Explicit ownership and reverse cleanup are honest; implicit snapshot rollback is not.
 
-### Option B: Fully async plugin lifecycle from day one
+### Keep full `&mut App` access during group build and cleanup
 
-**Pros**: Handles GPU/device/import setup uniformly.
+Rejected. It permits mutations with no retained cleanup owner. Narrow builders/contexts make the
+ownership rule enforceable by the Rust API.
 
-**Cons**: Makes every plugin pay async complexity.
+### Fully asynchronous plugin lifecycle
 
-**Decision**: Rejected for now.
-
-### Option C: Staged lifecycle with fallible app/plugin boundaries (Chosen)
-
-**Pros**: Keeps registration simple while supporting mature backend initialization and structured
-dependency failures.
-
-**Cons**: More lifecycle states to document and test.
-
-**Decision**: Chosen.
+Deferred. Device, window, and importer startup do not justify forcing every plugin hook to be async.
+Long-running services remain behind runners, task pools, and explicit backend state machines.
 
 ## Implementation Notes
 
-As of 2026-07-09:
-
-- `Plugin::build(&self, app: &mut App) -> Result<(), PluginError>`.
-- `App::add_plugin` returns `Result<&mut App, PluginError>` and does not register a plugin whose
-  `build` fails.
-- `App::add_plugin_if_missing` preserves ergonomic plugin groups without panic-on-duplicate helper
-  functions.
-- `PluginError::MissingPrerequisite` is the current structured dependency error; future dependency
-  metadata can build on it without changing the panic policy.
+- Canonical types are `PluginLifecycleState`, `PluginHook`, `PluginFailure`,
+  `PluginFailureReport`, `PluginCleanupContext`, and `PluginGroupBuilder`.
+- Plugin and group metadata remain stable and inspectable after successful installation. A failed
+  group is never published as installed; already committed member metadata remains inspectable on
+  the terminal app.
+- Cleanup-only failures use a report with no primary setup failure. `cleanup_complete` means every
+  retained hook was attempted, not that every hook succeeded.
+- Runtime diagnostics may later bridge failure reports, but logs are not lifecycle authority.
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Duplicate behavior | Unique plugin duplicate returns error | Unit test |
-| Dependency behavior | Missing dependency is diagnosed | Unit test |
-| Backend failure | Render/window init can fail without panic | Future integration test |
-| Simplicity | Common plugins only implement `build` | API review |
+| Preflight retry | Rejection leaves `Configuring` app unmodified | `nara_app` lifecycle tests |
+| Committed failure | Build/finish error or panic permanently prevents schedules | `nara_app` lifecycle tests |
+| Cleanup ownership | Every committed hook runs once in reverse order | cleanup order and unwind tests |
+| Failure fidelity | Primary error survives cleanup errors/panics | failure-report tests |
+| Dependency safety | Plugin/group cycles terminate with stable chains | cycle tests |
+| Runner shutdown | Prior runner error and cleanup report are both observable | runner cleanup test |
+| Built-in registration | Duplicate component registration is a contextual error, not panic | component plugin tests |
 
 ## Risks and Mitigations
 
 | Risk | Severity | Likelihood | Mitigation |
-|---|---|---:|---|
-| Lifecycle over-designed before implementation | Medium | Medium | Reserve phases in ADR; implement incrementally |
-| Hidden dependency ordering persists | Medium | High | Add dependency metadata before many plugins exist |
-| Async backend init leaks into all plugins | Medium | Medium | Keep fallible finish separate from general build |
+|---|---:|---:|---|
+| Plugin ignores a nested installation error | High | Medium | Nested failure poisons the app independently; outer success cannot publish it |
+| Cleanup itself fails | High | Medium | Mark attempted first, aggregate separately, continue reverse cleanup |
+| Panic abort configuration skips cleanup | High | Low | Document unwind-only containment; process supervision handles abort builds |
+| Compatibility wrappers preserve unsafe entry points | High | Medium | Pre-1.0 breaking migration removes old signatures and stale callers |

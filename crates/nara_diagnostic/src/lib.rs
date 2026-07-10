@@ -621,7 +621,7 @@ impl Plugin for DiagnosticsPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         if !app.world().contains_resource::<RuntimeDiagnostics>() {
-            app.insert_resource(RuntimeDiagnostics::new(self.settings));
+            app.insert_resource(RuntimeDiagnostics::new(self.settings))?;
         }
         Ok(())
     }

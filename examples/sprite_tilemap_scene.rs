@@ -1,15 +1,15 @@
 use nara::advanced_prelude::*;
 
-fn main() {
+fn main() -> Result<(), AppRunError> {
     let mut app = App::new();
-    app.add_plugins(Runtime2dPlugins)
-        .expect("2D runtime plugins should install once")
-        .add_startup_systems(StartupStage::Scene, setup_scene);
+    app.add_plugins(Runtime2dPlugins)?
+        .add_startup_systems(StartupStage::Scene, setup_scene)?;
 
-    app.update();
+    app.update()?;
 
     let batches = app.world().resource::<SpriteBatches>();
     assert_eq!(batches.total_instances(), 3);
+    Ok(())
 }
 
 fn setup_scene(mut commands: Commands) {

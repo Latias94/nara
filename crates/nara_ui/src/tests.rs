@@ -25,13 +25,20 @@ use crate::{
 fn root_targeting_primary_view_produces_child_rectangles() {
     let mut app = App::new();
     app.add_plugin(UiPlugin).unwrap();
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-        ..Camera2d::default()
-    });
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+            ..Camera2d::default()
+        });
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
     let child = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn((
             UiNode::new(
                 UiStyle::default()
@@ -58,7 +65,7 @@ fn root_targeting_primary_view_produces_child_rectangles() {
 #[test]
 fn computed_layout_and_interaction_state_are_runtime_only() {
     let mut registry = ComponentRegistry::new();
-    register_ui_components(&mut registry);
+    register_ui_components(&mut registry).expect("component registration should succeed");
 
     assert!(
         registry
@@ -90,7 +97,7 @@ fn computed_layout_and_interaction_state_are_runtime_only() {
 #[test]
 fn ui_node_codec_roundtrips_stable_authoring_fields() {
     let mut registry = ComponentRegistry::new();
-    register_ui_components(&mut registry);
+    register_ui_components(&mut registry).expect("component registration should succeed");
     let id = ComponentTypeId::new("nara.ui.UiNode");
     let value = ComponentValue::map([
         (
@@ -190,20 +197,31 @@ fn ui_node_codec_roundtrips_stable_authoring_fields() {
 fn hidden_and_zero_size_nodes_do_not_hit_test() {
     let mut app = App::new();
     app.add_plugin(UiPlugin).unwrap();
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-        ..Camera2d::default()
-    });
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
-    app.world_mut().spawn((
-        UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).with_visible(false),
-        Parent(root),
-    ));
-    app.world_mut().spawn((
-        UiNode::new(UiStyle::absolute(0.0, 0.0, 0.0, 100.0)),
-        Parent(root),
-    ));
     app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+            ..Camera2d::default()
+        });
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).with_visible(false),
+            Parent(root),
+        ));
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 0.0, 100.0)),
+            Parent(root),
+        ));
+    app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
         .set_position(Vec2::new(10.0, 10.0));
 
@@ -219,13 +237,20 @@ fn hidden_and_zero_size_nodes_do_not_hit_test() {
 fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
     let mut app = App::new();
     app.add_plugin(UiPlugin).unwrap();
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-        ..Camera2d::default()
-    });
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+            ..Camera2d::default()
+        });
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
     let lower = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).with_z_index(1),
             Parent(root),
@@ -233,6 +258,7 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
         .id();
     let upper = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0))
                 .with_z_index(2)
@@ -241,9 +267,11 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
         ))
         .id();
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
         .set_position(Vec2::new(10.0, 10.0));
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<ButtonInput<MouseButton>>()
         .press(MouseButton::Left);
 
@@ -256,6 +284,7 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
     assert_eq!(interaction.focused(), Some(upper));
 
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<ButtonInput<MouseButton>>()
         .release(MouseButton::Left);
     app.run_once(Duration::ZERO).unwrap();
@@ -272,20 +301,25 @@ fn routed_pointer_hits_only_matching_view_target() {
     app.add_plugin(UiPlugin).unwrap();
     let first_target = render_image_target(1);
     let second_target = render_image_target(2);
-    app.world_mut().spawn(Camera2d {
-        target: first_target,
-        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-        order: 0,
-        ..Camera2d::default()
-    });
-    app.world_mut().spawn(Camera2d {
-        target: second_target,
-        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-        order: 1,
-        ..Camera2d::default()
-    });
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            target: first_target,
+            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+            order: 0,
+            ..Camera2d::default()
+        });
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            target: second_target,
+            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+            order: 1,
+            ..Camera2d::default()
+        });
     let first_root = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn(UiRoot {
             target: first_target,
             order: 0,
@@ -293,6 +327,7 @@ fn routed_pointer_hits_only_matching_view_target() {
         .id();
     let second_root = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn(UiRoot {
             target: second_target,
             order: 0,
@@ -300,6 +335,7 @@ fn routed_pointer_hits_only_matching_view_target() {
         .id();
     let first = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)),
             Parent(first_root),
@@ -307,15 +343,18 @@ fn routed_pointer_hits_only_matching_view_target() {
         .id();
     let second = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)),
             Parent(second_root),
         ))
         .id();
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
         .set_position(Vec2::new(10.0, 10.0));
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<UiInteractionState>()
         .set_pointer_route(UiPointerRoute::for_target_view(second_target, 1));
 
@@ -333,22 +372,31 @@ fn routed_pointer_hits_only_matching_view_target() {
 fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
     let mut app = App::new();
     app.add_plugin(UiPlugin).unwrap();
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-        ..Camera2d::default()
-    });
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+            ..Camera2d::default()
+        });
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
     let button = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).focusable(),
             Parent(root),
         ))
         .id();
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
         .set_position(Vec2::new(10.0, 10.0));
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<ButtonInput<MouseButton>>()
         .press(MouseButton::Left);
 
@@ -364,6 +412,7 @@ fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
     );
 
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
         .set_position(Vec2::new(150.0, 10.0));
     app.run_once(Duration::ZERO).unwrap();
@@ -374,6 +423,7 @@ fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
     assert_eq!(interaction.focused(), Some(button));
 
     app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<ButtonInput<MouseButton>>()
         .release(MouseButton::Left);
     app.run_once(Duration::ZERO).unwrap();
@@ -385,23 +435,33 @@ fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
 fn clipped_child_does_not_hit_test_outside_parent_clip() {
     let mut app = App::new();
     app.add_plugin(UiPlugin).unwrap();
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-        ..Camera2d::default()
-    });
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+            ..Camera2d::default()
+        });
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
     let clipped_parent = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 50.0, 50.0)).clipping_children(),
             Parent(root),
         ))
         .id();
-    app.world_mut().spawn((
-        UiNode::new(UiStyle::absolute(40.0, 40.0, 50.0, 50.0)),
-        Parent(clipped_parent),
-    ));
     app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            UiNode::new(UiStyle::absolute(40.0, 40.0, 50.0, 50.0)),
+            Parent(clipped_parent),
+        ));
+    app.world_mut()
+        .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
         .set_position(Vec2::new(75.0, 75.0));
 
@@ -425,7 +485,7 @@ fn ui_panel_codec_resolves_stable_image_refs_during_preflight() {
     let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
         .with_project_asset_database(&database);
     let mut registry = ComponentRegistry::new();
-    register_ui_components(&mut registry);
+    register_ui_components(&mut registry).expect("component registration should succeed");
     let id = ComponentTypeId::new("nara.ui.UiPanel");
     let value = ui_panel_value(AssetRef::StableId(stable_id));
 

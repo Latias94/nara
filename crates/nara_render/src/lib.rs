@@ -10,7 +10,8 @@ use nara_core::Vec2;
 use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource};
 use nara_reflect::{
     ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind,
 };
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
@@ -413,65 +414,82 @@ impl Plugin for RenderPlugin {
         )
     }
 
+    fn preflight(&self, app: &App) -> Result<(), PluginError> {
+        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
+            return Ok(());
+        };
+        let component_id = ComponentTypeId::new("nara.render.Camera2d");
+        registry
+            .validate_component_registration::<Camera2d>(&component_id)
+            .map_err(|error| {
+                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+            })
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<ComponentRegistry>();
-        register_render_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
-        app.init_resource::<ClearColor>();
-        app.init_resource::<ExtractedViews>();
-        app.init_resource::<RenderFrame>();
-        app.init_resource::<FrameStats>();
-        app.init_resource::<RenderBackendStatus>();
-        app.init_resource::<RenderPrepareInvalidations>();
-        app.add_systems(CoreStage::Extract, extract_views);
-        app.add_systems(CoreStage::Render, begin_render_frame);
+        app.init_resource::<ComponentRegistry>()?;
+        let component_id = ComponentTypeId::new("nara.render.Camera2d");
+        register_render_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+            .map_err(|error| {
+                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+            })?;
+        app.init_resource::<ClearColor>()?;
+        app.init_resource::<ExtractedViews>()?;
+        app.init_resource::<RenderFrame>()?;
+        app.init_resource::<FrameStats>()?;
+        app.init_resource::<RenderBackendStatus>()?;
+        app.init_resource::<RenderPrepareInvalidations>()?;
+        app.add_systems(CoreStage::Extract, extract_views)?;
+        app.add_systems(CoreStage::Render, begin_render_frame)?;
         Ok(())
     }
 }
 
-pub fn register_render_components(registry: &mut ComponentRegistry) {
+pub fn register_render_components(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
     let component_id = ComponentTypeId::new("nara.render.Camera2d");
-    registry
-        .register_scene_component_with_fields::<Camera2d, _, _>(
-            component_id.clone(),
-            ComponentSchemaVersion(1),
-            camera_fields(),
-            |value| {
-                Ok(Camera2d {
-                    target: read_render_target(value.get("target"))?,
-                    viewport: read_optional_viewport(value.get("viewport"))?,
-                    clear_color: read_optional_color(value.get("clear_color"))?,
-                    viewport_height: read_f32(value.field("viewport_height")?, "viewport_height")?,
-                    order: optional_i32(value, "order")?.unwrap_or(0),
-                })
-            },
-            |camera| {
-                Ok(ComponentValue::map([
-                    ("target", render_target_value(camera.target)?),
-                    (
-                        "viewport",
-                        camera
-                            .viewport
-                            .map(viewport_value)
-                            .transpose()?
-                            .unwrap_or(ComponentValue::Null),
-                    ),
-                    (
-                        "clear_color",
-                        camera
-                            .clear_color
-                            .map(color_value)
-                            .transpose()?
-                            .unwrap_or(ComponentValue::Null),
-                    ),
-                    (
-                        "viewport_height",
-                        ComponentValue::f64(f64::from(camera.viewport_height))?,
-                    ),
-                    ("order", ComponentValue::I64(i64::from(camera.order))),
-                ]))
-            },
-        )
-        .expect("nara.render.Camera2d component registration should be unique");
+    registry.register_scene_component_with_fields::<Camera2d, _, _>(
+        component_id.clone(),
+        ComponentSchemaVersion(1),
+        camera_fields(),
+        |value| {
+            Ok(Camera2d {
+                target: read_render_target(value.get("target"))?,
+                viewport: read_optional_viewport(value.get("viewport"))?,
+                clear_color: read_optional_color(value.get("clear_color"))?,
+                viewport_height: read_f32(value.field("viewport_height")?, "viewport_height")?,
+                order: optional_i32(value, "order")?.unwrap_or(0),
+            })
+        },
+        |camera| {
+            Ok(ComponentValue::map([
+                ("target", render_target_value(camera.target)?),
+                (
+                    "viewport",
+                    camera
+                        .viewport
+                        .map(viewport_value)
+                        .transpose()?
+                        .unwrap_or(ComponentValue::Null),
+                ),
+                (
+                    "clear_color",
+                    camera
+                        .clear_color
+                        .map(color_value)
+                        .transpose()?
+                        .unwrap_or(ComponentValue::Null),
+                ),
+                (
+                    "viewport_height",
+                    ComponentValue::f64(f64::from(camera.viewport_height))?,
+                ),
+                ("order", ComponentValue::I64(i64::from(camera.order))),
+            ]))
+        },
+    )?;
+    Ok(())
 }
 
 fn camera_fields() -> [ComponentFieldSchema; 5] {
@@ -704,7 +722,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(WindowPlugin::default()).unwrap();
         app.add_plugin(RenderPlugin).unwrap();
-        app.world_mut().spawn(Camera2d::default());
+        app.world_mut()
+            .expect("app should allow world mutation")
+            .spawn(Camera2d::default());
 
         app.run_once(Duration::ZERO).unwrap();
 
@@ -724,12 +744,14 @@ mod tests {
     fn extracts_explicit_image_target_view_without_window() {
         let mut app = App::new();
         app.add_plugin(RenderPlugin).unwrap();
-        app.world_mut().spawn(Camera2d {
-            target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
-            viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-            clear_color: Some(Color::WHITE),
-            ..Camera2d::default()
-        });
+        app.world_mut()
+            .expect("app should allow world mutation")
+            .spawn(Camera2d {
+                target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
+                clear_color: Some(Color::WHITE),
+                ..Camera2d::default()
+            });
 
         app.run_once(Duration::ZERO).unwrap();
 
@@ -747,6 +769,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugin(RenderPlugin).unwrap();
         app.world_mut()
+            .expect("app should allow world mutation")
             .resource_mut::<ExtractedViews>()
             .push(ExtractedView {
                 camera_entity: Entity::PLACEHOLDER,
@@ -806,7 +829,7 @@ mod tests {
     #[test]
     fn camera_schema_exposes_authoring_fields() {
         let mut registry = ComponentRegistry::new();
-        register_render_components(&mut registry);
+        register_render_components(&mut registry).expect("component registration should succeed");
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.render.Camera2d"))

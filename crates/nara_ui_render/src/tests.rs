@@ -23,12 +23,18 @@ use crate::{
 #[test]
 fn colored_panel_queues_without_image_asset() {
     let mut app = ui_app();
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
-    app.world_mut().spawn((
-        UiNode::new(UiStyle::absolute(10.0, 20.0, 50.0, 25.0)),
-        UiPanel::from_color(Color::rgb(0.8, 0.2, 0.1)),
-        Parent(root),
-    ));
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            UiNode::new(UiStyle::absolute(10.0, 20.0, 50.0, 25.0)),
+            UiPanel::from_color(Color::rgb(0.8, 0.2, 0.1)),
+            Parent(root),
+        ));
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -50,12 +56,18 @@ fn image_panel_uses_prepared_image_material_key_when_ready() {
     let image = Handle::new(AssetId::from_raw(7));
     let mut app = ui_app();
     insert_loaded_image(&mut app, image);
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
-    app.world_mut().spawn((
-        UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0)),
-        UiPanel::from_image(image).with_sampler(SamplerDescriptor::NEAREST_CLAMP),
-        Parent(root),
-    ));
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0)),
+            UiPanel::from_image(image).with_sampler(SamplerDescriptor::NEAREST_CLAMP),
+            Parent(root),
+        ));
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -78,12 +90,18 @@ fn image_panel_uses_prepared_image_material_key_when_ready() {
 fn missing_image_panel_queues_fallback_material_and_records_stats() {
     let missing = Handle::new(AssetId::from_raw(99));
     let mut app = ui_app();
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
-    app.world_mut().spawn((
-        UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0)),
-        UiPanel::from_image(missing).with_tint(Color::rgba(1.0, 1.0, 1.0, 0.25)),
-        Parent(root),
-    ));
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0)),
+            UiPanel::from_image(missing).with_tint(Color::rgba(1.0, 1.0, 1.0, 0.25)),
+            Parent(root),
+        ));
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -98,24 +116,33 @@ fn missing_image_panel_queues_fallback_material_and_records_stats() {
 #[test]
 fn clipping_splits_batches_with_same_material() {
     let mut app = ui_app();
-    let root = app.world_mut().spawn(UiRoot::primary_window()).id();
+    let root = app
+        .world_mut()
+        .expect("app should allow world mutation")
+        .spawn(UiRoot::primary_window())
+        .id();
     let clip_parent = app
         .world_mut()
+        .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 64.0, 64.0)).clipping_children(),
             Parent(root),
         ))
         .id();
-    app.world_mut().spawn((
-        UiNode::new(UiStyle::absolute(4.0, 4.0, 16.0, 16.0)),
-        UiPanel::from_color(Color::WHITE),
-        Parent(clip_parent),
-    ));
-    app.world_mut().spawn((
-        UiNode::new(UiStyle::absolute(80.0, 0.0, 16.0, 16.0)),
-        UiPanel::from_color(Color::WHITE),
-        Parent(root),
-    ));
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            UiNode::new(UiStyle::absolute(4.0, 4.0, 16.0, 16.0)),
+            UiPanel::from_color(Color::WHITE),
+            Parent(clip_parent),
+        ));
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn((
+            UiNode::new(UiStyle::absolute(80.0, 0.0, 16.0, 16.0)),
+            UiPanel::from_color(Color::WHITE),
+            Parent(root),
+        ));
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -152,10 +179,12 @@ fn ui_rect_projection_uses_top_left_origin_and_flipped_uv() {
 fn ui_app() -> App {
     let mut app = App::new();
     app.add_plugin(UiRenderPlugin).unwrap();
-    app.world_mut().spawn(Camera2d {
-        viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-        ..Camera2d::default()
-    });
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .spawn(Camera2d {
+            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+            ..Camera2d::default()
+        });
     app
 }
 
@@ -176,8 +205,12 @@ fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {
             Some(import_hash),
         )
         .unwrap();
-    app.world_mut().insert_resource(images);
-    app.world_mut().insert_resource(states);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .insert_resource(images);
+    app.world_mut()
+        .expect("app should allow world mutation")
+        .insert_resource(states);
 }
 
 fn test_image() -> ImageAsset {

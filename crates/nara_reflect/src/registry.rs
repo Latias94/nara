@@ -174,6 +174,26 @@ impl ComponentRegistry {
         }
     }
 
+    pub fn validate_component_registration<T>(
+        &self,
+        id: &ComponentTypeId,
+    ) -> Result<(), ComponentRegistryError>
+    where
+        T: Component,
+    {
+        if self.schemas.contains_key(id) {
+            return Err(ComponentRegistryError::DuplicateComponentId(id.clone()));
+        }
+        if let Some(existing_component_id) = self.rust_type_ids.get(&TypeId::of::<T>()) {
+            return Err(ComponentRegistryError::DuplicateComponentRustType {
+                rust_type_path: std::any::type_name::<T>().to_string(),
+                existing_component_id: existing_component_id.clone(),
+                requested_component_id: id.clone(),
+            });
+        }
+        Ok(())
+    }
+
     pub fn register_component<T>(
         &mut self,
         id: ComponentTypeId,
@@ -498,17 +518,8 @@ impl ComponentRegistry {
     where
         T: Component,
     {
-        if self.schemas.contains_key(&id) {
-            return Err(ComponentRegistryError::DuplicateComponentId(id));
-        }
+        self.validate_component_registration::<T>(&id)?;
         let rust_type_id = TypeId::of::<T>();
-        if let Some(existing_component_id) = self.rust_type_ids.get(&rust_type_id) {
-            return Err(ComponentRegistryError::DuplicateComponentRustType {
-                rust_type_path: std::any::type_name::<T>().to_string(),
-                existing_component_id: existing_component_id.clone(),
-                requested_component_id: id,
-            });
-        }
 
         let schema = ComponentSchema {
             id: id.clone(),

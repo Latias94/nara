@@ -32,7 +32,9 @@ pub use nara_window as window;
 #[cfg(feature = "winit")]
 pub use nara_winit as winit;
 
-use nara_app::{App, PluginError, PluginGroup, PluginGroupId, PluginGroupMetadata, PluginId};
+use nara_app::{
+    App, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginGroupMetadata, PluginId,
+};
 
 const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.scene.hierarchy");
 const DIAGNOSTIC_PLUGIN_ID: PluginId = PluginId::new("nara.diagnostic");
@@ -137,13 +139,13 @@ impl PluginGroup for MinimalPlugins {
         )
     }
 
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
-        app.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
-        app.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
-        app.add_plugin_if_missing(nara_asset::AssetPlugin)?;
-        app.add_plugin_if_missing(nara_transform::TransformPlugin)?;
-        app.add_plugin_if_missing(nara_input::InputPlugin)?;
+    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
+        group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
+        group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
+        group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
+        group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
+        group.add_plugin_if_missing(nara_input::InputPlugin)?;
         Ok(())
     }
 }
@@ -164,9 +166,9 @@ impl PluginGroup for HeadlessRuntimePlugins {
         )
     }
 
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugins(MinimalPlugins)?;
-        app.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
+    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugins(MinimalPlugins)?;
+        group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
         Ok(())
     }
 }
@@ -183,13 +185,13 @@ impl PluginGroup for ServerPlugins {
         PluginGroupMetadata::new(PluginGroupId::new("nara.plugins.server"), SERVER_PLUGIN_IDS)
     }
 
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
-        app.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
-        app.add_plugin_if_missing(nara_tasks::TaskPlugin::deterministic())?;
-        app.add_plugin_if_missing(nara_asset::AssetPlugin)?;
-        app.add_plugin_if_missing(nara_transform::TransformPlugin)?;
-        app.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
+    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
+        group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
+        group.add_plugin_if_missing(nara_tasks::TaskPlugin::deterministic())?;
+        group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
+        group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
+        group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin)?;
         Ok(())
     }
 }
@@ -205,15 +207,15 @@ impl PluginGroup for Runtime2dPlugins {
         )
     }
 
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugins(MinimalPlugins)?;
-        app.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
-        app.add_plugin_if_missing(nara_tilemap::TilemapPlugin)?;
-        app.add_plugin_if_missing(nara_render::RenderPlugin)?;
-        app.add_plugin_if_missing(nara_image::ImagePlugin)?;
-        app.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
-        app.add_plugin_if_missing(nara_ui::UiPlugin)?;
-        app.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
+    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugins(MinimalPlugins)?;
+        group.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
+        group.add_plugin_if_missing(nara_tilemap::TilemapPlugin)?;
+        group.add_plugin_if_missing(nara_render::RenderPlugin)?;
+        group.add_plugin_if_missing(nara_image::ImagePlugin)?;
+        group.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
+        group.add_plugin_if_missing(nara_ui::UiPlugin)?;
+        group.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
         Ok(())
     }
 }
@@ -229,10 +231,10 @@ impl PluginGroup for DesktopWindowPlugins {
         )
     }
 
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(nara_window::WindowPlugin::default())?;
+    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugin_if_missing(nara_window::WindowPlugin::default())?;
         #[cfg(feature = "winit")]
-        app.add_plugin_if_missing(nara_winit::WinitPlugin::default())?;
+        group.add_plugin_if_missing(nara_winit::WinitPlugin::default())?;
         Ok(())
     }
 }
@@ -250,12 +252,12 @@ impl PluginGroup for DesktopWgpuPlugins {
         )
     }
 
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugins(Runtime2dPlugins)?;
-        app.add_plugins(DesktopWindowPlugins)?;
-        app.add_plugin_if_missing(nara_render_wgpu::WgpuRenderPlugin)?;
-        app.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
-        app.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
+    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugins(Runtime2dPlugins)?;
+        group.add_plugins(DesktopWindowPlugins)?;
+        group.add_plugin_if_missing(nara_render_wgpu::WgpuRenderPlugin)?;
+        group.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
+        group.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
         Ok(())
     }
 }
@@ -271,8 +273,8 @@ impl PluginGroup for ToolingPlugins {
         )
     }
 
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(nara_tooling::ToolingPlugin)?;
+    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugin_if_missing(nara_tooling::ToolingPlugin)?;
         Ok(())
     }
 }
@@ -314,8 +316,8 @@ pub mod prelude {
     };
     pub use nara_app::{
         App, AppExit, AppExitRequests, AppFrameOutcome, AppRunError, CoreStage, FixedTime, Plugin,
-        PluginError, PluginGroup, RealTime, RenderTime, RuntimeFrameStatus, RuntimeTimeSettings,
-        StartupStage, VirtualTime,
+        PluginCleanupContext, PluginError, PluginGroup, PluginGroupBuilder, RealTime, RenderTime,
+        RuntimeFrameStatus, RuntimeTimeSettings, StartupStage, VirtualTime,
     };
     pub use nara_asset::{
         Asset, AssetId, AssetPath, AssetPathError, AssetPlugin, AssetRef, AssetRefError,
@@ -402,8 +404,9 @@ pub mod prelude {
 pub mod advanced_prelude {
     pub use crate::prelude::*;
     pub use nara_app::{
-        PluginCapability, PluginCategory, PluginGroupId, PluginGroupMetadata, PluginId,
-        PluginMetadata, TaskUpdateSet,
+        PluginCapability, PluginCategory, PluginCleanupError, PluginFailure, PluginFailureReport,
+        PluginFailureSubject, PluginGroupId, PluginGroupMetadata, PluginHook, PluginId,
+        PluginLifecycleState, PluginMetadata, TaskUpdateSet,
     };
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,
@@ -598,8 +601,11 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(ServerPlugins).unwrap();
         app.insert_resource(ObservedServerCommands::default())
-            .add_systems(nara_app::CoreStage::Update, observe_server_commands);
+            .expect("server observation resource should install")
+            .add_systems(nara_app::CoreStage::Update, observe_server_commands)
+            .expect("server observation system should install");
         app.world_mut()
+            .expect("a configured app should allow world mutation")
             .resource_mut::<nara_gameplay::GameplayCommandQueue>()
             .push(nara_gameplay::GameplayCommandEnvelope::new(
                 nara_gameplay::GameplayCommandTypeId::new("server.tick").unwrap(),

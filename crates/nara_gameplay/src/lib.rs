@@ -547,21 +547,21 @@ impl Plugin for GameplayCommandPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         if !app.world().contains_resource::<ActionCommandMap>() {
-            app.insert_resource(ActionCommandMap::default());
+            app.insert_resource(ActionCommandMap::default())?;
         }
         if !app.world().contains_resource::<GameplayCommandQueue>() {
-            app.insert_resource(GameplayCommandQueue::default());
+            app.insert_resource(GameplayCommandQueue::default())?;
         }
         app.add_systems(
             CoreStage::PreUpdate,
             map_action_outcomes_to_commands
                 .after(InputSet::ResolveActions)
                 .in_set(GameplayCommandSet::MapActions),
-        )
+        )?
         .add_systems(
             CoreStage::Last,
             clear_gameplay_commands.in_set(GameplayCommandSet::Clear),
-        );
+        )?;
         Ok(())
     }
 }
@@ -673,13 +673,17 @@ mod tests {
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin).unwrap();
         app.insert_resource(ObservedCommands::default())
-            .add_systems(CoreStage::FixedUpdate, observe_commands);
+            .unwrap()
+            .add_systems(CoreStage::FixedUpdate, observe_commands)
+            .unwrap();
 
         let action = ActionId::new("jump").unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind(ActionBinding::key(action.clone(), KeyCode::Space));
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionCommandMap>()
             .bind(ActionCommandBinding::new(
                 action,
@@ -687,6 +691,7 @@ mod tests {
                 GameplayCommandTypeId::new("player.jump").unwrap(),
             ));
         app.world_mut()
+            .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .press(KeyCode::Space);
 
@@ -712,7 +717,9 @@ mod tests {
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin).unwrap();
         app.insert_resource(ObservedCommands::default())
-            .add_systems(CoreStage::Update, observe_commands);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_commands)
+            .unwrap();
 
         let action = ActionId::new("select").unwrap();
         let mut payload = GameplayCommandPayload::new();
@@ -721,18 +728,23 @@ mod tests {
             .unwrap();
         let target = GameplayCommandTarget::Scene(SceneStableId::new("scene/player").unwrap());
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind(ActionBinding::key(action.clone(), KeyCode::Enter));
-        app.world_mut().resource_mut::<ActionCommandMap>().bind(
-            ActionCommandBinding::new(
-                action,
-                ActionPhase::Started,
-                GameplayCommandTypeId::new("ui.select").unwrap(),
-            )
-            .with_target(target.clone())
-            .with_payload(payload.clone()),
-        );
         app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionCommandMap>()
+            .bind(
+                ActionCommandBinding::new(
+                    action,
+                    ActionPhase::Started,
+                    GameplayCommandTypeId::new("ui.select").unwrap(),
+                )
+                .with_target(target.clone())
+                .with_payload(payload.clone()),
+            );
+        app.world_mut()
+            .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
 
@@ -749,30 +761,40 @@ mod tests {
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin).unwrap();
         app.insert_resource(ObservedCommands::default())
-            .add_systems(CoreStage::Update, observe_commands);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_commands)
+            .unwrap();
 
         let menu = ActionContext::new("menu").unwrap();
         let action = ActionId::new("confirm").unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind(ActionBinding::key(action.clone(), KeyCode::Enter).with_context(menu.clone()));
-        app.world_mut().resource_mut::<ActionCommandMap>().bind(
-            ActionCommandBinding::new(
-                action.clone(),
-                ActionPhase::Started,
-                GameplayCommandTypeId::new("gameplay.confirm").unwrap(),
-            )
-            .with_context(ActionContext::gameplay()),
-        );
-        app.world_mut().resource_mut::<ActionCommandMap>().bind(
-            ActionCommandBinding::new(
-                action,
-                ActionPhase::Started,
-                GameplayCommandTypeId::new("menu.confirm").unwrap(),
-            )
-            .with_context(menu),
-        );
         app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionCommandMap>()
+            .bind(
+                ActionCommandBinding::new(
+                    action.clone(),
+                    ActionPhase::Started,
+                    GameplayCommandTypeId::new("gameplay.confirm").unwrap(),
+                )
+                .with_context(ActionContext::gameplay()),
+            );
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionCommandMap>()
+            .bind(
+                ActionCommandBinding::new(
+                    action,
+                    ActionPhase::Started,
+                    GameplayCommandTypeId::new("menu.confirm").unwrap(),
+                )
+                .with_context(menu),
+            );
+        app.world_mut()
+            .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
 
@@ -789,13 +811,17 @@ mod tests {
         app.add_plugin(InputPlugin).unwrap();
         app.add_plugin(GameplayCommandPlugin).unwrap();
         app.insert_resource(ObservedCommands::default())
-            .add_systems(CoreStage::Update, observe_commands);
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_commands)
+            .unwrap();
 
         let action = ActionId::new("cancel").unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionMap>()
             .bind(ActionBinding::key(action.clone(), KeyCode::Escape));
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionCommandMap>()
             .bind(ActionCommandBinding::new(
                 action.clone(),
@@ -803,6 +829,7 @@ mod tests {
                 GameplayCommandTypeId::new("cancel.started").unwrap(),
             ));
         app.world_mut()
+            .unwrap()
             .resource_mut::<ActionCommandMap>()
             .bind(ActionCommandBinding::new(
                 action,
@@ -811,10 +838,12 @@ mod tests {
             ));
 
         app.world_mut()
+            .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .press(KeyCode::Escape);
         app.run_once(std::time::Duration::ZERO).unwrap();
         app.world_mut()
+            .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
             .release(KeyCode::Escape);
         app.run_once(std::time::Duration::ZERO).unwrap();

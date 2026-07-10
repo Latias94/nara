@@ -8,8 +8,8 @@ use nara_image::ImageAsset;
 use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PreparedComponent,
+    ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PreparedComponent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -220,89 +220,106 @@ impl Plugin for SpritePlugin {
         )
     }
 
+    fn preflight(&self, app: &App) -> Result<(), PluginError> {
+        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
+            return Ok(());
+        };
+        let component_id = ComponentTypeId::new("nara.sprite.Sprite");
+        registry
+            .validate_component_registration::<Sprite>(&component_id)
+            .map_err(|error| {
+                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+            })
+    }
+
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<ComponentRegistry>();
-        register_sprite_components(&mut app.world_mut().resource_mut::<ComponentRegistry>());
+        app.init_resource::<ComponentRegistry>()?;
+        let component_id = ComponentTypeId::new("nara.sprite.Sprite");
+        register_sprite_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+            .map_err(|error| {
+                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+            })?;
         Ok(())
     }
 }
 
-pub fn register_sprite_components(registry: &mut ComponentRegistry) {
+pub fn register_sprite_components(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
     let component_id = ComponentTypeId::new("nara.sprite.Sprite");
-    registry
-        .register_component_codec_with_context_and_fields::<Sprite, _, _>(
-            component_id.clone(),
-            ComponentSchemaVersion(1),
-            sprite_fields(),
-            |value, context| {
-                let size = read_vec2(value.field("size")?, "size")?;
-                let material = read_sprite_material(value.field("material")?, context)?;
-                let texture_region =
-                    read_optional_texture_region(value.get("texture_region"), "texture_region")?;
-                let layer = optional_i32(value, "layer")?.unwrap_or(0);
-                let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
+    registry.register_component_codec_with_context_and_fields::<Sprite, _, _>(
+        component_id.clone(),
+        ComponentSchemaVersion(1),
+        sprite_fields(),
+        |value, context| {
+            let size = read_vec2(value.field("size")?, "size")?;
+            let material = read_sprite_material(value.field("material")?, context)?;
+            let texture_region =
+                read_optional_texture_region(value.get("texture_region"), "texture_region")?;
+            let layer = optional_i32(value, "layer")?.unwrap_or(0);
+            let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
 
-                Ok(PreparedComponent::new(move |world, entity| {
-                    let material = resolve_prepared_material(world, material)?;
-                    let sprite = Sprite {
-                        material,
-                        texture_region,
-                        size,
-                        anchor: SpriteAnchor::CENTER,
-                        layer,
-                        sort_key,
-                    };
-                    let mut entity_mut = world
-                        .get_entity_mut(entity)
-                        .map_err(|_| ComponentCodecError::EntityMissing)?;
-                    entity_mut.insert(sprite);
-                    Ok(())
-                }))
-            },
-            |world, entity, context| {
-                let Some(sprite) = world.get::<Sprite>(entity) else {
-                    return Ok(None);
+            Ok(PreparedComponent::new(move |world, entity| {
+                let material = resolve_prepared_material(world, material)?;
+                let sprite = Sprite {
+                    material,
+                    texture_region,
+                    size,
+                    anchor: SpriteAnchor::CENTER,
+                    layer,
+                    sort_key,
                 };
-                let image = match sprite.material.image {
-                    Some(handle) => Some(asset_ref_value(
-                        &AssetRef::from_handle_with_policy(
-                            world.get_resource::<AssetServer>().ok_or_else(|| {
-                                ComponentCodecError::Message(
-                                    "AssetServer resource is missing".to_string(),
-                                )
-                            })?,
-                            handle,
-                            context.asset_ref_export_policy(),
-                        )
-                        .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
-                    )?),
-                    None => None,
-                };
-                let material = material_value(
-                    image.unwrap_or(ComponentValue::Null),
-                    sprite.material.sampler,
-                    sprite.material.alpha_mode,
-                    sprite.material.tint,
-                )?;
+                let mut entity_mut = world
+                    .get_entity_mut(entity)
+                    .map_err(|_| ComponentCodecError::EntityMissing)?;
+                entity_mut.insert(sprite);
+                Ok(())
+            }))
+        },
+        |world, entity, context| {
+            let Some(sprite) = world.get::<Sprite>(entity) else {
+                return Ok(None);
+            };
+            let image = match sprite.material.image {
+                Some(handle) => Some(asset_ref_value(
+                    &AssetRef::from_handle_with_policy(
+                        world.get_resource::<AssetServer>().ok_or_else(|| {
+                            ComponentCodecError::Message(
+                                "AssetServer resource is missing".to_string(),
+                            )
+                        })?,
+                        handle,
+                        context.asset_ref_export_policy(),
+                    )
+                    .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
+                )?),
+                None => None,
+            };
+            let material = material_value(
+                image.unwrap_or(ComponentValue::Null),
+                sprite.material.sampler,
+                sprite.material.alpha_mode,
+                sprite.material.tint,
+            )?;
 
-                let mut fields = vec![
-                    ("size", vec2_value(sprite.size)?),
-                    ("material", material),
-                    ("layer", ComponentValue::I64(i64::from(sprite.layer))),
-                    ("sort_key", ComponentValue::I64(i64::from(sprite.sort_key))),
-                ];
-                fields.push((
-                    "texture_region",
-                    sprite
-                        .texture_region
-                        .map(texture_region_value)
-                        .transpose()?
-                        .unwrap_or(ComponentValue::Null),
-                ));
-                Ok(Some(ComponentValue::map(fields)))
-            },
-        )
-        .expect("nara.sprite.Sprite component registration should be unique");
+            let mut fields = vec![
+                ("size", vec2_value(sprite.size)?),
+                ("material", material),
+                ("layer", ComponentValue::I64(i64::from(sprite.layer))),
+                ("sort_key", ComponentValue::I64(i64::from(sprite.sort_key))),
+            ];
+            fields.push((
+                "texture_region",
+                sprite
+                    .texture_region
+                    .map(texture_region_value)
+                    .transpose()?
+                    .unwrap_or(ComponentValue::Null),
+            ));
+            Ok(Some(ComponentValue::map(fields)))
+        },
+    )?;
+    Ok(())
 }
 
 fn sprite_fields() -> [ComponentFieldSchema; 16] {
@@ -885,7 +902,8 @@ mod tests {
             let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
                 .with_project_asset_database(&database);
             let mut registry = ComponentRegistry::new();
-            register_sprite_components(&mut registry);
+            register_sprite_components(&mut registry)
+                .expect("component registration should succeed");
 
             let prepared = registry
                 .preflight_component_with_context(
@@ -918,7 +936,7 @@ mod tests {
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
         let mut registry = ComponentRegistry::new();
-        register_sprite_components(&mut registry);
+        register_sprite_components(&mut registry).expect("component registration should succeed");
 
         let result = registry
             .preflight_component_with_context(
@@ -955,7 +973,7 @@ mod tests {
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
         let mut registry = ComponentRegistry::new();
-        register_sprite_components(&mut registry);
+        register_sprite_components(&mut registry).expect("component registration should succeed");
 
         let result = registry
             .preflight_component_with_context(
@@ -978,7 +996,7 @@ mod tests {
         let database = test_database(stable_id, "textures/player.png");
         let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
         let mut registry = ComponentRegistry::new();
-        register_sprite_components(&mut registry);
+        register_sprite_components(&mut registry).expect("component registration should succeed");
 
         let result = registry
             .preflight_component_with_context(
@@ -998,7 +1016,7 @@ mod tests {
     #[test]
     fn sprite_schema_exposes_authoring_fields() {
         let mut registry = ComponentRegistry::new();
-        register_sprite_components(&mut registry);
+        register_sprite_components(&mut registry).expect("component registration should succeed");
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.sprite.Sprite"))

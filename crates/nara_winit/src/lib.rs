@@ -59,7 +59,7 @@ impl Plugin for WinitPlugin {
         app.add_plugin_if_missing(InputPlugin)?;
 
         let runner = self.runner;
-        app.set_runner(move |app| runner.run(app));
+        app.set_runner(move |app| runner.run(app))?;
         Ok(())
     }
 }
@@ -76,7 +76,7 @@ impl WinitRunner {
         Self { control_flow }
     }
 
-    pub fn run(self, app: App) -> Result<AppExit, AppRunError> {
+    pub fn run(self, app: &mut App) -> Result<AppExit, AppRunError> {
         let event_loop = EventLoop::new().map_err(|error| {
             AppRunError::runner(format!("failed to create winit event loop: {error}"))
         })?;
@@ -120,8 +120,8 @@ impl WinitControlFlow {
     }
 }
 
-struct WinitApp {
-    app: App,
+struct WinitApp<'app> {
+    app: &'app mut App,
     nara_windows_by_winit: HashMap<WinitWindowId, WindowId>,
     platform_windows: HashMap<WindowId, Arc<WinitWindow>>,
     last_frame: Instant,
@@ -129,8 +129,8 @@ struct WinitApp {
     failure: Option<AppRunError>,
 }
 
-impl WinitApp {
-    fn new(app: App) -> Self {
+impl<'app> WinitApp<'app> {
+    fn new(app: &'app mut App) -> Self {
         Self {
             app,
             nara_windows_by_winit: HashMap::new(),
@@ -146,7 +146,7 @@ impl WinitApp {
             return Ok(());
         }
 
-        let window = configured_primary_window(&mut self.app);
+        let window = configured_primary_window(&mut self.app)?;
         let window_id = window.id;
         let attributes = WinitWindow::default_attributes()
             .with_title(window.title.clone())
@@ -167,10 +167,10 @@ impl WinitApp {
         self.platform_windows
             .insert(window_id, platform_window.clone());
         self.app
-            .world_mut()
+            .world_mut()?
             .resource_mut::<BackendWindowHandles>()
             .insert(window_id, provider);
-        push_window_event(self.app.world_mut(), WindowEvent::Created { window_id });
+        push_window_event(self.app.world_mut()?, WindowEvent::Created { window_id });
 
         Ok(())
     }
@@ -197,33 +197,32 @@ impl WinitApp {
 
     fn handle_window_event(
         &mut self,
-        _event_loop: &ActiveEventLoop,
         winit_window_id: WinitWindowId,
         event: WinitWindowEvent,
-    ) {
+    ) -> Result<(), AppRunError> {
         let Some(window_id) = self.nara_windows_by_winit.get(&winit_window_id).copied() else {
-            return;
+            return Ok(());
         };
 
         match event {
             WinitWindowEvent::CloseRequested => {
                 push_window_event(
-                    self.app.world_mut(),
+                    self.app.world_mut()?,
                     WindowEvent::CloseRequested { window_id },
                 );
             }
             WinitWindowEvent::Destroyed => {
-                push_window_event(self.app.world_mut(), WindowEvent::Closed { window_id });
-                self.platform_windows.remove(&window_id);
-                self.app
-                    .world_mut()
+                let world = self.app.world_mut()?;
+                push_window_event(world, WindowEvent::Closed { window_id });
+                world
                     .resource_mut::<BackendWindowHandles>()
                     .remove(window_id);
+                self.platform_windows.remove(&window_id);
             }
             WinitWindowEvent::Resized(size) => {
                 let resolution = WindowResolution::new(size.width, size.height);
                 push_window_event(
-                    self.app.world_mut(),
+                    self.app.world_mut()?,
                     WindowEvent::Resized {
                         window_id,
                         resolution,
@@ -232,13 +231,13 @@ impl WinitApp {
             }
             WinitWindowEvent::Focused(focused) => {
                 push_window_event(
-                    self.app.world_mut(),
+                    self.app.world_mut()?,
                     WindowEvent::Focused { window_id, focused },
                 );
             }
             WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 push_window_event(
-                    self.app.world_mut(),
+                    self.app.world_mut()?,
                     WindowEvent::ScaleFactorChanged {
                         window_id,
                         scale_factor,
@@ -247,24 +246,26 @@ impl WinitApp {
             }
             WinitWindowEvent::RedrawRequested => {
                 push_window_event(
-                    self.app.world_mut(),
+                    self.app.world_mut()?,
                     WindowEvent::RedrawRequested { window_id },
                 );
             }
             WinitWindowEvent::KeyboardInput { event, .. } => {
-                apply_keyboard_input(self.app.world_mut(), &event);
+                apply_keyboard_input(self.app.world_mut()?, &event);
             }
             WinitWindowEvent::MouseInput { state, button, .. } => {
-                apply_mouse_input(self.app.world_mut(), state, button);
+                apply_mouse_input(self.app.world_mut()?, state, button);
             }
             WinitWindowEvent::CursorMoved { position, .. } => {
-                apply_cursor_moved(self.app.world_mut(), position.x, position.y);
+                apply_cursor_moved(self.app.world_mut()?, position.x, position.y);
             }
             WinitWindowEvent::CursorLeft { .. } => {
-                apply_cursor_left(self.app.world_mut());
+                apply_cursor_left(self.app.world_mut()?);
             }
             _ => {}
         }
+
+        Ok(())
     }
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: AppRunError) {
@@ -275,7 +276,7 @@ impl WinitApp {
     }
 }
 
-impl ApplicationHandler for WinitApp {
+impl ApplicationHandler for WinitApp<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let Err(error) = self.create_primary_window(event_loop) {
             self.fail(event_loop, error);
@@ -288,7 +289,9 @@ impl ApplicationHandler for WinitApp {
         window_id: WinitWindowId,
         event: WinitWindowEvent,
     ) {
-        self.handle_window_event(event_loop, window_id, event);
+        if let Err(error) = self.handle_window_event(window_id, event) {
+            self.fail(event_loop, error);
+        }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -299,13 +302,14 @@ impl ApplicationHandler for WinitApp {
     }
 }
 
-fn configured_primary_window(app: &mut App) -> Window {
-    let mut query = app.world_mut().query::<&Window>();
-    query
-        .iter(app.world())
+fn configured_primary_window(app: &mut App) -> Result<Window, AppRunError> {
+    let world = app.world_mut()?;
+    let mut query = world.query::<&Window>();
+    Ok(query
+        .iter(world)
         .next()
         .cloned()
-        .unwrap_or_else(Window::default)
+        .unwrap_or_else(Window::default))
 }
 
 fn raw_handle_provider(window: Arc<WinitWindow>) -> Result<RawWindowHandleProvider, AppRunError> {
