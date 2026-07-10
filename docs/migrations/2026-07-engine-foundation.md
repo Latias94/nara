@@ -31,6 +31,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | U3-1 | U3 | `a4167e4` | `rust-api/behavior` | Runtime/fixed/render time construction, mutation, and frame semantics | Use validated constructors/setters, handle time-frame errors, and replace bulk fixed-step observations with per-tick clock state. |
 | U5-1 | U5 | `e77da64` | `rust-api` | Task pool configuration, submission, terminal results, test execution, and shutdown | Configure bounded threaded pools, handle explicit spawn/terminal outcomes, and use the test-only inline driver where deterministic execution is required. |
 | U5-2 | U5 | `e77da64` | `persistent-shape` | `nara.toml` runtime plugin-plan spelling and task pool schema | Rewrite flat task fields into per-pool/shutdown tables and use only the canonical `runtime-2d` value. |
+| U18-1 | U18 | `6a70847` | `rust-api/behavior` | Diagnostic construction, reports, runtime observations, pressure snapshots, and diagnostic plugin composition | Migrate to validated/classified bounded observations and reduce any `diagnostics.runtime_capacity` above 4,096. |
 
 ## Entry Contract
 
@@ -360,6 +361,158 @@ not add aliases or parallel schema-version types.
 **Verification anchors**: the complete version-1 fixture, obsolete flat-schema/alias rejection,
 duration/fixed-cap/task-limit/profile merge tests, root configuration equality test, and stale-symbol
 searches.
+
+## U18-1: Privacy-Safe Bounded Diagnostic Observations
+
+**Removed contract**:
+
+- Runtime-owned `String` values in `DiagnosticCode`, `Diagnostic::message`, `DiagnosticContext`,
+  `RuntimeDiagnosticDomain`, `RuntimeDiagnosticContext`, and `RuntimeDiagnosticEntry`.
+- `Diagnostic::{error,warning,info}` constructors that accepted arbitrary strings, public context
+  fields, and convenience `with_*` methods that could copy raw paths, source text, or credentials.
+- Direct `RuntimeDiagnosticEntry` construction and `RuntimeDiagnostics::push`, arbitrary string
+  dedupe keys, `RuntimeDiagnosticsSettings { capacity }`, `bounded()`, and
+  `MAX_RUNTIME_DIAGNOSTICS_CAPACITY`.
+- `RuntimeDiagnostics::{clear,dropped_entries,emit_to_tracing}`. Consumers could erase shared
+  history, observe only one undifferentiated loss counter, or replay the complete retained history
+  into tracing on every call.
+- `Serialize`/`Deserialize` on the live `RuntimeDiagnostics` resource and `Deserialize` on
+  diagnostics, settings, identities, contexts, reports, severities, and entries. Diagnostic JSON
+  from the prototype is no longer an accepted input format.
+- Unbounded `DiagnosticReport` collection semantics: `push`/`extend` returned no admission result,
+  `diagnostics()` exposed the internal slice, `into_diagnostics()` erased loss accounting, and
+  severity reflected only entries still retained.
+- `DiagnosticsPlugin::new(runtime_settings)` and the assumption that runtime diagnostics were the
+  only headless observation resource.
+- Report-bearing `ProjectProfileError` variants containing `DiagnosticReport` inline.
+- Product-plan behavior that treated `DesktopWindowPlugins` and `ToolingPlugins` as complete plans
+  even though those public groups install only additive adapters.
+
+**Canonical replacement or deletion rationale**: engine-owned codes, domains, producers, field
+keys, and pressure IDs are validated source-authored identities. `SafeSummary` and
+`SafeDisplayText` reject unsafe shapes before publication. Context is expressed only through typed
+`DiagnosticField` values classified as public, project-relative, sensitive, or secret; sensitive
+and secret constructors accept no raw value. `DiagnosticReport` and `RuntimeDiagnostics` enforce
+independent entry, byte, field, and text budgets, return typed admission outcomes, use saturating
+sticky accounting, and expose explicit retained-entry iteration. Runtime events enter through
+`RuntimeDiagnosticDraft` plus `publish(frame)`, with structural dedupe policies and bounded
+retention. Numeric pressure lives in `RuntimePressureSnapshots`, not in free-text events.
+`DiagnosticsPlugin` installs and retains both resources. Report-bearing project profile errors box
+the report and use privacy-safe formatting. The additive window/tooling groups remain narrow;
+`add_project_plugin_plan` composes them with `MinimalPlugins` when a complete product plan is
+requested. The old APIs are deleted because compatibility wrappers would preserve the leak-prone,
+unbounded construction path.
+
+Use `RuntimeDiagnostics::stats()` for distinct published, deduplicated, rejected, evicted, expired,
+and truncation observations. History is removed only by configured retention/count/byte policy;
+there is no consumer-owned `clear`. For tracing, keep a caller-owned
+`RuntimeDiagnostics::tracing_cursor()` and call `emit_new_to_tracing`, or emit one selected entry.
+For serialization, call `snapshot()` and serialize the bounded output-only snapshot. Reconstruct
+live diagnostic state from current typed producer outcomes instead of deserializing old diagnostic
+JSON.
+
+**Before**:
+
+```rust
+let mut report = DiagnosticReport::default();
+report.push(
+    Diagnostic::error("asset.reload", format!("reload failed for {absolute_path}"))
+        .with_asset_ref(absolute_path),
+);
+for diagnostic in report.diagnostics() {
+    println!("{}", diagnostic.message);
+}
+
+let mut runtime = RuntimeDiagnostics::new(RuntimeDiagnosticsSettings { capacity: 256 });
+runtime.push(
+    RuntimeDiagnosticEntry::warning("asset", "asset.reload", "reload failed")
+        .with_dedupe_key(format!("asset:{absolute_path}")),
+);
+```
+
+**After**:
+
+```rust
+use nara_core::{ByteLimit, ItemLimit};
+
+let code = DiagnosticCode::new("asset.reload")?;
+let summary = SafeSummary::new("Asset reload failed")?;
+let asset_ref = DiagnosticFieldKey::new("asset_ref")?;
+let outcome = report.push(
+    Diagnostic::error(code, summary)
+        .try_with_field(DiagnosticField::sensitive(asset_ref))?,
+);
+for diagnostic in report.iter() {
+    diagnostic.emit_to_tracing();
+}
+
+let settings = RuntimeDiagnosticsSettings::new(
+    ItemLimit::new(256).expect("entry limit is non-zero"),
+    ByteLimit::new(512 * 1024).expect("byte limit is non-zero"),
+)?;
+let mut runtime = RuntimeDiagnostics::new(settings);
+let draft = RuntimeDiagnosticDraft::new(
+    DiagnosticProducer::new("nara.asset")?,
+    DiagnosticDomain::new("asset")?,
+    code,
+    DiagnosticSeverity::Warning,
+    summary,
+)
+.try_with_field(DiagnosticField::sensitive(asset_ref))?
+.dedupe_by_code();
+let publish = runtime.publish(draft, frame);
+```
+
+Whole reports must be merged with `DiagnosticReport::extend` so sticky severity and bounded-loss
+statistics survive. Use `iter`, `retained_len`, and `is_retained_empty` for retained entries;
+`len` and `is_empty` describe all observed entries. Use `into_retained_diagnostics` only when the
+caller intentionally consumes retained entries without merging report accounting.
+
+Construct a configured plugin with both policies:
+
+```rust
+app.add_plugin(DiagnosticsPlugin::new(
+    runtime_settings,
+    RuntimePressureSettings::default(),
+))?;
+```
+
+Code matching `ProjectProfileError::{InvalidManifest, UnknownProfile}` now receives
+`Box<DiagnosticReport>`. Dereference or borrow the box instead of destructuring an inline report.
+
+**Affected examples and fixtures**: `examples/headless_server.rs`,
+`examples/scene_prefab_roundtrip.rs`, the root facade/prelude and product-plan tests, project
+manifest/profile validation tests, asset reload diagnostics, scene/prefab/patch/Play Mode tests,
+and tooling inspector/workspace tests now use only classified fields and bounded reports.
+
+**User action**: migrate downstream Rust producers and consumers to the canonical types above.
+Audit each former message/context value and choose the narrowest valid field class. Do not copy a
+secret or raw sensitive value into a safe summary, public field, log, or dedupe key. Keep direct
+adapter groups additive, or call `add_project_plugin_plan` for full desktop-window/tooling plans.
+
+**Source action**: conditional `manual-rewrite`. The `nara.toml` field name and canonical version-1
+shape are unchanged, but its maximum is now 4,096 instead of 65,536. Existing values from 1 through
+4,096 need no edit. Manually reduce any experimental `diagnostics.runtime_capacity` in the range
+4,097 through 65,536 before loading the project. Runtime auto-rewrite is intentionally unsupported.
+Prototype diagnostic JSON is not project source and has no migration reader; regenerate diagnostic
+snapshots from a current run.
+
+**Cache action**: `keep`.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert `6a70847` together with migrated project/scene/tooling callers and ADR 0068.
+Do not add deprecated aliases, raw-string context builders, an unbounded report, or a second runtime
+diagnostic path.
+
+**Verification anchors**: `crates/nara_diagnostic/src/contract_tests.rs` covers safe identities,
+secret canaries, byte/field limits, sticky reports, dedupe, retention indexes, tombstone bounds,
+pressure snapshots, headless installation, serialization, tracing cursors, and compile-fail
+ownership guards. Focused project/scene/tooling/root tests cover caller migration. Sequential
+verification passed 50 default diagnostic tests, 51 `serde` diagnostic tests, strict diagnostic
+Clippy, two compile-fail doctests, the workspace check, and all five architecture documentation
+tests. Stale-symbol searches exclude the removed runtime context/domain, raw dedupe builder,
+`diagnostics()` accessor, and owned report extraction path.
 
 ## Persistent Format Matrix
 
