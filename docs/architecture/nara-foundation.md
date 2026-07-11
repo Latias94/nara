@@ -52,12 +52,12 @@ flowchart TD
     Facade --> Transform[nara_transform: spatial components]
     Facade --> Reflect[nara_reflect: component schema + value codec registry]
     Facade --> Diagnostic[nara_diagnostic: classified diagnostics + pressure snapshots]
+    Facade --> Identity[nara_identity: world-scoped identity + remaps]
     App --> Asset[nara_asset: AssetServer + Handle + AssetRef + reload scheduling]
     AssetWatch[nara_asset_watch: optional filesystem watcher adapter] --> Asset
     App --> Scene[nara_scene: runtime hierarchy + scene documents]
     App --> Input[nara_input: retained input + action outcomes]
     App --> Gameplay[nara_gameplay: gameplay command stream]
-    App --> Audio[nara_audio]
     App --> Render[nara_render: render data + backend seam]
     App --> Image[nara_image: typed image import + prepared image resources]
     App --> Sprite[nara_sprite: sprite authoring]
@@ -67,6 +67,9 @@ flowchart TD
     Window --> WinitAdapter[nara_winit adapter]
     App --> Tooling[nara_tooling: snapshots + UI-agnostic inspector + Play Mode model]
     Tooling --> EguiTooling[nara_tooling_egui: egui editor/debug adapter]
+    Scene --> Identity
+    Gameplay --> Identity
+    Tooling --> Identity
     Render --> SpriteRender
     Sprite --> SpriteRender
     Tilemap --> SpriteRender
@@ -85,6 +88,7 @@ flowchart TD
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars | Core primitives and unit-safe values that do not own domain overload policy |
 | `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; unsupported platform primitives remain explicit |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
+| `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, and stable non-`Entity` observation vocabulary |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry modules for Bevy-reflect-backed component metadata, asset-aware scene preflight, schema/capability export, and migrations |
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
@@ -104,7 +108,6 @@ flowchart TD
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that updates window resources plus keyboard, mouse-button, and pointer state |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
-| `nara_audio` | `AudioCommand`, `AudioSink` | Decoder, mixer, device backend |
 | `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, open scene document slots, active document, selection sets, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
@@ -152,11 +155,12 @@ sequenceDiagram
     Game->>App: add_plugin / add_systems
     App->>ECS: run startup schedules once
     loop frame
-        App->>Tasks: TaskUpdate::Poll
-        App->>Asset: coalesce source changes into reload requests
-        Image->>Tasks: spawn owned image import jobs
-        Tasks-->>Image: poll completed typed image results
-        Image->>Asset: apply load states, versions, and asset events
+        App->>Asset: TaskUpdate / AssetTaskUpdateSet::Poll
+        Tasks-->>Image: expose terminal IDs in the poller's entry snapshot
+        Asset->>Asset: ResolveSourceChanges into reload requests
+        Image->>Tasks: SpawnJobs attempts bounded image work
+        Image->>Asset: ApplyResults commits eligible outcomes
+        Note over Tasks,Image: readiness after the poller snapshot waits for next frame
         App->>ECS: PreUpdate / Update / PostUpdate
         Image->>Render: prepare backend-neutral image resource snapshots
         Render->>ECS: extract Camera2d views
@@ -234,12 +238,22 @@ second real adapter or stronger isolation pressure.
   component registration conflicts are checked during preflight and return contextual
   `PluginError` values rather than panic.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
-- `nara_project` validates quantized durations, fixed debt policy, per-kind/aggregate worker and queue limits, and shutdown timeouts before lowering. `apply_project_settings` installs configured diagnostics/tasks and validated time resources before the selected product bundle; `nara_project` itself remains side-effect-free.
+- `nara_project` validates quantized durations, fixed debt policy, per-kind/aggregate worker and queue
+  limits, and shutdown timeouts before lowering. It remains free of runtime side effects, but its
+  current manifest loader still uses ambient file IO and `apply_project_settings` currently mutates
+  settings/resources before a missing compiled product capability can reject composition. Those are
+  explicit U17/U32 migration gaps, not the selected contract.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
 - `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
-- `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age stats, and finite shutdown reports. `CoreStage::TaskUpdate` provides ordered poll/coalesce/spawn/apply boundaries; `inline_for_tests` drives the same queue state machine only in tests.
+- `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age
+  stats, and finite shutdown reports; `inline_for_tests` drives the same queue state machine only in
+  tests. The current `nara_app::TaskUpdateSet` and `TaskPlugin`-configured asset phases are an
+  explicit U33 ownership gap pending migration to `nara_asset::AssetTaskUpdateSet`.
 - `nara_fs` accepts host-opened handles rather than ambient paths. Windows strict traversal is handle-bound; Linux uses `openat2`; unsupported mount, reparse, filesystem, replacement-source, directory enumeration, unlink, or rename guarantees fail closed and remain visible in the capability matrix.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
+- `nara_identity` now implements the world-scoped identity core, structured references, atomic
+  fork/restore remaps, and tombstone policy. Root facade wiring and scene/gameplay/reflect/tooling
+  consumers remain the open U8 integration work; those domains must not retain duplicate owners.
 - `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains. Serializable components require explicit schema fields, duplicate Rust `TypeId` registration is rejected, and invalid schema defaults fail at registration.
 - `nara_diagnostic::DiagnosticReport` collects static safe summaries plus explicitly classified
   fields without implicit logging. Error and warning observations remain sticky even when bounded
@@ -326,6 +340,21 @@ second real adapter or stronger isolation pressure.
   problems while retaining domain-specific detail and explicit tracing bridges. See ADR
   [0048](adr/0048-runtime-diagnostics-and-observability-bus.md).
 - File-backed project data is untrusted input. Scene, prefab, patch, component value, image,
+- Root Cargo features form coarse compiled product-capability ceilings. The required product
+  capabilities of a resolved plugin plan must fit the normalized project request, which must fit
+  the compiled ceiling; plugin service requirements/conflicts close separately before any `App`
+  mutation. `default` is `runtime-core`, serde weak-forwards only into enabled domains, and a crate
+  without a real production consumer does not retain a placeholder boundary. The current flat root
+  dependency graph and `nara_audio` placeholder are U32 migration state, not selected boundaries.
+  See ADR
+  [0079](adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md).
+- `CoreStage::TaskUpdate` remains the app-owned main-thread integration point, while each business
+  domain owns its phase vocabulary. Asset/watch/image integration uses the asset-owned
+  Poll/ResolveSourceChanges/SpawnJobs/ApplyResults chain; every poller captures one immutable ready
+  membership or queue prefix at entry. Eligible predecessor-unblocked outcomes apply in that frame,
+  stale/superseded outcomes retire, and only later-ready or eligible missing-predecessor work waits.
+  See ADR
+  [0080](adr/0080-domain-owned-task-update-integration-sets.md).
   metadata, and artifact loaders need parse/decode budgets before mutating runtime or project state.
   See ADR [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md).
 - Asset roots require handle-bound authority beyond logical path validation. Symlinks, mounts,

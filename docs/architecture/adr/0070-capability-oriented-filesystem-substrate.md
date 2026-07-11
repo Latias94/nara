@@ -2,8 +2,10 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Refines**: [ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md),
+**Refines**: [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
+[ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md),
 [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md)
+**Refined By**: ADR 0079: Root Product Capabilities and Placeholder Domain Retirement
 
 ## Context
 

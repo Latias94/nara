@@ -4,7 +4,8 @@
 **Date**: 2026-07-09
 **Refines**: ADR 0001, ADR 0012, ADR 0015, ADR 0032
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0055: Feature Matrix,
-Boundary Checks, and Compatibility Fixtures
+Boundary Checks, and Compatibility Fixtures; ADR 0079: Root Product Capabilities and Placeholder
+Domain Retirement
 
 ## Context
 
@@ -24,26 +25,29 @@ nara will layer its facade and preludes by audience.
 flowchart TD
     Root[nara facade] --> Gameplay[nara::prelude]
     Root --> Advanced[nara::advanced_prelude]
-    Root --> Domain[nara::<domain>::prelude]
-    Root --> Backend[nara::<backend>::prelude behind feature]
-    Root --> Tooling[nara::<tooling>::prelude behind feature]
+    Root --> Domain[nara::<domain>::prelude behind product capability]
+    Root --> Backend[nara::<backend>::prelude behind adapter capability]
+    Root --> Tooling[nara::<tooling>::prelude behind tooling capability]
 ```
 
 Rules:
 
 - `nara::prelude` is gameplay-first, code-first, and backend-free. It should remain stable enough
   for examples, AI-generated gameplay, and small projects.
-- The default prelude may include `App`, `Plugin`, ECS basics, schedules commonly used by gameplay,
-  core math/color, transforms, scene hierarchy components, semantic asset handles/refs, sprite,
-  tilemap, camera, material authoring, runtime UI authoring, and common input/action types.
+- Under `runtime-core`, the gameplay prelude may include `App`, `Plugin`, ECS basics, schedules
+  commonly used by gameplay, core math/color, transforms, scene hierarchy components, semantic
+  asset handles/refs, stable identity, and common input/action types.
+- `runtime-2d` may add sprite, tilemap, camera, image, and material authoring exports;
+  `runtime-ui` may add runtime UI authoring exports. Enabling one capability must not expose items
+  from the other, and unavailable domains must be absent from root modules and all preludes.
 - The default prelude should not export backend-native types, `winit`/`wgpu` adapters, egui/dear
   imgui adapters, render extraction/queue/batch internals, GPU cache internals, tooling-only
   inspector state, or low-level task/backend diagnostics by default.
 - `nara::advanced_prelude` may expose low-level engine extension types: custom schedule labels,
   task resources, diagnostics, render pass planning, prepared render resources, and domain
   extension hooks.
-- Backend feature modules such as `nara::render_wgpu` or `nara::winit` may expose their own
-  preludes, but enabling a feature must not silently expand the gameplay prelude with backend
+- Adapter capability modules such as `nara::render_wgpu` or `nara::winit` may expose their own
+  preludes, but enabling a capability must not silently expand the gameplay prelude with backend
   internals.
 - Tooling/editor adapters expose explicit module preludes. Runtime/gameplay examples should not
   import egui tooling accidentally through the root prelude.
@@ -85,7 +89,8 @@ right imports.
 | Backend-free default | `nara::prelude` does not expose `wgpu`, `winit`, egui, or backend handles | API/dependency review |
 | Example clarity | Basic examples use `nara::prelude`; backend examples import backend modules explicitly | Example review |
 | Internal isolation | Extracted/queued/batch/render-cache internals are not in the default gameplay prelude | API review |
-| Feature discipline | Optional features do not silently widen the default gameplay prelude with backend internals | Feature tests/review |
+| Capability visibility | Root modules and preludes expose exactly the domains compiled by coarse product capabilities | Feature/API matrix |
+| Feature discipline | Optional adapter features do not silently widen the gameplay prelude with backend internals | Feature tests/review |
 | AI ergonomics | Generated gameplay can import one small prelude without learning backend crates | Example smoke test |
 
 ## Risks and Mitigations
@@ -96,11 +101,15 @@ right imports.
 | Prelude cleanup breaks examples | Medium | Medium | This is acceptable pre-1.0; update examples in the same change. |
 | Backend modules duplicate exports | Low | Medium | Keep module preludes narrow and feature-gated. |
 | Gameplay prelude grows too wide over time | Medium | Medium | Audit root facade when adding new crates or optional features. |
+| Feature-gated docs hide useful types | Low | Medium | Document named product combinations and keep domain preludes discoverable under their owning capability. |
 
 ## Consequences
 
 - The root facade should be audited soon. Backend/tooling/debug/internal render types should move
   out of `nara::prelude` into advanced or module-specific preludes.
+- Root modules, gameplay exports, advanced exports, and module preludes are all gated by the same
+  compiled product capability vocabulary; `default = ["runtime-core"]` does not compile or expose
+  2D, runtime UI, tooling, watcher, platform-adapter, or GPU-backend domains.
 - Examples should demonstrate explicit imports for backend adapters and tooling.
 - `AGENTS.md` should treat root prelude layering as an architecture rule.
 

@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0008, ADR 0042, ADR 0048
+**Refined By**: ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
 ## Context
 
@@ -67,8 +68,9 @@ flowchart TD
 
 ### Result integration
 
-- Background work never mutates `World`. Domains poll typed handles in `TaskUpdateSet::Poll` and
-  apply typed terminals in their declared apply set.
+- Background work never mutates `World`. Domains poll typed handles and apply typed terminals in
+  their own declared integration sets. `nara_tasks` defines and configures no business-domain set;
+  the asset domain's first concrete vocabulary is `AssetTaskUpdateSet` under ADR 0080.
 - `OrderedTaskResults<T>` provides a cross-frame ordered-prefix policy: a larger key remains held
   until every smaller outstanding key is terminal. This makes application order independent of
   worker completion at the explicit cost of head-of-line blocking.

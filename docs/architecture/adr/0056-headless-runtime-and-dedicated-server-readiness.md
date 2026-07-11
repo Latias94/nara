@@ -5,7 +5,8 @@
 **Refines**: ADR 0003, ADR 0024, ADR 0027, ADR 0028, ADR 0035, ADR 0041, ADR 0042,
 ADR 0046, ADR 0048
 **Refined By**: ADR 0057: Authoritative Fixed-Tick and Command Ingress; ADR 0058: Stable Runtime
-Identity and Entity References; ADR 0068: Global Resource Budgets, Metrics, and Diagnostic Privacy
+Identity and Entity References; ADR 0068: Global Resource Budgets, Metrics, and Diagnostic Privacy;
+ADR 0079: Root Product Capabilities and Placeholder Domain Retirement
 
 ## Context
 
@@ -42,8 +43,8 @@ flowchart TD
 
 Rules:
 
-- A server profile must not install window, render, audio-device, editor, or UI-toolkit adapter
-  plugins by default.
+- A server profile must not install window, render, audio-device, editor, UI-toolkit adapter, or
+  raw-input plugins/resources by default.
 - A server profile may install core runtime, tasks, diagnostics, asset identity/loading,
   scene/prefab spawning, deterministic-friendly gameplay, and domain services that explicitly
   support headless operation.
@@ -54,9 +55,15 @@ Rules:
   structural frame failure; server policy never silently switches to `DiscardExcess`.
 - `MinimalPlugins` remains a small headless foundation, but it is not the whole server product
   profile. `HeadlessRuntimePlugins` and `ServerPlugins` compose the richer products explicitly.
+- `runtime-core` compiles `nara_input` for the local/headless product and gameplay mapping, but
+  compiled availability never implies installation. `ServerPlugins` remains free of raw input even
+  when a host binary compiled desktop, rendering, or tooling capabilities for other profiles.
 - File-backed projects lower `nara.toml` profiles such as `headless`, `server`, `editor`, `dev`,
-  and `release` into ordinary resources and plugin groups. Code-first embedding may construct the
-  same resources manually.
+  and `release` into a runtime preset plus additive capabilities. Host composition validates the
+  normalized request against the compiled product ceiling, the resolved plan's required product
+  capabilities against that request, and plugin service requirements/conflicts separately before
+  applying ordinary resources or groups. Code-first embedding may construct the same request
+  manually.
 - Server-authoritative gameplay systems should run in fixed or explicitly declared simulation
   stages and should avoid presentation-only `Update`/render assumptions.
 - Client physical input eventually lowers into semantic gameplay commands or action outcomes before
@@ -133,6 +140,7 @@ exists.
 | Metric | Target | Measurement |
 |---|---:|---|
 | Headless profile isolation | Server/headless plugin groups compile without `winit`, `wgpu`, egui, or audio-device adapters | Feature/dependency search |
+| Installed input isolation | `ServerPlugins` installs no raw-input plugin/resource even when `nara_input` is compiled | Plugin/resource inspection |
 | Deterministic-friendly simulation | Server-ready gameplay systems can run from fixed simulation stages without render/window resources | Headless smoke tests |
 | Non-blocking background work | A blocked worker does not execute on or block the fixed-tick caller | Task/server integration tests |
 | Input abstraction | Gameplay command/action data can be produced without raw keyboard/mouse/window events | Input/action-map tests |
@@ -146,16 +154,18 @@ exists.
 |---|---|---:|---|
 | Server policy over-constrains single-player ergonomics | Medium | Medium | Keep raw input observations available locally, but recommend commands for scalable gameplay boundaries. |
 | "Deterministic-friendly" is mistaken for full lockstep determinism | High | Medium | Keep ADR 0024 wording: fixed-step friendly, no Phase 1 cross-platform lockstep guarantee. |
-| Plugin groups become confusing | Medium | Medium | Keep product bundles explicit: minimal, runtime 2D, desktop wgpu, editor, headless, server. |
+| Presets and capabilities become confusing | Medium | Medium | Keep runtime policy presets narrow, product capabilities additive, and normalized composition inspectable. |
 | Gameplay systems accidentally require render/window resources | High | Medium | Add headless smoke tests and plugin capability checks before server work begins. |
 | Metrics becomes another diagnostics queue | Medium | Medium | Treat metrics as structured observation data with retention/export policy, aligned with ADR 0048. |
 
 ## Consequences
 
 - Manifest profiles lower headless, server, editor, dev, release, and custom settings without adding
-  side effects to `nara_project`; the root facade applies them before plugin installation.
+  side effects or ambient IO to `nara_project`; host composition preflights them before any plugin
+  installation or resource mutation.
 - Product bundles distinguish `MinimalPlugins`, `HeadlessRuntimePlugins`, `ServerPlugins`,
-  `Runtime2dPlugins`, `DesktopWgpuPlugins`, and tooling groups.
+  `Runtime2dPlugins`, runtime UI, window, wgpu backend, and tooling groups without a fixed desktop
+  wgpu bundle.
 - Input action-map work should reserve a gameplay command output layer, not only retained
   `ButtonInput` state and UI routing decisions.
 - Save/replay/replication work should converge on a shared stable identity vocabulary instead of

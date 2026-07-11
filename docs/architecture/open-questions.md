@@ -105,8 +105,8 @@ This document contains undecided architecture questions only. Accepted decisions
 
 - **Status**: open
 - **Owner**: future audio domain
-- **Trigger**: A game requires spatial playback, mixing, streaming, and headless-safe audio intent.
-- **Related ADRs**: 0016, 0030, 0042
+- **Trigger**: The first real game or tool schedules an audio vertical slice with stable intent plus one decoder, mixer, or playback backend consumer.
+- **Related ADRs**: 0016, 0030, 0042, 0079
 - **Question**: Which backend and stable command/component boundary should implement the first audio vertical slice?
 
 ## OQ-015: Text Shaping and Localization Stack

@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-08
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0052: Task Backpressure,
-Cancellation, and Long-Running Diagnostics
+Cancellation, and Long-Running Diagnostics; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
 ## Context
 
@@ -91,7 +91,8 @@ Core rules:
 ## Consequences
 
 - `nara_tasks` or equivalent task infrastructure should exist before serious asset loading/importing.
-- `nara_app` should define where task results are ticked/applied, likely in fixed stages.
+- `nara_app` defines `CoreStage::TaskUpdate` as the main-thread integration point; each business
+  domain owns and orders its integration sets inside that stage.
 - Asset and scene loading APIs should model pending/loading/ready/failed states.
 - Render backend seams should avoid assuming all GPU work always happens inside gameplay systems.
 - Tests should support an explicitly test-only inline driver that exercises the same admission,
@@ -110,8 +111,8 @@ Core rules:
   that require completion-order independence use an ordered-prefix stream; domains that accept
   asynchronous availability may sort a ready snapshot. No type-erased global result bus exists.
 - `nara_app::CoreStage::TaskUpdate` is the first scheduled integration point for background work.
-  `TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs, ApplyAssetResults}` defines the
-  current frame-ordering contract.
+  The app crate owns only that stage. Business domains define and configure their own integration
+  sets, while `nara_tasks` provides execution mechanics without installing domain schedule phases.
 - Background tasks own their inputs and return data through `TaskHandle<T>`. They do not borrow or
   mutate `World`.
 - Cancellation is cooperative through `TaskCancellationToken`. Asset reload uses generations to

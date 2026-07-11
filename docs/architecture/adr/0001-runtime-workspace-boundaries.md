@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0044: Root Facade and Prelude Layering Policy
+**Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0079: Root Product
+Capabilities and Placeholder Domain Retirement
 
 ## Context
 

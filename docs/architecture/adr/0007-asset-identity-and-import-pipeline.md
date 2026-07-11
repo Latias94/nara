@@ -4,7 +4,7 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0050: Asset Root,
 Symlink, Junction, and Package Trust Policy; ADR 0051: Persistent File Envelope, Migration, and
-Golden Fixtures
+Golden Fixtures; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
 ## Context
 
@@ -90,9 +90,9 @@ Core rules:
 - Import work receives owned `ImportJobInput` values and returns typed `ImportedAsset<T>` values
   through `TypedImporter<T>`. Importers may read source bytes and produce backend-neutral runtime
   assets, but they must not allocate GPU resources.
-- `AssetPlugin` installs the asset resources and the `TaskUpdateSet::CoalesceAssetChanges` resolver.
-  Domain plugins are responsible for registering their own typed importers and spawning/applying
-  domain reload jobs.
+- `AssetPlugin` installs the asset resources, configures the chained `AssetTaskUpdateSet` ordering,
+  and runs source-change resolution in `AssetTaskUpdateSet::ResolveSourceChanges`. Domain plugins
+  register their own typed importers and join the asset-owned spawn/apply phases for reload jobs.
 
 ## Success Metrics
 

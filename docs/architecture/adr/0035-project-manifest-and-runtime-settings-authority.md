@@ -4,7 +4,8 @@
 **Date**: 2026-07-09
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041:
 Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0056: Headless Runtime and
-Dedicated Server Readiness
+Dedicated Server Readiness; ADR 0070: Capability-Oriented Filesystem Substrate; ADR 0079: Root
+Product Capabilities and Placeholder Domain Retirement
 
 ## Context
 
@@ -31,7 +32,9 @@ The manifest contract is:
   `.nara/import-cache`.
 - `[startup]` owns the default startup scene or entry point when a project is launched from files.
 - `[runtime]` owns pause, time scale, maximum frame delta, fixed timestep, per-frame fixed work,
-  bounded debt, catch-up policy, and product plugin plan.
+  bounded debt, catch-up policy, and a narrow runtime preset.
+- Project capability settings request an additive subset of the host's compiled product
+  capabilities. Preset implications and explicit requests normalize to one inspectable set.
 - `[tasks.io]`, `[tasks.compute]`, and `[tasks.async_compute]` own non-zero worker/pending limits;
   `[tasks.shutdown]` owns bounded drain/cancel/join timeouts. Production settings are threaded.
   Programmatic `TaskPlugin` configuration remains valid for embedded apps, while the inline driver
@@ -43,35 +46,48 @@ The manifest contract is:
   `server`, `editor`, `dev`, and `release` profiles. Overrides patch manifest values; they do not
   replace the manifest authority.
 
-Manifest parsing and validation should produce structured diagnostics. It should not create GPU
-resources, platform windows, task threads, or asset values directly. Instead, startup code lowers the
-validated manifest into normal nara resources and plugin configuration.
+Host/composition code opens and bounds `nara.toml` through a host-issued `nara_fs` capability, then
+passes an immutable byte or UTF-8 candidate into `nara_project`. The project crate owns parsing,
+validation diagnostics, profile overlays, and lowering; it exposes no ambient `File::open` or
+authorization-checked raw-path API.
 
-`EffectiveProjectSettings` contains validated domain values. The root facade's
-`apply_project_settings` inserts effective/time resources, installs configured diagnostics and task
-plugins, and only then installs the selected product bundle. `nara_project` itself remains
-side-effect-free.
+`EffectiveProjectSettings` contains validated domain values. Before `apply_project_settings`
+touches `App`, composition resolves the runtime preset and additive request, proves the normalized
+request fits the compiled product ceiling, proves the resolved plan's required product capabilities
+fit that request, and then closes plugin service requirements/conflicts and group membership. Any
+failure returns a structured `PluginError` with resources, schedules, plugins, group membership, and
+lifecycle state unchanged. Only a valid plan may apply resources and install plugins. `nara_project`
+itself remains side-effect-free.
 
 ```mermaid
 flowchart TD
-    Manifest[nara.toml] --> Validate[Manifest validation + diagnostics]
-    Validate --> Paths[Project paths / AssetSourceRoot / import cache]
-    Validate --> Startup[Startup scene / entry settings]
-    Validate --> Runtime[FixedTime / pause / background policy]
-    Validate --> Tasks[TaskPoolConfig]
-    Validate --> Window[Window defaults]
-    Validate --> Input[Input action map sources]
+    Host[Host composition] --> FS[nara_fs capability read and byte bound]
+    FS --> Candidate[Immutable nara.toml candidate]
+    Candidate --> Validate[nara_project parse, validate, profile, and lower]
+    Validate --> Product[Resolve compiled/requested/required product subsets]
+    Product --> Services[Close plugin service requirements/conflicts and groups]
+    Services --> Gate{Both closures valid?}
+    Gate -->|no| Reject[PluginError; App unchanged]
+    Gate -->|yes| Apply[Apply settings and install plugins]
+    Apply --> Paths[Project paths / AssetSourceRoot / import cache]
+    Apply --> Startup[Startup scene / entry settings]
+    Apply --> Runtime[FixedTime / pause / background policy]
+    Apply --> Tasks[TaskPoolConfig]
+    Apply --> Window[Window defaults]
+    Apply --> Input[Input action map sources]
     Paths --> Asset[nara_asset]
     Startup --> Scene[nara_scene]
     Runtime --> App[nara_app]
     Tasks --> TaskPlugin[nara_tasks]
     Window --> Winit[nara_winit / nara_window]
-    Validate --> Profile[plugin groups / profile policy]
+    Closure --> Profile[plugin groups / capability policy]
 ```
 
 ## Rules
 
 - `nara.toml` values are project data and should be serializable, reviewable, and AI-generatable.
+- File-backed hosts obtain manifest bytes through `nara_fs`; `nara_project` accepts immutable
+  candidates and never acquires ambient filesystem authority.
 - Code-first callers may construct equivalent resources manually. This is an override path, not a
   competing persistent format.
 - Generated/cache directories are configurable only through the manifest or explicit embedding
@@ -119,6 +135,8 @@ library-style embedded apps.
 | Deterministic profiles | Same manifest plus profile name yields same effective settings | Unit test |
 | Diagnostic quality | Invalid required fields report structured diagnostics | Unit test |
 | Applied task policy | Manifest worker/queue/shutdown values equal installed `TaskPools::config()` | Facade integration test |
+| Capability-bound ingest | `nara_project` contains no ambient manifest open and bounded host bytes parse identically | Boundary and parser tests |
+| Atomic composition | A missing compiled capability, unrequested plan product capability, missing plugin service, or conflict leaves `App` unchanged and retryable | Facade integration test |
 
 ## Risks and Mitigations
 
@@ -128,12 +146,18 @@ library-style embedded apps.
 | Embedded users feel forced into files | Medium | Low | Keep resource/plugin configuration as an explicit override path. |
 | Profile overlays become order-dependent | Medium | Medium | Require deterministic overlay resolution and tests. |
 | Early schema overfits desktop | Medium | Medium | Keep profile fields platform-neutral and let adapters lower settings. |
+| Validation and installation closures drift | Critical | Medium | Install from the same inspectable resolved plan that preflight validated and compare installed membership in tests. |
 
 ## Consequences
 
 - ADR 0020 remains the layout decision; this ADR defines the settings authority inside that layout.
 - Future `nara_project` or manifest code should be a pure validation/lowering layer, not a hidden
   runtime service.
+- File-backed launch composition owns manifest capabilities and bytes; project data cannot grant or
+  reconstruct filesystem authority.
+- Runtime presets and additive capabilities replace the mutually exclusive product plugin-plan
+  shape; product subset gates and the separate plugin service closure reject before any `App`
+  mutation.
 - Invalid duration quantization/overflow, zero/non-finite values, per-kind limits, aggregate task
   limits, and shutdown timeout limits are rejected before lowering.
 

@@ -5,6 +5,9 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-11
+* **Work Registration**: [Engine foundation contract completion](registry/2026-07/2026-07-11T140302Z-engine-foundation-contract-completion-codex-root-19e179d7f90d4576bc98a51b402ff3e2.md) - Fearless implementation of the mature-engine foundation audit plan.
+* **Decision**: [Root product capability and domain task ownership](decisions/2026-07/2026-07-11T140157Z-root-product-capability-and-domain-task-ownership-6c91ef42d87c40f7a8b4d2ab231583af.md) - ADR 0079 and ADR 0080 align compiled product ceilings, preflight composition, placeholder retirement, and domain-owned TaskUpdate integration.
+* **Research Findings**: [Root capability, task ownership, and manifest IO audit](2026-07/2026-07-11T114131Z-root-capability-task-ownership-and-manifest-io-audit-d3b79814f13b4bc3980973c209bf1e72.md) - Fresh audit of root compilation closure, plugin composition, TaskUpdate ownership, placeholder audio, and capability-bound project manifest ingest.
 * **Decision**: [Execution cursor disclosure boundary](decisions/2026-07/2026-07-11T035400Z-execution-cursor-disclosure-boundary-417ce2d6031b4bfd9b09c1d175539233.md) - Applies host observation allowlisting, redaction, budgets, and safe source locators to interpreter cursor payloads.
 * **Decision**: [Exact fixed-step time ledger and checkpoint boundaries](decisions/2026-07/2026-07-11T034911Z-exact-fixed-step-time-ledger-and-checkpoint-boundaries-5cf371cef1324269870794cc615858f0.md) - Freezes paused exact-step clock accounting and separates completed-tick observation from stable checkpoint eligibility.
 * **Research Findings**: [Correction: Play runtime debugging ADR assignment](2026-07/2026-07-11T030630Z-correction-play-runtime-debugging-adr-assignment-1e059736d9434a26a0c43328550e6f76.md) - Corrects the reserved ADR number and Bevy reference version in the prior research shard.

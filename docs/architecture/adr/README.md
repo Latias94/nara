@@ -105,3 +105,5 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md): Global Resource Budgets, Metrics, and Diagnostic Privacy
 - [ADR 0070](0070-capability-oriented-filesystem-substrate.md): Capability-Oriented Filesystem Substrate
 - [ADR 0076](0076-play-runtime-debug-control-and-observation.md): Play Runtime Debug Control and Observation
+- [ADR 0079](0079-root-product-capabilities-and-placeholder-domain-retirement.md): Root Product Capabilities and Placeholder Domain Retirement
+- [ADR 0080](0080-domain-owned-task-update-integration-sets.md): Domain-Owned TaskUpdate Integration Sets

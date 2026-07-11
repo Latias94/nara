@@ -40,7 +40,7 @@ The existing 335-test baseline is useful regression evidence but does not cover 
 
 - R1. ADRs must distinguish decision status from implementation status and link implemented claims to code and verification evidence.
 - R2. Breaking replacements must remove obsolete APIs and update every in-repo caller, example, facade export, and document without compatibility shims.
-- R3. The root facade must remain backend-free by default, and `ServerPlugins` must remain free of window, render, audio-device, editor, toolkit, and raw-input resources.
+- R3. Root Cargo features must define coarse compiled product capabilities; the required product capabilities of a resolved plugin plan must be a subset of the normalized project request, which must be a subset of that compiled ceiling. Plugin service requirements/conflicts close separately, and any product or service closure failure must return structured `PluginError` before `App` mutation. The default compiles only `runtime-core` and remains backend-free, while `ServerPlugins` remains free of window, render, audio-device, editor, toolkit, and raw-input resources.
 
 **App lifecycle, time, commands, and tasks**
 
@@ -49,7 +49,7 @@ The existing 335-test baseline is useful regression evidence but does not cover 
 - R6. Fixed update must expose a monotonic tick, per-tick delta and elapsed time, bounded catch-up debt, interpolation remainder below one tick, and explicit schedule/flush ordering.
 - R7. Each completed app frame must establish a Bevy ECS tracker boundary, including removal retention and direct change tracker cleanup.
 - R8. Gameplay commands must be admitted to an authoritative tick, ordered deterministically, retained across zero-tick frames, consumed exactly once, and reject invalid, duplicate, late, non-finite, or over-budget payloads.
-- R9. Task pools must use bounded queues, explicit accepted/rejected/coalesced outcomes, panic isolation, race-safe cancellation, finite shutdown policy, age/failure statistics, and deterministic main-thread result ordering independent of worker completion order.
+- R9. Task pools must use bounded queues, explicit accepted/rejected/coalesced outcomes, panic isolation, race-safe cancellation, finite shutdown policy, age/failure statistics, and deterministic main-thread result ordering independent of worker completion order. `nara_app` owns only the `CoreStage::TaskUpdate` integration point, business domains own their integration sets, and `nara_tasks` must not configure domain-specific schedule phases.
 
 **Input, hierarchy, and identity**
 
@@ -66,7 +66,7 @@ The existing 335-test baseline is useful regression evidence but does not cover 
 
 **Assets and project IO**
 
-- R17. All file-backed asset, editor, and cache reads/writes must use host-issued directory/file capabilities and a shared capability-oriented filesystem substrate that binds resolution and open/replace to verified parent handles, enforces trust and aggregate byte budgets, rejects unsupported hardlink/mount/volume/reparse cases in untrusted mode, and never returns an authorization-checked raw path to domain callers.
+- R17. All file-backed project-manifest, asset, editor, and cache reads/writes must use host-issued directory/file capabilities and a shared capability-oriented filesystem substrate that binds resolution and open/replace to verified parent handles, enforces trust and aggregate byte budgets, rejects unsupported hardlink/mount/volume/reparse cases in untrusted mode, and never returns an authorization-checked raw path to domain callers. Host/composition code reads bounded `nara.toml` bytes through `nara_fs`; `nara_project` only parses, validates, and lowers an immutable candidate.
 - R18. Stable asset IDs must be unique within their declared source/project namespace and fail closed on duplicate claims. Same-source rename must preserve identity through an idempotent recoverable transaction that converges path, metadata, dependencies, handles, generation, and pending reload state; cross-source moves must use an explicit copy-validate-publish-delete policy or fail structurally.
 - R19. Import jobs must use an engine-built or externally host-approved registered importer and canonical settings hash, bound the full dependency/subasset closure and execution time, require cooperative deadline/cancellation checks, include importer/toolchain/target compatibility in artifact identity, and publish immutable content-addressed artifact members through one verified group manifest pointer.
 - R20. Asset availability and latest load operation must be independent so a failed reload preserves and reports the last-good value; residency and ownership policy must be implementable rather than aspirational.
@@ -110,6 +110,8 @@ The existing 335-test baseline is useful regression evidence but does not cover 
 - AE18. Given a desktop 2D project with one imported image, sprite, camera, and runtime UI panel, when it starts and the image reloads, then the window renders the last-good asset through the normal import/prepare/material path without direct filesystem or backend-handle shortcuts.
 - AE19. Given an editor user opens a scene, edits and saves it, enters Play, pauses and steps once, stops, closes, and reopens the project, then the saved edit state is restored, Play mutations are absent, and no false dirty/saved state appears.
 - AE20. Given a public Rust API or persistent-format replacement, when a downstream developer reads the migration note, then every removed symbol/shape has a named replacement or explicit deletion rationale and all in-repo examples demonstrate only the new contract.
+- AE21. Given a project requests a product capability absent from the compiled Cargo feature ceiling, when composition is resolved, then a structured `PluginError` is returned before any resource, plugin, group membership, schedule, or lifecycle state is mutated.
+- AE22. Given a current-generation, expected-version eligible, predecessor-unblocked asset terminal ready before its poller captures the entry snapshot, a worker terminal that becomes ready after that snapshot, and an eligible synchronous rejection produced during SpawnJobs, when `TaskUpdate` runs, then the first and third must apply before same-frame `PreUpdate`/`Prepare`, while the second cannot be observed or applied before the next frame. Completion during the Poll set but after that poller's snapshot follows the second case; an observed outcome that becomes stale before ApplyResults is retired once rather than buffered or retried.
 
 ### Primary Users and Success Journeys
 
@@ -135,6 +137,7 @@ AE17-AE20 are the end-to-end product journeys. Unit-level negative-path contract
 - Every code-bearing P0/P1 defect from the July 10 audit, including breaking public API changes needed to remove false guarantees.
 - ADR governance and revisions needed to make the implementation contract unambiguous.
 - First shared capability filesystem substrate, file-source/VFS, editor filesystem adapter, device-domain epoch, runtime host, metrics, and CI implementations sufficient to prove the contracts.
+- Root product capability closure, domain-owned task integration sets, and retirement of placeholder crates without real consumers.
 
 **Deferred to Follow-Up Work**
 
@@ -179,6 +182,8 @@ AE17-AE20 are the end-to-end product journeys. Unit-level negative-path contract
 - KTD21. **Share capability-oriented filesystem primitives, not domain transactions.** A low-level `nara_fs` adapter owns host-issued directory/file capabilities, relative no-follow open, identity checks, exclusive temporary creation, replace, sync, lock, and digest primitives. Asset, editor, and future export domains retain their own transaction state machines and must justify any duplicate platform algorithm.
 - KTD22. **Keep trust authority outside project content.** A host trust store binds approval to canonical project-root identity, project-manifest digest, and each approved native module digest. Project settings may request or lower capabilities but cannot grant them; copied/replaced roots or changed content downgrade to untrusted until explicitly approved again.
 - KTD23. **Gate downstream work on falsifiable milestone evidence.** Stable U-IDs identify work items rather than execution order. Each milestone records continue/revise/abort evidence for its load-bearing lifecycle, identity, filesystem, asset, and GPU/editor decisions before dependent units open.
+- KTD24. **Treat compile, request, product installation, and plugin services as explicit closures.** Coarse root features define the compiled product ceiling; the resolved plan's required product capabilities must fit the normalized additive project request, which must fit that ceiling; plugin `provides`/`requires` services close separately before touching `App`. `default = ["runtime-core"]`; `serde` weak-forwards only into already enabled domains; placeholder crates without a real consumer are removed rather than granted empty capabilities.
+- KTD25. **Let domains own task-integration schedule sets and observation cutoffs.** `nara_app` owns `CoreStage::TaskUpdate`, `nara_tasks` owns execution mechanics, and `nara_asset` owns the Poll/ResolveSourceChanges/SpawnJobs/ApplyResults chain used by asset, watcher, and image systems. Each poller captures one immutable ready membership or queue prefix at system entry; eligible predecessor-unblocked outcomes must apply in that frame, stale/superseded outcomes retire, and only eligible missing-predecessor work remains buffered. A domain adds another set vocabulary only when its own ordering contract requires one.
 
 ### Identity Invariants
 
@@ -197,14 +202,17 @@ flowchart TB
   APP --> CMD[Tick command admission]
   APP --> TASK[Bounded task execution]
   TASK --> OBSCORE[Diagnostic privacy and pressure core]
-  APP --> GPU[Window and GPU epochs]
   CMD --> ID[Stable runtime identity]
+  ID --> CAP[Root product capability closure]
+  CAP --> GPU[Window and GPU epochs]
+  TASK --> TASKSETS[Domain-owned task integration sets]
+  CAP --> TASKSETS
   ID --> INPUT[Input routing]
   INPUT --> HIER[Hierarchy and visibility]
   ID --> DOC[Reflection and document migration]
   ADR --> FS[Capability filesystem substrate]
   FS --> VFS[Asset source and VFS]
-  TASK --> VFS
+  TASKSETS --> VFS
   DOC --> VFS
   VFS --> RENAME[Asset rename reconciliation]
   VFS --> IMPORT[Import and dependency scan]
@@ -225,12 +233,46 @@ flowchart TB
   TASK --> PLAY
   ARTIFACT --> PROJECT[Project trust and export values]
   INPUT --> PROJECT
+  CAP --> PROJECT
   OBSCORE --> BRIDGES[Domain diagnostic bridges and metrics]
   RENAME --> BRIDGES
   RENDER --> BRIDGES
   PLAY --> BRIDGES
   PROJECT --> BRIDGES
   BRIDGES --> CI[CI, fuzz, supply chain, and final gates]
+```
+
+```mermaid
+flowchart LR
+  Cargo[Compiled Cargo product ceiling] --> Ceiling{Normalized request available?}
+  Manifest[Project preset plus additive capability request] --> Normalize[Normalize implied capabilities]
+  Normalize --> Ceiling
+  Ceiling -->|no| Reject[Structured PluginError; App unchanged]
+  Ceiling -->|yes| Plan[Resolve required product capabilities]
+  Normalize --> Requested{Plan requirements fit request?}
+  Plan --> Requested
+  Requested -->|no| Reject
+  Requested -->|yes| Closure[Close plugin service requirements, conflicts, and groups]
+  Closure --> Validate{Service closure valid?}
+  Validate -->|no| Reject
+  Validate -->|yes| Install[Apply settings and install plugins]
+```
+
+```mermaid
+sequenceDiagram
+  participant Frame
+  participant Poll as Asset Poll
+  participant Resolve as Resolve Source Changes
+  participant Spawn as Spawn Jobs
+  participant Apply as Apply Results
+  participant Next as PreUpdate / Prepare
+  Frame->>Poll: each poller snapshots ready membership/prefix once at entry
+  Poll->>Resolve: publish polled terminals and source changes
+  Resolve->>Spawn: schedule generation-guarded work
+  Spawn->>Apply: publish synchronous rejection/removal outcomes
+  Apply->>Next: make same-frame applicable outcomes visible
+  Note over Poll: work arriving/ready after a poller's snapshot waits for next frame
+  Note over Spawn,Poll: accepted work completing after Spawn also waits for next frame Poll
 ```
 
 ### Plugin Failure Matrix
@@ -334,6 +376,9 @@ sequenceDiagram
 - Server execution becomes threaded-capable without surrendering deterministic application order.
 - Asset and render failures become more observable but may reject workloads that previously grew unbounded or silently degraded.
 - Editor workflows gain filesystem/recovery adapters while `nara_tooling` remains UI-toolkit agnostic.
+- Root compilation becomes capability-bounded: default builds stop compiling 2D, UI, tooling, watcher, and platform/backend domains, and the unused `nara_audio` placeholder leaves the active workspace until a real vertical slice exists.
+- Task execution remains shared, but asset/watch/image integration ordering moves to an asset-owned schedule vocabulary without changing the `TaskUpdate` main-thread boundary.
+- Project-manifest loading moves to host composition so `nara_project` no longer owns ambient path authority.
 
 ### Risks and Dependencies
 
@@ -350,6 +395,9 @@ sequenceDiagram
 | Hardlinks, mounts, volumes, and reparse types weaken lexical containment | In untrusted/recovery mode accept only platform objects whose identity the adapter can prove; fail closed and report unsupported capability otherwise. |
 | Broad parallel work collides on shared types | Parallelize only disjoint dependency layers; serialize units touching `nara_app`, identity, document envelopes, asset contracts, or root Cargo metadata. |
 | CI/fuzz additions become slow or flaky | Keep PR gates deterministic and bounded; schedule longer fuzz/stress jobs separately while retaining seed regression fixtures. |
+| Coarse Cargo capabilities still create an untested combination matrix | Keep the feature vocabulary product-sized, define implication closure once, and test every single capability plus named cross-capability products and `--all-features`. |
+| Project/plugin preflight drifts from what installation actually mutates | Resolve one inspectable composition value, test closure equality against installed group membership, and prohibit mutation before capability/requirement/conflict validation succeeds. |
+| Moving task sets changes same-frame visibility accidentally | Characterize Poll/Spawn/Apply frame boundaries before symbol migration and retain explicit same-frame/next-frame integration tests. |
 
 ### Sequencing
 
@@ -359,26 +407,27 @@ U-IDs are stable references and are not an execution sequence. `ce-work` follows
 |---|---|---|
 | A | U1 | Plan accepted |
 | B | U2, U25 | U1 governance/schema and touched-ADR entries exist |
-| C | U3, U5, U13 | Their Wave B dependency is verified |
+| C | U3, U5 | Their Wave B dependency is verified |
 | D | U4, U18 | U3 or U5 respectively is verified |
 | E | U8 | U3 and U4 are verified |
-| F | U6, U9 | U8 identity spike passes; U9 also has U1 |
-| G | U7, U10, U11 | Their input/document/filesystem prerequisites are verified |
-| H | U12, U15, U26 | U11 is stable; U15 also has U9/U10 |
-| I | U27, U29 | Import scan or workspace transaction prerequisites are verified |
-| J | U28, U30 | Artifact publication or persistence receipt prerequisites are verified |
-| K | U14, U16, U17, U21, U22 | Required asset/editor/input/GPU prerequisites are verified |
-| L | U23, U31 | Pure export/version values and all required producer bridges are stable |
-| M | U19 | All selected property/fuzz targets have stable contracts |
-| N | U24 | Local policy and verification jobs are green |
-| O | U20 | Every prior unit and milestone gate is complete |
+| F | U6, U9, U32 | U8 identity core passes; U9 also has U1 and U32 also has U2 |
+| G | U7, U10, U13, U33 | Their input/document/capability/task prerequisites are verified |
+| H | U11 | Identity, document, filesystem, and asset integration-set contracts are stable |
+| I | U12, U15, U26 | U11 is stable; U15 also has U9/U10 |
+| J | U27, U29 | Import scan or workspace transaction prerequisites are verified |
+| K | U28, U30 | Artifact publication or persistence receipt prerequisites are verified |
+| L | U14, U16, U17, U21, U22 | Required asset/editor/input/GPU/capability prerequisites are verified |
+| M | U23, U31 | Pure export/version values and all required producer bridges are stable |
+| N | U19 | All selected property/fuzz and capability-matrix targets have stable contracts |
+| O | U24 | Local policy and verification jobs are green |
+| P | U20 | Every prior unit and milestone gate is complete |
 
 ### Milestone Evidence Gates
 
 | Milestone | Units | Continue evidence | Revise or abort trigger |
 |---|---|---|---|
 | M1 Runtime safety | U1-U5, U18, U25 | Plugin phase matrix, fixed-step semantics, bounded tasks, diagnostic privacy core, and filesystem capability prototype pass focused tests | Built-in lifecycle cannot prove retry/cleanup ownership; task integration requires a global type-erased result bus; supported host cannot uphold capability-bound IO |
-| M2 Identity and data | U8-U12, U26-U28 | Two-world identity fork/reload, envelope migration matrix, source identity, dependency scan, artifact publication, and availability contracts pass | Identity axes cannot preserve stated fork/unload invariants; migrations need source mutation; duplicate asset identity cannot fail closed |
+| M2 Identity and data | U8-U12, U26-U28, U32-U33 | Two-world identity fork/reload, capability/plugin closure, domain-owned task phase semantics, envelope migration matrix, source identity, dependency scan, artifact publication, and availability contracts pass | Identity axes cannot preserve stated fork/unload invariants; unavailable capability rejection mutates `App`; task integration requires app/task ownership of business phases; migrations need source mutation; duplicate asset identity cannot fail closed |
 | M3 Interaction and persistence | U6-U7, U10, U15-U17, U29-U30 | Same-frame semantic input, hierarchy, prefab partial states, close/conflict state machines, persistence receipts, recovery budgets, Play host, and trust binding pass | Toolkit-independent transitions remain ambiguous; platform durability cannot issue truthful receipts; Play shutdown cannot be bounded |
 | M4 Rendering and product | U13-U14, U19, U21-U24, U31 | Device-domain recovery, target composition, culling/upload budgets, AE17-AE20, domain diagnostics, local quality policy, and hosted workflow structure pass | One-device-domain contract cannot serve the declared desktop journey; backend limits cannot be enforced before allocation; platform matrix cannot be represented honestly |
 
@@ -390,6 +439,7 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 - `docs/knowledge/engineering/decisions/2026-07-09-cross-cutting-runtime-risk-policies.md` records why ADRs 0048-0055 were accepted without full implementation.
 - `docs/knowledge/engineering/progress/2026-07-09-engine-lifecycle-contracts-implementation.md` identifies diagnostics, migration, task, and GPU follow-ups.
 - `docs/knowledge/engineering/subagents/2026-07-10-mature-engine-foundation-audit.md` records the Bevy/Godot/WGPU comparison and the July 10 implementation-gap synthesis that produced this plan.
+- `docs/knowledge/engineering/2026-07/2026-07-11T114131Z-root-capability-task-ownership-and-manifest-io-audit-d3b79814f13b4bc3980973c209bf1e72.md` records the fresh Cargo tree, placeholder audio, task-set ownership, and ambient manifest-IO evidence that added U32/U33.
 - `docs/plans/2026-07-09-006-refactor-engine-lifecycle-contracts-plan.md` and `docs/plans/2026-07-09-007-feat-server-ready-runtime-authority-plan.md` define preserved boundaries.
 - `repo-ref/bevy/crates/bevy_ecs/src/world/mod.rs`, `repo-ref/bevy/crates/bevy_time/src/fixed.rs`, and `repo-ref/bevy/crates/bevy_asset/src` provide ECS frame, per-tick time, and source/dependency prior art.
 - `repo-ref/godot/core/object/undo_redo.h`, `repo-ref/godot/editor`, and `repo-ref/godot/main/main.cpp` provide saved-checkpoint, safe-save, recovery, and lifecycle prior art.
@@ -408,30 +458,32 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 | U5 | Bounded task execution | `crates/nara_tasks/src/lib.rs`, `crates/nara_project/src/` | U2 |
 | U6 | Input routing and text identity | `crates/nara_input/`, `crates/nara_winit/`, `crates/nara_ui/` | U3, U4, U8 |
 | U7 | Hierarchy, transform, and visibility | `crates/nara_scene/`, `crates/nara_transform/`, render extractors | U3, U6 |
-| U8 | Stable runtime identity | identity crate/module selected by spike, `crates/nara_scene/`, `crates/nara_gameplay/`, `crates/nara_reflect/`, `crates/nara_tooling/` | U3, U4 |
+| U8 | Stable runtime identity | `crates/nara_identity/`, `crates/nara_scene/`, `crates/nara_gameplay/`, `crates/nara_reflect/`, `crates/nara_tooling/` | U3, U4 |
 | U9 | Reflection and document envelopes | `crates/nara_reflect/`, `crates/nara_scene/`, fixtures | U1, U8 |
 | U10 | Prefab provenance and atomic authoring | `crates/nara_scene/`, `crates/nara_tooling/` | U8, U9 |
-| U11 | Asset source, containment, and metadata identity | `crates/nara_asset/`, `crates/nara_asset_watch/` | U5, U9, U25 |
-| U12 | Importer selection and dependency scanning | `crates/nara_asset/`, `crates/nara_image/` | U5, U11 |
-| U13 | Surface lifetime and device epoch | `crates/nara_window/`, `crates/nara_winit/`, `crates/nara_render_wgpu/` | U2 |
+| U11 | Asset source, containment, and metadata identity | `crates/nara_asset/`, `crates/nara_asset_watch/` | U5, U9, U25, U33 |
+| U12 | Importer selection and dependency scanning | `crates/nara_asset/`, `crates/nara_image/` | U5, U11, U33 |
+| U13 | Surface lifetime and device epoch | `crates/nara_window/`, `crates/nara_winit/`, `crates/nara_render_wgpu/` | U2, U32 |
 | U14 | Render target composition and color | render crates and wgpu submission | U13, U28 |
 | U15 | Editor document transactions | `crates/nara_tooling/` | U9, U10, U11 |
 | U16 | Editor runtime host | `crates/nara_tooling/`, Play Mode tests | U3, U4, U5, U8, U10, U15, U29, U30 |
-| U17 | Project settings origins and trust | `crates/nara_project/`, `src/lib.rs` | U5, U6, U11, U12, U18, U25 |
+| U17 | Project settings origins and trust | `crates/nara_project/`, `src/lib.rs` | U5, U6, U11, U12, U18, U25, U32 |
 | U18 | Diagnostic privacy and pressure core | `crates/nara_diagnostic/`, unit-safe core scalars | U5 |
-| U19 | Property/fuzz, supply chain, and legal baseline | fuzz/property fixtures and root policy files | U9, U11, U12, U18, U21, U22, U26-U31 |
-| U20 | Integration cleanup and final gates | facade, examples, architecture docs, engineering memory | U2-U19, U21-U31 |
+| U19 | Property/fuzz, supply chain, and legal baseline | fuzz/property fixtures and root policy files | U9, U11, U12, U18, U21, U22, U26-U33 |
+| U20 | Integration cleanup and final gates | facade, examples, architecture docs, engineering memory | U2-U19, U21-U33 |
 | U21 | Bounds and tilemap culling | sprite/tilemap render crates | U7, U28 |
 | U22 | GPU upload and dynamic buffer budgets | `nara_render`, `nara_render_wgpu` | U13, U28 |
 | U23 | Export manifest and version contract values | `crates/nara_project/`, artifact contracts | U12, U17, U27 |
-| U24 | Hosted CI workflow matrix | `.github/workflows/` | U19 |
+| U24 | Hosted CI workflow matrix | `.github/workflows/` | U19, U32 |
 | U25 | Capability-oriented filesystem substrate | new `crates/nara_fs/`, platform integration tests | U1 |
 | U26 | Asset rename and watcher reconciliation | `crates/nara_asset/`, `crates/nara_asset_watch/` | U11 |
 | U27 | Artifact publication and integrity | `crates/nara_asset/`, artifact fixtures | U12, U25 |
 | U28 | Asset availability and residency | `crates/nara_asset/`, preparation consumers | U12, U27 |
 | U29 | Editor filesystem persistence receipts | new `crates/nara_tooling_fs/` | U15, U25 |
 | U30 | Editor recovery journal and multi-instance policy | `crates/nara_tooling/`, `crates/nara_tooling_fs/` | U15, U29 |
-| U31 | Domain diagnostic bridges and runtime metrics | composition plugins and producer crates | U11-U18, U21-U22, U26-U30 |
+| U31 | Domain diagnostic bridges and runtime metrics | composition plugins and producer crates | U11-U18, U21-U22, U26-U30, U32-U33 |
+| U32 | Root product capabilities and placeholder retirement | `Cargo.toml`, `src/lib.rs`, `crates/nara_project/`, `crates/nara_render_wgpu/` | U2, U8 |
+| U33 | Domain-owned TaskUpdate integration sets | `crates/nara_app/`, `crates/nara_tasks/`, `crates/nara_asset/`, watcher/image consumers | U5, U32 |
 
 ### U1. ADR Governance and Implementation Ledger
 
@@ -486,9 +538,9 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 - **Requirements:** R9 and R21.
 - **Dependencies:** U2.
 - **Files:** `docs/architecture/adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md`, `crates/nara_core/src/limits.rs`, `crates/nara_core/src/lib.rs`, `crates/nara_tasks/src/lib.rs`, `crates/nara_image/src/lib.rs`, `crates/nara_asset/src/reload.rs`, `crates/nara_project/src/sections.rs`, `crates/nara_project/src/profile.rs`, `crates/nara_project/src/effective.rs`, `crates/nara_project/src/tests.rs`, `examples/headless_server.rs`, `src/lib.rs`.
-- **Approach:** Introduce only unit-safe non-zero limit scalars in `nara_core`; keep task queue policy and outcomes in `nara_tasks`. Replace unbounded mpsc with a bounded pending queue that supports pending-only coalescing, catches each task panic into a failed terminal while preserving workers, resolves cancellation/result races by first terminal state, rejects after closure without caller-thread fallback, and defines finite drain/cancel/join shutdown with an explicit timed-out/detached report. Delete the production/project `Deterministic` execution mode; `inline_for_tests` drives the same bounded queue explicitly, while server profiles use threaded pools. Submission returns monotonic `TaskId` plus an explicit domain key; workers produce typed terminal handles only. Domain plugins poll in their existing `TaskUpdateSet::Poll` stage, sort ready results by `(admission_tick, domain_key, task_id)`, and apply in their declared Apply stage without a type-erased global result bus. Project settings configure real thread/queue/shutdown limits through composition before plugin installation rather than becoming side-effect owners.
+- **Approach:** Introduce only unit-safe non-zero limit scalars in `nara_core`; keep task queue policy and outcomes in `nara_tasks`. Replace unbounded mpsc with a bounded pending queue that supports pending-only coalescing, catches each task panic into a failed terminal while preserving workers, resolves cancellation/result races by first terminal state, rejects after closure without caller-thread fallback, and defines finite drain/cancel/join shutdown with an explicit timed-out/detached report. Delete the production/project `Deterministic` execution mode; `inline_for_tests` drives the same bounded queue explicitly, while server profiles use threaded pools. Submission returns monotonic `TaskId` plus an explicit domain key; workers produce typed terminal handles only. Domain plugins poll and apply in their declared domain-owned integration sets, sort ready results by `(admission_tick, domain_key, task_id)`, and use no type-erased global result bus; `nara_tasks` configures no business phases. Project settings configure real thread/queue/shutdown limits through composition before plugin installation rather than becoming side-effect owners.
 - **Execution note:** Write queue-full, panic, cancellation-race, closed-pool, out-of-order completion, and shutdown timeout tests first.
-- **Patterns to follow:** Existing `TaskUpdateSet` ordering and expected-version result application in asset reload.
+- **Patterns to follow:** Existing typed-terminal ordering and expected-version result application in asset reload; U33 owns the domain schedule vocabulary.
 - **Test scenarios:** Queue full rejects/coalesces as configured; panic fails the handle and worker survives; cancel-after-complete retains success; channel closure never runs work inline; shutdown is bounded; reverse completion applies in stable order; server profile uses threaded work without raw input or tick blocking.
 - **Verification:** AE4 passes, project task settings are no longer dead configuration, and task stats expose admitted/rejected/failed/age/shutdown outcomes.
 
@@ -521,9 +573,9 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 - **Goal:** Unify command, scene-instance, authoring, and future persistence identity without leaking runtime entities.
 - **Requirements:** R8 and R12.
 - **Dependencies:** U3, U4.
-- **Files:** `docs/architecture/adr/0058-stable-runtime-identity-and-entity-references.md`, `docs/architecture/adr/0076-play-runtime-debug-control-and-observation.md`, `crates/nara_identity/` or `crates/nara_ecs/src/identity.rs` selected by the spike, `crates/nara_scene/src/document.rs`, `crates/nara_scene/src/spawn.rs`, `crates/nara_scene/src/export.rs`, `crates/nara_scene/src/tests.rs`, `crates/nara_gameplay/src/lib.rs`, `crates/nara_reflect/src/value.rs`, `crates/nara_reflect/src/schema.rs`, `crates/nara_tooling/src/snapshot.rs`, `crates/nara_tooling/src/inspector.rs`, `src/lib.rs`.
-- **Approach:** First implement the Identity Invariants table as a narrow two-world fork, duplicate-scene, unload/reload, tombstone, command lookup, and tooling-observation spike. Use the spike and dependency graph to choose a deep identity owner (prefer a dedicated identity crate if justified; otherwise a narrow `nara_ecs` identity module), never `nara_scene` by convenience. Then add one world identity-domain allocator/index, make scene instance allocation domain-global, represent structured entity references in reflected values, distinguish scene-local and persistent runtime targets, and define deterministic remap/tombstone behavior for spawn, clone, fork, restore, unload, and lookup. Runtime-only/internal entities must be explicitly omitted/count-only or use a world-scoped non-persistent observation locator; do not assign persistent identity solely for tooling.
-- **Execution note:** The identity spike is the M2 entry gate. Add collision and remap tests before removing the duplicate gameplay-only stable ID vocabulary; revise KTD7 before U9/U10/U16 if the spike falsifies any axis.
+- **Files:** `docs/architecture/adr/0058-stable-runtime-identity-and-entity-references.md`, `docs/architecture/adr/0076-play-runtime-debug-control-and-observation.md`, `crates/nara_identity/`, `crates/nara_scene/src/document.rs`, `crates/nara_scene/src/spawn.rs`, `crates/nara_scene/src/export.rs`, `crates/nara_scene/src/tests.rs`, `crates/nara_gameplay/src/lib.rs`, `crates/nara_reflect/src/value.rs`, `crates/nara_reflect/src/schema.rs`, `crates/nara_tooling/src/snapshot.rs`, `crates/nara_tooling/src/inspector.rs`, `src/lib.rs`.
+- **Approach:** Implement the Identity Invariants table in the dedicated `nara_identity` deep owner through a narrow two-world fork, duplicate-scene, unload/reload, tombstone, command lookup, and tooling-observation core. Use one world identity-domain allocator/index, make scene instance allocation domain-global, represent structured entity references in reflected values, distinguish scene-local and persistent runtime targets, and define deterministic remap/tombstone behavior for spawn, clone, fork, restore, unload, and lookup. Migrate scene, gameplay, reflection, tooling, and facade consumers to that vocabulary. Runtime-only/internal entities must be explicitly omitted/count-only or use a world-scoped non-persistent observation locator; do not assign persistent identity solely for tooling.
+- **Execution note:** The identity core and its collision/remap evidence are the M2 entry gate; migrate every consumer and remove the duplicate gameplay-only stable ID vocabulary before opening U9/U10/U16. Revise KTD7 if consumer migration falsifies any axis.
 - **Patterns to follow:** `SceneEntityId`, runtime-only handle separation, and existing two-phase scene spawn.
 - **Test scenarios:** Multiple spawners and convenience spawn calls cannot collide; `Default`/`new` allocation policy is identical; zero/exhaustion/duplicate registration and map insertion fail atomically without wrap, saturation reuse, or silent overwrite; two instances of the same scene have distinct targets; equal runtime `Entity` bit patterns in different worlds never alias in observations; bare scene-local lookup is rejected when instance context is required; clone/fork remaps internal references; same-timeline restore into fresh `Entity` slots preserves or explicitly remaps semantic references; missing/tombstoned reference is diagnostic; export uses an explicit collision-checked remap rather than magic instance-name concatenation; runtime-only/internal observations follow the chosen omitted/count-only or world-scoped non-persistent policy; serialization contains stable reference data but no `Entity`; command lookup resolves through the world index.
 - **Verification:** No duplicate scene-stable identity type remains and identity searches find no persisted `Entity`/`AssetId`.
@@ -556,7 +608,7 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 
 - **Goal:** Make the asset source boundary the only path from logical identity to filesystem bytes.
 - **Requirements:** R17-R18 and R29.
-- **Dependencies:** U5, U9, U25.
+- **Dependencies:** U5, U9, U25, U33.
 - **Files:** `docs/architecture/adr/0036-event-message-and-resource-queue-lifetime.md`, `docs/architecture/adr/0049-untrusted-project-input-and-parse-budget-policy.md`, `docs/architecture/adr/0050-asset-root-symlink-junction-and-package-trust-policy.md`, new `docs/architecture/adr/0060-asset-source-vfs-trust-and-metadata-identity.md`, `crates/nara_asset/src/identity.rs`, `crates/nara_asset/src/database.rs`, `crates/nara_asset/src/reload.rs`, new focused source modules under `crates/nara_asset/src/`, `crates/nara_asset/tests/filesystem_source.rs`, `crates/nara_asset_watch/src/lib.rs`, `crates/nara_project/src/` budget/profile modules, asset metadata fixtures under `tests/fixtures/`.
 - **Approach:** Introduce source IDs/locators over U25 host-issued capabilities, make the asset source the only reader/stat/metadata authority, and enforce aggregate bounded reads. Metadata becomes path-independent and envelope-aware. A stable-ID namespace index rejects duplicate claims and quarantines both conflicting candidates without changing handles, dependencies, generations, or publication pointers. Replace unbounded unresolved history with bounded retry/diagnostic lifecycle; rename transaction policy belongs to U26.
 - **Execution note:** Write traversal, resolution/open race, link/object-identity, duplicate stable-ID, and retry-retention failures before removing `source_path()` bypasses.
@@ -568,7 +620,7 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 
 - **Goal:** Replace the image-specific reload bypass with a generic, deterministic, dependency-aware, cooperatively cancellable import path.
 - **Requirements:** R19 and R29.
-- **Dependencies:** U5, U11.
+- **Dependencies:** U5, U11, U33.
 - **Files:** `docs/architecture/adr/0037-asset-load-request-cache-and-lifetime-policy.md`, new `docs/architecture/adr/0061-importer-selection-dependency-scanning-and-compatibility.md`, `crates/nara_asset/src/import.rs`, `crates/nara_asset/src/reload.rs`, `crates/nara_image/src/lib.rs`, related tests and import fixtures.
 - **Approach:** Select only engine-built or externally host-approved importers from the registry, reject native importer construction in untrusted/recovery mode, canonicalize settings, and scan/bound dependencies and subassets before decode. Import contracts receive a deadline and cancellation token for scan, dependency resolution, decode, and candidate generation; implementations declare cooperative cancellation support, timeouts never publish candidates, and a timed-out worker releases pool capacity. Include implementation/toolchain/target/output recipe inputs in the candidate key; U27 owns publication.
 - **Execution note:** Add importer-selection, settings-key collision, dependency-cycle, decode-budget, pathological-timeout, cancellation-race, and worker-recovery tests before deleting the direct image path.
@@ -580,9 +632,9 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 
 - **Goal:** Repair unsafe window/surface ordering and make GPU recovery generation-safe.
 - **Requirements:** R22-R23.
-- **Dependencies:** U2.
+- **Dependencies:** U2, U32.
 - **Files:** `docs/architecture/adr/0032-render-backend-integration-boundary.md`, `docs/architecture/adr/0040-render-resource-lifetime-and-submitter-ownership.md`, `docs/architecture/adr/0062-gpu-device-epoch-surface-recovery-and-capabilities.md`, `crates/nara_window/src/lib.rs`, `crates/nara_winit/src/lib.rs`, `crates/nara_render_wgpu/src/lib.rs`, `crates/nara_render_wgpu/src/surface.rs`, `crates/nara_render_wgpu/src/texture.rs`, `crates/nara_render_wgpu/src/sprite.rs`, `crates/nara_render_wgpu/src/ui.rs`, `src/lib.rs`.
-- **Approach:** Store a raw-handle lease in each surface state, synchronize ECS window create/update/destroy with platform acknowledgements, require enabled desktop features for desktop bundles, choose an adapter compatible with the primary surface, key surface config fully, classify errors, and transition all surfaces/caches through one `(DeviceDomainId, DeviceEpoch)` invalidation. One domain is instantiated; no global bare epoch may enter cache keys.
+- **Approach:** Store a raw-handle lease in each surface state, synchronize ECS window create/update/destroy with platform acknowledgements, consume U32's `desktop-winit`/`render-wgpu` capability contract for desktop bundles, choose an adapter compatible with the primary surface, key surface config fully, classify errors, and transition all surfaces/caches through one `(DeviceDomainId, DeviceEpoch)` invalidation. One domain is instantiated; no global bare epoch may enter cache keys.
 - **Execution note:** Add pure lifetime/epoch/error-classification tests before touching unsafe surface creation.
 - **Patterns to follow:** Existing backend status resources and wgpu's surface-compatible adapter selection.
 - **Test scenarios:** Surface outlives temporary provider removal attempt; destroy releases surface before guard; domain/epoch clears every cache class; same numeric epoch in a different domain cannot alias; transient timeout does not recreate device; lost surface reconfigures only target state; incompatible surface fails explicitly; present-mode change reconfigures; missing feature returns plugin error.
@@ -627,14 +679,14 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 ### U17. Project Settings Origins, Trust Modes, and Runtime Application
 
 - **Goal:** Make project profile origins and trust/budget settings operational without giving `nara_project` side effects or executing untrusted native code.
-- **Requirements:** R3, R21, R29.
-- **Dependencies:** U5, U6, U11, U12, U18, U25.
-- **Files:** `docs/architecture/adr/0035-project-manifest-and-runtime-settings-authority.md`, `docs/architecture/adr/0067-project-trust-settings-origins-and-executable-code.md`, `crates/nara_project/src/lib.rs`, `crates/nara_project/src/manifest.rs`, `crates/nara_project/src/sections.rs`, `crates/nara_project/src/profile.rs`, `crates/nara_project/src/effective.rs`, `crates/nara_project/src/tests.rs`, `src/lib.rs`, project fixtures.
-- **Approach:** Track value origin/precedence and restart/runtime mutability, lower domain-owned budget/input configuration as pure data, validate secrets are external, and ensure root composition applies effective settings without giving `nara_project` side effects. Resolve trust monotonically against an external host store keyed by canonical root capability identity, manifest digest, and approved native module digests; project content cannot raise trust and any root/manifest/module mismatch downgrades before plugin/importer construction.
-- **Execution note:** Add unknown-field, invalid-profile, secret-leak, precedence, trust-mode, and composition fixture tests before extending manifest lowering.
+- **Requirements:** R3, R17, R21, and R29.
+- **Dependencies:** U5, U6, U11, U12, U18, U25, U32.
+- **Files:** `docs/architecture/adr/0035-project-manifest-and-runtime-settings-authority.md`, `docs/architecture/adr/0067-project-trust-settings-origins-and-executable-code.md`, `docs/architecture/adr/0070-capability-oriented-filesystem-substrate.md`, `crates/nara_fs/src/`, `crates/nara_project/src/lib.rs`, `crates/nara_project/src/manifest.rs`, `crates/nara_project/src/sections.rs`, `crates/nara_project/src/profile.rs`, `crates/nara_project/src/effective.rs`, `crates/nara_project/src/tests.rs`, `src/lib.rs`, project fixtures.
+- **Approach:** Make host/composition code open and bound `nara.toml` through `nara_fs`, then pass an immutable candidate into side-effect-free project parsing and lowering. Track value origin/precedence and restart/runtime mutability, lower domain-owned budget/input/capability configuration as pure data, validate secrets are external, and apply U32's preflighted composition without giving `nara_project` side effects. Resolve trust monotonically against an external host store keyed by canonical root capability identity, manifest digest, and approved native module digests; project content cannot raise trust and any root/manifest/module mismatch downgrades before plugin/importer construction.
+- **Execution note:** Add capability-bound read, ambient-path rejection, unknown-field, invalid-profile, secret-leak, precedence, trust-mode, and composition fixture tests before extending manifest lowering.
 - **Patterns to follow:** Existing side-effect-free `ProjectManifest` validation/lowering and explicit plugin plan values.
-- **Test scenarios:** Profile origin is inspectable; invalid zero/budget settings reject; server defaults remain strict; untrusted/recovery mode executes zero native project importer/plugin callbacks; trusted mode requires external host approval; copied/replaced root, changed manifest, changed native module, and manifest self-elevation all downgrade; secrets are refused from persistent settings; effective task/input/runtime/budget settings reach composition data.
-- **Verification:** Effective settings configure runtime/task/input/budget/trust composition and remain pure data.
+- **Test scenarios:** Host-issued capability reads a bounded manifest candidate; absolute/unchecked paths and an over-budget manifest are rejected before parsing; profile origin is inspectable; invalid zero/budget/capability settings reject; server defaults remain strict; untrusted/recovery mode executes zero native project importer/plugin callbacks; trusted mode requires external host approval; copied/replaced root, changed manifest, changed native module, and manifest self-elevation all downgrade; secrets are refused from persistent settings; effective task/input/runtime/budget/capability settings reach composition data.
+- **Verification:** Effective settings configure runtime/task/input/budget/trust/capability composition from capability-read bytes, `nara_project` remains pure data, and ambient `File::open`/path parsing APIs are absent.
 
 ### U18. Diagnostic Privacy, Retention, and Pressure Snapshot Core
 
@@ -652,12 +704,12 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 
 - **Goal:** Locally machine-enforce parser/data-integrity, dependency, license, and security-policy risk surfaces.
 - **Requirements:** R30.
-- **Dependencies:** U9, U11, U12, U18, U21, U22, U26-U31.
+- **Dependencies:** U9, U11, U12, U18, U21, U22, U26-U33.
 - **Files:** `deny.toml`, fuzz/property test configuration and targets, `tests/fixtures/`, `LICENSE-MIT`, `LICENSE-APACHE`, `SECURITY.md`, `CHANGELOG.md`, `THIRD_PARTY.md` or generated-notice policy, `Cargo.toml`.
-- **Approach:** Add dependency policy for advisories/licenses/sources, bounded parser/import/journal fuzz targets, property tests for canonicalization/inverse/migration/atomicity, dual-license texts, private vulnerability-report guidance, and third-party asset/dependency attribution policy. Before Cargo execution, statically inventory lockfile changes, build scripts, proc macros, and native build dependencies as trusted executable code; policy must require explicit review rather than claiming `cargo deny` sandboxes them.
+- **Approach:** Add dependency policy for advisories/licenses/sources, bounded parser/import/journal fuzz targets, property tests for canonicalization/inverse/migration/atomicity, U32's no-feature/default/coarse-feature/weak-serde closure matrix, dual-license texts, private vulnerability-report guidance, and third-party asset/dependency attribution policy. Before Cargo execution, statically inventory lockfile changes, build scripts, proc macros, and native build dependencies as trusted executable code; policy must require explicit review rather than claiming `cargo deny` sandboxes them.
 - **Execution note:** Treat policy/config as smoke-first work and retain every minimized fuzz failure as a deterministic regression seed.
 - **Patterns to follow:** Existing local verification matrix and Bevy's split CI/dependency workflows, right-sized for nara.
-- **Test scenarios:** Arbitrary bounded document/image/meta input cannot panic or partially mutate; canonicalization is idempotent; patch plus inverse restores; migration roundtrips fixtures; path containment corpus remains rejected; dependency policy accepts current lockfile; each optional feature example compiles on its supported target.
+- **Test scenarios:** Arbitrary bounded document/image/meta input cannot panic or partially mutate; canonicalization is idempotent; patch plus inverse restores; migration roundtrips fixtures; path containment corpus remains rejected; dependency policy accepts current lockfile; no-feature, default, each coarse feature, weak-serde-only, named product combinations, and all-features compile with the declared dependency closure; each optional feature example compiles on its supported target.
 - **Verification:** All locally executable property/fuzz seeds and dependency policies pass, and the repository's declared license/security baseline is complete and machine-checkable.
 
 ### U21. Bounds, Per-View Selection, and Tilemap Chunk Culling
@@ -700,9 +752,9 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 
 - **Goal:** Encode the local verification contract in least-privilege hosted workflows without making external runner availability a local completion blocker.
 - **Requirements:** R30.
-- **Dependencies:** U19.
+- **Dependencies:** U19, U32.
 - **Files:** `docs/architecture/adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md`, `.github/workflows/ci.yml`, `.github/workflows/dependencies.yml`, workflow policy tests or validation configuration.
-- **Approach:** Generate jobs from the Initial Platform Support Matrix for Windows/Linux/macOS serialization, headless, optional feature/example, dependency, and fuzz-seed gates. Pin actions by immutable commit, use top-level read-only permissions and `persist-credentials: false`, run PR code only on ephemeral hosted runners with no secrets/OIDC or writable shared cache, pass `--locked`, and prohibit unsafe `pull_request_target` checkout. Privileged release jobs must rebuild a trusted ref rather than consume PR artifacts.
+- **Approach:** Generate jobs from the Initial Platform Support Matrix for Windows/Linux/macOS serialization, headless, U32's product capability combinations, optional adapter/example, dependency, and fuzz-seed gates. Pin actions by immutable commit, use top-level read-only permissions and `persist-credentials: false`, run PR code only on ephemeral hosted runners with no secrets/OIDC or writable shared cache, pass `--locked`, and prohibit unsafe `pull_request_target` checkout. Privileged release jobs must rebuild a trusted ref rather than consume PR artifacts.
 - **Execution note:** Validate workflow structure and local-equivalent commands; hosted results become post-push landing evidence rather than a prerequisite the local executor can fabricate.
 - **Patterns to follow:** Bevy's split validation/dependency workflow shape, reduced to nara's current targets.
 - **Test scenarios:** Static policy rejects tag-pinned actions, implicit write permissions, credential persistence, secrets/OIDC for PR code, writable shared caches, missing `--locked`, unsafe event/checkout combinations, unreviewed executable-dependency changes, and privileged reuse of PR artifacts; matrix contains all declared supported host/feature gates.
@@ -784,7 +836,7 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 
 - **Goal:** Make stable producer failures and pressure results observable in headless/server composition without coupling foundation crates upward.
 - **Requirements:** R28-R29.
-- **Dependencies:** U11-U18, U21-U22, U26-U30.
+- **Dependencies:** U11-U18, U21-U22, U26-U30, U32-U33.
 - **Files:** `docs/architecture/adr/0048-runtime-diagnostics-and-observability-bus.md`, `docs/architecture/adr/0068-global-resource-budgets-metrics-and-diagnostic-privacy.md`, domain bridge modules in asset/watch/task/window/render/project/tooling composition crates, `src/lib.rs`, headless/server examples, and integration tests.
 - **Approach:** Preserve each producer's typed error and policy ownership. Composition plugins map allowed structured fields into U18 stable codes/sensitivity classes, expose numeric task/asset/render/frame/editor counters as pressure snapshots, and declare producer, consumer, retention, cleanup stage, and replay role. Add a bridge only after the producer unit stabilizes its errors; safe summaries and dedupe keys contain public/project-relative data only.
 - **Execution note:** Add one headless bridge test per producer plus cross-domain retention/dedupe/privacy integration before facade exposure.
@@ -792,15 +844,39 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 - **Test scenarios:** Asset/watch/task/window/render/project/editor/runtime-host failures bridge with stable codes; repeated failures dedupe/drop count; bearer tokens, credential URLs, environment values, absolute user paths, and native-module paths remain absent; producer-owned overload decisions appear as counters without being re-decided; diagnostics survive without tracing subscriber and clean at the declared stage.
 - **Verification:** A headless app can inspect all required producer failures and numeric pressure metrics through stable resources only.
 
+### U32. Root Product Capabilities and Placeholder Domain Retirement
+
+- **Goal:** Make root Cargo features, facade visibility, project capability requests, and installed plugin closures describe one truthful product boundary while retiring crates that have no real consumer.
+- **Requirements:** R2-R3, R21, and R30-R31.
+- **Dependencies:** U2, U8.
+- **Files:** `docs/architecture/adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md`, `Cargo.toml`, `Cargo.lock`, `src/lib.rs`, `crates/nara_app/src/lib.rs`, `crates/nara_project/src/sections.rs`, `crates/nara_project/src/profile.rs`, `crates/nara_project/src/effective.rs`, `crates/nara_project/src/tests.rs`, `crates/nara_render_wgpu/Cargo.toml`, focused modules under `crates/nara_render_wgpu/src/`, deletion of `crates/nara_audio/`, `tests/product_capabilities.rs`, affected examples, architecture docs, and the migration guide.
+- **Approach:** Make every root domain dependency optional and define coarse `runtime-core`, `runtime-2d`, `runtime-ui`, `tooling`, `asset-watch`, `desktop-winit`, `render-wgpu`, and `tooling-egui` capabilities plus cross-cutting `serde`; set the default to `runtime-core` and weak-forward serde only into activated domains. Keep runtime UI independent from sprite/tilemap compilation, remove UI from `Runtime2dPlugins`, add a runtime-UI group, and make wgpu sprite/UI submitters internal optional features over a backend-private quad representation. Replace `ProjectPluginPlan` with a narrow runtime preset plus additive capability set, validate `required_product_capabilities(resolved plan) <= normalized request <= compiled product ceiling`, then close plugin service requirements/conflicts separately before mutating `App`; return structured failures from either closure. Delete the unused audio crate/export/prelude/lockfile surface while retaining ADR 0030 as future direction. A new crate needs a real consumer and at least two of: dependency/platform isolation, cohesive deep ownership, independent optionality/testing, or multiple consumers.
+- **Execution note:** Capture no-feature/default dependency trees and pre-mutation composition state first; land manifest, facade, examples, migration notes, and stale-symbol deletion as one breaking unit without aliases for old feature or plugin-plan names.
+- **Patterns to follow:** Existing optional adapter crates, plugin metadata/group inspection, pre-mutation plugin prerequisite errors, and the root prelude layering policy.
+- **Test scenarios:** `--no-default-features` activates no engine product domain; default `runtime-core` excludes image/render/sprite/tilemap/UI/tooling/watch/platform/backend/audio crates while including input compilation; `serde` alone activates no product capability; every coarse feature, named product combination, and all-features build has the declared tree; Covers AE21: unavailable compiled capability, a resolved plan requiring an unrequested product capability, a missing plugin service requirement, and a declared conflict each leave resources/plugins/groups/schedules/lifecycle unchanged and permit a later valid install; preset and explicit capability forms normalize identically; server installs no raw input despite input compilation; runtime 2D installs no UI; runtime UI pulls no sprite/tilemap path; base wgpu pulls no sprite/UI submitter; audio and obsolete `winit`/`wgpu`/`egui`/`ProjectPluginPlan` names are absent.
+- **Verification:** Dependency, facade, project-composition, and installed-group matrices prove `required_product_capabilities(resolved plan) <= normalized request <= compiled product ceiling` plus a valid independent plugin service closure; migration notes cover every removed name and no placeholder-domain surface remains active.
+
+### U33. Domain-Owned TaskUpdate Integration Sets
+
+- **Goal:** Preserve deterministic main-thread task integration while moving business schedule ownership out of `nara_app` and `nara_tasks`.
+- **Requirements:** R2 and R9.
+- **Dependencies:** U5, U32.
+- **Files:** `docs/architecture/adr/0080-domain-owned-task-update-integration-sets.md`, `docs/migrations/2026-07-engine-foundation.md`, `crates/nara_app/src/lib.rs`, `crates/nara_tasks/src/runtime.rs`, `crates/nara_tasks/src/tests.rs`, `crates/nara_asset/src/lib.rs`, `crates/nara_asset/src/reload.rs`, `crates/nara_asset_watch/src/lib.rs`, `crates/nara_image/src/lib.rs`, `src/lib.rs`, and `tests/task_update_integration.rs`.
+- **Approach:** Keep only `CoreStage::TaskUpdate` in `nara_app`; keep bounded execution, terminal handles, cancellation, ordered integration helpers, and shutdown in `nara_tasks`. Define `AssetTaskUpdateSet::{Poll, ResolveSourceChanges, SpawnJobs, ApplyResults}` in `nara_asset` and configure the chained ordering from `AssetPlugin`; watcher polling, source resolution, and image job systems join those asset-owned sets. Each poller captures one immutable ready membership or queue prefix at system entry and drains only that snapshot: task pollers record ready terminal IDs and watcher pollers atomically take the existing prefix. ApplyResults must commit every current-generation, expected-version eligible, predecessor-unblocked observed or synchronous outcome in the same frame, retire stale/superseded outcomes, buffer only eligible missing-predecessor work, and leave later-ready work for the next poll. Delete `nara_app::TaskUpdateSet` without an alias and expose the asset set only through the advanced facade.
+- **Execution note:** Characterize current frame-boundary behavior before moving symbols, then migrate every in-repo consumer and canonical ADR vocabulary in the same unit.
+- **Patterns to follow:** Existing `CoreStage::TaskUpdate`, chained Bevy schedule sets, typed task terminals, and generation-stamped asset apply guards.
+- **Test scenarios:** Covers AE22: an eligible terminal in its poller's entry snapshot and an eligible synchronous rejection/removal produced during SpawnJobs must apply before same-frame `PreUpdate`/`Prepare`; worker readiness or watcher input arriving after that poller's snapshot, including during Poll or after SpawnJobs, is observed no earlier than the next frame; an outcome that becomes stale between Poll and ApplyResults retires once; an eligible ordered-prefix terminal with a missing predecessor remains buffered; `TaskPlugin` installs no business set; watcher Poll, source resolution, job spawn, and result apply retain stable order; schedule graph/ambiguity inspection proves independent domain sets gain no implicit cross-domain dependency edge; stale imports, exports, and current ownership claims for `nara_app::TaskUpdateSet` or asset phases in `nara_tasks` are absent from live source, examples, tests, facade, and canonical policy sections, while migration ADRs and immutable history may retain the old vocabulary.
+- **Verification:** Focused app/tasks/asset/watch/image tests pass, the advanced facade exports only the asset-owned set, migration guidance names the breaking replacement, and scoped ownership searches find no live asset scheduling vocabulary in `nara_app` or `nara_tasks`.
+
 ### U20. Facade Cleanup, Documentation Alignment, Review, and Final Gates
 
 - **Goal:** Remove abandoned code and stale vocabulary, align public examples/docs, and prove the complete plan against the workspace.
 - **Requirements:** R1-R3 and all cross-cutting verification requirements.
-- **Dependencies:** U2-U19, U21-U31.
+- **Dependencies:** U2-U19, U21-U33.
 - **Files:** `src/lib.rs`, `Cargo.toml`, `Cargo.lock`, affected examples/tests, `AGENTS.md`, `docs/architecture/nara-foundation.md`, `docs/architecture/open-questions.md`, `docs/architecture/adr/implementation-status.md`, `docs/knowledge/engineering/` sharded progress/verification/decision entries.
 - **Approach:** Remove old symbols and dead feature/config paths, complete non-blocking implementation-ledger classification for untouched ADRs, verify `bevy_ecs` uses only intentional features, keep advanced/backend exports out of the default prelude, update examples/architecture/migration notes, run simplification and full code review, resolve actionable findings, then record durable verification evidence.
 - **Patterns to follow:** Existing facade layering, dependency-boundary searches, Conventional Commits, and sharded engineering memory.
-- **Test scenarios:** All prior unit scenarios remain green together; default dependency tree excludes window/GPU/toolkit and unintended Bevy async task layers; server bundle has no raw input/backend resources; stale API searches return no matches; persistent identity searches find no runtime handles; examples compile and documented flows match behavior.
+- **Test scenarios:** All prior unit scenarios remain green together; no-feature/default/coarse-feature trees match U32's ceilings; server bundle has no raw input/backend resources; no app/task crate owns asset integration-set vocabulary; pure project/asset/image paths contain no ambient authorization bypass; stale API and placeholder-domain searches return no matches; persistent identity searches find no runtime handles; examples compile and documented flows match behavior.
 - **Verification:** Every locally executable Definition of Done item and Verification Contract gate passes on a clean feature branch with no abandoned experiments or untracked generated output; hosted CI evidence is recorded after push when available.
 
 ---
@@ -810,16 +886,17 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 | Gate | Applies to | Completion signal |
 |---|---|---|
 | `cargo fmt --all -- --check` | Every Rust unit and final | No formatting diff. |
-| Focused `cargo nextest run -p <affected crates>` | U2-U19, U21-U31 | Unit-specific happy, boundary, failure, and integration scenarios pass before commit. |
+| Focused `cargo nextest run -p <affected crates>` | U2-U19, U21-U33 | Unit-specific happy, boundary, failure, and integration scenarios pass before commit. |
 | `cargo nextest run --workspace` | U20 | Full workspace tests pass with every planned regression retained. |
 | `cargo check --workspace` | Every milestone boundary and U20 | Default backend-free workspace compiles. |
-| `cargo check --workspace --features serde` | U9-U12, U15, U17, U23, U26-U30, U20 | Canonical persistent/document/profile/intent/artifact/journal/export shapes compile with serialization and no obsolete versioned Rust API remains. |
-| `cargo check -p nara --all-features --all-targets` | U20 | Optional adapters and targets compile together for the current host; hosted jobs cover the remaining declared hosts rather than treating unsupported cross-host targets as local failures. |
-| Three winit/wgpu example checks from `AGENTS.md` | U13-U14, U21-U22, U20 | Clear, sprite, and runtime UI examples compile against the new backend contracts. |
-| `asset_import_texture`, `headless_server`, and scene/prefab/editor examples | U11-U18, U21-U23, U26-U31, U20 | AE17-AE19 import, server, migration, authoring, persistence, and Play flows compile and run where applicable. |
+| `cargo check --workspace --features serde` | U9-U12, U15, U17, U23, U26-U30, U32, U20 | Canonical persistent/document/profile/intent/artifact/journal/export shapes compile with serialization and no obsolete versioned Rust API remains. |
+| `cargo check -p nara --all-features --all-targets` | U32, U20 | Optional capabilities, adapters, and targets compile together for the current host; hosted jobs cover the remaining declared hosts rather than treating unsupported cross-host targets as local failures. |
+| Root capability matrix and dependency trees | U19, U24, U32, U20 | No-default, default, each coarse feature, weak-serde-only, named product combinations, and all-features compile; each tree matches ADR 0079, while missing compiled capability, unrequested plan requirement, missing service, and conflict rejection satisfy AE21 before mutation. |
+| Three desktop-winit/render-wgpu example checks from `AGENTS.md` | U13-U14, U21-U22, U32, U20 | Clear, sprite, and runtime UI examples compile against the new backend and product-capability contracts. |
+| `asset_import_texture`, `headless_server`, and scene/prefab/editor examples | U11-U18, U21-U23, U26-U33, U20 | AE17-AE19 import, server, migration, authoring, persistence, and Play flows compile and run where applicable. |
 | `cargo deny check` | U19, U24, U20 | Advisory, license, ban, and source policy passes or has documented reviewed exceptions. |
 | Property and bounded fuzz corpus | U9-U12, U15, U19, U21-U23, U25-U30 | No panic, budget escape, partial mutation, non-idempotent canonicalization, inverse/migration failure, containment escape, journal exhaustion, or corrupt publication for retained seeds. |
-| Dependency boundary searches from `AGENTS.md` | U13-U14, U21-U23, U25, U29, U20 | `winit` and `wgpu` imports remain isolated to adapter crates; platform filesystem side effects stay in `nara_fs`/`nara_tooling_fs`; pure domains do not gain backend dependencies. |
+| Dependency boundary searches from `AGENTS.md` | U11-U14, U17, U21-U23, U25, U29, U32-U33, U20 | `winit` and `wgpu` imports remain isolated to adapter crates; platform filesystem side effects stay in `nara_fs`/`nara_tooling_fs`; pure domains do not gain backend dependencies. Pure project/image/asset paths contain no authoritative `File::open`, `std::fs::read`, or canonicalize-then-open flow. |
 | Executable dependency inventory | U19, U24, U20 | Lockfile changes, build scripts, proc macros, and native build dependencies are enumerated and reviewed before Cargo execution in CI. |
 | Hosted workflow structure and least-privilege policy | U24, U20 | Workflow syntax, immutable action pins, read-only permissions, no PR secrets/OIDC/shared writable cache, event safety, `--locked`, trusted-ref release rebuild, and platform matrix coverage validate locally; hosted results are recorded after push. |
 | Stale-contract and runtime-handle searches | Every breaking unit and U20 | Removed APIs are absent and persistent data does not contain runtime identities/handles. |
@@ -831,19 +908,21 @@ At each gate, record evidence and a `continue`, `revise`, or `abort` decision in
 
 ## Definition of Done
 
-- U1-U31 are implemented according to the topological waves, with focused verification evidence and intentional Conventional Commits; stable U-IDs are not treated as sequence numbers.
+- U1-U33 are implemented according to the topological waves, with focused verification evidence and intentional Conventional Commits; stable U-IDs are not treated as sequence numbers.
 - Every milestone gate has a recorded `continue`, or an evidence-backed `revise` followed by updated ADR/plan and re-verification; no dependent wave bypasses a falsified KTD.
 - Every behavior-bearing unit has a regression test that failed or a characterization baseline observed before production changes, unless the unit documents a justified non-test smoke strategy.
 - All P0/P1 defects named in the audit are fixed or replaced by a stronger contract; no issue is merely restated in an ADR.
 - Revised/new ADRs match the final implementation, carry implementation status/evidence, and leave `open-questions.md` with only genuine future triggers; untouched ADRs have non-blocking ledger classifications.
-- Plugin lifecycle satisfies AE1; fixed tick/command/task semantics satisfy AE2-AE4; input routing satisfies AE5; hierarchy/identity/persistence satisfies AE6-AE11 and AE16; GPU/editor runtime satisfies AE12-AE15; product journeys and migration notes satisfy AE17-AE20.
+- Plugin lifecycle satisfies AE1; fixed tick/command/task semantics satisfy AE2-AE4 and AE22; input routing satisfies AE5; hierarchy/identity/persistence satisfies AE6-AE11 and AE16; GPU/editor runtime satisfies AE12-AE15; product journeys and migration notes satisfy AE17-AE20; capability preflight satisfies AE21.
 - Persistent readers are bounded and compatibility-matrix-aware; obsolete pre-launch shapes/readers are deleted, canonical shapes are version 1, and failure paths do not publish partial world, document, artifact, or workspace state.
-- File asset/editor/cache access is capability-authorized and containment-safe on supported platforms; duplicate stable IDs fail closed and rename preserves stable identity.
+- File project-manifest/asset/editor/cache access is capability-authorized and containment-safe on supported platforms; `nara_project` owns no ambient file IO, duplicate stable IDs fail closed, and rename preserves stable identity.
 - External trust binding prevents project content, copied roots, changed manifests, or changed native modules from self-elevating.
 - GPU recovery invalidates all device-domain-owned resources, and one target is acquired/presented once per frame regardless of camera count.
 - Editor documents cannot be silently closed or marked saved without confirmation/receipt, and Play Mode runs a real isolated `App` with bounded shutdown.
 - Recovery journals replay valid prefixes idempotently, never overwrite a newer baseline, and cannot resurrect an already committed revision.
 - Headless/server profiles expose diagnostics, metrics, and pressure outcomes without UI, tracing, or backend dependencies.
+- Root no-default/default/coarse-feature trees match the compiled capability contract, project capability rejection is pre-mutation, server installs no raw input, and no placeholder domain crate remains without a real consumer.
+- `nara_app` owns only the `TaskUpdate` stage, `nara_tasks` owns no business schedule sets, and asset/watch/image integration uses the asset-owned Poll/ResolveSourceChanges/SpawnJobs/ApplyResults chain with the AE22 frame boundary.
 - CI workflow structure, executable-dependency inventory, dependency policy, license, security, golden/property/fuzz, optional feature, and backend boundary gates are present and green where locally executable; hosted OS/hardware results and explicit capability skips are recorded after push rather than fabricated locally.
 - `cargo fmt --all`, full workspace nextest/check/serde/optional examples, dependency searches, `git diff --check`, memory validation, simplification, and full code review pass.
 - No abandoned attempts, dead compatibility wrappers, obsolete exports, temporary files, generated caches, or unrelated user changes remain in the branch.

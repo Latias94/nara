@@ -4,7 +4,7 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0037: Asset Load Request, Cache, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
-Allocation Policy
+Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
 ## Context
 
@@ -133,8 +133,8 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   narrow material wrappers; backend texture objects remain private to `nara_render_wgpu`.
 - `nara_image::ImagePlugin` is the first domain implementation of the async import seam. It registers
   `ImageImporter`, spawns image reload jobs from `AssetReloadRequest` values in
-  `TaskUpdateSet::SpawnAssetJobs`, applies typed `ImageAsset` results in
-  `TaskUpdateSet::ApplyAssetResults`, and then updates backend-neutral `PreparedImageResources` in
+  `AssetTaskUpdateSet::SpawnJobs`, applies typed `ImageAsset` results in
+  `AssetTaskUpdateSet::ApplyResults`, and then updates backend-neutral `PreparedImageResources` in
   `CoreStage::Prepare`.
 - `ImagePlugin` composes `ImagePreparePlugin` rather than registering a parallel prepare path. This
   keeps prepare stats and render-resource invalidation single-pass even when sprite rendering also

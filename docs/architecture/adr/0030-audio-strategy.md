@@ -2,6 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0079: Root Product
+Capabilities and Placeholder Domain Retirement
 
 ## Context
 
@@ -63,4 +65,3 @@ Rules:
 | Audio commands and components overlap unclearly | Medium | Medium | Use commands for one-shot actions, components for persistent emitters |
 | Streaming adds threading complexity | Medium | Medium | Use IO/async pools and backend adapter ownership |
 | Spatial audio conflicts with 2D/3D transforms | Medium | Medium | Define 2D spatial first, 3D later |
-
