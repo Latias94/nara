@@ -2,8 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0076: Play Runtime Debug
-Control and Observation
+**Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0058: Stable Runtime
+Identity and Entity References; ADR 0076: Play Runtime Debug Control and Observation
 
 ## Context
 

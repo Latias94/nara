@@ -101,6 +101,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0055](0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md): Feature Matrix, Boundary Checks, and Compatibility Fixtures
 - [ADR 0056](0056-headless-runtime-and-dedicated-server-readiness.md): Headless Runtime and Dedicated Server Readiness
 - [ADR 0057](0057-authoritative-fixed-tick-and-command-ingress.md): Authoritative Fixed-Tick and Command Ingress
+- [ADR 0058](0058-stable-runtime-identity-and-entity-references.md): Stable Runtime Identity and Entity References
 - [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md): Global Resource Budgets, Metrics, and Diagnostic Privacy
 - [ADR 0070](0070-capability-oriented-filesystem-substrate.md): Capability-Oriented Filesystem Substrate
 - [ADR 0076](0076-play-runtime-debug-control-and-observation.md): Play Runtime Debug Control and Observation
