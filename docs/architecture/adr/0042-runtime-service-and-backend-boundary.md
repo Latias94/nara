@@ -5,7 +5,7 @@
 **Refines**: ADR 0008, ADR 0016, ADR 0019, ADR 0021, ADR 0028, ADR 0030, ADR 0031
 **Refined By**: ADR 0048: Runtime Diagnostics and Observability Bus; ADR 0052: Task
 Backpressure, Cancellation, and Long-Running Diagnostics; ADR 0056: Headless Runtime and Dedicated
-Server Readiness
+Server Readiness; ADR 0076: Play Runtime Debug Control and Observation
 
 ## Context
 

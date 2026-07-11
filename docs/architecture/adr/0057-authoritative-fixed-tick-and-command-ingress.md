@@ -6,6 +6,7 @@
 Fixed Update, and Replay Policy; ADR 0036: Event, Message, and Resource Queue Lifetime;
 ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0056: Headless Runtime
 and Dedicated Server Readiness
+**Refined By**: ADR 0076: Play Runtime Debug Control and Observation
 
 ## Context
 
@@ -271,6 +272,6 @@ transport requirement that justifies the complexity.
 ## Open Questions
 
 - A versioned replay file envelope, checksum, snapshot cadence, and crash recovery remain deferred
-  until replay persistence has a concrete product workflow.
+  to [OQ-018](../open-questions.md#oq-018-persistent-replay-artifact-and-checkpoint-policy).
 - Cross-source fairness under sustained overload remains adapter policy; add a bounded sorted batch
   submission API only when a transport demonstrates the need.

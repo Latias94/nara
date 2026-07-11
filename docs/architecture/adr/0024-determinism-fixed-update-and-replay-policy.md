@@ -4,7 +4,7 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0056:
 Headless Runtime and Dedicated Server Readiness; ADR 0057: Authoritative Fixed-Tick and Command
-Ingress
+Ingress; ADR 0076: Play Runtime Debug Control and Observation
 
 ## Context
 
@@ -94,4 +94,3 @@ Frame:
 ## Follow-Up Questions
 
 - What is the canonical seeded RNG resource?
-- What data is required for a future replay capture?

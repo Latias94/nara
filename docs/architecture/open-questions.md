@@ -1,7 +1,7 @@
 # nara Architecture Open Questions
 
 **Status**: Living Draft
-**Updated**: 2026-07-10
+**Updated**: 2026-07-11
 
 This document contains undecided architecture questions only. Accepted decisions belong in ADRs; implementation evidence belongs in `adr/implementation-status.md` and engineering memory. Each question remains open until its trigger creates enough concrete pressure for an ADR.
 
@@ -93,14 +93,6 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Related ADRs**: 0020, 0035, 0051, 0055
 - **Question**: Which adapter owns package publication, signing hooks, target toolchains, and user-facing recovery once a real consumer exists?
 
-## OQ-012: Replay Capture Envelope
-
-- **Status**: open
-- **Owner**: gameplay/replay domain
-- **Trigger**: U4 authoritative command ingress is stable and a replay/debugging product flow is scheduled.
-- **Related ADRs**: 0023, 0024, 0036
-- **Question**: Which non-command state, checksums, snapshots, and engine/version metadata are required beyond admitted command envelopes?
-
 ## OQ-013: Typed Event and Request Channels
 
 - **Status**: open
@@ -140,3 +132,27 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Trigger**: A supported integration cannot be expressed through normalized input/window/text/accessibility events.
 - **Related ADRs**: 0013, 0041
 - **Question**: How can advanced users observe raw events without making winit types part of gameplay-facing or persistent contracts?
+
+## OQ-018: Persistent Replay Artifact and Checkpoint Policy
+
+- **Status**: open
+- **Owner**: future replay domain and participating runtime services
+- **Trigger**: U8 stable identity, U9 canonical schema/envelope, and U16 isolated runtime host are implemented, and a concrete persistent replay workflow has representative size/latency measurements.
+- **Related ADRs**: 0024, 0042, 0049, 0051, 0057, 0076
+- **Question**: What canonical artifact fields, checkpoint coverage registry, service outcome catalog, checksum algorithm, cadence, compression, compatibility fingerprint, and bounded retention defaults satisfy the first measured replay workflow?
+
+## OQ-019: System-Level Stepping and Breakpoint Executor
+
+- **Status**: open
+- **Owner**: `nara_app`, `nara_ecs`, `nara_tooling`
+- **Trigger**: U16 exact fixed-tick stepping is implemented and a real debugging workflow requires pausing inside a fixed tick rather than observing completed ticks.
+- **Related ADRs**: 0002, 0003, 0039, 0057, 0076
+- **Question**: Which stable system identity, topology generation, strict execution mode, open-tick transaction, conditional-breakpoint vocabulary, and failure/discard rules can support system stepping without splitting command acknowledgement or allowing parallel work across a claimed breakpoint?
+
+## OQ-020: Native Rust Code Reload Boundary
+
+- **Status**: open
+- **Owner**: future native module/runtime host domain
+- **Trigger**: Measured full rebuild plus isolated Play-host restart misses a real iteration-latency target and a concrete native module boundary can own ABI and state migration.
+- **Related ADRs**: 0021, 0034, 0042, 0076
+- **Question**: Can a narrow native module ABI prove code quiescence, thread/task/callback retirement, native-handle ownership, versioned state extraction/migration, two-phase publication, and rollback strongly enough to justify hot replacement over rebuild-and-restart?

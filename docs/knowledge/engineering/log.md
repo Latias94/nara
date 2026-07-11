@@ -5,6 +5,10 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-11
+* **Decision**: [Execution cursor disclosure boundary](decisions/2026-07/2026-07-11T035400Z-execution-cursor-disclosure-boundary-417ce2d6031b4bfd9b09c1d175539233.md) - Applies host observation allowlisting, redaction, budgets, and safe source locators to interpreter cursor payloads.
+* **Decision**: [Exact fixed-step time ledger and checkpoint boundaries](decisions/2026-07/2026-07-11T034911Z-exact-fixed-step-time-ledger-and-checkpoint-boundaries-5cf371cef1324269870794cc615858f0.md) - Freezes paused exact-step clock accounting and separates completed-tick observation from stable checkpoint eligibility.
+* **Research Findings**: [Correction: Play runtime debugging ADR assignment](2026-07/2026-07-11T030630Z-correction-play-runtime-debugging-adr-assignment-1e059736d9434a26a0c43328550e6f76.md) - Corrects the reserved ADR number and Bevy reference version in the prior research shard.
+* **Research Findings**: [Play runtime debugging and replay boundary](2026-07/2026-07-11T025253Z-play-runtime-debugging-and-replay-boundary-f6f7c22c453344a8ab7c9ca7d0eb96ff.md) - Research Findings for Play runtime debugging and replay boundary.
 * **Work Registration**: [Engine foundation contract completion](registry/2026-07/2026-07-11T015344Z-engine-foundation-contract-completion-codex-root-9a4fb3b296f140ef8a908f25e74f9a01.md) - Fearless implementation of the mature-engine foundation audit plan.
 * **Verification Evidence**: [M1 runtime safety gate continued](verification/2026-07/2026-07-11-m1-runtime-safety-gate.md) - U1-U5, U18, and U25 pass the sequential low-memory milestone gate; M1 decision is continue.
 

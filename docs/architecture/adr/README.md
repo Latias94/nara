@@ -17,7 +17,7 @@ ADR decision status is one of:
 - `Superseded`: replaced by a named ADR; its number is never reused.
 - `Rejected`: evaluated and deliberately not selected.
 
-New ADRs use the next monotonic number. They must contain Context, Decision, at least two Alternatives Considered, Consequences, Success Metrics, and Risks and Mitigations. Cross-domain or stateful decisions include a Mermaid flow or state diagram. Refinement and supersession links must be bidirectional.
+New ADRs use the next unassigned monotonic number; IDs reserved by an active accepted plan are not reused for a different decision. ADRs must contain Context, Decision, at least two Alternatives Considered, Consequences, Success Metrics, and Risks and Mitigations. Cross-domain or stateful decisions include a Mermaid flow or state diagram. Refinement and supersession links must be bidirectional.
 
 ## Implementation Evidence
 
@@ -103,3 +103,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0057](0057-authoritative-fixed-tick-and-command-ingress.md): Authoritative Fixed-Tick and Command Ingress
 - [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md): Global Resource Budgets, Metrics, and Diagnostic Privacy
 - [ADR 0070](0070-capability-oriented-filesystem-substrate.md): Capability-Oriented Filesystem Substrate
+- [ADR 0076](0076-play-runtime-debug-control-and-observation.md): Play Runtime Debug Control and Observation

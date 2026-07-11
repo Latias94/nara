@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0047: Editor Workspace and Scene Document State
+**Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0076: Play Runtime Debug
+Control and Observation
 
 ## Context
 

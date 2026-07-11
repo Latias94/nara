@@ -108,6 +108,31 @@ flowchart TD
 | `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, open scene document slots, active document, selection sets, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
+## Accepted Runtime Debugging Direction
+
+- `nara_app` owns pause/resume/time-scale execution and the exact single-fixed-tick path. One paused
+  step runs a complete fixed transaction and returns to paused; render-frame stepping and future
+  system stepping are different capabilities.
+- `nara_tooling` owns bounded, UI-agnostic observation, diff, timeline, and lifecycle models. It
+  consumes U8 stable identity and `nara_reflect` codecs; it does not serialize arbitrary worlds,
+  store allocator-local `Entity` values, or use `RuntimeDiagnostics` as a high-frequency trace.
+- Detailed component observation requires both schema eligibility and a host disclosure/redaction
+  policy. Unregistered runtime-only/internal entities are omitted/count-only unless U8 supplies a
+  world-scoped non-persistent observation locator.
+- Command, system, and component-change timelines distinguish proven provenance, temporal
+  correlation, and explicitly instrumented direct causality.
+- Interpreter-like AI/script/behavior domains own program generations, instruction IDs, source
+  maps, held-data projections, and failure semantics. Tooling consumes an optional
+  `ExecutionCursor`; cursor payloads and source locators pass the host observation
+  allowlist/redaction policy and never expose absolute host paths. Ordinary Rust systems and ECS
+  entities have no inferred source-line cursor.
+- Future backwards navigation restores a completed-tick checkpoint into a fresh isolated runtime
+  and replays authoritative commands plus recorded nondeterministic outcomes forward. It is not
+  reverse execution or inverse component mutation.
+- Native Rust code iteration uses rebuild-and-restart until a measured workflow justifies a
+  separate ABI, quiescence, state-migration, and rollback decision. Asset/data reload does not imply
+  machine-code hot replacement.
+
 ## Runtime Flow
 
 ```mermaid
