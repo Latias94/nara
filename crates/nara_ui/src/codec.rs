@@ -1,12 +1,11 @@
 use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle};
 use nara_core::Color;
-use nara_ecs::World;
 use nara_image::ImageAsset;
 use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentApplyContext, ComponentCodecError, ComponentDecodeContext, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent,
 };
 use nara_render::RenderTarget;
 
@@ -88,13 +87,9 @@ pub(crate) fn register_ui_panel_component(
         ui_panel_fields(),
         |value, context| {
             let material = read_panel_material(value.field("material")?, context)?;
-            Ok(PreparedComponent::new(move |world, entity| {
-                let material = resolve_prepared_material(world, material)?;
-                let mut entity_mut = world
-                    .get_entity_mut(entity)
-                    .map_err(|_| ComponentCodecError::EntityMissing)?;
-                entity_mut.insert(UiPanel { material });
-                Ok(())
+            Ok(PreparedComponent::new(move |context| {
+                let material = resolve_prepared_material(context, material)?;
+                Ok(UiPanel { material })
             }))
         },
         |world, entity, context| {
@@ -435,11 +430,11 @@ fn prepare_image_handle(
 }
 
 fn resolve_prepared_material(
-    world: &mut World,
+    context: &mut ComponentApplyContext,
     material: PreparedPanelMaterial,
 ) -> Result<UiPanelMaterial, ComponentCodecError> {
     Ok(UiPanelMaterial {
-        image: resolve_prepared_image(world, material.image)?,
+        image: resolve_prepared_image(context, material.image)?,
         sampler: material.sampler,
         alpha_mode: material.alpha_mode,
         tint: material.tint,
@@ -447,31 +442,28 @@ fn resolve_prepared_material(
 }
 
 fn resolve_prepared_image(
-    world: &mut World,
+    context: &mut ComponentApplyContext,
     image: Option<PreparedImage>,
 ) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
     match image {
         None => Ok(None),
         Some(PreparedImage::Resolved(handle)) => Ok(Some(handle)),
         Some(PreparedImage::Deferred(image_ref)) => {
-            resolve_optional_image(world, Some(&image_ref), "material.image.value")
+            resolve_optional_image(context, Some(&image_ref), "material.image.value")
         }
     }
 }
 
 fn resolve_optional_image(
-    world: &mut World,
+    context: &mut ComponentApplyContext,
     image_ref: Option<&AssetRef>,
     field: &str,
 ) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
     let Some(image_ref) = image_ref else {
         return Ok(None);
     };
-    if world.get_resource::<AssetServer>().is_none() {
-        world.insert_resource(AssetServer::new());
-    }
-    image_ref
-        .resolve::<ImageAsset>(&mut world.resource_mut::<AssetServer>())
+    context
+        .resolve_asset_ref::<ImageAsset>(image_ref)
         .map(Some)
         .map_err(|error| invalid_asset_ref(field, image_ref, error))
 }

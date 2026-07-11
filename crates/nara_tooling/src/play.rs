@@ -5,21 +5,22 @@ use std::{collections::BTreeSet, fmt};
 use nara_asset::{AssetRefExportPolicy, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
+use nara_identity::{EntityLookup, IdentityDomainError, SpawnedSceneInstance};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEncodeContext, ComponentMigrationError,
     ComponentRegistry, ComponentTypeId,
 };
 use nara_scene::{
     PrefabSourceResolver, SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityMap, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner,
+    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    ScenePatchReport, SceneSpawnReport, SceneSpawner,
 };
 
 use crate::diagnostic;
 use crate::inspector::{
     SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorModel, SceneInspectorState,
 };
-use crate::snapshot::WorldSnapshot;
+use crate::snapshot::WorldIdentitySnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SceneEditorMode {
@@ -61,20 +62,19 @@ impl SceneEditorMode {
 
 pub struct ScenePlaySession {
     world: World,
-    entity_map: SceneEntityMap,
+    instance: SpawnedSceneInstance,
     source_revision: SceneAuthoringRevision,
 }
 
 impl ScenePlaySession {
-    #[must_use]
-    pub fn new(
+    fn new(
         world: World,
-        entity_map: SceneEntityMap,
+        instance: SpawnedSceneInstance,
         source_revision: SceneAuthoringRevision,
     ) -> Self {
         Self {
             world,
-            entity_map,
+            instance,
             source_revision,
         }
     }
@@ -90,8 +90,13 @@ impl ScenePlaySession {
     }
 
     #[must_use]
-    pub fn entity_map(&self) -> &SceneEntityMap {
-        &self.entity_map
+    pub fn scene_instance(&self) -> &SpawnedSceneInstance {
+        &self.instance
+    }
+
+    #[must_use]
+    pub fn resolve(&self, entity: &SceneEntityId) -> EntityLookup {
+        self.instance.resolve(&self.world, entity)
     }
 
     #[must_use]
@@ -104,7 +109,7 @@ impl fmt::Debug for ScenePlaySession {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ScenePlaySession")
-            .field("entity_map", &self.entity_map)
+            .field("instance", &self.instance)
             .field("source_revision", &self.source_revision)
             .finish_non_exhaustive()
     }
@@ -115,7 +120,7 @@ pub struct ScenePlayTransitionReport {
     pub applied: bool,
     pub mode: SceneEditorMode,
     pub source_revision: Option<SceneAuthoringRevision>,
-    pub entity_map: Option<SceneEntityMap>,
+    pub active_instance: Option<SpawnedSceneInstance>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -179,7 +184,7 @@ pub struct SceneApplyChangesComponentReport {
 pub struct SceneEditorModel {
     pub mode: SceneEditorMode,
     pub inspector: SceneInspectorModel,
-    pub play_world_snapshot: Option<WorldSnapshot>,
+    pub play_world_snapshot: Option<WorldIdentitySnapshot>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -241,8 +246,10 @@ impl SceneEditorState {
     }
 
     #[must_use]
-    pub fn play_entity_map(&self) -> Option<&SceneEntityMap> {
-        self.play_session.as_ref().map(ScenePlaySession::entity_map)
+    pub fn play_scene_instance(&self) -> Option<&SpawnedSceneInstance> {
+        self.play_session
+            .as_ref()
+            .map(ScenePlaySession::scene_instance)
     }
 
     pub fn start_play(
@@ -308,13 +315,13 @@ impl SceneEditorState {
         }
 
         let source_revision = play_session.source_revision();
-        let entity_map = play_session.entity_map().clone();
+        let active_instance = play_session.scene_instance().clone();
         self.play_paused = true;
         ScenePlayTransitionReport {
             applied: true,
             mode: self.mode(),
             source_revision: Some(source_revision),
-            entity_map: Some(entity_map),
+            active_instance: Some(active_instance),
             diagnostics: DiagnosticReport::default(),
         }
     }
@@ -336,13 +343,13 @@ impl SceneEditorState {
         }
 
         let source_revision = play_session.source_revision();
-        let entity_map = play_session.entity_map().clone();
+        let active_instance = play_session.scene_instance().clone();
         self.play_paused = false;
         ScenePlayTransitionReport {
             applied: true,
             mode: self.mode(),
             source_revision: Some(source_revision),
-            entity_map: Some(entity_map),
+            active_instance: Some(active_instance),
             diagnostics: DiagnosticReport::default(),
         }
     }
@@ -357,13 +364,12 @@ impl SceneEditorState {
         };
 
         let source_revision = play_session.source_revision();
-        let entity_map = play_session.entity_map().clone();
         self.play_paused = false;
         ScenePlayTransitionReport {
             applied: true,
             mode: self.mode(),
             source_revision: Some(source_revision),
-            entity_map: Some(entity_map),
+            active_instance: None,
             diagnostics: DiagnosticReport::default(),
         }
     }
@@ -373,19 +379,16 @@ impl SceneEditorState {
         &mut self,
         session: &SceneAuthoringSession,
         registry: &ComponentRegistry,
-        edit_world_snapshot: Option<&WorldSnapshot>,
+        edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneEditorModel {
         let inspector = self.inspector.model(session, registry, edit_world_snapshot);
-        let play_world_snapshot = self
-            .play_session
-            .as_mut()
-            .map(|play_session| WorldSnapshot::capture(play_session.world_mut()));
+        let (play_world_snapshot, diagnostics) = self.capture_play_world_snapshot();
 
         SceneEditorModel {
             mode: self.mode(),
             inspector,
             play_world_snapshot,
-            diagnostics: DiagnosticReport::default(),
+            diagnostics,
         }
     }
 
@@ -395,7 +398,7 @@ impl SceneEditorState {
         session: &SceneAuthoringSession,
         registry: &ComponentRegistry,
         selected_entity: Option<&SceneEntityId>,
-        edit_world_snapshot: Option<&WorldSnapshot>,
+        edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneEditorModel {
         let inspector = self.inspector.model_with_selection(
             session,
@@ -403,16 +406,27 @@ impl SceneEditorState {
             selected_entity,
             edit_world_snapshot,
         );
-        let play_world_snapshot = self
-            .play_session
-            .as_mut()
-            .map(|play_session| WorldSnapshot::capture(play_session.world_mut()));
+        let (play_world_snapshot, diagnostics) = self.capture_play_world_snapshot();
 
         SceneEditorModel {
             mode: self.mode(),
             inspector,
             play_world_snapshot,
-            diagnostics: DiagnosticReport::default(),
+            diagnostics,
+        }
+    }
+
+    fn capture_play_world_snapshot(&self) -> (Option<WorldIdentitySnapshot>, DiagnosticReport) {
+        let Some(play_session) = self.play_session.as_ref() else {
+            return (None, DiagnosticReport::default());
+        };
+        match WorldIdentitySnapshot::capture_default(play_session.world()) {
+            Ok(snapshot) => (Some(snapshot), DiagnosticReport::default()),
+            Err(error) => {
+                let mut diagnostics = DiagnosticReport::default();
+                diagnostics.push(world_identity_snapshot_error(&error));
+                (None, diagnostics)
+            }
         }
     }
 
@@ -566,15 +580,32 @@ impl SceneEditorState {
                 applied: false,
                 mode: self.mode(),
                 source_revision: Some(source_revision),
-                entity_map: None,
+                active_instance: None,
                 diagnostics: report.diagnostics,
             };
         }
 
-        let entity_map = report.entity_map;
+        let SceneSpawnReport {
+            instance,
+            mut diagnostics,
+            ..
+        } = report;
+        let Some(instance) = instance else {
+            diagnostics.push(diagnostic::error(
+                "tooling.play-instance-missing",
+                "Successful Play Mode spawn did not publish an identity instance",
+            ));
+            return ScenePlayTransitionReport {
+                applied: false,
+                mode: self.mode(),
+                source_revision: Some(source_revision),
+                active_instance: None,
+                diagnostics,
+            };
+        };
         self.play_session = Some(ScenePlaySession::new(
             world,
-            entity_map.clone(),
+            instance.clone(),
             source_revision,
         ));
         self.play_paused = false;
@@ -582,8 +613,8 @@ impl SceneEditorState {
             applied: true,
             mode: self.mode(),
             source_revision: Some(source_revision),
-            entity_map: Some(entity_map),
-            diagnostics: report.diagnostics,
+            active_instance: Some(instance),
+            diagnostics,
         }
     }
 
@@ -620,7 +651,7 @@ impl SceneEditorState {
             .iter()
             .find(|entity| entity.id == request.entity)
         else {
-            let code = if play_session.entity_map().get(&request.entity).is_some() {
+            let code = if play_session.scene_instance().contains(&request.entity) {
                 "tooling.apply-changes-prefab-expanded-entity"
             } else {
                 "tooling.apply-changes-missing-scene-entity"
@@ -644,14 +675,16 @@ impl SceneEditorState {
             );
         }
 
-        let Some(play_entity) = play_session.entity_map().get(&request.entity) else {
-            return apply_changes_entity_error_report(
-                Some(source_revision),
-                current_revision,
-                "tooling.apply-changes-missing-runtime-entity",
-                "Apply Changes targets an entity that was not spawned into the Play Mode world",
-                &request.entity,
-            );
+        let play_entity = match play_session.resolve(&request.entity) {
+            EntityLookup::Resolved(entity) => entity,
+            lookup => {
+                return apply_changes_lookup_error_report(
+                    Some(source_revision),
+                    current_revision,
+                    &request.entity,
+                    lookup,
+                );
+            }
         };
 
         if request.components.is_empty() {
@@ -792,7 +825,7 @@ fn transition_error_report(
         applied: false,
         mode,
         source_revision: mode.source_revision(),
-        entity_map: None,
+        active_instance: None,
         diagnostics,
     }
 }
@@ -866,6 +899,62 @@ fn apply_changes_entity_error_report(
         patch_report: None,
         components: Vec::new(),
         diagnostics,
+    }
+}
+
+fn apply_changes_lookup_error_report(
+    source_revision: Option<SceneAuthoringRevision>,
+    current_revision: SceneAuthoringRevision,
+    entity: &SceneEntityId,
+    lookup: EntityLookup,
+) -> SceneApplyChangesReport {
+    let (code, summary) = match lookup {
+        EntityLookup::Tombstoned(_) => (
+            "tooling.apply-changes-runtime-entity-tombstoned",
+            "Apply Changes targets a retired Play Mode entity",
+        ),
+        EntityLookup::StaleRegistration => (
+            "tooling.apply-changes-runtime-entity-stale",
+            "Apply Changes targets a stale Play Mode identity registration",
+        ),
+        EntityLookup::DomainUnavailable => (
+            "tooling.apply-changes-identity-domain-unavailable",
+            "Apply Changes cannot access the Play Mode identity domain",
+        ),
+        EntityLookup::WrongWorldBinding | EntityLookup::WrongDomain { .. } => (
+            "tooling.apply-changes-identity-domain-mismatch",
+            "Apply Changes encountered a mismatched Play Mode identity domain",
+        ),
+        EntityLookup::ContextRequired => (
+            "tooling.apply-changes-identity-context-required",
+            "Apply Changes requires an unavailable scene identity context",
+        ),
+        EntityLookup::Missing => (
+            "tooling.apply-changes-missing-runtime-entity",
+            "Apply Changes targets an entity that was not spawned into the Play Mode world",
+        ),
+        EntityLookup::Resolved(_) => (
+            "tooling.apply-changes-identity-resolution-contract",
+            "Apply Changes received an invalid identity resolution outcome",
+        ),
+    };
+    apply_changes_entity_error_report(source_revision, current_revision, code, summary, entity)
+}
+
+fn world_identity_snapshot_error(error: &IdentityDomainError) -> Diagnostic {
+    match error {
+        IdentityDomainError::StaleRegistration => diagnostic::error(
+            "tooling.world-identity-snapshot-stale-registration",
+            "World identity snapshot found a stale registration",
+        ),
+        IdentityDomainError::WorldBindingMismatch => diagnostic::error(
+            "tooling.world-identity-snapshot-binding-mismatch",
+            "World identity snapshot found a mismatched world binding",
+        ),
+        _ => diagnostic::error(
+            "tooling.world-identity-snapshot-failed",
+            "World identity snapshot capture failed",
+        ),
     }
 }
 
@@ -1083,6 +1172,12 @@ fn with_codec_error(entry: Diagnostic, error: &ComponentCodecError) -> Diagnosti
         ComponentCodecError::EntityMissing => {
             diagnostic::with_public_identifier(entry, "codec_reason", "entity_missing")
         }
+        ComponentCodecError::WrongWorld => {
+            diagnostic::with_public_identifier(entry, "codec_reason", "wrong_world")
+        }
+        ComponentCodecError::AssetServerChanged => {
+            diagnostic::with_public_identifier(entry, "codec_reason", "asset_server_changed")
+        }
         ComponentCodecError::Message(_) => diagnostic::with_secret(
             diagnostic::with_public_identifier(entry, "codec_reason", "message"),
             "message",
@@ -1236,6 +1331,50 @@ mod tests {
         assert_eq!(
             entity.value(),
             DiagnosticValueRef::Identifier(target.as_str())
+        );
+    }
+
+    #[test]
+    fn stale_play_identity_fails_snapshot_and_apply_changes_with_stable_diagnostics() {
+        let registry = test_registry();
+        let id = scene_id("player");
+        let mut session = SceneAuthoringSession::new(scene_with_name(&id, "Hero"));
+        let mut editor = SceneEditorState::new();
+        assert!(editor.start_play(&session, &registry).applied);
+        let play_entity = resolved_play_entity(&editor, &id);
+        assert!(editor.play_world_mut().unwrap().despawn(play_entity));
+
+        let model = editor.model(&session, &registry, None);
+        assert!(model.play_world_snapshot.is_none());
+        assert!(model.diagnostics.iter().any(|entry| {
+            entry.code().as_str() == "tooling.world-identity-snapshot-stale-registration"
+        }));
+
+        let report = editor.apply_changes(
+            &mut session,
+            &registry,
+            SceneApplyChangesRequest::new(id, [name_type_id()]),
+        );
+        assert!(!report.supported);
+        assert!(!report.applied);
+        assert!(report.diagnostics.iter().any(|entry| {
+            entry.code().as_str() == "tooling.apply-changes-runtime-entity-stale"
+        }));
+    }
+
+    #[test]
+    fn snapshot_identity_failures_have_distinct_stable_diagnostic_codes() {
+        assert_eq!(
+            world_identity_snapshot_error(&IdentityDomainError::StaleRegistration)
+                .code()
+                .as_str(),
+            "tooling.world-identity-snapshot-stale-registration"
+        );
+        assert_eq!(
+            world_identity_snapshot_error(&IdentityDomainError::WorldBindingMismatch)
+                .code()
+                .as_str(),
+            "tooling.world-identity-snapshot-binding-mismatch"
         );
     }
 
@@ -1477,7 +1616,7 @@ mod tests {
         let start = editor.start_play(&session, &registry);
         assert!(start.applied);
 
-        let play_entity = editor.play_entity_map().unwrap().get(&id).unwrap();
+        let play_entity = resolved_play_entity(&editor, &id);
         editor
             .play_world_mut()
             .unwrap()
@@ -1562,7 +1701,7 @@ mod tests {
         let mut editor = SceneEditorState::new();
         assert!(editor.start_play(&session, &registry).applied);
 
-        let play_entity = editor.play_entity_map().unwrap().get(&id).unwrap();
+        let play_entity = resolved_play_entity(&editor, &id);
         editor
             .play_world_mut()
             .unwrap()
@@ -1596,7 +1735,7 @@ mod tests {
         let mut editor = SceneEditorState::new();
         assert!(editor.start_play(&session, &registry).applied);
 
-        let play_entity = editor.play_entity_map().unwrap().get(&id).unwrap();
+        let play_entity = resolved_play_entity(&editor, &id);
         editor
             .play_world_mut()
             .unwrap()
@@ -1628,7 +1767,7 @@ mod tests {
         let mut editor = SceneEditorState::new();
         assert!(editor.start_play(&session, &registry).applied);
 
-        let play_entity = editor.play_entity_map().unwrap().get(&id).unwrap();
+        let play_entity = resolved_play_entity(&editor, &id);
         editor
             .play_world_mut()
             .unwrap()
@@ -1805,7 +1944,7 @@ mod tests {
         let mut editor = SceneEditorState::new();
         assert!(editor.start_play(&session, &registry).applied);
 
-        let play_entity = editor.play_entity_map().unwrap().get(&id).unwrap();
+        let play_entity = resolved_play_entity(&editor, &id);
         editor
             .play_world_mut()
             .unwrap()
@@ -1876,7 +2015,7 @@ mod tests {
         let mut editor = SceneEditorState::new();
         assert!(editor.start_play(&session, &registry).applied);
 
-        let play_entity = editor.play_entity_map().unwrap().get(&id).unwrap();
+        let play_entity = resolved_play_entity(&editor, &id);
         editor
             .play_world_mut()
             .unwrap()
@@ -2052,6 +2191,17 @@ mod tests {
 
     fn scene_id(id: &str) -> SceneEntityId {
         SceneEntityId::new(id).unwrap()
+    }
+
+    fn resolved_play_entity(editor: &SceneEditorState, id: &SceneEntityId) -> Entity {
+        match editor
+            .play_session()
+            .expect("Play Mode should be active")
+            .resolve(id)
+        {
+            EntityLookup::Resolved(entity) => entity,
+            lookup => panic!("expected resolved Play Mode entity, got {lookup:?}"),
+        }
     }
 
     fn name_type_id() -> ComponentTypeId {

@@ -547,8 +547,16 @@ fn scene_component_fields(
     for field in &mut fields {
         if field.capabilities.is_empty() {
             field.capabilities = ComponentCapability::scene_field_for_kind(field.value_kind);
-        } else if matches!(field.value_kind, ComponentValueKind::AssetRef) {
-            field.capabilities.insert(ComponentCapability::AssetRef);
+        } else {
+            match field.value_kind {
+                ComponentValueKind::AssetRef => {
+                    field.capabilities.insert(ComponentCapability::AssetRef);
+                }
+                ComponentValueKind::EntityRef => {
+                    field.capabilities.insert(ComponentCapability::EntityRef);
+                }
+                _ => {}
+            }
         }
     }
     Ok(fields)

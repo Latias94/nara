@@ -5,8 +5,9 @@
 **Refines**: [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md),
 [ADR 0034](0034-editor-play-mode-world-boundary.md),
 [ADR 0039](0039-main-loop-time-pause-and-runtime-state.md),
-[ADR 0042](0042-runtime-service-and-backend-boundary.md), and
-[ADR 0057](0057-authoritative-fixed-tick-and-command-ingress.md)
+[ADR 0042](0042-runtime-service-and-backend-boundary.md),
+[ADR 0057](0057-authoritative-fixed-tick-and-command-ingress.md), and
+[ADR 0058](0058-stable-runtime-identity-and-entity-references.md)
 
 ## Context
 
@@ -20,10 +21,12 @@ nara already has several foundations for a high-quality runtime debugging experi
   structured diagnostics, and bounded background work;
 - a planned U16 runtime host whose paused single-step contract is exactly one complete fixed tick.
 
-The current tooling surface is not yet sufficient. `ScenePlaySession` owns a bare `World` rather
-than a scheduled, closeable `App`. `WorldSnapshot` contains only an entity count and allocator-local
-`Entity` values. There is no stable system execution trace, component-state diff, checkpoint
-contract, or domain-neutral representation of an interpreted AI/script instruction cursor.
+The U8 identity slice removed allocator-local entity observations: `ScenePlaySession` now retains a
+stable scene-instance handle and tooling captures a bounded `WorldIdentitySnapshot`. The Play
+session still owns a bare `World` rather than a scheduled, closeable `App`, and the identity-only
+snapshot intentionally contains no component payload. There is no stable system execution trace,
+component-state diff, checkpoint contract, or domain-neutral representation of an interpreted
+AI/script instruction cursor.
 
 These gaps can easily produce misleading APIs. A Rust ECS entity has no intrinsic "current source
 line". A Bevy schedule node is not a durable system identity. A component diff observed after a
@@ -126,8 +129,15 @@ state mutation.
 `nara_tooling` owns bounded, UI-agnostic observation and timeline models. `nara_reflect` supplies
 schema metadata and component encoding; it does not own history, sampling cadence, or debugger UI.
 
-The current allocator-local `WorldSnapshot { entities: Vec<Entity> }` is transitional and will be
-deleted rather than preserved behind a compatibility layer. Its replacement follows these rules:
+The allocator-local `WorldSnapshot { entities: Vec<Entity> }` has been deleted rather than
+preserved behind a compatibility layer. The initial replacement is
+`WorldIdentitySnapshot`: it records an optional world-domain ID, a hard locator limit, semantically
+sorted `WorldEntityLocator` values, total and identified entity counts, runtime-only count-only
+entities, and explicit returned/omitted locator counts. Dual scene and persistent axes do not
+double-count an entity. A moved identity domain or stale registration fails capture rather than
+publishing an ambiguous snapshot. Schema-safe component payloads remain a later U9/U16 layer.
+
+The observation model follows these rules:
 
 - Every detailed entity observation uses the U8 world/runtime stable identity vocabulary. A
   runtime-only/internal entity without a U8 stable observation locator is omitted or represented by
@@ -361,7 +371,7 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
 | Exact single step | One request from `Paused` completes exactly one fixed tick and returns to `Paused` | U16 integration tests |
 | Command integrity | A stepped tick completes `Admit -> Consume -> Capture -> Acknowledge` exactly once | `nara_gameplay`/host integration tests |
 | Lifecycle honesty | Stop timeout/failure never reports `Stopped`; startup failure publishes no host | U16 state-machine tests |
-| Stable observation | Snapshot/diff/remote records contain no runtime `Entity`, Bevy `NodeId`, or backend handle | Boundary and serialization tests |
+| Stable observation | Snapshot/diff/remote records contain no runtime `Entity`, Bevy `NodeId`, or backend handle | `nara_tooling` snapshot tests and `tests/stable_runtime_identity.rs` |
 | Bounded/privacy-safe capture | Every observation path enforces declared count/byte/depth/retention and field capability limits | Hostile/budget tests |
 | Cursor honesty | A subject is highlighted only from a domain-provided stable cursor/source map | Domain/tooling tests |
 | Causality honesty | Uninstrumented command/system/change links are labeled correlation, not causation | Model/API tests and UI review |
@@ -389,8 +399,8 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
 - U16 must replace the bare Play `World` with an isolated `App`, add an exact single-fixed-tick
   execution path independent of existing debt, preserve always-on real-time work, and close services
   finitely.
-- `WorldSnapshot` will be removed and replaced by a stable-identity, schema-aware, bounded
-  observation model; no compatibility wrapper is required before 1.0.
+- `WorldSnapshot` is removed. `WorldIdentitySnapshot` is the bounded identity-only base; U9/U16
+  extend observations with schema-aware component values rather than restoring a raw-entity view.
 - A future system-step implementation requires its own executor/topology ADR. A future persistent
   replay artifact requires its own format/checkpoint ADR. Native Rust hot replacement requires a
   separate ABI and migration ADR.

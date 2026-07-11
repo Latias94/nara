@@ -3,6 +3,7 @@ use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
     PublicDiagnosticIdentifier, SafeSummary,
 };
+use nara_identity::{EntityIdentityAxis, IdentityDomainError};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldPath, ComponentFieldPathError,
     ComponentFieldPathSegment, ComponentMigrationError,
@@ -193,6 +194,12 @@ pub(crate) fn with_codec_error(diagnostic: Diagnostic, error: &ComponentCodecErr
         ComponentCodecError::EntityMissing => {
             with_public_identifier(diagnostic, "codec-error-kind", "entity-missing")
         }
+        ComponentCodecError::WrongWorld => {
+            with_public_identifier(diagnostic, "codec-error-kind", "wrong-world")
+        }
+        ComponentCodecError::AssetServerChanged => {
+            with_public_identifier(diagnostic, "codec-error-kind", "asset-server-changed")
+        }
         ComponentCodecError::Message(_) => with_secret(
             with_public_identifier(diagnostic, "codec-error-kind", "message"),
             "codec-detail",
@@ -250,6 +257,140 @@ pub(crate) fn with_migration_error(
                 u64::from(to_version.0),
             ),
             error,
+        ),
+    }
+}
+
+pub(crate) fn with_identity_error(
+    diagnostic: Diagnostic,
+    error: &IdentityDomainError,
+) -> Diagnostic {
+    match error {
+        IdentityDomainError::WorldDomainIdExhausted => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "world-domain-id-exhausted",
+        ),
+        IdentityDomainError::WorldDomainUnavailable => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "world-domain-unavailable",
+        ),
+        IdentityDomainError::WorldBindingMismatch => {
+            with_public_identifier(diagnostic, "identity-error-kind", "world-binding-mismatch")
+        }
+        IdentityDomainError::SceneInstanceExhausted => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "scene-instance-exhausted",
+        ),
+        IdentityDomainError::SceneInstanceAlreadyClaimed { instance } => with_public_u64(
+            with_public_identifier(
+                diagnostic,
+                "identity-error-kind",
+                "scene-instance-already-claimed",
+            ),
+            "scene-instance",
+            instance.get(),
+        ),
+        IdentityDomainError::SceneInstanceNotActive { instance } => with_public_u64(
+            with_public_identifier(
+                diagnostic,
+                "identity-error-kind",
+                "scene-instance-not-active",
+            ),
+            "scene-instance",
+            instance.get(),
+        ),
+        IdentityDomainError::SceneInstanceMembershipMismatch { instance } => with_public_u64(
+            with_public_identifier(
+                diagnostic,
+                "identity-error-kind",
+                "scene-instance-membership-mismatch",
+            ),
+            "scene-instance",
+            instance.get(),
+        ),
+        IdentityDomainError::ReferenceAlreadyClaimed { .. } => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "reference-already-claimed",
+        ),
+        IdentityDomainError::EntityAxisAlreadyRegistered { axis } => with_public_identifier(
+            with_public_identifier(
+                diagnostic,
+                "identity-error-kind",
+                "entity-axis-already-registered",
+            ),
+            "identity-axis",
+            match axis {
+                EntityIdentityAxis::Scene => "scene",
+                EntityIdentityAxis::Persistent => "persistent",
+            },
+        ),
+        IdentityDomainError::EntityTokenNotAlive => {
+            with_public_identifier(diagnostic, "identity-error-kind", "entity-token-not-alive")
+        }
+        IdentityDomainError::EntityTokenNotOwned => {
+            with_public_identifier(diagnostic, "identity-error-kind", "entity-token-not-owned")
+        }
+        IdentityDomainError::DuplicateSceneEntityId { entity } => with_public_locator(
+            with_public_identifier(
+                diagnostic,
+                "identity-error-kind",
+                "duplicate-scene-entity-id",
+            ),
+            "entity-id",
+            entity.as_str(),
+        ),
+        IdentityDomainError::DuplicateRuntimeEntity => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "duplicate-runtime-entity",
+        ),
+        IdentityDomainError::IncompleteSceneFork => {
+            with_public_identifier(diagnostic, "identity-error-kind", "incomplete-scene-fork")
+        }
+        IdentityDomainError::IncompleteSceneForkIdentityAxes { entity } => with_public_locator(
+            with_public_identifier(
+                diagnostic,
+                "identity-error-kind",
+                "incomplete-scene-fork-identity-axes",
+            ),
+            "entity-id",
+            entity.as_str(),
+        ),
+        IdentityDomainError::InvalidSceneRemap(_) => {
+            with_public_identifier(diagnostic, "identity-error-kind", "invalid-scene-remap")
+        }
+        IdentityDomainError::LifetimeClaimLimit { requested, maximum } => with_public_u64(
+            with_public_u64(
+                with_public_identifier(diagnostic, "identity-error-kind", "lifetime-claim-limit"),
+                "requested-claims",
+                usize_to_u64(*requested),
+            ),
+            "maximum-claims",
+            usize_to_u64(*maximum),
+        ),
+        IdentityDomainError::WrongDomain { expected, actual } => with_public_u64(
+            with_public_u64(
+                with_public_identifier(diagnostic, "identity-error-kind", "wrong-domain"),
+                "expected-domain",
+                expected.get(),
+            ),
+            "actual-domain",
+            actual.get(),
+        ),
+        IdentityDomainError::EntityNotRegistered => {
+            with_public_identifier(diagnostic, "identity-error-kind", "entity-not-registered")
+        }
+        IdentityDomainError::StaleRegistration => {
+            with_public_identifier(diagnostic, "identity-error-kind", "stale-registration")
+        }
+        IdentityDomainError::RetirementSequenceExhausted => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "retirement-sequence-exhausted",
         ),
     }
 }

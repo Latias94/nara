@@ -12,7 +12,6 @@ use crate::{
         error as diagnostic_error, push_with_operation_index, with_asset_ref, with_codec_error,
         with_migration_error, with_public_locator, with_public_u64,
     },
-    document::validate_scene_entity_id,
 };
 
 pub(crate) struct PreparedScene {
@@ -118,17 +117,6 @@ fn preflight_scene_with_context_options(
     }
 
     for entity in &document.entities {
-        if validate_scene_entity_id(entity.id.as_str()).is_err() {
-            push_with_operation_index(
-                &mut diagnostics,
-                with_public_locator(
-                    diagnostic_error("scene.invalid-entity-id", "Scene entity ID is invalid"),
-                    "entity-id",
-                    entity.id.as_str(),
-                ),
-                operation_index,
-            );
-        }
         if !seen.insert(entity.id.clone()) {
             push_with_operation_index(
                 &mut diagnostics,
@@ -144,39 +132,18 @@ fn preflight_scene_with_context_options(
     }
 
     for entity in &document.entities {
-        if let Some(parent) = &entity.parent {
-            if validate_scene_entity_id(parent.as_str()).is_err() {
-                push_with_operation_index(
-                    &mut diagnostics,
-                    with_public_locator(
-                        with_public_locator(
-                            diagnostic_error(
-                                "scene.invalid-parent-id",
-                                "Scene parent ID is invalid",
-                            ),
-                            "entity-id",
-                            entity.id.as_str(),
-                        ),
-                        "field-path",
-                        "parent",
-                    ),
-                    operation_index,
-                );
-            }
-            if !ids.contains(parent) {
-                push_with_operation_index(
-                    &mut diagnostics,
-                    with_public_locator(
-                        diagnostic_error(
-                            "scene.missing-parent",
-                            "Scene parent entity does not exist",
-                        ),
-                        "entity-id",
-                        entity.id.as_str(),
-                    ),
-                    operation_index,
-                );
-            }
+        if let Some(parent) = &entity.parent
+            && !ids.contains(parent)
+        {
+            push_with_operation_index(
+                &mut diagnostics,
+                with_public_locator(
+                    diagnostic_error("scene.missing-parent", "Scene parent entity does not exist"),
+                    "entity-id",
+                    entity.id.as_str(),
+                ),
+                operation_index,
+            );
         }
         if let Some(prefab) = &entity.prefab
             && !allow_prefab_instances

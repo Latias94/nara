@@ -10,6 +10,7 @@ pub use nara_diagnostic as diagnostic;
 pub use nara_ecs as ecs;
 pub use nara_fs as fs;
 pub use nara_gameplay as gameplay;
+pub use nara_identity as identity;
 pub use nara_image as image;
 pub use nara_input as input;
 pub use nara_material as material;
@@ -416,7 +417,11 @@ pub mod prelude {
         GameplayCommandSettingsError, GameplayCommandSource, GameplayCommandSourceId,
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
         GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
-        MAX_ACTION_COMMAND_BINDINGS, PersistentRuntimeId, SceneStableId,
+        MAX_ACTION_COMMAND_BINDINGS,
+    };
+    pub use nara_identity::{
+        EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
+        PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId, SceneEntityIdError,
     };
     pub use nara_image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin, ImageSourceMetadata,
@@ -456,14 +461,14 @@ pub mod prelude {
         PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
         PrefabSourceResolver, SceneAuthoringHistoryStatus, SceneAuthoringRevision,
         SceneAuthoringSession, SceneAuthoringSourceId, SceneAuthoringSyncReport,
-        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError, SceneEntityMap,
-        SceneEntityRecord, SceneEntitySource, SceneExportOptions, SceneExportReport,
-        SceneFormatError, SceneInstanceId, ScenePatchDocument, ScenePatchOperation,
-        ScenePatchReport, SceneSpawnReport, SceneSpawner, Visibility, export_scene,
-        export_scene_with_options, spawn_child, spawn_prefab, spawn_prefab_with_asset_database,
-        spawn_prefab_with_patch, spawn_prefab_with_patch_and_asset_database, spawn_scene,
-        spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
-        spawn_scene_with_prefab_resolver_and_asset_database, sync_children,
+        SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneEntitySource,
+        SceneExportOptions, SceneExportReport, SceneFormatError, ScenePatchDocument,
+        ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner, Visibility,
+        export_scene, export_scene_with_options, spawn_child, spawn_prefab,
+        spawn_prefab_with_asset_database, spawn_prefab_with_patch,
+        spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
+        spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
+        sync_children,
     };
     pub use nara_sprite::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
     pub use nara_sprite_render::SpriteRenderPlugin;
@@ -521,6 +526,13 @@ pub mod advanced_prelude {
         RelativePath, ReplaceReceipt, ReplaceSourceBinding, ResolutionTier, StageStatus,
         TemporaryFile, TrustMode, platform_capability_matrix,
     };
+    pub use nara_identity::{
+        EntityIdentityAxis, EntityLookup, IdentityDomainError, IdentityDomainStats,
+        IdentityTombstone, IdentityTombstoneSubject, SceneIdentitySnapshot, SceneInstanceId,
+        SpawnedSceneInstance, TombstoneCause, WorldEntityLocator, WorldEntityLocatorRemap,
+        WorldEntityLocators, WorldIdentityDomain, WorldIdentityDomainId,
+        WorldIdentityDomainSettings, resolve_in_world,
+    };
     pub use nara_image::{
         ImageImportError, ImageImportedAsset, ImageImporter, ImagePreparePlugin, ImagePrepareStats,
         ImageReloadError, ImageReloadStats, PreparedImageResource, image_descriptor_hash,
@@ -564,7 +576,7 @@ pub mod tooling_prelude {
         SceneInspectorCommandReport, SceneInspectorComponentView, SceneInspectorEntityRow,
         SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
         SceneInspectorModel, SceneInspectorState, ScenePlaySession, ScenePlayTransitionReport,
-        ToolingPlugin, WorldSnapshot,
+        ToolingPlugin, WorldIdentitySnapshot,
     };
     #[cfg(feature = "egui")]
     pub use nara_tooling_egui::{

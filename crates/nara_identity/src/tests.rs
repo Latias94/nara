@@ -150,6 +150,41 @@ fn bidirectional_registration_rejects_both_collision_directions_atomically() {
 }
 
 #[test]
+fn local_domain_can_adopt_candidates_before_the_resource_is_published() {
+    let mut world = World::new();
+    let entity = world.spawn_empty().id();
+    let mut domain = WorldIdentityDomain::new(&world, settings(8, 4)).unwrap();
+
+    let token = domain.adopt_entity(&mut world, entity).unwrap();
+    assert_eq!(domain.adopt_entity(&mut world, entity).unwrap(), token);
+    let instance = domain
+        .register_new_scene_instance(&world, [(scene_id("entity"), token)])
+        .unwrap();
+
+    assert_eq!(
+        domain.lookup(
+            &world,
+            &instance.runtime_reference(&scene_id("entity")).unwrap()
+        ),
+        EntityLookup::Resolved(entity)
+    );
+}
+
+#[test]
+fn entity_adoption_rejects_a_marker_owned_by_another_domain() {
+    let mut world = World::new();
+    let entity = world.spawn_empty().id();
+    let first = WorldIdentityDomain::new(&world, settings(8, 4)).unwrap();
+    let second = WorldIdentityDomain::new(&world, settings(8, 4)).unwrap();
+
+    first.adopt_entity(&mut world, entity).unwrap();
+    assert_eq!(
+        second.adopt_entity(&mut world, entity),
+        Err(IdentityDomainError::EntityTokenNotOwned)
+    );
+}
+
+#[test]
 fn scene_batch_rejects_duplicate_ids_and_entities_without_claiming_an_instance() {
     let mut world = world_with_domain(16, 4);
     let first = spawn_token(&mut world);
@@ -508,15 +543,16 @@ fn same_timeline_restore_resolves_recorded_reference_to_a_fresh_entity_slot() {
 
 #[test]
 fn scene_snapshot_remap_covers_persistent_axes_or_fails_as_incomplete() {
-    let persistent = persistent_ref("77777777-7777-4777-8777-777777777777");
+    let source_persistent_reference = persistent_ref("77777777-7777-4777-8777-777777777777");
+    let target_persistent_reference = persistent_ref("88888888-8888-4888-8888-888888888888");
     let mut source_world = world_with_domain(16, 4);
     let source_token = spawn_token(&mut source_world);
-    let (source, source_persistent) = with_domain(&mut source_world, |world, domain| {
+    let (source, source_persistent_locator) = with_domain(&mut source_world, |world, domain| {
         let source = domain
             .register_new_scene_instance(world, [(scene_id("player"), source_token)])
             .unwrap();
         let locator = domain
-            .register_persistent(world, source_token, persistent.clone())
+            .register_persistent(world, source_token, source_persistent_reference.clone())
             .unwrap();
         (source, locator)
     });
@@ -543,14 +579,18 @@ fn scene_snapshot_remap_covers_persistent_axes_or_fails_as_incomplete() {
             .register_parallel_scene_fork(
                 world,
                 &source_snapshot,
-                [(scene_id("player"), target_token, Some(persistent.clone()))],
+                [(
+                    scene_id("player"),
+                    target_token,
+                    Some(target_persistent_reference.clone()),
+                )],
             )
             .unwrap()
     });
     assert_eq!(target.instance_id().get(), 1);
-    let target_persistent = WorldEntityLocator::new(
+    let target_persistent_locator = WorldEntityLocator::new(
         target.domain_id(),
-        RuntimeEntityReference::persistent(persistent),
+        RuntimeEntityReference::persistent(target_persistent_reference.clone()),
     );
 
     assert_eq!(
@@ -560,8 +600,30 @@ fn scene_snapshot_remap_covers_persistent_axes_or_fails_as_incomplete() {
         target.locator(&scene_id("player")).unwrap()
     );
     assert_eq!(
-        remap.rewrite(&source_persistent).unwrap(),
-        target_persistent
+        remap.rewrite(&source_persistent_locator).unwrap(),
+        target_persistent_locator
+    );
+    assert_eq!(
+        remap
+            .references()
+            .rewrite_entity_reference(&EntityReference::SceneLocal {
+                entity: scene_id("player"),
+            })
+            .unwrap(),
+        EntityReference::SceneLocal {
+            entity: scene_id("player"),
+        }
+    );
+    assert_eq!(
+        remap
+            .references()
+            .rewrite_entity_reference(&EntityReference::Persistent {
+                entity: source_persistent_reference,
+            })
+            .unwrap(),
+        EntityReference::Persistent {
+            entity: target_persistent_reference,
+        }
     );
 }
 
@@ -857,6 +919,22 @@ fn lifetime_claim_budget_charges_instances_and_entity_axes_atomically() {
         ));
         assert_eq!(domain.stats(), before);
     });
+}
+
+#[test]
+fn scene_instance_preflight_rejects_oversized_groups_without_mutation() {
+    let world = world_with_domain(2, 1);
+    let domain = world.resource::<WorldIdentityDomain>();
+    let before = domain.stats();
+
+    assert_eq!(
+        domain.preflight_scene_instance_registration(&world, 2),
+        Err(IdentityDomainError::LifetimeClaimLimit {
+            requested: 3,
+            maximum: 2,
+        })
+    );
+    assert_eq!(domain.stats(), before);
 }
 
 #[test]

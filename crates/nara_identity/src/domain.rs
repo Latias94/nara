@@ -388,6 +388,28 @@ impl WorldIdentityDomain {
         }
     }
 
+    pub fn adopt_entity(
+        &self,
+        world: &mut World,
+        entity: Entity,
+    ) -> Result<WorldEntityToken, IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        let mut entity_mut = world
+            .get_entity_mut(entity)
+            .map_err(|_| IdentityDomainError::EntityTokenNotAlive)?;
+        if let Some(marker) = entity_mut.get::<IdentityEntityMarker>() {
+            if marker.domain != self.id {
+                return Err(IdentityDomainError::EntityTokenNotOwned);
+            }
+        } else {
+            entity_mut.insert(IdentityEntityMarker { domain: self.id });
+        }
+        Ok(WorldEntityToken {
+            domain: self.id,
+            entity,
+        })
+    }
+
     pub fn register_new_scene_instance(
         &mut self,
         world: &World,
@@ -412,6 +434,32 @@ impl WorldIdentityDomain {
             .expect("scene instance allocation was preflighted");
         debug_assert_eq!(allocated, instance.non_zero());
         Ok(self.commit_scene_instance(instance, entries))
+    }
+
+    pub fn preflight_scene_instance_registration(
+        &self,
+        world: &World,
+        entity_count: usize,
+    ) -> Result<(), IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        let instance = SceneInstanceId::from_non_zero(
+            self.scene_instance_allocator
+                .peek()
+                .map_err(|_| IdentityDomainError::SceneInstanceExhausted)?,
+        );
+        self.preflight_scene_entry_count(instance, entity_count)
+    }
+
+    pub fn preflight_scene_instance_replacement(
+        &self,
+        world: &World,
+        current: &SpawnedSceneInstance,
+        entity_count: usize,
+        cause: TombstoneCause,
+    ) -> Result<(), IdentityDomainError> {
+        self.preflight_scene_instance_registration(world, entity_count)?;
+        self.prepare_scene_instance_retirement(world, current, cause)?;
+        Ok(())
     }
 
     pub fn replace_scene_instance(
@@ -880,7 +928,7 @@ impl WorldIdentityDomain {
                 .collect(),
         };
         let remap = WorldEntityLocatorRemap::between_scene_snapshots(source, &target_snapshot)
-            .map_err(IdentityDomainError::InvalidSceneRemap)?;
+            .map_err(|error| IdentityDomainError::InvalidSceneRemap(Box::new(error)))?;
         Ok((by_id.into_values().collect(), remap))
     }
 
@@ -901,6 +949,25 @@ impl WorldIdentityDomain {
             return Err(IdentityDomainError::LifetimeClaimLimit { requested, maximum });
         }
         Ok(maximum - requested)
+    }
+
+    fn preflight_scene_entry_count(
+        &self,
+        instance: SceneInstanceId,
+        entity_count: usize,
+    ) -> Result<(), IdentityDomainError> {
+        let maximum_entries = self.scene_entry_capacity(instance)?;
+        if entity_count > maximum_entries {
+            let retained = self
+                .claimed_scene_instances
+                .len()
+                .saturating_add(self.claimed_references.len());
+            return Err(IdentityDomainError::LifetimeClaimLimit {
+                requested: retained.saturating_add(1).saturating_add(entity_count),
+                maximum: self.settings.lifetime_claims.get(),
+            });
+        }
+        Ok(())
     }
 
     fn commit_scene_instance(
@@ -1253,7 +1320,7 @@ pub enum IdentityDomainError {
     #[error("scene fork does not preserve the source identity axes")]
     IncompleteSceneForkIdentityAxes { entity: SceneEntityId },
     #[error("scene identity remap validation failed")]
-    InvalidSceneRemap(#[source] IdentityRemapError),
+    InvalidSceneRemap(#[source] Box<IdentityRemapError>),
     #[error("identity lifetime claim limit was exceeded")]
     LifetimeClaimLimit { requested: usize, maximum: usize },
     #[error("identity operation targets the wrong world domain")]

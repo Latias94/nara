@@ -1530,6 +1530,7 @@ dependencies = [
  "nara_ecs",
  "nara_fs",
  "nara_gameplay",
+ "nara_identity",
  "nara_image",
  "nara_input",
  "nara_material",
@@ -1644,11 +1645,11 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "nara_identity",
  "nara_input",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "uuid",
 ]
 
 [[package]]
@@ -1725,8 +1726,11 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "nara_asset",
+ "nara_core",
  "nara_ecs",
+ "nara_identity",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1777,6 +1781,7 @@ dependencies = [
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_identity",
  "nara_reflect",
  "nara_transform",
  "ron",
@@ -1848,8 +1853,10 @@ dependencies = [
  "bevy_ecs",
  "nara_app",
  "nara_asset",
+ "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_identity",
  "nara_reflect",
  "nara_scene",
  "nara_transform",
@@ -1861,6 +1868,7 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "nara_diagnostic",
+ "nara_identity",
  "nara_reflect",
  "nara_scene",
  "nara_tooling",

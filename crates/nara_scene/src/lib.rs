@@ -15,26 +15,28 @@ mod validation;
 mod tests;
 
 pub use authoring::{
-    SceneAuthoringHistoryStatus, SceneAuthoringRevision, SceneAuthoringSession,
-    SceneAuthoringSourceId, SceneAuthoringSyncReport,
+    SceneAuthoringClearReport, SceneAuthoringHistoryStatus, SceneAuthoringRevision,
+    SceneAuthoringSession, SceneAuthoringSourceId, SceneAuthoringSyncReport,
 };
-pub use document::{
-    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityIdError, SceneEntityRecord,
+pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
+pub use export::{
+    SceneExportOptions, SceneExportOutput, SceneExportRemap, SceneExportReport, export_scene,
+    export_scene_with_options,
 };
-pub use export::{SceneExportOptions, SceneExportReport, export_scene, export_scene_with_options};
 pub use format::SceneFormatError;
 pub use hierarchy::{
     Children, HierarchyPlugin, Name, Parent, Transform2d, Visibility, register_scene_components,
     spawn_child, sync_children,
 };
+pub use nara_identity::{SceneEntityId, SceneEntityIdError, SceneInstanceId, SpawnedSceneInstance};
 pub use patch::{ScenePatchDocument, ScenePatchOperation, ScenePatchReport};
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabExpansionOptions, PrefabExpansionReport,
     PrefabInstance, PrefabInstantiationReport, PrefabSourceResolver,
 };
 pub use spawn::{
-    SceneEntityMap, SceneEntitySource, SceneInstanceId, SceneSpawnReport, SceneSpawner,
-    spawn_prefab, spawn_prefab_with_asset_database, spawn_prefab_with_patch,
+    SceneEntitySource, SceneSpawnReport, SceneSpawner, spawn_prefab,
+    spawn_prefab_with_asset_database, spawn_prefab_with_patch,
     spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
     spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
 };

@@ -13,7 +13,7 @@ use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
 use crate::play::{
     SceneApplyChangesReport, SceneEditorModel, SceneEditorState, ScenePlayTransitionReport,
 };
-use crate::snapshot::WorldSnapshot;
+use crate::snapshot::WorldIdentitySnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EditorDocumentId(u64);
@@ -159,7 +159,7 @@ impl EditorWorkspace {
     pub fn model(
         &mut self,
         registry: &ComponentRegistry,
-        edit_world_snapshot: Option<&WorldSnapshot>,
+        edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> EditorWorkspaceModel {
         let active_scene = self.active_document.and_then(|document| {
             self.scenes
@@ -588,7 +588,7 @@ impl EditorSceneSlot {
         &mut self,
         document: EditorDocumentId,
         registry: &ComponentRegistry,
-        edit_world_snapshot: Option<&WorldSnapshot>,
+        edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> EditorSceneModel {
         let editor = self.editor.model_with_selection(
             &self.session,

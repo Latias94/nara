@@ -14,6 +14,8 @@ pub const MAX_ACTION_COMMAND_BINDINGS: usize = 4_096;
 pub enum ActionCommandMapError {
     #[error("action command map exceeds its binding limit")]
     BindingLimit { requested: usize, maximum: usize },
+    #[error("action command authoring data cannot contain a runtime entity target")]
+    RuntimeEntityTarget,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -209,6 +211,12 @@ impl<'de> serde::Deserialize<'de> for ActionCommandMap {
 
 impl ActionCommandMap {
     pub fn bind(&mut self, binding: ActionCommandBinding) -> Result<(), ActionCommandMapError> {
+        if matches!(
+            binding.command().target(),
+            Some(GameplayCommandTarget::Entity(_))
+        ) {
+            return Err(ActionCommandMapError::RuntimeEntityTarget);
+        }
         let Some(requested) = self.bindings.len().checked_add(1) else {
             return Err(ActionCommandMapError::BindingLimit {
                 requested: usize::MAX,

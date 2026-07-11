@@ -77,16 +77,17 @@ fn main() {
     let spawn_report =
         spawner.spawn_with_asset_database(&mut world, &registry, &from_json, &asset_database);
     assert!(!spawn_report.diagnostics.has_errors());
-    assert_eq!(spawn_report.entity_map.len(), 3);
+    assert_eq!(spawn_report.instance.as_ref().unwrap().len(), 3);
 
     let export = export_scene(&world, &registry);
     assert!(!export.diagnostics.has_errors());
-    let canonical_json = export.document.to_json_string().unwrap();
+    let export_document = &export.output().unwrap().document;
+    let canonical_json = export_document.to_json_string().unwrap();
     assert!(canonical_json.contains("\"path\""));
     assert!(!canonical_json.contains("AssetId"));
     assert_eq!(
-        SceneDocument::from_json_str(&canonical_json).unwrap(),
-        export.document
+        &SceneDocument::from_json_str(&canonical_json).unwrap(),
+        export_document
     );
 
     let stable_export = export_scene_with_options(
@@ -97,7 +98,12 @@ fn main() {
         },
     );
     assert!(!stable_export.diagnostics.has_errors());
-    let stable_json = stable_export.document.to_json_string().unwrap();
+    let stable_json = stable_export
+        .output()
+        .unwrap()
+        .document
+        .to_json_string()
+        .unwrap();
     assert!(stable_json.contains("\"stable_id\""));
     assert!(stable_json.contains(PLAYER_TEXTURE_ID));
     assert!(stable_json.contains(TILESET_ID));

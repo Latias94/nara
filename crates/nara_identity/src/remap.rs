@@ -3,13 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 use crate::{
-    RuntimeEntityReference, SceneEntityId, SceneIdentitySnapshot, WorldEntityLocator,
-    WorldIdentityDomainId,
+    EntityReference, RuntimeEntityReference, SceneEntityId, SceneIdentitySnapshot,
+    WorldEntityLocator, WorldIdentityDomainId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityReferenceRemap {
     entries: BTreeMap<RuntimeEntityReference, RuntimeEntityReference>,
+    entity_references: BTreeMap<EntityReference, EntityReference>,
 }
 
 impl EntityReferenceRemap {
@@ -69,16 +70,47 @@ impl EntityReferenceRemap {
             }
             if let Some(existing_source) = target_claims.insert(target.clone(), source.clone()) {
                 return Err(IdentityRemapError::DuplicateTarget {
-                    target,
-                    first_source: existing_source,
-                    second_source: source,
+                    target: Box::new(target),
+                    first_source: Box::new(existing_source),
+                    second_source: Box::new(source),
                 });
             }
         }
         if remap.keys().ne(expected.iter()) {
             return Err(IdentityRemapError::IncompleteSourceSet);
         }
-        Ok(Self { entries: remap })
+
+        let mut entity_references = BTreeMap::new();
+        let mut target_claims = BTreeMap::<EntityReference, EntityReference>::new();
+        for (source, target) in &remap {
+            if !same_reference_axis(source, target) {
+                return Err(IdentityRemapError::IncompatibleReferenceAxes {
+                    from: Box::new(source.clone()),
+                    to: Box::new(target.clone()),
+                });
+            }
+            let source = durable_reference(source);
+            let target = durable_reference(target);
+            if entity_references
+                .insert(source.clone(), target.clone())
+                .is_some()
+            {
+                return Err(IdentityRemapError::DuplicateEntityReferenceSource {
+                    reference: source,
+                });
+            }
+            if let Some(existing_source) = target_claims.insert(target.clone(), source.clone()) {
+                return Err(IdentityRemapError::DuplicateEntityReferenceTarget {
+                    target: Box::new(target),
+                    first_source: Box::new(existing_source),
+                    second_source: Box::new(source),
+                });
+            }
+        }
+        Ok(Self {
+            entries: remap,
+            entity_references,
+        })
     }
 
     #[must_use]
@@ -107,8 +139,46 @@ impl EntityReferenceRemap {
             })
     }
 
+    pub fn rewrite_entity_reference(
+        &self,
+        source: &EntityReference,
+    ) -> Result<EntityReference, IdentityRemapError> {
+        self.entity_references.get(source).cloned().ok_or_else(|| {
+            IdentityRemapError::MissingEntityReferenceSource {
+                reference: source.clone(),
+            }
+        })
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&RuntimeEntityReference, &RuntimeEntityReference)> {
         self.entries.iter()
+    }
+}
+
+const fn same_reference_axis(
+    source: &RuntimeEntityReference,
+    target: &RuntimeEntityReference,
+) -> bool {
+    matches!(
+        (source, target),
+        (
+            RuntimeEntityReference::Scene { .. },
+            RuntimeEntityReference::Scene { .. }
+        ) | (
+            RuntimeEntityReference::Persistent { .. },
+            RuntimeEntityReference::Persistent { .. }
+        )
+    )
+}
+
+fn durable_reference(reference: &RuntimeEntityReference) -> EntityReference {
+    match reference {
+        RuntimeEntityReference::Scene { entity, .. } => EntityReference::SceneLocal {
+            entity: entity.clone(),
+        },
+        RuntimeEntityReference::Persistent { entity } => EntityReference::Persistent {
+            entity: entity.clone(),
+        },
     }
 }
 
@@ -184,12 +254,27 @@ pub enum IdentityRemapError {
     DuplicateSource { reference: RuntimeEntityReference },
     #[error("entity reference remap has a duplicate target")]
     DuplicateTarget {
-        target: RuntimeEntityReference,
-        first_source: RuntimeEntityReference,
-        second_source: RuntimeEntityReference,
+        target: Box<RuntimeEntityReference>,
+        first_source: Box<RuntimeEntityReference>,
+        second_source: Box<RuntimeEntityReference>,
+    },
+    #[error("entity reference remap changes the reference axis")]
+    IncompatibleReferenceAxes {
+        from: Box<RuntimeEntityReference>,
+        to: Box<RuntimeEntityReference>,
+    },
+    #[error("entity reference remap has a duplicate durable source")]
+    DuplicateEntityReferenceSource { reference: EntityReference },
+    #[error("entity reference remap has a duplicate durable target")]
+    DuplicateEntityReferenceTarget {
+        target: Box<EntityReference>,
+        first_source: Box<EntityReference>,
+        second_source: Box<EntityReference>,
     },
     #[error("entity reference remap is missing a source")]
     MissingSource { reference: RuntimeEntityReference },
+    #[error("entity reference remap is missing a durable source")]
+    MissingEntityReferenceSource { reference: EntityReference },
     #[error("entity reference remap does not cover its complete expected source set")]
     IncompleteSourceSet,
     #[error("scene instance remap does not cover the same entity group")]

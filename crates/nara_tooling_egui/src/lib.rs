@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 
 use egui::{Button, CollapsingHeader, RichText, ScrollArea, TextEdit, Ui};
+use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentFieldPath, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
@@ -256,7 +257,8 @@ impl EguiSceneInspectorPanel {
                 ComponentValueKind::Null
                 | ComponentValueKind::List
                 | ComponentValueKind::Map
-                | ComponentValueKind::AssetRef => {
+                | ComponentValueKind::AssetRef
+                | ComponentValueKind::EntityRef => {
                     ui.monospace(field_value_label(field));
                 }
             }
@@ -509,6 +511,16 @@ fn component_value_label(value: &ComponentValue) -> String {
         ComponentValue::String(value) => value.clone(),
         ComponentValue::List(values) => format!("[{} items]", values.len()),
         ComponentValue::Map(fields) => format!("{{{} fields}}", fields.len()),
+        ComponentValue::EntityReference(reference) => entity_reference_label(reference),
+    }
+}
+
+fn entity_reference_label(reference: &EntityReference) -> String {
+    match reference {
+        EntityReference::SceneLocal { entity } => format!("scene-local:{}", entity.as_str()),
+        EntityReference::Persistent { entity } => {
+            format!("{}:{}", entity.namespace.as_str(), entity.entity)
+        }
     }
 }
 
@@ -531,7 +543,8 @@ fn editable_value_text(kind: ComponentValueKind, value: &ComponentValue) -> Opti
         ComponentValueKind::Null
         | ComponentValueKind::List
         | ComponentValueKind::Map
-        | ComponentValueKind::AssetRef => None,
+        | ComponentValueKind::AssetRef
+        | ComponentValueKind::EntityRef => None,
     }
 }
 
@@ -544,7 +557,8 @@ fn empty_editable_text(kind: ComponentValueKind) -> &'static str {
         ComponentValueKind::Null
         | ComponentValueKind::List
         | ComponentValueKind::Map
-        | ComponentValueKind::AssetRef => "",
+        | ComponentValueKind::AssetRef
+        | ComponentValueKind::EntityRef => "",
     }
 }
 
@@ -572,7 +586,8 @@ fn parse_editable_value(kind: ComponentValueKind, text: &str) -> Result<Componen
         ComponentValueKind::Null
         | ComponentValueKind::List
         | ComponentValueKind::Map
-        | ComponentValueKind::AssetRef => Err(format!(
+        | ComponentValueKind::AssetRef
+        | ComponentValueKind::EntityRef => Err(format!(
             "{} fields are read-only in this panel",
             value_kind_label(kind)
         )),
@@ -607,6 +622,7 @@ fn value_kind_label(kind: ComponentValueKind) -> &'static str {
         ComponentValueKind::List => "list",
         ComponentValueKind::Map => "map",
         ComponentValueKind::AssetRef => "asset_ref",
+        ComponentValueKind::EntityRef => "entity_ref",
     }
 }
 
@@ -676,6 +692,23 @@ mod tests {
                 path,
                 value: ComponentValue::String("Hero".to_owned()),
             }
+        );
+    }
+
+    #[test]
+    fn renders_entity_references_as_stable_read_only_values() {
+        let reference = EntityReference::SceneLocal {
+            entity: SceneEntityId::new("player/camera").unwrap(),
+        };
+
+        assert_eq!(
+            entity_reference_label(&reference),
+            "scene-local:player/camera"
+        );
+        assert!(parse_editable_value(ComponentValueKind::EntityRef, "player/camera").is_err());
+        assert_eq!(
+            value_kind_label(ComponentValueKind::EntityRef),
+            "entity_ref"
         );
     }
 

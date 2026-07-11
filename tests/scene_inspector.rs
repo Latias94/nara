@@ -18,31 +18,29 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
     let mut inspector = SceneInspectorState::new();
     inspector.select_entity(Some(player.clone()));
     let mut world = World::new();
-    let runtime_entity = world.spawn_empty().id();
+    world.spawn_empty();
     assert!(session.sync_world(&mut world, &registry).synced);
-    let snapshot = WorldSnapshot::capture(&mut world);
+    let snapshot = WorldIdentitySnapshot::capture_default(&world).unwrap();
 
     let model = inspector.model(&session, &registry, Some(&snapshot));
 
-    assert!(model.world_snapshot.as_ref().unwrap().entity_count >= 3);
-    assert!(
-        model
-            .world_snapshot
-            .as_ref()
-            .unwrap()
-            .entities
-            .contains(&runtime_entity)
-    );
+    let world_snapshot = model.world_snapshot.as_ref().unwrap();
+    assert_eq!(world_snapshot.total_entity_count, 3);
+    assert_eq!(world_snapshot.identified_entity_count, 2);
+    assert_eq!(world_snapshot.runtime_only_entity_count, 1);
+    assert_eq!(world_snapshot.returned_locator_count, 2);
+    assert_eq!(world_snapshot.locators.len(), 2);
+    assert_eq!(world_snapshot.omitted_locator_count, 0);
     assert_eq!(model.schema_catalog.components.len(), 1);
     assert_eq!(model.history.undo_depth, 0);
     assert!(!model.live_dirty);
     assert!(!model.diagnostics.has_errors());
     assert_eq!(model.entities.len(), 2);
     assert!(model.entities.iter().any(|row| {
-        row.id == player && row.selected && row.component_count == 1 && row.live_entity.is_some()
+        row.id == player && row.selected && row.component_count == 1 && row.live_locator.is_some()
     }));
     assert!(model.entities.iter().any(|row| {
-        row.id == child && row.parent.as_ref() == Some(&player) && row.live_entity.is_some()
+        row.id == child && row.parent.as_ref() == Some(&player) && row.live_locator.is_some()
     }));
 
     let entity_view = model.selected_entity_view.unwrap();

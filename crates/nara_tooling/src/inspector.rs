@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_diagnostic::DiagnosticReport;
-use nara_ecs::Entity;
+use nara_identity::WorldEntityLocator;
 use nara_reflect::{
     ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
@@ -13,7 +13,7 @@ use nara_scene::{
     SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
 };
 
-use crate::{diagnostic, snapshot::WorldSnapshot};
+use crate::{diagnostic, snapshot::WorldIdentitySnapshot};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SceneInspectorState {
@@ -40,7 +40,7 @@ impl SceneInspectorState {
         &self,
         session: &SceneAuthoringSession,
         registry: &ComponentRegistry,
-        world_snapshot: Option<&WorldSnapshot>,
+        world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneInspectorModel {
         build_inspector_model(
             session,
@@ -56,7 +56,7 @@ impl SceneInspectorState {
         session: &SceneAuthoringSession,
         registry: &ComponentRegistry,
         selected_entity: Option<&SceneEntityId>,
-        world_snapshot: Option<&WorldSnapshot>,
+        world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneInspectorModel {
         build_inspector_model(session, registry, selected_entity, world_snapshot)
     }
@@ -163,7 +163,7 @@ pub struct SceneInspectorModel {
     pub entities: Vec<SceneInspectorEntityRow>,
     pub selected_entity_view: Option<SceneInspectorEntityView>,
     pub schema_catalog: ComponentSchemaCatalog,
-    pub world_snapshot: Option<WorldSnapshot>,
+    pub world_snapshot: Option<WorldIdentitySnapshot>,
     pub history: SceneAuthoringHistoryStatus,
     pub live_dirty: bool,
     pub diagnostics: DiagnosticReport,
@@ -176,7 +176,7 @@ pub struct SceneInspectorEntityRow {
     pub component_count: usize,
     pub has_prefab: bool,
     pub selected: bool,
-    pub live_entity: Option<Entity>,
+    pub live_locator: Option<WorldEntityLocator>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -331,7 +331,7 @@ fn build_inspector_model(
     session: &SceneAuthoringSession,
     registry: &ComponentRegistry,
     selected_entity: Option<&SceneEntityId>,
-    world_snapshot: Option<&WorldSnapshot>,
+    world_snapshot: Option<&WorldIdentitySnapshot>,
 ) -> SceneInspectorModel {
     let mut diagnostics = DiagnosticReport::default();
     let document = session.document();
@@ -344,7 +344,9 @@ fn build_inspector_model(
             component_count: entity.components.len(),
             has_prefab: entity.prefab.is_some(),
             selected: selected_entity == Some(&entity.id),
-            live_entity: session.live_entity_map().get(&entity.id),
+            live_locator: session
+                .live_instance()
+                .and_then(|instance| instance.locator(&entity.id)),
         })
         .collect::<Vec<_>>();
 

@@ -152,6 +152,13 @@ reconciled diagnostically; it is not silently treated as a valid entity.
 - Persistent IDs are preserved only for an authoritative fork/restore policy. Duplicated content
   must allocate or receive new persistent IDs and publish the remap.
 
+The complete group remap produces both runtime-reference and durable `EntityReference` mappings.
+Reflection rewrites declared component-reference candidates into a new value, and gameplay rewrites
+submission targets into a new submission before admission. A failed or incomplete rewrite leaves
+the source value/submission unchanged and cannot publish a partial candidate. U16 owns cloning the
+complete runtime host and deciding when those candidates commit; U8 supplies the bounded rewrite
+primitive rather than a partial world-clone API.
+
 No clone/fork helper may partially publish a remap. Generic caller-self-attested remap builders are
 not public. Duplicate source references, incomplete scene groups, mismatched identity axes, target
 collisions, stale registrations, or budget failures reject the entire operation.
@@ -170,7 +177,11 @@ and retains its separate named-target vocabulary for non-entity routing. The gam
 runtime command target because it is ambiguous when the same scene is spawned more than once.
 
 Command consumers resolve entity targets only through the current world's identity domain.
-Missing, tombstoned, wrong-domain, and stale-runtime outcomes remain distinguishable typed results.
+Missing, tombstoned, domain-unavailable, wrong-world-binding, and stale-runtime outcomes remain
+distinguishable typed results. A command target is scoped by its replay/runtime timeline and does
+not embed `WorldIdentityDomainId`; therefore `WrongDomain` is intentionally a
+`WorldEntityLocator`/`resolve_in_world` result, not a command-target result. Parallel-fork replay
+must rewrite the runtime target through the complete group remap before admission.
 
 ### Observation boundary
 
@@ -197,10 +208,18 @@ skipping every already-claimed authored or generated ID. It does not concatenate
 into authored namespaces.
 
 The export report exposes the stable source-to-document remap needed to rewrite internal
-`EntityReference` fields. A collision or incomplete rewrite fails the export rather than silently
-overwriting a record or emitting a dangling reference. Prefab expansion's documented
-`anchor/source_entity` authoring namespace is unchanged; this rule removes only the runtime export
-shortcut.
+`EntityReference` fields. Every active locator axis on an exported entity maps to the same assigned
+document ID, so a scene locator and persistent locator may intentionally be aliases in the remap;
+assigned IDs remain injective by exported entity. A locator collision or incomplete rewrite fails
+the export rather than silently overwriting a record or emitting a dangling reference. Prefab
+expansion's documented `anchor/source_entity` authoring namespace is unchanged; this rule removes
+only the runtime export shortcut.
+
+A persistent reference that resolves to an entity in the same export set is rewritten to that
+entity's assigned scene-local ID because the exported document does not recreate its source runtime
+persistent axis. A persistent reference that resolves to a live entity outside the export set stays
+persistent. Missing, tombstoned, stale, or otherwise invalid persistent targets fail the complete
+export; they are never preserved as unchecked document references.
 
 ## Ownership and Dependency Direction
 

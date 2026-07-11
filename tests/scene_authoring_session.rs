@@ -1,4 +1,9 @@
-use nara::{prelude::*, scene::ScenePatchDocument, scene::ScenePatchOperation};
+use nara::{
+    identity::{EntityLookup, SpawnedSceneInstance},
+    prelude::*,
+    scene::ScenePatchDocument,
+    scene::ScenePatchOperation,
+};
 
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestLabel {
@@ -21,9 +26,9 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
     assert!(first_sync.synced);
     assert!(!first_sync.diagnostics.has_errors());
     assert!(!session.is_live_dirty());
-    assert_eq!(first_sync.entity_map.len(), 1);
+    assert_eq!(first_sync.live_instance.as_ref().unwrap().len(), 1);
     assert!(world.get_entity(runtime_entity).is_ok());
-    let first_player = session.live_entity_map().get(&player).unwrap();
+    let first_player = resolve_scene_entity(session.live_instance().unwrap(), &world, &player);
     assert_eq!(world.get::<TestLabel>(first_player).unwrap().text, "Player");
 
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
@@ -52,7 +57,7 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
     assert_eq!(second_sync.removed_entities, 1);
     assert!(world.get_entity(first_player).is_err());
     assert!(world.get_entity(runtime_entity).is_ok());
-    let second_player = session.live_entity_map().get(&player).unwrap();
+    let second_player = resolve_scene_entity(session.live_instance().unwrap(), &world, &player);
     assert_eq!(world.get::<TestLabel>(second_player).unwrap().text, "Hero");
 }
 
@@ -146,7 +151,7 @@ fn failed_world_sync_keeps_existing_live_projection() {
     let mut world = World::new();
     let sync = session.sync_world(&mut world, &registry);
     assert!(sync.synced);
-    let live_player = session.live_entity_map().get(&player).unwrap();
+    let live_player = resolve_scene_entity(session.live_instance().unwrap(), &world, &player);
 
     session.replace_document(SceneDocument::new([SceneEntityRecord::new(player.clone())
         .with_component(
@@ -160,7 +165,10 @@ fn failed_world_sync_keeps_existing_live_projection() {
 
     assert!(!failed_sync.synced);
     assert!(failed_sync.diagnostics.has_errors());
-    assert_eq!(session.live_entity_map().get(&player), Some(live_player));
+    assert_eq!(
+        resolve_scene_entity(session.live_instance().unwrap(), &world, &player),
+        live_player
+    );
     assert!(world.get_entity(live_player).is_ok());
     assert!(session.is_live_dirty());
 }
@@ -228,8 +236,11 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     session.clear_history();
     assert_eq!(session.revision(), after_patch);
 
-    let removed_entities = session.clear_live_world(&mut world);
-    assert_eq!(removed_entities, 1);
+    let clear = session.clear_live_world(&mut world);
+    assert!(clear.cleared);
+    assert_eq!(clear.removed_entities, 1);
+    assert!(clear.live_instance.is_none());
+    assert!(session.live_instance().is_none());
     assert_eq!(session.revision(), after_patch);
 
     session.replace_document(SceneDocument::new([labeled_entity(
@@ -364,4 +375,15 @@ fn label_type_id() -> ComponentTypeId {
 
 fn scene_id(id: &str) -> SceneEntityId {
     SceneEntityId::new(id).unwrap()
+}
+
+fn resolve_scene_entity(
+    instance: &SpawnedSceneInstance,
+    world: &World,
+    id: &SceneEntityId,
+) -> Entity {
+    match instance.resolve(world, id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("expected resolved scene entity, got {lookup:?}"),
+    }
 }

@@ -15,8 +15,9 @@ pub use command::{
     GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
     MAX_GAMEPLAY_COMMAND_ID_BYTES, MAX_GAMEPLAY_COMMAND_PAYLOAD_BYTES,
     MAX_GAMEPLAY_COMMAND_PAYLOAD_ITEMS, MAX_GAMEPLAY_COMMAND_PAYLOAD_KEY_BYTES,
-    MAX_GAMEPLAY_COMMAND_STRING_BYTES, PersistentRuntimeId, SceneStableId,
+    MAX_GAMEPLAY_COMMAND_STRING_BYTES,
 };
+pub use nara_identity::RuntimeEntityReference;
 pub use queue::{
     GameplayCommandBatch, GameplayCommandLifecycleError, GameplayCommandLimitKind,
     GameplayCommandQueue, GameplayCommandQueueSettings, GameplayCommandQueueStats,
@@ -177,7 +178,7 @@ pub mod prelude {
         GameplayCommandSettingsError, GameplayCommandSource, GameplayCommandSourceId,
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
         GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
-        MAX_ACTION_COMMAND_BINDINGS, PersistentRuntimeId, SceneStableId,
+        MAX_ACTION_COMMAND_BINDINGS, RuntimeEntityReference,
     };
 }
 
@@ -188,7 +189,12 @@ mod tests {
     use super::*;
     use nara_app::CoreStage;
     use nara_core::{ByteLimit, ItemLimit};
-    use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+    use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
+    use nara_identity::{
+        EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId,
+        PersistentRuntimeReference, SceneEntityId, SceneInstanceId, SpawnedSceneInstance,
+        TombstoneCause, WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
+    };
     use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionPhase, InputPlugin, KeyCode,
     };
@@ -243,6 +249,52 @@ mod tests {
 
     fn sequence(value: u64) -> GameplayCommandSourceSequence {
         GameplayCommandSourceSequence::new(value).unwrap()
+    }
+
+    fn scene_entity_id(value: &str) -> SceneEntityId {
+        SceneEntityId::new(value).unwrap()
+    }
+
+    fn persistent_reference(value: &str) -> PersistentRuntimeReference {
+        PersistentRuntimeReference::new(
+            PersistentRuntimeNamespaceId::new("runtime").unwrap(),
+            PersistentRuntimeId::parse_str(value).unwrap(),
+        )
+    }
+
+    fn world_with_identity_domain() -> World {
+        let mut world = World::new();
+        let settings = WorldIdentityDomainSettings::new(
+            ItemLimit::new(64).unwrap(),
+            ItemLimit::new(16).unwrap(),
+        )
+        .unwrap();
+        let domain = WorldIdentityDomain::new(&world, settings).unwrap();
+        world.insert_resource(domain);
+        world
+    }
+
+    fn with_identity_domain<T>(
+        world: &mut World,
+        mutate: impl FnOnce(&World, &mut WorldIdentityDomain) -> T,
+    ) -> T {
+        let mut domain = world.remove_resource::<WorldIdentityDomain>().unwrap();
+        let result = mutate(world, &mut domain);
+        world.insert_resource(domain);
+        result
+    }
+
+    fn register_scene_entity(
+        world: &mut World,
+        entity_id: &SceneEntityId,
+    ) -> (SpawnedSceneInstance, nara_ecs::Entity) {
+        let token = spawn_identity_entity(world).unwrap();
+        let instance = with_identity_domain(world, |world, domain| {
+            domain
+                .register_new_scene_instance(world, [(entity_id.clone(), token)])
+                .unwrap()
+        });
+        (instance, token.entity())
     }
 
     fn submission(
@@ -428,7 +480,7 @@ mod tests {
         payload
             .insert("slot", GameplayCommandValue::I64(2))
             .unwrap();
-        let target = GameplayCommandTarget::Scene(SceneStableId::new("scene/player").unwrap());
+        let target = GameplayCommandTarget::named("player").unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<ActionMap>()
@@ -536,6 +588,35 @@ mod tests {
             })
         );
         assert_eq!(command_map.bindings().len(), before);
+    }
+
+    #[test]
+    fn action_command_map_rejects_runtime_entity_targets_without_mutation() {
+        let entity_targets = [
+            RuntimeEntityReference::scene(
+                SceneInstanceId::new(1).unwrap(),
+                scene_entity_id("player"),
+            ),
+            RuntimeEntityReference::persistent(persistent_reference(
+                "a1b2c3d4-e5f6-47a8-90ab-1234567890cd",
+            )),
+        ];
+        let mut command_map = ActionCommandMap::default();
+
+        for target in entity_targets {
+            let binding = ActionCommandBinding::new(
+                ActionId::new("select").unwrap(),
+                ActionPhase::Started,
+                GameplayCommandTypeId::new("select.entity").unwrap(),
+            )
+            .with_target(GameplayCommandTarget::Entity(target));
+
+            assert_eq!(
+                command_map.bind(binding),
+                Err(ActionCommandMapError::RuntimeEntityTarget)
+            );
+            assert!(command_map.bindings().is_empty());
+        }
     }
 
     #[test]
@@ -1329,10 +1410,156 @@ mod tests {
     }
 
     #[test]
-    fn persistent_runtime_ids_are_canonical_uuid_values() {
+    fn entity_command_target_logical_bytes_cover_the_nested_identity_shape() {
         assert!(PersistentRuntimeId::parse_str("not-a-uuid").is_err());
-        let id = PersistentRuntimeId::parse_str("A1B2C3D4-E5F6-47A8-90AB-1234567890CD").unwrap();
-        assert_eq!(id.as_str(), "a1b2c3d4-e5f6-47a8-90ab-1234567890cd");
+        let named = GameplayCommandTarget::named("player").unwrap();
+        let scene = GameplayCommandTarget::Entity(RuntimeEntityReference::scene(
+            SceneInstanceId::new(7).unwrap(),
+            scene_entity_id("scene/player"),
+        ));
+        let persistent = GameplayCommandTarget::Entity(RuntimeEntityReference::persistent(
+            persistent_reference("A1B2C3D4-E5F6-47A8-90AB-1234567890CD"),
+        ));
+
+        assert_eq!(named.logical_bytes(), Some(1 + "player".len()));
+        assert_eq!(
+            scene.logical_bytes(),
+            Some(1 + 1 + size_of::<u64>() + "scene/player".len())
+        );
+        assert_eq!(
+            persistent.logical_bytes(),
+            Some(1 + 1 + "runtime".len() + 36)
+        );
+    }
+
+    #[test]
+    fn entity_command_target_preserves_current_world_lookup_outcomes() {
+        let player = scene_entity_id("player");
+        let mut world = world_with_identity_domain();
+        let (resolved_instance, resolved_entity) = register_scene_entity(&mut world, &player);
+        let resolved_target =
+            GameplayCommandTarget::Entity(resolved_instance.runtime_reference(&player).unwrap());
+        assert_eq!(
+            resolved_target.resolve_entity(&world),
+            Some(EntityLookup::Resolved(resolved_entity))
+        );
+
+        let missing_target = GameplayCommandTarget::Entity(RuntimeEntityReference::scene(
+            SceneInstanceId::new(99).unwrap(),
+            player.clone(),
+        ));
+        assert_eq!(
+            missing_target.resolve_entity(&world),
+            Some(EntityLookup::Missing)
+        );
+
+        with_identity_domain(&mut world, |world, domain| {
+            domain
+                .retire_scene_instance(world, &resolved_instance, TombstoneCause::Unloaded)
+                .unwrap();
+        });
+        assert!(matches!(
+            resolved_target.resolve_entity(&world),
+            Some(EntityLookup::Tombstoned(Some(tombstone)))
+                if tombstone.cause() == TombstoneCause::Unloaded
+        ));
+
+        let (stale_instance, stale_entity) = register_scene_entity(&mut world, &player);
+        let stale_target =
+            GameplayCommandTarget::Entity(stale_instance.runtime_reference(&player).unwrap());
+        assert!(world.despawn(stale_entity));
+        assert_eq!(
+            stale_target.resolve_entity(&world),
+            Some(EntityLookup::StaleRegistration)
+        );
+
+        assert_eq!(
+            stale_target.resolve_entity(&World::new()),
+            Some(EntityLookup::DomainUnavailable)
+        );
+        assert_eq!(
+            GameplayCommandTarget::named("player")
+                .unwrap()
+                .resolve_entity(&world),
+            None
+        );
+    }
+
+    #[test]
+    fn entity_command_target_resolves_after_same_timeline_restore() {
+        let player = scene_entity_id("player");
+        let mut source_world = world_with_identity_domain();
+        let (source_instance, source_entity) = register_scene_entity(&mut source_world, &player);
+        let target =
+            GameplayCommandTarget::Entity(source_instance.runtime_reference(&player).unwrap());
+        let snapshot = source_world
+            .resource::<WorldIdentityDomain>()
+            .scene_identity_snapshot(&source_world, &source_instance)
+            .unwrap();
+
+        let mut restored_world = world_with_identity_domain();
+        let _occupied = restored_world.spawn_empty().id();
+        let restored_token = spawn_identity_entity(&mut restored_world).unwrap();
+        assert_ne!(source_entity.to_bits(), restored_token.entity().to_bits());
+        with_identity_domain(&mut restored_world, |world, domain| {
+            domain
+                .register_restored_scene_instance(
+                    world,
+                    &snapshot,
+                    [(player, restored_token, None)],
+                )
+                .unwrap();
+        });
+
+        assert_eq!(
+            target.resolve_entity(&restored_world),
+            Some(EntityLookup::Resolved(restored_token.entity()))
+        );
+    }
+
+    #[test]
+    fn parallel_fork_remaps_submission_targets_without_mutating_the_source() {
+        let player = scene_entity_id("player");
+        let mut source_world = world_with_identity_domain();
+        let (source_instance, _) = register_scene_entity(&mut source_world, &player);
+        let source_reference = source_instance.runtime_reference(&player).unwrap();
+        let source_snapshot = source_world
+            .resource::<WorldIdentityDomain>()
+            .scene_identity_snapshot(&source_world, &source_instance)
+            .unwrap();
+        let submission = GameplayCommandSubmission::new(
+            tick(7),
+            GameplayCommandIngressSource::replay("fork").unwrap(),
+            sequence(1),
+            command("player.move")
+                .with_target(GameplayCommandTarget::Entity(source_reference.clone())),
+        );
+
+        let mut fork_world = world_with_identity_domain();
+        let _occupied = register_scene_entity(&mut fork_world, &scene_entity_id("occupied"));
+        let fork_token = spawn_identity_entity(&mut fork_world).unwrap();
+        let (fork_instance, remap) = with_identity_domain(&mut fork_world, |world, domain| {
+            domain
+                .register_parallel_scene_fork(
+                    world,
+                    &source_snapshot,
+                    [(player.clone(), fork_token, None)],
+                )
+                .unwrap()
+        });
+
+        let remapped = submission.remap_entity_target(remap.references()).unwrap();
+        assert_eq!(
+            submission.command().target(),
+            Some(&GameplayCommandTarget::Entity(source_reference))
+        );
+        let expected =
+            GameplayCommandTarget::Entity(fork_instance.runtime_reference(&player).unwrap());
+        assert_eq!(remapped.command().target(), Some(&expected));
+        assert!(matches!(
+            expected.resolve_entity(&fork_world),
+            Some(EntityLookup::Resolved(entity)) if entity == fork_token.entity()
+        ));
     }
 
     #[test]
@@ -1529,6 +1756,71 @@ mod tests {
 
     #[cfg(feature = "serde")]
     #[test]
+    fn entity_command_targets_use_the_canonical_identity_shape() {
+        let named = GameplayCommandTarget::named("player").unwrap();
+        let scene = GameplayCommandTarget::Entity(RuntimeEntityReference::scene(
+            SceneInstanceId::new(7).unwrap(),
+            scene_entity_id("scene/player"),
+        ));
+        let persistent = GameplayCommandTarget::Entity(RuntimeEntityReference::persistent(
+            persistent_reference("A1B2C3D4-E5F6-47A8-90AB-1234567890CD"),
+        ));
+
+        assert_eq!(
+            serde_json::to_value(&named).unwrap(),
+            serde_json::json!({ "Named": "player" })
+        );
+        assert_eq!(
+            serde_json::to_value(&scene).unwrap(),
+            serde_json::json!({
+                "Entity": {
+                    "kind": "scene",
+                    "instance": 7,
+                    "entity": "scene/player"
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&persistent).unwrap(),
+            serde_json::json!({
+                "Entity": {
+                    "kind": "persistent",
+                    "entity": {
+                        "namespace": "runtime",
+                        "entity": "a1b2c3d4-e5f6-47a8-90ab-1234567890cd"
+                    }
+                }
+            })
+        );
+
+        for target in [&named, &scene, &persistent] {
+            let encoded = serde_json::to_value(target).unwrap();
+            assert_eq!(
+                serde_json::from_value::<GameplayCommandTarget>(encoded).unwrap(),
+                *target
+            );
+        }
+        assert!(
+            serde_json::from_value::<GameplayCommandTarget>(
+                serde_json::json!({ "Scene": "scene/player" })
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<GameplayCommandTarget>(serde_json::json!({
+                "Entity": {
+                    "kind": "scene",
+                    "instance": 7,
+                    "entity": "scene/player",
+                    "domain": 3
+                }
+            }))
+            .is_err()
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
     fn action_command_binding_defaults_context_to_gameplay() {
         let json = r#"{
             "action": "jump",
@@ -1552,5 +1844,24 @@ mod tests {
             "bindings": vec![binding; MAX_ACTION_COMMAND_BINDINGS + 1],
         });
         assert!(serde_json::from_value::<ActionCommandMap>(oversized).is_err());
+
+        let runtime_target = serde_json::json!({
+            "bindings": [{
+                "action": "jump",
+                "phase": "Started",
+                "command": {
+                    "command_type": "player.jump",
+                    "target": {
+                        "Entity": {
+                            "kind": "scene",
+                            "instance": 1,
+                            "entity": "player"
+                        }
+                    },
+                    "payload": {}
+                }
+            }]
+        });
+        assert!(serde_json::from_value::<ActionCommandMap>(runtime_target).is_err());
     }
 }

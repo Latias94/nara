@@ -1,12 +1,8 @@
-use std::{
-    collections::BTreeMap,
-    error::Error,
-    fmt::{self, Display, Formatter},
-};
+use std::collections::BTreeMap;
 
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
-use nara_ecs::Component;
+use nara_identity::SceneEntityId;
 use nara_reflect::{
     ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue,
@@ -20,43 +16,6 @@ use crate::{
         preflight_scene, preflight_scene_with_context,
     },
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
-pub struct SceneEntityId(String);
-
-impl SceneEntityId {
-    pub fn new(id: impl Into<String>) -> Result<Self, SceneEntityIdError> {
-        let id = id.into();
-        validate_scene_entity_id(&id)?;
-        Ok(Self(id))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for SceneEntityId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for SceneEntityId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(id).map_err(serde::de::Error::custom)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -205,70 +164,4 @@ impl SceneComponentRecord {
     pub fn new(version: ComponentSchemaVersion, value: ComponentValue) -> Self {
         Self { version, value }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SceneEntityIdError {
-    Empty,
-    LeadingSlash,
-    TrailingSlash,
-    EmptySegment,
-    CurrentDirectorySegment,
-    ParentDirectorySegment,
-    InvalidCharacter(char),
-}
-
-impl Display for SceneEntityIdError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => formatter.write_str("scene entity id is empty"),
-            Self::LeadingSlash => formatter.write_str("scene entity id must not start with '/'"),
-            Self::TrailingSlash => formatter.write_str("scene entity id must not end with '/'"),
-            Self::EmptySegment => formatter.write_str("scene entity id has an empty segment"),
-            Self::CurrentDirectorySegment => {
-                formatter.write_str("scene entity id must not contain '.' segments")
-            }
-            Self::ParentDirectorySegment => {
-                formatter.write_str("scene entity id must not contain '..' segments")
-            }
-            Self::InvalidCharacter(character) => {
-                write!(
-                    formatter,
-                    "scene entity id contains invalid character '{character}'"
-                )
-            }
-        }
-    }
-}
-
-impl Error for SceneEntityIdError {}
-
-pub(crate) fn validate_scene_entity_id(id: &str) -> Result<(), SceneEntityIdError> {
-    if id.is_empty() {
-        return Err(SceneEntityIdError::Empty);
-    }
-    if id.starts_with('/') {
-        return Err(SceneEntityIdError::LeadingSlash);
-    }
-    if id.ends_with('/') {
-        return Err(SceneEntityIdError::TrailingSlash);
-    }
-
-    for segment in id.split('/') {
-        match segment {
-            "" => return Err(SceneEntityIdError::EmptySegment),
-            "." => return Err(SceneEntityIdError::CurrentDirectorySegment),
-            ".." => return Err(SceneEntityIdError::ParentDirectorySegment),
-            _ => {}
-        }
-    }
-
-    for character in id.chars() {
-        if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | '/') {
-            continue;
-        }
-        return Err(SceneEntityIdError::InvalidCharacter(character));
-    }
-
-    Ok(())
 }

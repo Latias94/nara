@@ -21,7 +21,8 @@ fn play_start_uses_isolated_world_and_stop_discards_runtime_mutations() {
     let mut preview_world = World::new();
     let preview_sync = session.sync_world(&mut preview_world, &registry);
     assert!(preview_sync.synced);
-    let preview_entity = session.live_entity_map().get(&player).unwrap();
+    let preview_entity =
+        resolve_instance_entity(session.live_instance().unwrap(), &preview_world, &player);
 
     let mut editor = SceneEditorState::new();
     let start = editor.start_play(&session, &registry);
@@ -34,8 +35,8 @@ fn play_start_uses_isolated_world_and_stop_discards_runtime_mutations() {
         }
     );
     assert_eq!(start.source_revision, Some(session.revision()));
-    assert_eq!(editor.play_entity_map().unwrap().len(), 1);
-    let play_entity = editor.play_entity_map().unwrap().get(&player).unwrap();
+    assert_eq!(editor.play_scene_instance().unwrap().len(), 1);
+    let play_entity = resolve_play_entity(&editor, &player);
     assert_eq!(
         editor
             .play_world()
@@ -71,6 +72,7 @@ fn play_start_uses_isolated_world_and_stop_discards_runtime_mutations() {
     let stop = editor.stop_play();
 
     assert!(stop.applied);
+    assert!(stop.active_instance.is_none());
     assert_eq!(editor.mode(), SceneEditorMode::Edit);
     assert!(editor.play_world().is_none());
     assert_eq!(document_label(session.document(), &player), "Player");
@@ -105,42 +107,33 @@ fn play_transitions_reject_invalid_modes_and_preserve_active_session() {
 
     let start = editor.start_play(&session, &registry);
     assert!(start.applied);
-    let play_entity = editor.play_entity_map().unwrap().get(&player).unwrap();
+    let play_entity = resolve_play_entity(&editor, &player);
+    let instance_id = editor.play_scene_instance().unwrap().instance_id();
 
     assert_invalid_transition(
         editor.start_play(&session, &registry),
         "tooling.play-start-invalid-mode",
     );
-    assert_eq!(
-        editor.play_entity_map().unwrap().get(&player),
-        Some(play_entity)
-    );
+    assert_eq!(resolve_play_entity(&editor, &player), play_entity);
 
     let pause = editor.pause_play();
     assert!(pause.applied);
+    assert_eq!(pause.active_instance.unwrap().instance_id(), instance_id);
     assert!(editor.mode().is_paused());
     assert_invalid_transition(
         editor.start_play(&session, &registry),
         "tooling.play-start-invalid-mode",
     );
-    assert_eq!(
-        editor.play_entity_map().unwrap().get(&player),
-        Some(play_entity)
-    );
+    assert_eq!(resolve_play_entity(&editor, &player), play_entity);
     assert_invalid_transition(editor.pause_play(), "tooling.play-pause-invalid-mode");
-    assert_eq!(
-        editor.play_entity_map().unwrap().get(&player),
-        Some(play_entity)
-    );
+    assert_eq!(resolve_play_entity(&editor, &player), play_entity);
 
     let resume = editor.resume_play();
     assert!(resume.applied);
+    assert_eq!(resume.active_instance.unwrap().instance_id(), instance_id);
     assert!(editor.mode().is_play());
     assert_invalid_transition(editor.resume_play(), "tooling.play-resume-invalid-mode");
-    assert_eq!(
-        editor.play_entity_map().unwrap().get(&player),
-        Some(play_entity)
-    );
+    assert_eq!(resolve_play_entity(&editor, &player), play_entity);
 }
 
 #[test]
@@ -157,7 +150,7 @@ fn failed_play_start_reports_diagnostics_without_entering_play() {
     assert!(start.diagnostics.has_errors());
     assert_eq!(editor.mode(), SceneEditorMode::Edit);
     assert!(editor.play_session().is_none());
-    assert!(start.entity_map.is_none());
+    assert!(start.active_instance.is_none());
 }
 
 #[test]
@@ -174,12 +167,8 @@ fn prefab_play_start_variants_follow_spawn_preflight() {
     let start = editor.start_play_with_prefab_resolver(&session, &registry, &resolver);
 
     assert!(start.applied);
-    assert_eq!(editor.play_entity_map().unwrap().len(), 2);
-    let visual = editor
-        .play_entity_map()
-        .unwrap()
-        .get(&scene_id("enemy/visual"))
-        .unwrap();
+    assert_eq!(editor.play_scene_instance().unwrap().len(), 2);
+    let visual = resolve_play_entity(&editor, &scene_id("enemy/visual"));
     assert_eq!(
         editor
             .play_world()
@@ -222,7 +211,7 @@ fn asset_and_combined_play_start_variants_follow_spawn_preflight() {
     let start = editor.start_play_with_asset_database(&session, &registry, &database);
 
     assert!(start.applied);
-    let play_entity = editor.play_entity_map().unwrap().get(&player).unwrap();
+    let play_entity = resolve_play_entity(&editor, &player);
     let sprite = editor
         .play_world()
         .unwrap()
@@ -260,11 +249,7 @@ fn asset_and_combined_play_start_variants_follow_spawn_preflight() {
     );
 
     assert!(combined.applied);
-    let visual = editor
-        .play_entity_map()
-        .unwrap()
-        .get(&scene_id("player/visual"))
-        .unwrap();
+    let visual = resolve_play_entity(&editor, &scene_id("player/visual"));
     assert!(
         editor
             .play_world()
@@ -366,7 +351,7 @@ fn apply_changes_exports_selected_component_and_keeps_revision_guards() {
     assert!(status.supported);
     assert_eq!(status.source_revision, Some(session.revision()));
 
-    let play_entity = editor.play_entity_map().unwrap().get(&player).unwrap();
+    let play_entity = resolve_play_entity(&editor, &player);
     editor
         .play_world_mut()
         .unwrap()
@@ -441,6 +426,22 @@ fn assert_invalid_transition(report: ScenePlayTransitionReport, code: &str) {
         report.diagnostics.iter().next().unwrap().code().as_str(),
         code
     );
+}
+
+fn resolve_play_entity(editor: &SceneEditorState, id: &SceneEntityId) -> Entity {
+    let session = editor.play_session().expect("Play Mode should be active");
+    resolve_instance_entity(session.scene_instance(), session.world(), id)
+}
+
+fn resolve_instance_entity(
+    instance: &SpawnedSceneInstance,
+    world: &World,
+    id: &SceneEntityId,
+) -> Entity {
+    match instance.resolve(world, id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("expected resolved scene entity, got {lookup:?}"),
+    }
 }
 
 fn scene_registry() -> ComponentRegistry {

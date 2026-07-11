@@ -13,7 +13,6 @@ use crate::{
         error as diagnostic_error, with_capability, with_component_field_path,
         with_component_field_path_error, with_public_locator, with_public_u64,
     },
-    document::validate_scene_entity_id,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -346,16 +345,6 @@ fn add_entity(
     entity: &SceneEntityRecord,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    if validate_scene_entity_id(entity.id.as_str()).is_err() {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-invalid-entity-id",
-            "patch entity id is invalid",
-            Some(&entity.id),
-            None,
-            None,
-        ));
-    }
     if find_entity(document, &entity.id).is_some() {
         return Err(patch_diagnostic(
             operation_index,

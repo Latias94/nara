@@ -155,6 +155,8 @@ impl ComponentCapability {
         let mut capabilities = Self::scene_authoring();
         if matches!(kind, ComponentValueKind::AssetRef) {
             capabilities.insert(Self::AssetRef);
+        } else if matches!(kind, ComponentValueKind::EntityRef) {
+            capabilities.insert(Self::EntityRef);
         }
         capabilities
     }
@@ -173,4 +175,5 @@ pub enum ComponentValueKind {
     List,
     Map,
     AssetRef,
+    EntityRef,
 }

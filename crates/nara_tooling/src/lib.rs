@@ -18,7 +18,7 @@ pub use play::{
     SceneApplyChangesRequest, SceneEditorMode, SceneEditorModel, SceneEditorState,
     ScenePlaySession, ScenePlayTransitionReport,
 };
-pub use snapshot::WorldSnapshot;
+pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
 pub use workspace::{
     EditorDocumentId, EditorExternalReloadState, EditorSceneModel, EditorSceneSlot,
     EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,

@@ -109,6 +109,7 @@ nara_diagnostic.workspace = true
 nara_ecs.workspace = true
 nara_fs.workspace = true
 nara_image.workspace = true
+nara_identity.workspace = true
 nara_input.workspace = true
 nara_gameplay.workspace = true
 nara_material.workspace = true
@@ -143,6 +144,7 @@ serde = [
     "nara_diagnostic/serde",
     "nara_ecs/serde",
     "nara_image/serde",
+    "nara_identity/serde",
     "nara_input/serde",
     "nara_gameplay/serde",
     "nara_material/serde",

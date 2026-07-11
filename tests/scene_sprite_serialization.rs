@@ -25,7 +25,7 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
     let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
 
     assert!(!report.diagnostics.has_errors());
-    let entity = report.entity_map.get(&scene_id("player")).unwrap();
+    let entity = spawned_entity(&report, &world, &scene_id("player"));
     let sprite = world.get::<Sprite>(entity).unwrap();
     let texture = sprite
         .material
@@ -40,8 +40,9 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
 
     let path_export = export_scene(&world, &registry);
     assert!(!path_export.diagnostics.has_errors());
+    let path_document = &path_export.output().unwrap().document;
     assert_eq!(
-        exported_sprite_texture(&path_export.document),
+        exported_sprite_texture(path_document),
         ("path", "textures/player.png")
     );
 
@@ -53,15 +54,16 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
         },
     );
     assert!(!stable_export.diagnostics.has_errors());
+    let stable_document = &stable_export.output().unwrap().document;
     assert_eq!(
-        exported_sprite_texture(&stable_export.document),
+        exported_sprite_texture(stable_document),
         ("stable_id", PLAYER_STABLE_ID)
     );
 
     #[cfg(feature = "serde")]
     {
-        let json = stable_export.document.to_json_string().unwrap();
-        let ron = stable_export.document.to_ron_string().unwrap();
+        let json = stable_document.to_json_string().unwrap();
+        let ron = stable_document.to_ron_string().unwrap();
         assert!(json.contains(PLAYER_STABLE_ID));
         assert!(ron.contains(PLAYER_STABLE_ID));
         assert!(!json.contains("AssetId"));
@@ -81,7 +83,7 @@ fn unknown_sprite_stable_asset_id_fails_without_world_mutation() {
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.invalid-component-payload"
             && diagnostic_has_field(
@@ -120,7 +122,7 @@ fn sprite_path_asset_ref_still_resolves_without_project_database() {
     let report = spawn_scene(&mut world, &registry, &document);
 
     assert!(!report.diagnostics.has_errors());
-    let entity = report.entity_map.get(&scene_id("player")).unwrap();
+    let entity = spawned_entity(&report, &world, &scene_id("player"));
     let sprite = world.get::<Sprite>(entity).unwrap();
     let texture = sprite
         .material
@@ -145,7 +147,7 @@ fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutat
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.invalid-component-payload"
             && diagnostic_has_field(
@@ -191,7 +193,7 @@ fn prefab_stable_asset_id_uses_asset_database_preflight() {
     let report = spawn_prefab_with_asset_database(&mut world, &registry, &prefab, &database);
 
     assert!(!report.diagnostics.has_errors());
-    let entity = report.entity_map.get(&scene_id("player")).unwrap();
+    let entity = spawned_entity(&report, &world, &scene_id("player"));
     let sprite = world.get::<Sprite>(entity).unwrap();
     assert!(sprite.material.image.is_some());
 }
@@ -219,7 +221,7 @@ fn prefab_patch_field_override_preserves_inherited_sprite_data() {
 
     assert!(!report.diagnostics.has_errors());
     let sprite = world
-        .get::<Sprite>(report.entity_map.get(&scene_id("player")).unwrap())
+        .get::<Sprite>(spawned_entity(&report, &world, &scene_id("player")))
         .unwrap();
     assert_eq!(sprite.material.tint.r, 0.25);
     assert_eq!(sprite.material.tint.g, 1.0);
@@ -254,7 +256,7 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(world.get_resource::<AssetServer>().is_none());
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.invalid-component-payload"
             && diagnostic_has_field(
@@ -312,7 +314,7 @@ fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
     let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
 
     assert!(!report.diagnostics.has_errors());
-    let entity = report.entity_map.get(&scene_id("tiles")).unwrap();
+    let entity = spawned_entity(&report, &world, &scene_id("tiles"));
     let tilemap = world.get::<Tilemap>(entity).unwrap();
     let tileset = tilemap.tileset.expect("tileset handle should resolve");
     assert_eq!(
@@ -445,4 +447,16 @@ fn exported_sprite_texture(document: &SceneDocument) -> (&str, &str) {
         texture.field_str("kind").unwrap(),
         texture.field_str("value").unwrap(),
     )
+}
+
+fn spawned_entity(report: &SceneSpawnReport, world: &World, id: &SceneEntityId) -> Entity {
+    match report
+        .instance
+        .as_ref()
+        .expect("successful scene spawn should publish an instance")
+        .resolve(world, id)
+    {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("expected resolved scene entity, got {lookup:?}"),
+    }
 }

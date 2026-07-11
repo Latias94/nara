@@ -1,4 +1,7 @@
-use nara::{prelude::*, scene::register_scene_components, sprite::register_sprite_components};
+use nara::{
+    identity::EntityLookup, prelude::*, scene::register_scene_components,
+    sprite::register_sprite_components,
+};
 
 fn main() {
     let mut registry = ComponentRegistry::new();
@@ -50,7 +53,15 @@ fn main() {
     let mut world = World::new();
     let report = spawn_scene(&mut world, &registry, &expanded);
     assert!(!report.diagnostics.has_errors());
-    let visual = report.entity_map.get(&scene_id("enemy/visual")).unwrap();
+    let visual = match report
+        .instance
+        .as_ref()
+        .expect("successful scene spawn should publish an instance")
+        .resolve(&world, &scene_id("enemy/visual"))
+    {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("expected resolved prefab entity, got {lookup:?}"),
+    };
     let sprite = world.get::<Sprite>(visual).unwrap();
     assert_eq!(sprite.material.tint.r, 0.25);
     assert!(sprite.material.image.is_some());

@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
 
-use nara_asset::{AssetServer, ProjectAssetDatabase};
+use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
-use nara_ecs::{Component, Entity, World};
-use nara_reflect::{ComponentDecodeContext, ComponentRegistry};
+use nara_ecs::{Component, Entity, Mut, World};
+use nara_identity::{
+    IdentityDomainError, SceneInstanceId, SpawnedSceneInstance, TombstoneCause,
+    WorldIdentityDomain, WorldIdentityDomainSettings,
+};
+use nara_reflect::{ComponentApplyBatch, ComponentRegistry};
 
 use crate::{
     PrefabDocument, PrefabExpansionReport, PrefabSourceResolver, SceneDocument, SceneEntityId,
@@ -13,93 +17,39 @@ use crate::{
     validation::preflight_scene_with_context,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct SceneInstanceId(u64);
-
-impl SceneInstanceId {
-    #[must_use]
-    pub const fn from_raw(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    #[must_use]
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
 pub struct SceneEntitySource {
     pub instance_id: SceneInstanceId,
     pub entity_id: SceneEntityId,
 }
 
-impl SceneEntitySource {
-    #[must_use]
-    pub fn export_id(&self) -> SceneEntityId {
-        if self.instance_id.raw() == 1 {
-            return self.entity_id.clone();
-        }
-
-        SceneEntityId::new(format!(
-            "instance_{}/{}",
-            self.instance_id.raw(),
-            self.entity_id.as_str()
-        ))
-        .expect("scene entity source should produce valid export ids")
-    }
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct SceneEntityMap {
-    entities: BTreeMap<SceneEntityId, Entity>,
-}
-
-impl SceneEntityMap {
-    pub fn insert(&mut self, scene_id: SceneEntityId, entity: Entity) -> Option<Entity> {
-        self.entities.insert(scene_id, entity)
-    }
-
-    #[must_use]
-    pub fn get(&self, scene_id: &SceneEntityId) -> Option<Entity> {
-        self.entities.get(scene_id).copied()
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.entities.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entities.is_empty()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&SceneEntityId, Entity)> + '_ {
-        self.entities
-            .iter()
-            .map(|(scene_id, entity)| (scene_id, *entity))
-    }
-}
-
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SceneSpawnReport {
-    pub entity_map: SceneEntityMap,
+    pub instance: Option<SpawnedSceneInstance>,
     pub diagnostics: DiagnosticReport,
+    retired_entities: usize,
 }
 
-#[derive(Debug, Default)]
-pub struct SceneSpawner {
-    next_instance_id: u64,
+impl SceneSpawnReport {
+    #[must_use]
+    pub(crate) const fn retired_entities(&self) -> usize {
+        self.retired_entities
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SceneSpawner;
+
+#[derive(Debug, Clone, Copy)]
+enum SceneIdentityCommit<'a> {
+    Register,
+    Replace(&'a SpawnedSceneInstance),
 }
 
 impl SceneSpawner {
     #[must_use]
-    pub fn new() -> Self {
-        Self {
-            next_instance_id: 1,
-        }
+    pub const fn new() -> Self {
+        Self
     }
 
     pub fn spawn(
@@ -108,7 +58,13 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         document: &SceneDocument,
     ) -> SceneSpawnReport {
-        self.spawn_with_asset_context(world, registry, document, None)
+        self.spawn_with_asset_context(
+            world,
+            registry,
+            document,
+            None,
+            SceneIdentityCommit::Register,
+        )
     }
 
     pub fn spawn_with_asset_database(
@@ -118,7 +74,46 @@ impl SceneSpawner {
         document: &SceneDocument,
         database: &ProjectAssetDatabase,
     ) -> SceneSpawnReport {
-        self.spawn_with_asset_context(world, registry, document, Some(database))
+        self.spawn_with_asset_context(
+            world,
+            registry,
+            document,
+            Some(database),
+            SceneIdentityCommit::Register,
+        )
+    }
+
+    pub(crate) fn replace(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        current: &SpawnedSceneInstance,
+    ) -> SceneSpawnReport {
+        self.spawn_with_asset_context(
+            world,
+            registry,
+            document,
+            None,
+            SceneIdentityCommit::Replace(current),
+        )
+    }
+
+    pub(crate) fn replace_with_asset_database(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        current: &SpawnedSceneInstance,
+        database: &ProjectAssetDatabase,
+    ) -> SceneSpawnReport {
+        self.spawn_with_asset_context(
+            world,
+            registry,
+            document,
+            Some(database),
+            SceneIdentityCommit::Replace(current),
+        )
     }
 
     pub fn spawn_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
@@ -129,7 +124,13 @@ impl SceneSpawner {
         resolver: &R,
     ) -> SceneSpawnReport {
         let expansion = document.expand_prefabs(registry, resolver);
-        self.spawn_prefab_expansion(world, registry, expansion, None)
+        self.spawn_prefab_expansion(
+            world,
+            registry,
+            expansion,
+            None,
+            SceneIdentityCommit::Register,
+        )
     }
 
     pub fn spawn_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
@@ -141,7 +142,52 @@ impl SceneSpawner {
         database: &ProjectAssetDatabase,
     ) -> SceneSpawnReport {
         let expansion = document.expand_prefabs_with_asset_database(registry, resolver, database);
-        self.spawn_prefab_expansion(world, registry, expansion, Some(database))
+        self.spawn_prefab_expansion(
+            world,
+            registry,
+            expansion,
+            Some(database),
+            SceneIdentityCommit::Register,
+        )
+    }
+
+    pub(crate) fn replace_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        current: &SpawnedSceneInstance,
+        resolver: &R,
+    ) -> SceneSpawnReport {
+        let expansion = document.expand_prefabs(registry, resolver);
+        self.spawn_prefab_expansion(
+            world,
+            registry,
+            expansion,
+            None,
+            SceneIdentityCommit::Replace(current),
+        )
+    }
+
+    pub(crate) fn replace_with_prefab_resolver_and_asset_database<
+        R: PrefabSourceResolver + ?Sized,
+    >(
+        &mut self,
+        world: &mut World,
+        registry: &ComponentRegistry,
+        document: &SceneDocument,
+        current: &SpawnedSceneInstance,
+        resolver: &R,
+        database: &ProjectAssetDatabase,
+    ) -> SceneSpawnReport {
+        let expansion = document.expand_prefabs_with_asset_database(registry, resolver, database);
+        self.spawn_prefab_expansion(
+            world,
+            registry,
+            expansion,
+            Some(database),
+            SceneIdentityCommit::Replace(current),
+        )
     }
 
     fn spawn_with_asset_context(
@@ -150,44 +196,77 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         document: &SceneDocument,
         database: Option<&ProjectAssetDatabase>,
+        commit: SceneIdentityCommit<'_>,
     ) -> SceneSpawnReport {
-        let original_asset_server = world.get_resource::<AssetServer>().cloned();
-        let mut asset_server = world
-            .get_resource::<AssetServer>()
-            .cloned()
-            .unwrap_or_default();
-        let (preflight, asset_server_touched) = {
-            let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server);
-            if let Some(database) = database {
-                context = context.with_project_asset_database(database);
-            }
-            let preflight = preflight_scene_with_context(document, registry, &mut context);
-            (preflight, context.asset_server_touched())
-        };
+        let mut component_batch = ComponentApplyBatch::from_world(world);
+        let preflight = component_batch.with_decode_context(database, |context| {
+            preflight_scene_with_context(document, registry, context)
+        });
         if preflight.diagnostics.has_errors() {
             return SceneSpawnReport {
-                entity_map: SceneEntityMap::default(),
+                instance: None,
                 diagnostics: preflight.diagnostics,
+                retired_entities: 0,
             };
         }
 
-        let instance_id = SceneInstanceId::from_raw(self.next_instance_id);
-
-        let mut entity_map = SceneEntityMap::default();
+        let mut diagnostics = preflight.diagnostics;
+        let new_identity_domain =
+            match prepare_scene_identity(world, preflight.entities.len(), commit) {
+                Ok(domain) => domain,
+                Err(error) => {
+                    diagnostics.push(crate::diagnostics::with_identity_error(
+                        match commit {
+                            SceneIdentityCommit::Register => diagnostic_error(
+                                "scene.identity-registration-failed",
+                                "Scene identity registration failed",
+                            ),
+                            SceneIdentityCommit::Replace(_) => diagnostic_error(
+                                "scene.identity-replacement-failed",
+                                "Scene identity replacement failed",
+                            ),
+                        },
+                        &error,
+                    ));
+                    return SceneSpawnReport {
+                        instance: None,
+                        diagnostics,
+                        retired_entities: 0,
+                    };
+                }
+            };
+        let mut spawned_by_id = BTreeMap::new();
         let mut spawned_entities = Vec::new();
         for entity in &preflight.entities {
             let runtime_entity = world.spawn_empty().id();
             spawned_entities.push(runtime_entity);
-            world.entity_mut(runtime_entity).insert(SceneEntitySource {
-                instance_id,
-                entity_id: entity.id.clone(),
-            });
-            entity_map.insert(entity.id.clone(), runtime_entity);
+            if spawned_by_id
+                .insert(entity.id.clone(), runtime_entity)
+                .is_some()
+            {
+                diagnostics.push(with_public_locator(
+                    diagnostic_error(
+                        "scene.internal-duplicate-entity",
+                        "Scene spawn produced a duplicate entity identity",
+                    ),
+                    "entity-id",
+                    entity.id.as_str(),
+                ));
+                break;
+            }
         }
 
-        let mut diagnostics = preflight.diagnostics;
+        if diagnostics.has_errors() {
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
+        }
+
         for entity in preflight.entities {
-            let Some(runtime_entity) = entity_map.get(&entity.id) else {
+            let Some(runtime_entity) = spawned_by_id.get(&entity.id).copied() else {
                 diagnostics.push(with_public_locator(
                     diagnostic_error(
                         "scene.internal-missing-entity",
@@ -201,52 +280,133 @@ impl SceneSpawner {
 
             for component in entity.components {
                 let component_id = component.id;
-                if let Err(error) = component.prepared.apply(world, runtime_entity) {
-                    diagnostics.push(with_codec_error(
-                        with_public_locator(
+                component_batch = match component_batch.stage(runtime_entity, component.prepared) {
+                    Ok(batch) => batch,
+                    Err(error) => {
+                        diagnostics.push(with_codec_error(
                             with_public_locator(
-                                diagnostic_error(
-                                    "scene.component-apply-failed",
-                                    "Component apply failed",
+                                with_public_locator(
+                                    diagnostic_error(
+                                        "scene.component-apply-failed",
+                                        "Component apply failed",
+                                    ),
+                                    "entity-id",
+                                    entity.id.as_str(),
                                 ),
-                                "entity-id",
-                                entity.id.as_str(),
+                                "component-id",
+                                component_id.as_str(),
                             ),
-                            "component-id",
-                            component_id.as_str(),
-                        ),
-                        &error,
-                    ));
-                }
+                            &error,
+                        ));
+                        rollback_spawn_transaction(world, &spawned_entities);
+                        return SceneSpawnReport {
+                            instance: None,
+                            diagnostics,
+                            retired_entities: 0,
+                        };
+                    }
+                };
             }
 
             if let Some(parent_id) = entity.parent
-                && let Some(parent_entity) = entity_map.get(&parent_id)
+                && let Some(parent_entity) = spawned_by_id.get(&parent_id)
             {
                 world
                     .entity_mut(runtime_entity)
-                    .insert(Parent(parent_entity));
+                    .insert(Parent(*parent_entity));
             }
         }
 
         if diagnostics.has_errors() {
-            rollback_spawn_transaction(world, &spawned_entities, original_asset_server);
+            rollback_spawn_transaction(world, &spawned_entities);
             return SceneSpawnReport {
-                entity_map: SceneEntityMap::default(),
+                instance: None,
                 diagnostics,
+                retired_entities: 0,
             };
         }
 
-        if asset_server_touched {
-            world.insert_resource(asset_server);
+        if let Err(error) = component_batch.validate_commit(world) {
+            diagnostics.push(with_codec_error(
+                diagnostic_error(
+                    "scene.component-apply-commit-failed",
+                    "Prepared scene components could not be committed",
+                ),
+                &error,
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
         }
 
+        // The concrete identity commit is failure-atomic and neither retires the new targets nor
+        // touches AssetServer, so the component validation remains valid through the final commit.
+        let identity_commit =
+            commit_scene_identity(world, &spawned_by_id, commit, new_identity_domain);
+        let (instance, retired) = match identity_commit {
+            Ok(result) => result,
+            Err(error) => {
+                diagnostics.push(crate::diagnostics::with_identity_error(
+                    match commit {
+                        SceneIdentityCommit::Register => diagnostic_error(
+                            "scene.identity-registration-failed",
+                            "Scene identity registration failed",
+                        ),
+                        SceneIdentityCommit::Replace(_) => diagnostic_error(
+                            "scene.identity-replacement-failed",
+                            "Scene identity replacement failed",
+                        ),
+                    },
+                    &error,
+                ));
+                rollback_spawn_transaction(world, &spawned_entities);
+                return SceneSpawnReport {
+                    instance: None,
+                    diagnostics,
+                    retired_entities: 0,
+                };
+            }
+        };
+
+        if let Err(error) = component_batch.commit(world) {
+            diagnostics.push(with_codec_error(
+                diagnostic_error(
+                    "scene.component-apply-commit-failed",
+                    "Prepared scene components could not be committed",
+                ),
+                &error,
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
+        }
+
+        for (entity_id, runtime_entity) in &spawned_by_id {
+            world.entity_mut(*runtime_entity).insert(SceneEntitySource {
+                instance_id: instance.instance_id(),
+                entity_id: entity_id.clone(),
+            });
+        }
+
+        let retired_entities = despawn_entities(world, &retired);
+        if retired_entities != retired.len() {
+            diagnostics.push(crate::diagnostics::warning(
+                "scene.retired-entity-already-missing",
+                "A retired scene entity was already absent",
+            ));
+        }
         sync_children(world);
-        self.next_instance_id = self.next_instance_id.saturating_add(1).max(1);
 
         SceneSpawnReport {
-            entity_map,
+            instance: Some(instance),
             diagnostics,
+            retired_entities,
         }
     }
 
@@ -256,22 +416,22 @@ impl SceneSpawner {
         registry: &ComponentRegistry,
         expansion: PrefabExpansionReport,
         database: Option<&ProjectAssetDatabase>,
+        commit: SceneIdentityCommit<'_>,
     ) -> SceneSpawnReport {
         let mut diagnostics = expansion.diagnostics;
         if diagnostics.has_errors() {
             return SceneSpawnReport {
-                entity_map: SceneEntityMap::default(),
+                instance: None,
                 diagnostics,
+                retired_entities: 0,
             };
         }
 
         let document = expansion
             .document
             .expect("successful prefab expansion should include document");
-        let mut report = match database {
-            Some(database) => self.spawn_with_asset_database(world, registry, &document, database),
-            None => self.spawn(world, registry, &document),
-        };
+        let mut report =
+            self.spawn_with_asset_context(world, registry, &document, database, commit);
         diagnostics.extend(report.diagnostics);
         report.diagnostics = diagnostics;
         report
@@ -313,8 +473,9 @@ impl SceneSpawner {
         let mut diagnostics = instantiate.diagnostics;
         if diagnostics.has_errors() {
             return SceneSpawnReport {
-                entity_map: SceneEntityMap::default(),
+                instance: None,
                 diagnostics,
+                retired_entities: 0,
             };
         }
 
@@ -340,8 +501,9 @@ impl SceneSpawner {
         let mut diagnostics = instantiate.diagnostics;
         if diagnostics.has_errors() {
             return SceneSpawnReport {
-                entity_map: SceneEntityMap::default(),
+                instance: None,
                 diagnostics,
+                retired_entities: 0,
             };
         }
 
@@ -355,25 +517,88 @@ impl SceneSpawner {
     }
 }
 
-fn rollback_spawn_transaction(
-    world: &mut World,
-    spawned_entities: &[Entity],
-    original_asset_server: Option<AssetServer>,
-) {
+fn rollback_spawn_transaction(world: &mut World, spawned_entities: &[Entity]) {
     for entity in spawned_entities.iter().rev().copied() {
         if world.get_entity(entity).is_ok() {
             world.despawn(entity);
         }
     }
+}
 
-    match original_asset_server {
-        Some(asset_server) => {
-            world.insert_resource(asset_server);
+fn prepare_scene_identity(
+    world: &World,
+    entity_count: usize,
+    commit: SceneIdentityCommit<'_>,
+) -> Result<Option<WorldIdentityDomain>, IdentityDomainError> {
+    if let Some(domain) = world.get_resource::<WorldIdentityDomain>() {
+        match commit {
+            SceneIdentityCommit::Register => {
+                domain.preflight_scene_instance_registration(world, entity_count)?;
+            }
+            SceneIdentityCommit::Replace(current) => {
+                domain.preflight_scene_instance_replacement(
+                    world,
+                    current,
+                    entity_count,
+                    TombstoneCause::Replaced,
+                )?;
+            }
         }
-        None => {
-            world.remove_resource::<AssetServer>();
+        return Ok(None);
+    }
+    if matches!(commit, SceneIdentityCommit::Replace(_)) {
+        return Err(IdentityDomainError::WorldDomainUnavailable);
+    }
+
+    let domain = WorldIdentityDomain::new(world, WorldIdentityDomainSettings::default())?;
+    domain.preflight_scene_instance_registration(world, entity_count)?;
+    Ok(Some(domain))
+}
+
+fn commit_scene_identity(
+    world: &mut World,
+    spawned_by_id: &BTreeMap<SceneEntityId, Entity>,
+    commit: SceneIdentityCommit<'_>,
+    new_domain: Option<WorldIdentityDomain>,
+) -> Result<(SpawnedSceneInstance, Vec<Entity>), IdentityDomainError> {
+    if let Some(mut domain) = new_domain {
+        debug_assert!(!world.contains_resource::<WorldIdentityDomain>());
+        let result = commit_scene_identity_with_domain(&mut domain, world, spawned_by_id, commit)?;
+        world.insert_resource(domain);
+        return Ok(result);
+    }
+
+    world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
+        commit_scene_identity_with_domain(&mut domain, world, spawned_by_id, commit)
+    })
+}
+
+fn commit_scene_identity_with_domain(
+    domain: &mut WorldIdentityDomain,
+    world: &mut World,
+    spawned_by_id: &BTreeMap<SceneEntityId, Entity>,
+    commit: SceneIdentityCommit<'_>,
+) -> Result<(SpawnedSceneInstance, Vec<Entity>), IdentityDomainError> {
+    let mut entries = Vec::with_capacity(spawned_by_id.len());
+    for (entity_id, entity) in spawned_by_id {
+        entries.push((entity_id.clone(), domain.adopt_entity(world, *entity)?));
+    }
+    match commit {
+        SceneIdentityCommit::Register => domain
+            .register_new_scene_instance(world, entries)
+            .map(|instance| (instance, Vec::new())),
+        SceneIdentityCommit::Replace(current) => {
+            domain.replace_scene_instance(world, current, entries, TombstoneCause::Replaced)
         }
     }
+}
+
+fn despawn_entities(world: &mut World, entities: &[Entity]) -> usize {
+    entities
+        .iter()
+        .copied()
+        .filter(|entity| world.despawn(*entity))
+        .count()
 }
 
 #[must_use]

@@ -5,8 +5,14 @@ use nara_asset::{
     AssetId, AssetPath, AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,
     ProjectAssetDatabase, StableAssetId,
 };
+use nara_core::ItemLimit;
 use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticValueRef};
-use nara_ecs::{Component, World};
+use nara_ecs::{Component, Entity, Mut, World};
+use nara_identity::{
+    EntityLookup, EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
+    PersistentRuntimeReference, SpawnedSceneInstance, TombstoneCause, WorldEntityLocator,
+    WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
+};
 use nara_reflect::bevy_reflect;
 use nara_reflect::{
     ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldPathError,
@@ -29,8 +35,51 @@ struct TestBrokenExport;
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestApplyFails;
 
+#[derive(Clone, Debug, PartialEq, Component)]
+struct TestEntityLink {
+    target: EntityReference,
+}
+
 #[derive(Debug)]
 struct TestAsset;
+
+fn spawned_instance(report: &SceneSpawnReport) -> &SpawnedSceneInstance {
+    report
+        .instance
+        .as_ref()
+        .expect("successful scene spawn must publish an identity instance")
+}
+
+fn spawned_entity(
+    world: &World,
+    report: &SceneSpawnReport,
+    id: &SceneEntityId,
+) -> nara_ecs::Entity {
+    match spawned_instance(report).resolve(world, id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("spawned scene entity did not resolve: {lookup:?}"),
+    }
+}
+
+fn persistent_reference(value: &str) -> PersistentRuntimeReference {
+    PersistentRuntimeReference::new(
+        PersistentRuntimeNamespaceId::new("save").unwrap(),
+        PersistentRuntimeId::parse_str(value).unwrap(),
+    )
+}
+
+fn register_persistent_axis(
+    world: &mut World,
+    entity: Entity,
+    persistent: PersistentRuntimeReference,
+) -> WorldEntityLocator {
+    world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
+        let token = domain.adopt_entity(world, entity).unwrap();
+        domain
+            .register_persistent(world, token, persistent)
+            .unwrap()
+    })
+}
 
 fn diagnostic_has_text_field(diagnostic: &Diagnostic, key: &str, expected: &str) -> bool {
     diagnostic.fields().iter().any(|field| {
@@ -430,8 +479,8 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
         Some("enemy")
     );
     assert!(!report.diagnostics.has_errors());
-    assert_eq!(report.entity_map.len(), 2);
-    let visual = report.entity_map.get(&scene_id("enemy/visual")).unwrap();
+    assert_eq!(spawned_instance(&report).len(), 2);
+    let visual = spawned_entity(&world, &report, &scene_id("enemy/visual"));
     assert_eq!(world.get::<TestPosition>(visual).unwrap().x, 3);
 }
 
@@ -562,7 +611,7 @@ fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
     }));
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
 }
 
 #[test]
@@ -677,7 +726,7 @@ fn invalid_component_payload_does_not_mutate_world() {
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
 }
 
 #[test]
@@ -698,7 +747,7 @@ fn component_migration_runs_before_scene_preflight_without_mutating_document() {
 
     assert!(!validation.has_errors());
     assert!(!report.diagnostics.has_errors());
-    let entity = report.entity_map.get(&id).unwrap();
+    let entity = spawned_entity(&world, &report, &id);
     assert_eq!(world.get::<TestPosition>(entity).unwrap().x, 8);
     let source_component = document.entities[0]
         .components
@@ -765,13 +814,220 @@ fn path_asset_ref_resolves_before_scene_spawn_without_database() {
     let report = spawn_scene(&mut world, &registry, &document);
 
     assert!(!report.diagnostics.has_errors());
-    let entity = report.entity_map.get(&id).unwrap();
+    let entity = spawned_entity(&world, &report, &id);
     let link = world.get::<TestAssetLink>(entity).unwrap();
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
         asset_server.path(link.handle.id()),
         Some("textures/player.png")
     );
+}
+
+#[test]
+#[allow(clippy::default_constructed_unit_structs)]
+fn scene_instance_allocation_is_world_global_across_every_spawner_entrypoint() {
+    let registry = test_registry();
+    let id = scene_id("entity");
+    let document = SceneDocument::new([SceneEntityRecord::new(id.clone())]);
+    let mut world = World::new();
+
+    let first = SceneSpawner::new().spawn(&mut world, &registry, &document);
+    let second = SceneSpawner::default().spawn(&mut world, &registry, &document);
+    let third = spawn_scene(&mut world, &registry, &document);
+
+    assert!(
+        [&first, &second, &third]
+            .into_iter()
+            .all(|report| !report.diagnostics.has_errors())
+    );
+    assert_eq!(spawned_instance(&first).instance_id().get(), 1);
+    assert_eq!(spawned_instance(&second).instance_id().get(), 2);
+    assert_eq!(spawned_instance(&third).instance_id().get(), 3);
+    let entities = [
+        spawned_entity(&world, &first, &id),
+        spawned_entity(&world, &second, &id),
+        spawned_entity(&world, &third, &id),
+    ];
+    assert!(entities[0] != entities[1] && entities[1] != entities[2]);
+    assert_eq!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .stats()
+            .active_scene_instances,
+        3
+    );
+}
+
+#[test]
+fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
+    let registry = ComponentRegistry::new();
+    let document = SceneDocument::new([]);
+    let mut world = World::new();
+
+    let first = spawn_scene(&mut world, &registry, &document);
+    let second = spawn_scene(&mut world, &registry, &document);
+
+    assert!(!first.diagnostics.has_errors());
+    assert!(!second.diagnostics.has_errors());
+    assert!(spawned_instance(&first).is_empty());
+    assert!(spawned_instance(&second).is_empty());
+    assert_eq!(spawned_instance(&first).instance_id().get(), 1);
+    assert_eq!(spawned_instance(&second).instance_id().get(), 2);
+    let stats = world.resource::<WorldIdentityDomain>().stats();
+    assert_eq!(stats.lifetime_claims, 2);
+    assert_eq!(stats.claimed_scene_instances, 2);
+    assert_eq!(stats.active_scene_instances, 2);
+    assert_eq!(stats.active_scene_entities, 0);
+}
+
+#[test]
+fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
+    let registry = test_asset_registry();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
+        asset_link_type_id(),
+        asset_link_record(AssetRef::path("textures/generated.png").unwrap()),
+    )]);
+    let mut world = World::new();
+    let settings =
+        WorldIdentityDomainSettings::new(ItemLimit::new(1).unwrap(), ItemLimit::new(1).unwrap())
+            .unwrap();
+    let domain = WorldIdentityDomain::new(&world, settings).unwrap();
+    world.insert_resource(domain);
+    let mut asset_server = AssetServer::new();
+    let existing = asset_server
+        .reserve::<TestAsset>("textures/existing.png")
+        .unwrap();
+    world.insert_resource(asset_server);
+    world.increment_change_tick();
+
+    let before_entities = world.iter_entities().count();
+    let before_stats = world.resource::<WorldIdentityDomain>().stats();
+    let before_ticks = world
+        .get_resource_change_ticks::<AssetServer>()
+        .expect("asset server must be installed");
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.diagnostics.has_errors());
+    assert!(report.instance.is_none());
+    assert_eq!(world.iter_entities().count(), before_entities);
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        before_stats
+    );
+    let after_ticks = world
+        .get_resource_change_ticks::<AssetServer>()
+        .expect("asset server must remain installed");
+    assert_eq!(after_ticks.added, before_ticks.added);
+    assert_eq!(after_ticks.changed, before_ticks.changed);
+    let asset_server = world.resource::<AssetServer>();
+    assert_eq!(
+        asset_server.path(existing.id()),
+        Some("textures/existing.png")
+    );
+    assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
+
+    let empty = spawn_scene(&mut world, &registry, &SceneDocument::new([]));
+    assert!(!empty.diagnostics.has_errors());
+    assert_eq!(spawned_instance(&empty).instance_id().get(), 1);
+}
+
+#[test]
+fn authoring_replacement_and_clear_publish_typed_tombstones() {
+    let registry = test_registry();
+    let id = scene_id("player");
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(1))]));
+    let mut world = World::new();
+
+    let first_sync = session.sync_world(&mut world, &registry);
+    assert!(first_sync.synced);
+    let first = first_sync.live_instance.unwrap();
+    let first_entity = match first.resolve(&world, &id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("first authoring instance did not resolve: {lookup:?}"),
+    };
+
+    session
+        .replace_document(SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(2))]));
+    let second_sync = session.sync_world(&mut world, &registry);
+    assert!(second_sync.synced);
+    assert_eq!(second_sync.removed_entities, 1);
+    let second = second_sync.live_instance.unwrap();
+    assert_ne!(first.instance_id(), second.instance_id());
+    assert!(world.get_entity(first_entity).is_err());
+    let EntityLookup::Tombstoned(Some(replaced)) = first.resolve(&world, &id) else {
+        panic!("replaced instance must resolve to a retained tombstone");
+    };
+    assert_eq!(replaced.cause(), TombstoneCause::Replaced);
+    let second_entity = match second.resolve(&world, &id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("replacement authoring instance did not resolve: {lookup:?}"),
+    };
+    assert_eq!(world.get::<TestPosition>(second_entity).unwrap().x, 2);
+
+    let revision = session.revision();
+    let clear = session.clear_live_world(&mut world);
+    assert!(clear.cleared);
+    assert_eq!(clear.removed_entities, 1);
+    assert!(clear.live_instance.is_none());
+    assert!(session.live_instance().is_none());
+    assert_eq!(session.revision(), revision);
+    assert!(session.is_live_dirty());
+    assert!(world.get_entity(second_entity).is_err());
+    let EntityLookup::Tombstoned(Some(unloaded)) = second.resolve(&world, &id) else {
+        panic!("cleared instance must resolve to a retained tombstone");
+    };
+    assert_eq!(unloaded.cause(), TombstoneCause::Unloaded);
+}
+
+#[test]
+fn authoring_replacement_failure_keeps_the_previous_projection() {
+    let registry = test_registry();
+    let id = scene_id("player");
+    let mut world = World::new();
+    let settings =
+        WorldIdentityDomainSettings::new(ItemLimit::new(3).unwrap(), ItemLimit::new(3).unwrap())
+            .unwrap();
+    let domain = WorldIdentityDomain::new(&world, settings).unwrap();
+    world.insert_resource(domain);
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(1))]));
+
+    let first_sync = session.sync_world(&mut world, &registry);
+    assert!(first_sync.synced);
+    let first = first_sync.live_instance.unwrap();
+    let first_entity = match first.resolve(&world, &id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("first authoring instance did not resolve: {lookup:?}"),
+    };
+    let before_entities = world.iter_entities().count();
+    let before_stats = world.resource::<WorldIdentityDomain>().stats();
+
+    session
+        .replace_document(SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(2))]));
+    let failed = session.sync_world(&mut world, &registry);
+
+    assert!(!failed.synced);
+    assert!(failed.diagnostics.has_errors());
+    assert_eq!(failed.removed_entities, 0);
+    assert_eq!(failed.live_instance.as_ref(), Some(&first));
+    assert_eq!(session.live_instance(), Some(&first));
+    assert!(session.is_live_dirty());
+    assert_eq!(world.iter_entities().count(), before_entities);
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        before_stats
+    );
+    assert_eq!(
+        first.resolve(&world, &id),
+        EntityLookup::Resolved(first_entity)
+    );
+    assert_eq!(world.get::<TestPosition>(first_entity).unwrap().x, 1);
 }
 
 #[test]
@@ -792,7 +1048,7 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
 
     assert!(!validation.has_errors());
     assert!(!report.diagnostics.has_errors());
-    let entity = report.entity_map.get(&id).unwrap();
+    let entity = spawned_entity(&world, &report, &id);
     let link = world.get::<TestAssetLink>(entity).unwrap();
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
@@ -824,7 +1080,8 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
 
     let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
     assert!(report.diagnostics.has_errors());
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
+    assert!(world.get_resource::<WorldIdentityDomain>().is_none());
     assert_eq!(world.iter_entities().count(), before_entities);
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
@@ -859,7 +1116,7 @@ fn component_apply_failure_in_multi_component_entity_reports_component_and_rolls
     let report = spawn_scene(&mut world, &registry, &document);
 
     assert!(report.diagnostics.has_errors());
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
     assert_eq!(world.iter_entities().count(), before_entities);
     assert!(report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.component-apply-failed"
@@ -882,8 +1139,9 @@ fn component_apply_failure_removes_scratch_asset_server() {
     let report = spawn_scene(&mut world, &registry, &document);
 
     assert!(report.diagnostics.has_errors());
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
     assert!(world.get_resource::<AssetServer>().is_none());
+    assert!(world.get_resource::<WorldIdentityDomain>().is_none());
     assert_eq!(world.iter_entities().count(), before_entities);
 }
 
@@ -905,11 +1163,54 @@ fn component_apply_failure_restores_original_asset_server() {
     let report = spawn_scene(&mut world, &registry, &document);
 
     assert!(report.diagnostics.has_errors());
-    assert!(report.entity_map.is_empty());
+    assert!(report.instance.is_none());
+    assert!(world.get_resource::<WorldIdentityDomain>().is_none());
     assert_eq!(world.iter_entities().count(), before_entities);
     let asset_server = world.resource::<AssetServer>();
     assert_eq!(
         asset_server.path(existing_handle.id()),
+        Some("textures/existing.png")
+    );
+    assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
+}
+
+#[test]
+fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
+    let registry = failing_apply_registry();
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(scene_id("asset")).with_component(
+            apply_resolves_asset_type_id(),
+            asset_link_record(AssetRef::path("textures/generated.png").unwrap()),
+        ),
+        SceneEntityRecord::new(scene_id("fails"))
+            .with_component(apply_fails_type_id(), apply_fails_record(None)),
+    ]);
+    let mut asset_server = AssetServer::new();
+    let existing = asset_server
+        .reserve::<TestAsset>("textures/existing.png")
+        .unwrap();
+    let mut world = World::new();
+    world.insert_resource(asset_server);
+    world.increment_change_tick();
+    let before_entities = world.iter_entities().count();
+    let before_ticks = world
+        .get_resource_change_ticks::<AssetServer>()
+        .expect("asset server must be installed");
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.diagnostics.has_errors());
+    assert!(report.instance.is_none());
+    assert_eq!(world.iter_entities().count(), before_entities);
+    assert!(world.get_resource::<WorldIdentityDomain>().is_none());
+    let after_ticks = world
+        .get_resource_change_ticks::<AssetServer>()
+        .expect("asset server must remain installed");
+    assert_eq!(after_ticks.added, before_ticks.added);
+    assert_eq!(after_ticks.changed, before_ticks.changed);
+    let asset_server = world.resource::<AssetServer>();
+    assert_eq!(
+        asset_server.path(existing.id()),
         Some("textures/existing.png")
     );
     assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
@@ -933,9 +1234,9 @@ fn spawns_hierarchy_records_source_and_exports_stable_document() {
     let report = spawner.spawn(&mut world, &registry, &document);
 
     assert!(!report.diagnostics.has_errors());
-    assert_eq!(report.entity_map.len(), 2);
-    let parent = report.entity_map.get(&parent_id).unwrap();
-    let child = report.entity_map.get(&child_id).unwrap();
+    assert_eq!(spawned_instance(&report).len(), 2);
+    let parent = spawned_entity(&world, &report, &parent_id);
+    let child = spawned_entity(&world, &report, &child_id);
     assert_eq!(
         world
             .get::<Children>(parent)
@@ -952,9 +1253,12 @@ fn spawns_hierarchy_records_source_and_exports_stable_document() {
     let export = export_scene(&world, &registry);
 
     assert!(!export.diagnostics.has_errors());
-    assert_eq!(export.document.entities.len(), 2);
+    let output = export.output().unwrap();
+    assert_eq!(output.document.entities.len(), 2);
     assert_eq!(
         export
+            .output()
+            .unwrap()
             .document
             .entities
             .iter()
@@ -963,7 +1267,7 @@ fn spawns_hierarchy_records_source_and_exports_stable_document() {
         vec!["parent", "parent/child"]
     );
     assert_eq!(
-        export.document.entities[1]
+        output.document.entities[1]
             .parent
             .as_ref()
             .unwrap()
@@ -973,7 +1277,7 @@ fn spawns_hierarchy_records_source_and_exports_stable_document() {
 }
 
 #[test]
-fn repeated_prefab_spawns_export_with_instance_namespaces() {
+fn repeated_scene_spawns_export_with_injective_generated_ids() {
     let registry = test_registry();
     let id = scene_id("enemy");
     let document =
@@ -996,14 +1300,307 @@ fn repeated_prefab_spawns_export_with_instance_namespaces() {
     );
 
     let export = export_scene(&world, &registry);
-    let ids = export
+    let output = export.output().unwrap();
+    let ids = output
         .document
         .entities
         .iter()
         .map(|entity| entity.id.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(ids, vec!["enemy", "instance_2/enemy"]);
+    assert_eq!(ids, vec!["entity_1", "entity_2"]);
+    assert_eq!(output.remap.len(), 2);
+    assert!(
+        output
+            .remap
+            .iter()
+            .all(|(_, id)| !id.as_str().starts_with("instance_"))
+    );
+}
+
+#[test]
+fn generated_export_ids_skip_every_authored_claim() {
+    let registry = test_registry();
+    let authored = SceneDocument::new([SceneEntityRecord::new(scene_id("entity_1"))]);
+    let duplicate = SceneDocument::new([SceneEntityRecord::new(scene_id("enemy"))]);
+    let mut world = World::new();
+
+    assert!(
+        !spawn_scene(&mut world, &registry, &authored)
+            .diagnostics
+            .has_errors()
+    );
+    assert!(
+        !spawn_scene(&mut world, &registry, &duplicate)
+            .diagnostics
+            .has_errors()
+    );
+    assert!(
+        !spawn_scene(&mut world, &registry, &duplicate)
+            .diagnostics
+            .has_errors()
+    );
+
+    let export = export_scene(&world, &registry);
+    let output = export.output().unwrap();
+    let ids = output
+        .document
+        .entities
+        .iter()
+        .map(|entity| entity.id.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(ids, vec!["entity_1", "entity_2", "entity_3"]);
+    let assigned = output.remap.iter().map(|(_, id)| id).collect::<Vec<_>>();
+    assert_eq!(assigned.len(), output.document.entities.len());
+    assert!(assigned.windows(2).all(|pair| pair[0] != pair[1]));
+}
+
+#[test]
+fn export_rewrites_scene_local_references_with_owner_instance_context() {
+    let registry = entity_link_registry();
+    let source = scene_id("source");
+    let target = scene_id("target");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(source.clone()).with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::SceneLocal {
+                entity: target.clone(),
+            }),
+        ),
+        SceneEntityRecord::new(target),
+    ]);
+    let mut world = World::new();
+
+    assert!(
+        !spawn_scene(&mut world, &registry, &document)
+            .diagnostics
+            .has_errors()
+    );
+    assert!(
+        !spawn_scene(&mut world, &registry, &document)
+            .diagnostics
+            .has_errors()
+    );
+
+    let export = export_scene(&world, &registry);
+    assert!(!export.diagnostics.has_errors());
+    let output = export.output().unwrap();
+    let ids = output
+        .document
+        .entities
+        .iter()
+        .map(|entity| entity.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["entity_1", "entity_2", "entity_3", "entity_4"]);
+    assert_eq!(
+        exported_entity_link(&output.document.entities[0]),
+        &EntityReference::SceneLocal {
+            entity: scene_id("entity_2"),
+        }
+    );
+    assert_eq!(
+        exported_entity_link(&output.document.entities[2]),
+        &EntityReference::SceneLocal {
+            entity: scene_id("entity_4"),
+        }
+    );
+}
+
+#[test]
+fn dangling_scene_local_reference_prevents_export_publication() {
+    let registry = entity_link_registry();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
+        entity_link_type_id(),
+        entity_link_record(EntityReference::SceneLocal {
+            entity: scene_id("missing"),
+        }),
+    )]);
+    let mut world = World::new();
+    let spawn = spawn_scene(&mut world, &registry, &document);
+    assert!(!spawn.diagnostics.has_errors());
+
+    let export = export_scene(&world, &registry);
+
+    assert!(export.diagnostics.has_errors());
+    assert!(export.output().is_none());
+    assert!(export.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.export-entity-reference-rewrite-failed"
+            && diagnostic_has_text_field(
+                diagnostic,
+                "rewrite-error-kind",
+                "scene-local-target-missing",
+            )
+    }));
+}
+
+#[test]
+fn persistent_reference_to_exported_entity_rewrites_to_scene_local() {
+    let registry = entity_link_registry();
+    let source = scene_id("source");
+    let target = scene_id("target");
+    let persistent = persistent_reference("11111111-1111-4111-8111-111111111111");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(source.clone()).with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::Persistent {
+                entity: persistent.clone(),
+            }),
+        ),
+        SceneEntityRecord::new(target.clone()),
+    ]);
+    let mut world = World::new();
+    let spawn = spawn_scene(&mut world, &registry, &document);
+    assert!(!spawn.diagnostics.has_errors());
+    let target_entity = spawned_entity(&world, &spawn, &target);
+    let persistent_locator = register_persistent_axis(&mut world, target_entity, persistent);
+
+    let export = export_scene(&world, &registry);
+
+    assert!(!export.diagnostics.has_errors());
+    let output = export.output().unwrap();
+    let source_record = output
+        .document
+        .entities
+        .iter()
+        .find(|record| record.id == source)
+        .unwrap();
+    assert_eq!(
+        exported_entity_link(source_record),
+        &EntityReference::SceneLocal {
+            entity: target.clone(),
+        }
+    );
+    assert_eq!(output.remap.get(&persistent_locator), Some(&target));
+}
+
+#[test]
+fn resolved_external_persistent_reference_is_preserved() {
+    let registry = entity_link_registry();
+    let source = scene_id("source");
+    let persistent = persistent_reference("22222222-2222-4222-8222-222222222222");
+    let document = SceneDocument::new([SceneEntityRecord::new(source.clone()).with_component(
+        entity_link_type_id(),
+        entity_link_record(EntityReference::Persistent {
+            entity: persistent.clone(),
+        }),
+    )]);
+    let mut world = World::new();
+    let spawn = spawn_scene(&mut world, &registry, &document);
+    assert!(!spawn.diagnostics.has_errors());
+    let external = spawn_identity_entity(&mut world).unwrap().entity();
+    register_persistent_axis(&mut world, external, persistent.clone());
+
+    let export = export_scene(&world, &registry);
+
+    assert!(!export.diagnostics.has_errors());
+    let source_record = &export.output().unwrap().document.entities[0];
+    assert_eq!(
+        exported_entity_link(source_record),
+        &EntityReference::Persistent { entity: persistent }
+    );
+}
+
+#[test]
+fn missing_persistent_reference_prevents_export_publication() {
+    let registry = entity_link_registry();
+    let persistent = persistent_reference("33333333-3333-4333-8333-333333333333");
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
+        entity_link_type_id(),
+        entity_link_record(EntityReference::Persistent { entity: persistent }),
+    )]);
+    let mut world = World::new();
+    assert!(
+        !spawn_scene(&mut world, &registry, &document)
+            .diagnostics
+            .has_errors()
+    );
+
+    let export = export_scene(&world, &registry);
+
+    assert!(export.diagnostics.has_errors());
+    assert!(export.output().is_none());
+    assert!(export.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.export-entity-reference-rewrite-failed"
+            && diagnostic_has_text_field(
+                diagnostic,
+                "rewrite-error-kind",
+                "persistent-target-missing",
+            )
+    }));
+}
+
+#[test]
+fn tombstoned_persistent_reference_prevents_export_publication() {
+    let registry = entity_link_registry();
+    let persistent = persistent_reference("44444444-4444-4444-8444-444444444444");
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
+        entity_link_type_id(),
+        entity_link_record(EntityReference::Persistent {
+            entity: persistent.clone(),
+        }),
+    )]);
+    let mut world = World::new();
+    assert!(
+        !spawn_scene(&mut world, &registry, &document)
+            .diagnostics
+            .has_errors()
+    );
+    let external = spawn_identity_entity(&mut world).unwrap().entity();
+    register_persistent_axis(&mut world, external, persistent);
+    world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
+        let token = domain.adopt_entity(world, external).unwrap();
+        domain
+            .retire_entity(world, token, TombstoneCause::Despawned)
+            .unwrap();
+    });
+
+    let export = export_scene(&world, &registry);
+
+    assert!(export.diagnostics.has_errors());
+    assert!(export.output().is_none());
+    assert!(export.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.export-entity-reference-rewrite-failed"
+            && diagnostic_has_text_field(
+                diagnostic,
+                "rewrite-error-kind",
+                "persistent-target-tombstoned",
+            )
+    }));
+}
+
+#[test]
+fn stale_persistent_reference_prevents_export_publication() {
+    let registry = entity_link_registry();
+    let persistent = persistent_reference("55555555-5555-4555-8555-555555555555");
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
+        entity_link_type_id(),
+        entity_link_record(EntityReference::Persistent {
+            entity: persistent.clone(),
+        }),
+    )]);
+    let mut world = World::new();
+    assert!(
+        !spawn_scene(&mut world, &registry, &document)
+            .diagnostics
+            .has_errors()
+    );
+    let external = spawn_identity_entity(&mut world).unwrap().entity();
+    register_persistent_axis(&mut world, external, persistent);
+    assert!(world.despawn(external));
+
+    let export = export_scene(&world, &registry);
+
+    assert!(export.diagnostics.has_errors());
+    assert!(export.output().is_none());
+    assert!(export.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.export-entity-reference-rewrite-failed"
+            && diagnostic_has_text_field(
+                diagnostic,
+                "rewrite-error-kind",
+                "persistent-target-stale",
+            )
+    }));
 }
 
 #[test]
@@ -1026,7 +1623,7 @@ fn direct_prefab_spawn_applies_patch_field_overrides() {
     let report = spawner.spawn_prefab_with_patch(&mut world, &registry, &prefab, &patch);
 
     assert!(!report.diagnostics.has_errors());
-    let entity = report.entity_map.get(&id).unwrap();
+    let entity = spawned_entity(&world, &report, &id);
     assert_eq!(world.get::<TestPosition>(entity).unwrap().x, 9);
 }
 
@@ -1058,14 +1655,14 @@ fn prefab_patch_can_add_and_remove_components() {
     assert!(!report.diagnostics.has_errors());
     assert_eq!(
         world
-            .get::<TestPosition>(report.entity_map.get(&added).unwrap())
+            .get::<TestPosition>(spawned_entity(&world, &report, &added))
             .unwrap()
             .x,
         7
     );
     assert!(
         world
-            .get::<TestPosition>(report.entity_map.get(&removed).unwrap())
+            .get::<TestPosition>(spawned_entity(&world, &report, &removed))
             .is_none()
     );
 }
@@ -1145,23 +1742,23 @@ fn patch_validation_failure_preserves_sticky_pressure_stats_and_operation_contex
 fn export_drops_parent_that_is_not_in_document() {
     let registry = test_registry();
     let mut world = World::new();
+    let child_id = scene_id("child");
+    let report = spawn_scene(
+        &mut world,
+        &registry,
+        &SceneDocument::new([SceneEntityRecord::new(child_id.clone())
+            .with_component(position_type_id(), position_record(3))]),
+    );
+    let child = spawned_entity(&world, &report, &child_id);
     let parent = world.spawn_empty().id();
-    let child = world
-        .spawn((
-            Parent(parent),
-            SceneEntitySource {
-                instance_id: SceneInstanceId::from_raw(1),
-                entity_id: scene_id("child"),
-            },
-            TestPosition { x: 3 },
-        ))
-        .id();
+    world.entity_mut(child).insert(Parent(parent));
 
     let export = export_scene(&world, &registry);
+    let output = export.output().unwrap();
 
-    assert_eq!(export.document.entities.len(), 1);
-    assert_eq!(export.document.entities[0].id.as_str(), "child");
-    assert_eq!(export.document.entities[0].parent, None);
+    assert_eq!(output.document.entities.len(), 1);
+    assert_eq!(output.document.entities[0].id.as_str(), "child");
+    assert_eq!(output.document.entities[0].parent, None);
     assert_eq!(world.get::<Parent>(child).unwrap().0, parent);
     assert!(
         export
@@ -1175,17 +1772,23 @@ fn export_drops_parent_that_is_not_in_document() {
 fn export_component_encode_failure_is_an_error() {
     let registry = broken_export_registry();
     let mut world = World::new();
-    world.spawn((
-        SceneEntitySource {
-            instance_id: SceneInstanceId::from_raw(1),
-            entity_id: scene_id("broken"),
-        },
-        TestBrokenExport,
-    ));
+    let report = spawn_scene(
+        &mut world,
+        &registry,
+        &SceneDocument::new([SceneEntityRecord::new(scene_id("broken")).with_component(
+            broken_export_type_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                ComponentValue::map([("broken", ComponentValue::String("value".to_owned()))]),
+            ),
+        )]),
+    );
+    assert!(!report.diagnostics.has_errors());
 
     let export = export_scene(&world, &registry);
 
     assert!(export.diagnostics.has_errors());
+    assert!(export.output().is_none());
     assert!(
         export
             .diagnostics
@@ -1321,6 +1924,32 @@ fn test_registry() -> ComponentRegistry {
     registry
 }
 
+fn entity_link_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_scene_component_with_fields::<TestEntityLink, _, _>(
+            entity_link_type_id(),
+            ComponentSchemaVersion(1),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["target"]),
+                ComponentValueKind::EntityRef,
+            )],
+            |value| {
+                Ok(TestEntityLink {
+                    target: value.field_entity_reference("target")?.clone(),
+                })
+            },
+            |link| {
+                Ok(ComponentValue::map([(
+                    "target",
+                    ComponentValue::EntityReference(link.target.clone()),
+                )]))
+            },
+        )
+        .unwrap();
+    registry
+}
+
 fn migrated_position_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     registry
@@ -1378,29 +2007,20 @@ fn test_asset_registry() -> ComponentRegistry {
             |value, context| {
                 let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
                 let prepared = prepare_test_asset_handle(context, "asset.value", asset_ref)?;
-                Ok(PreparedComponent::new(move |world, entity| {
+                Ok(PreparedComponent::new(move |context| {
                     let handle = match prepared {
                         PreparedTestAsset::Resolved(handle) => handle,
-                        PreparedTestAsset::Deferred(asset_ref) => {
-                            if world.get_resource::<AssetServer>().is_none() {
-                                world.insert_resource(AssetServer::new());
-                            }
-                            asset_ref
-                                .resolve::<TestAsset>(&mut world.resource_mut::<AssetServer>())
-                                .map_err(|error| {
-                                    ComponentCodecError::invalid_asset_ref(
-                                        "asset.value",
-                                        asset_ref.to_string(),
-                                        error.to_string(),
-                                    )
-                                })?
-                        }
+                        PreparedTestAsset::Deferred(asset_ref) => context
+                            .resolve_asset_ref::<TestAsset>(&asset_ref)
+                            .map_err(|error| {
+                                ComponentCodecError::invalid_asset_ref(
+                                    "asset.value",
+                                    asset_ref.to_string(),
+                                    error.to_string(),
+                                )
+                            })?,
                     };
-                    let mut entity_mut = world
-                        .get_entity_mut(entity)
-                        .map_err(|_| ComponentCodecError::EntityMissing)?;
-                    entity_mut.insert(TestAssetLink { handle });
-                    Ok(())
+                    Ok(TestAssetLink { handle })
                 }))
             },
             |world, entity, _context| {
@@ -1427,15 +2047,7 @@ fn broken_export_registry() -> ComponentRegistry {
                 ComponentFieldPath::from_fields(["broken"]),
                 ComponentValueKind::String,
             )],
-            |_value, _context| {
-                Ok(PreparedComponent::new(|world, entity| {
-                    let mut entity_mut = world
-                        .get_entity_mut(entity)
-                        .map_err(|_| ComponentCodecError::EntityMissing)?;
-                    entity_mut.insert(TestBrokenExport);
-                    Ok(())
-                }))
-            },
+            |_value, _context| Ok(PreparedComponent::insert(TestBrokenExport)),
             |_world, _entity, _context| Err(ComponentCodecError::invalid_field("broken", "boom")),
         )
         .unwrap();
@@ -1444,6 +2056,33 @@ fn broken_export_registry() -> ComponentRegistry {
 
 fn failing_apply_registry() -> ComponentRegistry {
     let mut registry = test_registry();
+    registry
+        .register_component_codec_with_context_and_fields::<TestAssetLink, _, _>(
+            apply_resolves_asset_type_id(),
+            ComponentSchemaVersion(1),
+            [ComponentFieldSchema::required(
+                ComponentFieldPath::from_fields(["asset"]),
+                ComponentValueKind::AssetRef,
+            )],
+            |value, _context| {
+                let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
+                Ok(PreparedComponent::new(move |context| {
+                    let handle =
+                        context
+                            .resolve_asset_ref::<TestAsset>(&asset_ref)
+                            .map_err(|error| {
+                                ComponentCodecError::invalid_asset_ref(
+                                    "asset.value",
+                                    asset_ref.to_string(),
+                                    error.to_string(),
+                                )
+                            })?;
+                    Ok(TestAssetLink { handle })
+                }))
+            },
+            |_world, _entity, _context| Ok(None),
+        )
+        .unwrap();
     registry
         .register_component_codec_with_context_and_fields::<TestApplyFails, _, _>(
             apply_fails_type_id(),
@@ -1466,8 +2105,8 @@ fn failing_apply_registry() -> ComponentRegistry {
                     }
                 }
 
-                Ok(PreparedComponent::new(|_world, _entity| {
-                    Err(ComponentCodecError::invalid_field(
+                Ok(PreparedComponent::new(|_context| {
+                    Err::<TestApplyFails, _>(ComponentCodecError::invalid_field(
                         "apply",
                         "intentional failure",
                     ))
@@ -1611,6 +2250,14 @@ fn apply_fails_type_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.test.ApplyFails")
 }
 
+fn apply_resolves_asset_type_id() -> ComponentTypeId {
+    ComponentTypeId::new("nara.test.ApplyResolvesAsset")
+}
+
+fn entity_link_type_id() -> ComponentTypeId {
+    ComponentTypeId::new("nara.test.EntityLink")
+}
+
 fn position_type_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.test.Position")
 }
@@ -1620,4 +2267,21 @@ fn position_record(x: i32) -> SceneComponentRecord {
         ComponentSchemaVersion(1),
         ComponentValue::map([("x", ComponentValue::I64(i64::from(x)))]),
     )
+}
+
+fn entity_link_record(target: EntityReference) -> SceneComponentRecord {
+    SceneComponentRecord::new(
+        ComponentSchemaVersion(1),
+        ComponentValue::map([("target", ComponentValue::EntityReference(target))]),
+    )
+}
+
+fn exported_entity_link(record: &SceneEntityRecord) -> &EntityReference {
+    record
+        .components
+        .get(&entity_link_type_id())
+        .expect("exported source entity must retain its entity-link component")
+        .value
+        .field_entity_reference("target")
+        .expect("exported entity-link target must remain typed")
 }

@@ -3,13 +3,15 @@
 use nara_app::{App, Plugin, PluginError};
 use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle};
 use nara_core::{Color, Vec2};
-use nara_ecs::{Component, World};
+use nara_ecs::Component;
+#[cfg(test)]
+use nara_ecs::World;
 use nara_image::ImageAsset;
 use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentApplyContext, ComponentCodecError, ComponentDecodeContext, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -259,21 +261,16 @@ pub fn register_sprite_components(
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
             let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
 
-            Ok(PreparedComponent::new(move |world, entity| {
-                let material = resolve_prepared_material(world, material)?;
-                let sprite = Sprite {
+            Ok(PreparedComponent::new(move |context| {
+                let material = resolve_prepared_material(context, material)?;
+                Ok(Sprite {
                     material,
                     texture_region,
                     size,
                     anchor: SpriteAnchor::CENTER,
                     layer,
                     sort_key,
-                };
-                let mut entity_mut = world
-                    .get_entity_mut(entity)
-                    .map_err(|_| ComponentCodecError::EntityMissing)?;
-                entity_mut.insert(sprite);
-                Ok(())
+                })
             }))
         },
         |world, entity, context| {
@@ -482,24 +479,24 @@ fn prepare_texture_handle(
 }
 
 fn resolve_prepared_texture(
-    world: &mut World,
+    context: &mut ComponentApplyContext,
     texture: Option<PreparedTexture>,
 ) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
     match texture {
         None => Ok(None),
         Some(PreparedTexture::Resolved(handle)) => Ok(Some(handle)),
         Some(PreparedTexture::Deferred(texture_ref)) => {
-            resolve_optional_texture(world, Some(&texture_ref), "material.image.value")
+            resolve_optional_texture(context, Some(&texture_ref), "material.image.value")
         }
     }
 }
 
 fn resolve_prepared_material(
-    world: &mut World,
+    context: &mut ComponentApplyContext,
     material: PreparedSpriteMaterial,
 ) -> Result<SpriteMaterial, ComponentCodecError> {
     Ok(SpriteMaterial {
-        image: resolve_prepared_texture(world, material.image)?,
+        image: resolve_prepared_texture(context, material.image)?,
         sampler: material.sampler,
         alpha_mode: material.alpha_mode,
         tint: material.tint,
@@ -507,18 +504,15 @@ fn resolve_prepared_material(
 }
 
 fn resolve_optional_texture(
-    world: &mut World,
+    context: &mut ComponentApplyContext,
     texture_ref: Option<&AssetRef>,
     field: &str,
 ) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
     let Some(texture_ref) = texture_ref else {
         return Ok(None);
     };
-    if world.get_resource::<AssetServer>().is_none() {
-        world.insert_resource(AssetServer::new());
-    }
-    texture_ref
-        .resolve::<ImageAsset>(&mut world.resource_mut::<AssetServer>())
+    context
+        .resolve_asset_ref::<ImageAsset>(texture_ref)
         .map(Some)
         .map_err(|error| invalid_asset_ref(field, texture_ref, error))
 }

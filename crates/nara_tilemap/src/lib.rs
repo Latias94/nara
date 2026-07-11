@@ -5,13 +5,15 @@ use std::collections::BTreeMap;
 use nara_app::{App, Plugin, PluginError};
 use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, Handle};
 use nara_core::{Color, Vec2};
-use nara_ecs::{Component, World};
+use nara_ecs::Component;
+#[cfg(test)]
+use nara_ecs::World;
 use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentApplyContext, ComponentCodecError, ComponentDecodeContext, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent,
 };
 
 pub const DEFAULT_TILE_SIZE: Vec2 = Vec2::new(16.0, 16.0);
@@ -505,8 +507,8 @@ pub fn register_tilemap_components(
             let tileset = prepare_optional_tileset(context, tileset_ref)?;
             let cells = read_cells(value.get("cells"))?;
 
-            Ok(PreparedComponent::new(move |world, entity| {
-                let tileset = resolve_prepared_tileset(world, tileset)?;
+            Ok(PreparedComponent::new(move |context| {
+                let tileset = resolve_prepared_tileset(context, tileset)?;
                 let mut tilemap = Tilemap::new(tile_size)
                     .with_layer(layer)
                     .with_sort_key(sort_key);
@@ -516,12 +518,7 @@ pub fn register_tilemap_components(
                 for (coord, cell) in cells {
                     tilemap.set_cell(coord, cell);
                 }
-
-                let mut entity_mut = world
-                    .get_entity_mut(entity)
-                    .map_err(|_| ComponentCodecError::EntityMissing)?;
-                entity_mut.insert(tilemap);
-                Ok(())
+                Ok(tilemap)
             }))
         },
         |world, entity, context| {
@@ -646,30 +643,27 @@ fn tileset_asset_source_kind() -> AssetSourceKind {
 }
 
 fn resolve_prepared_tileset(
-    world: &mut World,
+    context: &mut ComponentApplyContext,
     tileset: Option<PreparedTileset>,
 ) -> Result<Option<Handle<TileSet>>, ComponentCodecError> {
     match tileset {
         None => Ok(None),
         Some(PreparedTileset::Resolved(handle)) => Ok(Some(handle)),
         Some(PreparedTileset::Deferred(tileset_ref)) => {
-            resolve_optional_tileset(world, Some(&tileset_ref))
+            resolve_optional_tileset(context, Some(&tileset_ref))
         }
     }
 }
 
 fn resolve_optional_tileset(
-    world: &mut World,
+    context: &mut ComponentApplyContext,
     tileset_ref: Option<&AssetRef>,
 ) -> Result<Option<Handle<TileSet>>, ComponentCodecError> {
     let Some(tileset_ref) = tileset_ref else {
         return Ok(None);
     };
-    if world.get_resource::<AssetServer>().is_none() {
-        world.insert_resource(AssetServer::new());
-    }
-    tileset_ref
-        .resolve::<TileSet>(&mut world.resource_mut::<AssetServer>())
+    context
+        .resolve_asset_ref::<TileSet>(tileset_ref)
         .map(Some)
         .map_err(|error| invalid_asset_ref("tileset.value", tileset_ref, error))
 }

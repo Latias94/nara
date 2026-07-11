@@ -9,7 +9,7 @@ use nara_asset::{
     AssetRef, AssetRefError, AssetRefExportPolicy, AssetServer, AssetSourceKind, Handle,
     ProjectAssetDatabase,
 };
-use nara_ecs::{Component, Entity, World};
+use nara_ecs::{Component, Entity, World, world::WorldId};
 
 use crate::{ComponentValue, ComponentValueError};
 
@@ -27,6 +27,8 @@ pub enum ComponentCodecError {
         asset_ref: String,
         message: String,
     },
+    WrongWorld,
+    AssetServerChanged,
     EntityMissing,
     Message(String),
 }
@@ -80,6 +82,10 @@ impl Display for ComponentCodecError {
                     formatter,
                     "invalid asset reference in '{field}' ('{asset_ref}'): {message}"
                 )
+            }
+            Self::WrongWorld => formatter.write_str("component batch belongs to a different world"),
+            Self::AssetServerChanged => {
+                formatter.write_str("asset server changed after the component batch was created")
             }
             Self::EntityMissing => formatter.write_str("target entity does not exist"),
             Self::Message(message) => formatter.write_str(message),
@@ -216,19 +222,154 @@ impl<'a> ComponentEncodeContext<'a> {
     }
 }
 
-type ApplyComponentFn =
-    dyn FnOnce(&mut World, Entity) -> Result<(), ComponentCodecError> + Send + 'static;
+pub struct ComponentApplyContext {
+    asset_server: AssetServer,
+    asset_server_touched: bool,
+}
+
+impl ComponentApplyContext {
+    fn from_asset_server(asset_server: AssetServer) -> Self {
+        Self {
+            asset_server,
+            asset_server_touched: false,
+        }
+    }
+
+    pub fn resolve_asset_ref<T>(
+        &mut self,
+        asset_ref: &AssetRef,
+    ) -> Result<Handle<T>, AssetRefError> {
+        self.asset_server_touched = true;
+        asset_ref.resolve(&mut self.asset_server)
+    }
+}
+
+trait PreparedComponentValue: Send {
+    fn insert(self: Box<Self>, world: &mut World, entity: Entity);
+}
+
+impl<T> PreparedComponentValue for T
+where
+    T: Component,
+{
+    fn insert(self: Box<Self>, world: &mut World, entity: Entity) {
+        world.entity_mut(entity).insert(*self);
+    }
+}
+
+type PrepareComponentFn = dyn FnOnce(
+        &mut ComponentApplyContext,
+    ) -> Result<Box<dyn PreparedComponentValue>, ComponentCodecError>
+    + Send
+    + 'static;
+
+struct StagedComponent {
+    entity: Entity,
+    value: Box<dyn PreparedComponentValue>,
+}
+
+/// Stages prepared components and their scratch asset-server state for one world transaction.
+///
+/// Staging consumes and returns the batch so a failed codec cannot leave a committable partial
+/// batch. Commit validates the originating world, every target, and the source asset-server state
+/// before publishing components and the scratch asset server together.
+#[must_use]
+pub struct ComponentApplyBatch {
+    world_id: WorldId,
+    origin_asset_server: Option<AssetServer>,
+    context: ComponentApplyContext,
+    components: Vec<StagedComponent>,
+}
+
+impl ComponentApplyBatch {
+    pub fn from_world(world: &World) -> Self {
+        let origin_asset_server = world.get_resource::<AssetServer>().cloned();
+        Self {
+            world_id: world.id(),
+            context: ComponentApplyContext::from_asset_server(
+                origin_asset_server.clone().unwrap_or_default(),
+            ),
+            origin_asset_server,
+            components: Vec::new(),
+        }
+    }
+
+    pub fn with_decode_context<T>(
+        &mut self,
+        database: Option<&ProjectAssetDatabase>,
+        decode: impl FnOnce(&mut ComponentDecodeContext<'_>) -> T,
+    ) -> T {
+        let mut context = ComponentDecodeContext::with_asset_server(&mut self.context.asset_server);
+        if let Some(database) = database {
+            context = context.with_project_asset_database(database);
+        }
+        let result = decode(&mut context);
+        self.context.asset_server_touched |= context.asset_server_touched();
+        result
+    }
+
+    pub fn stage(
+        mut self,
+        entity: Entity,
+        component: PreparedComponent,
+    ) -> Result<Self, ComponentCodecError> {
+        let value = (component.prepare)(&mut self.context)?;
+        self.components.push(StagedComponent { entity, value });
+        Ok(self)
+    }
+
+    pub fn commit(self, world: &mut World) -> Result<(), ComponentCodecError> {
+        self.validate_commit(world)?;
+        self.commit_validated(world);
+        Ok(())
+    }
+
+    pub fn validate_commit(&self, world: &World) -> Result<(), ComponentCodecError> {
+        if world.id() != self.world_id {
+            return Err(ComponentCodecError::WrongWorld);
+        }
+        if self
+            .components
+            .iter()
+            .any(|component| world.get_entity(component.entity).is_err())
+        {
+            return Err(ComponentCodecError::EntityMissing);
+        }
+        if self.context.asset_server_touched
+            && world.get_resource::<AssetServer>() != self.origin_asset_server.as_ref()
+        {
+            return Err(ComponentCodecError::AssetServerChanged);
+        }
+        Ok(())
+    }
+
+    fn commit_validated(self, world: &mut World) {
+        for component in self.components {
+            component.value.insert(world, component.entity);
+        }
+        if self.context.asset_server_touched {
+            world.insert_resource(self.context.asset_server);
+        }
+    }
+}
 
 pub struct PreparedComponent {
-    apply: Box<ApplyComponentFn>,
+    prepare: Box<PrepareComponentFn>,
 }
 
 impl PreparedComponent {
-    pub fn new(
-        apply: impl FnOnce(&mut World, Entity) -> Result<(), ComponentCodecError> + Send + 'static,
-    ) -> Self {
+    pub fn new<T>(
+        prepare: impl FnOnce(&mut ComponentApplyContext) -> Result<T, ComponentCodecError>
+        + Send
+        + 'static,
+    ) -> Self
+    where
+        T: Component,
+    {
         Self {
-            apply: Box::new(apply),
+            prepare: Box::new(move |context| {
+                prepare(context).map(|component| Box::new(component) as Box<_>)
+            }),
         }
     }
 
@@ -236,17 +377,13 @@ impl PreparedComponent {
     where
         T: Component,
     {
-        Self::new(move |world, entity| {
-            let mut entity_mut = world
-                .get_entity_mut(entity)
-                .map_err(|_| ComponentCodecError::EntityMissing)?;
-            entity_mut.insert(component);
-            Ok(())
-        })
+        Self::new(move |_context| Ok(component))
     }
 
     pub fn apply(self, world: &mut World, entity: Entity) -> Result<(), ComponentCodecError> {
-        (self.apply)(world, entity)
+        ComponentApplyBatch::from_world(world)
+            .stage(entity, self)?
+            .commit(world)
     }
 }
 

@@ -5,6 +5,11 @@ use std::{
     num::NonZeroU64,
 };
 
+use nara_ecs::World;
+use nara_identity::{
+    EntityLookup, EntityReferenceRemap, IdentityRemapError, RuntimeEntityReference,
+    WorldIdentityDomain,
+};
 use thiserror::Error;
 
 macro_rules! string_id_serde {
@@ -40,6 +45,7 @@ pub const MAX_GAMEPLAY_COMMAND_STRING_BYTES: usize = 128 * 1024;
 
 const VARIANT_TAG_BYTES: usize = 1;
 const U64_BYTES: usize = 8;
+const UUID_HYPHENATED_BYTES: usize = 36;
 const I64_BYTES: usize = 8;
 const F64_BYTES: usize = 8;
 const BOOL_BYTES: usize = 1;
@@ -116,54 +122,6 @@ impl Display for GameplayCommandTargetId {
 
 string_id_serde!(GameplayCommandTargetId, new);
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SceneStableId(String);
-
-impl SceneStableId {
-    pub fn new(id: impl Into<String>) -> Result<Self, GameplayCommandIdError> {
-        let id = id.into();
-        validate_id("scene stable id", &id)?;
-        Ok(Self(id))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for SceneStableId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-string_id_serde!(SceneStableId, new);
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PersistentRuntimeId(String);
-
-impl PersistentRuntimeId {
-    pub fn parse_str(id: impl Into<String>) -> Result<Self, GameplayCommandIdError> {
-        let id = id.into();
-        let id = uuid::Uuid::parse_str(&id).map_err(|_| GameplayCommandIdError::InvalidUuid)?;
-        Ok(Self(id.to_string()))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Display for PersistentRuntimeId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-string_id_serde!(PersistentRuntimeId, parse_str);
-
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum GameplayCommandIdError {
     #[error("{kind} cannot be empty")]
@@ -176,15 +134,12 @@ pub enum GameplayCommandIdError {
         length: usize,
         maximum: usize,
     },
-    #[error("persistent runtime id must be a UUID")]
-    InvalidUuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GameplayCommandTarget {
-    Scene(SceneStableId),
-    Persistent(PersistentRuntimeId),
+    Entity(RuntimeEntityReference),
     Named(GameplayCommandTargetId),
 }
 
@@ -193,13 +148,41 @@ impl GameplayCommandTarget {
         GameplayCommandTargetId::new(id).map(Self::Named)
     }
 
+    #[must_use]
+    pub fn resolve_entity(&self, world: &World) -> Option<EntityLookup> {
+        let Self::Entity(reference) = self else {
+            return None;
+        };
+        Some(
+            world
+                .get_resource::<WorldIdentityDomain>()
+                .map_or(EntityLookup::DomainUnavailable, |domain| {
+                    domain.lookup(world, reference)
+                }),
+        )
+    }
+
+    pub fn remap_entity_reference(
+        &self,
+        remap: &EntityReferenceRemap,
+    ) -> Result<Self, IdentityRemapError> {
+        match self {
+            Self::Entity(reference) => remap.rewrite(reference).map(Self::Entity),
+            Self::Named(id) => Ok(Self::Named(id.clone())),
+        }
+    }
+
     pub(crate) fn logical_bytes(&self) -> Option<usize> {
-        let id_bytes = match self {
-            Self::Scene(id) => id.as_str().len(),
-            Self::Persistent(id) => id.as_str().len(),
+        let value_bytes = match self {
+            Self::Entity(RuntimeEntityReference::Scene { entity, .. }) => VARIANT_TAG_BYTES
+                .checked_add(U64_BYTES)?
+                .checked_add(entity.as_str().len())?,
+            Self::Entity(RuntimeEntityReference::Persistent { entity }) => VARIANT_TAG_BYTES
+                .checked_add(entity.namespace.as_str().len())?
+                .checked_add(UUID_HYPHENATED_BYTES)?,
             Self::Named(id) => id.as_str().len(),
         };
-        VARIANT_TAG_BYTES.checked_add(id_bytes)
+        VARIANT_TAG_BYTES.checked_add(value_bytes)
     }
 }
 
@@ -598,6 +581,21 @@ impl GameplayCommandDraft {
         &self.payload
     }
 
+    pub fn remap_entity_target(
+        &self,
+        remap: &EntityReferenceRemap,
+    ) -> Result<Self, IdentityRemapError> {
+        Ok(Self {
+            command_type: self.command_type.clone(),
+            target: self
+                .target
+                .as_ref()
+                .map(|target| target.remap_entity_reference(remap))
+                .transpose()?,
+            payload: self.payload.clone(),
+        })
+    }
+
     pub(crate) fn logical_bytes(&self) -> Option<usize> {
         self.command_type
             .as_str()
@@ -723,6 +721,18 @@ impl GameplayCommandSubmission {
     #[must_use]
     pub const fn command(&self) -> &GameplayCommandDraft {
         &self.command
+    }
+
+    pub fn remap_entity_target(
+        &self,
+        remap: &EntityReferenceRemap,
+    ) -> Result<Self, IdentityRemapError> {
+        Ok(Self {
+            tick: self.tick,
+            source: self.source.clone(),
+            source_sequence: self.source_sequence,
+            command: self.command.remap_entity_target(remap)?,
+        })
     }
 
     #[must_use]

@@ -6,6 +6,8 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+use nara_identity::EntityReference;
+
 use crate::{
     codec::ComponentCodecError,
     path::{
@@ -68,6 +70,8 @@ pub enum ComponentValue {
     String(String),
     List(Vec<ComponentValue>),
     Map(BTreeMap<String, ComponentValue>),
+    #[cfg_attr(feature = "serde", serde(rename = "entity_ref"))]
+    EntityReference(EntityReference),
 }
 
 impl ComponentValue {
@@ -109,6 +113,7 @@ impl ComponentValue {
             Self::String(_) => ComponentValueKind::String,
             Self::List(_) => ComponentValueKind::List,
             Self::Map(_) => ComponentValueKind::Map,
+            Self::EntityReference(_) => ComponentValueKind::EntityRef,
         }
     }
 
@@ -145,7 +150,7 @@ impl ComponentValue {
                     };
                     let requested_index = *index;
                     let item_index = usize::try_from(requested_index).unwrap_or(usize::MAX);
-                    current = items.get(item_index).ok_or_else(|| {
+                    current = items.get(item_index).ok_or({
                         ComponentFieldPathError::IndexOutOfBounds {
                             path: child_path,
                             index: requested_index,
@@ -381,6 +386,15 @@ impl ComponentValue {
             .ok_or_else(|| ComponentCodecError::invalid_field(field, "string"))
     }
 
+    pub fn field_entity_reference(
+        &self,
+        field: &str,
+    ) -> Result<&EntityReference, ComponentCodecError> {
+        self.field(field)?
+            .as_entity_reference()
+            .ok_or_else(|| ComponentCodecError::invalid_field(field, "entity reference"))
+    }
+
     #[must_use]
     pub fn as_i64(&self) -> Option<i64> {
         match self {
@@ -409,6 +423,14 @@ impl ComponentValue {
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn as_entity_reference(&self) -> Option<&EntityReference> {
+        match self {
+            Self::EntityReference(reference) => Some(reference),
             _ => None,
         }
     }

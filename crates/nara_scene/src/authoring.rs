@@ -2,12 +2,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
-use nara_ecs::{Entity, World};
+use nara_ecs::{Mut, World};
+use nara_identity::{SpawnedSceneInstance, TombstoneCause, WorldIdentityDomain};
 use nara_reflect::ComponentRegistry;
 
 use crate::{
-    PrefabSourceResolver, SceneDocument, SceneEntityMap, ScenePatchDocument, ScenePatchReport,
-    SceneSpawnReport, SceneSpawner, diagnostics::info as diagnostic_info, hierarchy::sync_children,
+    PrefabSourceResolver, SceneDocument, ScenePatchDocument, ScenePatchReport, SceneSpawnReport,
+    SceneSpawner,
+    diagnostics::{
+        error as diagnostic_error, info as diagnostic_info, warning as diagnostic_warning,
+    },
+    hierarchy::sync_children,
 };
 
 static NEXT_AUTHORING_SOURCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -51,7 +56,15 @@ pub struct SceneAuthoringHistoryStatus {
 pub struct SceneAuthoringSyncReport {
     pub synced: bool,
     pub removed_entities: usize,
-    pub entity_map: SceneEntityMap,
+    pub live_instance: Option<SpawnedSceneInstance>,
+    pub diagnostics: DiagnosticReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneAuthoringClearReport {
+    pub cleared: bool,
+    pub removed_entities: usize,
+    pub live_instance: Option<SpawnedSceneInstance>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -61,9 +74,8 @@ pub struct SceneAuthoringSession {
     revision: SceneAuthoringRevision,
     undo_stack: Vec<ScenePatchDocument>,
     redo_stack: Vec<ScenePatchDocument>,
-    live_entities: SceneEntityMap,
+    live_instance: Option<SpawnedSceneInstance>,
     live_dirty: bool,
-    spawner: SceneSpawner,
 }
 
 impl SceneAuthoringSession {
@@ -77,9 +89,8 @@ impl SceneAuthoringSession {
             },
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            live_entities: SceneEntityMap::default(),
+            live_instance: None,
             live_dirty: true,
-            spawner: SceneSpawner::new(),
         }
     }
 
@@ -114,8 +125,8 @@ impl SceneAuthoringSession {
     }
 
     #[must_use]
-    pub fn live_entity_map(&self) -> &SceneEntityMap {
-        &self.live_entities
+    pub fn live_instance(&self) -> Option<&SpawnedSceneInstance> {
+        self.live_instance.as_ref()
     }
 
     #[must_use]
@@ -192,8 +203,12 @@ impl SceneAuthoringSession {
         world: &mut World,
         registry: &ComponentRegistry,
     ) -> SceneAuthoringSyncReport {
-        let report = self.spawner.spawn(world, registry, &self.document);
-        self.finish_world_sync(world, report)
+        let mut spawner = SceneSpawner::new();
+        let report = match self.live_instance.as_ref() {
+            Some(current) => spawner.replace(world, registry, &self.document, current),
+            None => spawner.spawn(world, registry, &self.document),
+        };
+        self.finish_world_sync(report)
     }
 
     pub fn sync_world_with_asset_database(
@@ -202,10 +217,18 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> SceneAuthoringSyncReport {
-        let report =
-            self.spawner
-                .spawn_with_asset_database(world, registry, &self.document, database);
-        self.finish_world_sync(world, report)
+        let mut spawner = SceneSpawner::new();
+        let report = match self.live_instance.as_ref() {
+            Some(current) => spawner.replace_with_asset_database(
+                world,
+                registry,
+                &self.document,
+                current,
+                database,
+            ),
+            None => spawner.spawn_with_asset_database(world, registry, &self.document, database),
+        };
+        self.finish_world_sync(report)
     }
 
     pub fn sync_world_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
@@ -214,10 +237,18 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         resolver: &R,
     ) -> SceneAuthoringSyncReport {
-        let report =
-            self.spawner
-                .spawn_with_prefab_resolver(world, registry, &self.document, resolver);
-        self.finish_world_sync(world, report)
+        let mut spawner = SceneSpawner::new();
+        let report = match self.live_instance.as_ref() {
+            Some(current) => spawner.replace_with_prefab_resolver(
+                world,
+                registry,
+                &self.document,
+                current,
+                resolver,
+            ),
+            None => spawner.spawn_with_prefab_resolver(world, registry, &self.document, resolver),
+        };
+        self.finish_world_sync(report)
     }
 
     pub fn sync_world_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
@@ -227,22 +258,93 @@ impl SceneAuthoringSession {
         resolver: &R,
         database: &ProjectAssetDatabase,
     ) -> SceneAuthoringSyncReport {
-        let report = self.spawner.spawn_with_prefab_resolver_and_asset_database(
-            world,
-            registry,
-            &self.document,
-            resolver,
-            database,
-        );
-        self.finish_world_sync(world, report)
+        let mut spawner = SceneSpawner::new();
+        let report = match self.live_instance.as_ref() {
+            Some(current) => spawner.replace_with_prefab_resolver_and_asset_database(
+                world,
+                registry,
+                &self.document,
+                current,
+                resolver,
+                database,
+            ),
+            None => spawner.spawn_with_prefab_resolver_and_asset_database(
+                world,
+                registry,
+                &self.document,
+                resolver,
+                database,
+            ),
+        };
+        self.finish_world_sync(report)
     }
 
-    pub fn clear_live_world(&mut self, world: &mut World) -> usize {
-        let removed_entities = despawn_entities(world, live_entities(&self.live_entities));
-        self.live_entities = SceneEntityMap::default();
+    pub fn clear_live_world(&mut self, world: &mut World) -> SceneAuthoringClearReport {
+        let Some(current) = self.live_instance.clone() else {
+            return SceneAuthoringClearReport {
+                cleared: true,
+                removed_entities: 0,
+                live_instance: None,
+                diagnostics: DiagnosticReport::default(),
+            };
+        };
+        if !world.contains_resource::<WorldIdentityDomain>() {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(crate::diagnostics::with_identity_error(
+                diagnostic_error(
+                    "scene.identity-retirement-failed",
+                    "Scene identity retirement failed",
+                ),
+                &nara_identity::IdentityDomainError::WorldDomainUnavailable,
+            ));
+            return SceneAuthoringClearReport {
+                cleared: false,
+                removed_entities: 0,
+                live_instance: Some(current),
+                diagnostics,
+            };
+        }
+
+        let retirement = world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
+            domain.retire_scene_instance(world, &current, TombstoneCause::Unloaded)
+        });
+        let retired = match retirement {
+            Ok(retired) => retired,
+            Err(error) => {
+                let mut diagnostics = DiagnosticReport::default();
+                diagnostics.push(crate::diagnostics::with_identity_error(
+                    diagnostic_error(
+                        "scene.identity-retirement-failed",
+                        "Scene identity retirement failed",
+                    ),
+                    &error,
+                ));
+                return SceneAuthoringClearReport {
+                    cleared: false,
+                    removed_entities: 0,
+                    live_instance: Some(current),
+                    diagnostics,
+                };
+            }
+        };
+
+        let removed_entities = despawn_entities(world, &retired);
+        let mut diagnostics = DiagnosticReport::default();
+        if removed_entities != retired.len() {
+            diagnostics.push(diagnostic_warning(
+                "scene.retired-entity-already-missing",
+                "A retired scene entity was already absent",
+            ));
+        }
+        self.live_instance = None;
         self.live_dirty = !self.document.entities.is_empty();
         sync_children(world);
-        removed_entities
+        SceneAuthoringClearReport {
+            cleared: true,
+            removed_entities,
+            live_instance: None,
+            diagnostics,
+        }
     }
 
     fn record_forward_patch(&mut self, patch: &ScenePatchDocument, report: &ScenePatchReport) {
@@ -286,36 +388,44 @@ impl SceneAuthoringSession {
         self.revision = self.revision.next();
     }
 
-    fn finish_world_sync(
-        &mut self,
-        world: &mut World,
-        report: SceneSpawnReport,
-    ) -> SceneAuthoringSyncReport {
+    fn finish_world_sync(&mut self, report: SceneSpawnReport) -> SceneAuthoringSyncReport {
+        let removed_entities = report.retired_entities();
         let SceneSpawnReport {
-            entity_map,
+            instance,
             diagnostics,
+            ..
         } = report;
 
         if diagnostics.has_errors() {
-            despawn_entities(world, live_entities(&entity_map));
-            sync_children(world);
             return SceneAuthoringSyncReport {
                 synced: false,
                 removed_entities: 0,
-                entity_map: self.live_entities.clone(),
+                live_instance: self.live_instance.clone(),
                 diagnostics,
             };
         }
 
-        let removed_entities = despawn_entities(world, live_entities(&self.live_entities));
-        self.live_entities = entity_map.clone();
+        let Some(instance) = instance else {
+            let mut diagnostics = diagnostics;
+            diagnostics.push(diagnostic_error(
+                "scene.identity-instance-missing",
+                "Successful scene synchronization did not publish an identity instance",
+            ));
+            return SceneAuthoringSyncReport {
+                synced: false,
+                removed_entities: 0,
+                live_instance: self.live_instance.clone(),
+                diagnostics,
+            };
+        };
+
+        self.live_instance = Some(instance.clone());
         self.live_dirty = false;
-        sync_children(world);
 
         SceneAuthoringSyncReport {
             synced: true,
             removed_entities,
-            entity_map,
+            live_instance: Some(instance),
             diagnostics,
         }
     }
@@ -341,18 +451,10 @@ fn history_miss_report(code: &'static str, summary: &'static str) -> ScenePatchR
     }
 }
 
-fn live_entities(entity_map: &SceneEntityMap) -> Vec<Entity> {
-    entity_map.iter().map(|(_, entity)| entity).collect()
-}
-
-fn despawn_entities(world: &mut World, entities: Vec<Entity>) -> usize {
+fn despawn_entities(world: &mut World, entities: &[nara_ecs::Entity]) -> usize {
     entities
-        .into_iter()
-        .filter(|entity| {
-            if world.get_entity(*entity).is_err() {
-                return false;
-            }
-            world.despawn(*entity)
-        })
+        .iter()
+        .copied()
+        .filter(|entity| world.despawn(*entity))
         .count()
 }
