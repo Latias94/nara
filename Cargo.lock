@@ -1652,6 +1652,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara_identity"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_core",
+ "nara_ecs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "nara_image"
 version = "0.1.0"
 dependencies = [

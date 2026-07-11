@@ -31,9 +31,9 @@ lifetime, and serialization rules that must remain explicit.
 ## Decision
 
 Create a dedicated `nara_identity` crate. It is below scene, gameplay, reflection, and tooling and
-depends only on shared limit scalars, the ECS substrate, and identity-format support. `nara_ecs`
-remains the thin Bevy ECS boundary; identity is a product domain rather than an ECS storage
-primitive.
+depends only on shared limit scalars, the ECS substrate and derive support, and identity-format
+support. `nara_ecs` remains the thin Bevy ECS boundary; identity is a product domain rather than an
+ECS storage primitive.
 
 `nara_identity` owns the canonical types, the world-owned allocator/index, lookup outcomes, remap
 records, and bounded tombstone evidence. No higher crate may define a competing scene or persistent
@@ -52,6 +52,8 @@ runtime identity type.
 | `RuntimeEntityReference` | Resolvable scene-instance/entity pair or persistent runtime ID | Allowed in command/replay records that explicitly belong to one runtime timeline; forbidden as project authoring data | World identity domain |
 | `WorldIdentityDomainId` | Process-unique opaque ID for one world identity domain | Observation/session records only; not project identity | Owning world resource |
 | `WorldEntityLocator` | World domain ID plus `RuntimeEntityReference` | Observation/session records only | Matching world identity domain |
+| `WorldEntityToken` | Opaque capability for one entity minted by its bound world identity domain | Never serialized | Matching bound world plus private identity marker |
+| `SceneIdentitySnapshot` | Bounded authoritative scene-group projection containing every active scene and persistent axis | Never serialized as project data | Matching world identity domain |
 | Bevy `Entity` | Generational allocator slot inside one `World` | Never serialized or exposed as stable observation identity | Bevy `World` only |
 
 Serde support is not itself permission to place a value in every persistent format. Scene, prefab,
@@ -62,9 +64,12 @@ encode runtime references only inside their declared timeline and existing ADR 0
 ### World identity domain
 
 Each world that needs semantic identity owns exactly one `WorldIdentityDomain` ECS resource. Domain
-creation is fallible. A checked process allocator issues non-zero domain IDs and returns a typed
-exhaustion error without advancing or wrapping; there is no infallible `Default` path that could
-silently alias a live domain. The resource owns:
+creation is fallible and binds the resource to the target Bevy `WorldId`. Moving that resource into
+another world does not transfer authority: every mutation, lookup, reverse lookup, retirement, and
+snapshot entry point validates the binding and fails with a typed world-binding error. A checked
+process allocator issues non-zero domain IDs and returns a typed exhaustion error without advancing
+or wrapping; there is no infallible `Default` path that could silently alias a live domain. The
+resource owns:
 
 - one process-unique world domain ID;
 - the sole scene-instance allocator for that world;
@@ -72,6 +77,12 @@ silently alias a live domain. The resource owns:
 - an entity-to-identity reverse index that may carry both axes for one entity;
 - bounded lifetime claim sets for instance IDs and entity-reference axes that prevent reuse;
 - a bounded recent-tombstone detail window and monotonic retirement sequence.
+
+Identity-aware spawn mints an opaque, non-serializable `WorldEntityToken` and attaches a crate-private
+domain marker to the entity. Registration accepts the token plus the target `World`, never a bare
+`Entity`, and validates the world binding, token domain, current entity generation, and private
+marker before consuming a claim. Equal entity allocator bits, a moved domain resource, a dead token,
+or an unrelated replacement entity therefore cannot acquire another world's identity.
 
 Creating a `SceneSpawner` never creates an allocator. Every spawn entry point obtains the allocator
 from the target world's identity domain, so `SceneSpawner::new`, `SceneSpawner::default`, and all
@@ -84,9 +95,11 @@ twice. Restoring an explicit instance ID into a fresh same-timeline domain reser
 advances the next allocation past it, or marks the allocator exhausted when the restored value is
 the maximum.
 
-Registration is a preflight-then-commit operation. A reference collision, entity-axis collision,
-tombstoned claim, or budget failure changes neither forward nor reverse index. An entity may have
-one scene identity and one persistent identity, but never two identities on the same axis.
+Registration is a preflight-then-commit operation. A wrong-world binding, stale token, reference
+collision, entity-axis collision, tombstoned claim, or budget failure changes neither allocator nor
+forward or reverse index. Input collection stops at the remaining lifetime-claim capacity instead
+of materializing an unbounded rejected batch. An entity may have one scene identity and one
+persistent identity, but never two identities on the same axis.
 
 ### Claims, tombstones, and lookup
 
@@ -99,17 +112,19 @@ The domain has two related budgets:
 2. A recent tombstone-detail budget bounds retained cause/sequence metadata. Older details may be
    evicted, but their claims remain and lookup still returns `Tombstoned` rather than `Missing`.
 
-Domain-only lookup returns a typed outcome:
+Lookup always receives the target `World` and returns a typed outcome:
 
 - `Resolved(Entity)` when the reference is active;
 - `Tombstoned` with optional recent detail when the reference existed and retired;
 - `Missing` when the domain has never claimed the reference.
+- `WrongWorldBinding` when the installed domain resource belongs to another Bevy world;
+- `StaleRegistration` when the registered entity generation or private ownership marker is absent.
 
-`resolve_in_world` additionally validates the world-scoped locator, the installed domain resource,
-and the current Bevy entity generation. It can return `WrongDomain` or `StaleRegistration` without
-collapsing either into `Missing` or `Tombstoned`. A durable scene-local `EntityReference` also
-returns `ContextRequired` unless the caller supplies its owning scene instance; the domain never
-guesses by scanning for a matching local ID.
+`resolve_in_world` additionally validates the world-scoped locator and installed domain ID. It can
+return `WrongDomain`, `WrongWorldBinding`, or `StaleRegistration` without collapsing any of them into
+`Missing` or `Tombstoned`. A durable scene-local `EntityReference` also returns `ContextRequired`
+unless the caller supplies its owning scene instance; the domain never guesses by scanning for a
+matching local ID.
 
 Retirement removes every active axis for an entity atomically, records tombstones, and never makes
 the claims reusable. Callers retire identity before or as part of despawn/unload. Direct external
@@ -121,21 +136,25 @@ reconciled diagnostically; it is not silently treated as a valid entity.
 - A normal scene spawn allocates a fresh `SceneInstanceId` and registers every local
   `SceneEntityId` under it. The returned scene-instance handle contains stable references, not a
   copied map of runtime entities. Consumers resolve through the world domain.
-- Duplicating or parallel-forking scene content allocates a fresh target instance and returns an
-  explicit group remap from every source runtime reference to its target runtime reference.
-  Internal references are rewritten through that complete remap before publication.
+- Duplicating or parallel-forking scene content starts from a bounded authoritative
+  `SceneIdentitySnapshot` produced by the source domain. The target transaction supplies one token
+  per source entity plus an explicit target persistent reference exactly where the source snapshot
+  has that axis. It preflights both axes, target claims, budget, and a planned target snapshot;
+  constructs the complete locator remap; and only then allocates and commits the target instance.
 - A parallel world fork receives a new `WorldIdentityDomainId`. Equal Bevy `Entity` bits can never
   make its `WorldEntityLocator` equal to the source locator.
 - A same-timeline checkpoint restore creates a new world identity domain ID and fresh Bevy
-  entities. It explicitly preserves or rewrites semantic `RuntimeEntityReference` values before
-  command replay resumes, and publishes a locator remap that replaces the old domain ID. The source
+  entities. It uses the same preflight/remap/commit transaction while reserving the recorded scene
+  instance ID. It explicitly preserves or rewrites semantic `RuntimeEntityReference` values before
+  command replay resumes and publishes a locator remap that replaces the old domain ID. The source
   and restored worlds may coexist without locator aliasing. Recorded commands resolve through the
   restored domain, never through recorded `Entity` bits.
 - Persistent IDs are preserved only for an authoritative fork/restore policy. Duplicated content
   must allocate or receive new persistent IDs and publish the remap.
 
-No clone/fork helper may partially publish a remap. Duplicate source references, incomplete group
-coverage, target collisions, or budget failures reject the entire operation.
+No clone/fork helper may partially publish a remap. Generic caller-self-attested remap builders are
+not public. Duplicate source references, incomplete scene groups, mismatched identity axes, target
+collisions, stale registrations, or budget failures reject the entire operation.
 
 ### Reflected values and command targets
 
@@ -186,7 +205,7 @@ shortcut.
 ## Ownership and Dependency Direction
 
 ```text
-nara_identity -> { nara_core, nara_ecs, uuid }
+nara_identity -> { nara_core, nara_ecs, bevy_ecs (derive support), uuid }
 nara_gameplay -> nara_identity
 nara_reflect  -> nara_identity
 nara_scene    -> { nara_identity, nara_reflect }
@@ -257,6 +276,7 @@ server commands and tooling without raw entities, and makes fork/restore remaps 
 |---|---|---:|---|
 | Lifetime claim budget eventually exhausts in a very long world | High | Low | Make the budget explicit and observable; fail closed; replace the world/timeline instead of reusing identity. |
 | Direct Bevy despawn leaves a stale active index | High | Medium | Provide retirement helpers, validate resolved entities against the world, and surface a typed stale-registration outcome. |
+| Domain resource is moved into a different Bevy world | High | Low | Bind domains to `WorldId`; validate all entity-bearing operations; require private entity markers and opaque tokens. |
 | Runtime references leak into project documents because they implement serde | High | Medium | Keep project component values typed as `EntityReference`; add negative fixtures and capability validation. |
 | Fork remap misses an internal reference | High | Medium | Require complete group preflight and atomic publication; test multi-entity cyclic references. |
 | Observation volume grows with large worlds | Medium | High | Hard item limits, stable truncation, and count-only unidentified entities. |
