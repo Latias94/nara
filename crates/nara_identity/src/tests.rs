@@ -664,6 +664,134 @@ fn retirement_sequence_exhaustion_is_failure_atomic() {
 }
 
 #[test]
+fn scene_instance_replacement_retires_the_old_group_and_publishes_the_new_group() {
+    let mut world = world_with_domain(16, 8);
+    let old_token = spawn_token(&mut world);
+    let new_token = spawn_token(&mut world);
+    let entity_id = scene_id("entity");
+
+    with_domain(&mut world, |world, domain| {
+        let current = domain
+            .register_new_scene_instance(world, [(entity_id.clone(), old_token)])
+            .unwrap();
+        let old_reference = current.runtime_reference(&entity_id).unwrap();
+
+        let (replacement, retired) = domain
+            .replace_scene_instance(
+                world,
+                &current,
+                [(entity_id.clone(), new_token)],
+                TombstoneCause::Replaced,
+            )
+            .unwrap();
+
+        assert_eq!(retired, [old_token.entity()]);
+        assert_ne!(replacement.instance_id(), current.instance_id());
+        let EntityLookup::Tombstoned(Some(tombstone)) = domain.lookup(world, &old_reference) else {
+            panic!("replaced scene reference must resolve to a detailed tombstone");
+        };
+        assert_eq!(tombstone.cause(), TombstoneCause::Replaced);
+        assert_eq!(
+            domain.lookup(world, &replacement.runtime_reference(&entity_id).unwrap()),
+            EntityLookup::Resolved(new_token.entity())
+        );
+    });
+}
+
+#[test]
+fn scene_instance_replacement_candidate_failure_preserves_the_old_group_and_allocator() {
+    let mut world = world_with_domain(16, 8);
+    let old_token = spawn_token(&mut world);
+    let first_candidate = spawn_token(&mut world);
+    let second_candidate = spawn_token(&mut world);
+    let entity_id = scene_id("entity");
+
+    with_domain(&mut world, |world, domain| {
+        let current = domain
+            .register_new_scene_instance(world, [(entity_id.clone(), old_token)])
+            .unwrap();
+        let old_reference = current.runtime_reference(&entity_id).unwrap();
+        let before = domain.stats();
+
+        assert!(matches!(
+            domain.replace_scene_instance(
+                world,
+                &current,
+                [
+                    (entity_id.clone(), first_candidate),
+                    (entity_id.clone(), second_candidate),
+                ],
+                TombstoneCause::Replaced,
+            ),
+            Err(IdentityDomainError::DuplicateSceneEntityId { .. })
+        ));
+        assert_eq!(domain.stats(), before);
+        assert_eq!(
+            domain.lookup(world, &old_reference),
+            EntityLookup::Resolved(old_token.entity())
+        );
+
+        let (replacement, retired) = domain
+            .replace_scene_instance(
+                world,
+                &current,
+                [(entity_id, first_candidate)],
+                TombstoneCause::Replaced,
+            )
+            .unwrap();
+        assert_eq!(replacement.instance_id().get(), 2);
+        assert_eq!(retired, [old_token.entity()]);
+    });
+}
+
+#[test]
+fn scene_instance_replacement_retirement_failure_does_not_publish_or_consume_an_instance() {
+    let mut world = world_with_domain(16, 8);
+    let old_token = spawn_token(&mut world);
+    let new_token = spawn_token(&mut world);
+    let entity_id = scene_id("entity");
+
+    with_domain(&mut world, |world, domain| {
+        let current = domain
+            .register_new_scene_instance(world, [(entity_id.clone(), old_token)])
+            .unwrap();
+        let old_reference = current.runtime_reference(&entity_id).unwrap();
+        domain
+            .set_next_retirement_sequence_for_test(u64::MAX)
+            .unwrap();
+        let before = domain.stats();
+
+        assert_eq!(
+            domain.replace_scene_instance(
+                world,
+                &current,
+                [(entity_id.clone(), new_token)],
+                TombstoneCause::Replaced,
+            ),
+            Err(IdentityDomainError::RetirementSequenceExhausted)
+        );
+        assert_eq!(domain.stats(), before);
+        assert_eq!(
+            domain.lookup(world, &old_reference),
+            EntityLookup::Resolved(old_token.entity())
+        );
+        assert_eq!(domain.locators_for_token(world, new_token).unwrap(), None);
+
+        domain.set_next_retirement_sequence_for_test(1).unwrap();
+        let (replacement, retired) = domain
+            .replace_scene_instance(
+                world,
+                &current,
+                [(entity_id, new_token)],
+                TombstoneCause::Replaced,
+            )
+            .unwrap();
+        assert_eq!(replacement.instance_id().get(), 2);
+        assert_eq!(retired, [old_token.entity()]);
+    });
+}
+
+#[test]
 fn scene_instance_can_retire_after_one_member_was_already_despawned() {
     let mut world = world_with_domain(16, 8);
     let first = spawn_token(&mut world);

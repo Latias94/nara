@@ -309,6 +309,14 @@ struct EntityIdentityAxes {
     persistent: Option<RuntimeEntityReference>,
 }
 
+struct PreparedRetirement {
+    instance: Option<SceneInstanceId>,
+    entities: Vec<Entity>,
+    identities: Vec<EntityIdentityAxes>,
+    sequence_allocator: MonotonicNonZeroU64Allocator,
+    tombstones: Vec<(IdentityTombstoneSubject, IdentityTombstone)>,
+}
+
 #[derive(Debug)]
 struct SceneIdentityGroupEntry {
     entity_id: SceneEntityId,
@@ -404,6 +412,38 @@ impl WorldIdentityDomain {
             .expect("scene instance allocation was preflighted");
         debug_assert_eq!(allocated, instance.non_zero());
         Ok(self.commit_scene_instance(instance, entries))
+    }
+
+    pub fn replace_scene_instance(
+        &mut self,
+        world: &World,
+        current: &SpawnedSceneInstance,
+        entries: impl IntoIterator<Item = (SceneEntityId, WorldEntityToken)>,
+        cause: TombstoneCause,
+    ) -> Result<(SpawnedSceneInstance, Vec<Entity>), IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        let instance = SceneInstanceId::from_non_zero(
+            self.scene_instance_allocator
+                .peek()
+                .map_err(|_| IdentityDomainError::SceneInstanceExhausted)?,
+        );
+        let maximum_entries = self.scene_entry_capacity(instance)?;
+        let entries = collect_scene_entries(
+            entries,
+            maximum_entries,
+            self.settings.lifetime_claims.get(),
+        )?;
+        self.preflight_scene_instance(world, instance, &entries)?;
+        let retirement = self.prepare_scene_instance_retirement(world, current, cause)?;
+
+        let allocated = self
+            .scene_instance_allocator
+            .allocate()
+            .expect("replacement scene instance allocation was preflighted");
+        debug_assert_eq!(allocated, instance.non_zero());
+        let retired = self.commit_retirement(retirement);
+        let replacement = self.commit_scene_instance(instance, entries);
+        Ok((replacement, retired))
     }
 
     pub fn register_restored_scene_instance(
@@ -641,6 +681,16 @@ impl WorldIdentityDomain {
         instance: &SpawnedSceneInstance,
         cause: TombstoneCause,
     ) -> Result<Vec<Entity>, IdentityDomainError> {
+        let retirement = self.prepare_scene_instance_retirement(world, instance, cause)?;
+        Ok(self.commit_retirement(retirement))
+    }
+
+    fn prepare_scene_instance_retirement(
+        &self,
+        world: &World,
+        instance: &SpawnedSceneInstance,
+        cause: TombstoneCause,
+    ) -> Result<PreparedRetirement, IdentityDomainError> {
         self.validate_world_binding(world)?;
         if instance.domain_id() != self.id {
             return Err(IdentityDomainError::WrongDomain {
@@ -673,7 +723,7 @@ impl WorldIdentityDomain {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        self.retire_entities_and_instance(Some(instance.instance), entities, cause)
+        self.prepare_retirement(Some(instance.instance), entities, cause)
     }
 
     pub fn retire_entity(
@@ -684,7 +734,8 @@ impl WorldIdentityDomain {
     ) -> Result<(), IdentityDomainError> {
         self.validate_world_binding(world)?;
         self.validate_token_domain(token)?;
-        self.retire_entities_and_instance(None, vec![token.entity()], cause)?;
+        let retirement = self.prepare_retirement(None, vec![token.entity()], cause)?;
+        self.commit_retirement(retirement);
         Ok(())
     }
 
@@ -911,12 +962,12 @@ impl WorldIdentityDomain {
         }
     }
 
-    fn retire_entities_and_instance(
-        &mut self,
+    fn prepare_retirement(
+        &self,
         instance: Option<SceneInstanceId>,
         mut entities: Vec<Entity>,
         cause: TombstoneCause,
-    ) -> Result<Vec<Entity>, IdentityDomainError> {
+    ) -> Result<PreparedRetirement, IdentityDomainError> {
         entities.sort_by_key(|entity| entity.to_bits());
         entities.dedup();
 
@@ -954,6 +1005,23 @@ impl WorldIdentityDomain {
             })
             .collect::<Result<Vec<_>, IdentityDomainError>>()?;
 
+        Ok(PreparedRetirement {
+            instance,
+            entities,
+            identities,
+            sequence_allocator,
+            tombstones,
+        })
+    }
+
+    fn commit_retirement(&mut self, retirement: PreparedRetirement) -> Vec<Entity> {
+        let PreparedRetirement {
+            instance,
+            entities,
+            identities,
+            sequence_allocator,
+            tombstones,
+        } = retirement;
         if let Some(instance) = instance {
             self.active_scene_instances.remove(&instance);
         }
@@ -977,7 +1045,7 @@ impl WorldIdentityDomain {
         }
         self.retirement_sequence = sequence_allocator;
         self.record_tombstones(tombstones);
-        Ok(entities)
+        entities
     }
 
     fn record_tombstones(
