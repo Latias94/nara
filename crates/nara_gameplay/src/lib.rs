@@ -1355,6 +1355,19 @@ mod tests {
         );
         let encoded = serde_json::to_string(&submission).unwrap();
         assert_eq!(
+            serde_json::to_value(&submission).unwrap(),
+            serde_json::json!({
+                "tick": 1,
+                "source": { "Replay": { "stream": "stream" } },
+                "source_sequence": 9,
+                "command": {
+                    "command_type": "player.jump",
+                    "target": null,
+                    "payload": {}
+                }
+            })
+        );
+        assert_eq!(
             serde_json::from_str::<GameplayCommandSubmission>(&encoded).unwrap(),
             submission
         );
