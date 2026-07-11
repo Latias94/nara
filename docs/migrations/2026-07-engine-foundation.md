@@ -29,6 +29,8 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | U2-1 | U2 | `2867235` | `rust-api` | `App` mutation/update, `Plugin`, cleanup, group, and runner signatures | Propagate setup/update errors, use narrow cleanup/group contexts, and let runners borrow the app. |
 | U2-2 | U2 | `2867235` | `rust-api` | Built-in `register_*_components` helpers | Handle `ComponentRegistryError`; plugin installation now reports contextual registration failure. |
 | U3-1 | U3 | `a4167e4` | `rust-api/behavior` | Runtime/fixed/render time construction, mutation, and frame semantics | Use validated constructors/setters, handle time-frame errors, and replace bulk fixed-step observations with per-tick clock state. |
+| U4-1 | U4 | `8ba9384` | `rust-api/behavior` | Gameplay command construction, ingress, fixed-tick observation, retirement, and action mapping | Build bounded drafts/submissions, handle typed rejection, consume the current batch in declared sets, and propagate fallible action bindings. |
+| U4-2 | U4 | `8ba9384` | `persistent-shape` | Prototype serialized gameplay command submissions | Rewrite to the canonical tick/source/source-sequence/command shape; enforce ADR 0049 outer parse budgets before serde. |
 | U5-1 | U5 | `e77da64` | `rust-api` | Task pool configuration, submission, terminal results, test execution, and shutdown | Configure bounded threaded pools, handle explicit spawn/terminal outcomes, and use the test-only inline driver where deterministic execution is required. |
 | U5-2 | U5 | `e77da64` | `persistent-shape` | `nara.toml` runtime plugin-plan spelling and task pool schema | Rewrite flat task fields into per-pool/shutdown tables and use only the canonical `runtime-2d` value. |
 | U18-1 | U18 | `6a70847` | `rust-api/behavior` | Diagnostic construction, reports, runtime observations, pressure snapshots, and diagnostic plugin composition | Migrate to validated/classified bounded observations and reduce any `diagnostics.runtime_capacity` above 4,096. |
@@ -215,6 +217,173 @@ normalization, saturating clocks, or a second bulk-step API.
 **Verification anchors**: `nara_app` zero/one/many-step, pause/scale, discard/preserve debt,
 overflow atomicity, Startup timing, fixed-set flush, removed-component, and tracker-boundary tests;
 `cargo nextest run -p nara_app --locked` passes 52 tests.
+
+## U4-1: Authoritative Fixed-Tick Gameplay Command Lifecycle
+
+**Removed contract**:
+
+- `GameplayCommandTime`, optional/zero authoritative ticks, frame provenance, and
+  arrival-assigned/saturating sequence values.
+- Public-field `GameplayCommandEnvelope` construction and direct queue `push`, `clear`, and
+  `as_slice` access, plus queue `is_empty` whose frame-vector meaning is replaced by lifecycle-aware
+  `is_idle`.
+- Frame-scoped queue serialization and `GameplayCommandSet::{MapActions, Clear}` with
+  `CoreStage::Last` cleanup.
+- Public source construction that could impersonate `LocalAction`, including action names embedded
+  in the source variant.
+- Infallible, unbounded `ActionCommandMap::bind` and `bind_action`.
+- Public flat `ActionCommandBinding` fields and its flat serialized
+  `command_type`/`target`/`payload` shape.
+- Unit-like `GameplayCommandPlugin` construction with no explicit queue settings.
+
+**Canonical replacement or deletion rationale**: command intent is a bounded
+`GameplayCommandDraft`. A public producer wraps it in `GameplayCommandSubmission` with a non-zero
+authoritative tick, `GameplayCommandIngressSource`, and non-zero producer sequence, then handles the
+typed result from `GameplayCommandQueue::submit`. Admission creates immutable
+`GameplayCommandEnvelope` values ordered by `(tick, source rank/source ID, source sequence)`.
+Fixed Prepare closes the tick into `GameplayCommandBatch`; current-gated Consume and Capture observe
+it; engine-owned Ack retires it. Pending and active work share one retained budget. Any lifecycle
+invariant failure is sticky and terminal, quarantines active work, gates consumers, and requires the
+runtime to be rebuilt. The old frame vector was deleted because it lost commands during zero-step
+frames and repeated them during catch-up frames.
+
+**Before**:
+
+```rust
+let mut command = GameplayCommandEnvelope::new(
+    GameplayCommandTypeId::new("move")?,
+    GameplayCommandSource::Test,
+    GameplayCommandTime {
+        frame: 17,
+        fixed_tick: None,
+    },
+);
+command.target = Some(GameplayCommandTarget::named("player")?);
+queue.push(command);
+for command in queue.as_slice() {
+    apply(command);
+}
+queue.clear();
+```
+
+**After**:
+
+```rust
+let submission = GameplayCommandSubmission::new(
+    GameplayCommandTick::new(17).expect("tick is non-zero"),
+    GameplayCommandIngressSource::test("driver")?,
+    GameplayCommandSourceSequence::new(1).expect("sequence is non-zero"),
+    GameplayCommandDraft::new(GameplayCommandTypeId::new("move")?),
+);
+let accepted_key = queue.submit(submission)?;
+
+// Systems in GameplayCommandSet::Consume read GameplayCommandBatch::commands().
+// Systems in Capture record the same immutable batch before engine-owned Ack retires it.
+```
+
+Replace `queue.is_empty()` with `queue.is_idle()` only when the caller truly needs to know that no
+pending, active, quarantined, or poisoned lifecycle state remains. Most consumers should read only
+the current `GameplayCommandBatch` in a declared command set.
+
+`ActionCommandMap::bind` and `bind_action` now return `Result<(), ActionCommandMapError>` and reject
+binding 4,097 rather than growing without bound.
+
+Old public binding-field access such as `binding.command_type` becomes
+`binding.command().command_type()`. Use `binding.action()`, `context()`, and `phase()` for routing,
+and the existing builders to replace target/payload intent atomically.
+
+Replace `app.add_plugin(GameplayCommandPlugin)?` with
+`app.add_plugin(GameplayCommandPlugin::default())?`, or pass validated custom limits through
+`GameplayCommandPlugin::new(settings)`.
+
+**Affected examples and fixtures**: the root facade prelude and `ServerPlugins` tests,
+`examples/headless_server.rs`, and all `nara_gameplay` tests now use the canonical queue/batch and
+fallible binding APIs.
+
+**User action**: replace direct envelope/queue mutation with a draft and submission; assign one
+stable source sequence per producer stream; register simulation and capture systems in the declared
+command sets; handle every submission/binding rejection. Do not read pending buckets or acknowledge
+batches from game code.
+
+**Source action**: `none` for Rust-only projects.
+
+**Cache action**: `keep`.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert `8ba9384` together with all facade/example callers. Do not restore the frame
+vector, public `LocalAction`, consumer-owned clear/ack, or a compatibility wrapper.
+
+**Verification anchors**: 27 `nara_gameplay` serde tests cover zero/one/many tick delivery,
+canonical full-envelope ordering, duplicate/late/future rejection atomicity, all count/byte limits,
+NaN/infinity, hostile serde values, local-source reservation, and terminal poison/quarantine. Root
+tests cover exact `ServerPlugins` batches and absence of raw input; `headless_server` runs without a
+desktop backend. Stale searches exclude `GameplayCommandTime`, frame provenance, queue
+`push/clear/as_slice`, and `MapActions/Clear` sets.
+
+## U4-2: Canonical Gameplay Command Submission Shape
+
+**Removed contract**: prototype command JSON containing frame/time fields, optional ticks, legacy
+source variants, public admitted envelopes, or live queue/batch state; and flat action-command
+binding JSON with sibling `command_type`, `target`, and `payload` fields.
+
+**Canonical replacement or deletion rationale**: only `GameplayCommandSubmission` is accepted for
+ingress deserialization, and only admitted `GameplayCommandEnvelope` is serialized for capture.
+Queue and batch runtime state are not serializable. This is a pre-release canonical reset, so the
+correct shape remains version 1 when a replay owner later defines its outer envelope; no `V2` type
+or legacy reader is retained.
+
+```json
+{
+  "tick": 17,
+  "source": { "Test": { "driver": "driver" } },
+  "source_sequence": 1,
+  "command": { "command_type": "move", "target": null, "payload": {} }
+}
+```
+
+Action bindings now nest command intent so the Rust and persisted contracts share one bounded draft:
+
+```json
+{
+  "action": "jump",
+  "phase": "Started",
+  "command": {
+    "command_type": "player.jump",
+    "target": null,
+    "payload": {}
+  }
+}
+```
+
+Move former binding-level `command_type`, `target`, and `payload` fields under `command`; retain
+`action`, optional/default gameplay `context`, and `phase` at the binding level.
+
+The exact submission and admitted-envelope serde representations are covered by golden-value tests
+in `nara_gameplay`; the action-binding test covers the nested command shape and default gameplay
+context. A concrete file, replay, network, or package adapter must first enforce ADR 0049 encoded
+byte, nesting-depth, and container-count budgets; semantic serde limits run after that outer
+allocation boundary.
+
+**Affected examples and fixtures**: no repository persistent command fixture used the removed
+shape. Serde tests now reject obsolete/unknown fields, reserved local ingress, zero identities,
+oversized strings/keys/maps, duplicate keys, and non-finite values.
+
+**User action**: manually rewrite experimental command captures to the canonical submission shape,
+or regenerate them from current code. Do not deserialize untrusted bytes without an outer bounded
+reader/parser.
+
+**Source action**: `manual-rewrite`; runtime auto-rewrite is unsupported.
+
+**Cache action**: `delete` or regenerate prototype replay captures.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: restore an external backup and revert `8ba9384`; do not add a dual reader.
+
+**Verification anchors**: `nara_gameplay` serde rejection, canonical submission/envelope
+serialization, and action-binding shape tests, plus ADR 0057's explicit outer parse-budget
+requirement.
 
 ## U5-1: Bounded Threaded Task Admission and Typed Terminals
 

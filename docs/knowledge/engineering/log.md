@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-11
+* **Work Registration**: [Engine foundation contract completion](registry/2026-07/2026-07-11T015344Z-engine-foundation-contract-completion-codex-root-9a4fb3b296f140ef8a908f25e74f9a01.md) - Fearless implementation of the mature-engine foundation audit plan.
+* **Verification Evidence**: [M1 runtime safety gate continued](verification/2026-07/2026-07-11-m1-runtime-safety-gate.md) - U1-U5, U18, and U25 pass the sequential low-memory milestone gate; M1 decision is continue.
+
 ## 2026-07-10
 * **Memory Event**: [Correction: Correction: the M1 unit range U1-U5 includes U4. Current GameplayCommandQueue re](logs/2026-07/2026-07-10T134753Z-correction-correction-the-m1-unit-range-u1-u5-includes-u4-current-gameplaycommandqueue-re-2cf0b4d5de50496abbca6dc33965618b.md) - Correction: the M1 unit range U1-U5 includes U4. Current GameplayCommandQueue remains frame-oriented and is cleared in CoreStage::Last, so U
 * **Work Registration**: [Engine foundation contract completion](registry/2026-07/2026-07-10T134719Z-engine-foundation-contract-completion-codex-root-8490b424714a497884c8d87f1c96d20e.md) - Fearless implementation of the mature-engine foundation audit plan.

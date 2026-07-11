@@ -57,8 +57,10 @@ sequenceDiagram
 ### Values and durable shape
 
 - `GameplayCommandDraft` contains command type, optional stable target vocabulary, and payload.
-- `GameplayCommandSubmission` adds authoritative tick, canonical source, and source sequence. It is
-  the validated ingress and deserialization shape.
+- `GameplayCommandSubmission` adds authoritative tick, `GameplayCommandIngressSource`, and source
+  sequence. It is the validated public ingress and deserialization shape. The ingress source type
+  intentionally excludes `LocalAction`; only the engine-owned action mapper can allocate that
+  reserved source stream.
 - `GameplayCommandEnvelope` is created only by admission. Its fields are immutable through public
   APIs and it is serializable for replay capture.
 - Runtime `GameplayCommandQueue` and `GameplayCommandBatch` state is not serializable.
@@ -71,6 +73,11 @@ AI driver, then external producer. `LocalAction` is one reserved stream; its sou
 preserves the already deterministic action/binding iteration order. Adding or reordering source
 kinds requires an ADR update rather than relying on Rust enum declaration order.
 
+Serde validation is the semantic inner boundary, not an allocation firewall. A file, replay,
+network, package, or other untrusted adapter must enforce the encoded byte, nesting-depth, and
+container-count budgets from ADR 0049 before deserializing a submission. It must not feed an
+unbounded reader directly into serde and rely on post-allocation string/value validation.
+
 Caller-supplied source labels do not prove authentication or authorization. A future networking
 adapter must bind an authenticated peer/session to a host-issued source before submission.
 
@@ -79,9 +86,9 @@ lookup authority, unload, and tombstone behavior remain owned by the runtime ide
 `nara_gameplay` does not depend on `nara_scene` and does not convert durable targets into runtime
 `Entity` values.
 
-### Tick state machine
+### Tick state machine and terminal failure
 
-The queue maintains two monotonic watermarks and at most one active batch:
+While healthy, the queue maintains two monotonic watermarks and at most one active batch:
 
 ```text
 acknowledged_through <= closed_through <= acknowledged_through + 1
@@ -108,24 +115,47 @@ successfully completed tick. Multiple read-only systems may observe that batch. 
 claim of one business handler, durable crash recovery, or transactional exactly-once execution
 across a process failure.
 
+An empty healthy tick still has an active `GameplayCommandBatch` for `T`; therefore `Consume` and
+`Capture` run once for every authoritative fixed tick, including ticks with no commands.
+
+Any command lifecycle invariant failure is terminal for that runtime instance. The queue records
+the first fault as sticky state, rejects later submissions with `LifecycleFaulted`, and rejects
+later admission/acknowledgement with `Poisoned`. If a batch was visible when the fault occurred, its
+commands move into queue-owned quarantine and the public batch becomes inactive before any later
+consumer can observe it. `Consume` and `Capture` are gated on a current healthy batch, so they do
+not execute after admission failure or against a stale batch. Pending and quarantined commands stay
+retained and budgeted; there is no in-place recovery or acknowledgement path. The owning runtime
+must be discarded and rebuilt from a known-good boundary.
+
 ### Bounds, validation, and overload
 
 `nara_gameplay` owns immutable queue limits using the unit-safe scalar types from `nara_core`.
-Limits cover future tick horizon, total live commands, total live logical bytes, per-command bytes,
-payload fields, payload bytes, payload key bytes, and payload string bytes. Defaults are finite and
-constructors reject settings above domain hard ceilings.
+Defaults are finite and constructors reject settings above domain hard ceilings:
 
-Live usage includes pending commands plus the active batch. Moving a command into the batch does
-not release capacity; acknowledgement is the only normal retirement boundary. All size arithmetic,
-tick increments, and sequence increments use checked operations. Saturation is permitted only for
-observation counters.
+| Limit | Default | Hard ceiling |
+|---|---:|---:|
+| Action-command bindings | 4,096 | 4,096 |
+| Retained commands | 4,096 | 65,536 |
+| Retained logical bytes | 4 MiB | 64 MiB |
+| One command | 64 KiB | 512 KiB |
+| Payload fields | 64 | 256 |
+| Payload logical bytes | 32 KiB | 256 KiB |
+| Payload key | 256 bytes | 256 bytes |
+| Payload string | 128 KiB | 128 KiB |
+| Future tick horizon | 600 | 1,000,000 |
+
+Healthy live usage includes pending commands plus the active batch. Poisoned live usage includes
+pending commands plus quarantine. Moving a command into the batch does not release capacity;
+acknowledgement is the only normal retirement boundary, and poison deliberately keeps reservations
+until the runtime is disposed. All size arithmetic, tick increments, and sequence increments use
+checked operations. Saturation is permitted only for observation counters.
 
 Logical bytes are a deterministic admission weight, not allocator resident memory or serialized
 length. They comprise fixed one-byte variant tags, eight-byte integer/float/tick/sequence scalars,
 one byte for booleans, and UTF-8 lengths for command/source/target IDs, payload keys, and payload
 strings. Item limits separately bound container/node overhead.
 
-Submission rejection precedence is stable:
+For a healthy queue, submission rejection precedence is stable:
 
 1. structural, finite-value, and per-command validation;
 2. late tick;
@@ -133,6 +163,9 @@ Submission rejection precedence is stable:
 4. duplicate key;
 5. live item capacity;
 6. live byte capacity.
+
+A poisoned queue is the only precedence exception: it returns `LifecycleFaulted` before inspecting
+new input because that runtime can no longer admit authoritative work.
 
 Validation and checked candidate accounting complete before queue content, watermarks, retained
 usage, or the local sequence allocator changes. A rejection may increment bounded statistics but
@@ -149,8 +182,8 @@ must collect and sort a bounded batch before calling ingress.
 
 | Resource | Producer | Consumer | Retention and cleanup | Replay/diagnostic role |
 |---|---|---|---|---|
-| `GameplayCommandQueue` | Local action mapper and explicit test/replay/AI/external adapters | `Admit` system | Accepted intent remains until its target tick is acknowledged; overload rejects rather than evicts | Typed rejection and numeric stats are the U4 observation surface; U31 bridges them to runtime diagnostics/pressure |
-| `GameplayCommandBatch` | `Admit` at fixed Prepare | Simulation in `Consume`, replay/debug taps in `Capture` | Exactly one active tick; engine-owned `Acknowledge` retires after Capture | Canonical replay capture point; not a frame event and not read after fixed Finalize |
+| `GameplayCommandQueue` | Engine-owned local action mapper and explicit test/replay/AI/external adapters | `Admit` system | Accepted intent remains until its target tick is acknowledged; overload rejects rather than evicts; terminal poison retains pending plus quarantined work until runtime disposal | Typed rejection, lifecycle-fault, quarantine, and numeric stats are the U4 observation surface; U31 bridges them to runtime diagnostics/pressure |
+| `GameplayCommandBatch` | `Admit` at fixed Prepare | Simulation in current-gated `Consume`, replay/debug taps in current-gated `Capture` | Exactly one healthy active tick, including an empty batch; engine-owned `Acknowledge` retires after Capture; poison hides and quarantines the batch | Canonical replay capture point; not a frame event and not read after fixed Finalize |
 
 ## Alternatives Considered
 
@@ -196,8 +229,11 @@ transport requirement that justifies the complexity.
 ## Consequences
 
 - Fixed gameplay consumers must join `GameplayCommandSet::Consume`; replay/debug taps join
-  `GameplayCommandSet::Capture`.
+  `GameplayCommandSet::Capture`. Both sets execute only while the batch belongs to the current
+  healthy tick.
 - `CoreStage::Last` no longer owns gameplay command cleanup.
+- Public producers use `GameplayCommandIngressSource`; they cannot impersonate the reserved local
+  action stream. `ActionCommandMap::bind` and `bind_action` are fallible at the binding limit.
 - The local input bridge retains semantic commands across pause/zero-tick frames without extending
   the lifetime of raw input observations.
 - Persistent prototype command JSON using frame/time fields must be rewritten to the canonical
@@ -214,17 +250,20 @@ transport requirement that justifies the complexity.
 | Zero-tick retention | One local action submitted before zero fixed steps appears once at the next authoritative tick | AE2 app test |
 | Catch-up delivery | A command for tick 1 is absent from ticks 2 and 3 in the same frame | `nara_gameplay` fixed-stage tests |
 | Deterministic order | Reversing arrival order for the same accepted key set produces identical batches | Pure queue and server replay tests |
-| Bounded retention | Pending plus active items/bytes never exceed configured limits; exact boundary accepts and boundary + 1 rejects | Queue limit tests |
+| Bounded retention | Healthy pending plus active, or poisoned pending plus quarantine, never exceed configured limits; exact boundary accepts and boundary + 1 rejects | Queue limit and poison-quarantine tests |
 | Invalid ingress | Zero tick/sequence, invalid IDs/targets, NaN/Inf, late, future, and duplicate submissions are rejected without partial retention | Constructor, serde, and queue tests |
-| Lifecycle ownership | Capture observes the active batch before Ack, and no command cleanup system exists in `CoreStage::Last` | Schedule and stale-contract checks |
+| Lifecycle ownership | Capture observes a current healthy batch before Ack; a fault is sticky, quarantines active work, and gates consumers; no command cleanup system exists in `CoreStage::Last` | Schedule, poison, and stale-contract checks |
 
 ## Risks and Mitigations
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | A client chooses a source ID to influence ordering | High | Medium | Treat source as a label, not authority; future authenticated adapters issue/bind it before ingress |
-| Active commands escape the memory budget | High | Medium | Account pending plus active together and release only at Ack; test capacity while a batch is active |
+| Active or faulted commands escape the memory budget | High | Medium | Account pending plus active while healthy and pending plus quarantine after poison; release only at successful Ack or runtime disposal |
 | A new source variant changes replay order | High | Low | Manual canonical rank with tests; require an ADR change for ordering changes |
+| An external producer impersonates local input | High | Medium | Exclude `LocalAction` from the public ingress source type and reserve its sequence allocator for the engine mapper |
+| Lifecycle failure exposes stale commands | High | Low | Sticky terminal poison, queue-owned quarantine, and current-batch run conditions fail closed; rebuild the runtime rather than recovering in place |
+| Untrusted serde input allocates before semantic bounds reject it | High | Medium | Require ADR 0049 encoded byte/depth/count limits in every concrete file/replay/network adapter before deserialization |
 | Ack runs before replay capture | High | Low | Chain `Capture -> Acknowledge` inside fixed Finalize and test both views |
 | Scene-local target is mistaken for global runtime identity | High | Medium | Limit U4 to structural validation; U8 owns instance-aware lookup, unload, and tombstones |
 | Exactly-once wording implies crash transactions | Medium | Medium | Scope the guarantee to one batch/retirement in a successfully completed tick |
