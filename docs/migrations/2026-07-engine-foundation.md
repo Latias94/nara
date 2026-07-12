@@ -33,6 +33,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | U4-2 | U4 | `8ba9384` | `persistent-shape` | Prototype serialized gameplay command submissions | Rewrite to the canonical tick/source/source-sequence/command shape; enforce ADR 0049 outer parse budgets before serde. |
 | U5-1 | U5 | `e77da64` | `rust-api` | Task pool configuration, submission, terminal results, test execution, and shutdown | Configure bounded threaded pools, handle explicit spawn/terminal outcomes, and use the test-only inline driver where deterministic execution is required. |
 | U5-2 | U5 | `e77da64` | `persistent-shape` | `nara.toml` runtime plugin-plan spelling and task pool schema | Rewrite flat task fields into per-pool/shutdown tables and use only the canonical `runtime-2d` value. |
+| U8-1 | U8 | `9263d8c` | `rust-api/behavior/persistent-shape` | Runtime entity identity, scene instance handles, gameplay entity targets, reflected references, export remaps, and tooling snapshots | Use `nara_identity` references/locators, keep scene instance context explicit, remap before fork/replay/export, and replace raw `Entity` observations. |
 | U18-1 | U18 | `6a70847` | `rust-api/behavior` | Diagnostic construction, reports, runtime observations, pressure snapshots, and diagnostic plugin composition | Migrate to validated/classified bounded observations and reduce any `diagnostics.runtime_capacity` above 4,096. |
 
 ## Entry Contract
@@ -530,6 +531,112 @@ not add aliases or parallel schema-version types.
 **Verification anchors**: the complete version-1 fixture, obsolete flat-schema/alias rejection,
 duration/fixed-cap/task-limit/profile merge tests, root configuration equality test, and stale-symbol
 searches.
+
+## U8-1: World-Scoped Runtime Identity and Stable Entity References
+
+**Removed contract**:
+
+- Gameplay-owned `SceneStableId` and `PersistentRuntimeId` definitions and their duplicate
+  command-target identity ownership. The canonical `PersistentRuntimeId` remains in
+  `nara_identity`.
+- `nara_scene::SceneInstanceId`, `SceneEntityMap`, `SceneSpawnReport::entity_map`,
+  `SceneAuthoringSession::live_entity_map`, and export IDs derived from instance-name string
+  concatenation.
+- `WorldSnapshot { entities: Vec<Entity> }`, raw live/play `Entity` observations, and tooling APIs
+  that treated allocator-local entity bits as stable identity.
+- Entity-reference clone/export paths that could publish an incomplete remap or preserve an
+  unresolved runtime target.
+
+**Canonical replacement or deletion rationale**: `nara_identity` is the single deep owner of
+world-domain, scene-instance, persistent, locator, remap, lookup, and tombstone semantics.
+`SceneSpawnReport` returns a `SpawnedSceneInstance`; callers resolve its stable references through
+the owning `WorldIdentityDomain`. Gameplay entity targets use `RuntimeEntityReference`. Reflected
+component values use durable `EntityReference::{SceneLocal, Persistent}` and bounded, failure-atomic
+rewrite helpers. Tooling captures `WorldIdentitySnapshot`, which reports stable locators plus
+count-only runtime entities without exposing Bevy `Entity`. The removed APIs could alias across
+worlds, collide across spawners, or serialize process-local handles.
+
+**Before**:
+
+```rust
+let report = spawn_scene(&mut world, &registry, &document);
+let entity = report.entity_map.get(&entity_id).unwrap();
+let target = GameplayCommandTarget::Scene(SceneStableId::new("player")?);
+let observed_entities = WorldSnapshot::capture(&mut world).entities;
+```
+
+**After**:
+
+```rust
+let report = spawn_scene(&mut world, &registry, &document);
+let instance = report.instance.expect("scene spawn succeeded");
+let target = GameplayCommandTarget::Entity(
+    instance.runtime_reference(&entity_id).expect("entity is a member"),
+);
+let Some(EntityLookup::Resolved(entity)) = target.resolve_entity(&world) else {
+    panic!("entity target must resolve");
+};
+let snapshot = WorldIdentitySnapshot::capture(
+    &world,
+    ItemLimit::new(4_096).expect("limit is non-zero"),
+)?;
+```
+
+Gameplay scene targets serialize with explicit instance context and no world/domain/process handle:
+
+```json
+{
+  "Entity": {
+    "kind": "scene",
+    "instance": 7,
+    "entity": "player"
+  }
+}
+```
+
+Reflected durable references use the canonical `entity_ref` leaf shape. Scene-local values do not
+carry a runtime scene instance; the owning scene instance supplies that context when resolving:
+
+```json
+{
+  "type": "entity_ref",
+  "value": {
+    "kind": "scene_local",
+    "entity": "root/player"
+  }
+}
+```
+
+**Affected examples and fixtures**: scene/prefab roundtrip and override examples, authoring,
+inspector, Play Mode, sprite/tilemap/UI codec tests, root facade exports, and all scene spawn/export
+callers now use the shared identity domain.
+
+**User action**: replace map/raw-entity access with `SpawnedSceneInstance`,
+`RuntimeEntityReference`, `WorldEntityLocator`, and typed lookup results. Include scene-instance
+context when targeting one of several instances of the same scene. Before replaying into a parallel
+fork or exporting a renamed group, build the complete remap and rewrite every declared target; do
+not publish a partial candidate. Replace tooling raw-entity snapshots with bounded
+`WorldIdentitySnapshot` capture.
+
+**Source action**: `manual-rewrite` for experimental serialized command targets or reflected
+component values. Loading obsolete persistent shapes for automatic rewrite is unsupported.
+
+**Cache action**: `delete` or regenerate prototype replay/debug captures containing old gameplay
+target tags or raw `Entity` values.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: restore external source/capture backups and revert `9263d8c` together with the U8
+identity-core commits. Do not reintroduce duplicate ID owners, a `SceneEntityMap` compatibility
+wrapper, or raw-entity observation fields.
+
+**Verification anchors**: `crates/nara_identity/src/tests.rs`,
+`crates/nara_reflect/src/tests.rs`, `crates/nara_scene/src/tests.rs`, tooling snapshot/Play tests,
+and `tests/stable_runtime_identity.rs` cover world aliasing, duplicate instances, fork/restore
+remaps, lookup outcomes, failure-atomic scene replacement/export, canonical serde shapes, and
+count-only runtime observations. `cargo nextest run --workspace --all-features` passed 618 tests
+with 3 configured skips at `9263d8c`; stale-symbol searches exclude the removed identity/map/raw
+snapshot vocabulary from code, tests, and examples.
 
 ## U18-1: Privacy-Safe Bounded Diagnostic Observations
 

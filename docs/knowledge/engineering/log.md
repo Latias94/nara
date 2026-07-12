@@ -4,6 +4,11 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-12
+* **Work Registration**: [Engine foundation contract completion](registry/2026-07/2026-07-12T003354Z-engine-foundation-contract-completion-codex-root-94a3690a870242ef85c08cc910cc0ea8.md) - Fearless implementation of the mature-engine foundation audit plan.
+* **Session Handoff**: [U8 identity completion and U9 entry handoff](sessions/2026-07/2026-07-12T003354Z-u8-identity-completion-and-u9-entry-handoff-66302302f4b84591bde7c4d1377e9fa5.md) - Durable continuation state after completing the U8 consumer migration.
+* **Verification Evidence**: [U8 stable runtime identity final verification](verification/2026-07/2026-07-12T003354Z-u8-stable-runtime-identity-final-verification-0ef7fd8028de4210a46569ef8be66a80.md) - Focused and workspace evidence for the completed U8 identity contract.
+
 ## 2026-07-11
 * **Work Registration**: [Engine foundation contract completion](registry/2026-07/2026-07-11T140302Z-engine-foundation-contract-completion-codex-root-19e179d7f90d4576bc98a51b402ff3e2.md) - Fearless implementation of the mature-engine foundation audit plan.
 * **Decision**: [Root product capability and domain task ownership](decisions/2026-07/2026-07-11T140157Z-root-product-capability-and-domain-task-ownership-6c91ef42d87c40f7a8b4d2ab231583af.md) - ADR 0079 and ADR 0080 align compiled product ceilings, preflight composition, placeholder retirement, and domain-owned TaskUpdate integration.

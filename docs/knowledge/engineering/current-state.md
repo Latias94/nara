@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "f6d941f959f114f32ad0ee840d22c426a4982537d7e5f060503cc9f30e98c95e"
+source_fingerprint: "b28301b103903ef8a162a92308763588abd6a71708b3b7f7d153d709b9b2f40b"
 ---
 
 # Current State
@@ -12,17 +12,19 @@ source_fingerprint: "f6d941f959f114f32ad0ee840d22c426a4982537d7e5f060503cc9f30e9
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `f6d941f959f114f32ad0ee840d22c426a4982537d7e5f060503cc9f30e98c95e`
-- Immutable records: 102
+- Source fingerprint: `b28301b103903ef8a162a92308763588abd6a71708b3b7f7d153d709b9b2f40b`
+- Immutable records: 105
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Engine foundation contract completion](registry/2026-07/2026-07-11T140302Z-engine-foundation-contract-completion-codex-root-19e179d7f90d4576bc98a51b402ff3e2.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Engine foundation contract completion](registry/2026-07/2026-07-12T003354Z-engine-foundation-contract-completion-codex-root-94a3690a870242ef85c08cc910cc0ea8.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Session Handoff**: [U8 identity completion and U9 entry handoff](sessions/2026-07/2026-07-12T003354Z-u8-identity-completion-and-u9-entry-handoff-66302302f4b84591bde7c4d1377e9fa5.md) - Durable continuation state after completing the U8 consumer migration.
+- **Verification Evidence**: [U8 stable runtime identity final verification](verification/2026-07/2026-07-12T003354Z-u8-stable-runtime-identity-final-verification-0ef7fd8028de4210a46569ef8be66a80.md) - Focused and workspace evidence for the completed U8 identity contract.
 - **Decision**: [Root product capability and domain task ownership](decisions/2026-07/2026-07-11T140157Z-root-product-capability-and-domain-task-ownership-6c91ef42d87c40f7a8b4d2ab231583af.md) - ADR 0079 and ADR 0080 align compiled product ceilings, preflight composition, placeholder retirement, and domain-owned TaskUpdate integration.
 - **Research Findings**: [Root capability, task ownership, and manifest IO audit](2026-07/2026-07-11T114131Z-root-capability-task-ownership-and-manifest-io-audit-d3b79814f13b4bc3980973c209bf1e72.md) - Fresh audit of root compilation closure, plugin composition, TaskUpdate ownership, placeholder audio, and capability-bound project manifest ingest.
 - **Decision**: [Execution cursor disclosure boundary](decisions/2026-07/2026-07-11T035400Z-execution-cursor-disclosure-boundary-417ce2d6031b4bfd9b09c1d175539233.md) - Applies host observation allowlisting, redaction, budgets, and safe source locators to interpreter cursor payloads.
@@ -33,8 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Correction: Correction: the M1 unit range U1-U5 includes U4. Current GameplayCommandQueue re](logs/2026-07/2026-07-10T134753Z-correction-correction-the-m1-unit-range-u1-u5-includes-u4-current-gameplaycommandqueue-re-2cf0b4d5de50496abbca6dc33965618b.md) - Correction: the M1 unit range U1-U5 includes U4. Current GameplayCommandQueue remains frame-oriented and is cleared in CoreStage::Last, so U
 - **Work Progress**: [Engine foundation U4 blocks M1 gate](progress/2026-07/2026-07-10-engine-foundation-u4-gap-correction.md) - Correction: M1 includes U4, whose frame-cleared gameplay queue still violates authoritative tick admission.
 - **Legacy Rollup Snapshot**: [Legacy rollup current-state.md before derived adoption](legacy/2026-07/2026-07-10T133221Z-legacy-rollup-current-state-md-before-derived-adoption-b396412c56c14976894c714622a2dcf9.md) - Preserved current-state.md before derived rollup adoption.
-- **Legacy Rollup Snapshot**: [Legacy rollup log.md before derived adoption](legacy/2026-07/2026-07-10T133221Z-legacy-rollup-log-md-before-derived-adoption-977bd7d264d44c89a86de0793b3cd8a9.md) - Preserved log.md before derived rollup adoption.
-- **Memory Event**: [Verification: U18 diagnostic privacy and pressure core committed as 6a70847. Sequential verifi](logs/2026-07/2026-07-10T133020Z-verification-u18-diagnostic-privacy-and-pressure-core-committed-as-6a70847-sequential-verifi-eed0a2761d5f4183963607b4c5171545.md) - U18 diagnostic privacy and pressure core committed as 6a70847. Sequential verification passed 50 default tests, 51 serde tests, strict Clipp
 
 # Integration Notes
 
