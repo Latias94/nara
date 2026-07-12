@@ -3,14 +3,16 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Amended**: 2026-07-10 for the unreleased canonical-version reset policy
+**Implemented Slice**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes
 **Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0043, ADR 0045
-**Refined By**: ADR 0055: Feature Matrix, Boundary Checks, and Compatibility Fixtures
+**Refined By**: ADR 0055: Feature Matrix, Boundary Checks, and Compatibility Fixtures;
+ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 ## Context
 
-Scene, prefab, and patch documents have format versions.
-Asset metadata and import artifact records do not yet share a file envelope.
-Component schema migration exists, and document migration policy exists, but persistent files still lack one consistent header contract and long-term golden fixtures.
+Scene, prefab, standalone patch, and component-schema-catalog files now share the first canonical
+envelope implementation. Asset metadata, import artifact records, and project manifests do not yet
+share that file boundary.
 
 Without a shared envelope and fixture strategy, every file format will invent version names,
 generator metadata, unknown-field behavior, and compatibility tests separately. Patch migration is
@@ -42,7 +44,9 @@ Rules:
 - Persistent files include at least `kind`, `format_version`, `engine_min_version`, and `generator`.
 - The corrected unreleased shape for each kind is canonical `format_version = 1`. Superseded draft
   readers, structs, and fixtures are removed, and corrected Rust APIs use unsuffixed names.
-- Scene, prefab, scene patch, asset meta, import artifact record, component schema catalog, and future project manifest files each have a distinct `kind`.
+- Scene, prefab, scene patch, and component schema catalog currently have distinct canonical kinds.
+  Asset metadata, import artifact records, and a future file-backed project-manifest envelope remain
+  long-term participants, not implemented RGF-U1 facts.
 - Unknown future versions fail with structured diagnostics.
 - Prototype versions/shapes fail with structured diagnostics rather than using a hidden fallback.
 - A non-v1 version is readable only when the format's compatibility matrix links an ADR that names
@@ -50,10 +54,25 @@ Rules:
 - Runtime load may migrate in memory but must not rewrite source files silently.
 - Patch migration runs before patch validation/apply and must rewrite operation payloads and field paths through registered migration data.
 - Component field path migrations are part of schema migration review when a field is renamed, moved, split, or merged.
-- Canonical fixtures live under `tests/fixtures/format-v1/` or an equivalent format-owner
+- Canonical fixtures live under `tests/fixtures/formats/v1/` or an equivalent format-owner
   directory and cover load, validate, and canonical reserialize behavior. ADR-retained versions add
   migration input/output fixtures under their declared version.
 - Golden fixtures test codes and structural output, not unstable prose text.
+
+### Current Compatibility Matrix
+
+| File kind | Written | Readable | Retained migration chain |
+|---|---:|---:|---|
+| `scene` | 1 | 1 | none |
+| `prefab` | 1 | 1 | none |
+| `scene_patch` | 1 | 1 | none |
+| `component_schema_catalog` | 1 | 1 | none; a successor is checked against its direct predecessor |
+
+The eight RGF-U1 JSON/RON golden files intentionally contain empty payload containers. They lock
+the common envelope, field names, omission rules, line endings, and empty canonical shape. They do
+not prove representative nested payload stability. Non-empty component values, field-ID patches,
+embedded prefab overrides, catalog entries, and rejection behavior are covered by construction-based
+round-trip and negative tests until a real project fixture is admitted.
 
 ## Alternatives Considered
 

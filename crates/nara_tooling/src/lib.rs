@@ -20,9 +20,9 @@ pub use play::{
 };
 pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
 pub use workspace::{
-    EditorDocumentId, EditorExternalReloadState, EditorSceneModel, EditorSceneSlot,
-    EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,
-    EditorWorkspaceCommandReport, EditorWorkspaceModel,
+    EditorDocumentId, EditorExternalReloadState, EditorSceneModel,
+    EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
+    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
 };
 
 #[derive(Debug, Default)]

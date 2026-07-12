@@ -6,7 +6,11 @@
 
 ## Problem
 
-nara needs a Rust-native engine foundation that supports code-first game authoring, strict ECS data flow, and future AI-generated game logic. The repository started as a single hello-world package, so the first decision is not implementation detail but module shape: what should be stable enough for users and agents to build against, and what should stay hidden behind narrow seams.
+nara needs a foundation for a complete Rust-first game production path: typed gameplay code, an
+ECS-backed simulation, project and editor workflows, backend services, debugging, and delivery.
+The repository started as a single hello-world package, so the first decision is not a renderer
+feature but module shape: which contracts form one coherent product, which modules can be reused or
+replaced, and which implementation details stay hidden behind narrow boundaries.
 
 ## Governance
 
@@ -16,8 +20,15 @@ nara is unreleased. Incorrect prototype APIs and draft persistent shapes are rem
 
 ## Goals
 
-- Keep the public authoring interface small: `App`, `Plugin`, `World`, typed components, asset handles, and renderer-facing data.
-- Keep runtime data strongly typed and ECS-first. Scene hierarchy is represented by data components such as `Parent` and `Children`.
+- Make public Rust APIs sufficient for complete game production rather than only engine extension
+  or performance hotspots.
+- Keep the public authoring interface small: `App`, `Plugin`, `World`, typed components, asset
+  handles, and renderer-facing data.
+- Keep simulation data strongly typed and ECS-backed. Scene hierarchy is represented by data
+  components such as `Parent` and `Children`; project documents, editor state, and native services
+  retain separate authorities.
+- Compose first-party modules into a coherent default product while preserving documented crate,
+  plugin, and backend boundaries for supported reuse and replacement.
 - Isolate backends. wgpu, windowing, audio, egui, and dear-imgui must sit behind adapters rather than leak into gameplay code.
 - Make Phase 2 serialization and inspection natural by reserving explicit asset, scene, and tooling crates now.
 
@@ -85,12 +96,12 @@ flowchart TD
 | `nara_app` | `App`, `Plugin`, terminal plugin lifecycle/failure reports, `StartupStage`, `CoreStage`, `FixedUpdateSet`, validated real/virtual/fixed/render time resources and frame outcomes | Preflight versus committed hook containment, reverse once-only cleanup, borrowing runner policy, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary |
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker pools with pending-only coalescing, panic isolation, first-terminal cancellation, finite drain/cancel/join, and an explicitly test-only inline driver |
-| `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars | Core primitives and unit-safe values that do not own domain overload policy |
+| `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
 | `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; unsupported platform primitives remain explicit |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, and stable non-`Entity` observation vocabulary |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
-| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry modules for Bevy-reflect-backed component metadata, asset-aware scene preflight, schema/capability export, and migrations |
+| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, runtime-independent `ComponentSchemaCatalog`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, atomic Building-to-Frozen publication, asset-aware scene preflight, schema/capability export, and migrations |
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, hot reload scheduling, dependency graph, reload generations |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, semantic watch event queue, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
@@ -108,7 +119,7 @@ flowchart TD
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
 | `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that updates window resources plus keyboard, mouse-button, and pointer state |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
-| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldSnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, open scene document slots, active document, selection sets, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
+| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldIdentitySnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, stable identity-only snapshots, open scene document slots, active document, selection sets, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
 ## Accepted Runtime Debugging Direction
@@ -117,10 +128,10 @@ flowchart TD
   step runs a complete fixed transaction and returns to paused; render-frame stepping and future
   system stepping are different capabilities.
 - `nara_tooling` owns bounded, UI-agnostic observation, diff, timeline, and lifecycle models. It
-  consumes U8 stable identity and `nara_reflect` codecs; it does not serialize arbitrary worlds,
+  consumes the implemented legacy U8 stable identity and `nara_reflect` codecs; it does not serialize arbitrary worlds,
   store allocator-local `Entity` values, or use `RuntimeDiagnostics` as a high-frequency trace.
 - Detailed component observation requires both schema eligibility and a host disclosure/redaction
-  policy. Unregistered runtime-only/internal entities are omitted/count-only unless U8 supplies a
+  policy. Unregistered runtime-only/internal entities are omitted/count-only unless the identity domain supplies a
   world-scoped non-persistent observation locator.
 - Command, system, and component-change timelines distinguish proven provenance, temporal
   correlation, and explicitly instrumented direct causality.
@@ -132,9 +143,11 @@ flowchart TD
 - Future backwards navigation restores a completed-tick checkpoint into a fresh isolated runtime
   and replays authoritative commands plus recorded nondeterministic outcomes forward. It is not
   reverse execution or inverse component mutation.
-- Native Rust code iteration uses rebuild-and-restart until a measured workflow justifies a
-  separate ABI, quiescence, state-migration, and rollback decision. Asset/data reload does not imply
-  machine-code hot replacement.
+- Rust iteration classifies each change. Asset/scene/data changes use domain reload; compatible
+  function-body changes may use an optional development hot-patch plugin at a quiescent boundary;
+  structural or unknown changes rebuild and start a fresh isolated runtime with explicit validated
+  restoration. Optional script adapters own a separate reload contract. See ADR
+  [0021](adr/0021-scripting-and-wasm-boundary.md).
 
 ## Runtime Flow
 
@@ -216,7 +229,7 @@ second real adapter or stronger isolation pressure.
 | Foundation compile cost | No heavy graphics/window deps in default facade | Dependency tree review |
 | User-facing startup API | A minimal app can call `App::new().update()` and examples can use `Commands`/`Query` systems | Example and smoke test |
 | Backend isolation | Gameplay and render-domain crates do not import `wgpu` directly | `rg "wgpu::" crates src Cargo.toml` |
-| Tooling readiness | Runtime can produce `WorldSnapshot` and scene inspector models without editor UI deps | Unit or smoke test |
+| Tooling readiness | Runtime can produce `WorldIdentitySnapshot` and local scene inspector models without editor UI deps | Unit or smoke test |
 
 ## Risks and Mitigations
 
@@ -251,10 +264,15 @@ second real adapter or stronger isolation pressure.
   explicit U33 ownership gap pending migration to `nara_asset::AssetTaskUpdateSet`.
 - `nara_fs` accepts host-opened handles rather than ambient paths. Windows strict traversal is handle-bound; Linux uses `openat2`; unsupported mount, reparse, filesystem, replacement-source, directory enumeration, unlink, or rename guarantees fail closed and remain visible in the capability matrix.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
-- `nara_identity` now implements the world-scoped identity core, structured references, atomic
-  fork/restore remaps, and tombstone policy. Root facade wiring and scene/gameplay/reflect/tooling
-  consumers remain the open U8 integration work; those domains must not retain duplicate owners.
-- `nara_reflect` exports a `ComponentSchemaCatalog`, structured `ComponentFieldPath` values, and component value migration chains. Serializable components require explicit schema fields, duplicate Rust `TypeId` registration is rejected, and invalid schema defaults fail at registration.
+- `nara_identity` implements the world-scoped identity core, structured references, atomic
+  fork/restore remaps, tombstone policy, root facade wiring, and scene/gameplay/reflect/tooling
+  integration. Those domains must not retain duplicate identity owners.
+- `nara_reflect` separates an opaque-ID, alias, tombstone, version, default, and capability catalog
+  from native Rust/Bevy bindings and migration functions. `ComponentFieldId` is the durable patch
+  address; `ComponentFieldPath` is only the current value locator. A registry remains Building until
+  freeze atomically validates the full candidate, required bindings, defaults, lineage, and
+  migration chain, then publishes an immutable snapshot. Invalid registration candidates remain
+  repairable until freeze succeeds.
 - `nara_diagnostic::DiagnosticReport` collects static safe summaries plus explicitly classified
   fields without implicit logging. Error and warning observations remain sticky even when bounded
   storage rejects or evicts an entry; report merges preserve source accounting and reapply target
@@ -268,7 +286,11 @@ second real adapter or stronger isolation pressure.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and `RenderPassPlan`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource and consumes the explicit pass plan for clear/world/UI/gizmo order.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
-- `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from `SceneAuthoringSession`, `ComponentRegistry`, and optional `WorldSnapshot`, then applies field/reparent commands as scene patches.
+- `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from
+  `SceneAuthoringSession`, a frozen `ComponentRegistry`, and an optional identity-only
+  `WorldIdentitySnapshot`. Its local projection includes only component and field values eligible
+  for `inspect`; it does not implement remote disclosure, logging, persistence, or host redaction.
+  Authoring commands still apply through validated scene patches.
 - `nara_tooling::SceneEditorState` owns the first UI-agnostic Play Mode model. It starts plain, prefab-resolved, asset-aware, and combined Play sessions by spawning a fresh isolated runtime `World` through `SceneSpawner`, exposes Play/Paused/Edit mode state, and rejects persistent inspector edits while Play or Paused is active.
 - Stop Play drops the runtime `World` and discards runtime changes by default. Apply Changes now supports a narrow selected-entity / explicit-component subset: it encodes registered scene/edit-capable Play world components into `ScenePatchDocument` operations, applies them through `SceneAuthoringSession`, records undo, and rejects stale revisions, runtime-only components, prefab-expanded entities, and failed patch validation with diagnostics.
 - `nara_tooling::EditorWorkspace` is the UI-agnostic editor document authority. It owns open scene slots, active document, selection sets, dirty/saved revisions, external reload pending/conflict state, per-document undo/redo, and workspace command reports.
@@ -304,6 +326,20 @@ second real adapter or stronger isolation pressure.
   GPU textures, buffers, samplers, bind groups, pipelines, and intermediate targets; invalidation is
   generation/device/budget aware; submitters are owned by domain plugins or plugin groups. See ADR
   [0040](adr/0040-render-resource-lifetime-and-submitter-ownership.md).
+- Render pipelines use data-driven recipes and stable feature/pass providers above an engine-owned
+  plan/graph compiler. It produces reusable `CompiledPipelineTemplate` values and backend-neutral
+  frame-local `FrameExecutionPlan` values. wgpu remains the only RHI; exact wgpu limits and handles
+  stay in the backend, while project data expresses semantic requirements and explicit fallbacks.
+  One frame-wide coordinator orders encoding and submission across target transactions; each target
+  transaction owns acquire/import, final-consumer, and present/publish boundaries. See ADR
+  [0077](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md).
+- GPU execution is owned by one serialized render-host authority that consumes owned
+  backend-neutral frame packets. Browser WebGPU is JavaScript-agent/local-executor affine and
+  initializes asynchronously; native placement is adapter-declared. Surface and unexpected device
+  loss are distinct, and Device/Queue-dependent physical state and results are scoped to a
+  non-reused host/device epoch. The fragile WASM Send/Sync feature is not an ownership shortcut. See
+  ADR
+  [0078](adr/0078-render-host-affinity-webgpu-initialization-and-device-recovery.md).
 - Input is layered through normalized events, retained device state, routing decisions, action maps,
   text/IME streams, UI focus/pointer capture, and future accessibility semantics. See ADR
   [0041](adr/0041-input-routing-actions-text-focus-and-accessibility.md).
@@ -318,28 +354,15 @@ second real adapter or stronger isolation pressure.
 - The root facade uses layered preludes. `nara::prelude` is gameplay-first and backend-free;
   backend/tooling/debug/render internals move to advanced or module-specific preludes. See ADR
   [0044](adr/0044-root-facade-and-prelude-layering-policy.md).
-- Component schemas carry capability metadata for scene/save/inspect/edit/animate/replicate/script
-  eligibility at component and field granularity. Capabilities gate domain participation but do not
-  replace domain policy. See ADR
+- Canonical-v1 component schemas carry `scene`, `inspect`, and `edit` eligibility at component and
+  field granularity, plus field-only `asset_ref` and `entity_ref` value markers. Save, animation,
+  replication, scripting, diagnostics, and runtime-only state do not reserve speculative wire
+  values. Capabilities gate domain participation but do not replace domain policy. See ADR
   [0045](adr/0045-component-schema-capability-metadata.md).
 - Plugins expose stable IDs, declared capabilities, requirements/conflicts, and inspectable group
   membership. Default plugin groups are explicit product bundles, and `MinimalPlugins` stays
   headless/minimal. See ADR
   [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md).
-- Headless runtime and dedicated-server readiness are first-class profile constraints. Server
-  profiles exclude window/render/audio-device/editor/UI-toolkit adapters by default, run
-  deterministic-friendly gameplay through declared simulation stages, consume semantic gameplay
-  commands instead of raw device input, keep networking optional, and expose diagnostics/metrics
-  without editor UI. See ADR
-  [0056](adr/0056-headless-runtime-and-dedicated-server-readiness.md).
-- Editor workspace state belongs in `nara_tooling`: open document slots, active document, selection
-  sets, dirty/saved revisions, external reload conflicts, per-document undo/redo, and workspace
-  commands are implemented as UI-toolkit-agnostic `EditorWorkspace` state and reports. See ADR
-  [0047](adr/0047-editor-workspace-and-scene-document-state.md).
-- Runtime diagnostics use a shared observational bus for asset/watch/task/render/window/service
-  problems while retaining domain-specific detail and explicit tracing bridges. See ADR
-  [0048](adr/0048-runtime-diagnostics-and-observability-bus.md).
-- File-backed project data is untrusted input. Scene, prefab, patch, component value, image,
 - Root Cargo features form coarse compiled product-capability ceilings. The required product
   capabilities of a resolved plugin plan must fit the normalized project request, which must fit
   the compiled ceiling; plugin service requirements/conflicts close separately before any `App`
@@ -355,6 +378,20 @@ second real adapter or stronger isolation pressure.
   stale/superseded outcomes retire, and only later-ready or eligible missing-predecessor work waits.
   See ADR
   [0080](adr/0080-domain-owned-task-update-integration-sets.md).
+- Headless runtime and dedicated-server readiness are first-class profile constraints. Server
+  profiles exclude window/render/audio-device/editor/UI-toolkit adapters by default, run
+  deterministic-friendly gameplay through declared simulation stages, consume semantic gameplay
+  commands instead of raw device input, keep networking optional, and expose diagnostics/metrics
+  without editor UI. See ADR
+  [0056](adr/0056-headless-runtime-and-dedicated-server-readiness.md).
+- Editor workspace state belongs in `nara_tooling`: open document slots, active document, selection
+  sets, dirty/saved revisions, external reload conflicts, per-document undo/redo, and workspace
+  commands are implemented as UI-toolkit-agnostic `EditorWorkspace` state and reports. See ADR
+  [0047](adr/0047-editor-workspace-and-scene-document-state.md).
+- Runtime diagnostics use a shared observational bus for asset/watch/task/render/window/service
+  problems while retaining domain-specific detail and explicit tracing bridges. See ADR
+  [0048](adr/0048-runtime-diagnostics-and-observability-bus.md).
+- File-backed project data is untrusted input. Scene, prefab, patch, component value, image,
   metadata, and artifact loaders need parse/decode budgets before mutating runtime or project state.
   See ADR [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md).
 - Asset roots require handle-bound authority beyond logical path validation. Symlinks, mounts,
@@ -362,9 +399,10 @@ second real adapter or stronger isolation pressure.
   are part of asset/editor safety. See ADR [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md)
   and [0070](adr/0070-capability-oriented-filesystem-substrate.md).
 - Persistent files use a common envelope, a strict per-kind compatibility matrix, and canonical
-  golden fixtures. Scene, prefab, patch, asset metadata, import artifacts, and schema catalogs
-  carry kind, format version, minimum engine version, and generator metadata. Corrected unreleased
-  shapes reset to canonical version 1; only ADR-retained versions get migration chains. See ADR
+  golden fixtures. The implemented RGF-U1 matrix covers scene, prefab, standalone patch, and schema
+  catalog files with kind, format version, minimum engine version, and generator metadata. Asset
+  metadata and import artifacts remain future format-owner work. Corrected unreleased shapes reset
+  to canonical version 1; only ADR-retained versions get migration chains. See ADR
   [0051](adr/0051-persistent-file-envelope-migration-and-golden-fixtures.md).
 - Large 2D maps require visibility, camera culling, and backend-neutral tilemap chunk caches instead
   of full cell expansion every frame. See ADR
@@ -378,34 +416,42 @@ second real adapter or stronger isolation pressure.
 
 ## Next Implementation Slices
 
-1. Establish canonical version-1 envelopes and golden fixtures for scene, prefab, patch, asset
-   metadata, import artifact, and schema catalog files; delete prototype readers and add migration
-   chains only for explicit future compatibility windows.
+1. Extend the implemented scene/prefab/patch/schema-catalog envelope boundary to asset metadata or
+   import artifacts only when a concrete file-backed consumer admits that format. Keep project
+   manifest ingest bounded and host-authorized without inventing a second project settings file.
 2. Add U31 composition bridges for stabilized task, asset, watcher, window, render, project, and
    editor outcomes, plus their numeric pressure snapshots, without moving producer policy into the
    diagnostics crate.
-3. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
-   buffers, buffer/pipeline stats, and device-loss recovery for all GPU resource classes.
-4. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
+3. Replace the ordinary-resource wgpu backend boundary with a serialized host authority and owned
+   frame packet, add browser-local asynchronous WebGPU initialization with adapter-declared native
+   placement, and make native plus
+   `wasm32-unknown-unknown` render checks part of the local feature matrix.
+4. Make surface/offscreen rendering use frame-wide coordination over target transactions: acquire
+   and present each target once, order cross-target encoding/submission, compose views with explicit
+   viewport/scissor/load semantics, and stop hard-coding each domain submitter in the backend system
+   signature.
+5. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
+   buffers, buffer/pipeline stats, device epochs, and loss recovery for every GPU resource class.
+6. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
    widget state, keyboard/gamepad focus, action-map routing, and editor dogfooding once the runtime
    model is stable.
-5. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
+7. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
    composition, 3D depth/prepass, or transient resource lifetime creates pressure beyond
-   `RenderPassPlan`.
-6. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
+   `RenderPassPlan`; implement it behind the recipe/compiler ownership fixed by ADR 0077.
+8. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
-7. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
+9. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
    override write-back, and edit-while-playing merge semantics are designed.
-8. Design reusable material assets and custom shader specialization after inline
+10. Design reusable material assets and custom shader specialization after inline
    `Material2dDescriptor` has enough runtime/UI pressure.
-9. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
+11. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
     or widening file-backed editor workflows.
-10. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
+12. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
     formats again.
-11. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
+13. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
     jobs.
-12. Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
-13. Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
+14. Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
+15. Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
     pressure.
-14. Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
+16. Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
     GitHub Actions.

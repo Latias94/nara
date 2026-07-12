@@ -10,7 +10,10 @@ use nara::{
 
 #[test]
 fn scene_commands_and_tooling_share_one_world_scoped_identity_contract() {
-    let registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistry::new();
+    registry
+        .freeze()
+        .expect("component registry should freeze before scene spawn");
     let entity_id = SceneEntityId::new("player").unwrap();
     let document = SceneDocument::new([SceneEntityRecord::new(entity_id.clone())]);
     let mut world = World::new();

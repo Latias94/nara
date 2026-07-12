@@ -1601,6 +1601,7 @@ name = "nara_core"
 version = "0.1.0"
 dependencies = [
  "glam 0.30.10",
+ "semver",
  "serde",
  "serde_json",
 ]
@@ -1675,6 +1676,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_reflect",
  "nara_render",
  "nara_tasks",
  "serde",
@@ -1725,10 +1727,13 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "bevy_reflect",
+ "blake3",
+ "nara_app",
  "nara_asset",
  "nara_core",
  "nara_ecs",
  "nara_identity",
+ "ron",
  "serde",
  "serde_json",
 ]
@@ -1761,6 +1766,7 @@ dependencies = [
  "nara_ecs",
  "nara_image",
  "nara_material",
+ "nara_reflect",
  "nara_render",
  "nara_sprite_render",
  "nara_ui",
@@ -1815,6 +1821,7 @@ dependencies = [
  "nara_ecs",
  "nara_image",
  "nara_material",
+ "nara_reflect",
  "nara_render",
  "nara_sprite",
  "nara_tilemap",
@@ -1915,6 +1922,7 @@ dependencies = [
  "nara_ecs",
  "nara_image",
  "nara_material",
+ "nara_reflect",
  "nara_render",
  "nara_scene",
  "nara_ui",
@@ -2742,6 +2750,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "serde"

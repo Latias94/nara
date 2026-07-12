@@ -1,12 +1,12 @@
 use std::collections::BTreeSet;
 
 use nara_asset::{AssetRef, ProjectAssetDatabase};
-use nara_diagnostic::DiagnosticReport;
+use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_identity::WorldEntityLocator;
 use nara_reflect::{
-    ComponentCapability, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind,
+    ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind,
 };
 use nara_scene::{
     SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
@@ -67,7 +67,7 @@ impl SceneInspectorState {
         registry: &ComponentRegistry,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
-        self.apply_command_with_patch_apply(session, command, |session, patch| {
+        self.apply_command_with_patch_apply(session, registry, command, |session, patch| {
             session.apply_patch(patch, registry)
         })
     }
@@ -79,7 +79,7 @@ impl SceneInspectorState {
         database: &ProjectAssetDatabase,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
-        self.apply_command_with_patch_apply(session, command, |session, patch| {
+        self.apply_command_with_patch_apply(session, registry, command, |session, patch| {
             session.apply_patch_with_asset_database(patch, registry, database)
         })
     }
@@ -87,6 +87,7 @@ impl SceneInspectorState {
     fn apply_command_with_patch_apply(
         &mut self,
         session: &mut SceneAuthoringSession,
+        registry: &ComponentRegistry,
         command: SceneInspectorCommand,
         mut apply_patch: impl FnMut(&mut SceneAuthoringSession, &ScenePatchDocument) -> ScenePatchReport,
     ) -> SceneInspectorCommandReport {
@@ -111,9 +112,23 @@ impl SceneInspectorState {
                     .with_entity_selection(self.selected_entity.clone());
                 }
 
-                let patch = command
-                    .to_patch()
-                    .expect("non-selection inspector commands should produce patches");
+                let patch = match command.to_patch_for_document(session.document(), registry) {
+                    Ok(Some(patch)) => patch,
+                    Ok(None) => {
+                        unreachable!("non-selection inspector commands should produce patches")
+                    }
+                    Err(diagnostic) => {
+                        let mut diagnostics = DiagnosticReport::default();
+                        diagnostics.push(diagnostic);
+                        return SceneInspectorCommandReport {
+                            applied: false,
+                            selected_entity: self.selected_entity.clone(),
+                            patch: None,
+                            patch_report: None,
+                            diagnostics,
+                        };
+                    }
+                };
                 let patch_report = apply_patch(session, &patch);
                 let applied = patch_report.applied;
                 if applied {
@@ -162,7 +177,6 @@ pub struct SceneInspectorModel {
     pub selected_entity: Option<SceneEntityId>,
     pub entities: Vec<SceneInspectorEntityRow>,
     pub selected_entity_view: Option<SceneInspectorEntityView>,
-    pub schema_catalog: ComponentSchemaCatalog,
     pub world_snapshot: Option<WorldIdentitySnapshot>,
     pub history: SceneAuthoringHistoryStatus,
     pub live_dirty: bool,
@@ -173,7 +187,7 @@ pub struct SceneInspectorModel {
 pub struct SceneInspectorEntityRow {
     pub id: SceneEntityId,
     pub parent: Option<SceneEntityId>,
-    pub component_count: usize,
+    pub inspectable_component_count: usize,
     pub has_prefab: bool,
     pub selected: bool,
     pub live_locator: Option<WorldEntityLocator>,
@@ -191,16 +205,15 @@ pub struct SceneInspectorEntityView {
 pub struct SceneInspectorComponentView {
     pub component: ComponentTypeId,
     pub document_version: ComponentSchemaVersion,
-    pub schema_version: Option<ComponentSchemaVersion>,
-    pub rust_type_path: Option<String>,
+    pub schema_version: ComponentSchemaVersion,
     pub capabilities: BTreeSet<ComponentCapability>,
-    pub schema_known: bool,
-    pub raw_value: ComponentValue,
     pub fields: Vec<SceneInspectorFieldView>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneInspectorFieldView {
+    pub id: ComponentFieldId,
+    pub aliases: Vec<String>,
     pub path: ComponentFieldPath,
     pub value_kind: ComponentValueKind,
     pub required: bool,
@@ -226,20 +239,20 @@ pub enum SceneInspectorCommand {
         entity: SceneEntityId,
         component: ComponentTypeId,
         component_version: ComponentSchemaVersion,
-        path: ComponentFieldPath,
+        field: ComponentFieldId,
         value: ComponentValue,
     },
     RemoveField {
         entity: SceneEntityId,
         component: ComponentTypeId,
         component_version: ComponentSchemaVersion,
-        path: ComponentFieldPath,
+        field: ComponentFieldId,
     },
     SetAssetRefField {
         entity: SceneEntityId,
         component: ComponentTypeId,
         component_version: ComponentSchemaVersion,
-        path: ComponentFieldPath,
+        field: ComponentFieldId,
         asset_ref: AssetRef,
     },
     Reparent {
@@ -268,37 +281,37 @@ impl SceneInspectorCommand {
                 entity,
                 component,
                 component_version,
-                path,
+                field,
                 value,
             } => ScenePatchOperation::SetField {
                 entity: entity.clone(),
                 component: component.clone(),
                 component_version: *component_version,
-                path: path.clone(),
+                field: field.clone(),
                 value: value.clone(),
             },
             Self::RemoveField {
                 entity,
                 component,
                 component_version,
-                path,
+                field,
             } => ScenePatchOperation::RemoveField {
                 entity: entity.clone(),
                 component: component.clone(),
                 component_version: *component_version,
-                path: path.clone(),
+                field: field.clone(),
             },
             Self::SetAssetRefField {
                 entity,
                 component,
                 component_version,
-                path,
+                field,
                 asset_ref,
             } => ScenePatchOperation::SetAssetRefField {
                 entity: entity.clone(),
                 component: component.clone(),
                 component_version: *component_version,
-                path: path.clone(),
+                field: field.clone(),
                 asset_ref: asset_ref.clone(),
             },
             Self::Reparent { entity, parent } => ScenePatchOperation::Reparent {
@@ -307,6 +320,67 @@ impl SceneInspectorCommand {
             },
         };
         Some(ScenePatchDocument::new([operation]))
+    }
+
+    fn to_patch_for_document(
+        &self,
+        document: &SceneDocument,
+        registry: &ComponentRegistry,
+    ) -> Result<Option<ScenePatchDocument>, Diagnostic> {
+        let Some(patch) = self.to_patch() else {
+            return Ok(None);
+        };
+        let Some((entity_id, component_id)) = self.component_target() else {
+            return Ok(Some(patch));
+        };
+        let Some(component) = document
+            .entities
+            .iter()
+            .find(|entity| &entity.id == entity_id)
+            .and_then(|entity| entity.components.get(component_id))
+        else {
+            return Ok(Some(patch));
+        };
+        let Some(schema) = registry.schema(component_id) else {
+            return Ok(Some(patch));
+        };
+        if component.version == schema.version {
+            return Ok(Some(patch));
+        }
+
+        let migrated = registry
+            .migrate_component_value(component_id, component.version, &component.value)
+            .map_err(|_| {
+                component_migration_diagnostic(
+                    entity_id,
+                    component_id,
+                    component.version,
+                    schema.version,
+                )
+            })?;
+        let mut operations = Vec::with_capacity(patch.operations.len() + 1);
+        operations.push(ScenePatchOperation::ReplaceComponent {
+            entity: entity_id.clone(),
+            component: component_id.clone(),
+            value: SceneComponentRecord::new(migrated.version, migrated.value),
+        });
+        operations.extend(patch.operations);
+        Ok(Some(ScenePatchDocument::new(operations)))
+    }
+
+    fn component_target(&self) -> Option<(&SceneEntityId, &ComponentTypeId)> {
+        match self {
+            Self::SetField {
+                entity, component, ..
+            }
+            | Self::RemoveField {
+                entity, component, ..
+            }
+            | Self::SetAssetRefField {
+                entity, component, ..
+            } => Some((entity, component)),
+            Self::SelectEntity { .. } | Self::Reparent { .. } => None,
+        }
     }
 }
 
@@ -334,6 +408,12 @@ fn build_inspector_model(
     world_snapshot: Option<&WorldIdentitySnapshot>,
 ) -> SceneInspectorModel {
     let mut diagnostics = DiagnosticReport::default();
+    if !registry.is_frozen() {
+        diagnostics.push(diagnostic::error(
+            "tooling.inspector-registry-not-frozen",
+            "inspector requires a frozen component registry",
+        ));
+    }
     let document = session.document();
     let entities = document
         .entities
@@ -341,7 +421,7 @@ fn build_inspector_model(
         .map(|entity| SceneInspectorEntityRow {
             id: entity.id.clone(),
             parent: entity.parent.clone(),
-            component_count: entity.components.len(),
+            inspectable_component_count: inspectable_component_count(entity, registry),
             has_prefab: entity.prefab.is_some(),
             selected: selected_entity == Some(&entity.id),
             live_locator: session
@@ -368,7 +448,6 @@ fn build_inspector_model(
         selected_entity: selected_entity.cloned(),
         entities,
         selected_entity_view,
-        schema_catalog: registry.schema_catalog(),
         world_snapshot: world_snapshot.cloned(),
         history: session.history_status(),
         live_dirty: session.is_live_dirty(),
@@ -376,16 +455,79 @@ fn build_inspector_model(
     }
 }
 
+fn inspectable_component_count(
+    entity: &nara_scene::SceneEntityRecord,
+    registry: &ComponentRegistry,
+) -> usize {
+    if !registry.is_frozen() {
+        return 0;
+    }
+    entity
+        .components
+        .keys()
+        .filter(|component_id| {
+            registry
+                .schema(component_id)
+                .is_some_and(|schema| schema.has_capability(ComponentCapability::Inspect))
+        })
+        .count()
+}
+
 fn build_entity_view(
     entity: &nara_scene::SceneEntityRecord,
     registry: &ComponentRegistry,
     diagnostics: &mut DiagnosticReport,
 ) -> SceneInspectorEntityView {
+    if !registry.is_frozen() {
+        return SceneInspectorEntityView {
+            id: entity.id.clone(),
+            parent: entity.parent.clone(),
+            has_prefab: entity.prefab.is_some(),
+            components: Vec::new(),
+        };
+    }
+
     let components = entity
         .components
         .iter()
-        .map(|(component_id, component)| {
-            build_component_view(&entity.id, component_id, component, registry, diagnostics)
+        .filter_map(|(component_id, component)| {
+            let Some(schema) = registry.schema(component_id) else {
+                diagnostics.push(diagnostic::with_component(
+                    diagnostic::with_entity(
+                        diagnostic::warning(
+                            "tooling.inspector-unknown-component",
+                            "inspector cannot find schema for a component on the selected entity",
+                        ),
+                        &entity.id,
+                    ),
+                    component_id,
+                ));
+                return None;
+            };
+            if !schema.has_capability(ComponentCapability::Inspect) {
+                return None;
+            }
+            match registry.migrate_component_value(
+                component_id,
+                component.version,
+                &component.value,
+            ) {
+                Ok(migrated) => Some(build_component_view(
+                    component_id,
+                    component,
+                    schema,
+                    &migrated.value,
+                )),
+                Err(_) => {
+                    diagnostics.push(component_migration_diagnostic(
+                        &entity.id,
+                        component_id,
+                        component.version,
+                        schema.version,
+                    ));
+                    None
+                }
+            }
         })
         .collect();
 
@@ -398,40 +540,44 @@ fn build_entity_view(
 }
 
 fn build_component_view(
-    entity_id: &SceneEntityId,
     component_id: &ComponentTypeId,
     component: &SceneComponentRecord,
-    registry: &ComponentRegistry,
-    diagnostics: &mut DiagnosticReport,
+    schema: &ComponentSchema,
+    current_value: &ComponentValue,
 ) -> SceneInspectorComponentView {
-    let schema = registry.schema(component_id);
-    if schema.is_none() {
-        diagnostics.push(diagnostic::with_component(
-            diagnostic::with_entity(
-                diagnostic::warning(
-                    "tooling.inspector-unknown-component",
-                    "inspector cannot find schema for a component on the selected entity",
-                ),
-                entity_id,
-            ),
-            component_id,
-        ));
-    }
-
     SceneInspectorComponentView {
         component: component_id.clone(),
         document_version: component.version,
-        schema_version: schema.map(|schema| schema.version),
-        rust_type_path: schema.map(|schema| schema.rust_type_path.clone()),
-        capabilities: schema
-            .map(|schema| schema.capabilities.clone())
-            .unwrap_or_default(),
-        schema_known: schema.is_some(),
-        raw_value: component.value.clone(),
-        fields: schema
-            .map(|schema| build_field_views(schema, &component.value))
-            .unwrap_or_default(),
+        schema_version: schema.version,
+        capabilities: schema.capabilities.clone(),
+        fields: build_field_views(schema, current_value),
     }
+}
+
+fn component_migration_diagnostic(
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+    source_version: ComponentSchemaVersion,
+    target_version: ComponentSchemaVersion,
+) -> Diagnostic {
+    diagnostic::with_public_u64(
+        diagnostic::with_public_u64(
+            diagnostic::with_component(
+                diagnostic::with_entity(
+                    diagnostic::error(
+                        "tooling.inspector-component-migration-failed",
+                        "inspector could not migrate a component to the current schema",
+                    ),
+                    entity,
+                ),
+                component,
+            ),
+            "source-version",
+            u64::from(source_version.get()),
+        ),
+        "target-version",
+        u64::from(target_version.get()),
+    )
 }
 
 fn build_field_views(
@@ -441,6 +587,7 @@ fn build_field_views(
     schema
         .fields
         .iter()
+        .filter(|field| field.has_capability(ComponentCapability::Inspect))
         .map(|field| build_field_view(field, value))
         .collect()
 }
@@ -451,6 +598,8 @@ fn build_field_view(
 ) -> SceneInspectorFieldView {
     match value.get_path(&field.path) {
         Ok(value) => SceneInspectorFieldView {
+            id: field.id.clone(),
+            aliases: field.aliases.clone(),
             path: field.path.clone(),
             value_kind: field.value_kind,
             required: field.required,
@@ -460,6 +609,8 @@ fn build_field_view(
             state: SceneInspectorFieldState::Present,
         },
         Err(error) => SceneInspectorFieldView {
+            id: field.id.clone(),
+            aliases: field.aliases.clone(),
             path: field.path.clone(),
             value_kind: field.value_kind,
             required: field.required,

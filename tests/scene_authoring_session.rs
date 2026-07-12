@@ -35,7 +35,7 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
         entity: player.clone(),
         component: label_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["text"]),
+        field: ComponentFieldId::new("text"),
         value: ComponentValue::String("Hero".to_string()),
     }]);
     let patch_report = session.apply_patch(&patch, &registry);
@@ -73,7 +73,7 @@ fn authoring_session_undo_redo_are_transactional() {
         entity: player.clone(),
         component: label_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["text"]),
+        field: ComponentFieldId::new("text"),
         value: ComponentValue::String("Hero".to_string()),
     }]);
 
@@ -122,7 +122,7 @@ fn failed_authoring_patch_does_not_dirty_live_world_or_enter_history() {
         entity: player.clone(),
         component: label_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["missing"]),
+        field: ComponentFieldId::new("missing"),
         value: ComponentValue::String("Hero".to_string()),
     }]);
     let report = session.apply_patch(&invalid_patch, &registry);
@@ -216,7 +216,7 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
         entity: player.clone(),
         component: label_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["missing"]),
+        field: ComponentFieldId::new("missing"),
         value: ComponentValue::String("Hero".to_string()),
     }]);
     let invalid_report = session.apply_patch(&invalid_patch, &registry);
@@ -314,14 +314,18 @@ fn authoring_revision_source_identity_prevents_cross_session_equality() {
 fn scene_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     let label_id = label_type_id();
+    let schema = ComponentSchema::new(label_id, "Label", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("text"),
+            "Text",
+            ComponentFieldPath::from_fields(["text"]),
+            ComponentValueKind::String,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
     registry
-        .register_scene_component_with_fields::<TestLabel, _, _>(
-            label_id.clone(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["text"]),
-                ComponentValueKind::String,
-            )],
+        .register_persistent_component_with_codec::<TestLabel, _, _>(
+            schema,
             |value| {
                 Ok(TestLabel {
                     text: value.field_str("text")?.to_string(),
@@ -335,6 +339,7 @@ fn scene_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
+    registry.freeze().unwrap();
     registry
 }
 
@@ -364,7 +369,7 @@ fn set_label_patch(entity: &SceneEntityId, text: &str) -> ScenePatchDocument {
         entity: entity.clone(),
         component: label_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["text"]),
+        field: ComponentFieldId::new("text"),
         value: ComponentValue::String(text.to_string()),
     }])
 }

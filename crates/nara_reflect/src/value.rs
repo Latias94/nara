@@ -55,11 +55,52 @@ impl<'de> serde::Deserialize<'de> for ComponentFloat {
     }
 }
 
+/// Deterministic structural cost for a [`ComponentValue`].
+///
+/// Nodes bound container/object overhead while logical bytes bound owned scalar and map-key
+/// payload. The accounting is independent of a serializer and uses saturating arithmetic so it
+/// remains safe for programmatically constructed values.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComponentValueCost {
+    nodes: usize,
+    logical_bytes: usize,
+}
+
+impl ComponentValueCost {
+    pub const ZERO: Self = Self {
+        nodes: 0,
+        logical_bytes: 0,
+    };
+
+    #[must_use]
+    pub const fn nodes(self) -> usize {
+        self.nodes
+    }
+
+    #[must_use]
+    pub const fn logical_bytes(self) -> usize {
+        self.logical_bytes
+    }
+
+    #[must_use]
+    pub const fn saturating_add(self, other: Self) -> Self {
+        Self {
+            nodes: self.nodes.saturating_add(other.nodes),
+            logical_bytes: self.logical_bytes.saturating_add(other.logical_bytes),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "serde",
-    serde(tag = "type", content = "value", rename_all = "snake_case")
+    serde(
+        tag = "type",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )
 )]
 pub enum ComponentValue {
     Null,
@@ -87,6 +128,46 @@ impl ComponentValue {
                 .map(|(key, value)| (key.into(), value))
                 .collect(),
         )
+    }
+
+    #[must_use]
+    pub fn cost(&self) -> ComponentValueCost {
+        const PERSISTENT_RUNTIME_ID_BYTES: usize = 16;
+
+        let mut pending = vec![self];
+        let mut cost = ComponentValueCost::ZERO;
+        while let Some(value) = pending.pop() {
+            cost.nodes = cost.nodes.saturating_add(1);
+            match value {
+                Self::Null => {}
+                Self::Bool(_) => {
+                    cost.logical_bytes = cost.logical_bytes.saturating_add(1);
+                }
+                Self::I64(_) | Self::U64(_) | Self::F64(_) => {
+                    cost.logical_bytes = cost.logical_bytes.saturating_add(8);
+                }
+                Self::String(value) => {
+                    cost.logical_bytes = cost.logical_bytes.saturating_add(value.len());
+                }
+                Self::List(values) => pending.extend(values),
+                Self::Map(values) => {
+                    for (key, value) in values {
+                        cost.logical_bytes = cost.logical_bytes.saturating_add(key.len());
+                        pending.push(value);
+                    }
+                }
+                Self::EntityReference(EntityReference::SceneLocal { entity }) => {
+                    cost.logical_bytes = cost.logical_bytes.saturating_add(entity.as_str().len());
+                }
+                Self::EntityReference(EntityReference::Persistent { entity }) => {
+                    cost.logical_bytes = cost
+                        .logical_bytes
+                        .saturating_add(entity.namespace.as_str().len())
+                        .saturating_add(PERSISTENT_RUNTIME_ID_BYTES);
+                }
+            }
+        }
+        cost
     }
 
     #[must_use]
@@ -177,6 +258,9 @@ impl ComponentValue {
         path: &ComponentFieldPath,
         value: ComponentValue,
     ) -> Result<Option<ComponentValue>, ComponentFieldPathError> {
+        if path.is_empty() {
+            return Ok(Some(std::mem::replace(self, value)));
+        }
         let (last, parent_segments) = path
             .segments()
             .split_last()
@@ -215,6 +299,9 @@ impl ComponentValue {
         path: &ComponentFieldPath,
         value: ComponentValue,
     ) -> Result<ComponentValue, ComponentFieldPathError> {
+        if path.is_empty() {
+            return Ok(std::mem::replace(self, value));
+        }
         let (last, parent_segments) = path
             .segments()
             .split_last()

@@ -9,6 +9,7 @@ fn main() {
     register_transform_components(&mut registry)
         .expect("transform components should register once");
     register_sprite_components(&mut registry).expect("sprite components should register once");
+    registry.freeze().expect("component registry should freeze");
 
     let player = scene_id("player");
     let enemy = scene_id("enemy");
@@ -30,7 +31,7 @@ fn main() {
             entity: player.clone(),
             component: sprite_id(),
             component_version: v1(),
-            path: ComponentFieldPath::from_fields(["material", "image"]),
+            field: ComponentFieldId::new("material.image"),
             asset_ref: AssetRef::path("textures/player.png").unwrap(),
         },
         ScenePatchOperation::Reparent {
@@ -39,12 +40,12 @@ fn main() {
         },
     ]);
 
-    let json = serde_json::to_string_pretty(&patch).unwrap();
-    let ron = ron::ser::to_string_pretty(&patch, ron::ser::PrettyConfig::default()).unwrap();
-    let from_json = serde_json::from_str::<ScenePatchDocument>(&json).unwrap();
-    let from_ron = ron::from_str::<ScenePatchDocument>(&ron).unwrap();
-    assert_eq!(from_json, patch);
-    assert_eq!(from_ron, patch);
+    let json = patch.to_json_string().unwrap();
+    let ron = patch.to_ron_string().unwrap();
+    let from_json = ScenePatchDocumentCandidate::decode_json_str(&json).unwrap();
+    let from_ron = ScenePatchDocumentCandidate::decode_ron_str(&ron).unwrap();
+    assert_eq!(from_json.to_json_string().unwrap(), json);
+    assert_eq!(from_ron.to_ron_string().unwrap(), ron);
     assert_no_runtime_ids(&json);
     assert_no_runtime_ids(&ron);
 

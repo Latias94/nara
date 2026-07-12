@@ -9,9 +9,9 @@ pub use nara_core::Color;
 use nara_core::Vec2;
 use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource};
 use nara_reflect::{
-    ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
-    ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_transform::Transform2d;
 use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
@@ -412,6 +412,7 @@ impl Plugin for RenderPlugin {
             nara_app::PluginId::new("nara.render"),
             nara_app::PluginCategory::Render,
         )
+        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
     }
 
     fn preflight(&self, app: &App) -> Result<(), PluginError> {
@@ -427,7 +428,6 @@ impl Plugin for RenderPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<ComponentRegistry>()?;
         let component_id = ComponentTypeId::new("nara.render.Camera2d");
         register_render_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
@@ -449,10 +449,11 @@ pub fn register_render_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     let component_id = ComponentTypeId::new("nara.render.Camera2d");
-    registry.register_scene_component_with_fields::<Camera2d, _, _>(
-        component_id.clone(),
-        ComponentSchemaVersion(1),
-        camera_fields(),
+    let schema = ComponentSchema::new(component_id, "Camera 2D", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(camera_fields());
+    registry.register_persistent_component_with_codec::<Camera2d, _, _>(
+        schema,
         |value| {
             Ok(Camera2d {
                 target: read_render_target(value.get("target"))?,
@@ -495,29 +496,44 @@ pub fn register_render_components(
 fn camera_fields() -> [ComponentFieldSchema; 5] {
     [
         ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("target"),
+            "Target",
             ComponentFieldPath::from_fields(["target"]),
             ComponentValueKind::String,
             ComponentValue::String("primary_window".to_string()),
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("viewport"),
+            "Viewport",
             ComponentFieldPath::from_fields(["viewport"]),
             ComponentValueKind::Map,
             ComponentValue::Null,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("clear_color"),
+            "Clear color",
             ComponentFieldPath::from_fields(["clear_color"]),
             ComponentValueKind::Map,
             ComponentValue::Null,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::required(
+            ComponentFieldId::new("viewport_height"),
+            "Viewport height",
             ComponentFieldPath::from_fields(["viewport_height"]),
             ComponentValueKind::F64,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("order"),
+            "Order",
             ComponentFieldPath::from_fields(["order"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
     ]
 }
 
@@ -692,6 +708,7 @@ mod tests {
 
     use nara_app::App;
     use nara_asset::AssetId;
+    use nara_reflect::ComponentRegistryPlugin;
     use nara_window::WindowPlugin;
 
     #[test]
@@ -720,6 +737,7 @@ mod tests {
     #[test]
     fn extracts_primary_window_camera_view() {
         let mut app = App::new();
+        app.add_plugin(ComponentRegistryPlugin).unwrap();
         app.add_plugin(WindowPlugin::default()).unwrap();
         app.add_plugin(RenderPlugin).unwrap();
         app.world_mut()
@@ -743,6 +761,7 @@ mod tests {
     #[test]
     fn extracts_explicit_image_target_view_without_window() {
         let mut app = App::new();
+        app.add_plugin(ComponentRegistryPlugin).unwrap();
         app.add_plugin(RenderPlugin).unwrap();
         app.world_mut()
             .expect("app should allow world mutation")
@@ -767,6 +786,7 @@ mod tests {
     #[test]
     fn extraction_clears_stale_views_when_camera_or_window_is_missing() {
         let mut app = App::new();
+        app.add_plugin(ComponentRegistryPlugin).unwrap();
         app.add_plugin(RenderPlugin).unwrap();
         app.world_mut()
             .expect("app should allow world mutation")
@@ -830,17 +850,20 @@ mod tests {
     fn camera_schema_exposes_authoring_fields() {
         let mut registry = ComponentRegistry::new();
         register_render_components(&mut registry).expect("component registration should succeed");
+        registry.freeze().expect("component registry should freeze");
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.render.Camera2d"))
             .unwrap();
+        let mut fields = schema
+            .fields
+            .iter()
+            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .collect::<Vec<_>>();
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
 
         assert_eq!(
-            schema
-                .fields
-                .iter()
-                .map(|field| (field.path.to_string(), field.value_kind, field.required))
-                .collect::<Vec<_>>(),
+            fields,
             vec![
                 ("clear_color".to_string(), ComponentValueKind::Map, false),
                 ("order".to_string(), ComponentValueKind::I64, false),

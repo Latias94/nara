@@ -40,6 +40,7 @@ use nara_app::{
 };
 
 const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.scene.hierarchy");
+const COMPONENT_REGISTRY_PLUGIN_ID: PluginId = nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID;
 const DIAGNOSTIC_PLUGIN_ID: PluginId = PluginId::new("nara.diagnostic");
 const TASK_PLUGIN_ID: PluginId = PluginId::new("nara.tasks");
 const ASSET_PLUGIN_ID: PluginId = PluginId::new("nara.asset");
@@ -62,6 +63,7 @@ const WGPU_RENDER_PLUGIN_ID: PluginId = PluginId::new("nara.render-wgpu");
 const TOOLING_PLUGIN_ID: PluginId = PluginId::new("nara.tooling");
 
 const MINIMAL_PLUGIN_IDS: &[PluginId] = &[
+    COMPONENT_REGISTRY_PLUGIN_ID,
     HIERARCHY_PLUGIN_ID,
     DIAGNOSTIC_PLUGIN_ID,
     TASK_PLUGIN_ID,
@@ -71,6 +73,7 @@ const MINIMAL_PLUGIN_IDS: &[PluginId] = &[
 ];
 
 const HEADLESS_RUNTIME_PLUGIN_IDS: &[PluginId] = &[
+    COMPONENT_REGISTRY_PLUGIN_ID,
     HIERARCHY_PLUGIN_ID,
     DIAGNOSTIC_PLUGIN_ID,
     TASK_PLUGIN_ID,
@@ -82,6 +85,7 @@ const HEADLESS_RUNTIME_PLUGIN_IDS: &[PluginId] = &[
 
 const SERVER_PLUGIN_IDS: &[PluginId] = &[
     SERVER_TIME_POLICY_PLUGIN_ID,
+    COMPONENT_REGISTRY_PLUGIN_ID,
     HIERARCHY_PLUGIN_ID,
     DIAGNOSTIC_PLUGIN_ID,
     TASK_PLUGIN_ID,
@@ -91,6 +95,7 @@ const SERVER_PLUGIN_IDS: &[PluginId] = &[
 ];
 
 const RUNTIME_2D_PLUGIN_IDS: &[PluginId] = &[
+    COMPONENT_REGISTRY_PLUGIN_ID,
     HIERARCHY_PLUGIN_ID,
     DIAGNOSTIC_PLUGIN_ID,
     TASK_PLUGIN_ID,
@@ -145,6 +150,7 @@ impl PluginGroup for MinimalPlugins {
     }
 
     fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+        group.add_plugin_if_missing(nara_reflect::ComponentRegistryPlugin)?;
         group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
         group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
         group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
@@ -218,6 +224,7 @@ impl PluginGroup for ServerPlugins {
 
     fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
         group.add_plugin_if_missing(ServerTimePolicyPlugin)?;
+        group.add_plugin_if_missing(nara_reflect::ComponentRegistryPlugin)?;
         group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
         group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
         group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
@@ -447,28 +454,33 @@ pub mod prelude {
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentCodec, ComponentCodecError, ComponentDecodeContext,
-        ComponentEncodeContext, ComponentFieldPath, ComponentFieldPathError,
-        ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat, ComponentMigrationError,
-        ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
-        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueError,
-        ComponentValueKind, MigratedComponentValue, PreparedComponent,
+        ComponentEncodeContext, ComponentFieldId, ComponentFieldIdError, ComponentFieldPath,
+        ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
+        ComponentMigrationError, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+        ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+        ComponentValueError, ComponentValueKind, MigratedComponentValue, PreparedComponent,
     };
     pub use nara_render::{
         Camera2d, ClearColor, Extent2d, RenderImage2d, RenderPlugin, RenderTarget, ViewportRect,
     };
     pub use nara_scene::{
         Children, HierarchyPlugin, InMemoryPrefabSourceResolver, Name, Parent, PrefabDocument,
-        PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
-        PrefabSourceResolver, SceneAuthoringHistoryStatus, SceneAuthoringRevision,
-        SceneAuthoringSession, SceneAuthoringSourceId, SceneAuthoringSyncReport,
-        SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneEntitySource,
-        SceneExportOptions, SceneExportReport, SceneFormatError, ScenePatchDocument,
-        ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner, Visibility,
-        export_scene, export_scene_with_options, spawn_child, spawn_prefab,
+        PrefabExpansionBudgetKind, PrefabExpansionLimits, PrefabExpansionOptions,
+        PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport, PrefabSourceResolver,
+        SceneAuthoringHistoryStatus, SceneAuthoringRevision, SceneAuthoringSession,
+        SceneAuthoringSourceId, SceneAuthoringSyncReport, SceneComponentRecord, SceneDocument,
+        SceneEntityRecord, SceneEntitySource, SceneExportOptions, SceneExportReport,
+        ScenePatchDocument, ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner,
+        Visibility, export_scene, export_scene_with_options, spawn_child, spawn_prefab,
         spawn_prefab_with_asset_database, spawn_prefab_with_patch,
         spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
         spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
         sync_children,
+    };
+    #[cfg(feature = "serde")]
+    pub use nara_scene::{
+        PrefabDocumentCandidate, SceneDocumentCandidate, SceneFilePublicationError,
+        SceneFormatError, ScenePatchDocumentCandidate,
     };
     pub use nara_sprite::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
     pub use nara_sprite_render::SpriteRenderPlugin;

@@ -17,3 +17,6 @@ nara_render.workspace = true
 nara_sprite.workspace = true
 nara_tilemap.workspace = true
 nara_transform.workspace = true
+
+[dev-dependencies]
+nara_reflect.workspace = true

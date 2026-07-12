@@ -8,15 +8,22 @@ license.workspace = true
 [dependencies]
 bevy_ecs.workspace = true
 bevy_reflect.workspace = true
+blake3.workspace = true
+nara_app.workspace = true
 nara_asset.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
 nara_identity.workspace = true
+ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
-
-[dev-dependencies]
-serde_json.workspace = true
+serde_json = { workspace = true, optional = true }
 
 [features]
 default = []
-serde = ["dep:serde", "nara_identity/serde"]
+serde = [
+    "dep:ron",
+    "dep:serde",
+    "dep:serde_json",
+    "nara_core/serde",
+    "nara_identity/serde",
+]

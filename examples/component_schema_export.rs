@@ -12,9 +12,10 @@ fn main() {
     register_render_components(&mut registry).expect("render components should register once");
     register_sprite_components(&mut registry).expect("sprite components should register once");
     register_tilemap_components(&mut registry).expect("tilemap components should register once");
+    registry.freeze().expect("component registry should freeze");
 
-    let catalog = registry.schema_catalog();
-    let json = serde_json::to_string_pretty(&catalog).unwrap();
+    let catalog = registry.catalog().unwrap();
+    let json = catalog.to_json_string().unwrap();
 
     assert!(json.contains("nara.transform.Transform2d"));
     assert!(json.contains("nara.sprite.Sprite"));

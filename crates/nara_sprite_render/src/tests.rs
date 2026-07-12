@@ -36,10 +36,17 @@ fn instance() -> SpriteInstance {
     SpriteInstance::axis_aligned(Vec2::ZERO, Vec2::splat(0.5), Color::WHITE)
 }
 
+fn sprite_app() -> App {
+    let mut app = App::new();
+    app.add_plugin(nara_reflect::ComponentRegistryPlugin)
+        .unwrap();
+    app.add_plugin(SpriteRenderPlugin).unwrap();
+    app
+}
+
 #[test]
 fn extraction_clears_stale_sprites_and_uses_identity_transform() {
-    let mut app = App::new();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    let mut app = sprite_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<ExtractedSprites>()
@@ -94,8 +101,7 @@ fn sprite_extraction_preserves_rotation_axes() {
 
 #[test]
 fn tilemap_cells_lower_to_world_positions() {
-    let mut app = App::new();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    let mut app = sprite_app();
     let mut tilemap = Tilemap::new(Vec2::new(10.0, 20.0)).with_layer(2);
     tilemap.set_cell(
         TileCoord::new(1, -1),
@@ -130,8 +136,7 @@ fn tilemap_cells_lower_to_world_positions() {
 
 #[test]
 fn queueing_records_missing_texture_assets() {
-    let mut app = App::new();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    let mut app = sprite_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .spawn(Camera2d {
@@ -157,8 +162,7 @@ fn queueing_records_missing_texture_assets() {
 #[test]
 fn queueing_uses_prepared_image_resource_keys_and_uvs() {
     let image = Handle::new(AssetId::from_raw(7));
-    let mut app = App::new();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    let mut app = sprite_app();
     insert_loaded_image(&mut app, image);
     app.world_mut()
         .expect("app should allow world mutation")
@@ -319,8 +323,7 @@ fn material_image_sort_groups_matching_keys_and_splits_batches() {
 #[test]
 fn same_image_with_different_samplers_splits_batches() {
     let image = Handle::new(AssetId::from_raw(7));
-    let mut app = App::new();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    let mut app = sprite_app();
     insert_loaded_image(&mut app, image);
     app.world_mut()
         .expect("app should allow world mutation")
@@ -424,8 +427,7 @@ fn generated_instances_fit_camera_viewport_aspect_and_position() {
 #[test]
 fn app_pipeline_extracts_tilemaps_into_batches() {
     let target = RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(9)));
-    let mut app = App::new();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    let mut app = sprite_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .spawn(Camera2d {
@@ -466,8 +468,7 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
         TileSet::from_image(image, TileAtlasLayout::grid(Vec2::new(16.0, 16.0), 4, 2)),
     );
 
-    let mut app = App::new();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    let mut app = sprite_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .insert_resource(tilesets);
@@ -504,8 +505,7 @@ fn tilemap_extraction_skips_out_of_range_atlas_tiles() {
         TileSet::from_image(image, TileAtlasLayout::grid(Vec2::new(16.0, 16.0), 4, 2)),
     );
 
-    let mut app = App::new();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    let mut app = sprite_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .insert_resource(tilesets);

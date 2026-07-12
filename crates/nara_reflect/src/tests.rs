@@ -28,201 +28,27 @@ struct ExistingApplyState(u32);
 struct TestAsset;
 
 #[test]
-fn registers_component_schema_by_stable_id_and_rust_type() {
-    let mut registry = ComponentRegistry::new();
-    let id = ComponentTypeId::new("nara.test.Position");
+fn component_value_cost_counts_nodes_and_logical_bytes_deterministically() {
+    let value = ComponentValue::map([
+        ("text", ComponentValue::String("abc".to_owned())),
+        (
+            "items",
+            ComponentValue::List(vec![ComponentValue::Null, ComponentValue::U64(7)]),
+        ),
+    ]);
 
-    registry
-        .register_component::<Position>(id.clone(), ComponentSchemaVersion(1))
-        .unwrap();
+    let cost = value.cost();
 
-    assert_eq!(
-        registry.schema(&id).unwrap().version,
-        ComponentSchemaVersion(1)
-    );
-    assert!(
-        !registry
-            .schema(&id)
-            .unwrap()
-            .has_capability(ComponentCapability::Scene)
-    );
-    assert_eq!(
-        registry.schema_for_type::<Position>().unwrap().id.as_str(),
-        "nara.test.Position"
-    );
-}
-
-#[test]
-fn rejects_duplicate_component_ids() {
-    let mut registry = ComponentRegistry::new();
-    let id = ComponentTypeId::new("nara.test.Position");
-
-    registry
-        .register_component::<Position>(id.clone(), ComponentSchemaVersion(1))
-        .unwrap();
-    let result = registry.register_component::<Position>(id.clone(), ComponentSchemaVersion(1));
-    assert!(matches!(
-        result,
-        Err(ComponentRegistryError::DuplicateComponentId(duplicate)) if duplicate == id
-    ));
-}
-
-#[test]
-fn rejects_duplicate_component_rust_types() {
-    let mut registry = ComponentRegistry::new();
-    let position_id = ComponentTypeId::new("nara.test.Position");
-    let alias_id = ComponentTypeId::new("nara.test.PositionAlias");
-
-    registry
-        .register_component::<Position>(position_id.clone(), ComponentSchemaVersion(1))
-        .unwrap();
-
-    let result =
-        registry.register_component::<Position>(alias_id.clone(), ComponentSchemaVersion(1));
-
-    assert!(matches!(
-        result,
-        Err(ComponentRegistryError::DuplicateComponentRustType {
-            existing_component_id,
-            requested_component_id,
-            ..
-        }) if existing_component_id == position_id && requested_component_id == alias_id
-    ));
-}
-
-#[test]
-fn component_registration_validation_is_read_only_and_matches_commit_checks() {
-    let mut registry = ComponentRegistry::new();
-    let position_id = ComponentTypeId::new("nara.test.Position");
-    let alias_id = ComponentTypeId::new("nara.test.PositionAlias");
-
-    registry
-        .validate_component_registration::<Position>(&position_id)
-        .unwrap();
-    assert!(registry.schema(&position_id).is_none());
-
-    registry
-        .register_component::<Position>(position_id.clone(), ComponentSchemaVersion(1))
-        .unwrap();
-    assert!(matches!(
-        registry.validate_component_registration::<Velocity>(&position_id),
-        Err(ComponentRegistryError::DuplicateComponentId(duplicate)) if duplicate == position_id
-    ));
-    assert!(matches!(
-        registry.validate_component_registration::<Position>(&alias_id),
-        Err(ComponentRegistryError::DuplicateComponentRustType {
-            existing_component_id,
-            requested_component_id,
-            ..
-        }) if existing_component_id == position_id && requested_component_id == alias_id
-    ));
-    assert_eq!(registry.schemas().count(), 1);
-}
-
-#[test]
-fn scene_components_require_fields() {
-    let mut registry = ComponentRegistry::new();
-    let id = ComponentTypeId::new("nara.test.Position");
-
-    let result = registry.register_scene_component_with_fields::<Position, _, _>(
-        id.clone(),
-        ComponentSchemaVersion(1),
-        [],
-        |_value| Ok(Position { x: 0.0, y: 0.0 }),
-        |_position| Ok(ComponentValue::Map(Default::default())),
-    );
-
-    assert!(matches!(
-        result,
-        Err(ComponentRegistryError::MissingSceneComponentFields { component_id })
-            if component_id == id
-    ));
-}
-
-#[test]
-fn rejects_component_field_default_kind_mismatch() {
-    let mut registry = ComponentRegistry::new();
-    let id = ComponentTypeId::new("nara.test.Position");
-    let path = ComponentFieldPath::from_fields(["x"]);
-
-    let result = registry.register_scene_component_with_fields::<Position, _, _>(
-        id.clone(),
-        ComponentSchemaVersion(1),
-        [ComponentFieldSchema::optional_with_default(
-            path.clone(),
-            ComponentValueKind::F64,
-            ComponentValue::String("wrong".to_string()),
-        )],
-        |_value| Ok(Position { x: 0.0, y: 0.0 }),
-        |_position| Ok(ComponentValue::Map(Default::default())),
-    );
-
-    assert!(matches!(
-        result,
-        Err(ComponentRegistryError::InvalidComponentFieldDefault {
-            component_id,
-            path: failed_path,
-            expected: ComponentValueKind::F64,
-            actual: ComponentValueKind::String,
-        }) if component_id == id && failed_path == path
-    ));
-}
-
-#[test]
-fn exports_schema_catalog_in_deterministic_order() {
-    let mut registry = ComponentRegistry::new();
-    let position_id = ComponentTypeId::new("nara.test.Position");
-    let velocity_id = ComponentTypeId::new("nara.test.Velocity");
-
-    registry
-        .register_component::<Position>(position_id.clone(), ComponentSchemaVersion(1))
-        .unwrap()
-        .register_component::<Velocity>(velocity_id.clone(), ComponentSchemaVersion(1))
-        .unwrap()
-        .register_component_fields(
-            &position_id,
-            [
-                ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["y"]),
-                    ComponentValueKind::F64,
-                ),
-                ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["x"]),
-                    ComponentValueKind::F64,
-                ),
-            ],
-        )
-        .unwrap();
-
-    let catalog = registry.schema_catalog();
-
-    assert_eq!(
-        catalog
-            .components
-            .iter()
-            .map(|schema| schema.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["nara.test.Position", "nara.test.Velocity"]
-    );
-    assert_eq!(
-        registry
-            .schema(&position_id)
-            .unwrap()
-            .fields
-            .iter()
-            .map(|field| field.path.to_string())
-            .collect::<Vec<_>>(),
-        vec!["x", "y"]
-    );
+    assert_eq!(cost.nodes(), 5);
+    assert_eq!(cost.logical_bytes(), 20);
 }
 
 #[test]
 fn migrates_component_values_to_current_schema_version() {
     let mut registry = ComponentRegistry::new();
     let id = ComponentTypeId::new("nara.test.Position");
+    register_migration_test_component(&mut registry, &id, ComponentSchemaVersion(3));
     registry
-        .register_component::<Position>(id.clone(), ComponentSchemaVersion(3))
-        .unwrap()
         .register_component_migration(
             &id,
             ComponentSchemaVersion(1),
@@ -255,6 +81,7 @@ fn migrates_component_values_to_current_schema_version() {
             },
         )
         .unwrap();
+    registry.freeze().unwrap();
 
     let migrated = registry
         .migrate_component_value(
@@ -272,9 +99,8 @@ fn migrates_component_values_to_current_schema_version() {
 fn reports_missing_component_migration_chain() {
     let mut registry = ComponentRegistry::new();
     let id = ComponentTypeId::new("nara.test.Position");
-    registry
-        .register_component::<Position>(id.clone(), ComponentSchemaVersion(2))
-        .unwrap();
+    register_migration_test_component(&mut registry, &id, ComponentSchemaVersion(2));
+    registry.freeze().unwrap();
 
     let error = registry
         .migrate_component_value(
@@ -294,12 +120,38 @@ fn reports_missing_component_migration_chain() {
     ));
 }
 
+fn register_migration_test_component(
+    registry: &mut ComponentRegistry,
+    id: &ComponentTypeId,
+    version: ComponentSchemaVersion,
+) {
+    let schema = ComponentSchema::new(id.clone(), "Position", version);
+    registry
+        .register_persistent_component_with_codec::<Position, _, _>(
+            schema,
+            |_value| Ok(Position { x: 0.0, y: 0.0 }),
+            |_position| Ok(ComponentValue::Map(BTreeMap::new())),
+        )
+        .unwrap();
+}
+
 #[test]
 fn rejects_non_finite_component_floats() {
     assert_eq!(
         ComponentValue::f64(f64::NAN),
         Err(ComponentValueError::NonFiniteFloat)
     );
+}
+
+#[test]
+fn catalog_fingerprint_rejects_non_lowercase_ascii_and_multibyte_input_without_panicking() {
+    assert!(CatalogFingerprint::from_hex(&"0".repeat(CatalogFingerprint::HEX_LENGTH)).is_ok());
+    assert!(CatalogFingerprint::from_hex(&"A".repeat(CatalogFingerprint::HEX_LENGTH)).is_err());
+
+    let malformed = format!("{}{}", "0".repeat(63), "é");
+    let result = std::panic::catch_unwind(|| CatalogFingerprint::from_hex(&malformed));
+
+    assert!(matches!(result, Ok(Err(CatalogFingerprintParseError))));
 }
 
 #[test]
@@ -338,6 +190,24 @@ fn component_value_sets_nested_map_field() {
 
     assert_eq!(previous, Some(ComponentValue::I64(1)));
     assert_eq!(value.get_path(&path).unwrap().as_i64(), Some(9));
+}
+
+#[test]
+fn component_value_set_and_replace_support_the_root_path() {
+    let root = ComponentFieldPath::empty();
+    let mut value = ComponentValue::String("before".to_owned());
+
+    let previous = value
+        .set_path(&root, ComponentValue::String("after".to_owned()))
+        .unwrap();
+    assert_eq!(previous, Some(ComponentValue::String("before".to_owned())));
+    assert_eq!(value, ComponentValue::String("after".to_owned()));
+
+    let previous = value
+        .replace_path(&root, ComponentValue::String("final".to_owned()))
+        .unwrap();
+    assert_eq!(previous, ComponentValue::String("after".to_owned()));
+    assert_eq!(value, ComponentValue::String("final".to_owned()));
 }
 
 #[test]
@@ -424,20 +294,27 @@ fn invalid_component_value_path_does_not_mutate_original() {
 fn preflights_applies_and_encodes_scene_component() {
     let mut registry = ComponentRegistry::new();
     let id = ComponentTypeId::new("nara.test.Position");
+    let schema = ComponentSchema::new(id.clone(), "Position", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("x"),
+                "X",
+                ComponentFieldPath::from_fields(["x"]),
+                ComponentValueKind::F64,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("y"),
+                "Y",
+                ComponentFieldPath::from_fields(["y"]),
+                ComponentValueKind::F64,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ]);
     registry
-        .register_scene_component_with_fields::<Position, _, _>(
-            id.clone(),
-            ComponentSchemaVersion(1),
-            [
-                ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["x"]),
-                    ComponentValueKind::F64,
-                ),
-                ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["y"]),
-                    ComponentValueKind::F64,
-                ),
-            ],
+        .register_persistent_component_with_codec::<Position, _, _>(
+            schema,
             |value| {
                 let x = value
                     .get("x")
@@ -459,6 +336,7 @@ fn preflights_applies_and_encodes_scene_component() {
             },
         )
         .unwrap();
+    registry.freeze().unwrap();
 
     let schema = registry.schema(&id).unwrap();
     assert!(schema.has_capability(ComponentCapability::Scene));
@@ -632,13 +510,29 @@ fn component_batch_publishes_components_and_scratch_assets_together() {
 }
 
 fn entity_reference_schema(fields: Vec<ComponentFieldSchema>) -> ComponentSchema {
-    ComponentSchema {
-        id: ComponentTypeId::new("nara.test.EntityLinks"),
-        version: ComponentSchemaVersion(1),
-        rust_type_path: "nara_test::EntityLinks".to_owned(),
-        capabilities: [ComponentCapability::Scene].into_iter().collect(),
-        fields,
-    }
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.test.EntityLinks"),
+        "Entity links",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities([ComponentCapability::Scene])
+    .with_fields(fields)
+}
+
+fn required_test_field(
+    id: &str,
+    path: ComponentFieldPath,
+    kind: ComponentValueKind,
+) -> ComponentFieldSchema {
+    ComponentFieldSchema::required(ComponentFieldId::new(id), id, path, kind)
+}
+
+fn optional_test_field(
+    id: &str,
+    path: ComponentFieldPath,
+    kind: ComponentValueKind,
+) -> ComponentFieldSchema {
+    ComponentFieldSchema::optional(ComponentFieldId::new(id), id, path, kind)
 }
 
 fn scene_reference(value: &str) -> EntityReference {
@@ -651,7 +545,7 @@ fn scene_reference(value: &str) -> EntityReference {
 fn declared_entity_reference_rewrite_is_typed_and_failure_atomic() {
     let path = ComponentFieldPath::from_fields(["target"]);
     let schema = entity_reference_schema(vec![
-        ComponentFieldSchema::required(path.clone(), ComponentValueKind::EntityRef)
+        required_test_field("target", path.clone(), ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
     ]);
     let original = ComponentValue::map([(
@@ -701,9 +595,9 @@ fn entity_reference_rewrite_validates_every_field_before_callbacks() {
     let first = ComponentFieldPath::from_fields(["first"]);
     let missing = ComponentFieldPath::from_fields(["missing"]);
     let schema = entity_reference_schema(vec![
-        ComponentFieldSchema::required(first.clone(), ComponentValueKind::EntityRef)
+        required_test_field("first", first.clone(), ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
-        ComponentFieldSchema::required(missing, ComponentValueKind::EntityRef)
+        required_test_field("missing", missing, ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
     ]);
     let value = ComponentValue::map([(
@@ -730,9 +624,9 @@ fn entity_reference_rewrite_validates_every_field_before_callbacks() {
 fn entity_reference_rewrite_rejects_duplicate_schema_paths() {
     let path = ComponentFieldPath::from_fields(["target"]);
     let schema = entity_reference_schema(vec![
-        ComponentFieldSchema::required(path.clone(), ComponentValueKind::EntityRef)
+        required_test_field("target", path.clone(), ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
-        ComponentFieldSchema::optional(path, ComponentValueKind::EntityRef)
+        optional_test_field("target-alias", path, ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
     ]);
     let value = ComponentValue::map([(
@@ -757,7 +651,8 @@ fn entity_reference_rewrite_rejects_duplicate_schema_paths() {
 
 #[test]
 fn undeclared_nested_entity_reference_is_rejected() {
-    let schema = entity_reference_schema(vec![ComponentFieldSchema::required(
+    let schema = entity_reference_schema(vec![required_test_field(
+        "payload",
         ComponentFieldPath::from_fields(["payload"]),
         ComponentValueKind::Map,
     )]);
@@ -823,8 +718,12 @@ fn entity_reference_rewrite_enforces_node_and_depth_limits() {
 #[test]
 fn root_entity_reference_rewrite_accepts_exact_traversal_limits() {
     let schema = entity_reference_schema(vec![
-        ComponentFieldSchema::required(ComponentFieldPath::empty(), ComponentValueKind::EntityRef)
-            .with_capability(ComponentCapability::EntityRef),
+        required_test_field(
+            "root",
+            ComponentFieldPath::empty(),
+            ComponentValueKind::EntityRef,
+        )
+        .with_capability(ComponentCapability::EntityRef),
     ]);
     let original = ComponentValue::EntityReference(scene_reference("target"));
     let exact = EntityReferenceTraversalLimits::new(
@@ -870,7 +769,7 @@ fn root_entity_reference_rewrite_accepts_exact_traversal_limits() {
 fn entity_reference_rewrite_distinguishes_optional_and_invalid_fields() {
     let path = ComponentFieldPath::from_fields(["target"]);
     let optional = entity_reference_schema(vec![
-        ComponentFieldSchema::optional(path.clone(), ComponentValueKind::EntityRef)
+        optional_test_field("target", path.clone(), ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
     ]);
     for value in [
@@ -890,7 +789,7 @@ fn entity_reference_rewrite_distinguishes_optional_and_invalid_fields() {
     }
 
     let required = entity_reference_schema(vec![
-        ComponentFieldSchema::required(path.clone(), ComponentValueKind::EntityRef)
+        required_test_field("target", path.clone(), ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
     ]);
     let null = rewrite_declared_entity_references(
@@ -920,7 +819,8 @@ fn entity_reference_rewrite_distinguishes_optional_and_invalid_fields() {
         )
     ));
 
-    let missing_capability = entity_reference_schema(vec![ComponentFieldSchema::required(
+    let missing_capability = entity_reference_schema(vec![required_test_field(
+        "target",
         path,
         ComponentValueKind::EntityRef,
     )]);
@@ -995,9 +895,9 @@ fn parallel_fork_remap_rewrites_reflected_reference_candidates_atomically() {
     let peer_path = ComponentFieldPath::from_fields(["peer"]);
     let persistent_path = ComponentFieldPath::from_fields(["persistent"]);
     let schema = entity_reference_schema(vec![
-        ComponentFieldSchema::required(peer_path, ComponentValueKind::EntityRef)
+        required_test_field("peer", peer_path, ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
-        ComponentFieldSchema::required(persistent_path, ComponentValueKind::EntityRef)
+        required_test_field("persistent", persistent_path, ComponentValueKind::EntityRef)
             .with_capability(ComponentCapability::EntityRef),
     ]);
     let original = ComponentValue::map([

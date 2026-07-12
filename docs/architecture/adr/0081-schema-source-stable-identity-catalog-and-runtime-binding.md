@@ -1,0 +1,236 @@
+# ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
+
+**Status**: Accepted
+**Date**: 2026-07-12
+**Implemented Slice**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12
+**Refines**: ADR 0011, ADR 0045, ADR 0051
+**Related**: ADR 0034, ADR 0058, ADR 0076
+
+## Context
+
+ADR 0011 made `ComponentTypeId` independent from Rust type names, but the first implementation still
+mixes four different concerns in `ComponentRegistry`:
+
+- persistent component identity and field paths;
+- exported schema metadata;
+- Rust `TypeId` and `rust_type_path` bindings;
+- Bevy reflection, codecs, and migration closures.
+
+That shape is not suitable for the canonical version-1 schema catalog required by ADR 0051. A Rust
+type path is process/toolchain binding metadata rather than persistent identity, and a name-based
+field path changes when an author renames a field. Nara's Rust-first product direction still needs
+scene, prefab, save, inspector, and patch data to survive refactors and runtime reconstruction.
+
+The schema catalog must therefore become stable before it becomes persistent. This ADR only closes
+the identity, authority, catalog, binding, and freeze boundaries needed by RGF-U1. It does not
+select a scripting language or implement dynamic ECS components.
+
+## Decision
+
+Nara separates schema declaration authority, compiled semantic authority, and runtime binding
+authority.
+
+```mermaid
+flowchart TD
+    Source[Rust declarations or project data schemas] --> Identity[Explicit stable IDs and tombstones]
+    Identity --> Compile[Schema collection and validation]
+    Source --> Compile
+    Compile --> Catalog[Immutable runtime-independent schema catalog]
+    Catalog --> Native[Native Rust and codec bindings]
+    Native --> Runtime[RuntimeInstance]
+    Catalog -. concrete adapter requirement .-> Optional[Optional adapter-specific projection]
+    Optional -.-> Runtime
+```
+
+### Authority Layers
+
+1. Native Rust declarations and project data formats own semantic declarations. Stable IDs and
+   tombstones should be explicit in their source when practical; an engine-managed,
+   version-controlled sidecar is allowed only when an authoring format cannot retain them safely.
+2. A validated immutable catalog is the semantic authority consumed by runtimes, tools, validators,
+   and code generators. The catalog is derived and rebuildable from the declaration source plus its
+   identity sidecar.
+3. A runtime binding registry maps catalog identities to Rust/Bevy types, codecs, migration code, or
+   a future dynamic representation. Runtime binding metadata is not persistent schema identity.
+
+No layer may silently manufacture a replacement identity from a Rust path, display name, field
+name, or current runtime `ComponentId`.
+
+### Stable Type and Field Identity
+
+- `ComponentTypeId` remains the stable identity for the component-role slice of the schema catalog.
+  It is an opaque, bounded string. Existing built-in reverse-domain IDs become permanent tokens;
+  their resemblance to names does not make them renameable aliases.
+- Every catalog field has a `ComponentFieldId`. It is opaque, bounded, unique within its owning
+  component type, never reused, and retained as a tombstone after deletion.
+- Type and field display names are mutable aliases. Renaming an alias does not change an ID and does
+  not require a persistent field-reference migration.
+- `ComponentFieldPath` locates data inside the current version's `ComponentValue`. It is a codec and
+  value-layout locator, not durable field identity.
+- Persistent patch operations and other durable field references use
+  `ComponentTypeId + ComponentFieldId`. The active schema resolves that identity to the current
+  value path before validation or mutation.
+- Moving a field between owning types, splitting or merging fields, or changing semantics requires
+  an explicit migration. A storage-path change that preserves one field ID is handled by the
+  component value migration and current catalog mapping.
+- Durable field writes carry the component schema version that defines their value semantics.
+  Stable identity alone cannot upgrade an old field value: until a dedicated field-value migration
+  contract exists, writes from an older component version are rejected. Whole-component values use
+  the registered component migration chain; identity-only field removal may resolve against the
+  current catalog.
+- Identity allocation and tombstone persistence for generated or adapter-owned schemas belong to
+  the concrete generator or adapter. RGF-U1 establishes the catalog contract but does not invent a
+  universal source language or sidecar format.
+
+The version-1 wire representation uses validated strings for type and field IDs. This ADR does not
+require UUIDs or numeric IDs; a later encoding change requires a new catalog format version rather
+than reinterpretation of version 1.
+
+### Runtime-Independent Persistent Catalog
+
+The persistent catalog contains only stable semantic data:
+
+- catalog format version and a separate catalog generation/fingerprint seam;
+- type IDs, aliases, schema versions, roles, and capabilities;
+- field IDs, aliases, current value locators, value kinds, defaults, and capabilities;
+- retained type and field tombstones needed to prove non-reuse.
+
+The catalog must not contain Rust `TypeId`, `rust_type_path`, Bevy `ComponentId`, codec closures,
+function pointers, VM handles, or backend-native values. Rust paths may remain non-persistent debug
+metadata on a native binding.
+
+The first RGF-U1 catalog contains only component-role declarations. Plain values, data assets,
+commands, and events may later reuse the same stable identity discipline when a real persistent
+format needs it; this ADR does not require one universal project type system.
+
+File `format_version`, catalog generation/fingerprint, per-type schema version, and
+`engine_min_version` are distinct axes. None may be reused as another axis.
+
+### Capabilities and Whole-Value Access
+
+Component and field capability defaults are empty. Canonical version 1 contains exactly `scene`,
+`inspect`, `edit`, `asset_ref`, and `entity_ref`. The first three are component-and-field
+eligibility gates. `asset_ref` and `entity_ref` are field-only value-kind markers and are rejected
+at component scope. Save, animation, replication, scripting, diagnostics, and runtime-only state do
+not have speculative wire capabilities; a concrete domain consumer must admit each future value.
+
+An operation is eligible only when both the component and every touched field grant the required
+capability. Whole-value encode/apply paths must prove complete declared-field coverage and reject
+unknown or ineligible fields. A mixed-capability value returns a projection-required error rather
+than silently filtering fields. Field-level patch operations are the explicit projection path.
+
+`inspect` is eligibility only. It does not replace the host disclosure/redaction policy required by
+ADR 0076.
+
+### Freeze and Runtime Ownership
+
+Each runtime-owned registry has a one-way state transition:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Building
+    Building --> Building: registration rejected without mutation
+    Building --> Frozen: full validation and snapshot publication succeeds
+    Building --> Building: freeze validation fails
+    Frozen --> Frozen: every mutation is rejected
+```
+
+- Component owners register schemas and bindings only during plugin `build`.
+- The reflection/schema registry plugin owns `freeze` in plugin `finish`. Schema provider plugins
+  require that owner, so its build creates the registry before providers register and its finish
+  freezes before the app can become `Ready`.
+- Freeze atomically validates identity uniqueness/non-reuse, aliases, fields, capability scope,
+  defaults, migrations, and required runtime bindings. Failure publishes no frozen snapshot and
+  causes normal fallible plugin finish failure.
+- Frozen registries expose no unchecked mutable Bevy type registry, codec table, migration table,
+  schema, or capability path.
+- A structural catalog change builds and validates a fresh `RuntimeInstance`; an active runtime is
+  never unfrozen or modified in place. Presentation-only UI state may live outside the frozen
+  catalog, but catalog aliases themselves change only in a new catalog generation.
+
+### Persistent File Boundary
+
+A complete file envelope belongs only to a top-level file. Embedded semantic records do not repeat
+file generator or minimum-engine metadata. In particular, `PrefabInstance` embeds a versioned patch
+record, while a standalone scene-patch file wraps that record in the shared ADR 0051 envelope.
+
+The RGF-U1 compatibility matrix contains exactly four version-1 kinds: scene, prefab, scene patch,
+and component schema catalog. There is no speculative document migration registry while all
+matrices are version-1-only.
+
+## Alternatives Considered
+
+### Option A: Keep the Rust-bound, name-path catalog
+
+**Pros**: Smallest immediate change and preserves current tests.
+
+**Cons**: Freezes `rust_type_path` and rename-sensitive paths into canonical version 1 and
+guarantees another persistent-format reset after an ordinary Rust refactor.
+
+**Decision**: Rejected.
+
+### Option B: Use stable type IDs but retain name-based durable field paths
+
+**Pros**: Preserves most patch APIs and component registrations.
+
+**Cons**: A field rename changes durable addresses, forces unnecessary migrations, and contradicts
+the non-reused field identity contract.
+
+**Decision**: Rejected.
+
+### Option C: Separate stable field IDs from current value locators
+
+**Pros**: Alias and storage-path changes can preserve identity, catalogs remain independent from
+process-local Rust/Bevy bindings, and patches resolve through one validated authority.
+
+**Cons**: Requires a breaking patch/schema API migration and explicit IDs for every built-in field.
+
+**Decision**: Chosen.
+
+### Option D: Implement dynamic ECS lowering and a universal scripting host in RGF-U1
+
+**Pros**: Proves the full product direction immediately.
+
+**Cons**: Couples persistence foundation work to unproven non-Rust component, query, scripting,
+and reload requirements and exceeds RGF-U1's dependency evidence.
+
+**Decision**: Rejected for RGF-U1 and retained as a later evidence-driven slice.
+
+## Success Metrics
+
+| Metric | Target | Measurement |
+|---|---:|---|
+| Rename-safe identity | Type/field alias changes preserve stable IDs and durable patch targets | Catalog and patch tests |
+| Runtime independence | Canonical catalog fixtures contain no process-local Rust/Bevy/codec identity | Golden-file tests and stale search |
+| Non-reuse | Duplicate or tombstoned type/field IDs fail before catalog publication | Registry freeze tests |
+| Frozen authority | Every schema, binding, codec, and migration mutation fails after freeze | Registry state-machine tests |
+| Whole-value safety | Mixed-capability whole values never reach encode/apply | Projection gate tests |
+| Runtime isolation | Structural catalog changes require a fresh runtime snapshot | Plugin/runtime lifecycle tests |
+| Scope control | Dynamic ECS and universal scripting-host APIs are absent from RGF-U1 | API and dependency review |
+
+## Risks and Mitigations
+
+| Risk | Severity | Likelihood | Mitigation |
+|---|---|---:|---|
+| Human-readable IDs are accidentally treated as aliases | High | Medium | Validate and document IDs as opaque permanent tokens; expose aliases separately. |
+| Field-ID registration becomes verbose | Medium | High | Allow explicit named presets/builders, but never infer identity or capability from Rust fields. |
+| Freeze order depends on plugin installation accidents | High | Medium | Require the registry-owner plugin through plugin metadata and reject registration outside build. |
+| Catalog and native bindings diverge | High | Medium | Freeze validates complete binding coverage for native component declarations. |
+| Future dynamic representation pressures the v1 catalog | Medium | Medium | Keep runtime layout and `ComponentId` outside the persistent catalog. |
+| Tombstone policy grows without a source compiler | Medium | Low | RGF-U1 models and validates tombstones; the later compiler owns allocation and sidecar persistence. |
+
+## Consequences
+
+- ADR 0011's namespaced strings remain valid only as opaque permanent component IDs, not as mutable
+  type names.
+- `ComponentSchema` and the persistent catalog must lose `rust_type_path`; native binding metadata
+  retains it outside the wire model.
+- `ComponentFieldId` becomes the durable patch and schema reference; `ComponentFieldPath` becomes a
+  current value-layout locator.
+- Existing built-in registrations must declare IDs, aliases, capabilities, and value locators
+  explicitly before RGF-U1 freezes the registry.
+- Existing bare scene/prefab/patch readers and the Rust-bound catalog are prototype shapes and must
+  not survive as hidden version-1 compatibility readers.
+- Dynamic non-Rust components, per-World dynamic `ComponentId`, `RuntimeSchemaRecord`, generated
+  schema sidecars, scripting adapters, and adapter-specific hot replacement require separate,
+  evidence-backed decisions.

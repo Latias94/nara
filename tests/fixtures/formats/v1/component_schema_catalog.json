@@ -1,0 +1,14 @@
+{
+  "kind": "component_schema_catalog",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "generation": 1,
+    "components": [],
+    "type_tombstones": []
+  }
+}

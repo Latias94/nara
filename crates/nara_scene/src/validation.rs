@@ -10,7 +10,7 @@ use crate::{
     SceneDocument, SceneEntityId, SceneEntityRecord,
     diagnostics::{
         error as diagnostic_error, push_with_operation_index, with_asset_ref, with_codec_error,
-        with_migration_error, with_public_locator, with_public_u64,
+        with_migration_error, with_public_locator,
     },
 };
 
@@ -94,27 +94,18 @@ fn preflight_scene_with_context_options(
     operation_index: Option<usize>,
 ) -> PreparedScene {
     let mut diagnostics = DiagnosticReport::default();
+    if !registry.is_frozen() {
+        diagnostics.push(diagnostic_error(
+            "scene.component-registry-not-frozen",
+            "Scene validation requires a frozen component registry",
+        ));
+        return PreparedScene {
+            entities: Vec::new(),
+            diagnostics,
+        };
+    }
     let mut seen = BTreeSet::<SceneEntityId>::new();
     let mut ids = BTreeSet::<SceneEntityId>::new();
-
-    if document.format_version != SceneDocument::CURRENT_FORMAT_VERSION {
-        push_with_operation_index(
-            &mut diagnostics,
-            with_public_u64(
-                with_public_u64(
-                    diagnostic_error(
-                        "scene.unsupported-format-version",
-                        "Scene format version is unsupported",
-                    ),
-                    "actual-version",
-                    u64::from(document.format_version),
-                ),
-                "expected-version",
-                u64::from(SceneDocument::CURRENT_FORMAT_VERSION),
-            ),
-            operation_index,
-        );
-    }
 
     for entity in &document.entities {
         if !seen.insert(entity.id.clone()) {
@@ -365,26 +356,57 @@ fn detect_parent_cycles(
         .map(|entity| (entity.id.clone(), entity.parent.clone()))
         .collect::<BTreeMap<_, _>>();
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum VisitState {
+        Visiting,
+        Acyclic,
+        Cyclic,
+    }
+
+    let mut states = BTreeMap::<SceneEntityId, VisitState>::new();
     for entity in &document.entities {
-        let mut visiting = BTreeSet::new();
+        if matches!(
+            states.get(&entity.id),
+            Some(VisitState::Acyclic | VisitState::Cyclic)
+        ) {
+            continue;
+        }
+
+        let mut path = Vec::new();
         let mut current = Some(entity.id.clone());
-        while let Some(id) = current {
-            if !visiting.insert(id.clone()) {
-                push_with_operation_index(
-                    diagnostics,
-                    with_public_locator(
-                        diagnostic_error(
-                            "scene.parent-cycle",
-                            "Scene hierarchy contains a parent cycle",
-                        ),
-                        "entity-id",
-                        entity.id.as_str(),
-                    ),
-                    operation_index,
-                );
-                break;
+        let outcome = loop {
+            let Some(id) = current else {
+                break VisitState::Acyclic;
+            };
+            match states.get(&id) {
+                Some(VisitState::Acyclic) => break VisitState::Acyclic,
+                Some(VisitState::Cyclic | VisitState::Visiting) => break VisitState::Cyclic,
+                None => {
+                    states.insert(id.clone(), VisitState::Visiting);
+                    path.push(id.clone());
+                    current = parents.get(&id).and_then(Clone::clone);
+                }
             }
-            current = parents.get(&id).and_then(Clone::clone);
+        };
+        for id in path {
+            states.insert(id, outcome);
+        }
+    }
+
+    for entity in &document.entities {
+        if states.get(&entity.id) == Some(&VisitState::Cyclic) {
+            push_with_operation_index(
+                diagnostics,
+                with_public_locator(
+                    diagnostic_error(
+                        "scene.parent-cycle",
+                        "Scene hierarchy contains a parent cycle",
+                    ),
+                    "entity-id",
+                    entity.id.as_str(),
+                ),
+                operation_index,
+            );
         }
     }
 }

@@ -135,6 +135,37 @@ fn sprite_path_asset_ref_still_resolves_without_project_database() {
 }
 
 #[test]
+fn sprite_codec_round_trip_preserves_anchor() {
+    let registry = component_registry();
+    let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
+    let expected_anchor = SpriteAnchor {
+        normalized: Vec2::new(-0.5, 0.75),
+    };
+    let mut source_world = World::new();
+    let mut sprite = Sprite::from_color(Vec2::new(16.0, 24.0), Color::WHITE);
+    sprite.anchor = expected_anchor;
+    let source_entity = source_world.spawn(sprite).id();
+
+    let encoded = registry
+        .encode_component(&sprite_id, &source_world, source_entity)
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let prepared = registry
+        .preflight_component(&sprite_id, &encoded)
+        .unwrap()
+        .unwrap();
+    let mut target_world = World::new();
+    let target_entity = target_world.spawn_empty().id();
+    prepared.apply(&mut target_world, target_entity).unwrap();
+
+    assert_eq!(
+        target_world.get::<Sprite>(target_entity).unwrap().anchor,
+        expected_anchor
+    );
+}
+
+#[test]
 fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutation() {
     let registry = component_registry();
     let database = asset_database(PLAYER_STABLE_ID, "textures/player.png");
@@ -212,7 +243,7 @@ fn prefab_patch_field_override_preserves_inherited_sprite_data() {
         entity: scene_id("player"),
         component: ComponentTypeId::new("nara.sprite.Sprite"),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["material", "tint", "r"]),
+        field: ComponentFieldId::new("material.tint.r"),
         value: ComponentValue::f64(0.25).unwrap(),
     }]);
     let mut world = World::new();
@@ -243,7 +274,7 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
         entity: scene_id("player"),
         component: ComponentTypeId::new("nara.sprite.Sprite"),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["material", "image"]),
+        field: ComponentFieldId::new("material.image"),
         asset_ref: AssetRef::stable_id(UNKNOWN_STABLE_ID).unwrap(),
     }]);
     let database = ProjectAssetDatabase::default();
@@ -294,9 +325,7 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
 
 #[test]
 fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
-    let mut registry = component_registry();
-    nara::tilemap::register_tilemap_components(&mut registry)
-        .expect("tilemap components should register once");
+    let registry = component_registry_with_tilemap();
     let database = asset_database_with_kind(
         TILESET_STABLE_ID,
         "tilesets/basic.tileset.ron",
@@ -325,11 +354,25 @@ fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
 
 fn component_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
-    nara::scene::register_scene_components(&mut registry)
-        .expect("scene components should register once");
-    nara::sprite::register_sprite_components(&mut registry)
-        .expect("sprite components should register once");
+    register_base_components(&mut registry);
+    registry.freeze().unwrap();
     registry
+}
+
+fn component_registry_with_tilemap() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    register_base_components(&mut registry);
+    nara::tilemap::register_tilemap_components(&mut registry)
+        .expect("tilemap components should register once");
+    registry.freeze().unwrap();
+    registry
+}
+
+fn register_base_components(registry: &mut ComponentRegistry) {
+    nara::scene::register_scene_components(registry)
+        .expect("scene components should register once");
+    nara::sprite::register_sprite_components(registry)
+        .expect("sprite components should register once");
 }
 
 fn asset_database(stable_id: &str, path: &str) -> ProjectAssetDatabase {

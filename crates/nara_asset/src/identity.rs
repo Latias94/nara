@@ -250,6 +250,7 @@ impl<'de> serde::Deserialize<'de> for AssetRef {
         D: serde::Deserializer<'de>,
     {
         #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
             kind: String,
             value: String,

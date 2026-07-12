@@ -17,6 +17,7 @@ serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 nara_core.workspace = true
+nara_reflect.workspace = true
 
 [features]
 default = []

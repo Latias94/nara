@@ -40,6 +40,17 @@ Rules:
 - AI/editor repair loops receive enough context to shrink or split the input, but diagnostics themselves are capped.
 - Runtime hot reload uses the same budgets as initial load unless a future profile explicitly chooses stricter reload limits.
 
+### Implemented RGF-U1 Slice
+
+Scene, prefab, standalone patch, and component-schema-catalog decoders accept already acquired
+`&[u8]` input and enforce encoded-byte, serde shape, string, domain-count, diagnostic-source, and
+patch-work limits before publishing a file candidate. Candidate publication remains separate from
+frozen-registry semantic validation and target mutation.
+
+This slice does not authorize how a host obtains those bytes. Host-issued bounded file reads,
+image encoded/decoded/in-flight budgets, asset metadata, import artifacts, project-manifest ingest,
+and ADR 0048 runtime diagnostic bridges remain owned by their later safety or product-host units.
+
 ## Alternatives Considered
 
 ### Option A: Trust local project files

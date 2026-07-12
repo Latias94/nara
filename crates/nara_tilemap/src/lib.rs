@@ -11,9 +11,10 @@ use nara_ecs::World;
 use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_reflect::{
-    ComponentApplyContext, ComponentCodecError, ComponentDecodeContext, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PreparedComponent,
 };
 
 pub const DEFAULT_TILE_SIZE: Vec2 = Vec2::new(16.0, 16.0);
@@ -465,6 +466,7 @@ impl Plugin for TilemapPlugin {
             nara_app::PluginId::new("nara.tilemap"),
             nara_app::PluginCategory::Runtime,
         )
+        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
     }
 
     fn preflight(&self, app: &App) -> Result<(), PluginError> {
@@ -481,7 +483,6 @@ impl Plugin for TilemapPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<Assets<TileSet>>()?;
-        app.init_resource::<ComponentRegistry>()?;
         let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
         register_tilemap_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
@@ -495,10 +496,11 @@ pub fn register_tilemap_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
-    registry.register_component_codec_with_context_and_fields::<Tilemap, _, _>(
-        component_id.clone(),
-        ComponentSchemaVersion(1),
-        tilemap_fields(),
+    let schema = ComponentSchema::new(component_id, "Tilemap", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(tilemap_fields());
+    registry.register_persistent_component_codec_with_context::<Tilemap, _, _>(
+        schema,
         |value, context| {
             let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
@@ -556,33 +558,52 @@ pub fn register_tilemap_components(
 fn tilemap_fields() -> [ComponentFieldSchema; 6] {
     [
         ComponentFieldSchema::required(
+            ComponentFieldId::new("tile_size.x"),
+            "Tile width",
             ComponentFieldPath::from_fields(["tile_size", "x"]),
             ComponentValueKind::F64,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::required(
+            ComponentFieldId::new("tile_size.y"),
+            "Tile height",
             ComponentFieldPath::from_fields(["tile_size", "y"]),
             ComponentValueKind::F64,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("layer"),
+            "Layer",
             ComponentFieldPath::from_fields(["layer"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("sort_key"),
+            "Sort key",
             ComponentFieldPath::from_fields(["sort_key"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("tileset"),
+            "Tileset",
             ComponentFieldPath::from_fields(["tileset"]),
             ComponentValueKind::AssetRef,
             ComponentValue::Null,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_capability(ComponentCapability::AssetRef),
         ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("cells"),
+            "Cells",
             ComponentFieldPath::from_fields(["cells"]),
             ComponentValueKind::List,
             ComponentValue::List(Vec::new()),
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
     ]
 }
 
@@ -861,6 +882,13 @@ mod tests {
     };
     use nara_reflect::ComponentDecodeContext;
 
+    fn frozen_tilemap_registry() -> ComponentRegistry {
+        let mut registry = ComponentRegistry::new();
+        register_tilemap_components(&mut registry).expect("component registration should succeed");
+        registry.freeze().expect("component registry should freeze");
+        registry
+    }
+
     #[test]
     fn tile_coordinates_floor_divide_negative_chunks() {
         assert_eq!(TileCoord::new(0, 0).chunk(), TileChunkCoord::new(0, 0));
@@ -989,9 +1017,7 @@ mod tests {
         let prepared = {
             let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
                 .with_project_asset_database(&database);
-            let mut registry = ComponentRegistry::new();
-            register_tilemap_components(&mut registry)
-                .expect("component registration should succeed");
+            let registry = frozen_tilemap_registry();
 
             let prepared = registry
                 .preflight_component_with_context(
@@ -1026,8 +1052,7 @@ mod tests {
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
-        let mut registry = ComponentRegistry::new();
-        register_tilemap_components(&mut registry).expect("component registration should succeed");
+        let registry = frozen_tilemap_registry();
 
         let result = registry
             .preflight_component_with_context(
@@ -1063,8 +1088,7 @@ mod tests {
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
-        let mut registry = ComponentRegistry::new();
-        register_tilemap_components(&mut registry).expect("component registration should succeed");
+        let registry = frozen_tilemap_registry();
 
         let result = registry
             .preflight_component_with_context(
@@ -1086,8 +1110,7 @@ mod tests {
         let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let database = test_database(stable_id, "tilesets/terrain.ron");
         let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
-        let mut registry = ComponentRegistry::new();
-        register_tilemap_components(&mut registry).expect("component registration should succeed");
+        let registry = frozen_tilemap_registry();
 
         let result = registry
             .preflight_component_with_context(
@@ -1106,19 +1129,20 @@ mod tests {
 
     #[test]
     fn tilemap_schema_exposes_authoring_fields() {
-        let mut registry = ComponentRegistry::new();
-        register_tilemap_components(&mut registry).expect("component registration should succeed");
+        let registry = frozen_tilemap_registry();
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.tilemap.Tilemap"))
             .unwrap();
+        let mut fields = schema
+            .fields
+            .iter()
+            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .collect::<Vec<_>>();
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
 
         assert_eq!(
-            schema
-                .fields
-                .iter()
-                .map(|field| (field.path.to_string(), field.value_kind, field.required))
-                .collect::<Vec<_>>(),
+            fields,
             vec![
                 ("cells".to_string(), ComponentValueKind::List, false),
                 ("layer".to_string(), ComponentValueKind::I64, false),

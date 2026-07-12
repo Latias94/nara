@@ -124,6 +124,7 @@ impl<'de> serde::Deserialize<'de> for ComponentFieldPathSegment {
         D: serde::Deserializer<'de>,
     {
         #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Wire {
             kind: String,
             value: SegmentValue,

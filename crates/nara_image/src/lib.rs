@@ -2122,6 +2122,8 @@ mod tests {
             )
             .unwrap();
         let mut app = App::new();
+        app.add_plugin(nara_reflect::ComponentRegistryPlugin)
+            .unwrap();
         app.add_plugin(nara_render::RenderPlugin).unwrap();
         app.add_plugin(ImagePreparePlugin).unwrap();
         app.world_mut().unwrap().insert_resource(images);
@@ -2153,6 +2155,8 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(task_pools).unwrap();
         app.insert_resource(AssetSourceRoot::new(asset_root))
+            .unwrap();
+        app.add_plugin(nara_reflect::ComponentRegistryPlugin)
             .unwrap();
         app.add_plugin(nara_render::RenderPlugin).unwrap();
         app.add_plugin(ImagePlugin).unwrap();

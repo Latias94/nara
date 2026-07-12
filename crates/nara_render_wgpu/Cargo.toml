@@ -23,4 +23,5 @@ thiserror.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
+nara_reflect.workspace = true
 nara_ui.workspace = true

@@ -18,24 +18,18 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneDocument {
-    pub format_version: u32,
     pub entities: Vec<SceneEntityRecord>,
 }
 
 impl SceneDocument {
-    pub const CURRENT_FORMAT_VERSION: u32 = 1;
-
     #[must_use]
     pub fn new(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
         let mut entities = entities.into_iter().collect::<Vec<_>>();
         entities.sort_by(|left, right| left.id.cmp(&right.id));
-        Self {
-            format_version: Self::CURRENT_FORMAT_VERSION,
-            entities,
-        }
+        Self { entities }
     }
 
     pub fn canonicalize(&mut self) {
@@ -98,7 +92,6 @@ impl SceneDocument {
 impl Default for SceneDocument {
     fn default() -> Self {
         Self {
-            format_version: Self::CURRENT_FORMAT_VERSION,
             entities: Vec::new(),
         }
     }

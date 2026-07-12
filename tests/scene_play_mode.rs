@@ -444,17 +444,20 @@ fn resolve_instance_entity(
     }
 }
 
-fn scene_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn register_label_component(registry: &mut ComponentRegistry) {
     let label_id = label_type_id();
+    let schema = ComponentSchema::new(label_id, "Label", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("text"),
+            "Text",
+            ComponentFieldPath::from_fields(["text"]),
+            ComponentValueKind::String,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
     registry
-        .register_scene_component_with_fields::<TestLabel, _, _>(
-            label_id.clone(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["text"]),
-                ComponentValueKind::String,
-            )],
+        .register_persistent_component_with_codec::<TestLabel, _, _>(
+            schema,
             |value| {
                 Ok(TestLabel {
                     text: value.field_str("text")?.to_string(),
@@ -468,13 +471,21 @@ fn scene_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
+}
+
+fn scene_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    register_label_component(&mut registry);
+    registry.freeze().unwrap();
     registry
 }
 
 fn sprite_registry() -> ComponentRegistry {
-    let mut registry = scene_registry();
+    let mut registry = ComponentRegistry::new();
+    register_label_component(&mut registry);
     nara::sprite::register_sprite_components(&mut registry)
         .expect("sprite components should register once");
+    registry.freeze().unwrap();
     registry
 }
 
@@ -512,7 +523,7 @@ fn set_label_command(entity: &SceneEntityId, text: &str) -> SceneInspectorComman
         entity: entity.clone(),
         component: label_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["text"]),
+        field: ComponentFieldId::new("text"),
         value: ComponentValue::String(text.to_string()),
     }
 }

@@ -119,6 +119,21 @@ pub fn export_scene_with_options(
     options: SceneExportOptions,
 ) -> SceneExportReport {
     let mut diagnostics = DiagnosticReport::default();
+    let schemas = match registry.schemas() {
+        Ok(schemas) => schemas
+            .filter(|schema| schema.has_capability(ComponentCapability::Scene))
+            .collect::<Vec<_>>(),
+        Err(_) => {
+            diagnostics.push(diagnostic_error(
+                "scene.component-registry-not-frozen",
+                "Component registry must be frozen before scene publication",
+            ));
+            return SceneExportReport {
+                output: None,
+                diagnostics,
+            };
+        }
+    };
     let Some(domain) = world.get_resource::<WorldIdentityDomain>() else {
         diagnostics.push(diagnostic_error(
             "scene.export-identity-domain-missing",
@@ -235,10 +250,7 @@ pub fn export_scene_with_options(
         }
 
         let mut components = BTreeMap::new();
-        for schema in registry
-            .schemas()
-            .filter(|schema| schema.has_capability(ComponentCapability::Scene))
-        {
+        for schema in &schemas {
             let Some(encoded) = registry.encode_component_with_context(
                 &schema.id,
                 world,

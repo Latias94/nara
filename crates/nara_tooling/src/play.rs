@@ -1272,8 +1272,9 @@ mod tests {
     use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
     use nara_ecs::Component;
     use nara_reflect::{
-        ComponentFieldPath, ComponentFieldSchema, ComponentSchemaVersion, ComponentValue,
-        ComponentValueKind, PreparedComponent, Reflect, bevy_reflect,
+        ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+        ComponentSchema, ComponentSchemaVersion, ComponentValue, ComponentValueKind,
+        PreparedComponent, Reflect, bevy_reflect,
     };
     use nara_scene::{
         InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabInstance, SceneEntityRecord,
@@ -1965,7 +1966,7 @@ mod tests {
             SceneApplyChangesComponentStatus::Rejected
         );
         assert!(report.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code().as_str() == "tooling.apply-changes-component-not-editable"
+            diagnostic.code().as_str() == "tooling.apply-changes-unknown-component"
         }));
         assert_eq!(document_name_value(&session, &id), "Hero");
         assert_eq!(session.history_status().undo_depth, 0);
@@ -2008,7 +2009,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_patch_validation_preserves_document_and_undo_history() {
+    fn schema_invalid_codec_output_preserves_document_and_undo_history() {
         let registry = test_registry_with_bad_export();
         let id = scene_id("player");
         let mut session = SceneAuthoringSession::new(scene_empty_entity(&id));
@@ -2028,21 +2029,17 @@ mod tests {
             SceneApplyChangesRequest::new(id.clone(), [bad_export_type_id()]),
         );
 
-        assert!(report.supported);
+        assert!(!report.supported);
         assert!(!report.applied);
-        assert!(report.patch.is_some());
+        assert!(report.patch.is_none());
         assert_eq!(
             report.components[0].status,
             SceneApplyChangesComponentStatus::Rejected
         );
-        assert!(
-            report
-                .patch_report
-                .as_ref()
-                .unwrap()
-                .diagnostics
-                .has_errors()
-        );
+        assert!(report.patch_report.is_none());
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "tooling.apply-changes-component-encode-failed"
+        }));
         assert!(!document_has_component(
             &session,
             &id,
@@ -2051,32 +2048,47 @@ mod tests {
         assert_eq!(session.history_status().undo_depth, 0);
     }
 
+    fn register_test_components(registry: &mut ComponentRegistry) {
+        register_scene_components(registry).expect("component registration should succeed");
+        register_transform_components(registry).expect("component registration should succeed");
+    }
+
     fn test_registry() -> ComponentRegistry {
         let mut registry = ComponentRegistry::new();
-        register_scene_components(&mut registry).expect("component registration should succeed");
-        register_transform_components(&mut registry)
-            .expect("component registration should succeed");
+        register_test_components(&mut registry);
+        registry.freeze().expect("component registry should freeze");
         registry
     }
 
     fn test_registry_with_runtime_only() -> ComponentRegistry {
-        let mut registry = test_registry();
+        let mut registry = ComponentRegistry::new();
+        register_test_components(&mut registry);
         registry
-            .register_component::<RuntimeOnly>(runtime_only_type_id(), ComponentSchemaVersion(1))
-            .unwrap();
+            .register_reflected_type::<RuntimeOnly>()
+            .expect("runtime-only reflection registration should succeed");
+        registry.freeze().expect("component registry should freeze");
         registry
     }
 
     fn test_registry_with_bad_export() -> ComponentRegistry {
-        let mut registry = test_registry();
+        let mut registry = ComponentRegistry::new();
+        register_test_components(&mut registry);
+        let schema = ComponentSchema::new(
+            bad_export_type_id(),
+            "Bad export",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("x"),
+            "X",
+            ComponentFieldPath::from_fields(["x"]),
+            ComponentValueKind::I64,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
         registry
-            .register_component_codec_with_fields::<BadExport, _, _>(
-                bad_export_type_id(),
-                ComponentSchemaVersion(1),
-                [ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["x"]),
-                    ComponentValueKind::I64,
-                )],
+            .register_persistent_component_codec::<BadExport, _, _>(
+                schema,
                 |value| {
                     value.field_i64("x")?;
                     Ok(PreparedComponent::insert(BadExport))
@@ -2090,19 +2102,29 @@ mod tests {
                 },
             )
             .unwrap();
+        registry.freeze().expect("component registry should freeze");
         registry
     }
 
     fn test_registry_with_migrating_position() -> ComponentRegistry {
-        let mut registry = test_registry();
+        let mut registry = ComponentRegistry::new();
+        register_test_components(&mut registry);
+        let schema = ComponentSchema::new(
+            migrating_position_type_id(),
+            "Migrating position",
+            ComponentSchemaVersion(2),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("x"),
+            "X",
+            ComponentFieldPath::from_fields(["x2"]),
+            ComponentValueKind::I64,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
         registry
-            .register_scene_component_with_fields::<MigratingPosition, _, _>(
-                migrating_position_type_id(),
-                ComponentSchemaVersion(2),
-                [ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["x2"]),
-                    ComponentValueKind::I64,
-                )],
+            .register_persistent_component_with_codec::<MigratingPosition, _, _>(
+                schema,
                 |value| {
                     let x = value.field_i64("x2")?;
                     Ok(MigratingPosition {
@@ -2136,6 +2158,7 @@ mod tests {
                 },
             )
             .unwrap();
+        registry.freeze().expect("component registry should freeze");
         registry
     }
 

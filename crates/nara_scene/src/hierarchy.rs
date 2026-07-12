@@ -1,9 +1,10 @@
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_ecs::{Bundle, Component, Entity, World};
 use nara_reflect::{
-    ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
-    ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, Reflect, bevy_reflect,
+    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, Reflect,
+    bevy_reflect,
 };
 
 pub use nara_transform::Transform2d;
@@ -102,6 +103,7 @@ impl Plugin for HierarchyPlugin {
             nara_app::PluginId::new("nara.scene.hierarchy"),
             nara_app::PluginCategory::Core,
         )
+        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
     }
 
     fn preflight(&self, app: &App) -> Result<(), PluginError> {
@@ -125,7 +127,6 @@ impl Plugin for HierarchyPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<ComponentRegistry>()?;
         let registry = &mut app.world_mut()?.resource_mut::<ComponentRegistry>();
         let name_id = ComponentTypeId::new("nara.scene.Name");
         register_name_component(registry).map_err(|error| {
@@ -153,13 +154,17 @@ pub fn register_scene_components(
 
 fn register_name_component(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
     let name_id = ComponentTypeId::new("nara.scene.Name");
-    registry.register_scene_component_with_fields::<Name, _, _>(
-        name_id.clone(),
-        ComponentSchemaVersion(1),
-        [ComponentFieldSchema::required(
+    let schema = ComponentSchema::new(name_id, "Name", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("value"),
+            "Name",
             ComponentFieldPath::empty(),
             ComponentValueKind::String,
-        )],
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+    registry.register_persistent_component_with_codec::<Name, _, _>(
+        schema,
         |value| {
             Ok(Name::new(value.as_str().ok_or_else(|| {
                 ComponentCodecError::invalid_field("Name", "string")
@@ -174,13 +179,17 @@ fn register_visibility_component(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     let visibility_id = ComponentTypeId::new("nara.scene.Visibility");
-    registry.register_scene_component_with_fields::<Visibility, _, _>(
-        visibility_id.clone(),
-        ComponentSchemaVersion(1),
-        [ComponentFieldSchema::required(
+    let schema = ComponentSchema::new(visibility_id, "Visibility", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("value"),
+            "Visibility",
             ComponentFieldPath::empty(),
             ComponentValueKind::String,
-        )],
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+    registry.register_persistent_component_with_codec::<Visibility, _, _>(
+        schema,
         |value| match value.as_str() {
             Some("visible") => Ok(Visibility::Visible),
             Some("hidden") => Ok(Visibility::Hidden),

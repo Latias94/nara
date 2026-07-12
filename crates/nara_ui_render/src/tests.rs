@@ -178,6 +178,8 @@ fn ui_rect_projection_uses_top_left_origin_and_flipped_uv() {
 
 fn ui_app() -> App {
     let mut app = App::new();
+    app.add_plugin(nara_reflect::ComponentRegistryPlugin)
+        .unwrap();
     app.add_plugin(UiRenderPlugin).unwrap();
     app.world_mut()
         .expect("app should allow world mutation")

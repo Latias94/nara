@@ -3,9 +3,10 @@ use nara_core::Color;
 use nara_image::ImageAsset;
 use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
-    ComponentApplyContext, ComponentCodecError, ComponentDecodeContext, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PreparedComponent,
 };
 use nara_render::RenderTarget;
 
@@ -27,10 +28,11 @@ pub(crate) fn register_ui_root_component(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     let root_id = ComponentTypeId::new("nara.ui.UiRoot");
-    registry.register_scene_component_with_fields::<UiRoot, _, _>(
-        root_id.clone(),
-        ComponentSchemaVersion(1),
-        ui_root_fields(),
+    let schema = ComponentSchema::new(root_id, "UI root", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(ui_root_fields());
+    registry.register_persistent_component_with_codec::<UiRoot, _, _>(
+        schema,
         |value| {
             Ok(UiRoot {
                 target: read_render_target(value.get("target"))?,
@@ -51,10 +53,11 @@ pub(crate) fn register_ui_node_component(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     let node_id = ComponentTypeId::new("nara.ui.UiNode");
-    registry.register_scene_component_with_fields::<UiNode, _, _>(
-        node_id.clone(),
-        ComponentSchemaVersion(1),
-        ui_node_fields(),
+    let schema = ComponentSchema::new(node_id, "UI node", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(ui_node_fields());
+    registry.register_persistent_component_with_codec::<UiNode, _, _>(
+        schema,
         |value| {
             Ok(UiNode {
                 style: read_style(value.get("style"))?,
@@ -81,10 +84,11 @@ pub(crate) fn register_ui_panel_component(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     let panel_id = ComponentTypeId::new("nara.ui.UiPanel");
-    registry.register_component_codec_with_context_and_fields::<UiPanel, _, _>(
-        panel_id.clone(),
-        ComponentSchemaVersion(1),
-        ui_panel_fields(),
+    let schema = ComponentSchema::new(panel_id, "UI panel", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(ui_panel_fields());
+    registry.register_persistent_component_codec_with_context::<UiPanel, _, _>(
+        schema,
         |value, context| {
             let material = read_panel_material(value.field("material")?, context)?;
             Ok(PreparedComponent::new(move |context| {
@@ -127,12 +131,16 @@ pub(crate) fn register_ui_panel_component(
 
 fn ui_root_fields() -> [ComponentFieldSchema; 2] {
     [
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "target",
+            "Target",
             ComponentFieldPath::from_fields(["target"]),
             ComponentValueKind::String,
             ComponentValue::String("primary_window".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "order",
+            "Order",
             ComponentFieldPath::from_fields(["order"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
@@ -142,62 +150,86 @@ fn ui_root_fields() -> [ComponentFieldSchema; 2] {
 
 fn ui_node_fields() -> [ComponentFieldSchema; 12] {
     [
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "clip",
+            "Clip",
             ComponentFieldPath::from_fields(["clip"]),
             ComponentValueKind::Bool,
             ComponentValue::Bool(false),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "focusable",
+            "Focusable",
             ComponentFieldPath::from_fields(["focusable"]),
             ComponentValueKind::Bool,
             ComponentValue::Bool(false),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "style.height.kind",
+            "Height mode",
             ComponentFieldPath::from_fields(["style", "height", "kind"]),
             ComponentValueKind::String,
             ComponentValue::String("auto".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "style.height.value",
+            "Height value",
             ComponentFieldPath::from_fields(["style", "height", "value"]),
             ComponentValueKind::F64,
             ComponentValue::f64(0.0).expect("0.0 is a valid ComponentValue f64"),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "style.left.kind",
+            "Left mode",
             ComponentFieldPath::from_fields(["style", "left", "kind"]),
             ComponentValueKind::String,
             ComponentValue::String("px".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "style.left.value",
+            "Left value",
             ComponentFieldPath::from_fields(["style", "left", "value"]),
             ComponentValueKind::F64,
             ComponentValue::f64(0.0).expect("0.0 is a valid ComponentValue f64"),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "style.top.kind",
+            "Top mode",
             ComponentFieldPath::from_fields(["style", "top", "kind"]),
             ComponentValueKind::String,
             ComponentValue::String("px".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "style.top.value",
+            "Top value",
             ComponentFieldPath::from_fields(["style", "top", "value"]),
             ComponentValueKind::F64,
             ComponentValue::f64(0.0).expect("0.0 is a valid ComponentValue f64"),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "style.width.kind",
+            "Width mode",
             ComponentFieldPath::from_fields(["style", "width", "kind"]),
             ComponentValueKind::String,
             ComponentValue::String("auto".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "style.width.value",
+            "Width value",
             ComponentFieldPath::from_fields(["style", "width", "value"]),
             ComponentValueKind::F64,
             ComponentValue::f64(0.0).expect("0.0 is a valid ComponentValue f64"),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "visible",
+            "Visible",
             ComponentFieldPath::from_fields(["visible"]),
             ComponentValueKind::Bool,
             ComponentValue::Bool(true),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "z_index",
+            "Z index",
             ComponentFieldPath::from_fields(["z_index"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
@@ -207,58 +239,116 @@ fn ui_node_fields() -> [ComponentFieldSchema; 12] {
 
 fn ui_panel_fields() -> [ComponentFieldSchema; 11] {
     [
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "material.alpha_mode",
+            "Alpha mode",
             ComponentFieldPath::from_fields(["material", "alpha_mode"]),
             ComponentValueKind::String,
             ComponentValue::String("blend".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional_asset_ref(
+            "material.image",
+            "Image",
             ComponentFieldPath::from_fields(["material", "image"]),
-            ComponentValueKind::AssetRef,
             ComponentValue::Null,
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "material.sampler.address_mode_u",
+            "Horizontal address mode",
             ComponentFieldPath::from_fields(["material", "sampler", "address_mode_u"]),
             ComponentValueKind::String,
             ComponentValue::String("clamp_to_edge".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "material.sampler.address_mode_v",
+            "Vertical address mode",
             ComponentFieldPath::from_fields(["material", "sampler", "address_mode_v"]),
             ComponentValueKind::String,
             ComponentValue::String("clamp_to_edge".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "material.sampler.mag_filter",
+            "Magnification filter",
             ComponentFieldPath::from_fields(["material", "sampler", "mag_filter"]),
             ComponentValueKind::String,
             ComponentValue::String("linear".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "material.sampler.min_filter",
+            "Minimum filter",
             ComponentFieldPath::from_fields(["material", "sampler", "min_filter"]),
             ComponentValueKind::String,
             ComponentValue::String("linear".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        ui_optional(
+            "material.sampler.mipmap_filter",
+            "Mipmap filter",
             ComponentFieldPath::from_fields(["material", "sampler", "mipmap_filter"]),
             ComponentValueKind::String,
             ComponentValue::String("linear".to_string()),
         ),
-        ComponentFieldSchema::required(
+        ui_required(
+            "material.tint.a",
+            "Tint alpha",
             ComponentFieldPath::from_fields(["material", "tint", "a"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::required(
+        ui_required(
+            "material.tint.b",
+            "Tint blue",
             ComponentFieldPath::from_fields(["material", "tint", "b"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::required(
+        ui_required(
+            "material.tint.g",
+            "Tint green",
             ComponentFieldPath::from_fields(["material", "tint", "g"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::required(
+        ui_required(
+            "material.tint.r",
+            "Tint red",
             ComponentFieldPath::from_fields(["material", "tint", "r"]),
             ComponentValueKind::F64,
         ),
     ]
+}
+
+fn ui_required(
+    id: &str,
+    alias: &str,
+    path: ComponentFieldPath,
+    kind: ComponentValueKind,
+) -> ComponentFieldSchema {
+    ComponentFieldSchema::required(ComponentFieldId::new(id), alias, path, kind)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+}
+
+fn ui_optional(
+    id: &str,
+    alias: &str,
+    path: ComponentFieldPath,
+    kind: ComponentValueKind,
+    default_value: ComponentValue,
+) -> ComponentFieldSchema {
+    ComponentFieldSchema::optional_with_default(
+        ComponentFieldId::new(id),
+        alias,
+        path,
+        kind,
+        default_value,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+}
+
+fn ui_optional_asset_ref(
+    id: &str,
+    alias: &str,
+    path: ComponentFieldPath,
+    default_value: ComponentValue,
+) -> ComponentFieldSchema {
+    ui_optional(id, alias, path, ComponentValueKind::AssetRef, default_value)
+        .with_capability(ComponentCapability::AssetRef)
 }
 
 fn read_render_target(value: Option<&ComponentValue>) -> Result<RenderTarget, ComponentCodecError> {

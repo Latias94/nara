@@ -793,6 +793,8 @@ mod tests {
     #[test]
     fn plugin_reports_skipped_frame_status_without_views() {
         let mut app = App::new();
+        app.add_plugin(nara_reflect::ComponentRegistryPlugin)
+            .unwrap();
         app.add_plugin(WgpuRenderPlugin).unwrap();
 
         app.run_once(Duration::ZERO).unwrap();

@@ -35,6 +35,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | U5-2 | U5 | `e77da64` | `persistent-shape` | `nara.toml` runtime plugin-plan spelling and task pool schema | Rewrite flat task fields into per-pool/shutdown tables and use only the canonical `runtime-2d` value. |
 | U8-1 | U8 | `9263d8c` | `rust-api/behavior/persistent-shape` | Runtime entity identity, scene instance handles, gameplay entity targets, reflected references, export remaps, and tooling snapshots | Use `nara_identity` references/locators, keep scene instance context explicit, remap before fork/replay/export, and replace raw `Entity` observations. |
 | U18-1 | U18 | `6a70847` | `rust-api/behavior` | Diagnostic construction, reports, runtime observations, pressure snapshots, and diagnostic plugin composition | Migrate to validated/classified bounded observations and reduce any `diagnostics.runtime_capacity` above 4,096. |
+| RGF-U1-1 | RGF-U1 | `RGF-U1` | `rust-api/persistent-shape` | Component/field identity, registry lifecycle, durable field patches, and canonical scene/prefab/patch/catalog files | Assign permanent field IDs, build/freeze the registry before use, rewrite experimental files to the canonical envelopes, and load file bytes through candidates. |
 
 ## Entry Contract
 
@@ -790,10 +791,91 @@ Clippy, two compile-fail doctests, the workspace check, and all five architectur
 tests. Stale-symbol searches exclude the removed runtime context/domain, raw dedupe builder,
 `diagnostics()` accessor, and owned report extraction path.
 
+## RGF-U1-1: Stable Schema Identity and Canonical Persistence Files
+
+**Removed contract**:
+
+- Persistent schema entries containing `rust_type_path`, native Rust/Bevy identity, or codecs.
+- Name-only durable patch targets and persistent `ComponentFieldPath` addresses.
+- Registry mutation after runtime publication and access to an unfrozen candidate as runtime truth.
+- Direct file deserialization into `SceneDocument`, `PrefabDocument`, or `ScenePatchDocument`.
+- Prototype scene, prefab, patch, and schema-catalog shapes without the shared canonical envelope.
+- Speculative save, animation, replication, scripting, diagnostic, and runtime-only capability
+  values in canonical version 1.
+
+**Canonical replacement or deletion rationale**: stable `ComponentTypeId` and
+`ComponentFieldId` values are permanent durable identity; aliases and current value paths may
+change. A runtime-independent catalog carries schemas, aliases, defaults, capabilities, and
+tombstones, while native bindings and migration functions remain process-local. A registry
+publishes one immutable snapshot only after an atomic `Building -> Frozen` validation. Scene,
+prefab, standalone patch, and component-schema-catalog files use the same strict version-1 envelope
+and produce bounded candidates before semantic publication.
+
+**Before**:
+
+```rust
+ScenePatchOperation::SetField {
+    entity,
+    component,
+    path: ComponentFieldPath::from_fields(["health"]),
+    value: ComponentValue::I64(9),
+}
+```
+
+**After**:
+
+```rust
+ScenePatchOperation::SetField {
+    entity,
+    component,
+    component_version: ComponentSchemaVersion::ONE,
+    field: ComponentFieldId::new("health.current"),
+    value: ComponentValue::I64(9),
+}
+```
+
+**Affected examples and fixtures**: component-schema export, scene/prefab round trips, patch
+overrides, authoring/Inspector/Play tests, every built-in persistent component provider, and the
+eight JSON/RON fixtures under `tests/fixtures/formats/v1/` use the canonical identities and file
+boundary.
+
+**User action**: assign explicit permanent field IDs and aliases to persistent Rust components;
+replace name/path patch targets with field IDs and the current component version; rewrite an
+old-version field write through the current value semantics instead of relying on its stable ID;
+finish component registration before registry freeze; manually rewrite experimental source files
+to the canonical envelope. Regenerate experimental catalogs from the current component
+declarations.
+
+**Source action**: `manual-rewrite`. Runtime auto-rewrite is unsupported because no released
+compatibility window retains the prototype shapes.
+
+**Cache action**: `delete` or regenerate derived schema catalogs and cached prototype documents;
+keep source files only after manual canonical rewrite.
+
+**Compatibility window**: none (unreleased canonical replacement). A generation-N catalog is
+validated against exactly generation N-1 and its fingerprint. RGF-U1 does not retain an arbitrary
+historical catalog chain or any non-v1 file migration.
+
+**Rollback**: restore an external source backup and revert the complete RGF-U1 change. Do not add a
+second reader, infer stable IDs from Rust names, or unfreeze a published registry.
+
+**Verification anchors**: `crates/nara_core/tests/format_contract.rs`,
+`crates/nara_reflect/tests/{catalog_format,registry_contract}.rs`,
+`crates/nara_scene/tests/format_contract.rs`, root scene/Inspector/Play tests, and the canonical
+fixtures cover ordered budget gates, post-migration shape/value growth, strict envelopes, lineage,
+freeze atomicity, durable field-ID patches, old-version field-write rejection, and candidate
+publication. The empty-payload golden files lock the envelope and empty
+canonical shape only; construction-based non-empty round trips cover component values, prefab
+embedding, patch operations, and catalog records.
+
 ## Persistent Format Matrix
 
-U9 and later format-owning units populate this table before writing a new shape. Rows describe only formats intentionally supported after the refactor; deleted draft formats do not remain as pseudo-legacy rows.
+Rows describe only formats intentionally supported after the refactor; deleted draft formats do
+not remain as pseudo-legacy rows.
 
 | Kind | Canonical written version | Readable versions | Retained migration chain | Engine minimum | Source action | Cache action |
 |---|---:|---|---|---|---|---|
-| _Added by the format owner_ | 1 | 1 | none | _set by owner_ | _set by owner_ | _set by owner_ |
+| `scene` | 1 | 1 | none | `0.1.0` | `manual-rewrite` | `keep` after rewrite |
+| `prefab` | 1 | 1 | none | `0.1.0` | `manual-rewrite` | `keep` after rewrite |
+| `scene_patch` | 1 | 1 | none | `0.1.0` | `manual-rewrite` | `keep` after rewrite |
+| `component_schema_catalog` | 1 | 1 | direct predecessor validation only | `0.1.0` | regenerate or `manual-rewrite` | `delete`/regenerate derived copies |

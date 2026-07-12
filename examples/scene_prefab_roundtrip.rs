@@ -19,16 +19,27 @@ fn main() {
     register_render_components(&mut registry).expect("render components should register once");
     register_sprite_components(&mut registry).expect("sprite components should register once");
     register_tilemap_components(&mut registry).expect("tilemap components should register once");
+    registry.freeze().expect("component registry should freeze");
 
     let scene = sample_scene();
     let asset_database = sample_asset_database();
     let json = scene.to_json_string().unwrap();
     let ron = scene.to_ron_string().unwrap();
 
-    let from_json = SceneDocument::from_json_str(&json).unwrap();
-    let from_ron = SceneDocument::from_ron_str(&ron).unwrap();
-    assert_eq!(from_json, scene);
-    assert_eq!(from_ron, scene);
+    let from_json = SceneAuthoringSession::try_from_file_candidate_with_asset_database(
+        SceneDocumentCandidate::decode_json_str(&json).unwrap(),
+        &registry,
+        &asset_database,
+    )
+    .unwrap();
+    let from_ron = SceneAuthoringSession::try_from_file_candidate_with_asset_database(
+        SceneDocumentCandidate::decode_ron_str(&ron).unwrap(),
+        &registry,
+        &asset_database,
+    )
+    .unwrap();
+    assert_eq!(from_json.document(), &scene);
+    assert_eq!(from_ron.document(), &scene);
 
     let mut invalid = scene.clone();
     invalid.entities[1].components.insert(
@@ -74,8 +85,12 @@ fn main() {
 
     let mut world = World::new();
     let mut spawner = SceneSpawner::new();
-    let spawn_report =
-        spawner.spawn_with_asset_database(&mut world, &registry, &from_json, &asset_database);
+    let spawn_report = spawner.spawn_with_asset_database(
+        &mut world,
+        &registry,
+        from_json.document(),
+        &asset_database,
+    );
     assert!(!spawn_report.diagnostics.has_errors());
     assert_eq!(spawn_report.instance.as_ref().unwrap().len(), 3);
 
@@ -85,10 +100,13 @@ fn main() {
     let canonical_json = export_document.to_json_string().unwrap();
     assert!(canonical_json.contains("\"path\""));
     assert!(!canonical_json.contains("AssetId"));
-    assert_eq!(
-        &SceneDocument::from_json_str(&canonical_json).unwrap(),
-        export_document
-    );
+    let canonical_session = SceneAuthoringSession::try_from_file_candidate_with_asset_database(
+        SceneDocumentCandidate::decode_json_str(&canonical_json).unwrap(),
+        &registry,
+        &asset_database,
+    )
+    .unwrap();
+    assert_eq!(canonical_session.document(), export_document);
 
     let stable_export = export_scene_with_options(
         &world,

@@ -1,34 +1,34 @@
+use std::fmt::{self, Display, Formatter};
+
 use nara_asset::{AssetRef, ProjectAssetDatabase};
+use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::ComponentRegistry;
 
 use crate::{
-    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref, with_public_locator,
         with_public_u64,
     },
+    patch::{
+        scene_entities_source_value_cost, scene_entity_component_value_cost, scene_patch_value_cost,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PrefabDocument {
-    pub format_version: u32,
     pub entities: Vec<SceneEntityRecord>,
 }
 
 impl PrefabDocument {
-    pub const CURRENT_FORMAT_VERSION: u32 = 1;
-
     #[must_use]
     pub fn new(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
         let mut entities = entities.into_iter().collect::<Vec<_>>();
         entities.sort_by(|left, right| left.id.cmp(&right.id));
-        Self {
-            format_version: Self::CURRENT_FORMAT_VERSION,
-            entities,
-        }
+        Self { entities }
     }
 
     pub fn canonicalize(&mut self) {
@@ -38,7 +38,6 @@ impl PrefabDocument {
     #[must_use]
     pub fn instantiate(&self) -> SceneDocument {
         let mut document = SceneDocument {
-            format_version: self.format_version,
             entities: self.entities.clone(),
         };
         document.canonicalize();
@@ -108,7 +107,6 @@ impl PrefabDocument {
 impl Default for PrefabDocument {
     fn default() -> Self {
         Self {
-            format_version: Self::CURRENT_FORMAT_VERSION,
             entities: Vec::new(),
         }
     }
@@ -143,12 +141,34 @@ impl PrefabInstantiationReport {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PrefabInstance {
     pub source: AssetRef,
     #[cfg_attr(feature = "serde", serde(default))]
     pub overrides: ScenePatchDocument,
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PrefabInstance {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct PrefabInstanceWire {
+            source: AssetRef,
+            #[serde(default)]
+            overrides: crate::patch::ScenePatchDocumentWire,
+        }
+
+        let wire = PrefabInstanceWire::deserialize(deserializer)?;
+        Ok(Self {
+            source: wire.source,
+            overrides: wire.overrides.into_document(),
+        })
+    }
 }
 
 pub trait PrefabSourceResolver {
@@ -184,6 +204,39 @@ impl InMemoryPrefabSourceResolver {
         self.sources.push((source, prefab));
         None
     }
+
+    #[cfg(feature = "serde")]
+    pub fn insert_file_candidate(
+        &mut self,
+        source: AssetRef,
+        candidate: crate::PrefabDocumentCandidate,
+        registry: &ComponentRegistry,
+    ) -> Result<Option<PrefabDocument>, crate::SceneFilePublicationError> {
+        let (prefab, _) = candidate.into_canonical_document(registry)?;
+        let diagnostics = prefab.instantiate().validate_authoring(registry);
+        if diagnostics.has_errors() {
+            return Err(crate::SceneFilePublicationError::new(diagnostics));
+        }
+        Ok(self.insert(source, prefab))
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn insert_file_candidate_with_asset_database(
+        &mut self,
+        source: AssetRef,
+        candidate: crate::PrefabDocumentCandidate,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> Result<Option<PrefabDocument>, crate::SceneFilePublicationError> {
+        let (prefab, _) = candidate.into_canonical_document(registry)?;
+        let diagnostics = prefab
+            .instantiate()
+            .validate_authoring_with_asset_database(registry, database);
+        if diagnostics.has_errors() {
+            return Err(crate::SceneFilePublicationError::new(diagnostics));
+        }
+        Ok(self.insert(source, prefab))
+    }
 }
 
 impl PrefabSourceResolver for InMemoryPrefabSourceResolver {
@@ -196,13 +249,189 @@ impl PrefabSourceResolver for InMemoryPrefabSourceResolver {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefabExpansionBudgetKind {
+    MaterializedEntities,
+    MaterializedComponents,
+    MaterializedValueNodes,
+    MaterializedValueBytes,
+    ResolvedInstances,
+    AppliedPatchOperations,
+    GeneratedIdentifierBytes,
+    SingleGeneratedIdentifierBytes,
+}
+
+impl PrefabExpansionBudgetKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::MaterializedEntities => "materialized-entities",
+            Self::MaterializedComponents => "materialized-components",
+            Self::MaterializedValueNodes => "materialized-value-nodes",
+            Self::MaterializedValueBytes => "materialized-value-bytes",
+            Self::ResolvedInstances => "resolved-instances",
+            Self::AppliedPatchOperations => "applied-patch-operations",
+            Self::GeneratedIdentifierBytes => "generated-identifier-bytes",
+            Self::SingleGeneratedIdentifierBytes => "single-generated-identifier-bytes",
+        }
+    }
+}
+
+impl Display for PrefabExpansionBudgetKind {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrefabExpansionLimits {
+    materialized_entities: ItemLimit,
+    materialized_components: ItemLimit,
+    materialized_value_nodes: ItemLimit,
+    materialized_value_bytes: ByteLimit,
+    resolved_instances: ItemLimit,
+    applied_patch_operations: ItemLimit,
+    generated_identifier_bytes: ByteLimit,
+    single_generated_identifier_bytes: ByteLimit,
+}
+
+impl Default for PrefabExpansionLimits {
+    fn default() -> Self {
+        Self {
+            materialized_entities: ItemLimit::new(100_000)
+                .expect("prefab expansion entity limit is non-zero"),
+            materialized_components: ItemLimit::new(500_000)
+                .expect("prefab expansion component limit is non-zero"),
+            materialized_value_nodes: ItemLimit::new(5_000_000)
+                .expect("prefab expansion value node limit is non-zero"),
+            materialized_value_bytes: ByteLimit::new(64 * 1024 * 1024)
+                .expect("prefab expansion value byte limit is non-zero"),
+            resolved_instances: ItemLimit::new(100_000)
+                .expect("prefab expansion instance limit is non-zero"),
+            applied_patch_operations: ItemLimit::new(100_000)
+                .expect("prefab expansion patch operation limit is non-zero"),
+            generated_identifier_bytes: ByteLimit::new(8 * 1024 * 1024)
+                .expect("prefab expansion generated identifier byte limit is non-zero"),
+            single_generated_identifier_bytes: ByteLimit::new(1024 * 1024)
+                .expect("prefab expansion identifier byte limit is non-zero"),
+        }
+    }
+}
+
+impl PrefabExpansionLimits {
+    #[must_use]
+    pub const fn materialized_entities(self) -> ItemLimit {
+        self.materialized_entities
+    }
+
+    #[must_use]
+    pub const fn materialized_components(self) -> ItemLimit {
+        self.materialized_components
+    }
+
+    #[must_use]
+    pub const fn materialized_value_nodes(self) -> ItemLimit {
+        self.materialized_value_nodes
+    }
+
+    #[must_use]
+    pub const fn materialized_value_bytes(self) -> ByteLimit {
+        self.materialized_value_bytes
+    }
+
+    #[must_use]
+    pub const fn resolved_instances(self) -> ItemLimit {
+        self.resolved_instances
+    }
+
+    #[must_use]
+    pub const fn applied_patch_operations(self) -> ItemLimit {
+        self.applied_patch_operations
+    }
+
+    #[must_use]
+    pub const fn generated_identifier_bytes(self) -> ByteLimit {
+        self.generated_identifier_bytes
+    }
+
+    #[must_use]
+    pub const fn single_generated_identifier_bytes(self) -> ByteLimit {
+        self.single_generated_identifier_bytes
+    }
+
+    #[must_use]
+    pub const fn with_materialized_entities(mut self, limit: ItemLimit) -> Self {
+        self.materialized_entities = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_materialized_components(mut self, limit: ItemLimit) -> Self {
+        self.materialized_components = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_materialized_value_nodes(mut self, limit: ItemLimit) -> Self {
+        self.materialized_value_nodes = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_materialized_value_bytes(mut self, limit: ByteLimit) -> Self {
+        self.materialized_value_bytes = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_resolved_instances(mut self, limit: ItemLimit) -> Self {
+        self.resolved_instances = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_applied_patch_operations(mut self, limit: ItemLimit) -> Self {
+        self.applied_patch_operations = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_generated_identifier_bytes(mut self, limit: ByteLimit) -> Self {
+        self.generated_identifier_bytes = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_single_generated_identifier_bytes(mut self, limit: ByteLimit) -> Self {
+        self.single_generated_identifier_bytes = limit;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrefabExpansionOptions {
     pub max_depth: usize,
+    pub limits: PrefabExpansionLimits,
 }
 
 impl Default for PrefabExpansionOptions {
     fn default() -> Self {
-        Self { max_depth: 32 }
+        Self {
+            max_depth: 32,
+            limits: PrefabExpansionLimits::default(),
+        }
+    }
+}
+
+impl PrefabExpansionOptions {
+    #[must_use]
+    pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = max_depth;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_limits(mut self, limits: PrefabExpansionLimits) -> Self {
+        self.limits = limits;
+        self
     }
 }
 
@@ -210,6 +439,17 @@ impl Default for PrefabExpansionOptions {
 pub struct PrefabExpansionReport {
     pub document: Option<SceneDocument>,
     pub diagnostics: DiagnosticReport,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct PrefabExpansionUsage {
+    materialized_entities: usize,
+    materialized_components: usize,
+    materialized_value_nodes: usize,
+    materialized_value_bytes: usize,
+    resolved_instances: usize,
+    applied_patch_operations: usize,
+    generated_identifier_bytes: usize,
 }
 
 impl SceneDocument {
@@ -267,6 +507,8 @@ struct PrefabExpansionContext<'a, R: PrefabSourceResolver + ?Sized> {
     options: PrefabExpansionOptions,
     database: Option<&'a ProjectAssetDatabase>,
     stack: Vec<AssetRef>,
+    usage: PrefabExpansionUsage,
+    budget_failed: bool,
     diagnostics: DiagnosticReport,
 }
 
@@ -283,13 +525,14 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             options,
             database,
             stack: Vec::new(),
+            usage: PrefabExpansionUsage::default(),
+            budget_failed: false,
             diagnostics: DiagnosticReport::default(),
         }
     }
 
     fn expand_scene_document(&mut self, document: &SceneDocument) -> PrefabExpansionReport {
         let mut expanded = SceneDocument {
-            format_version: document.format_version,
             entities: Vec::new(),
         };
         self.expand_entities(&document.entities, &mut expanded.entities);
@@ -319,11 +562,17 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         output: &mut Vec<SceneEntityRecord>,
     ) {
         for entity in entities {
+            if self.budget_failed {
+                break;
+            }
             self.expand_entity(entity, output);
         }
     }
 
     fn expand_entity(&mut self, entity: &SceneEntityRecord, output: &mut Vec<SceneEntityRecord>) {
+        if !self.reserve_materialized_entity(entity) {
+            return;
+        }
         let mut anchor = entity.clone();
         let prefab_instance = anchor.prefab.take();
         output.push(anchor);
@@ -339,6 +588,9 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         instance: &PrefabInstance,
         output: &mut Vec<SceneEntityRecord>,
     ) {
+        if !self.reserve_resolved_instance(anchor_id, &instance.source) {
+            return;
+        }
         if self.stack.len() >= self.options.max_depth {
             self.diagnostics.push(with_asset_ref(
                 with_public_u64(
@@ -424,6 +676,19 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return;
         };
 
+        if !self.reserve_applied_patch_operations(
+            instance.overrides.operations.len(),
+            anchor_id,
+            &instance.source,
+        ) || !self.preflight_source_materialization(
+            prefab,
+            &instance.overrides,
+            anchor_id,
+            &instance.source,
+        ) {
+            return;
+        }
+
         self.stack.push(instance.source.clone());
 
         let mut source_document = prefab.instantiate();
@@ -446,7 +711,6 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
 
         let diagnostics_before = self.diagnostics.stats().published_entries();
         let mut expanded_source = SceneDocument {
-            format_version: source_document.format_version,
             entities: Vec::new(),
         };
         self.expand_entities(&source_document.entities, &mut expanded_source.entities);
@@ -457,13 +721,320 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             self.diagnostics.extend(validation);
         }
 
-        if self.diagnostics.stats().published_entries() == diagnostics_before {
-            for entity in namespace_prefab_entities(anchor_id, expanded_source.entities) {
-                output.push(entity);
-            }
+        if self.diagnostics.stats().published_entries() == diagnostics_before
+            && let Some(entities) =
+                self.namespace_prefab_entities(anchor_id, expanded_source.entities)
+        {
+            output.extend(entities);
         }
 
         self.stack.pop();
+    }
+
+    fn reserve_materialized_entity(&mut self, entity: &SceneEntityRecord) -> bool {
+        let value_cost = scene_entity_component_value_cost(entity);
+        let Some(entities) = self.observe_item_budget(
+            PrefabExpansionBudgetKind::MaterializedEntities,
+            self.usage.materialized_entities,
+            1,
+            self.options.limits.materialized_entities(),
+            Some(&entity.id),
+            entity.prefab.as_ref().map(|prefab| &prefab.source),
+        ) else {
+            return false;
+        };
+        let Some(components) = self.observe_item_budget(
+            PrefabExpansionBudgetKind::MaterializedComponents,
+            self.usage.materialized_components,
+            entity.components.len(),
+            self.options.limits.materialized_components(),
+            Some(&entity.id),
+            entity.prefab.as_ref().map(|prefab| &prefab.source),
+        ) else {
+            return false;
+        };
+        let Some(value_nodes) = self.observe_item_budget(
+            PrefabExpansionBudgetKind::MaterializedValueNodes,
+            self.usage.materialized_value_nodes,
+            value_cost.nodes(),
+            self.options.limits.materialized_value_nodes(),
+            Some(&entity.id),
+            entity.prefab.as_ref().map(|prefab| &prefab.source),
+        ) else {
+            return false;
+        };
+        let Some(value_bytes) = self.observe_byte_budget(
+            PrefabExpansionBudgetKind::MaterializedValueBytes,
+            self.usage.materialized_value_bytes,
+            value_cost.logical_bytes(),
+            self.options.limits.materialized_value_bytes(),
+            Some(&entity.id),
+            entity.prefab.as_ref().map(|prefab| &prefab.source),
+        ) else {
+            return false;
+        };
+        self.usage.materialized_entities = entities;
+        self.usage.materialized_components = components;
+        self.usage.materialized_value_nodes = value_nodes;
+        self.usage.materialized_value_bytes = value_bytes;
+        true
+    }
+
+    fn reserve_resolved_instance(&mut self, anchor_id: &SceneEntityId, source: &AssetRef) -> bool {
+        let Some(instances) = self.observe_item_budget(
+            PrefabExpansionBudgetKind::ResolvedInstances,
+            self.usage.resolved_instances,
+            1,
+            self.options.limits.resolved_instances(),
+            Some(anchor_id),
+            Some(source),
+        ) else {
+            return false;
+        };
+        self.usage.resolved_instances = instances;
+        true
+    }
+
+    fn reserve_applied_patch_operations(
+        &mut self,
+        amount: usize,
+        anchor_id: &SceneEntityId,
+        source: &AssetRef,
+    ) -> bool {
+        let Some(operations) = self.observe_item_budget(
+            PrefabExpansionBudgetKind::AppliedPatchOperations,
+            self.usage.applied_patch_operations,
+            amount,
+            self.options.limits.applied_patch_operations(),
+            Some(anchor_id),
+            Some(source),
+        ) else {
+            return false;
+        };
+        self.usage.applied_patch_operations = operations;
+        true
+    }
+
+    fn preflight_source_materialization(
+        &mut self,
+        prefab: &PrefabDocument,
+        overrides: &ScenePatchDocument,
+        anchor_id: &SceneEntityId,
+        source: &AssetRef,
+    ) -> bool {
+        let value_cost = scene_entities_source_value_cost(&prefab.entities)
+            .saturating_add(scene_patch_value_cost(overrides));
+        let mut entities = prefab.entities.len();
+        let mut components = prefab
+            .entities
+            .iter()
+            .map(|entity| entity.components.len())
+            .sum::<usize>();
+        for operation in &overrides.operations {
+            match operation {
+                ScenePatchOperation::AddEntity { entity } => {
+                    entities = entities.saturating_add(1);
+                    components = components.saturating_add(entity.components.len());
+                }
+                ScenePatchOperation::AddComponent { .. } => {
+                    components = components.saturating_add(1);
+                }
+                ScenePatchOperation::RemoveEntity { .. }
+                | ScenePatchOperation::RemoveComponent { .. }
+                | ScenePatchOperation::ReplaceComponent { .. }
+                | ScenePatchOperation::SetField { .. }
+                | ScenePatchOperation::RemoveField { .. }
+                | ScenePatchOperation::Reparent { .. }
+                | ScenePatchOperation::SetAssetRefField { .. } => {}
+            }
+        }
+
+        self.observe_item_budget(
+            PrefabExpansionBudgetKind::MaterializedEntities,
+            self.usage.materialized_entities,
+            entities,
+            self.options.limits.materialized_entities(),
+            Some(anchor_id),
+            Some(source),
+        )
+        .is_some()
+            && self
+                .observe_item_budget(
+                    PrefabExpansionBudgetKind::MaterializedComponents,
+                    self.usage.materialized_components,
+                    components,
+                    self.options.limits.materialized_components(),
+                    Some(anchor_id),
+                    Some(source),
+                )
+                .is_some()
+            && self
+                .observe_item_budget(
+                    PrefabExpansionBudgetKind::MaterializedValueNodes,
+                    self.usage.materialized_value_nodes,
+                    value_cost.nodes(),
+                    self.options.limits.materialized_value_nodes(),
+                    Some(anchor_id),
+                    Some(source),
+                )
+                .is_some()
+            && self
+                .observe_byte_budget(
+                    PrefabExpansionBudgetKind::MaterializedValueBytes,
+                    self.usage.materialized_value_bytes,
+                    value_cost.logical_bytes(),
+                    self.options.limits.materialized_value_bytes(),
+                    Some(anchor_id),
+                    Some(source),
+                )
+                .is_some()
+    }
+
+    fn namespace_prefab_entities(
+        &mut self,
+        anchor_id: &SceneEntityId,
+        entities: Vec<SceneEntityRecord>,
+    ) -> Option<Vec<SceneEntityRecord>> {
+        let mut generated_bytes = 0_usize;
+        let single_limit = self.options.limits.single_generated_identifier_bytes();
+        for entity in &entities {
+            let identifier_lengths = [
+                namespaced_identifier_len(anchor_id, &entity.id),
+                entity
+                    .parent
+                    .as_ref()
+                    .map_or(anchor_id.as_str().len(), |parent| {
+                        namespaced_identifier_len(anchor_id, parent)
+                    }),
+            ];
+            for identifier_len in identifier_lengths {
+                if identifier_len > single_limit.get() {
+                    self.fail_budget(
+                        PrefabExpansionBudgetKind::SingleGeneratedIdentifierBytes,
+                        identifier_len,
+                        single_limit.get(),
+                        Some(anchor_id),
+                        None,
+                    );
+                    return None;
+                }
+                generated_bytes = generated_bytes.saturating_add(identifier_len);
+            }
+        }
+
+        let aggregate_limit = self.options.limits.generated_identifier_bytes();
+        let Some(observed) = self
+            .usage
+            .generated_identifier_bytes
+            .checked_add(generated_bytes)
+        else {
+            self.fail_budget(
+                PrefabExpansionBudgetKind::GeneratedIdentifierBytes,
+                usize::MAX,
+                aggregate_limit.get(),
+                Some(anchor_id),
+                None,
+            );
+            return None;
+        };
+        if observed > aggregate_limit.get() {
+            self.fail_budget(
+                PrefabExpansionBudgetKind::GeneratedIdentifierBytes,
+                observed,
+                aggregate_limit.get(),
+                Some(anchor_id),
+                None,
+            );
+            return None;
+        }
+        self.usage.generated_identifier_bytes = observed;
+
+        Some(
+            entities
+                .into_iter()
+                .map(|mut entity| {
+                    let local_id = entity.id.clone();
+                    entity.id = namespace_scene_entity_id(anchor_id, &local_id);
+                    entity.parent = Some(match entity.parent {
+                        Some(parent) => namespace_scene_entity_id(anchor_id, &parent),
+                        None => anchor_id.clone(),
+                    });
+                    entity.prefab = None;
+                    entity
+                })
+                .collect(),
+        )
+    }
+
+    fn observe_item_budget(
+        &mut self,
+        kind: PrefabExpansionBudgetKind,
+        current: usize,
+        amount: usize,
+        limit: ItemLimit,
+        entity: Option<&SceneEntityId>,
+        source: Option<&AssetRef>,
+    ) -> Option<usize> {
+        let observed = current.saturating_add(amount);
+        if observed > limit.get() {
+            self.fail_budget(kind, observed, limit.get(), entity, source);
+            return None;
+        }
+        Some(observed)
+    }
+
+    fn observe_byte_budget(
+        &mut self,
+        kind: PrefabExpansionBudgetKind,
+        current: usize,
+        amount: usize,
+        limit: ByteLimit,
+        entity: Option<&SceneEntityId>,
+        source: Option<&AssetRef>,
+    ) -> Option<usize> {
+        let observed = current.saturating_add(amount);
+        if observed > limit.get() {
+            self.fail_budget(kind, observed, limit.get(), entity, source);
+            return None;
+        }
+        Some(observed)
+    }
+
+    fn fail_budget(
+        &mut self,
+        kind: PrefabExpansionBudgetKind,
+        observed: usize,
+        maximum: usize,
+        entity: Option<&SceneEntityId>,
+        source: Option<&AssetRef>,
+    ) {
+        if self.budget_failed {
+            return;
+        }
+        self.budget_failed = true;
+        let mut diagnostic = with_public_u64(
+            with_public_u64(
+                with_public_locator(
+                    diagnostic_error(
+                        "scene.prefab-expansion-budget-exceeded",
+                        "Prefab expansion budget was exceeded",
+                    ),
+                    "budget-kind",
+                    kind.as_str(),
+                ),
+                "observed",
+                usize_to_u64(observed),
+            ),
+            "maximum",
+            usize_to_u64(maximum),
+        );
+        if let Some(entity) = entity {
+            diagnostic = with_public_locator(diagnostic, "entity-id", entity.as_str());
+        }
+        if let Some(source) = source {
+            diagnostic = with_asset_ref(diagnostic, "asset-ref", source);
+        }
+        self.diagnostics.push(diagnostic);
     }
 
     fn validate_document(&self, document: &SceneDocument) -> DiagnosticReport {
@@ -474,23 +1045,12 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
     }
 }
 
-fn namespace_prefab_entities(
-    anchor_id: &SceneEntityId,
-    entities: Vec<SceneEntityRecord>,
-) -> Vec<SceneEntityRecord> {
-    entities
-        .into_iter()
-        .map(|mut entity| {
-            let local_id = entity.id.clone();
-            entity.id = namespace_scene_entity_id(anchor_id, &local_id);
-            entity.parent = Some(match entity.parent {
-                Some(parent) => namespace_scene_entity_id(anchor_id, &parent),
-                None => anchor_id.clone(),
-            });
-            entity.prefab = None;
-            entity
-        })
-        .collect()
+fn namespaced_identifier_len(anchor_id: &SceneEntityId, local_id: &SceneEntityId) -> usize {
+    anchor_id
+        .as_str()
+        .len()
+        .saturating_add(1)
+        .saturating_add(local_id.as_str().len())
 }
 
 fn namespace_scene_entity_id(anchor_id: &SceneEntityId, local_id: &SceneEntityId) -> SceneEntityId {

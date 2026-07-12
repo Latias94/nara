@@ -76,11 +76,16 @@ pub struct SceneAuthoringSession {
     redo_stack: Vec<ScenePatchDocument>,
     live_instance: Option<SpawnedSceneInstance>,
     live_dirty: bool,
+    source_upgrade_required: bool,
 }
 
 impl SceneAuthoringSession {
     #[must_use]
     pub fn new(document: SceneDocument) -> Self {
+        Self::new_with_source_state(document, false)
+    }
+
+    fn new_with_source_state(document: SceneDocument, source_upgrade_required: bool) -> Self {
         Self {
             document,
             revision: SceneAuthoringRevision {
@@ -91,7 +96,41 @@ impl SceneAuthoringSession {
             redo_stack: Vec::new(),
             live_instance: None,
             live_dirty: true,
+            source_upgrade_required,
         }
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn try_from_file_candidate(
+        candidate: crate::SceneDocumentCandidate,
+        registry: &ComponentRegistry,
+    ) -> Result<Self, crate::SceneFilePublicationError> {
+        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
+        let diagnostics = document.validate_authoring(registry);
+        if diagnostics.has_errors() {
+            return Err(crate::SceneFilePublicationError::new(diagnostics));
+        }
+        Ok(Self::new_with_source_state(
+            document,
+            source_upgrade_required,
+        ))
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn try_from_file_candidate_with_asset_database(
+        candidate: crate::SceneDocumentCandidate,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> Result<Self, crate::SceneFilePublicationError> {
+        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
+        let diagnostics = document.validate_authoring_with_asset_database(registry, database);
+        if diagnostics.has_errors() {
+            return Err(crate::SceneFilePublicationError::new(diagnostics));
+        }
+        Ok(Self::new_with_source_state(
+            document,
+            source_upgrade_required,
+        ))
     }
 
     #[must_use]
@@ -105,10 +144,50 @@ impl SceneAuthoringSession {
     }
 
     pub fn replace_document(&mut self, document: SceneDocument) {
+        self.replace_document_with_source_state(document, false);
+    }
+
+    fn replace_document_with_source_state(
+        &mut self,
+        document: SceneDocument,
+        source_upgrade_required: bool,
+    ) {
         self.document = document;
         self.advance_revision();
         self.clear_history();
         self.live_dirty = true;
+        self.source_upgrade_required = source_upgrade_required;
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn try_replace_file_candidate(
+        &mut self,
+        candidate: crate::SceneDocumentCandidate,
+        registry: &ComponentRegistry,
+    ) -> Result<(), crate::SceneFilePublicationError> {
+        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
+        let diagnostics = document.validate_authoring(registry);
+        if diagnostics.has_errors() {
+            return Err(crate::SceneFilePublicationError::new(diagnostics));
+        }
+        self.replace_document_with_source_state(document, source_upgrade_required);
+        Ok(())
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn try_replace_file_candidate_with_asset_database(
+        &mut self,
+        candidate: crate::SceneDocumentCandidate,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> Result<(), crate::SceneFilePublicationError> {
+        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
+        let diagnostics = document.validate_authoring_with_asset_database(registry, database);
+        if diagnostics.has_errors() {
+            return Err(crate::SceneFilePublicationError::new(diagnostics));
+        }
+        self.replace_document_with_source_state(document, source_upgrade_required);
+        Ok(())
     }
 
     pub fn clear_history(&mut self) {
@@ -134,6 +213,15 @@ impl SceneAuthoringSession {
         self.live_dirty
     }
 
+    #[must_use]
+    pub fn source_upgrade_required(&self) -> bool {
+        self.source_upgrade_required
+    }
+
+    pub fn acknowledge_source_saved(&mut self) {
+        self.source_upgrade_required = false;
+    }
+
     pub fn apply_patch(
         &mut self,
         patch: &ScenePatchDocument,
@@ -154,6 +242,31 @@ impl SceneAuthoringSession {
             patch.apply_to_scene_with_asset_database(&mut self.document, registry, database);
         self.record_forward_patch(patch, &report);
         report
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn apply_file_patch_candidate(
+        &mut self,
+        candidate: crate::ScenePatchDocumentCandidate,
+        registry: &ComponentRegistry,
+    ) -> ScenePatchReport {
+        match candidate.into_canonical_document(registry) {
+            Ok((patch, _)) => self.apply_patch(&patch, registry),
+            Err(error) => crate::format::publication_error_patch_report(error),
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn apply_file_patch_candidate_with_asset_database(
+        &mut self,
+        candidate: crate::ScenePatchDocumentCandidate,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> ScenePatchReport {
+        match candidate.into_canonical_document(registry) {
+            Ok((patch, _)) => self.apply_patch_with_asset_database(&patch, registry, database),
+            Err(error) => crate::format::publication_error_patch_report(error),
+        }
     }
 
     pub fn undo(&mut self, registry: &ComponentRegistry) -> ScenePatchReport {

@@ -9,9 +9,10 @@ use nara_ecs::World;
 use nara_image::ImageAsset;
 use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
-    ComponentApplyContext, ComponentCodecError, ComponentDecodeContext, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PreparedComponent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -220,6 +221,7 @@ impl Plugin for SpritePlugin {
             nara_app::PluginId::new("nara.sprite"),
             nara_app::PluginCategory::Runtime,
         )
+        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
     }
 
     fn preflight(&self, app: &App) -> Result<(), PluginError> {
@@ -235,7 +237,6 @@ impl Plugin for SpritePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<ComponentRegistry>()?;
         let component_id = ComponentTypeId::new("nara.sprite.Sprite");
         register_sprite_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
@@ -249,12 +250,14 @@ pub fn register_sprite_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     let component_id = ComponentTypeId::new("nara.sprite.Sprite");
-    registry.register_component_codec_with_context_and_fields::<Sprite, _, _>(
-        component_id.clone(),
-        ComponentSchemaVersion(1),
-        sprite_fields(),
+    let schema = ComponentSchema::new(component_id, "Sprite", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(sprite_fields());
+    registry.register_persistent_component_codec_with_context::<Sprite, _, _>(
+        schema,
         |value, context| {
             let size = read_vec2(value.field("size")?, "size")?;
+            let anchor = read_optional_anchor(value.get("anchor"))?;
             let material = read_sprite_material(value.field("material")?, context)?;
             let texture_region =
                 read_optional_texture_region(value.get("texture_region"), "texture_region")?;
@@ -267,7 +270,7 @@ pub fn register_sprite_components(
                     material,
                     texture_region,
                     size,
-                    anchor: SpriteAnchor::CENTER,
+                    anchor,
                     layer,
                     sort_key,
                 })
@@ -301,6 +304,7 @@ pub fn register_sprite_components(
 
             let mut fields = vec![
                 ("size", vec2_value(sprite.size)?),
+                ("anchor", vec2_value(sprite.anchor.normalized)?),
                 ("material", material),
                 ("layer", ComponentValue::I64(i64::from(sprite.layer))),
                 ("sort_key", ComponentValue::I64(i64::from(sprite.sort_key))),
@@ -319,83 +323,165 @@ pub fn register_sprite_components(
     Ok(())
 }
 
-fn sprite_fields() -> [ComponentFieldSchema; 16] {
+fn sprite_fields() -> [ComponentFieldSchema; 18] {
     [
-        ComponentFieldSchema::required(
+        sprite_required(
+            "size.x",
+            "Width",
             ComponentFieldPath::from_fields(["size", "x"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::required(
+        sprite_required(
+            "size.y",
+            "Height",
             ComponentFieldPath::from_fields(["size", "y"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::required(
+        sprite_optional(
+            "anchor.x",
+            "Anchor X",
+            ComponentFieldPath::from_fields(["anchor", "x"]),
+            ComponentValueKind::F64,
+            ComponentValue::f64(0.0).expect("zero is a finite component value"),
+        ),
+        sprite_optional(
+            "anchor.y",
+            "Anchor Y",
+            ComponentFieldPath::from_fields(["anchor", "y"]),
+            ComponentValueKind::F64,
+            ComponentValue::f64(0.0).expect("zero is a finite component value"),
+        ),
+        sprite_required(
+            "material.tint.r",
+            "Tint red",
             ComponentFieldPath::from_fields(["material", "tint", "r"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::required(
+        sprite_required(
+            "material.tint.g",
+            "Tint green",
             ComponentFieldPath::from_fields(["material", "tint", "g"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::required(
+        sprite_required(
+            "material.tint.b",
+            "Tint blue",
             ComponentFieldPath::from_fields(["material", "tint", "b"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::required(
+        sprite_required(
+            "material.tint.a",
+            "Tint alpha",
             ComponentFieldPath::from_fields(["material", "tint", "a"]),
             ComponentValueKind::F64,
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional_asset_ref(
+            "material.image",
+            "Image",
             ComponentFieldPath::from_fields(["material", "image"]),
-            ComponentValueKind::AssetRef,
             ComponentValue::Null,
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "material.sampler.min_filter",
+            "Minimum filter",
             ComponentFieldPath::from_fields(["material", "sampler", "min_filter"]),
             ComponentValueKind::String,
             ComponentValue::String("linear".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "material.sampler.mag_filter",
+            "Magnification filter",
             ComponentFieldPath::from_fields(["material", "sampler", "mag_filter"]),
             ComponentValueKind::String,
             ComponentValue::String("linear".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "material.sampler.mipmap_filter",
+            "Mipmap filter",
             ComponentFieldPath::from_fields(["material", "sampler", "mipmap_filter"]),
             ComponentValueKind::String,
             ComponentValue::String("linear".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "material.sampler.address_mode_u",
+            "Horizontal address mode",
             ComponentFieldPath::from_fields(["material", "sampler", "address_mode_u"]),
             ComponentValueKind::String,
             ComponentValue::String("clamp_to_edge".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "material.sampler.address_mode_v",
+            "Vertical address mode",
             ComponentFieldPath::from_fields(["material", "sampler", "address_mode_v"]),
             ComponentValueKind::String,
             ComponentValue::String("clamp_to_edge".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "material.alpha_mode",
+            "Alpha mode",
             ComponentFieldPath::from_fields(["material", "alpha_mode"]),
             ComponentValueKind::String,
             ComponentValue::String("blend".to_string()),
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "layer",
+            "Layer",
             ComponentFieldPath::from_fields(["layer"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "sort_key",
+            "Sort key",
             ComponentFieldPath::from_fields(["sort_key"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
         ),
-        ComponentFieldSchema::optional_with_default(
+        sprite_optional(
+            "texture_region",
+            "Texture region",
             ComponentFieldPath::from_fields(["texture_region"]),
             ComponentValueKind::Map,
             ComponentValue::Null,
         ),
     ]
+}
+
+fn sprite_required(
+    id: &str,
+    alias: &str,
+    path: ComponentFieldPath,
+    kind: ComponentValueKind,
+) -> ComponentFieldSchema {
+    ComponentFieldSchema::required(ComponentFieldId::new(id), alias, path, kind)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+}
+
+fn sprite_optional(
+    id: &str,
+    alias: &str,
+    path: ComponentFieldPath,
+    kind: ComponentValueKind,
+    default_value: ComponentValue,
+) -> ComponentFieldSchema {
+    ComponentFieldSchema::optional_with_default(
+        ComponentFieldId::new(id),
+        alias,
+        path,
+        kind,
+        default_value,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+}
+
+fn sprite_optional_asset_ref(
+    id: &str,
+    alias: &str,
+    path: ComponentFieldPath,
+    default_value: ComponentValue,
+) -> ComponentFieldSchema {
+    sprite_optional(id, alias, path, ComponentValueKind::AssetRef, default_value)
+        .with_capability(ComponentCapability::AssetRef)
 }
 
 #[derive(Debug, Clone)]
@@ -542,6 +628,17 @@ fn read_vec2(value: &ComponentValue, field: &str) -> Result<Vec2, ComponentCodec
         read_f32(value.field("x")?, &format!("{field}.x"))?,
         read_f32(value.field("y")?, &format!("{field}.y"))?,
     ))
+}
+
+fn read_optional_anchor(
+    value: Option<&ComponentValue>,
+) -> Result<SpriteAnchor, ComponentCodecError> {
+    value
+        .map(|value| read_vec2(value, "anchor"))
+        .transpose()
+        .map(|normalized| SpriteAnchor {
+            normalized: normalized.unwrap_or(Vec2::ZERO),
+        })
 }
 
 fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
@@ -832,6 +929,13 @@ mod tests {
     };
     use nara_reflect::ComponentDecodeContext;
 
+    fn frozen_sprite_registry() -> ComponentRegistry {
+        let mut registry = ComponentRegistry::new();
+        register_sprite_components(&mut registry).expect("component registration should succeed");
+        registry.freeze().expect("component registry should freeze");
+        registry
+    }
+
     #[test]
     fn creates_color_sprite_with_default_authoring_state() {
         let sprite = Sprite::from_color(Vec2::new(16.0, 16.0), Color::WHITE);
@@ -895,9 +999,7 @@ mod tests {
         let prepared = {
             let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
                 .with_project_asset_database(&database);
-            let mut registry = ComponentRegistry::new();
-            register_sprite_components(&mut registry)
-                .expect("component registration should succeed");
+            let registry = frozen_sprite_registry();
 
             let prepared = registry
                 .preflight_component_with_context(
@@ -929,8 +1031,7 @@ mod tests {
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
-        let mut registry = ComponentRegistry::new();
-        register_sprite_components(&mut registry).expect("component registration should succeed");
+        let registry = frozen_sprite_registry();
 
         let result = registry
             .preflight_component_with_context(
@@ -966,8 +1067,7 @@ mod tests {
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_project_asset_database(&database);
-        let mut registry = ComponentRegistry::new();
-        register_sprite_components(&mut registry).expect("component registration should succeed");
+        let registry = frozen_sprite_registry();
 
         let result = registry
             .preflight_component_with_context(
@@ -989,8 +1089,7 @@ mod tests {
         let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let database = test_database(stable_id, "textures/player.png");
         let mut context = ComponentDecodeContext::new().with_project_asset_database(&database);
-        let mut registry = ComponentRegistry::new();
-        register_sprite_components(&mut registry).expect("component registration should succeed");
+        let registry = frozen_sprite_registry();
 
         let result = registry
             .preflight_component_with_context(
@@ -1009,20 +1108,23 @@ mod tests {
 
     #[test]
     fn sprite_schema_exposes_authoring_fields() {
-        let mut registry = ComponentRegistry::new();
-        register_sprite_components(&mut registry).expect("component registration should succeed");
+        let registry = frozen_sprite_registry();
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.sprite.Sprite"))
             .unwrap();
+        let mut fields = schema
+            .fields
+            .iter()
+            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .collect::<Vec<_>>();
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
 
         assert_eq!(
-            schema
-                .fields
-                .iter()
-                .map(|field| (field.path.to_string(), field.value_kind, field.required))
-                .collect::<Vec<_>>(),
+            fields,
             vec![
+                ("anchor.x".to_string(), ComponentValueKind::F64, false),
+                ("anchor.y".to_string(), ComponentValueKind::F64, false),
                 ("layer".to_string(), ComponentValueKind::I64, false),
                 (
                     "material.alpha_mode".to_string(),

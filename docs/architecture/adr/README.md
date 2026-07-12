@@ -64,7 +64,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0018](0018-coordinate-units-and-time.md): Coordinate, Units, and Time
 - [ADR 0019](0019-physics-strategy.md): Physics Strategy
 - [ADR 0020](0020-project-layout-and-package-format.md): Project Layout and Package Format
-- [ADR 0021](0021-scripting-and-wasm-boundary.md): Scripting and WASM Boundary
+- [ADR 0021](0021-scripting-and-wasm-boundary.md): Rust Authoring, Hot Iteration, and Optional Scripting Adapters
 - [ADR 0022](0022-3d-coordinate-system.md): 3D Coordinate System
 - [ADR 0023](0023-event-message-and-command-model.md): Event, Message, and Command Model
 - [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md): Determinism, Fixed Update, and Replay Policy
@@ -105,5 +105,8 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md): Global Resource Budgets, Metrics, and Diagnostic Privacy
 - [ADR 0070](0070-capability-oriented-filesystem-substrate.md): Capability-Oriented Filesystem Substrate
 - [ADR 0076](0076-play-runtime-debug-control-and-observation.md): Play Runtime Debug Control and Observation
+- [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md): Render Pipeline Recipes, Graph Compilation, and Backend Encoding
+- [ADR 0078](0078-render-host-affinity-webgpu-initialization-and-device-recovery.md): Render Host Affinity, WebGPU Initialization, and Device Recovery
 - [ADR 0079](0079-root-product-capabilities-and-placeholder-domain-retirement.md): Root Product Capabilities and Placeholder Domain Retirement
 - [ADR 0080](0080-domain-owned-task-update-integration-sets.md): Domain-Owned TaskUpdate Integration Sets
+- [ADR 0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md): Schema Source, Stable Identity, Catalog, and Runtime Binding

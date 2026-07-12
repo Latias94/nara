@@ -4,9 +4,9 @@ use nara_app::{App, Plugin, PluginError};
 use nara_core::{Mat3, Vec2};
 use nara_ecs::Component;
 use nara_reflect::{
-    ComponentCodecError, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
-    ComponentRegistryError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Component)]
@@ -60,6 +60,7 @@ impl Plugin for TransformPlugin {
             nara_app::PluginId::new("nara.transform"),
             nara_app::PluginCategory::Core,
         )
+        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
     }
 
     fn preflight(&self, app: &App) -> Result<(), PluginError> {
@@ -75,7 +76,6 @@ impl Plugin for TransformPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<ComponentRegistry>()?;
         let component_id = ComponentTypeId::new("nara.transform.Transform2d");
         register_transform_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
@@ -89,10 +89,11 @@ pub fn register_transform_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     let component_id = ComponentTypeId::new("nara.transform.Transform2d");
-    registry.register_scene_component_with_fields::<Transform2d, _, _>(
-        component_id.clone(),
-        ComponentSchemaVersion(1),
-        transform_fields(),
+    let schema = ComponentSchema::new(component_id, "Transform 2D", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(transform_fields());
+    registry.register_persistent_component_with_codec::<Transform2d, _, _>(
+        schema,
         |value| {
             Ok(Transform2d {
                 translation: read_vec2(value.field("translation")?, "translation")?,
@@ -117,25 +118,40 @@ pub fn register_transform_components(
 fn transform_fields() -> [ComponentFieldSchema; 5] {
     [
         ComponentFieldSchema::required(
+            ComponentFieldId::new("translation.x"),
+            "Translation X",
             ComponentFieldPath::from_fields(["translation", "x"]),
             ComponentValueKind::F64,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::required(
+            ComponentFieldId::new("translation.y"),
+            "Translation Y",
             ComponentFieldPath::from_fields(["translation", "y"]),
             ComponentValueKind::F64,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::required(
+            ComponentFieldId::new("rotation"),
+            "Rotation",
             ComponentFieldPath::from_fields(["rotation"]),
             ComponentValueKind::F64,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::required(
+            ComponentFieldId::new("scale.x"),
+            "Scale X",
             ComponentFieldPath::from_fields(["scale", "x"]),
             ComponentValueKind::F64,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::required(
+            ComponentFieldId::new("scale.y"),
+            "Scale Y",
             ComponentFieldPath::from_fields(["scale", "y"]),
             ComponentValueKind::F64,
-        ),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
     ]
 }
 
@@ -171,6 +187,7 @@ pub mod prelude {
 mod tests {
     use super::*;
     use nara_app::{PluginId, PluginLifecycleState};
+    use nara_reflect::ComponentRegistryPlugin;
 
     #[test]
     fn plugin_preflight_reports_component_conflicts_without_poisoning_app() {
@@ -180,6 +197,8 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(registry)
             .expect("app should accept the component registry");
+        app.add_plugin(ComponentRegistryPlugin)
+            .expect("registry owner should install");
 
         let error = app
             .add_plugin(TransformPlugin)
@@ -207,17 +226,20 @@ mod tests {
         let mut registry = ComponentRegistry::new();
         register_transform_components(&mut registry)
             .expect("component registration should succeed");
+        registry.freeze().expect("component registry should freeze");
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.transform.Transform2d"))
             .unwrap();
+        let mut fields = schema
+            .fields
+            .iter()
+            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .collect::<Vec<_>>();
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
 
         assert_eq!(
-            schema
-                .fields
-                .iter()
-                .map(|field| (field.path.to_string(), field.value_kind, field.required))
-                .collect::<Vec<_>>(),
+            fields,
             vec![
                 ("rotation".to_string(), ComponentValueKind::F64, true),
                 ("scale.x".to_string(), ComponentValueKind::F64, true),

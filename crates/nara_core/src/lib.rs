@@ -1,9 +1,22 @@
 //! Shared engine primitives that are independent from ECS and rendering.
 
+pub mod format;
 pub mod limits;
+#[cfg(feature = "serde")]
+pub mod serde_shape;
 
+pub use format::{
+    EngineVersion, EngineVersionParseError, FormatGenerator, FormatGeneratorError, FormatKind,
+    FormatKindError, FormatVersion, PersistentFileContract, PersistentFileContractError,
+    PersistentFileDecodeError, PersistentFileEnvelope, PersistentFileHeader,
+    decode_persistent_file, decode_persistent_file_with_preflight,
+};
 pub use glam::{Mat3, Vec2, Vec3};
 pub use limits::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
+#[cfg(feature = "serde")]
+pub use serde_shape::{
+    SerdeShapeError, SerdeShapeLimits, SerdeShapePreflightError, preflight_serde_shape,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

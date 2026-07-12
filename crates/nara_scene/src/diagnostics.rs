@@ -403,9 +403,6 @@ pub(crate) fn with_capability(
         ComponentCapability::Scene => "scene",
         ComponentCapability::Inspect => "inspect",
         ComponentCapability::Edit => "edit",
-        ComponentCapability::Animate => "animate",
-        ComponentCapability::Replicate => "replicate",
-        ComponentCapability::Script => "script",
         ComponentCapability::AssetRef => "asset-ref",
         ComponentCapability::EntityRef => "entity-ref",
     };

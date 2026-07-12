@@ -1,7 +1,8 @@
 use nara::{
+    core::{ByteLimit, ItemLimit},
     diagnostic::DiagnosticValueRef,
     prelude::*,
-    scene::{ScenePatchDocument, ScenePatchOperation},
+    scene::{ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation},
 };
 
 #[derive(Clone, Debug, PartialEq, Component)]
@@ -9,6 +10,9 @@ struct TestPosition {
     x: i32,
     y: Option<i32>,
 }
+
+#[derive(Clone, Debug, PartialEq, Component)]
+struct TestBlob(String);
 
 fn diagnostic_has_field(
     diagnostic: &Diagnostic,
@@ -53,7 +57,7 @@ fn patch_adds_component_sets_field_reparents_and_inverse_restores() {
             entity: player.clone(),
             component: position_type_id(),
             component_version: ComponentSchemaVersion(1),
-            path: ComponentFieldPath::from_fields(["x"]),
+            field: ComponentFieldId::new("x"),
             value: ComponentValue::I64(7),
         },
         ScenePatchOperation::Reparent {
@@ -77,6 +81,36 @@ fn patch_adds_component_sets_field_reparents_and_inverse_restores() {
 }
 
 #[test]
+fn stable_field_id_patch_resolves_current_path_after_rename() {
+    let registry = renamed_field_registry();
+    let player = scene_id("player");
+    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
+        position_type_id(),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([("renamed_x", ComponentValue::I64(1))]),
+        ),
+    )]);
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: player.clone(),
+        component: position_type_id(),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("x"),
+        value: ComponentValue::I64(9),
+    }]);
+
+    let report = patch.apply_to_scene(&mut scene, &registry);
+
+    assert!(report.applied);
+    assert_eq!(
+        component_value(&scene, &player)
+            .field_i64("renamed_x")
+            .unwrap(),
+        9
+    );
+}
+
+#[test]
 fn invalid_patch_operation_leaves_document_unchanged_with_operation_context() {
     let registry = test_registry();
     let player = scene_id("player");
@@ -92,7 +126,7 @@ fn invalid_patch_operation_leaves_document_unchanged_with_operation_context() {
             entity: player.clone(),
             component: position_type_id(),
             component_version: ComponentSchemaVersion(1),
-            path: ComponentFieldPath::from_fields(["missing"]),
+            field: ComponentFieldId::new("missing"),
             value: ComponentValue::I64(9),
         },
     ]);
@@ -123,9 +157,9 @@ fn invalid_patch_operation_leaves_document_unchanged_with_operation_context() {
     );
     assert_diagnostic_field(
         diagnostic,
-        "field-path",
+        "field-id",
         DiagnosticFieldClass::Public,
-        DiagnosticValueRef::Identifier("f_missing"),
+        DiagnosticValueRef::Identifier("missing"),
     );
 }
 
@@ -156,7 +190,7 @@ fn unsupported_patch_format_version_fails_before_mutating_document() {
             entity: player,
             component: position_type_id(),
             component_version: ComponentSchemaVersion(1),
-            path: ComponentFieldPath::from_fields(["x"]),
+            field: ComponentFieldId::new("x"),
             value: ComponentValue::I64(9),
         }],
     };
@@ -181,7 +215,7 @@ fn stale_patch_component_schema_version_fails_before_mutating_document() {
         entity: player,
         component: position_type_id(),
         component_version: ComponentSchemaVersion(0),
-        path: ComponentFieldPath::from_fields(["x"]),
+        field: ComponentFieldId::new("x"),
         value: ComponentValue::I64(9),
     }]);
 
@@ -229,7 +263,7 @@ fn set_field_without_edit_capability_fails_before_mutating_document() {
         entity: player,
         component: position_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["x"]),
+        field: ComponentFieldId::new("x"),
         value: ComponentValue::I64(9),
     }]);
 
@@ -251,6 +285,253 @@ fn set_field_without_edit_capability_fails_before_mutating_document() {
                 DiagnosticFieldClass::Public,
                 DiagnosticValueRef::Identifier("f_x"),
             )
+    }));
+}
+
+#[test]
+fn whole_component_and_entity_operations_require_edit_for_every_field() {
+    let registry = readonly_field_registry();
+    let player = scene_id("player");
+    let child = scene_id("child");
+    let readonly = position_record(1, None);
+    let cases = [
+        (
+            SceneDocument::new([SceneEntityRecord::new(player.clone())]),
+            ScenePatchOperation::AddComponent {
+                entity: player.clone(),
+                component: position_type_id(),
+                value: readonly.clone(),
+            },
+        ),
+        (
+            SceneDocument::new([SceneEntityRecord::new(player.clone())
+                .with_component(position_type_id(), readonly.clone())]),
+            ScenePatchOperation::RemoveComponent {
+                entity: player.clone(),
+                component: position_type_id(),
+            },
+        ),
+        (
+            SceneDocument::new([SceneEntityRecord::new(player.clone())
+                .with_component(position_type_id(), readonly.clone())]),
+            ScenePatchOperation::ReplaceComponent {
+                entity: player.clone(),
+                component: position_type_id(),
+                value: readonly.clone(),
+            },
+        ),
+        (
+            SceneDocument::new([]),
+            ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(player.clone())
+                    .with_component(position_type_id(), readonly.clone()),
+            },
+        ),
+        (
+            SceneDocument::new([
+                SceneEntityRecord::new(player.clone()),
+                SceneEntityRecord::new(child.clone())
+                    .with_parent(player.clone())
+                    .with_component(position_type_id(), readonly),
+            ]),
+            ScenePatchOperation::RemoveEntity {
+                entity: player.clone(),
+            },
+        ),
+    ];
+
+    for (mut scene, operation) in cases {
+        let original = scene.clone();
+        let report = ScenePatchDocument::new([operation]).apply_to_scene(&mut scene, &registry);
+
+        assert!(!report.applied);
+        assert_eq!(scene, original);
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.patch-component-capability-missing"
+        }));
+    }
+}
+
+#[test]
+fn patch_combined_validation_work_budget_is_exact_and_failure_atomic() {
+    let registry = test_registry();
+    let root = scene_id("root");
+    let child = scene_id("child");
+    let original = SceneDocument::new([
+        SceneEntityRecord::new(root.clone()),
+        SceneEntityRecord::new(child.clone()),
+    ]);
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::Reparent {
+            entity: child.clone(),
+            parent: Some(root),
+        },
+        ScenePatchOperation::Reparent {
+            entity: child,
+            parent: None,
+        },
+    ]);
+
+    let exact_limits =
+        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(9).unwrap());
+    let mut exact = original.clone();
+    let exact_report = patch.apply_to_scene_with_limits(&mut exact, &registry, exact_limits);
+    assert!(exact_report.applied);
+    assert_eq!(exact, original);
+
+    let rejected_limits =
+        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(8).unwrap());
+    let mut rejected = original.clone();
+    let rejected_report =
+        patch.apply_to_scene_with_limits(&mut rejected, &registry, rejected_limits);
+    assert!(!rejected_report.applied);
+    assert_eq!(rejected, original);
+    assert!(rejected_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-validation-work-budget-exceeded"
+    }));
+}
+
+#[test]
+fn patch_rejects_source_work_before_semantic_validation() {
+    let registry = test_registry();
+    let unknown_component = ComponentTypeId::new("nara.test.Unknown");
+    let mut scene = SceneDocument::new([SceneEntityRecord::new(scene_id("invalid"))
+        .with_component(
+            unknown_component,
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+        )]);
+    let original = scene.clone();
+    let limits = ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(2).unwrap());
+
+    let report =
+        ScenePatchDocument::default().apply_to_scene_with_limits(&mut scene, &registry, limits);
+
+    assert!(!report.applied);
+    assert_eq!(scene, original);
+    assert_eq!(report.diagnostics.stats().observed_errors(), 1);
+    let diagnostic = report.diagnostics.iter().next().unwrap();
+    assert_eq!(
+        diagnostic.code().as_str(),
+        "scene.patch-validation-work-budget-exceeded"
+    );
+    assert_diagnostic_field(
+        diagnostic,
+        "budget-kind",
+        DiagnosticFieldClass::Public,
+        DiagnosticValueRef::Identifier("structural-items"),
+    );
+    assert!(
+        !report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.unknown-component" })
+    );
+}
+
+#[test]
+fn patch_validation_value_budget_bounds_repeated_large_payload_work() {
+    let registry = test_registry();
+    let root = scene_id("root");
+    let child = scene_id("child");
+    let payload = ComponentValue::String("x".repeat(64 * 1024));
+    let per_validation_bytes = payload.cost().logical_bytes();
+    let original = SceneDocument::new([
+        SceneEntityRecord::new(root.clone()).with_component(
+            blob_type_id(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, payload),
+        ),
+        SceneEntityRecord::new(child.clone()),
+    ]);
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::Reparent {
+            entity: child.clone(),
+            parent: Some(root),
+        },
+        ScenePatchOperation::Reparent {
+            entity: child,
+            parent: None,
+        },
+    ]);
+
+    let exact_limits = ScenePatchApplyLimits::default().with_validation_value_bytes(
+        ByteLimit::new(per_validation_bytes.saturating_mul(3)).unwrap(),
+    );
+    let mut exact = original.clone();
+    let exact_report = patch.apply_to_scene_with_limits(&mut exact, &registry, exact_limits);
+    assert!(exact_report.applied);
+    assert_eq!(exact, original);
+
+    let rejected_limits = ScenePatchApplyLimits::default().with_validation_value_bytes(
+        ByteLimit::new(per_validation_bytes.saturating_mul(3).saturating_sub(1)).unwrap(),
+    );
+    let mut rejected = original.clone();
+    let rejected_report =
+        patch.apply_to_scene_with_limits(&mut rejected, &registry, rejected_limits);
+    assert!(!rejected_report.applied);
+    assert_eq!(rejected, original);
+    assert!(rejected_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-validation-work-budget-exceeded"
+            && diagnostic_has_field(
+                diagnostic,
+                "budget-kind",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("value-bytes"),
+            )
+    }));
+
+    let exact_node_limits =
+        ScenePatchApplyLimits::default().with_validation_value_nodes(ItemLimit::new(3).unwrap());
+    let mut exact_nodes = original.clone();
+    assert!(
+        patch
+            .apply_to_scene_with_limits(&mut exact_nodes, &registry, exact_node_limits)
+            .applied
+    );
+
+    let rejected_node_limits =
+        ScenePatchApplyLimits::default().with_validation_value_nodes(ItemLimit::new(2).unwrap());
+    let mut rejected_nodes = original.clone();
+    let rejected_node_report =
+        patch.apply_to_scene_with_limits(&mut rejected_nodes, &registry, rejected_node_limits);
+    assert!(!rejected_node_report.applied);
+    assert_eq!(rejected_nodes, original);
+    assert!(rejected_node_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-validation-work-budget-exceeded"
+            && diagnostic_has_field(
+                diagnostic,
+                "budget-kind",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Identifier("value-nodes"),
+            )
+    }));
+}
+
+#[test]
+fn field_patch_rejects_an_unmigrated_target_record() {
+    let registry = migrated_field_registry();
+    let player = scene_id("player");
+    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
+        position_type_id(),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([("x", ComponentValue::I64(1))]),
+        ),
+    )]);
+    let original = scene.clone();
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: player,
+        component: position_type_id(),
+        component_version: ComponentSchemaVersion(2),
+        field: ComponentFieldId::new("x"),
+        value: ComponentValue::I64(9),
+    }]);
+
+    let report = patch.apply_to_scene(&mut scene, &registry);
+
+    assert!(!report.applied);
+    assert_eq!(scene, original);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-target-component-version-mismatch"
     }));
 }
 
@@ -297,7 +578,7 @@ fn remove_required_field_fails_before_mutating_document() {
         entity: player,
         component: position_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["x"]),
+        field: ComponentFieldId::new("x"),
     }])
     .apply_to_scene(&mut scene, &registry);
 
@@ -325,13 +606,13 @@ fn remove_optional_field_and_set_asset_ref_field_are_schema_checked() {
             entity: player.clone(),
             component: position_type_id(),
             component_version: ComponentSchemaVersion(1),
-            path: ComponentFieldPath::from_fields(["y"]),
+            field: ComponentFieldId::new("y"),
         },
         ScenePatchOperation::SetAssetRefField {
             entity: player.clone(),
             component: position_type_id(),
             component_version: ComponentSchemaVersion(1),
-            path: ComponentFieldPath::from_fields(["asset"]),
+            field: ComponentFieldId::new("asset"),
             asset_ref: AssetRef::path("textures/player.png").unwrap(),
         },
     ]);
@@ -354,26 +635,37 @@ fn remove_optional_field_and_set_asset_ref_field_are_schema_checked() {
 fn test_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     let component_id = position_type_id();
+    let schema = ComponentSchema::new(component_id, "Position", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("x"),
+                "X",
+                ComponentFieldPath::from_fields(["x"]),
+                ComponentValueKind::I64,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+            ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new("y"),
+                "Y",
+                ComponentFieldPath::from_fields(["y"]),
+                ComponentValueKind::I64,
+                ComponentValue::I64(0),
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+            ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new("asset"),
+                "Asset",
+                ComponentFieldPath::from_fields(["asset"]),
+                ComponentValueKind::AssetRef,
+                ComponentValue::Null,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_capability(ComponentCapability::AssetRef),
+        ]);
     registry
-        .register_scene_component_with_fields::<TestPosition, _, _>(
-            component_id.clone(),
-            ComponentSchemaVersion(1),
-            [
-                ComponentFieldSchema::required(
-                    ComponentFieldPath::from_fields(["x"]),
-                    ComponentValueKind::I64,
-                ),
-                ComponentFieldSchema::optional_with_default(
-                    ComponentFieldPath::from_fields(["y"]),
-                    ComponentValueKind::I64,
-                    ComponentValue::I64(0),
-                ),
-                ComponentFieldSchema::optional_with_default(
-                    ComponentFieldPath::from_fields(["asset"]),
-                    ComponentValueKind::AssetRef,
-                    ComponentValue::Null,
-                ),
-            ],
+        .register_persistent_component_with_codec::<TestPosition, _, _>(
+            schema,
             |value| {
                 let x = value.field_i64("x")?;
                 Ok(TestPosition {
@@ -400,21 +692,48 @@ fn test_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
+    let blob_schema = ComponentSchema::new(blob_type_id(), "Blob", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("value"),
+            "Value",
+            ComponentFieldPath::empty(),
+            ComponentValueKind::String,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+    registry
+        .register_persistent_component_with_codec::<TestBlob, _, _>(
+            blob_schema,
+            |value| {
+                Ok(TestBlob(
+                    value
+                        .as_str()
+                        .ok_or_else(|| ComponentCodecError::invalid_field("value", "string"))?
+                        .to_owned(),
+                ))
+            },
+            |blob| Ok(ComponentValue::String(blob.0.clone())),
+        )
+        .unwrap();
+    registry.freeze().unwrap();
     registry
 }
 
 fn readonly_field_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     let component_id = position_type_id();
+    let schema = ComponentSchema::new(component_id, "Position", ComponentSchemaVersion::ONE)
+        .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("x"),
+            "X",
+            ComponentFieldPath::from_fields(["x"]),
+            ComponentValueKind::I64,
+        )
+        .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])]);
     registry
-        .register_scene_component_with_fields::<TestPosition, _, _>(
-            component_id.clone(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["x"]),
-                ComponentValueKind::I64,
-            )
-            .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])],
+        .register_persistent_component_with_codec::<TestPosition, _, _>(
+            schema,
             |value| {
                 let x = value.field_i64("x")?;
                 Ok(TestPosition {
@@ -431,6 +750,100 @@ fn readonly_field_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn renamed_field_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    let schema = ComponentSchema::new(
+        position_type_id(),
+        "Renamed position",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("x"),
+        "Horizontal position",
+        ComponentFieldPath::from_fields(["renamed_x"]),
+        ComponentValueKind::I64,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+    registry
+        .register_persistent_component_with_codec::<TestPosition, _, _>(
+            schema,
+            |value| {
+                let x = value.field_i64("renamed_x")?;
+                Ok(TestPosition {
+                    x: i32::try_from(x)
+                        .map_err(|_| ComponentCodecError::invalid_field("renamed_x", "i32"))?,
+                    y: None,
+                })
+            },
+            |position| {
+                Ok(ComponentValue::map([(
+                    "renamed_x",
+                    ComponentValue::I64(i64::from(position.x)),
+                )]))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn migrated_field_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    let schema = ComponentSchema::new(
+        position_type_id(),
+        "Migrated position",
+        ComponentSchemaVersion(2),
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("x"),
+        "Horizontal position",
+        ComponentFieldPath::from_fields(["x2"]),
+        ComponentValueKind::I64,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+    registry
+        .register_persistent_component_with_codec::<TestPosition, _, _>(
+            schema,
+            |value| {
+                let x = value.field_i64("x2")?;
+                Ok(TestPosition {
+                    x: i32::try_from(x)
+                        .map_err(|_| ComponentCodecError::invalid_field("x2", "i32"))?,
+                    y: None,
+                })
+            },
+            |position| {
+                Ok(ComponentValue::map([(
+                    "x2",
+                    ComponentValue::I64(i64::from(position.x)),
+                )]))
+            },
+        )
+        .unwrap();
+    registry
+        .register_component_migration(
+            &position_type_id(),
+            ComponentSchemaVersion::ONE,
+            ComponentSchemaVersion(2),
+            |value| {
+                let ComponentValue::Map(mut fields) = value else {
+                    return Err(ComponentCodecError::invalid_field("<root>", "map"));
+                };
+                let x = fields
+                    .remove("x")
+                    .ok_or_else(|| ComponentCodecError::missing_field("x"))?;
+                fields.insert("x2".to_owned(), x);
+                Ok(ComponentValue::Map(fields))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
     registry
 }
 
@@ -460,6 +873,10 @@ fn position_record(x: i32, y: Option<i32>) -> SceneComponentRecord {
 
 fn position_type_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.test.Position")
+}
+
+fn blob_type_id() -> ComponentTypeId {
+    ComponentTypeId::new("nara.test.Blob")
 }
 
 fn scene_id(id: &str) -> SceneEntityId {

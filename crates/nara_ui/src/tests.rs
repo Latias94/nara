@@ -10,8 +10,8 @@ use nara_ecs::World;
 use nara_input::{ButtonInput, MouseButton, PointerState};
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_reflect::{
-    ComponentDecodeContext, ComponentEncodeContext, ComponentRegistry, ComponentTypeId,
-    ComponentValue, ComponentValueKind,
+    ComponentDecodeContext, ComponentEncodeContext, ComponentRegistry, ComponentRegistryPlugin,
+    ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_render::{Camera2d, RenderImage2d, RenderTarget, ViewportRect};
 use nara_scene::Parent;
@@ -21,10 +21,23 @@ use crate::{
     UiStyle, UiVal, register_ui_components,
 };
 
+fn ui_app() -> App {
+    let mut app = App::new();
+    app.add_plugin(ComponentRegistryPlugin).unwrap();
+    app.add_plugin(UiPlugin).unwrap();
+    app
+}
+
+fn frozen_ui_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    register_ui_components(&mut registry).expect("component registration should succeed");
+    registry.freeze().expect("component registry should freeze");
+    registry
+}
+
 #[test]
 fn root_targeting_primary_view_produces_child_rectangles() {
-    let mut app = App::new();
-    app.add_plugin(UiPlugin).unwrap();
+    let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .spawn(Camera2d {
@@ -64,8 +77,7 @@ fn root_targeting_primary_view_produces_child_rectangles() {
 
 #[test]
 fn computed_layout_and_interaction_state_are_runtime_only() {
-    let mut registry = ComponentRegistry::new();
-    register_ui_components(&mut registry).expect("component registration should succeed");
+    let registry = frozen_ui_registry();
 
     assert!(
         registry
@@ -96,8 +108,7 @@ fn computed_layout_and_interaction_state_are_runtime_only() {
 
 #[test]
 fn ui_node_codec_roundtrips_stable_authoring_fields() {
-    let mut registry = ComponentRegistry::new();
-    register_ui_components(&mut registry).expect("component registration should succeed");
+    let registry = frozen_ui_registry();
     let id = ComponentTypeId::new("nara.ui.UiNode");
     let value = ComponentValue::map([
         (
@@ -136,14 +147,16 @@ fn ui_node_codec_roundtrips_stable_authoring_fields() {
         .unwrap()
         .unwrap();
     assert_eq!(encoded.field_i64("z_index").unwrap(), 7);
+    let mut fields = registry
+        .schema(&id)
+        .unwrap()
+        .fields
+        .iter()
+        .map(|field| (field.path.to_string(), field.value_kind, field.required))
+        .collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.0.cmp(&right.0));
     assert_eq!(
-        registry
-            .schema(&id)
-            .unwrap()
-            .fields
-            .iter()
-            .map(|field| (field.path.to_string(), field.value_kind, field.required))
-            .collect::<Vec<_>>(),
+        fields,
         vec![
             ("clip".to_string(), ComponentValueKind::Bool, false),
             ("focusable".to_string(), ComponentValueKind::Bool, false),
@@ -195,8 +208,7 @@ fn ui_node_codec_roundtrips_stable_authoring_fields() {
 
 #[test]
 fn hidden_and_zero_size_nodes_do_not_hit_test() {
-    let mut app = App::new();
-    app.add_plugin(UiPlugin).unwrap();
+    let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .spawn(Camera2d {
@@ -235,8 +247,7 @@ fn hidden_and_zero_size_nodes_do_not_hit_test() {
 
 #[test]
 fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
-    let mut app = App::new();
-    app.add_plugin(UiPlugin).unwrap();
+    let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .spawn(Camera2d {
@@ -297,8 +308,7 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
 
 #[test]
 fn routed_pointer_hits_only_matching_view_target() {
-    let mut app = App::new();
-    app.add_plugin(UiPlugin).unwrap();
+    let mut app = ui_app();
     let first_target = render_image_target(1);
     let second_target = render_image_target(2);
     app.world_mut()
@@ -370,8 +380,7 @@ fn routed_pointer_hits_only_matching_view_target() {
 
 #[test]
 fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
-    let mut app = App::new();
-    app.add_plugin(UiPlugin).unwrap();
+    let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .spawn(Camera2d {
@@ -433,8 +442,7 @@ fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
 
 #[test]
 fn clipped_child_does_not_hit_test_outside_parent_clip() {
-    let mut app = App::new();
-    app.add_plugin(UiPlugin).unwrap();
+    let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
         .spawn(Camera2d {
@@ -484,8 +492,7 @@ fn ui_panel_codec_resolves_stable_image_refs_during_preflight() {
     let mut asset_server = AssetServer::new();
     let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
         .with_project_asset_database(&database);
-    let mut registry = ComponentRegistry::new();
-    register_ui_components(&mut registry).expect("component registration should succeed");
+    let registry = frozen_ui_registry();
     let id = ComponentTypeId::new("nara.ui.UiPanel");
     let value = ui_panel_value(AssetRef::StableId(stable_id));
 

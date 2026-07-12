@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use egui::{Button, CollapsingHeader, RichText, ScrollArea, TextEdit, Ui};
 use nara_identity::EntityReference;
 use nara_reflect::{
-    ComponentFieldPath, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentCapability, ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind,
 };
 use nara_scene::SceneEntityId;
 use nara_tooling::{
@@ -177,17 +178,6 @@ impl EguiSceneInspectorPanel {
         CollapsingHeader::new(title)
             .default_open(true)
             .show(ui, |ui| {
-                if !component.schema_known {
-                    ui.label(RichText::new("Schema unavailable").weak());
-                    ui.monospace(component_value_label(&component.raw_value));
-                    return;
-                }
-                let Some(component_version) = component.schema_version else {
-                    ui.label(RichText::new("Schema version unavailable").weak());
-                    ui.monospace(component_value_label(&component.raw_value));
-                    return;
-                };
-
                 if component.fields.is_empty() {
                     ui.label(RichText::new("No inspectable fields").weak());
                     return;
@@ -198,7 +188,7 @@ impl EguiSceneInspectorPanel {
                         ui,
                         entity,
                         &component.component,
-                        component_version,
+                        component.schema_version,
                         field,
                         editing_enabled,
                         response,
@@ -217,7 +207,9 @@ impl EguiSceneInspectorPanel {
         editing_enabled: bool,
         response: &mut EguiSceneInspectorPanelResponse,
     ) {
-        let key = EguiInspectorFieldKey::new(entity, component, &field.path);
+        let key = EguiInspectorFieldKey::new(entity, component, &field.id);
+        let field_editing_enabled =
+            editing_enabled && field.capabilities.contains(&ComponentCapability::Edit);
         ui.horizontal(|ui| {
             let mut field_label = field.path.to_string();
             if field.required {
@@ -235,7 +227,7 @@ impl EguiSceneInspectorPanel {
                         component,
                         component_version,
                         field,
-                        editing_enabled,
+                        field_editing_enabled,
                         response,
                     );
                 }
@@ -250,7 +242,7 @@ impl EguiSceneInspectorPanel {
                         component,
                         component_version,
                         field,
-                        editing_enabled,
+                        field_editing_enabled,
                         response,
                     );
                 }
@@ -263,15 +255,17 @@ impl EguiSceneInspectorPanel {
                 }
             }
 
-            if editing_enabled && field.value.is_some() && !field.required {
-                if ui.small_button("Remove").clicked() {
-                    response.push_command(SceneInspectorCommand::RemoveField {
-                        entity: entity.clone(),
-                        component: component.clone(),
-                        component_version,
-                        path: field.path.clone(),
-                    });
-                }
+            if field_editing_enabled
+                && field.value.is_some()
+                && !field.required
+                && ui.small_button("Remove").clicked()
+            {
+                response.push_command(SceneInspectorCommand::RemoveField {
+                    entity: entity.clone(),
+                    component: component.clone(),
+                    component_version,
+                    field: field.id.clone(),
+                });
             }
         });
 
@@ -308,7 +302,7 @@ impl EguiSceneInspectorPanel {
                 entity: entity.clone(),
                 component: component.clone(),
                 component_version,
-                path: field.path.clone(),
+                field: field.id.clone(),
                 value: ComponentValue::Bool(value),
             });
         }
@@ -340,7 +334,7 @@ impl EguiSceneInspectorPanel {
                 entity,
                 component,
                 component_version,
-                &field.path,
+                &field.id,
                 field.value_kind,
                 buffer_text,
             ) {
@@ -407,15 +401,15 @@ impl EguiSceneInspectorPanelResponse {
 struct EguiInspectorFieldKey {
     entity: String,
     component: String,
-    path: String,
+    field: String,
 }
 
 impl EguiInspectorFieldKey {
-    fn new(entity: &SceneEntityId, component: &ComponentTypeId, path: &ComponentFieldPath) -> Self {
+    fn new(entity: &SceneEntityId, component: &ComponentTypeId, field: &ComponentFieldId) -> Self {
         Self {
             entity: entity.as_str().to_owned(),
             component: component.as_str().to_owned(),
-            path: path.to_string(),
+            field: field.as_str().to_owned(),
         }
     }
 }
@@ -482,16 +476,13 @@ fn entity_row_label(entity: &nara_tooling::SceneInspectorEntityRow) -> String {
     format!(
         "{} ({} components{})",
         entity.id.as_str(),
-        entity.component_count,
+        entity.inspectable_component_count,
         prefab_marker
     )
 }
 
 fn component_title(component: &SceneInspectorComponentView) -> String {
-    match &component.rust_type_path {
-        Some(type_path) => format!("{} ({type_path})", component.component.as_str()),
-        None => component.component.as_str().to_owned(),
-    }
+    component.component.as_str().to_owned()
 }
 
 fn field_value_label(field: &SceneInspectorFieldView) -> String {
@@ -598,7 +589,7 @@ fn editable_set_field_command(
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     component_version: ComponentSchemaVersion,
-    path: &ComponentFieldPath,
+    field: &ComponentFieldId,
     kind: ComponentValueKind,
     text: &str,
 ) -> Result<SceneInspectorCommand, String> {
@@ -606,7 +597,7 @@ fn editable_set_field_command(
         entity: entity.clone(),
         component: component.clone(),
         component_version,
-        path: path.clone(),
+        field: field.clone(),
         value: parse_editable_value(kind, text)?,
     })
 }
@@ -631,7 +622,6 @@ mod tests {
     use super::*;
 
     use nara_diagnostic::DiagnosticReport;
-    use nara_reflect::ComponentSchemaCatalog;
     use nara_scene::SceneAuthoringHistoryStatus;
 
     #[test]
@@ -671,13 +661,13 @@ mod tests {
         let entity = SceneEntityId::new("player").unwrap();
         let component = ComponentTypeId::new("nara.test.Name");
         let component_version = ComponentSchemaVersion(1);
-        let path = ComponentFieldPath::from_fields(["display_name"]);
+        let field = ComponentFieldId::new("display_name");
 
         let command = editable_set_field_command(
             &entity,
             &component,
             component_version,
-            &path,
+            &field,
             ComponentValueKind::String,
             "Hero",
         )
@@ -689,7 +679,7 @@ mod tests {
                 entity,
                 component,
                 component_version,
-                path,
+                field,
                 value: ComponentValue::String("Hero".to_owned()),
             }
         );
@@ -722,7 +712,6 @@ mod tests {
                 selected_entity: None,
                 entities: Vec::new(),
                 selected_entity_view: None,
-                schema_catalog: ComponentSchemaCatalog::default(),
                 world_snapshot: None,
                 history: SceneAuthoringHistoryStatus::default(),
                 live_dirty: false,

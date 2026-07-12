@@ -219,6 +219,7 @@ impl Plugin for UiPlugin {
             nara_app::PluginId::new("nara.ui"),
             nara_app::PluginCategory::Runtime,
         )
+        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
     }
 
     fn preflight(&self, app: &App) -> Result<(), PluginError> {
@@ -252,7 +253,6 @@ impl Plugin for UiPlugin {
         app.add_plugin_if_missing(RenderPlugin)?;
         app.add_plugin_if_missing(nara_input::InputPlugin)?;
         app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
-        app.init_resource::<ComponentRegistry>()?;
         let registry = &mut app.world_mut()?.resource_mut::<ComponentRegistry>();
         let root_id = ComponentTypeId::new("nara.ui.UiRoot");
         codec::register_ui_root_component(registry).map_err(|error| {

@@ -19,9 +19,9 @@ nara already has several foundations for a high-quality runtime debugging experi
   acknowledgement;
 - isolated Play Mode world creation, stable scene authoring IDs, reflected component schemas,
   structured diagnostics, and bounded background work;
-- a planned U16 runtime host whose paused single-step contract is exactly one complete fixed tick.
+- a planned RGF-U5 runtime host whose paused single-step contract is exactly one complete fixed tick.
 
-The U8 identity slice removed allocator-local entity observations: `ScenePlaySession` now retains a
+The legacy U8 identity slice removed allocator-local entity observations: `ScenePlaySession` now retains a
 stable scene-instance handle and tooling captures a bounded `WorldIdentitySnapshot`. The Play
 session still owns a bare `World` rather than a scheduled, closeable `App`, and the identity-only
 snapshot intentionally contains no component payload. There is no stable system execution trace,
@@ -120,7 +120,7 @@ Control commands take effect only at nara-owned main-thread safe points. The fir
 does not pause inside an executing Rust system and does not expose render-frame stepping as fixed
 simulation stepping.
 
-U16 retains the lifecycle states `Starting`, `Running`, `Paused`, `Stepping`, `Stopping`, `Stopped`,
+RGF-U5 retains the lifecycle states `Starting`, `Running`, `Paused`, `Stepping`, `Stopping`, `Stopped`,
 and `Failed`. Exact Rust type names may change, but illegal transitions must reject without partial
 state mutation.
 
@@ -135,13 +135,15 @@ preserved behind a compatibility layer. The initial replacement is
 sorted `WorldEntityLocator` values, total and identified entity counts, runtime-only count-only
 entities, and explicit returned/omitted locator counts. Dual scene and persistent axes do not
 double-count an entity. A moved identity domain or stale registration fails capture rather than
-publishing an ambiguous snapshot. Schema-safe component payloads remain a later U9/U16 layer.
+publishing an ambiguous snapshot. RGF-U1 adds local Inspector filtering through schema `inspect`
+eligibility, but a general component-observation payload and host disclosure policy remain a later
+evidence-driven slice.
 
 The observation model follows these rules:
 
-- Every detailed entity observation uses the U8 world/runtime stable identity vocabulary. A
-  runtime-only/internal entity without a U8 stable observation locator is omitted or represented by
-  aggregate counts; U8 may instead define a world-scoped non-persistent locator. It must not be
+- Every detailed entity observation uses the legacy U8 world/runtime stable identity vocabulary. A
+  runtime-only/internal entity without a stable observation locator is omitted or represented by
+  aggregate counts; the identity domain may instead define a world-scoped non-persistent locator. It must not be
   assigned a persistent identity merely for tooling. Runtime `Entity`, Bevy `NodeId`, backend
   handles, and process pointers never enter snapshot, diff, breakpoint, replay, or remote-tooling
   records.
@@ -285,9 +287,10 @@ cannot leave logs without the checkpoint they depend on. Failure or timeout publ
 segment and preserves the last valid one.
 
 The persistent artifact envelope, exact checkpoint contents, cadence, compression, checksum
-algorithm, service outcome catalog, storage budget, and crash-recovery policy remain deferred until
-U8 identity, U9 schema/envelope, and U16 runtime-host contracts are implemented and a concrete
-persistent replay workflow has representative size and latency measurements.
+algorithm, service outcome catalog, storage budget, and crash-recovery policy remain deferred. The
+legacy U8 identity and RGF-U1 schema/envelope prerequisites are implemented; RGF-U5 runtime-host
+work and a concrete persistent replay workflow with representative size and latency measurements
+are still required.
 
 ### Native Rust code iteration
 
@@ -314,7 +317,7 @@ versioned state extraction/migration, two-phase publication, and failure rollbac
 | `nara_app` | Pause/resume/time-scale execution semantics, exact complete fixed-tick step, safe points, app lifecycle and bounded close | Timeline UI, component-history policy, replay file format |
 | `nara_tooling` | Runtime-host orchestration, commands, bounded snapshots/diffs/timelines, filters and presentation models | Direct scheduler mutation, arbitrary world serialization, native backend state |
 | `nara_gameplay` | Immutable admitted command batch and `Capture` seam | Debugger lifecycle or replay persistence |
-| U8 identity domain | World/instance/persistent identity vocabulary, allocator/index, bidirectional lookup, remap and tombstones | Snapshot/history retention, debugger UI or replay file policy |
+| `nara_identity` | World/instance/persistent identity vocabulary, allocator/index, bidirectional lookup, remap and tombstones | Snapshot/history retention, debugger UI or replay file policy |
 | `nara_reflect` | Stable component IDs, schema capabilities, canonical component encoding | Sampling cadence, history retention or causality policy |
 | `nara_diagnostic` | Debugger faults, pressure/truncation reports and safe diagnostic links | High-frequency execution trace or component payload storage |
 | Interpreter/AI/script domains | Program identity/generation, instruction cursor, held-data projection and domain failure semantics | Global tooling UI or runtime-host lifecycle |
@@ -368,9 +371,9 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Exact single step | One request from `Paused` completes exactly one fixed tick and returns to `Paused` | U16 integration tests |
+| Exact single step | One request from `Paused` completes exactly one fixed tick and returns to `Paused` | RGF-U5 integration tests |
 | Command integrity | A stepped tick completes `Admit -> Consume -> Capture -> Acknowledge` exactly once | `nara_gameplay`/host integration tests |
-| Lifecycle honesty | Stop timeout/failure never reports `Stopped`; startup failure publishes no host | U16 state-machine tests |
+| Lifecycle honesty | Stop timeout/failure never reports `Stopped`; startup failure publishes no host | RGF-U5 state-machine tests |
 | Stable observation | Snapshot/diff/remote records contain no runtime `Entity`, Bevy `NodeId`, or backend handle | `nara_tooling` snapshot tests and `tests/stable_runtime_identity.rs` |
 | Bounded/privacy-safe capture | Every observation path enforces declared count/byte/depth/retention and field capability limits | Hostile/budget tests |
 | Cursor honesty | A subject is highlighted only from a domain-provided stable cursor/source map | Domain/tooling tests |
@@ -385,22 +388,23 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
 | Debug stepping corrupts an open command batch | High | Medium | Keep system stepping out of the first slice; require an explicit open-tick transaction before adding it. |
 | Parallel systems cross a claimed breakpoint | High | Medium | Require a strict debug executor/barrier and never expose Bevy's topology prefix as a causal stop. |
 | Snapshot capture leaks secrets or exhausts memory | High | Medium | Capability-gate fields, apply hard budgets, report truncation, and link diagnostics rather than copying arbitrary errors. |
-| Runtime identities alias across worlds or reloads | High | Medium | Depend on U8 domain-global allocation, world/host generation, remap, and tombstone invariants. |
+| Runtime identities alias across worlds or reloads | High | Medium | Depend on the legacy U8 domain-global allocation, world/host generation, remap, and tombstone invariants. |
 | Timeline correlation is presented as causality | Medium | High | Encode evidence strength in the model and reserve causal claims for explicit instrumentation. |
 | Replay silently diverges through service state | High | Medium | Require per-service replay classification, semantic checksums, and fail-closed compatibility. |
 | Hot reload leaves old code or callbacks alive | Critical | Medium | Do not claim native hot swap; require a future quiescence/ABI/migration/rollback ADR. |
 
 ## Consequences
 
-- U8 must make stable identity usable by tooling snapshots, domain cursors, command targets, and
-  future checkpoints without fixing allocator width or persistent replay format prematurely.
-- U9 must expose conservative inspect/diagnostic capability gates and canonical component encoding
-  before arbitrary component-state capture is enabled.
-- U16 must replace the bare Play `World` with an isolated `App`, add an exact single-fixed-tick
+- Legacy U8 makes stable identity usable by tooling snapshots, command targets, and future domain
+  cursors/checkpoints without fixing allocator width or persistent replay format prematurely.
+- RGF-U1 exposes conservative `inspect` eligibility and canonical component encoding to the local
+  Inspector. It does not authorize arbitrary or remote component-state capture.
+- RGF-U5 must replace the bare Play `World` with an isolated `App`, add an exact single-fixed-tick
   execution path independent of existing debt, preserve always-on real-time work, and close services
   finitely.
-- `WorldSnapshot` is removed. `WorldIdentitySnapshot` is the bounded identity-only base; U9/U16
-  extend observations with schema-aware component values rather than restoring a raw-entity view.
+- `WorldSnapshot` is removed. `WorldIdentitySnapshot` is the bounded identity-only base; a future
+  host-owned observation slice may add disclosure-filtered schema-aware component values rather
+  than restoring a raw-entity view.
 - A future system-step implementation requires its own executor/topology ADR. A future persistent
   replay artifact requires its own format/checkpoint ADR. Native Rust hot replacement requires a
   separate ABI and migration ADR.

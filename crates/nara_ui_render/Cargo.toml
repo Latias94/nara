@@ -17,4 +17,5 @@ nara_render.workspace = true
 nara_ui.workspace = true
 
 [dev-dependencies]
+nara_reflect.workspace = true
 nara_scene.workspace = true

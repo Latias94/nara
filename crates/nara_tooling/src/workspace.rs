@@ -1,4 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt::{self, Display, Formatter},
+};
 
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
@@ -86,34 +90,45 @@ impl EditorWorkspace {
         self.active_document.and_then(|id| self.scenes.get(&id))
     }
 
-    pub fn scene_mut(&mut self, document: EditorDocumentId) -> Option<&mut EditorSceneSlot> {
-        self.scenes.get_mut(&document)
-    }
-
-    pub fn active_scene_mut(&mut self) -> Option<&mut EditorSceneSlot> {
-        let document = self.active_document?;
-        self.scenes.get_mut(&document)
-    }
-
-    pub fn open_scene(
+    pub fn open_scene_session(
         &mut self,
         title: impl Into<String>,
-        document: SceneDocument,
-    ) -> EditorWorkspaceCommandReport {
+        session: SceneAuthoringSession,
+    ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
+        if session.live_instance().is_some() {
+            let context = WorkspaceDocumentContext {
+                active: self.active_document,
+                requested: None,
+                target: None,
+            };
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-session-attached",
+                    "workspace publication requires a detached scene authoring session",
+                ),
+                session,
+            ));
+        }
+
         let document_id = self.allocate_document_id();
-        let slot = EditorSceneSlot::new(title, document);
+        let slot = EditorSceneSlot::from_session(title, session);
         self.scenes.insert(document_id, slot);
         self.active_document = Some(document_id);
-        EditorWorkspaceCommandReport {
+        let dirty = self
+            .scenes
+            .get(&document_id)
+            .is_some_and(EditorSceneSlot::is_dirty);
+        Ok(EditorWorkspaceCommandReport {
             applied: true,
             document: Some(document_id),
             opened_document: Some(document_id),
             active_document: self.active_document,
-            dirty: Some(false),
+            dirty: Some(dirty),
             revision: self.scenes.get(&document_id).map(|slot| slot.revision()),
             diagnostics: DiagnosticReport::default(),
             ..EditorWorkspaceCommandReport::default()
-        }
+        })
     }
 
     pub fn apply_command(
@@ -122,9 +137,6 @@ impl EditorWorkspace {
         command: EditorWorkspaceCommand,
     ) -> EditorWorkspaceCommandReport {
         match command {
-            EditorWorkspaceCommand::OpenScene { title, document } => {
-                self.open_scene(title, document)
-            }
             EditorWorkspaceCommand::CloseScene { document } => self.close_scene(document),
             EditorWorkspaceCommand::SetActiveScene { document } => self.set_active_scene(document),
             EditorWorkspaceCommand::SelectEntity { document, entity } => {
@@ -141,9 +153,6 @@ impl EditorWorkspace {
             EditorWorkspaceCommand::MarkSaved { document } => self.mark_saved(document),
             EditorWorkspaceCommand::MarkExternalChanged { document } => {
                 self.mark_external_changed(document)
-            }
-            EditorWorkspaceCommand::ReloadExternalDocument { document, scene } => {
-                self.reload_external_document(document, scene)
             }
             EditorWorkspaceCommand::StartPlay { document } => self.start_play(registry, document),
             EditorWorkspaceCommand::PausePlay { document } => self.pause_play(document),
@@ -382,30 +391,66 @@ impl EditorWorkspace {
         report_for_slot(document, active_document, slot)
     }
 
-    fn reload_external_document(
+    pub fn reload_external_session(
         &mut self,
         document: Option<EditorDocumentId>,
-        scene: SceneDocument,
-    ) -> EditorWorkspaceCommandReport {
+        session: SceneAuthoringSession,
+    ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
         let active_document = self.active_document;
         let context = WorkspaceDocumentContext::new(active_document, document);
         let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_resolution_error_report(context),
+                session,
+            ));
+        };
+        if !slot.editor.mode().is_edit() {
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-reload-play-active",
+                    "external scene reload requires Play Mode to stop first",
+                ),
+                session,
+            ));
+        }
+        if slot.session.live_instance().is_some() {
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-current-session-attached",
+                    "external scene reload requires the current authoring session to detach first",
+                ),
+                session,
+            ));
+        }
+        if session.live_instance().is_some() {
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-session-attached",
+                    "workspace publication requires a detached scene authoring session",
+                ),
+                session,
+            ));
         };
         if slot.is_dirty() {
             slot.external_reload = EditorExternalReloadState::Conflict;
-            return workspace_error_report(
-                context,
-                "tooling.workspace-reload-conflict",
-                "external scene reload cannot replace a dirty editor document",
-            );
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-reload-conflict",
+                    "external scene reload cannot replace a dirty editor document",
+                ),
+                session,
+            ));
         }
-        slot.session.replace_document(scene);
+        slot.session = session;
         slot.selection.clear();
         slot.editor = SceneEditorState::new();
-        slot.mark_saved();
+        slot.saved_revision = slot.session.revision();
         slot.external_reload = EditorExternalReloadState::Clean;
-        report_for_slot(document, active_document, slot)
+        Ok(report_for_slot(document, active_document, slot))
     }
 
     fn start_play(
@@ -515,9 +560,7 @@ pub struct EditorSceneSlot {
 }
 
 impl EditorSceneSlot {
-    #[must_use]
-    pub fn new(title: impl Into<String>, document: SceneDocument) -> Self {
-        let session = SceneAuthoringSession::new(document);
+    fn from_session(title: impl Into<String>, session: SceneAuthoringSession) -> Self {
         let saved_revision = session.revision();
         Self {
             title: title.into(),
@@ -539,17 +582,9 @@ impl EditorSceneSlot {
         &self.session
     }
 
-    pub fn session_mut(&mut self) -> &mut SceneAuthoringSession {
-        &mut self.session
-    }
-
     #[must_use]
     pub fn editor(&self) -> &SceneEditorState {
         &self.editor
-    }
-
-    pub fn editor_mut(&mut self) -> &mut SceneEditorState {
-        &mut self.editor
     }
 
     #[must_use]
@@ -569,7 +604,7 @@ impl EditorSceneSlot {
 
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.session.revision() != self.saved_revision
+        self.session.revision() != self.saved_revision || self.session.source_upgrade_required()
     }
 
     #[must_use]
@@ -577,8 +612,9 @@ impl EditorSceneSlot {
         self.external_reload
     }
 
-    pub fn mark_saved(&mut self) {
+    fn mark_saved(&mut self) {
         self.saved_revision = self.session.revision();
+        self.session.acknowledge_source_saved();
         if self.external_reload != EditorExternalReloadState::Conflict {
             self.external_reload = EditorExternalReloadState::Clean;
         }
@@ -676,10 +712,6 @@ pub enum EditorExternalReloadState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorWorkspaceCommand {
-    OpenScene {
-        title: String,
-        document: SceneDocument,
-    },
     CloseScene {
         document: Option<EditorDocumentId>,
     },
@@ -709,10 +741,6 @@ pub enum EditorWorkspaceCommand {
     },
     MarkExternalChanged {
         document: Option<EditorDocumentId>,
-    },
-    ReloadExternalDocument {
-        document: Option<EditorDocumentId>,
-        scene: SceneDocument,
     },
     StartPlay {
         document: Option<EditorDocumentId>,
@@ -745,6 +773,44 @@ pub struct EditorWorkspaceCommandReport {
     pub apply_changes_report: Option<SceneApplyChangesReport>,
     pub diagnostics: DiagnosticReport,
 }
+
+#[derive(Debug)]
+pub struct EditorSceneSessionPublicationError {
+    report: Box<EditorWorkspaceCommandReport>,
+    session: Box<SceneAuthoringSession>,
+}
+
+impl EditorSceneSessionPublicationError {
+    fn new(report: EditorWorkspaceCommandReport, session: SceneAuthoringSession) -> Self {
+        Self {
+            report: Box::new(report),
+            session: Box::new(session),
+        }
+    }
+
+    #[must_use]
+    pub fn report(&self) -> &EditorWorkspaceCommandReport {
+        &self.report
+    }
+
+    #[must_use]
+    pub fn into_session(self) -> SceneAuthoringSession {
+        *self.session
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (EditorWorkspaceCommandReport, SceneAuthoringSession) {
+        (*self.report, *self.session)
+    }
+}
+
+impl Display for EditorSceneSessionPublicationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("scene authoring session was not published to the editor workspace")
+    }
+}
+
+impl Error for EditorSceneSessionPublicationError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorWorkspaceModel {
@@ -902,7 +968,7 @@ mod tests {
     #[test]
     fn two_open_scene_slots_keep_selection_and_dirty_isolated() {
         let mut workspace = EditorWorkspace::new();
-        let registry = ComponentRegistry::default();
+        let registry = frozen_empty_registry();
         let hero = entity_id("hero");
         let enemy = entity_id("enemy");
         let first = open_scene(&mut workspace, "first", scene_with_entity(hero.clone()));
@@ -941,7 +1007,7 @@ mod tests {
     #[test]
     fn selecting_missing_scene_entity_reports_workspace_diagnostic() {
         let mut workspace = EditorWorkspace::new();
-        let registry = ComponentRegistry::default();
+        let registry = frozen_empty_registry();
         let document = open_scene(
             &mut workspace,
             "scene",
@@ -977,7 +1043,7 @@ mod tests {
     #[test]
     fn missing_requested_document_does_not_fall_back_to_active_document() {
         let mut workspace = EditorWorkspace::new();
-        let registry = ComponentRegistry::default();
+        let registry = frozen_empty_registry();
         let active = open_scene(
             &mut workspace,
             "active-a",
@@ -1022,7 +1088,7 @@ mod tests {
     #[test]
     fn requested_document_remains_target_when_another_document_is_active() {
         let mut workspace = EditorWorkspace::new();
-        let registry = ComponentRegistry::default();
+        let registry = frozen_empty_registry();
         let active = open_scene(
             &mut workspace,
             "active-a",
@@ -1073,7 +1139,7 @@ mod tests {
     #[test]
     fn undo_targets_active_document_only() {
         let mut workspace = EditorWorkspace::new();
-        let registry = ComponentRegistry::default();
+        let registry = frozen_empty_registry();
         let first = open_scene(&mut workspace, "first", SceneDocument::default());
         let second = open_scene(&mut workspace, "second", SceneDocument::default());
 
@@ -1112,7 +1178,7 @@ mod tests {
     #[test]
     fn external_reload_tracks_pending_and_dirty_conflict() {
         let mut workspace = EditorWorkspace::new();
-        let registry = ComponentRegistry::default();
+        let registry = frozen_empty_registry();
         let document = open_scene(&mut workspace, "scene", SceneDocument::default());
 
         workspace.apply_command(
@@ -1126,13 +1192,12 @@ mod tests {
             EditorExternalReloadState::Pending
         );
 
-        workspace.apply_command(
-            &registry,
-            EditorWorkspaceCommand::ReloadExternalDocument {
-                document: Some(document),
-                scene: scene_with_entity(entity_id("fresh")),
-            },
-        );
+        workspace
+            .reload_external_session(
+                Some(document),
+                SceneAuthoringSession::new(scene_with_entity(entity_id("fresh"))),
+            )
+            .unwrap();
         assert!(document_has_entity(
             workspace.scene(document).unwrap().session().document(),
             &entity_id("fresh")
@@ -1159,6 +1224,164 @@ mod tests {
             workspace.scene(document).unwrap().external_reload(),
             EditorExternalReloadState::Conflict
         );
+
+        let replacement = SceneAuthoringSession::new(scene_with_entity(entity_id("rejected")));
+        let replacement_revision = replacement.revision();
+        let error = workspace
+            .reload_external_session(Some(document), replacement)
+            .unwrap_err();
+        assert!(
+            error
+                .report()
+                .diagnostics
+                .iter()
+                .any(|entry| entry.code().as_str() == "tooling.workspace-reload-conflict")
+        );
+        let replacement = error.into_session();
+        assert_eq!(replacement.revision(), replacement_revision);
+        let slot = workspace.scene(document).unwrap();
+        assert!(document_has_entity(
+            slot.session().document(),
+            &entity_id("fresh")
+        ));
+        assert!(!document_has_entity(
+            slot.session().document(),
+            &entity_id("rejected")
+        ));
+    }
+
+    #[test]
+    fn opening_a_session_preserves_its_authoring_source_identity() {
+        let mut workspace = EditorWorkspace::new();
+        let session = SceneAuthoringSession::new(scene_with_entity(entity_id("hero")));
+        let source_revision = session.revision();
+
+        let document = workspace
+            .open_scene_session("scene", session)
+            .unwrap()
+            .opened_document
+            .unwrap();
+
+        assert_eq!(
+            workspace.scene(document).unwrap().session().revision(),
+            source_revision
+        );
+    }
+
+    #[test]
+    fn reloading_from_a_session_adopts_the_new_publication_identity() {
+        let mut workspace = EditorWorkspace::new();
+        let document = open_scene(&mut workspace, "scene", SceneDocument::default());
+        let original_revision = workspace.scene(document).unwrap().revision();
+        let replacement = SceneAuthoringSession::new(scene_with_entity(entity_id("replacement")));
+        let replacement_revision = replacement.revision();
+        assert_ne!(
+            replacement_revision.source_id(),
+            original_revision.source_id()
+        );
+
+        let report = workspace
+            .reload_external_session(Some(document), replacement)
+            .unwrap();
+
+        assert!(report.applied);
+        let slot = workspace.scene(document).unwrap();
+        assert_eq!(slot.revision(), replacement_revision);
+        assert!(document_has_entity(
+            slot.session().document(),
+            &entity_id("replacement")
+        ));
+        assert!(!slot.is_dirty());
+        assert_eq!(slot.external_reload(), EditorExternalReloadState::Clean);
+    }
+
+    #[test]
+    fn rejected_session_publication_returns_the_original_session() {
+        let mut workspace = EditorWorkspace::new();
+        let missing = EditorDocumentId::from_raw(99);
+        let replacement = SceneAuthoringSession::new(scene_with_entity(entity_id("replacement")));
+        let replacement_revision = replacement.revision();
+
+        let error = workspace
+            .reload_external_session(Some(missing), replacement)
+            .unwrap_err();
+        assert!(
+            error
+                .report()
+                .diagnostics
+                .iter()
+                .any(|entry| entry.code().as_str() == "tooling.workspace-missing-document")
+        );
+        let replacement = error.into_session();
+        assert_eq!(replacement.revision(), replacement_revision);
+        assert!(document_has_entity(
+            replacement.document(),
+            &entity_id("replacement")
+        ));
+        assert!(workspace.is_empty());
+    }
+
+    #[test]
+    fn attached_session_cannot_be_published_without_its_live_world() {
+        let registry = frozen_empty_registry();
+        let mut session = SceneAuthoringSession::new(SceneDocument::default());
+        let mut world = nara_ecs::World::new();
+        assert!(session.sync_world(&mut world, &registry).synced);
+        assert!(session.live_instance().is_some());
+        let mut workspace = EditorWorkspace::new();
+
+        let error = workspace.open_scene_session("scene", session).unwrap_err();
+
+        assert!(
+            error
+                .report()
+                .diagnostics
+                .iter()
+                .any(|entry| entry.code().as_str() == "tooling.workspace-session-attached")
+        );
+        assert!(error.into_session().live_instance().is_some());
+        assert!(workspace.is_empty());
+    }
+
+    #[test]
+    fn external_reload_is_rejected_until_play_stops() {
+        let registry = frozen_empty_registry();
+        let mut workspace = EditorWorkspace::new();
+        let document = open_scene(&mut workspace, "scene", SceneDocument::default());
+        let start = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::StartPlay {
+                document: Some(document),
+            },
+        );
+        assert!(start.applied);
+        let replacement = SceneAuthoringSession::new(scene_with_entity(entity_id("replacement")));
+
+        let error = workspace
+            .reload_external_session(Some(document), replacement)
+            .unwrap_err();
+
+        assert!(
+            error
+                .report()
+                .diagnostics
+                .iter()
+                .any(|entry| entry.code().as_str() == "tooling.workspace-reload-play-active")
+        );
+        assert!(workspace.scene(document).unwrap().editor().mode().is_play());
+        let replacement = error.into_session();
+        let stop = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::StopPlay {
+                document: Some(document),
+            },
+        );
+        assert!(stop.applied);
+        assert!(
+            workspace
+                .reload_external_session(Some(document), replacement)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -1181,13 +1404,20 @@ mod tests {
             .value()
     }
 
+    fn frozen_empty_registry() -> ComponentRegistry {
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        registry
+    }
+
     fn open_scene(
         workspace: &mut EditorWorkspace,
         title: &str,
         document: SceneDocument,
     ) -> EditorDocumentId {
         workspace
-            .open_scene(title.to_owned(), document)
+            .open_scene_session(title.to_owned(), SceneAuthoringSession::new(document))
+            .unwrap()
             .opened_document
             .unwrap()
     }

@@ -5,7 +5,7 @@ use nara_asset::{
     AssetId, AssetPath, AssetRecord, AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle,
     ProjectAssetDatabase, StableAssetId,
 };
-use nara_core::ItemLimit;
+use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticValueRef};
 use nara_ecs::{Component, Entity, Mut, World};
 use nara_identity::{
@@ -15,8 +15,9 @@ use nara_identity::{
 };
 use nara_reflect::bevy_reflect;
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentFieldPath, ComponentFieldPathError,
-    ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistry, ComponentSchemaVersion,
+    ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentFieldId,
+    ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema,
+    ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent, Reflect,
 };
 #[derive(Clone, Debug, PartialEq, Component, Reflect)]
@@ -42,6 +43,38 @@ struct TestEntityLink {
 
 #[derive(Debug)]
 struct TestAsset;
+
+fn test_component_schema(
+    id: ComponentTypeId,
+    alias: &str,
+    version: ComponentSchemaVersion,
+    fields: impl IntoIterator<Item = ComponentFieldSchema>,
+) -> ComponentSchema {
+    ComponentSchema::new(id, alias, version)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(fields)
+}
+
+fn test_component_field(
+    id: &str,
+    alias: &str,
+    path: ComponentFieldPath,
+    value_kind: ComponentValueKind,
+    required: bool,
+) -> ComponentFieldSchema {
+    let field = if required {
+        ComponentFieldSchema::required(ComponentFieldId::new(id), alias, path, value_kind)
+    } else {
+        ComponentFieldSchema::optional(ComponentFieldId::new(id), alias, path, value_kind)
+    }
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING);
+
+    match value_kind {
+        ComponentValueKind::AssetRef => field.with_capability(ComponentCapability::AssetRef),
+        ComponentValueKind::EntityRef => field.with_capability(ComponentCapability::EntityRef),
+        _ => field,
+    }
+}
 
 fn spawned_instance(report: &SceneSpawnReport) -> &SpawnedSceneInstance {
     report
@@ -361,7 +394,6 @@ fn validation_reports_duplicate_missing_parent_cycle_and_unknown_component() {
     let cycle_b = scene_id("cycle_b");
     let unknown_component = ComponentTypeId::new("nara.test.Unknown");
     let document = SceneDocument {
-        format_version: SceneDocument::CURRENT_FORMAT_VERSION,
         entities: vec![
             SceneEntityRecord::new(id.clone()),
             SceneEntityRecord::new(id),
@@ -386,32 +418,6 @@ fn validation_reports_duplicate_missing_parent_cycle_and_unknown_component() {
     assert!(codes.contains(&"scene.parent-cycle"));
     assert!(codes.contains(&"scene.unknown-component"));
     assert!(report.has_errors());
-}
-
-#[test]
-fn validates_document_format_version() {
-    let registry = test_registry();
-    let document = SceneDocument {
-        format_version: SceneDocument::CURRENT_FORMAT_VERSION + 1,
-        entities: vec![SceneEntityRecord::new(scene_id("player"))],
-    };
-
-    let report = document.validate(&registry);
-
-    assert!(report.has_errors());
-    assert!(
-        report
-            .iter()
-            .any(|diagnostic| diagnostic.code().as_str() == "scene.unsupported-format-version")
-    );
-}
-
-#[test]
-fn prefab_default_uses_current_format_version() {
-    assert_eq!(
-        PrefabDocument::default().format_version,
-        PrefabDocument::CURRENT_FORMAT_VERSION
-    );
 }
 
 #[test]
@@ -497,7 +503,7 @@ fn prefab_instance_override_patch_applies_before_namespacing() {
         entity: scene_id("visual"),
         component: position_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["x"]),
+        field: ComponentFieldId::new("x"),
         value: ComponentValue::I64(11),
     }]);
     let document = SceneDocument::new([prefab_anchor_with_overrides("enemy", source, overrides)]);
@@ -698,7 +704,7 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
     let expansion = document.expand_prefabs_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions { max_depth: 1 },
+        PrefabExpansionOptions::default().with_max_depth(1),
     );
 
     assert!(expansion.document.is_none());
@@ -706,6 +712,204 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
         diagnostic.code().as_str() == "scene.prefab-depth-exceeded"
             && diagnostic_has_text_field(diagnostic, "entity-id", "weapon")
             && diagnostic_has_u64_field(diagnostic, "maximum-depth", 1)
+    }));
+}
+
+#[test]
+fn prefab_expansion_entity_budget_is_aggregate_across_reused_sources() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/unit.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("body"))]),
+    );
+    let document = SceneDocument::new([
+        prefab_anchor("left", source.clone()),
+        prefab_anchor("right", source),
+    ]);
+    let exact = PrefabExpansionOptions::default().with_limits(
+        PrefabExpansionLimits::default().with_materialized_entities(ItemLimit::new(4).unwrap()),
+    );
+    assert!(
+        document
+            .expand_prefabs_with_options(&registry, &resolver, exact)
+            .document
+            .is_some()
+    );
+
+    let over = PrefabExpansionOptions::default().with_limits(
+        PrefabExpansionLimits::default().with_materialized_entities(ItemLimit::new(3).unwrap()),
+    );
+    let expansion = document.expand_prefabs_with_options(&registry, &resolver, over);
+    assert!(expansion.document.is_none());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
+            && diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-entities")
+            && diagnostic_has_u64_field(diagnostic, "observed", 4)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 3)
+    }));
+}
+
+#[test]
+fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
+    let mut registry = ComponentRegistry::new();
+    register_scene_components(&mut registry).unwrap();
+    registry.freeze().unwrap();
+    let source = AssetRef::path("prefabs/unit.ron").unwrap();
+    let payload = "x".repeat(64 * 1024);
+    let payload_bytes = payload.len();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("body")).with_component(
+            ComponentTypeId::new("nara.scene.Name"),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::String(payload)),
+        )]),
+    );
+    let document = SceneDocument::new([
+        prefab_anchor("left", source.clone()),
+        prefab_anchor("right", source),
+    ]);
+
+    let exact_limits = PrefabExpansionLimits::default()
+        .with_materialized_value_nodes(ItemLimit::new(2).unwrap())
+        .with_materialized_value_bytes(ByteLimit::new(payload_bytes * 2).unwrap());
+    assert!(
+        document
+            .expand_prefabs_with_options(
+                &registry,
+                &resolver,
+                PrefabExpansionOptions::default().with_limits(exact_limits),
+            )
+            .document
+            .is_some()
+    );
+
+    let node_limits =
+        PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::ONE);
+    let node_report = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(node_limits),
+    );
+    assert!(node_report.document.is_none());
+    assert!(node_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-value-nodes")
+            && diagnostic_has_u64_field(diagnostic, "observed", 2)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 1)
+    }));
+
+    let byte_limits = PrefabExpansionLimits::default()
+        .with_materialized_value_bytes(ByteLimit::new(payload_bytes * 2 - 1).unwrap());
+    let byte_report = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(byte_limits),
+    );
+    assert!(byte_report.document.is_none());
+    assert!(byte_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-value-bytes")
+            && diagnostic_has_u64_field(diagnostic, "observed", (payload_bytes * 2) as u64)
+            && diagnostic_has_u64_field(diagnostic, "maximum", (payload_bytes * 2 - 1) as u64)
+    }));
+}
+
+#[test]
+fn prefab_expansion_component_and_instance_budgets_are_independent() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/unit.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([
+            SceneEntityRecord::new(scene_id("first"))
+                .with_component(position_type_id(), position_record(1)),
+            SceneEntityRecord::new(scene_id("second"))
+                .with_component(position_type_id(), position_record(2)),
+        ]),
+    );
+    let document = SceneDocument::new([prefab_anchor("root", source.clone())]);
+    let component_limited = PrefabExpansionOptions::default().with_limits(
+        PrefabExpansionLimits::default().with_materialized_components(ItemLimit::new(1).unwrap()),
+    );
+    let expansion = document.expand_prefabs_with_options(&registry, &resolver, component_limited);
+    assert!(expansion.document.is_none());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-components")
+            && diagnostic_has_u64_field(diagnostic, "observed", 2)
+    }));
+
+    let two_instances = SceneDocument::new([
+        prefab_anchor("left", source.clone()),
+        prefab_anchor("right", source),
+    ]);
+    let instance_limited = PrefabExpansionOptions::default()
+        .with_limits(PrefabExpansionLimits::default().with_resolved_instances(ItemLimit::ONE));
+    let expansion =
+        two_instances.expand_prefabs_with_options(&registry, &resolver, instance_limited);
+    assert!(expansion.document.is_none());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "resolved-instances")
+            && diagnostic_has_u64_field(diagnostic, "observed", 2)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 1)
+    }));
+}
+
+#[test]
+fn prefab_expansion_counts_override_operations_per_instance() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/unit.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("body"))
+            .with_component(position_type_id(), position_record(1))]),
+    );
+    let overrides = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: scene_id("body"),
+        component: position_type_id(),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("x"),
+        value: ComponentValue::I64(2),
+    }]);
+    let document = SceneDocument::new([
+        prefab_anchor_with_overrides("left", source.clone(), overrides.clone()),
+        prefab_anchor_with_overrides("right", source, overrides),
+    ]);
+    let options = PrefabExpansionOptions::default().with_limits(
+        PrefabExpansionLimits::default().with_applied_patch_operations(ItemLimit::ONE),
+    );
+
+    let expansion = document.expand_prefabs_with_options(&registry, &resolver, options);
+
+    assert!(expansion.document.is_none());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "applied-patch-operations")
+            && diagnostic_has_u64_field(diagnostic, "observed", 2)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 1)
+    }));
+}
+
+#[test]
+fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/unit.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("child"))]),
+    );
+    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let limits = PrefabExpansionLimits::default()
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(13).unwrap());
+
+    let expansion = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(limits),
+    );
+
+    assert!(expansion.document.is_none());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
+            && diagnostic_has_u64_field(diagnostic, "observed", 14)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 13)
     }));
 }
 
@@ -761,14 +965,21 @@ fn component_migration_runs_before_scene_preflight_without_mutating_document() {
 #[test]
 fn missing_component_migration_reports_unsupported_version() {
     let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        position_type_id(),
+        "Position",
+        ComponentSchemaVersion(2),
+        [test_component_field(
+            "x",
+            "X",
+            ComponentFieldPath::from_fields(["x2"]),
+            ComponentValueKind::I64,
+            true,
+        )],
+    );
     registry
-        .register_scene_component_with_fields::<TestPosition, _, _>(
-            position_type_id(),
-            ComponentSchemaVersion(2),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["x2"]),
-                ComponentValueKind::I64,
-            )],
+        .register_persistent_component_with_codec::<TestPosition, _, _>(
+            schema,
             |value| {
                 let x = value.field_i64("x2")?;
                 Ok(TestPosition {
@@ -784,6 +995,7 @@ fn missing_component_migration_reports_unsupported_version() {
             },
         )
         .unwrap();
+    registry.freeze().unwrap();
     let document = SceneDocument::new([SceneEntityRecord::new(scene_id("bad")).with_component(
         position_type_id(),
         SceneComponentRecord::new(
@@ -860,7 +1072,8 @@ fn scene_instance_allocation_is_world_global_across_every_spawner_entrypoint() {
 
 #[test]
 fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
-    let registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistry::new();
+    registry.freeze().unwrap();
     let document = SceneDocument::new([]);
     let mut world = World::new();
 
@@ -1277,6 +1490,29 @@ fn spawns_hierarchy_records_source_and_exports_stable_document() {
 }
 
 #[test]
+fn export_rejects_a_building_component_registry() {
+    let frozen_registry = test_registry();
+    let entity_id = scene_id("entity");
+    let document =
+        SceneDocument::new([SceneEntityRecord::new(entity_id)
+            .with_component(position_type_id(), position_record(1))]);
+    let mut world = World::new();
+    let report = spawn_scene(&mut world, &frozen_registry, &document);
+    assert!(!report.diagnostics.has_errors());
+    let mut building_registry = ComponentRegistry::new();
+    register_test_position(&mut building_registry).unwrap();
+
+    let export = export_scene(&world, &building_registry);
+
+    assert!(export.output().is_none());
+    assert!(
+        export.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.component-registry-not-frozen"
+        })
+    );
+}
+
+#[test]
 fn repeated_scene_spawns_export_with_injective_generated_ids() {
     let registry = test_registry();
     let id = scene_id("enemy");
@@ -1614,7 +1850,7 @@ fn direct_prefab_spawn_applies_patch_field_overrides() {
         entity: id.clone(),
         component: position_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["x"]),
+        field: ComponentFieldId::new("x"),
         value: ComponentValue::I64(9),
     }]);
     let mut world = World::new();
@@ -1676,7 +1912,7 @@ fn unknown_prefab_patch_target_prevents_world_mutation() {
         entity: scene_id("missing"),
         component: position_type_id(),
         component_version: ComponentSchemaVersion(1),
-        path: ComponentFieldPath::from_fields(["x"]),
+        field: ComponentFieldId::new("x"),
         value: ComponentValue::I64(9),
     }]);
     let mut world = World::new();
@@ -1808,8 +2044,8 @@ fn export_component_encode_failure_is_an_error() {
 #[cfg(feature = "serde")]
 #[test]
 fn scene_entity_id_deserialization_validates_shape() {
-    let error = serde_json::from_str::<SceneDocument>(
-        r#"{"format_version":1,"entities":[{"id":"root/../player","components":{}}]}"#,
+    let error = SceneDocumentCandidate::decode_json_str(
+        r#"{"kind":"scene","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"nara","version":"0.1.0"},"payload":{"entities":[{"id":"root/../player","components":{}}]}}"#,
     )
     .unwrap_err();
 
@@ -1819,19 +2055,20 @@ fn scene_entity_id_deserialization_validates_shape() {
 #[cfg(feature = "serde")]
 #[test]
 fn scene_json_rejects_unknown_document_entity_and_component_fields() {
-    let document_error =
-        SceneDocument::from_json_str(r#"{"format_version":1,"entities":[],"unexpected":true}"#)
-            .unwrap_err();
+    let document_error = SceneDocumentCandidate::decode_json_str(
+        r#"{"kind":"scene","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"nara","version":"0.1.0"},"payload":{"entities":[],"unexpected":true}}"#,
+    )
+    .unwrap_err();
     assert!(document_error.to_string().contains("unknown field"));
 
-    let entity_error = SceneDocument::from_json_str(
-        r#"{"format_version":1,"entities":[{"id":"player","components":{},"unexpected":true}]}"#,
+    let entity_error = SceneDocumentCandidate::decode_json_str(
+        r#"{"kind":"scene","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"nara","version":"0.1.0"},"payload":{"entities":[{"id":"player","components":{},"unexpected":true}]}}"#,
     )
     .unwrap_err();
     assert!(entity_error.to_string().contains("unknown field"));
 
-    let component_error = SceneDocument::from_json_str(
-        r#"{"format_version":1,"entities":[{"id":"player","components":{"nara.test.Position":{"version":1,"value":{"type":"null"},"unexpected":true}}}]}"#,
+    let component_error = SceneDocumentCandidate::decode_json_str(
+        r#"{"kind":"scene","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"nara","version":"0.1.0"},"payload":{"entities":[{"id":"player","components":{"nara.test.Position":{"version":1,"value":{"type":"null"},"unexpected":true}}}]}}"#,
     )
     .unwrap_err();
     assert!(component_error.to_string().contains("unknown field"));
@@ -1840,9 +2077,10 @@ fn scene_json_rejects_unknown_document_entity_and_component_fields() {
 #[cfg(feature = "serde")]
 #[test]
 fn prefab_json_rejects_unknown_fields() {
-    let prefab_error =
-        PrefabDocument::from_json_str(r#"{"format_version":1,"entities":[],"unexpected":true}"#)
-            .unwrap_err();
+    let prefab_error = PrefabDocumentCandidate::decode_json_str(
+        r#"{"kind":"prefab","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"nara","version":"0.1.0"},"payload":{"entities":[],"unexpected":true}}"#,
+    )
+    .unwrap_err();
 
     assert!(prefab_error.to_string().contains("unknown field"));
 }
@@ -1850,14 +2088,14 @@ fn prefab_json_rejects_unknown_fields() {
 #[cfg(feature = "serde")]
 #[test]
 fn patch_json_rejects_unknown_document_and_operation_fields() {
-    let document_error = serde_json::from_str::<ScenePatchDocument>(
-        r#"{"format_version":1,"operations":[],"unexpected":true}"#,
+    let document_error = ScenePatchDocumentCandidate::decode_json_str(
+        r#"{"kind":"scene_patch","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"nara","version":"0.1.0"},"payload":{"format_version":1,"operations":[],"unexpected":true}}"#,
     )
     .unwrap_err();
     assert!(document_error.to_string().contains("unknown field"));
 
-    let operation_error = serde_json::from_str::<ScenePatchDocument>(
-        r#"{"format_version":1,"operations":[{"op":"remove_entity","args":{"entity":"player","unexpected":true}}]}"#,
+    let operation_error = ScenePatchDocumentCandidate::decode_json_str(
+        r#"{"kind":"scene_patch","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"nara","version":"0.1.0"},"payload":{"format_version":1,"operations":[{"op":"remove_entity","args":{"entity":"player","unexpected":true}}]}}"#,
     )
     .unwrap_err();
     assert!(operation_error.to_string().contains("unknown field"));
@@ -1867,6 +2105,7 @@ fn patch_json_rejects_unknown_document_and_operation_fields() {
 fn scene_component_schemas_expose_scalar_fields() {
     let mut registry = ComponentRegistry::new();
     register_scene_components(&mut registry).expect("component registration should succeed");
+    registry.freeze().expect("component registry should freeze");
 
     let name_schema = registry
         .schema(&ComponentTypeId::new("nara.scene.Name"))
@@ -1893,47 +2132,64 @@ fn scene_component_schemas_expose_scalar_fields() {
     );
 }
 
+fn register_test_position(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+    let schema = test_component_schema(
+        position_type_id(),
+        "Position",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "x",
+            "X",
+            ComponentFieldPath::from_fields(["x"]),
+            ComponentValueKind::I64,
+            true,
+        )],
+    );
+    registry.register_persistent_component_with_codec::<TestPosition, _, _>(
+        schema,
+        |value| {
+            let x = value
+                .get("x")
+                .and_then(ComponentValue::as_i64)
+                .ok_or_else(|| ComponentCodecError::invalid_field("x", "i64"))?;
+            Ok(TestPosition {
+                x: i32::try_from(x).map_err(|_| ComponentCodecError::invalid_field("x", "i32"))?,
+            })
+        },
+        |position| {
+            Ok(ComponentValue::map([(
+                "x",
+                ComponentValue::I64(i64::from(position.x)),
+            )]))
+        },
+    )?;
+    Ok(())
+}
+
 fn test_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
-    registry
-        .register_scene_component_with_fields::<TestPosition, _, _>(
-            position_type_id(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["x"]),
-                ComponentValueKind::I64,
-            )],
-            |value| {
-                let x = value
-                    .get("x")
-                    .and_then(ComponentValue::as_i64)
-                    .ok_or_else(|| ComponentCodecError::invalid_field("x", "i64"))?;
-                Ok(TestPosition {
-                    x: i32::try_from(x)
-                        .map_err(|_| ComponentCodecError::invalid_field("x", "i32"))?,
-                })
-            },
-            |position| {
-                Ok(ComponentValue::map([(
-                    "x",
-                    ComponentValue::I64(i64::from(position.x)),
-                )]))
-            },
-        )
-        .unwrap();
+    register_test_position(&mut registry).unwrap();
+    registry.freeze().unwrap();
     registry
 }
 
 fn entity_link_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        entity_link_type_id(),
+        "Entity link",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "target",
+            "Target",
+            ComponentFieldPath::from_fields(["target"]),
+            ComponentValueKind::EntityRef,
+            true,
+        )],
+    );
     registry
-        .register_scene_component_with_fields::<TestEntityLink, _, _>(
-            entity_link_type_id(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["target"]),
-                ComponentValueKind::EntityRef,
-            )],
+        .register_persistent_component_with_codec::<TestEntityLink, _, _>(
+            schema,
             |value| {
                 Ok(TestEntityLink {
                     target: value.field_entity_reference("target")?.clone(),
@@ -1947,19 +2203,27 @@ fn entity_link_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
+    registry.freeze().unwrap();
     registry
 }
 
 fn migrated_position_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        position_type_id(),
+        "Position",
+        ComponentSchemaVersion(2),
+        [test_component_field(
+            "x",
+            "X",
+            ComponentFieldPath::from_fields(["x2"]),
+            ComponentValueKind::I64,
+            true,
+        )],
+    );
     registry
-        .register_scene_component_with_fields::<TestPosition, _, _>(
-            position_type_id(),
-            ComponentSchemaVersion(2),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["x2"]),
-                ComponentValueKind::I64,
-            )],
+        .register_persistent_component_with_codec::<TestPosition, _, _>(
+            schema,
             |value| {
                 let x = value.field_i64("x2")?;
                 Ok(TestPosition {
@@ -1991,19 +2255,27 @@ fn migrated_position_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
+    registry.freeze().unwrap();
     registry
 }
 
 fn test_asset_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        asset_link_type_id(),
+        "Asset link",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "asset",
+            "Asset",
+            ComponentFieldPath::from_fields(["asset"]),
+            ComponentValueKind::AssetRef,
+            true,
+        )],
+    );
     registry
-        .register_component_codec_with_context_and_fields::<TestAssetLink, _, _>(
-            asset_link_type_id(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["asset"]),
-                ComponentValueKind::AssetRef,
-            )],
+        .register_persistent_component_codec_with_context::<TestAssetLink, _, _>(
+            schema,
             |value, context| {
                 let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
                 let prepared = prepare_test_asset_handle(context, "asset.value", asset_ref)?;
@@ -2034,36 +2306,53 @@ fn test_asset_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
+    registry.freeze().unwrap();
     registry
 }
 
 fn broken_export_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        broken_export_type_id(),
+        "Broken export",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "broken",
+            "Broken",
+            ComponentFieldPath::from_fields(["broken"]),
+            ComponentValueKind::String,
+            true,
+        )],
+    );
     registry
-        .register_component_codec_with_context_and_fields::<TestBrokenExport, _, _>(
-            broken_export_type_id(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["broken"]),
-                ComponentValueKind::String,
-            )],
+        .register_persistent_component_codec_with_context::<TestBrokenExport, _, _>(
+            schema,
             |_value, _context| Ok(PreparedComponent::insert(TestBrokenExport)),
             |_world, _entity, _context| Err(ComponentCodecError::invalid_field("broken", "boom")),
         )
         .unwrap();
+    registry.freeze().unwrap();
     registry
 }
 
 fn failing_apply_registry() -> ComponentRegistry {
-    let mut registry = test_registry();
+    let mut registry = ComponentRegistry::new();
+    register_test_position(&mut registry).unwrap();
+    let resolves_asset_schema = test_component_schema(
+        apply_resolves_asset_type_id(),
+        "Apply resolves asset",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "asset",
+            "Asset",
+            ComponentFieldPath::from_fields(["asset"]),
+            ComponentValueKind::AssetRef,
+            true,
+        )],
+    );
     registry
-        .register_component_codec_with_context_and_fields::<TestAssetLink, _, _>(
-            apply_resolves_asset_type_id(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::required(
-                ComponentFieldPath::from_fields(["asset"]),
-                ComponentValueKind::AssetRef,
-            )],
+        .register_persistent_component_codec_with_context::<TestAssetLink, _, _>(
+            resolves_asset_schema,
             |value, _context| {
                 let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
                 Ok(PreparedComponent::new(move |context| {
@@ -2083,14 +2372,21 @@ fn failing_apply_registry() -> ComponentRegistry {
             |_world, _entity, _context| Ok(None),
         )
         .unwrap();
+    let apply_fails_schema = test_component_schema(
+        apply_fails_type_id(),
+        "Apply fails",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "asset",
+            "Asset",
+            ComponentFieldPath::from_fields(["asset"]),
+            ComponentValueKind::AssetRef,
+            false,
+        )],
+    );
     registry
-        .register_component_codec_with_context_and_fields::<TestApplyFails, _, _>(
-            apply_fails_type_id(),
-            ComponentSchemaVersion(1),
-            [ComponentFieldSchema::optional(
-                ComponentFieldPath::from_fields(["asset"]),
-                ComponentValueKind::AssetRef,
-            )],
+        .register_persistent_component_codec_with_context::<TestApplyFails, _, _>(
+            apply_fails_schema,
             |value, context| {
                 if let Some(asset_value) = value.get("asset") {
                     let asset_ref = read_asset_ref(asset_value, "asset")?;
@@ -2115,6 +2411,7 @@ fn failing_apply_registry() -> ComponentRegistry {
             |_world, _entity, _context| Ok(None),
         )
         .unwrap();
+    registry.freeze().unwrap();
     registry
 }
 

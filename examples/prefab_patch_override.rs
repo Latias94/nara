@@ -7,6 +7,9 @@ fn main() {
     let mut registry = ComponentRegistry::new();
     register_scene_components(&mut registry).expect("scene components should register once");
     register_sprite_components(&mut registry).expect("sprite components should register once");
+    registry
+        .freeze()
+        .expect("component registry should freeze before scene expansion");
 
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let enemy_prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))
@@ -17,14 +20,14 @@ fn main() {
             entity: scene_id("visual"),
             component: sprite_id(),
             component_version: v1(),
-            path: ComponentFieldPath::from_fields(["material", "tint", "r"]),
+            field: ComponentFieldId::new("material.tint.r"),
             value: ComponentValue::f64(0.25).unwrap(),
         },
         ScenePatchOperation::SetAssetRefField {
             entity: scene_id("visual"),
             component: sprite_id(),
             component_version: v1(),
-            path: ComponentFieldPath::from_fields(["material", "image"]),
+            field: ComponentFieldId::new("material.image"),
             asset_ref: AssetRef::path("textures/enemy.png").unwrap(),
         },
     ]);
