@@ -7,6 +7,7 @@ artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
 execution: code
+superseded_by: docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md
 ---
 
 # Engine Foundation Contract Completion - Plan

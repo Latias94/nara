@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-12
+* **Work Registration**: [Reference-game-driven foundation refactor](registry/2026-07/2026-07-12T065721Z-engine-foundation-contract-completion-codex-root-61e0215a3ccb43eba92e2e06ea5360c9.md) - Execute the reference-game-driven successor plan through an independently consumable Rust game proof.
+* **Session Handoff**: [RGF-U9 governance migration and RGF-U1 entry handoff](sessions/2026-07/2026-07-12T065637Z-rgf-u9-governance-migration-and-rgf-u1-entry-handoff-61e62159c1ee4c74a7b5da57625260df.md) - The reference-game-driven foundation plan is the sole active execution contract; RGF-U1 is the first code unit.
 * **Work Registration**: [Engine foundation contract completion](registry/2026-07/2026-07-12T003354Z-engine-foundation-contract-completion-codex-root-94a3690a870242ef85c08cc910cc0ea8.md) - Fearless implementation of the mature-engine foundation audit plan.
 * **Session Handoff**: [U8 identity completion and U9 entry handoff](sessions/2026-07/2026-07-12T003354Z-u8-identity-completion-and-u9-entry-handoff-66302302f4b84591bde7c4d1377e9fa5.md) - Durable continuation state after completing the U8 consumer migration.
 * **Verification Evidence**: [U8 stable runtime identity final verification](verification/2026-07/2026-07-12T003354Z-u8-stable-runtime-identity-final-verification-0ef7fd8028de4210a46569ef8be66a80.md) - Focused and workspace evidence for the completed U8 identity contract.
