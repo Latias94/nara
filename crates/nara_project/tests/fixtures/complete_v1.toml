@@ -13,7 +13,10 @@ fixed_timestep_seconds = 0.01
 max_fixed_steps_per_frame = 4
 max_fixed_debt_steps = 20
 catch_up_policy = "preserve-debt"
-plugin_plan = "runtime-2d"
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-2d"]
 
 [tasks.io]
 workers = 2

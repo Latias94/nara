@@ -7,6 +7,7 @@ use nara::{
         ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
         ComponentFieldSchema, ComponentSchema, ComponentValueKind,
     },
+    scene::SceneDocumentCandidate,
     tooling::EditorWorkspace,
     tooling_prelude::EditorWorkspaceCommand,
 };

@@ -46,6 +46,9 @@ Rules:
 - Persistent format fixtures are part of compatibility testing and belong to ADR 0051's envelope/migration policy.
 - CI should be introduced when the project starts accepting external contributions, when release artifacts exist, or when local verification drift becomes common.
 - Until CI exists, plan Verification Contracts must name the local gates they require.
+- `tests/product_capabilities.rs` is the executable local contract for the root feature vocabulary,
+  weak `serde`, target gating, server exclusions, and wgpu submitter dependency trees. RGF-U15
+  mirrors that policy on hosted Windows and Linux rather than redefining it.
 
 ## Alternatives Considered
 

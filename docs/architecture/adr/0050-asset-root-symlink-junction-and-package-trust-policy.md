@@ -110,8 +110,9 @@ closed when a platform cannot prove the requested policy.
 ## Consequences
 
 - `AssetSourceRoot::source_path` cannot remain the authorization boundary.
-- File-backed asset work migrates to `nara_fs` capabilities in U11; editor persistence uses the same
-  primitives through its own transaction adapter in U29.
+- RGF-U3 already routes file-backed project-manifest ingest through `nara_fs`; RGF-U12 extends the
+  same authority to the startup content closure. Asset-wide enumeration and watch/cache migration
+  remain trigger-driven, while editor persistence/recovery belongs to proposed ADR 0091.
 - Existing path-based containment checks may remain only for logical validation or safe diagnostics,
   not as evidence that a file access is authorized.
 - Unsupported platform/filesystem combinations produce structured failures instead of a permissive

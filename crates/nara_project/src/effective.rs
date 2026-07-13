@@ -4,19 +4,19 @@ use nara_ecs::Resource;
 use nara_tasks::TaskPoolConfig;
 use nara_window::{PresentMode, Window, WindowMode, WindowResolution};
 
+use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::manifest::ProjectManifest;
 use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
-use crate::sections::{
-    ProjectPathsManifest, ProjectPluginPlan, ProjectProfileKind, ProjectStartupManifest,
-};
+use crate::sections::{ProjectPathsManifest, ProjectProfileKind, ProjectStartupManifest};
 
 #[derive(Debug, Clone, PartialEq, Resource)]
 pub struct EffectiveProjectSettings {
     pub schema_version: u32,
     pub project: EffectiveProjectInfo,
     pub profile_name: Option<String>,
-    pub plugin_plan: ProjectPluginPlan,
+    pub runtime_preset: RuntimePreset,
+    pub requested_capabilities: ProductCapabilitySet,
     pub paths: EffectiveProjectPaths,
     pub startup: EffectiveStartupSettings,
     pub runtime: EffectiveRuntimeSettings,
@@ -36,7 +36,8 @@ impl EffectiveProjectSettings {
                 version: manifest.project.version.clone(),
             },
             profile_name: None,
-            plugin_plan: manifest.runtime.plugin_plan,
+            runtime_preset: manifest.runtime.preset,
+            requested_capabilities: manifest.capabilities.lower(),
             paths: EffectiveProjectPaths::from_manifest(manifest.paths.clone())?,
             startup: EffectiveStartupSettings::from_manifest(manifest.startup.clone())?,
             runtime: manifest.runtime.lower()?,
@@ -52,17 +53,18 @@ impl EffectiveProjectSettings {
     pub(crate) fn apply_profile_kind_defaults(&mut self, kind: ProjectProfileKind) {
         match kind {
             ProjectProfileKind::Headless => {
-                self.plugin_plan = ProjectPluginPlan::HeadlessRuntime;
+                self.runtime_preset = RuntimePreset::LocalHeadless;
                 self.window.enabled = false;
             }
             ProjectProfileKind::Server => {
-                self.plugin_plan = ProjectPluginPlan::Server;
+                self.runtime_preset = RuntimePreset::Server;
                 self.window.enabled = false;
                 self.runtime
                     .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
             }
             ProjectProfileKind::Editor => {
-                self.plugin_plan = ProjectPluginPlan::Tooling;
+                self.requested_capabilities
+                    .insert(ProductCapability::Tooling);
             }
             ProjectProfileKind::Dev | ProjectProfileKind::Release | ProjectProfileKind::Custom => {}
         }
@@ -71,24 +73,25 @@ impl EffectiveProjectSettings {
     pub(crate) fn enforce_profile_kind_invariants(&mut self, kind: ProjectProfileKind) {
         match kind {
             ProjectProfileKind::Headless => {
-                self.plugin_plan = ProjectPluginPlan::HeadlessRuntime;
+                self.runtime_preset = RuntimePreset::LocalHeadless;
                 self.window.enabled = false;
             }
             ProjectProfileKind::Server => {
-                self.plugin_plan = ProjectPluginPlan::Server;
+                self.runtime_preset = RuntimePreset::Server;
                 self.window.enabled = false;
                 self.runtime
                     .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
             }
-            ProjectProfileKind::Editor
-            | ProjectProfileKind::Dev
-            | ProjectProfileKind::Release
-            | ProjectProfileKind::Custom => {}
+            ProjectProfileKind::Editor => {
+                self.requested_capabilities
+                    .insert(ProductCapability::Tooling);
+            }
+            ProjectProfileKind::Dev | ProjectProfileKind::Release | ProjectProfileKind::Custom => {}
         }
     }
 
     pub(crate) fn enforce_product_invariants(&mut self) {
-        if self.plugin_plan == ProjectPluginPlan::Server {
+        if self.runtime_preset == RuntimePreset::Server {
             self.window.enabled = false;
             self.runtime
                 .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);

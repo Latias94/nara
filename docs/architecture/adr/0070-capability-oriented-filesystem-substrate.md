@@ -88,7 +88,7 @@ physical media has persisted data the operating system reported as synced.
   IDs or inode values may be reused after deletion/close and must not become persistent trust IDs.
 - Exclusive temporary creation occurs in the verified target directory and returns a handle.
 - Cleanup must be bound to that same temporary handle. Unix has no portable unlink-by-handle
-  primitive, so U25 never emulates it with `stat(name)` followed by `unlink(name)`: explicit discard
+  primitive, so the foundation never emulates it with `stat(name)` followed by `unlink(name)`: explicit discard
   reports `Unsupported`, drop closes the handle, and the name remains a recoverable orphan. A later
   bounded recovery workflow may remove it only through a primitive whose guarantee is explicit.
 - Streaming digest reads are bounded by the calling domain and compare length and digest without
@@ -130,9 +130,9 @@ physical media has persisted data the operating system reported as synced.
   parent-directory-sync stages completed, were unsupported, or remain unknown; callers do not infer
   directory durability from file flush success.
 
-### U25 completion boundary and downstream ownership
+### Implemented foundation and downstream ownership
 
-U25 completes the shared authority substrate required to start downstream work: host-handle import,
+The implemented foundation supplies the shared authority substrate required to start downstream work: host-handle import,
 validated relative components, capability-specific resolution evidence, live identity, exclusive
 same-directory temporary creation, truthful replacement tiers, file/directory sync reporting,
 locking, positional reads, and bounded digest verification. Windows handle-bound temporary discard
@@ -140,18 +140,19 @@ is included; Unix discard deliberately leaves a recoverable orphan rather than r
 the wrong name.
 
 Three reserved public operations remain explicitly `Unsupported` and are not counted as implemented
-U25 capability:
+foundation capability:
 
 | Reserved primitive | First owning unit | Completion rule |
 |---|---|---|
-| Handle-bound directory enumeration | U11 | Implement platform enumeration and return name plus scoped observation from `nara_fs`; `nara_asset` must not enumerate ambient paths. |
-| Same-capability non-overwrite rename | U26 | Add a typed source-binding/conflict receipt in `nara_fs`; asset rename reconciliation owns only the transaction. |
-| Relative identity-guarded unlink and orphan reclamation | U29, consumed by U30 | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
+| Handle-bound directory enumeration | A concrete asset/indexing host | Implement platform enumeration and return name plus scoped observation from `nara_fs`; `nara_asset` must not enumerate ambient paths. |
+| Same-capability non-overwrite rename | A concrete asset rename workflow | Add a typed source-binding/conflict receipt in `nara_fs`; asset rename reconciliation owns only the transaction. |
+| Relative identity-guarded unlink and orphan reclamation | Proposed ADR 0091 persistence/recovery | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
 
-This deferral does not treat static `Unsupported` values as successful evidence. U11 reuses U25's
-root/open/identity boundary and must extend enumeration in this crate; U29 reuses U25's
-temp/replace/sync receipts and must extend cleanup here; U26 remains gated on the shared rename
-primitive. Downstream domain crates are prohibited from copying those platform algorithms.
+This deferral does not treat static `Unsupported` values as successful evidence. RGF-U3 is the
+first production consumer of bounded host-issued file authority for `nara.toml`. RGF-U12 reuses the
+same root/open/identity boundary for the startup content closure. Future indexing, rename, and ADR
+0091 persistence/recovery work must extend the shared primitives here; downstream domain crates are
+prohibited from copying those platform algorithms.
 
 ## Alternatives Considered
 

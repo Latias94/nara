@@ -5,7 +5,7 @@ const UI_TEXTURE_STABLE_ID: &str = "f7d2d9c7-2b13-49fe-8b89-83d0f98f0c3f";
 
 fn main() -> Result<(), AppRunError> {
     let mut app = App::new();
-    app.add_plugins(Runtime2dPlugins)?
+    app.add_plugins(RuntimeUiPlugins)?
         .add_plugin(WindowPlugin {
             primary_window: Some(Window::new(
                 "nara runtime ui",

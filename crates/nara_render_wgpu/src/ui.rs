@@ -1,93 +1,89 @@
-use crate::sprite::{
-    WgpuSpriteBatchBuffer, WgpuSpriteDrawStats, create_sprite_batch_buffers,
-    sprite_batch_draw_stats,
-};
-use crate::texture::{WgpuSpriteTextureCache, WgpuSpriteTextureError};
-use nara_asset::Assets;
-use nara_image::{ImageAsset, PreparedImageResource};
-use nara_render::{PreparedRenderResources, RenderPhaseLabel};
-use nara_sprite_render::{ColorKey, SpriteBatch, SpriteInstance, SpriteMaterialKey, TextureUvRect};
-use nara_ui_render::{UiBatch, UiColorKey, UiInstance, UiMaterialKey, UiTextureRect};
+use crate::quad::{WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey};
+use nara_render::{RenderPhaseInput, RenderPhaseLabel};
+use nara_ui_render::{UiBatch, UiBatches, UiInstance};
 
-pub(crate) fn create_ui_batch_buffers(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    batches: &[&UiBatch],
-    texture_layout: &wgpu::BindGroupLayout,
-    texture_cache: &mut WgpuSpriteTextureCache,
-    images: Option<&Assets<ImageAsset>>,
-    prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
-    frame_index: u64,
-) -> Result<Vec<WgpuSpriteBatchBuffer>, WgpuSpriteTextureError> {
-    let sprite_batches = ui_batches_as_sprite_batches(batches);
-    let refs = sprite_batches.iter().collect::<Vec<_>>();
-    create_sprite_batch_buffers(
-        device,
-        queue,
-        &refs,
-        texture_layout,
-        texture_cache,
-        images,
-        prepared_images,
-        frame_index,
-    )
+pub(crate) fn collect_ui_quad_batches(
+    batches: &UiBatches,
+    view_index: usize,
+) -> Vec<WgpuQuadBatch> {
+    batches.for_view(view_index).map(ui_quad_batch).collect()
 }
 
-pub(crate) fn ui_batch_draw_stats(batches: &[&UiBatch]) -> WgpuSpriteDrawStats {
-    let sprite_batches = ui_batches_as_sprite_batches(batches);
-    let refs = sprite_batches.iter().collect::<Vec<_>>();
-    sprite_batch_draw_stats(&refs)
+pub(crate) fn append_ui_phase_inputs(batches: &UiBatches, inputs: &mut Vec<RenderPhaseInput>) {
+    inputs.extend(batches.as_slice().iter().map(|batch| RenderPhaseInput {
+        view_index: batch.view_index,
+        phase: RenderPhaseLabel::UI,
+    }));
 }
 
-fn ui_batches_as_sprite_batches(batches: &[&UiBatch]) -> Vec<SpriteBatch> {
-    batches
-        .iter()
-        .map(|batch| SpriteBatch {
-            view_index: batch.view_index,
-            view_order: batch.view_order,
-            target: batch.target,
-            phase: RenderPhaseLabel::UI,
-            layer: batch.order,
-            sort_key: batch.z_index,
-            material: sprite_material_key(batch.material),
-            instances: batch
-                .instances
-                .iter()
-                .copied()
-                .map(sprite_instance)
-                .collect(),
-        })
-        .collect()
-}
-
-fn sprite_material_key(material: UiMaterialKey) -> SpriteMaterialKey {
-    SpriteMaterialKey {
-        image: material.image,
-        sampler: material.sampler,
-        alpha_mode: material.alpha_mode,
-        tint: sprite_color_key(material.tint),
+fn ui_quad_batch(batch: &UiBatch) -> WgpuQuadBatch {
+    WgpuQuadBatch {
+        phase: RenderPhaseLabel::UI,
+        material: WgpuQuadMaterialKey {
+            image: batch.material.image,
+            sampler: batch.material.sampler,
+            alpha_mode: batch.material.alpha_mode,
+        },
+        instances: batch.instances.iter().map(ui_quad_instance).collect(),
+        counts_as_sprites: false,
     }
 }
 
-fn sprite_color_key(color: UiColorKey) -> ColorKey {
-    ColorKey {
-        r: color.r,
-        g: color.g,
-        b: color.b,
-        a: color.a,
+fn ui_quad_instance(instance: &UiInstance) -> WgpuQuadInstance {
+    WgpuQuadInstance {
+        center: instance.center.to_array(),
+        x_axis: instance.x_axis.to_array(),
+        y_axis: instance.y_axis.to_array(),
+        color: [
+            instance.color.r,
+            instance.color.g,
+            instance.color.b,
+            instance.color.a,
+        ],
+        uv_min: instance.uv.min.to_array(),
+        uv_size: instance.uv.size.to_array(),
     }
 }
 
-fn sprite_instance(instance: UiInstance) -> SpriteInstance {
-    SpriteInstance {
-        center: instance.center,
-        x_axis: instance.x_axis,
-        y_axis: instance.y_axis,
-        color: instance.color,
-        uv: sprite_texture_rect(instance.uv),
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nara_core::{Color, Vec2};
+    use nara_material::{AlphaMode2d, SamplerDescriptor};
+    use nara_render::RenderTarget;
+    use nara_ui::UiRect;
+    use nara_ui_render::{UiClipRect, UiColorKey, UiMaterialKey, UiTextureRect};
 
-fn sprite_texture_rect(rect: UiTextureRect) -> TextureUvRect {
-    TextureUvRect::new(rect.min, rect.size)
+    #[test]
+    fn ui_adapter_does_not_require_sprite_domain_types() {
+        let batch = UiBatch {
+            view_index: 0,
+            view_order: 0,
+            target: RenderTarget::PrimaryWindow,
+            order: 0,
+            z_index: 0,
+            material: UiMaterialKey {
+                image: None,
+                sampler: SamplerDescriptor::default(),
+                alpha_mode: AlphaMode2d::Blend,
+                tint: UiColorKey::from_color(Color::WHITE),
+            },
+            clip_rect: Some(UiClipRect::from_rect(UiRect::from_origin_size(
+                Vec2::ZERO,
+                Vec2::ONE,
+            ))),
+            instances: vec![UiInstance {
+                center: Vec2::ZERO,
+                x_axis: Vec2::X,
+                y_axis: Vec2::Y,
+                color: Color::WHITE,
+                uv: UiTextureRect::FULL,
+            }],
+        };
+
+        let converted = ui_quad_batch(&batch);
+        assert_eq!(converted.phase, RenderPhaseLabel::UI);
+        assert!(!converted.counts_as_sprites);
+        assert_eq!(converted.instances.len(), 1);
+    }
 }

@@ -266,10 +266,11 @@ second real adapter or stronger isolation pressure.
   `PluginError` values rather than panic.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
 - `nara_project` validates quantized durations, fixed debt policy, per-kind/aggregate worker and queue
-  limits, and shutdown timeouts before lowering. It remains free of runtime side effects, but its
-  current manifest loader still uses ambient file IO and `apply_project_settings` currently mutates
-  settings/resources before a missing compiled product capability can reject composition. Those are
-  explicit U17/U32 migration gaps, not the selected contract.
+  limits, shutdown timeouts, runtime presets, and coarse capability requests before lowering. It
+  remains free of runtime side effects and accepts only bounded immutable bytes. The root product
+  host reads an already authorized `FileCapability` and publishes `ProjectSettingsCandidate` only
+  after normalized requested capabilities fit the compiled ceiling. RGF-U4 still owns the separate
+  plugin service/conflict/slot closure, while RGF-U12 owns asset roots and startup-scene content.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
 - `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
 - `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age
@@ -277,6 +278,9 @@ second real adapter or stronger isolation pressure.
   tests. The current `nara_app::TaskUpdateSet` and `TaskPlugin`-configured asset phases are an
   explicit U33 ownership gap pending migration to `nara_asset::AssetTaskUpdateSet`.
 - `nara_fs` accepts host-opened handles rather than ambient paths. Windows strict traversal is handle-bound; Linux uses `openat2`; unsupported mount, reparse, filesystem, replacement-source, directory enumeration, unlink, or rename guarantees fail closed and remain visible in the capability matrix.
+- The independent reference game opens its committed `nara.toml` through a directory capability and
+  consumes its fixed timestep from a randomized current directory. This proves authorized manifest
+  ingest only; it does not claim the RGF-U12 asset/startup content closure.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_identity` implements the world-scoped identity core, structured references, atomic
   fork/restore remaps, tombstone policy, root facade wiring, and scene/gameplay/reflect/tooling
@@ -385,9 +389,11 @@ second real adapter or stronger isolation pressure.
 - Root Cargo features form coarse compiled product-capability ceilings. The required product
   capabilities of a resolved plugin plan must fit the normalized project request, which must fit
   the compiled ceiling; plugin service requirements/conflicts close separately before any `App`
-  mutation. `default` is `runtime-core`, serde weak-forwards only into enabled domains, and a crate
-  without a real production consumer does not retain a placeholder boundary. The current flat root
-  dependency graph and `nara_audio` placeholder are U32 migration state, not selected boundaries.
+  mutation. `default` is `runtime-core`, serde weak-forwards only into enabled domains, root engine
+  dependencies are optional, and `nara_render_wgpu` gates its sprite/UI submitters independently.
+  The gameplay prelude remains backend-free, advanced/tooling/backend surfaces are explicit, and
+  `nara_audio` has been retired because it had no production consumer. RGF-U4 still owns complete
+  pre-mutation plugin closure and configurable slots.
   See ADR
   [0079](adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md).
 - `CoreStage::TaskUpdate` remains the app-owned main-thread integration point, while each business

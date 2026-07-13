@@ -13,7 +13,6 @@ members = [
     "crates/nara_app",
     "crates/nara_asset",
     "crates/nara_asset_watch",
-    "crates/nara_audio",
     "crates/nara_core",
     "crates/nara_diagnostic",
     "crates/nara_ecs",
@@ -53,7 +52,6 @@ license = "MIT OR Apache-2.0"
 nara_app = { path = "crates/nara_app" }
 nara_asset = { path = "crates/nara_asset" }
 nara_asset_watch = { path = "crates/nara_asset_watch" }
-nara_audio = { path = "crates/nara_audio" }
 nara_core = { path = "crates/nara_core" }
 nara_diagnostic = { path = "crates/nara_diagnostic" }
 nara_ecs = { path = "crates/nara_ecs" }
@@ -112,34 +110,33 @@ rustix = "1.1.4"
 windows-sys = "0.61.2"
 
 [dependencies]
-nara_app.workspace = true
-nara_asset.workspace = true
+nara_app = { workspace = true, optional = true }
+nara_asset = { workspace = true, optional = true }
 nara_asset_watch = { workspace = true, optional = true }
-nara_audio.workspace = true
-nara_core.workspace = true
-nara_diagnostic.workspace = true
-nara_ecs.workspace = true
-nara_fs.workspace = true
-nara_image.workspace = true
-nara_identity.workspace = true
-nara_input.workspace = true
-nara_gameplay.workspace = true
-nara_material.workspace = true
-nara_project.workspace = true
-nara_reflect.workspace = true
-nara_render.workspace = true
+nara_core = { workspace = true, optional = true }
+nara_diagnostic = { workspace = true, optional = true }
+nara_ecs = { workspace = true, optional = true }
+nara_fs = { workspace = true, optional = true }
+nara_image = { workspace = true, optional = true }
+nara_identity = { workspace = true, optional = true }
+nara_input = { workspace = true, optional = true }
+nara_gameplay = { workspace = true, optional = true }
+nara_material = { workspace = true, optional = true }
+nara_project = { workspace = true, optional = true }
+nara_reflect = { workspace = true, optional = true }
+nara_render = { workspace = true, optional = true }
 nara_render_wgpu = { workspace = true, optional = true }
-nara_scene.workspace = true
-nara_sprite.workspace = true
-nara_sprite_render.workspace = true
-nara_tilemap.workspace = true
-nara_tasks.workspace = true
-nara_tooling.workspace = true
+nara_scene = { workspace = true, optional = true }
+nara_sprite = { workspace = true, optional = true }
+nara_sprite_render = { workspace = true, optional = true }
+nara_tilemap = { workspace = true, optional = true }
+nara_tasks = { workspace = true, optional = true }
+nara_tooling = { workspace = true, optional = true }
 nara_tooling_egui = { workspace = true, optional = true }
-nara_transform.workspace = true
-nara_ui.workspace = true
-nara_ui_render.workspace = true
-nara_window.workspace = true
+nara_transform = { workspace = true, optional = true }
+nara_ui = { workspace = true, optional = true }
+nara_ui_render = { workspace = true, optional = true }
+nara_window = { workspace = true, optional = true }
 nara_winit = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -147,72 +144,167 @@ bevy_ecs.workspace = true
 image.workspace = true
 ron.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
 
 [features]
-default = []
-serde = [
-    "nara_asset/serde",
-    "nara_core/serde",
-    "nara_diagnostic/serde",
-    "nara_ecs/serde",
-    "nara_image/serde",
-    "nara_identity/serde",
-    "nara_input/serde",
-    "nara_gameplay/serde",
-    "nara_material/serde",
-    "nara_reflect/serde",
-    "nara_transform/serde",
-    "nara_render/serde",
-    "nara_scene/serde",
-    "nara_sprite/serde",
-    "nara_tilemap/serde",
-    "nara_ui/serde",
-    "nara_window/serde",
+default = ["runtime-core"]
+runtime-core = [
+    "dep:nara_app",
+    "dep:nara_asset",
+    "dep:nara_core",
+    "dep:nara_diagnostic",
+    "dep:nara_ecs",
+    "dep:nara_fs",
+    "dep:nara_gameplay",
+    "dep:nara_identity",
+    "dep:nara_input",
+    "dep:nara_project",
+    "dep:nara_reflect",
+    "dep:nara_scene",
+    "dep:nara_tasks",
+    "dep:nara_transform",
+    "dep:nara_window",
 ]
-winit = ["dep:nara_winit"]
-wgpu = ["dep:nara_render_wgpu"]
-egui = ["dep:nara_tooling_egui"]
-asset-watch = ["dep:nara_asset_watch"]
+runtime-2d = [
+    "runtime-core",
+    "dep:nara_image",
+    "dep:nara_material",
+    "dep:nara_render",
+    "dep:nara_sprite",
+    "dep:nara_sprite_render",
+    "dep:nara_tilemap",
+    "nara_render_wgpu?/sprite-submitter",
+]
+runtime-ui = [
+    "runtime-core",
+    "dep:nara_image",
+    "dep:nara_material",
+    "dep:nara_render",
+    "dep:nara_ui",
+    "dep:nara_ui_render",
+    "nara_render_wgpu?/ui-submitter",
+]
+tooling = ["runtime-core", "dep:nara_tooling"]
+asset-watch = ["runtime-core", "dep:nara_asset_watch"]
+desktop-winit = ["runtime-core", "dep:nara_winit"]
+render-wgpu = ["runtime-core", "dep:nara_render", "dep:nara_render_wgpu"]
+tooling-egui = ["tooling", "dep:nara_tooling_egui"]
+serde = [
+    "nara_asset?/serde",
+    "nara_core?/serde",
+    "nara_diagnostic?/serde",
+    "nara_ecs?/serde",
+    "nara_image?/serde",
+    "nara_identity?/serde",
+    "nara_input?/serde",
+    "nara_gameplay?/serde",
+    "nara_material?/serde",
+    "nara_reflect?/serde",
+    "nara_transform?/serde",
+    "nara_render?/serde",
+    "nara_scene?/serde",
+    "nara_sprite?/serde",
+    "nara_tilemap?/serde",
+    "nara_ui?/serde",
+    "nara_window?/serde",
+]
 
 [[example]]
 name = "windowed_clear"
 path = "examples/windowed_clear.rs"
-required-features = ["winit", "wgpu"]
+required-features = ["desktop-winit", "render-wgpu"]
 
 [[example]]
 name = "windowed_sprites"
 path = "examples/windowed_sprites.rs"
-required-features = ["winit", "wgpu"]
+required-features = ["runtime-2d", "desktop-winit", "render-wgpu"]
 
 [[example]]
 name = "runtime_ui_panel"
 path = "examples/runtime_ui_panel.rs"
-required-features = ["winit", "wgpu"]
+required-features = ["runtime-ui", "desktop-winit", "render-wgpu"]
 
 [[example]]
 name = "asset_import_texture"
 path = "examples/asset_import_texture.rs"
+required-features = ["runtime-2d"]
 
 [[example]]
 name = "headless_server"
 path = "examples/headless_server.rs"
+required-features = ["runtime-core"]
 
 [[example]]
 name = "scene_prefab_roundtrip"
 path = "examples/scene_prefab_roundtrip.rs"
-required-features = ["serde"]
+required-features = ["runtime-2d", "serde"]
 
 [[example]]
 name = "scene_patch_roundtrip"
 path = "examples/scene_patch_roundtrip.rs"
-required-features = ["serde"]
+required-features = ["runtime-2d", "serde"]
 
 [[example]]
 name = "component_schema_export"
 path = "examples/component_schema_export.rs"
-required-features = ["serde"]
+required-features = ["runtime-2d", "serde"]
 
 [[example]]
 name = "prefab_patch_override"
 path = "examples/prefab_patch_override.rs"
-required-features = ["serde"]
+required-features = ["runtime-2d", "serde"]
+
+[[example]]
+name = "hello_world"
+path = "examples/hello_world.rs"
+required-features = ["runtime-2d"]
+
+[[example]]
+name = "sprite_tilemap_scene"
+path = "examples/sprite_tilemap_scene.rs"
+required-features = ["runtime-2d"]
+
+[[test]]
+name = "product_capabilities"
+path = "tests/product_capabilities.rs"
+required-features = ["runtime-core"]
+
+[[test]]
+name = "project_composition"
+path = "tests/project_composition.rs"
+required-features = ["runtime-core"]
+
+[[test]]
+name = "scene_authoring_session"
+path = "tests/scene_authoring_session.rs"
+required-features = ["runtime-core"]
+
+[[test]]
+name = "scene_file_workspace"
+path = "tests/scene_file_workspace.rs"
+required-features = ["tooling", "serde"]
+
+[[test]]
+name = "scene_inspector"
+path = "tests/scene_inspector.rs"
+required-features = ["tooling"]
+
+[[test]]
+name = "scene_patch_transactions"
+path = "tests/scene_patch_transactions.rs"
+required-features = ["runtime-core"]
+
+[[test]]
+name = "scene_play_mode"
+path = "tests/scene_play_mode.rs"
+required-features = ["tooling", "runtime-2d"]
+
+[[test]]
+name = "scene_sprite_serialization"
+path = "tests/scene_sprite_serialization.rs"
+required-features = ["runtime-2d"]
+
+[[test]]
+name = "stable_runtime_identity"
+path = "tests/stable_runtime_identity.rs"
+required-features = ["tooling"]

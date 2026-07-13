@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::quad::WgpuQuadMaterialKey;
 use nara_asset::{Assets, Handle};
 use nara_image::{ImageAsset, ImageColorSpace, ImageFormat, PreparedImageResource};
 use nara_material::{AddressMode, FilterMode, SamplerDescriptor};
@@ -7,7 +8,6 @@ use nara_render::{
     PreparedRenderResources, RenderPrepareStatus, RenderResourceKey, RenderResourceKind,
     RenderResourceSnapshot,
 };
-use nara_sprite_render::SpriteMaterialKey;
 use thiserror::Error;
 
 const RGBA8_BYTES_PER_PIXEL: u32 = 4;
@@ -18,9 +18,9 @@ pub(crate) struct WgpuSpriteTextureCache {
     policy: WgpuTextureCachePolicy,
     stats: WgpuTextureCacheStats,
     fallback_texture: Option<WgpuTextureResource>,
-    fallback_bindings: BTreeMap<SpriteMaterialKey, WgpuSpriteTextureBinding>,
+    fallback_bindings: BTreeMap<WgpuQuadMaterialKey, WgpuSpriteTextureBinding>,
     images: BTreeMap<RenderResourceKey, WgpuImageTextureResource>,
-    image_bindings: BTreeMap<SpriteMaterialKey, WgpuSpriteImageBinding>,
+    image_bindings: BTreeMap<WgpuQuadMaterialKey, WgpuSpriteImageBinding>,
 }
 
 impl Default for WgpuSpriteTextureCache {
@@ -101,7 +101,7 @@ impl WgpuSpriteTextureCache {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
-        material: SpriteMaterialKey,
+        material: WgpuQuadMaterialKey,
         frame_index: u64,
     ) -> wgpu::BindGroup {
         if self.fallback_texture.is_none() {
@@ -142,7 +142,7 @@ impl WgpuSpriteTextureCache {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
-        material: SpriteMaterialKey,
+        material: WgpuQuadMaterialKey,
         images: &Assets<ImageAsset>,
         prepared_images: &PreparedRenderResources<PreparedImageResource>,
         frame_index: u64,

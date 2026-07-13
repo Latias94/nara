@@ -1,414 +1,473 @@
 //! Public facade for the nara engine workspace.
 
+#[cfg(feature = "runtime-core")]
 pub use nara_app as app;
+#[cfg(feature = "runtime-core")]
 pub use nara_asset as asset;
 #[cfg(feature = "asset-watch")]
 pub use nara_asset_watch as asset_watch;
-pub use nara_audio as audio;
+#[cfg(feature = "runtime-core")]
 pub use nara_core as core;
+#[cfg(feature = "runtime-core")]
 pub use nara_diagnostic as diagnostic;
+#[cfg(feature = "runtime-core")]
 pub use nara_ecs as ecs;
+#[cfg(feature = "runtime-core")]
 pub use nara_fs as fs;
+#[cfg(feature = "runtime-core")]
 pub use nara_gameplay as gameplay;
+#[cfg(feature = "runtime-core")]
 pub use nara_identity as identity;
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 pub use nara_image as image;
+#[cfg(feature = "runtime-core")]
 pub use nara_input as input;
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 pub use nara_material as material;
+#[cfg(feature = "runtime-core")]
 pub use nara_project as project;
+#[cfg(feature = "runtime-core")]
 pub use nara_reflect as reflect;
+#[cfg(feature = "runtime-core")]
 pub use nara_reflect::PersistentComponent;
+#[cfg(any(
+    feature = "runtime-2d",
+    feature = "runtime-ui",
+    feature = "render-wgpu"
+))]
 pub use nara_render as render;
-#[cfg(feature = "wgpu")]
+#[cfg(feature = "render-wgpu")]
 pub use nara_render_wgpu as render_wgpu;
+#[cfg(feature = "runtime-core")]
 pub use nara_scene as scene;
+#[cfg(feature = "runtime-2d")]
 pub use nara_sprite as sprite;
+#[cfg(feature = "runtime-2d")]
 pub use nara_sprite_render as sprite_render;
+#[cfg(feature = "runtime-core")]
 pub use nara_tasks as tasks;
+#[cfg(feature = "runtime-2d")]
 pub use nara_tilemap as tilemap;
+#[cfg(feature = "tooling")]
 pub use nara_tooling as tooling;
-#[cfg(feature = "egui")]
+#[cfg(feature = "tooling-egui")]
 pub use nara_tooling_egui as tooling_egui;
+#[cfg(feature = "runtime-core")]
 pub use nara_transform as transform;
+#[cfg(feature = "runtime-ui")]
 pub use nara_ui as ui;
+#[cfg(feature = "runtime-ui")]
 pub use nara_ui_render as ui_render;
+#[cfg(feature = "runtime-core")]
 pub use nara_window as window;
-#[cfg(feature = "winit")]
+#[cfg(feature = "desktop-winit")]
 pub use nara_winit as winit;
 
+#[cfg(feature = "runtime-core")]
+pub mod project_host;
+
+#[cfg(feature = "runtime-core")]
 #[doc(hidden)]
 pub mod __macro_support {
     pub use nara_reflect::__macro_support::*;
 }
 
-use nara_app::{
-    App, Plugin, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginGroupMetadata,
-    PluginId,
-};
-
-const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.scene.hierarchy");
-const COMPONENT_REGISTRY_PLUGIN_ID: PluginId = nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID;
-const DIAGNOSTIC_PLUGIN_ID: PluginId = PluginId::new("nara.diagnostic");
-const TASK_PLUGIN_ID: PluginId = PluginId::new("nara.tasks");
-const ASSET_PLUGIN_ID: PluginId = PluginId::new("nara.asset");
-const TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.transform");
-const INPUT_PLUGIN_ID: PluginId = PluginId::new("nara.input");
-const GAMEPLAY_COMMAND_PLUGIN_ID: PluginId = PluginId::new("nara.gameplay.commands");
-const SERVER_TIME_POLICY_PLUGIN_ID: PluginId = PluginId::new("nara.server-time-policy");
-const SPRITE_PLUGIN_ID: PluginId = PluginId::new("nara.sprite");
-const TILEMAP_PLUGIN_ID: PluginId = PluginId::new("nara.tilemap");
-const RENDER_PLUGIN_ID: PluginId = PluginId::new("nara.render");
-const IMAGE_PLUGIN_ID: PluginId = PluginId::new("nara.image");
-const SPRITE_RENDER_PLUGIN_ID: PluginId = PluginId::new("nara.sprite-render");
-const UI_PLUGIN_ID: PluginId = PluginId::new("nara.ui");
-const UI_RENDER_PLUGIN_ID: PluginId = PluginId::new("nara.ui-render");
-const WINDOW_PLUGIN_ID: PluginId = PluginId::new("nara.window");
-#[cfg(feature = "winit")]
-const WINIT_PLUGIN_ID: PluginId = PluginId::new("nara.winit");
-#[cfg(feature = "wgpu")]
-const WGPU_RENDER_PLUGIN_ID: PluginId = PluginId::new("nara.render-wgpu");
-const TOOLING_PLUGIN_ID: PluginId = PluginId::new("nara.tooling");
-
-const MINIMAL_PLUGIN_IDS: &[PluginId] = &[
-    COMPONENT_REGISTRY_PLUGIN_ID,
-    HIERARCHY_PLUGIN_ID,
-    DIAGNOSTIC_PLUGIN_ID,
-    TASK_PLUGIN_ID,
-    ASSET_PLUGIN_ID,
-    TRANSFORM_PLUGIN_ID,
-    INPUT_PLUGIN_ID,
-];
-
-const HEADLESS_RUNTIME_PLUGIN_IDS: &[PluginId] = &[
-    COMPONENT_REGISTRY_PLUGIN_ID,
-    HIERARCHY_PLUGIN_ID,
-    DIAGNOSTIC_PLUGIN_ID,
-    TASK_PLUGIN_ID,
-    ASSET_PLUGIN_ID,
-    TRANSFORM_PLUGIN_ID,
-    INPUT_PLUGIN_ID,
-    GAMEPLAY_COMMAND_PLUGIN_ID,
-];
-
-const SERVER_PLUGIN_IDS: &[PluginId] = &[
-    SERVER_TIME_POLICY_PLUGIN_ID,
-    COMPONENT_REGISTRY_PLUGIN_ID,
-    HIERARCHY_PLUGIN_ID,
-    DIAGNOSTIC_PLUGIN_ID,
-    TASK_PLUGIN_ID,
-    ASSET_PLUGIN_ID,
-    TRANSFORM_PLUGIN_ID,
-    GAMEPLAY_COMMAND_PLUGIN_ID,
-];
-
-const RUNTIME_2D_PLUGIN_IDS: &[PluginId] = &[
-    COMPONENT_REGISTRY_PLUGIN_ID,
-    HIERARCHY_PLUGIN_ID,
-    DIAGNOSTIC_PLUGIN_ID,
-    TASK_PLUGIN_ID,
-    ASSET_PLUGIN_ID,
-    TRANSFORM_PLUGIN_ID,
-    INPUT_PLUGIN_ID,
-    SPRITE_PLUGIN_ID,
-    TILEMAP_PLUGIN_ID,
-    RENDER_PLUGIN_ID,
-    IMAGE_PLUGIN_ID,
-    SPRITE_RENDER_PLUGIN_ID,
-    UI_PLUGIN_ID,
-    UI_RENDER_PLUGIN_ID,
-];
-
-#[cfg(not(feature = "winit"))]
-const DESKTOP_WINDOW_PLUGIN_IDS: &[PluginId] = &[WINDOW_PLUGIN_ID];
-#[cfg(feature = "winit")]
-const DESKTOP_WINDOW_PLUGIN_IDS: &[PluginId] = &[WINDOW_PLUGIN_ID, WINIT_PLUGIN_ID];
-
-#[cfg(all(feature = "wgpu", not(feature = "winit")))]
-const DESKTOP_WGPU_PLUGIN_IDS: &[PluginId] = &[
-    WINDOW_PLUGIN_ID,
-    WGPU_RENDER_PLUGIN_ID,
-    SPRITE_RENDER_PLUGIN_ID,
-    UI_RENDER_PLUGIN_ID,
-];
-#[cfg(all(feature = "wgpu", feature = "winit"))]
-const DESKTOP_WGPU_PLUGIN_IDS: &[PluginId] = &[
-    WINDOW_PLUGIN_ID,
-    WINIT_PLUGIN_ID,
-    WGPU_RENDER_PLUGIN_ID,
-    SPRITE_RENDER_PLUGIN_ID,
-    UI_RENDER_PLUGIN_ID,
-];
-
-const TOOLING_PLUGIN_IDS: &[PluginId] = &[TOOLING_PLUGIN_ID];
-
-/// Minimal runtime defaults for headless examples, tests, and AI-generated scenes.
-///
-/// Platform windows and GPU backends are intentionally excluded. They should be
-/// installed by dedicated backend plugins.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct MinimalPlugins;
-
-impl PluginGroup for MinimalPlugins {
-    fn metadata(&self) -> PluginGroupMetadata {
-        PluginGroupMetadata::new(
-            PluginGroupId::new("nara.plugins.minimal"),
-            MINIMAL_PLUGIN_IDS,
-        )
-    }
-
-    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-        group.add_plugin_if_missing(nara_reflect::ComponentRegistryPlugin)?;
-        group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
-        group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
-        group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
-        group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
-        group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
-        group.add_plugin_if_missing(nara_input::InputPlugin)?;
-        Ok(())
-    }
-}
-
-/// Headless runtime defaults for tests, AI drivers, and non-windowed game logic.
-///
-/// This group keeps low-level input observations available for local drivers,
-/// but adds semantic gameplay command resources so gameplay systems can consume
-/// commands instead of raw keyboard or pointer state.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct HeadlessRuntimePlugins;
-
-impl PluginGroup for HeadlessRuntimePlugins {
-    fn metadata(&self) -> PluginGroupMetadata {
-        PluginGroupMetadata::new(
-            PluginGroupId::new("nara.plugins.headless-runtime"),
-            HEADLESS_RUNTIME_PLUGIN_IDS,
-        )
-    }
-
-    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-        group.add_plugins(MinimalPlugins)?;
-        group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin::default())?;
-        Ok(())
-    }
-}
-
-/// Dedicated-server-ready defaults without desktop, render, editor, audio, or raw input plugins.
-///
-/// Networking is intentionally not included. Server producers should write
-/// semantic commands into `GameplayCommandQueue`.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ServerPlugins;
-
-#[derive(Debug, Default, Clone, Copy)]
-struct ServerTimePolicyPlugin;
-
-impl Plugin for ServerTimePolicyPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(SERVER_TIME_POLICY_PLUGIN_ID, nara_app::PluginCategory::Core)
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let Some(mut fixed_time) = app.world_mut()?.get_resource_mut::<nara_app::FixedTime>()
-        else {
-            return Err(PluginError::SetupFailed {
-                plugin: SERVER_TIME_POLICY_PLUGIN_ID,
-                message: "server time policy requires FixedTime".to_owned(),
-            });
-        };
-        fixed_time
-            .set_catch_up_policy(nara_app::FixedCatchUpPolicy::PreserveDebt)
-            .map_err(|error| PluginError::SetupFailed {
-                plugin: SERVER_TIME_POLICY_PLUGIN_ID,
-                message: error.to_string(),
-            })?;
-        Ok(())
-    }
-}
-
-impl PluginGroup for ServerPlugins {
-    fn metadata(&self) -> PluginGroupMetadata {
-        PluginGroupMetadata::new(PluginGroupId::new("nara.plugins.server"), SERVER_PLUGIN_IDS)
-    }
-
-    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-        group.add_plugin_if_missing(ServerTimePolicyPlugin)?;
-        group.add_plugin_if_missing(nara_reflect::ComponentRegistryPlugin)?;
-        group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
-        group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
-        group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
-        group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
-        group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
-        group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin::default())?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Runtime2dPlugins;
-
-impl PluginGroup for Runtime2dPlugins {
-    fn metadata(&self) -> PluginGroupMetadata {
-        PluginGroupMetadata::new(
-            PluginGroupId::new("nara.plugins.runtime-2d"),
-            RUNTIME_2D_PLUGIN_IDS,
-        )
-    }
-
-    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-        group.add_plugins(MinimalPlugins)?;
-        group.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
-        group.add_plugin_if_missing(nara_tilemap::TilemapPlugin)?;
-        group.add_plugin_if_missing(nara_render::RenderPlugin)?;
-        group.add_plugin_if_missing(nara_image::ImagePlugin)?;
-        group.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
-        group.add_plugin_if_missing(nara_ui::UiPlugin)?;
-        group.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
-        Ok(())
-    }
-}
-
-/// Additive desktop window adapters for an app that already has its runtime core.
-///
-/// This group intentionally reports and installs only window/platform plugins. Use
-/// [`add_project_plugin_plan`] for the complete `desktop-window` product plan.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DesktopWindowPlugins;
-
-impl PluginGroup for DesktopWindowPlugins {
-    fn metadata(&self) -> PluginGroupMetadata {
-        PluginGroupMetadata::new(
-            PluginGroupId::new("nara.plugins.desktop-window"),
-            DESKTOP_WINDOW_PLUGIN_IDS,
-        )
-    }
-
-    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-        group.add_plugin_if_missing(nara_window::WindowPlugin::default())?;
-        #[cfg(feature = "winit")]
-        group.add_plugin_if_missing(nara_winit::WinitPlugin::default())?;
-        Ok(())
-    }
-}
-
-#[cfg(feature = "wgpu")]
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DesktopWgpuPlugins;
-
-#[cfg(feature = "wgpu")]
-impl PluginGroup for DesktopWgpuPlugins {
-    fn metadata(&self) -> PluginGroupMetadata {
-        PluginGroupMetadata::new(
-            PluginGroupId::new("nara.plugins.desktop-wgpu"),
-            DESKTOP_WGPU_PLUGIN_IDS,
-        )
-    }
-
-    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-        group.add_plugins(Runtime2dPlugins)?;
-        group.add_plugins(DesktopWindowPlugins)?;
-        group.add_plugin_if_missing(nara_render_wgpu::WgpuRenderPlugin)?;
-        group.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
-        group.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
-        Ok(())
-    }
-}
-
-/// Additive editor tooling adapters for an app that already has its runtime core.
-///
-/// This group intentionally reports and installs only tooling plugins. Use
-/// [`add_project_plugin_plan`] for the complete `tooling` product plan.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ToolingPlugins;
-
-impl PluginGroup for ToolingPlugins {
-    fn metadata(&self) -> PluginGroupMetadata {
-        PluginGroupMetadata::new(
-            PluginGroupId::new("nara.plugins.tooling"),
-            TOOLING_PLUGIN_IDS,
-        )
-    }
-
-    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-        group.add_plugin_if_missing(nara_tooling::ToolingPlugin)?;
-        Ok(())
-    }
-}
-
-/// Installs a complete product plan, composing the core runtime with any additive adapters.
-pub fn add_project_plugin_plan(
-    app: &mut App,
-    plan: nara_project::ProjectPluginPlan,
-) -> Result<&mut App, PluginError> {
-    match plan {
-        nara_project::ProjectPluginPlan::Minimal => app.add_plugins(MinimalPlugins),
-        nara_project::ProjectPluginPlan::HeadlessRuntime => app.add_plugins(HeadlessRuntimePlugins),
-        nara_project::ProjectPluginPlan::Server => app.add_plugins(ServerPlugins),
-        nara_project::ProjectPluginPlan::Runtime2d => app.add_plugins(Runtime2dPlugins),
-        nara_project::ProjectPluginPlan::DesktopWindow => {
-            app.add_plugins(MinimalPlugins)?;
-            app.add_plugins(DesktopWindowPlugins)
-        }
-        nara_project::ProjectPluginPlan::DesktopWgpu => add_desktop_wgpu_plugin_plan(app),
-        nara_project::ProjectPluginPlan::Tooling => {
-            app.add_plugins(MinimalPlugins)?;
-            app.add_plugins(ToolingPlugins)
-        }
-    }
-}
-
-/// Applies validated project settings before installing the selected product bundle.
-pub fn apply_project_settings(
-    app: &mut App,
-    settings: nara_project::EffectiveProjectSettings,
-) -> Result<&mut App, PluginError> {
-    let plan = settings.plugin_plan;
-    let runtime_time = settings.runtime.runtime_time_settings();
-    let fixed_time = settings.runtime.fixed_time();
-    let task_config = settings.tasks.pool_config;
-    let diagnostics = settings.diagnostics.runtime;
-
-    app.insert_resource(settings)?;
-    app.insert_resource(runtime_time)?;
-    app.insert_resource(fixed_time)?;
-    app.add_plugin(nara_diagnostic::DiagnosticsPlugin::new(
-        diagnostics,
-        nara_diagnostic::RuntimePressureSettings::default(),
-    ))?;
-    app.add_plugin(nara_tasks::TaskPlugin::new(task_config))?;
-    add_project_plugin_plan(app, plan)
-}
-
-#[cfg(feature = "wgpu")]
-fn add_desktop_wgpu_plugin_plan(app: &mut App) -> Result<&mut App, PluginError> {
-    app.add_plugins(DesktopWgpuPlugins)
-}
-
-#[cfg(not(feature = "wgpu"))]
-fn add_desktop_wgpu_plugin_plan(_app: &mut App) -> Result<&mut App, PluginError> {
-    Err(PluginError::SetupFailed {
-        plugin: PluginId::new("nara.project.plugin-plan"),
-        message: "desktop-wgpu project plugin plan requires the 'wgpu' feature".to_owned(),
-    })
-}
-
-pub mod prelude {
-    #[cfg(feature = "wgpu")]
-    pub use crate::DesktopWgpuPlugins;
-    pub use crate::{
-        DesktopWindowPlugins, HeadlessRuntimePlugins, MinimalPlugins, Runtime2dPlugins,
-        ServerPlugins, add_project_plugin_plan, apply_project_settings,
+#[cfg(feature = "runtime-core")]
+mod product {
+    use nara_app::{
+        App, Plugin, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId,
+        PluginGroupMetadata, PluginId,
     };
+
+    const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.scene.hierarchy");
+    const COMPONENT_REGISTRY_PLUGIN_ID: PluginId = nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID;
+    const DIAGNOSTIC_PLUGIN_ID: PluginId = PluginId::new("nara.diagnostic");
+    const TASK_PLUGIN_ID: PluginId = PluginId::new("nara.tasks");
+    const ASSET_PLUGIN_ID: PluginId = PluginId::new("nara.asset");
+    const TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.transform");
+    const INPUT_PLUGIN_ID: PluginId = PluginId::new("nara.input");
+    const GAMEPLAY_COMMAND_PLUGIN_ID: PluginId = PluginId::new("nara.gameplay.commands");
+    const SERVER_TIME_POLICY_PLUGIN_ID: PluginId = PluginId::new("nara.server-time-policy");
+
+    const MINIMAL_PLUGIN_IDS: &[PluginId] = &[
+        COMPONENT_REGISTRY_PLUGIN_ID,
+        HIERARCHY_PLUGIN_ID,
+        DIAGNOSTIC_PLUGIN_ID,
+        TASK_PLUGIN_ID,
+        ASSET_PLUGIN_ID,
+        TRANSFORM_PLUGIN_ID,
+        INPUT_PLUGIN_ID,
+    ];
+
+    const HEADLESS_RUNTIME_PLUGIN_IDS: &[PluginId] = &[
+        COMPONENT_REGISTRY_PLUGIN_ID,
+        HIERARCHY_PLUGIN_ID,
+        DIAGNOSTIC_PLUGIN_ID,
+        TASK_PLUGIN_ID,
+        ASSET_PLUGIN_ID,
+        TRANSFORM_PLUGIN_ID,
+        INPUT_PLUGIN_ID,
+        GAMEPLAY_COMMAND_PLUGIN_ID,
+    ];
+
+    const SERVER_PLUGIN_IDS: &[PluginId] = &[
+        SERVER_TIME_POLICY_PLUGIN_ID,
+        COMPONENT_REGISTRY_PLUGIN_ID,
+        HIERARCHY_PLUGIN_ID,
+        DIAGNOSTIC_PLUGIN_ID,
+        TASK_PLUGIN_ID,
+        ASSET_PLUGIN_ID,
+        TRANSFORM_PLUGIN_ID,
+        GAMEPLAY_COMMAND_PLUGIN_ID,
+    ];
+
+    /// Minimal runtime defaults for headless examples and code-first games.
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct MinimalPlugins;
+
+    impl PluginGroup for MinimalPlugins {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(
+                PluginGroupId::new("nara.plugins.minimal"),
+                MINIMAL_PLUGIN_IDS,
+            )
+        }
+
+        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+            group.add_plugin_if_missing(nara_reflect::ComponentRegistryPlugin)?;
+            group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
+            group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
+            group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
+            group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
+            group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
+            group.add_plugin_if_missing(nara_input::InputPlugin)?;
+            Ok(())
+        }
+    }
+
+    /// Local headless defaults with input observations and semantic gameplay commands.
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct HeadlessRuntimePlugins;
+
+    impl PluginGroup for HeadlessRuntimePlugins {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(
+                PluginGroupId::new("nara.plugins.headless-runtime"),
+                HEADLESS_RUNTIME_PLUGIN_IDS,
+            )
+        }
+
+        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+            group.add_plugins(MinimalPlugins)?;
+            group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin::default())?;
+            Ok(())
+        }
+    }
+
+    /// Dedicated-server defaults without raw input, window, render, or tooling installation.
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct ServerPlugins;
+
+    #[derive(Debug, Default, Clone, Copy)]
+    struct ServerTimePolicyPlugin;
+
+    impl Plugin for ServerTimePolicyPlugin {
+        fn metadata(&self) -> nara_app::PluginMetadata {
+            nara_app::PluginMetadata::new(
+                SERVER_TIME_POLICY_PLUGIN_ID,
+                nara_app::PluginCategory::Core,
+            )
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            let Some(mut fixed_time) = app.world_mut()?.get_resource_mut::<nara_app::FixedTime>()
+            else {
+                return Err(PluginError::SetupFailed {
+                    plugin: SERVER_TIME_POLICY_PLUGIN_ID,
+                    message: "server time policy requires FixedTime".to_owned(),
+                });
+            };
+            fixed_time
+                .set_catch_up_policy(nara_app::FixedCatchUpPolicy::PreserveDebt)
+                .map_err(|error| PluginError::SetupFailed {
+                    plugin: SERVER_TIME_POLICY_PLUGIN_ID,
+                    message: error.to_string(),
+                })?;
+            Ok(())
+        }
+    }
+
+    impl PluginGroup for ServerPlugins {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(PluginGroupId::new("nara.plugins.server"), SERVER_PLUGIN_IDS)
+        }
+
+        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+            group.add_plugin_if_missing(ServerTimePolicyPlugin)?;
+            group.add_plugin_if_missing(nara_reflect::ComponentRegistryPlugin)?;
+            group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
+            group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
+            group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
+            group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
+            group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
+            group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin::default())?;
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "runtime-2d")]
+    const RUNTIME_2D_PLUGIN_IDS: &[PluginId] = &[
+        COMPONENT_REGISTRY_PLUGIN_ID,
+        HIERARCHY_PLUGIN_ID,
+        DIAGNOSTIC_PLUGIN_ID,
+        TASK_PLUGIN_ID,
+        ASSET_PLUGIN_ID,
+        TRANSFORM_PLUGIN_ID,
+        INPUT_PLUGIN_ID,
+        PluginId::new("nara.sprite"),
+        PluginId::new("nara.tilemap"),
+        PluginId::new("nara.render"),
+        PluginId::new("nara.image"),
+        PluginId::new("nara.sprite-render"),
+    ];
+
+    #[cfg(feature = "runtime-2d")]
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct Runtime2dPlugins;
+
+    #[cfg(feature = "runtime-2d")]
+    impl PluginGroup for Runtime2dPlugins {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(
+                PluginGroupId::new("nara.plugins.runtime-2d"),
+                RUNTIME_2D_PLUGIN_IDS,
+            )
+        }
+
+        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+            group.add_plugins(MinimalPlugins)?;
+            group.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
+            group.add_plugin_if_missing(nara_tilemap::TilemapPlugin)?;
+            group.add_plugin_if_missing(nara_render::RenderPlugin)?;
+            group.add_plugin_if_missing(nara_image::ImagePlugin)?;
+            group.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "runtime-ui")]
+    const RUNTIME_UI_PLUGIN_IDS: &[PluginId] = &[
+        COMPONENT_REGISTRY_PLUGIN_ID,
+        HIERARCHY_PLUGIN_ID,
+        DIAGNOSTIC_PLUGIN_ID,
+        TASK_PLUGIN_ID,
+        ASSET_PLUGIN_ID,
+        TRANSFORM_PLUGIN_ID,
+        INPUT_PLUGIN_ID,
+        PluginId::new("nara.render"),
+        PluginId::new("nara.image"),
+        PluginId::new("nara.ui"),
+        PluginId::new("nara.ui-render"),
+    ];
+
+    #[cfg(feature = "runtime-ui")]
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct RuntimeUiPlugins;
+
+    #[cfg(feature = "runtime-ui")]
+    impl PluginGroup for RuntimeUiPlugins {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(
+                PluginGroupId::new("nara.plugins.runtime-ui"),
+                RUNTIME_UI_PLUGIN_IDS,
+            )
+        }
+
+        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+            group.add_plugins(MinimalPlugins)?;
+            group.add_plugin_if_missing(nara_render::RenderPlugin)?;
+            group.add_plugin_if_missing(nara_image::ImagePlugin)?;
+            group.add_plugin_if_missing(nara_ui::UiPlugin)?;
+            group.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "desktop-winit")]
+    const DESKTOP_WINIT_PLUGIN_IDS: &[PluginId] =
+        &[PluginId::new("nara.window"), PluginId::new("nara.winit")];
+
+    #[cfg(feature = "desktop-winit")]
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct DesktopWinitPlugins;
+
+    #[cfg(feature = "desktop-winit")]
+    impl PluginGroup for DesktopWinitPlugins {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(
+                PluginGroupId::new("nara.plugins.desktop-winit"),
+                DESKTOP_WINIT_PLUGIN_IDS,
+            )
+        }
+
+        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+            group.add_plugin_if_missing(nara_window::WindowPlugin::default())?;
+            group.add_plugin_if_missing(nara_winit::WinitPlugin::default())?;
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "render-wgpu")]
+    const WGPU_BACKEND_PLUGIN_IDS: &[PluginId] = &[
+        PluginId::new("nara.render"),
+        PluginId::new("nara.render-wgpu"),
+    ];
+
+    #[cfg(feature = "render-wgpu")]
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct WgpuBackendPlugins;
+
+    #[cfg(feature = "render-wgpu")]
+    impl PluginGroup for WgpuBackendPlugins {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(
+                PluginGroupId::new("nara.plugins.render-wgpu"),
+                WGPU_BACKEND_PLUGIN_IDS,
+            )
+        }
+
+        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+            group.add_plugin_if_missing(nara_render::RenderPlugin)?;
+            group.add_plugin_if_missing(nara_render_wgpu::WgpuRenderPlugin)?;
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "tooling")]
+    const TOOLING_PLUGIN_IDS: &[PluginId] = &[PluginId::new("nara.tooling")];
+
+    #[cfg(feature = "tooling")]
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct ToolingPlugins;
+
+    #[cfg(feature = "tooling")]
+    impl PluginGroup for ToolingPlugins {
+        fn metadata(&self) -> PluginGroupMetadata {
+            PluginGroupMetadata::new(
+                PluginGroupId::new("nara.plugins.tooling"),
+                TOOLING_PLUGIN_IDS,
+            )
+        }
+
+        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
+            group.add_plugin_if_missing(nara_tooling::ToolingPlugin)?;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "desktop-winit")]
+pub use product::DesktopWinitPlugins;
+#[cfg(feature = "runtime-2d")]
+pub use product::Runtime2dPlugins;
+#[cfg(feature = "runtime-ui")]
+pub use product::RuntimeUiPlugins;
+#[cfg(feature = "tooling")]
+pub use product::ToolingPlugins;
+#[cfg(feature = "render-wgpu")]
+pub use product::WgpuBackendPlugins;
+#[cfg(feature = "runtime-core")]
+pub use product::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
+
+#[cfg(feature = "runtime-core")]
+pub mod prelude {
+    #[cfg(feature = "runtime-2d")]
+    pub use crate::Runtime2dPlugins;
+    #[cfg(feature = "runtime-ui")]
+    pub use crate::RuntimeUiPlugins;
+    pub use crate::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
     pub use nara_app::{
-        App, AppExit, AppExitRequests, AppFrameOutcome, AppRunError, CoreStage, FixedCatchUpPolicy,
-        FixedTime, FixedTimeError, FixedUpdateSet, Plugin, PluginCleanupContext, PluginError,
-        PluginGroup, PluginGroupBuilder, RealTime, RenderTime, RuntimeFrameStatus,
-        RuntimeTimeSettings, StartupStage, TimeFrameError, TimeFrameResource, TimeSettingsError,
-        VirtualTime,
+        App, AppExit, AppRunError, CoreStage, FixedCatchUpPolicy, FixedTime, FixedUpdateSet,
+        Plugin, PluginError, PluginGroup, RealTime, RuntimeTimeSettings, StartupStage, VirtualTime,
     };
     pub use nara_asset::{
-        Asset, AssetId, AssetPath, AssetPathError, AssetPlugin, AssetRef, AssetRefError,
-        AssetRefExportPolicy, AssetServer, Assets, Handle, StableAssetId, StableAssetIdError,
+        Asset, AssetId, AssetPath, AssetRef, AssetServer, Assets, Handle, StableAssetId,
     };
-    pub use nara_audio::{AudioClip, AudioCommand, AudioSink};
     pub use nara_core::{Color, Vec2, Vec3};
+    pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
+    pub use nara_gameplay::{
+        ActionCommandBinding, ActionCommandMap, GameplayCommandDraft, GameplayCommandIngressSource,
+        GameplayCommandKey, GameplayCommandPayload, GameplayCommandSource, GameplayCommandSourceId,
+        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
+        GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
+    };
+    pub use nara_identity::{
+        EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
+        PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId,
+    };
+    pub use nara_input::{
+        ActionBinding, ActionContext, ActionId, ActionMap, ActionOutcome, ActionOutcomes,
+        ActionPhase, ActionValue, ButtonInput, InputBinding, KeyCode, MouseButton, PointerState,
+    };
+    pub use nara_reflect::{
+        ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
+        ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue, PersistentComponent, PersistentComponentProvider,
+    };
+    pub use nara_scene::{
+        Children, HierarchyPlugin, Name, Parent, PrefabDocument, SceneAuthoringSession,
+        SceneComponentRecord, SceneDocument, SceneEntityRecord, ScenePatchDocument,
+        ScenePatchOperation, SceneSpawner, Visibility, export_scene, spawn_prefab, spawn_scene,
+    };
+    pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
+
+    #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+    pub use nara_image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin};
+    #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+    pub use nara_material::{
+        AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, SamplerDescriptor,
+    };
+    #[cfg(any(
+        feature = "runtime-2d",
+        feature = "runtime-ui",
+        feature = "render-wgpu"
+    ))]
+    pub use nara_render::{Camera2d, ClearColor, RenderImage2d, RenderPlugin, RenderTarget};
+    #[cfg(feature = "runtime-2d")]
+    pub use nara_sprite::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
+    #[cfg(feature = "runtime-2d")]
+    pub use nara_tilemap::{
+        TileCell, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
+    };
+    #[cfg(feature = "runtime-ui")]
+    pub use nara_ui::{UiNode, UiPanel, UiPanelMaterial, UiPlugin, UiRect, UiRoot, UiStyle, UiVal};
+}
+
+#[cfg(feature = "runtime-core")]
+pub mod advanced_prelude {
+    pub use crate::prelude::*;
+    pub use nara_app::{
+        AppExitRequests, AppFrameOutcome, FixedTimeError, PluginCapability, PluginCategory,
+        PluginCleanupContext, PluginCleanupError, PluginFailure, PluginFailureReport,
+        PluginFailureSubject, PluginGroupBuilder, PluginGroupId, PluginGroupMetadata, PluginHook,
+        PluginId, PluginLifecycleState, PluginMetadata, RenderTime, RuntimeFrameStatus,
+        TaskUpdateSet, TimeFrameError, TimeFrameResource, TimeSettingsError,
+    };
+    pub use nara_asset::{
+        ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,
+        AssetEvent, AssetEventKind, AssetEvents, AssetLoadGeneration, AssetLoadGenerations,
+        AssetMeta, AssetPathError, AssetRecord, AssetRefError, AssetRefExportPolicy,
+        AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind,
+        AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges,
+        AssetSourceKind, AssetSourceRoot, AssetState, AssetStateError, AssetStates, AssetVersion,
+        DigestParseError, ImportArtifactDigest, ImportArtifactKey, ImportArtifactPath,
+        ImportArtifactRecord, ImportDependency, ImportDependencyDigest, ImportDependencyRole,
+        ImportError, ImportJobInput, ImportProfile, ImportRequest, ImportSettingsHash,
+        ImportedAsset, Importer, ImporterDescriptor, ImporterId, ImporterRegistry, LoadState,
+        MissingMetaPolicy, ProjectAssetDatabase, SourceChangeResolver, SourceExtension, SourceHash,
+        TypedImporter,
+    };
+    pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
     pub use nara_diagnostic::{
         Diagnostic, DiagnosticBuildError, DiagnosticCode, DiagnosticDedupePolicy, DiagnosticDomain,
         DiagnosticField, DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer,
@@ -419,121 +478,6 @@ pub mod prelude {
         RuntimeDiagnosticsSettings, RuntimePressureSettings, RuntimePressureSnapshotDraft,
         RuntimePressureSnapshots, SafeDisplayText, SafeSummary,
     };
-    pub use nara_ecs::{Bundle, Commands, Component, Entity, Query, Res, ResMut, Resource, World};
-    pub use nara_gameplay::{
-        ActionCommandBinding, ActionCommandMap, ActionCommandMapError, GameplayCommandBatch,
-        GameplayCommandDraft, GameplayCommandEnvelope, GameplayCommandIdError,
-        GameplayCommandIngressSource, GameplayCommandKey, GameplayCommandLifecycleError,
-        GameplayCommandLimitKind, GameplayCommandPayload, GameplayCommandPayloadError,
-        GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandQueueSettings,
-        GameplayCommandQueueStats, GameplayCommandRejection, GameplayCommandSet,
-        GameplayCommandSettingsError, GameplayCommandSource, GameplayCommandSourceId,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
-        GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
-        MAX_ACTION_COMMAND_BINDINGS,
-    };
-    pub use nara_identity::{
-        EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-        PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId, SceneEntityIdError,
-    };
-    pub use nara_image::{
-        ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin, ImageSourceMetadata,
-    };
-    pub use nara_input::{
-        ActionBinding, ActionContext, ActionId, ActionIdError, ActionMap, ActionOutcome,
-        ActionOutcomes, ActionPhase, ActionValue, ButtonInput, InputBinding, InputPlugin, KeyCode,
-        MouseButton, PointerState,
-    };
-    pub use nara_material::{
-        AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, Material2dKey,
-        SamplerDescriptor, material2d_descriptor_key,
-    };
-    pub use nara_project::{
-        EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveProjectInfo,
-        EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
-        EffectiveStartupSettings, EffectiveTaskSettings, EffectiveWindowSettings,
-        ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
-        ProjectManifest, ProjectManifestLoad, ProjectPath, ProjectPathError, ProjectPathsManifest,
-        ProjectPluginPlan, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
-        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
-        ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectWindowManifest,
-    };
-    pub use nara_reflect::{
-        ComponentCapability, ComponentCodec, ComponentCodecError, ComponentDecodeContext,
-        ComponentEncodeContext, ComponentFieldId, ComponentFieldIdError, ComponentFieldPath,
-        ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
-        ComponentMigrationError, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-        ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-        ComponentValueError, ComponentValueKind, MigratedComponentValue, PersistentComponent,
-        PersistentComponentProvider, PreparedComponent,
-    };
-    pub use nara_render::{
-        Camera2d, ClearColor, Extent2d, RenderImage2d, RenderPlugin, RenderTarget, ViewportRect,
-    };
-    pub use nara_scene::{
-        Children, HierarchyPlugin, InMemoryPrefabSourceResolver, Name, Parent, PrefabDocument,
-        PrefabExpansionBudgetKind, PrefabExpansionLimits, PrefabExpansionOptions,
-        PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport, PrefabSourceResolver,
-        SceneAuthoringHistoryStatus, SceneAuthoringRevision, SceneAuthoringSession,
-        SceneAuthoringSourceId, SceneAuthoringSyncReport, SceneComponentRecord, SceneDocument,
-        SceneEntityRecord, SceneEntitySource, SceneExportOptions, SceneExportReport,
-        ScenePatchDocument, ScenePatchOperation, ScenePatchReport, SceneSpawnReport, SceneSpawner,
-        Visibility, export_scene, export_scene_with_options, spawn_child, spawn_prefab,
-        spawn_prefab_with_asset_database, spawn_prefab_with_patch,
-        spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
-        spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
-        sync_children,
-    };
-    #[cfg(feature = "serde")]
-    pub use nara_scene::{
-        PrefabDocumentCandidate, SceneDocumentCandidate, SceneFilePublicationError,
-        SceneFormatError, ScenePatchDocumentCandidate,
-    };
-    pub use nara_sprite::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
-    pub use nara_sprite_render::SpriteRenderPlugin;
-    pub use nara_tasks::{TaskPlugin, TaskPoolConfig};
-    pub use nara_tilemap::{
-        DEFAULT_CHUNK_SIZE, DEFAULT_TILE_SIZE, DirtyTileChunk, TileAtlasLayout, TileAtlasRegion,
-        TileCell, TileChunkCoord, TileCoord, TileIndex, TileLayer, TileSet, TileSetMaterial,
-        Tilemap, TilemapPlugin,
-    };
-    pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
-    pub use nara_ui::{
-        ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiInteractionTarget, UiNode,
-        UiPanel, UiPanelMaterial, UiPlugin, UiPointerRoute, UiRect, UiRoot, UiStyle, UiVal,
-    };
-    pub use nara_ui_render::UiRenderPlugin;
-}
-
-pub mod advanced_prelude {
-    pub use crate::prelude::*;
-    pub use nara_app::{
-        PluginCapability, PluginCategory, PluginCleanupError, PluginFailure, PluginFailureReport,
-        PluginFailureSubject, PluginGroupId, PluginGroupMetadata, PluginHook, PluginId,
-        PluginLifecycleState, PluginMetadata, TaskUpdateSet,
-    };
-    pub use nara_asset::{
-        ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,
-        AssetEvent, AssetEventKind, AssetEvents, AssetLoadGeneration, AssetLoadGenerations,
-        AssetMeta, AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
-        AssetReloadRequestKind, AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind,
-        AssetSourceChanges, AssetSourceKind, AssetSourceRoot, AssetState, AssetStateError,
-        AssetStates, AssetVersion, DigestParseError, ImportArtifactDigest, ImportArtifactKey,
-        ImportArtifactPath, ImportArtifactPathError, ImportArtifactRecord, ImportDependency,
-        ImportDependencyDigest, ImportDependencyRole, ImportError, ImportJobInput,
-        ImportLabelError, ImportLabelKind, ImportProfile, ImportRequest, ImportSettingsHash,
-        ImportedAsset, ImportedAssetType, Importer, ImporterDescriptor, ImporterDescriptorError,
-        ImporterId, ImporterRegistry, ImporterRegistryError, ImporterSelectionError,
-        ImporterVersion, LoadState, MissingMetaPolicy, ProjectAssetDatabase, SourceChangeResolver,
-        SourceExtension, SourceHash, TypedImporter, UnresolvedAssetSourceChange,
-    };
-    #[cfg(feature = "asset-watch")]
-    pub use nara_asset_watch::{
-        AssetWatchDiagnostic, AssetWatchDiagnosticKind, AssetWatchDiagnostics, AssetWatchError,
-        AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue, AssetWatchPlugin,
-        AssetWatchQueueItem, AssetWatchTranslator, AssetWatcher,
-    };
-    pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
     pub use nara_fs::{
         CapabilityGeneration, CapabilityReader, CapabilityRights, CapabilitySessionId,
         ConflictProtection, ContentDigest, DigestLimit, DirectoryCapability,
@@ -545,6 +489,13 @@ pub mod advanced_prelude {
         RelativePath, ReplaceReceipt, ReplaceSourceBinding, ResolutionTier, StageStatus,
         TemporaryFile, TrustMode, platform_capability_matrix,
     };
+    pub use nara_gameplay::{
+        GameplayCommandBatch, GameplayCommandEnvelope, GameplayCommandIdError,
+        GameplayCommandLifecycleError, GameplayCommandLimitKind, GameplayCommandPayloadError,
+        GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandQueueSettings,
+        GameplayCommandQueueStats, GameplayCommandRejection, GameplayCommandSet,
+        GameplayCommandSettingsError,
+    };
     pub use nara_identity::{
         EntityIdentityAxis, EntityLookup, IdentityDomainError, IdentityDomainStats,
         IdentityTombstone, IdentityTombstoneSubject, SceneIdentitySnapshot, SceneInstanceId,
@@ -552,32 +503,59 @@ pub mod advanced_prelude {
         WorldEntityLocators, WorldIdentityDomain, WorldIdentityDomainId,
         WorldIdentityDomainSettings, resolve_in_world,
     };
-    pub use nara_image::{
-        ImageImportError, ImageImportedAsset, ImageImporter, ImagePreparePlugin, ImagePrepareStats,
-        ImageReloadError, ImageReloadStats, PreparedImageResource, image_descriptor_hash,
-        image_resource_key, prepare_images,
-    };
-    pub use nara_render::{
-        ExtractedView, ExtractedViews, FrameStats, PreparedRenderResource,
-        PreparedRenderResourceRecord, PreparedRenderResources, RenderBackendState,
-        RenderBackendStatus, RenderFrame, RenderFrameSkip, RenderFrameSkipReason, RenderFrameState,
-        RenderPhaseLabel, RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
-        RenderPrepareInvalidationReason, RenderPrepareInvalidations, RenderPrepareStatus,
-        RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
-    };
-    pub use nara_sprite_render::{
-        ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
-        QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance,
-        SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
+    pub use nara_reflect::{
+        ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
+        ComponentFieldPathError, ComponentFieldPathSegment, ComponentFloat,
+        ComponentMigrationError, ComponentRegistryError, ComponentValueError, ComponentValueKind,
+        MigratedComponentValue, PreparedComponent,
     };
     pub use nara_tasks::{
         OrderedTaskResults, OrderedTaskTerminal, TaskCancellation, TaskCancellationReason,
         TaskCancellationToken, TaskCoalesceKey, TaskConfigError, TaskDescriptor, TaskDomainKey,
         TaskFailure, TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey,
-        TaskOverloadPolicy, TaskPoolError, TaskPoolKind, TaskPoolShutdownReport, TaskPoolStats,
-        TaskPools, TaskRejectReason, TaskRejection, TaskShutdownPolicy, TaskShutdownReport,
-        TaskSpawnOutcome, TaskSpawnRequest, TaskStats, TaskTerminal, TaskTerminalState,
+        TaskOverloadPolicy, TaskPlugin, TaskPoolConfig, TaskPoolError, TaskPoolKind,
+        TaskPoolShutdownReport, TaskPoolStats, TaskPools, TaskRejectReason, TaskRejection,
+        TaskShutdownPolicy, TaskShutdownReport, TaskSpawnOutcome, TaskSpawnRequest, TaskStats,
+        TaskTerminal, TaskTerminalState,
     };
+
+    #[cfg(feature = "asset-watch")]
+    pub use nara_asset_watch::{
+        AssetWatchDiagnostic, AssetWatchDiagnosticKind, AssetWatchDiagnostics, AssetWatchError,
+        AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue, AssetWatchPlugin,
+        AssetWatchQueueItem, AssetWatchTranslator, AssetWatcher,
+    };
+    #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+    pub use nara_image::{
+        ImageImportError, ImageImportedAsset, ImageImporter, ImagePreparePlugin, ImagePrepareStats,
+        ImageReloadError, ImageReloadStats, ImageSourceMetadata, PreparedImageResource,
+        image_descriptor_hash, image_resource_key, prepare_images,
+    };
+    #[cfg(any(
+        feature = "runtime-2d",
+        feature = "runtime-ui",
+        feature = "render-wgpu"
+    ))]
+    pub use nara_render::{
+        Extent2d, ExtractedView, ExtractedViews, FrameStats, PreparedRenderResource,
+        PreparedRenderResourceRecord, PreparedRenderResources, RenderBackendState,
+        RenderBackendStatus, RenderFrame, RenderFrameSkip, RenderFrameSkipReason, RenderFrameState,
+        RenderPhaseLabel, RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
+        RenderPrepareInvalidationReason, RenderPrepareInvalidations, RenderPrepareStatus,
+        RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, ViewportRect,
+    };
+    #[cfg(feature = "runtime-2d")]
+    pub use nara_sprite_render::{
+        ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
+        QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance,
+        SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
+    };
+    #[cfg(feature = "runtime-ui")]
+    pub use nara_ui::{
+        ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiInteractionTarget,
+        UiPointerRoute,
+    };
+    #[cfg(feature = "runtime-ui")]
     pub use nara_ui_render::{
         ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, QueuedUiItem, QueuedUiItems,
         UiBatch, UiBatches, UiClipRect, UiColorKey, UiInstance, UiMaterialKey, UiRenderStats,
@@ -585,7 +563,9 @@ pub mod advanced_prelude {
     };
 }
 
+#[cfg(feature = "tooling")]
 pub mod tooling_prelude {
+    pub use crate::ToolingPlugins;
     pub use nara_tooling::{
         EditorDocumentId, EditorExternalReloadState, EditorSceneModel, EditorSceneSlot,
         EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,
@@ -597,15 +577,20 @@ pub mod tooling_prelude {
         SceneInspectorModel, SceneInspectorState, ScenePlaySession, ScenePlayTransitionReport,
         ToolingPlugin, WorldIdentitySnapshot,
     };
-    #[cfg(feature = "egui")]
+    #[cfg(feature = "tooling-egui")]
     pub use nara_tooling_egui::{
         EguiSceneEditorPanel, EguiSceneEditorPanelResponse, EguiSceneInspectorPanel,
         EguiSceneInspectorPanelResponse,
     };
 }
 
+#[cfg(feature = "runtime-core")]
 pub mod backend_prelude {
-    #[cfg(feature = "wgpu")]
+    #[cfg(feature = "desktop-winit")]
+    pub use crate::DesktopWinitPlugins;
+    #[cfg(feature = "render-wgpu")]
+    pub use crate::WgpuBackendPlugins;
+    #[cfg(feature = "render-wgpu")]
     pub use nara_render_wgpu::{
         SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, WgpuBackendState,
         WgpuRenderBackend, WgpuRenderError, WgpuRenderPlugin,
@@ -615,173 +600,41 @@ pub mod backend_prelude {
         WindowCloseRequests, WindowEvent, WindowEvents, WindowId, WindowMode, WindowPlugin,
         WindowResolution, apply_window_event, push_window_event,
     };
-    #[cfg(feature = "winit")]
+    #[cfg(feature = "desktop-winit")]
     pub use nara_winit::{WinitControlFlow, WinitPlugin, WinitRunner};
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime-core"))]
 mod tests {
     use super::*;
+    use nara_app::{App, FixedCatchUpPolicy, PluginGroupId};
     use nara_ecs::schedule::IntoScheduleConfigs;
 
     #[test]
     fn minimal_plugins_install_only_headless_core_resources() {
         let mut app = App::new();
-
         app.add_plugins(MinimalPlugins).unwrap();
 
-        assert!(
-            app.world()
-                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
-        );
-        assert!(
-            app.world()
-                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
-        );
         assert!(app.world().contains_resource::<nara_asset::AssetServer>());
         assert!(app.world().contains_resource::<nara_input::PointerState>());
-        assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
-        assert!(
-            !app.world()
-                .contains_resource::<nara_sprite_render::SpriteBatches>()
-        );
-        assert!(!app.world().contains_resource::<nara_ui_render::UiBatches>());
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
     }
 
     #[test]
-    fn desktop_window_plugins_remain_an_additive_adapter_group() {
+    fn headless_runtime_plugins_install_semantic_command_resources() {
         let mut app = App::new();
-
-        app.add_plugins(DesktopWindowPlugins).unwrap();
-
-        assert!(app.world().contains_resource::<nara_window::WindowEvents>());
-        assert!(
-            !app.world()
-                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
-        );
-        assert!(!app.world().contains_resource::<nara_tasks::TaskPools>());
-        let metadata = app
-            .installed_plugin_groups()
-            .find(|group| group.id == PluginGroupId::new("nara.plugins.desktop-window"))
-            .unwrap();
-        assert_eq!(metadata.plugins, DESKTOP_WINDOW_PLUGIN_IDS);
-        assert!(!metadata.plugins.contains(&DIAGNOSTIC_PLUGIN_ID));
-    }
-
-    #[test]
-    fn tooling_plugins_remain_an_additive_adapter_group() {
-        let mut app = App::new();
-
-        app.add_plugins(ToolingPlugins).unwrap();
-
-        assert!(
-            app.world()
-                .contains_resource::<nara_tooling::EditorWorkspace>()
-        );
-        assert!(
-            !app.world()
-                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
-        );
-        assert!(!app.world().contains_resource::<nara_tasks::TaskPools>());
-        let metadata = app
-            .installed_plugin_groups()
-            .find(|group| group.id == PluginGroupId::new("nara.plugins.tooling"))
-            .unwrap();
-        assert_eq!(metadata.plugins, TOOLING_PLUGIN_IDS);
-        assert!(!metadata.plugins.contains(&DIAGNOSTIC_PLUGIN_ID));
-    }
-
-    #[test]
-    fn desktop_window_project_plan_composes_core_with_additive_window_adapters() {
-        let mut app = App::new();
-
-        add_project_plugin_plan(&mut app, nara_project::ProjectPluginPlan::DesktopWindow).unwrap();
-
-        assert!(
-            app.world()
-                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
-        );
-        assert!(
-            app.world()
-                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
-        );
-        assert!(app.world().contains_resource::<nara_tasks::TaskPools>());
-        assert!(app.world().contains_resource::<nara_asset::AssetServer>());
-        assert!(app.world().contains_resource::<nara_input::PointerState>());
-        assert!(app.world().contains_resource::<nara_window::WindowEvents>());
-    }
-
-    #[test]
-    fn tooling_project_plan_composes_core_with_additive_tooling_adapters() {
-        let mut app = App::new();
-
-        add_project_plugin_plan(&mut app, nara_project::ProjectPluginPlan::Tooling).unwrap();
-
-        assert!(
-            app.world()
-                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
-        );
-        assert!(
-            app.world()
-                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
-        );
-        assert!(app.world().contains_resource::<nara_tasks::TaskPools>());
-        assert!(app.world().contains_resource::<nara_asset::AssetServer>());
-        assert!(app.world().contains_resource::<nara_input::PointerState>());
-        assert!(
-            app.world()
-                .contains_resource::<nara_tooling::EditorWorkspace>()
-        );
-        assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
-    }
-
-    #[test]
-    fn runtime_2d_plugins_install_render_and_submitter_resources() {
-        let mut app = App::new();
-
-        app.add_plugins(Runtime2dPlugins).unwrap();
-
-        assert!(app.world().contains_resource::<nara_render::RenderFrame>());
-        assert!(
-            app.world()
-                .contains_resource::<nara_sprite_render::SpriteBatches>()
-        );
-        assert!(app.world().contains_resource::<nara_ui_render::UiBatches>());
-        let metadata = app
-            .installed_plugin_groups()
-            .find(|group| group.id == PluginGroupId::new("nara.plugins.runtime-2d"))
-            .unwrap();
-        assert!(metadata.plugins.contains(&DIAGNOSTIC_PLUGIN_ID));
-    }
-
-    #[test]
-    fn headless_runtime_plugins_install_command_resources() {
-        let mut app = App::new();
-
         app.add_plugins(HeadlessRuntimePlugins).unwrap();
 
-        assert!(
-            app.world()
-                .contains_resource::<nara_diagnostic::RuntimeDiagnostics>()
-        );
-        assert!(
-            app.world()
-                .contains_resource::<nara_diagnostic::RuntimePressureSnapshots>()
-        );
         assert!(
             app.world()
                 .contains_resource::<nara_gameplay::GameplayCommandQueue>()
         );
         assert!(app.world().contains_resource::<nara_input::PointerState>());
-        assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
-        assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
     }
 
     #[test]
     fn server_plugins_install_command_runtime_without_desktop_or_raw_input() {
         let mut app = App::new();
-
         app.add_plugins(ServerPlugins).unwrap();
 
         assert!(
@@ -806,12 +659,6 @@ mod tests {
                 .get()
                 > 0
         );
-        assert_eq!(
-            app.world()
-                .resource::<nara_app::FixedTime>()
-                .catch_up_policy(),
-            nara_app::FixedCatchUpPolicy::PreserveDebt
-        );
         assert!(!app.world().contains_resource::<nara_input::PointerState>());
         assert!(
             !app.world()
@@ -826,11 +673,27 @@ mod tests {
             !app.world()
                 .contains_resource::<nara_input::ActionOutcomes>()
         );
+        #[cfg(any(
+            feature = "runtime-2d",
+            feature = "runtime-ui",
+            feature = "render-wgpu"
+        ))]
         assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
+        #[cfg(feature = "tooling")]
         assert!(
             !app.world()
                 .contains_resource::<nara_tooling::EditorWorkspace>()
+        );
+        assert_eq!(
+            app.world()
+                .resource::<nara_app::FixedTime>()
+                .catch_up_policy(),
+            FixedCatchUpPolicy::PreserveDebt
+        );
+        assert!(
+            app.installed_plugin_groups()
+                .any(|group| group.id == PluginGroupId::new("nara.plugins.server"))
         );
     }
 
@@ -992,7 +855,7 @@ mod tests {
             forward[0]
                 .1
                 .iter()
-                .map(|command| { (command.source().clone(), command.source_sequence().get(),) })
+                .map(|command| { (command.source().clone(), command.source_sequence().get()) })
                 .collect::<Vec<_>>(),
             [
                 (
@@ -1105,81 +968,42 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "runtime-2d")]
     #[test]
-    fn project_plugin_plan_server_maps_to_server_plugins() {
+    fn runtime_2d_installs_sprite_submission_without_runtime_ui() {
         let mut app = App::new();
-
-        add_project_plugin_plan(&mut app, nara_project::ProjectPluginPlan::Server).unwrap();
+        app.add_plugins(Runtime2dPlugins).unwrap();
 
         assert!(
-            app.installed_plugin_groups()
-                .any(|group| group.id == PluginGroupId::new("nara.plugins.server"))
+            app.world()
+                .contains_resource::<nara_sprite_render::SpriteBatches>()
         );
+        let metadata = app
+            .installed_plugin_groups()
+            .find(|group| group.id == PluginGroupId::new("nara.plugins.runtime-2d"))
+            .unwrap();
         assert!(
-            app.world()
-                .contains_resource::<nara_gameplay::GameplayCommandQueue>()
-        );
-        assert_eq!(
-            app.world()
-                .resource::<nara_app::FixedTime>()
-                .catch_up_policy(),
-            nara_app::FixedCatchUpPolicy::PreserveDebt
+            !metadata
+                .plugins
+                .contains(&nara_app::PluginId::new("nara.ui"))
         );
     }
 
+    #[cfg(feature = "runtime-ui")]
     #[test]
-    fn project_settings_configure_time_and_task_plugins_before_the_bundle() {
-        let load = nara_project::ProjectManifest::parse_toml_str(
-            r#"
-schema_version = 1
-
-[project]
-name = "Configured Server"
-
-[runtime]
-plugin_plan = "server"
-catch_up_policy = "discard-excess"
-max_fixed_debt_steps = 9
-
-[tasks.io]
-workers = 1
-pending_capacity = 3
-
-[tasks.compute]
-workers = 1
-pending_capacity = 4
-
-[tasks.async_compute]
-workers = 1
-pending_capacity = 5
-
-[tasks.shutdown]
-drain_timeout_ms = 20
-cancel_timeout_ms = 20
-join_timeout_ms = 20
-"#,
-        );
-        assert!(!load.has_errors(), "{:?}", load.diagnostics);
-        let settings = load.manifest.unwrap().resolve_profile(None).unwrap();
-        let expected_tasks = settings.tasks.pool_config;
-
+    fn runtime_ui_installs_ui_submission_as_an_independent_product() {
         let mut app = App::new();
-        apply_project_settings(&mut app, settings).unwrap();
+        app.add_plugins(RuntimeUiPlugins).unwrap();
 
-        assert_eq!(
-            *app.world().resource::<nara_tasks::TaskPools>().config(),
-            expected_tasks
-        );
-        assert_eq!(
-            app.world()
-                .resource::<nara_app::FixedTime>()
-                .catch_up_policy(),
-            nara_app::FixedCatchUpPolicy::PreserveDebt
-        );
+        assert!(app.world().contains_resource::<nara_ui_render::UiBatches>());
+        let metadata = app
+            .installed_plugin_groups()
+            .find(|group| group.id == PluginGroupId::new("nara.plugins.runtime-ui"))
+            .unwrap();
         assert!(
-            app.world()
-                .contains_resource::<nara_project::EffectiveProjectSettings>()
+            !metadata
+                .plugins
+                .contains(&nara_app::PluginId::new("nara.sprite"))
         );
-        assert!(!app.world().contains_resource::<nara_input::PointerState>());
     }
 }

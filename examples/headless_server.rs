@@ -1,6 +1,10 @@
 use std::{error::Error, time::Duration};
 
-use nara::{ecs::schedule::IntoScheduleConfigs, prelude::*};
+use nara::{
+    advanced_prelude::{GameplayCommandBatch, GameplayCommandQueue, GameplayCommandSet},
+    ecs::schedule::IntoScheduleConfigs,
+    prelude::*,
+};
 
 #[derive(Debug, Default, Resource)]
 struct ObservedCommands(Vec<GameplayCommandKey>);
@@ -12,28 +16,8 @@ fn observe_commands(batch: Res<GameplayCommandBatch>, mut observed: ResMut<Obser
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let load = ProjectManifest::parse_toml_str(
-        r#"
-schema_version = 1
-
-[project]
-name = "Headless Example"
-
-[profiles.server]
-"#,
-    );
-
-    if load.has_errors() {
-        return Err(format!("invalid manifest diagnostics: {:?}", load.diagnostics).into());
-    }
-
-    let settings = load
-        .manifest
-        .expect("valid manifest load should carry a manifest")
-        .resolve_profile(Some("server"))?;
-
     let mut app = App::new();
-    apply_project_settings(&mut app, settings)?
+    app.add_plugins(ServerPlugins)?
         .insert_resource(ObservedCommands::default())?
         .add_systems(
             CoreStage::FixedUpdate,

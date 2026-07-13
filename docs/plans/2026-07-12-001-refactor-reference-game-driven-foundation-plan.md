@@ -802,11 +802,11 @@ cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test auth
 
 # RGF-U3
 cargo nextest run --locked -p nara_project -p nara_fs -p nara_render_wgpu --test-threads=1
-cargo nextest run --locked -p nara --test product_capabilities --test project_composition --test-threads=1
+cargo nextest run --locked -p nara --features serde --test product_capabilities --test project_composition --test-threads=1
 cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test project_manifest_ingest --test-threads=1
-cargo check -p nara --locked --no-default-features --features runtime-2d,runtime-ui,desktop-winit,render-wgpu --example windowed_clear
-cargo check -p nara --locked --no-default-features --features runtime-2d,runtime-ui,desktop-winit,render-wgpu --example windowed_sprites
-cargo check -p nara --locked --no-default-features --features runtime-2d,runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel
+cargo check -p nara --locked --no-default-features --features desktop-winit,render-wgpu --example windowed_clear
+cargo check -p nara --locked --no-default-features --features runtime-2d,desktop-winit,render-wgpu --example windowed_sprites
+cargo check -p nara --locked --no-default-features --features runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel
 
 # RGF-U18
 cargo nextest run --locked -p nara --test module_consumer_boundary --test-threads=1

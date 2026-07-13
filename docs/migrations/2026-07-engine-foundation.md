@@ -36,6 +36,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | U8-1 | U8 | `9263d8c` | `rust-api/behavior/persistent-shape` | Runtime entity identity, scene instance handles, gameplay entity targets, reflected references, export remaps, and tooling snapshots | Use `nara_identity` references/locators, keep scene instance context explicit, remap before fork/replay/export, and replace raw `Entity` observations. |
 | U18-1 | U18 | `6a70847` | `rust-api/behavior` | Diagnostic construction, reports, runtime observations, pressure snapshots, and diagnostic plugin composition | Migrate to validated/classified bounded observations and reduce any `diagnostics.runtime_capacity` above 4,096. |
 | RGF-U1-1 | RGF-U1 | `RGF-U1` | `rust-api/persistent-shape` | Component/field identity, registry lifecycle, durable field patches, and canonical scene/prefab/patch/catalog files | Assign permanent field IDs, build/freeze the registry before use, rewrite experimental files to the canonical envelopes, and load file bytes through candidates. |
+| RGF-U3-1 | RGF-U3 | `RGF-U3` | `cargo-feature/rust-api/persistent-shape` | Root product capabilities, plugin bundles/preludes, and `nara.toml` product selection | Select the new coarse features, import advanced/tooling/backend names explicitly, replace plugin-plan data with runtime preset plus requested capabilities, and open manifests through a host-issued file capability. |
 
 ## Entry Contract
 
@@ -867,6 +868,90 @@ freeze atomicity, durable field-ID patches, old-version field-write rejection, a
 publication. The empty-payload golden files lock the envelope and empty
 canonical shape only; construction-based non-empty round trips cover component values, prefab
 embedding, patch operations, and catalog records.
+
+## RGF-U3-1: Truthful Product Capabilities and Authorized Manifest Ingest
+
+**Removed contract**:
+
+- Flat mandatory root dependencies behind `default = []` and adapter aliases `winit`, `wgpu`, and
+  `egui`.
+- `DesktopWgpuPlugins`, `ProjectPluginPlan`, `apply_project_settings`, and ambient
+  `ProjectManifest::parse_toml_file*` entry points.
+- The broad default prelude as an import path for diagnostic storage, queue lifecycle, tooling,
+  render batches, and backend implementation types.
+- The unconsumed `nara_audio` placeholder crate and root scaffold binary.
+
+**Canonical replacement or deletion rationale**: root Cargo features are the compiled product
+ceiling: `runtime-core`, `runtime-2d`, `runtime-ui`, `tooling`, `asset-watch`, `desktop-winit`,
+`render-wgpu`, and `tooling-egui`; `serde` weakly forwards only into selected domains. Projects use
+`[runtime].preset` plus `[capabilities].requested`. The root host reads an already opened
+`FileCapability`, applies the 256 KiB sentinel read and bounded TOML shape preflight, then publishes
+an immutable `ProjectSettingsCandidate` only when the request fits the compiled ceiling. Plugin
+service/conflict/slot closure remains RGF-U4, and assets/startup scene remain RGF-U12.
+
+**Before**:
+
+```toml
+[dependencies]
+nara = { path = "..", features = ["wgpu", "winit", "serde"] }
+```
+
+```rust
+app.add_plugins(DesktopWgpuPlugins)?;
+```
+
+**After**:
+
+```toml
+[dependencies]
+nara = { path = "..", default-features = false, features = [
+    "runtime-2d",
+    "desktop-winit",
+    "render-wgpu",
+    "serde",
+] }
+```
+
+```rust
+app.add_plugins(Runtime2dPlugins)?;
+app.add_plugins(DesktopWinitPlugins)?;
+app.add_plugins(WgpuBackendPlugins)?;
+```
+
+File-backed projects declare product intent separately:
+
+```toml
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d", "render-wgpu"]
+```
+
+**Affected examples and fixtures**: all root examples now declare `required-features`; optional
+tooling/2D integration tests are target-gated; the independent reference game disables root
+defaults, commits `nara.toml`, and consumes its non-default fixed timestep through authorized
+manifest ingest.
+
+**User action**: replace removed root features and bundles, move advanced imports to
+`advanced_prelude`, `tooling_prelude`, `backend_prelude`, or module paths, rewrite project plugin
+selection to runtime preset plus requested capabilities, and let host code open `nara.toml` before
+calling `ingest_project_manifest`.
+
+**Source action**: `manual-rewrite`; no released compatibility window exists.
+
+**Cache action**: regenerate Cargo lockfiles and build artifacts after changing features. Project
+source remains valid after the explicit `nara.toml` rewrite.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the complete RGF-U3 change. Do not restore legacy feature aliases, ambient
+file loading, the broad prelude, or the audio placeholder as compatibility shims.
+
+**Verification anchors**: `tests/{product_capabilities,project_composition}.rs`, the four
+`nara_render_wgpu` submitter feature checks, minimal desktop example checks, and
+`reference-game/tests/project_manifest_ingest.rs` prove feature/dependency truth, explicit surface
+imports, authorized bounded ingest, product request rejection, and actual settings consumption.
 
 ## Persistent Format Matrix
 

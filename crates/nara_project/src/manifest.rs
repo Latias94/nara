@@ -1,19 +1,22 @@
-use std::{collections::BTreeMap, fmt, fs::File, io::Read, path::Path};
+use std::{collections::BTreeMap, fmt};
 
+use nara_core::{
+    ByteLimit, DepthLimit, ItemLimit, SerdeShapeError, SerdeShapeLimits, SerdeShapePreflightError,
+    preflight_serde_shape,
+};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use serde::Deserialize;
-use thiserror::Error;
 
 use crate::effective::EffectiveProjectSettings;
 use crate::profile::{ProjectProfileError, ProjectProfileOverlay};
 use crate::sections::{
-    ProjectDiagnosticsManifest, ProjectInfo, ProjectInputManifest, ProjectPathsManifest,
-    ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest, ProjectTasksManifest,
-    ProjectWindowManifest,
+    ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectInfo, ProjectInputManifest,
+    ProjectPathsManifest, ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest,
+    ProjectTasksManifest, ProjectWindowManifest,
 };
 use crate::validation::{
     error, validate_path_field, validate_profile_name, with_field_path, with_profile_identifier,
-    with_public_i64, with_public_identifier, with_public_u64, with_secret, with_sensitive,
+    with_public_u64, with_secret,
 };
 use crate::{CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT};
 
@@ -57,45 +60,6 @@ impl ProjectManifestLoad {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum ProjectManifestFileError {
-    #[error("failed to read project manifest metadata")]
-    Metadata(#[source] std::io::Error),
-    #[error("project manifest is too large: {actual_bytes} bytes > {limit_bytes} bytes")]
-    TooLarge { actual_bytes: u64, limit_bytes: u64 },
-    #[error("failed to read project manifest")]
-    Read(#[source] std::io::Error),
-}
-
-impl ProjectManifestFileError {
-    #[must_use]
-    pub fn to_diagnostic(&self) -> Diagnostic {
-        match self {
-            Self::Metadata(io_error) => io_error_diagnostic(
-                "project.manifest.metadata",
-                "Project manifest metadata could not be read",
-                io_error,
-            ),
-            Self::TooLarge {
-                actual_bytes,
-                limit_bytes,
-            } => {
-                let diagnostic = error(
-                    "project.manifest.too-large",
-                    "Project manifest exceeds its byte limit",
-                );
-                let diagnostic = with_public_u64(diagnostic, "actual", *actual_bytes);
-                with_public_u64(diagnostic, "limit", *limit_bytes)
-            }
-            Self::Read(io_error) => io_error_diagnostic(
-                "project.manifest.read",
-                "Project manifest content could not be read",
-                io_error,
-            ),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectManifest {
@@ -105,6 +69,8 @@ pub struct ProjectManifest {
     pub paths: ProjectPathsManifest,
     #[serde(default)]
     pub startup: ProjectStartupManifest,
+    #[serde(default)]
+    pub capabilities: ProjectCapabilitiesManifest,
     #[serde(default)]
     pub runtime: ProjectRuntimeManifest,
     #[serde(default)]
@@ -122,44 +88,32 @@ pub struct ProjectManifest {
 impl ProjectManifest {
     #[must_use]
     pub fn parse_toml_str(source: &str) -> ProjectManifestLoad {
-        match toml::from_str::<Self>(source) {
-            Ok(manifest) => ProjectManifestLoad::ok(manifest),
-            Err(parse_error) => {
-                let mut diagnostics = DiagnosticReport::default();
-                let diagnostic = error(
-                    "project.manifest.parse",
-                    "Project manifest syntax or structure is invalid",
-                );
-                let diagnostic = with_secret(diagnostic, "manifest_content");
-                let (line, column) = parse_error
-                    .span()
-                    .map_or((0, 0), |span| source_location(source, span.start));
-                let diagnostic = with_public_u64(diagnostic, "line", line);
-                let diagnostic = with_public_u64(diagnostic, "column", column);
-                diagnostics.push(diagnostic);
-                ProjectManifestLoad::failed(diagnostics)
-            }
-        }
+        Self::parse_toml_bytes(source.as_bytes())
     }
 
     #[must_use]
-    pub fn parse_toml_file(path: impl AsRef<Path>) -> ProjectManifestLoad {
-        Self::parse_toml_file_with_limit(path, DEFAULT_MANIFEST_BYTE_LIMIT)
-    }
-
-    #[must_use]
-    pub fn parse_toml_file_with_limit(
-        path: impl AsRef<Path>,
-        limit_bytes: u64,
-    ) -> ProjectManifestLoad {
-        match read_manifest_to_string(path.as_ref(), limit_bytes) {
-            Ok(source) => Self::parse_toml_str(&source),
-            Err(error) => {
-                let mut diagnostics = DiagnosticReport::default();
-                diagnostics.push(error.to_diagnostic());
-                ProjectManifestLoad::failed(diagnostics)
-            }
+    pub fn parse_toml_bytes(source: &[u8]) -> ProjectManifestLoad {
+        let limit = usize::try_from(DEFAULT_MANIFEST_BYTE_LIMIT)
+            .expect("the project manifest byte limit fits usize on supported targets");
+        if source.len() > limit {
+            return ProjectManifestLoad::failed(single_diagnostic(manifest_too_large_diagnostic(
+                source.len(),
+                limit,
+            )));
         }
+
+        let Ok(source) = std::str::from_utf8(source) else {
+            let diagnostic = error(
+                "project.manifest.utf8",
+                "Project manifest content is not valid UTF-8",
+            );
+            return ProjectManifestLoad::failed(single_diagnostic(with_secret(
+                diagnostic,
+                "manifest_content",
+            )));
+        };
+
+        parse_bounded_toml(source)
     }
 
     #[must_use]
@@ -216,6 +170,8 @@ impl ProjectManifest {
             validate_path_field(&mut diagnostics, "startup.default_scene", scene);
         }
 
+        self.capabilities
+            .validate_into(&mut diagnostics, "capabilities");
         self.runtime.validate_into(&mut diagnostics, "runtime");
         self.tasks.validate_into(&mut diagnostics, "tasks");
         self.window.validate_into(&mut diagnostics, "window");
@@ -278,38 +234,124 @@ impl ProjectManifest {
     }
 }
 
-fn io_error_diagnostic(
-    code: &'static str,
-    summary: &'static str,
-    io_error: &std::io::Error,
-) -> Diagnostic {
-    let diagnostic = error(code, summary);
-    let diagnostic = with_public_identifier(
-        diagnostic,
-        "io_kind",
-        io_error_kind_identifier(io_error.kind()),
-    );
-    let diagnostic = if let Some(os_code) = io_error.raw_os_error() {
-        with_public_i64(diagnostic, "os_code", i64::from(os_code))
-    } else {
-        diagnostic
+fn parse_bounded_toml(source: &str) -> ProjectManifestLoad {
+    let deserializer = match toml::de::Deserializer::parse(source) {
+        Ok(deserializer) => deserializer,
+        Err(parse_error) => {
+            return ProjectManifestLoad::failed(single_diagnostic(manifest_parse_diagnostic(
+                source,
+                parse_error.span().map(|span| span.start),
+            )));
+        }
     };
-    with_sensitive(diagnostic, "manifest_path")
+    match preflight_serde_shape(deserializer, manifest_shape_limits()) {
+        Ok(()) => {}
+        Err(SerdeShapePreflightError::Shape(shape)) => {
+            return ProjectManifestLoad::failed(single_diagnostic(manifest_shape_diagnostic(
+                shape,
+            )));
+        }
+        Err(SerdeShapePreflightError::Parse(parse_error)) => {
+            return ProjectManifestLoad::failed(single_diagnostic(manifest_parse_diagnostic(
+                source,
+                parse_error.span().map(|span| span.start),
+            )));
+        }
+    }
+
+    match toml::from_str::<ProjectManifest>(source) {
+        Ok(manifest) => ProjectManifestLoad::ok(manifest),
+        Err(parse_error) => ProjectManifestLoad::failed(single_diagnostic(
+            manifest_parse_diagnostic(source, parse_error.span().map(|span| span.start)),
+        )),
+    }
 }
 
-fn io_error_kind_identifier(kind: std::io::ErrorKind) -> &'static str {
-    match kind {
-        std::io::ErrorKind::NotFound => "not-found",
-        std::io::ErrorKind::PermissionDenied => "permission-denied",
-        std::io::ErrorKind::AlreadyExists => "already-exists",
-        std::io::ErrorKind::InvalidInput => "invalid-input",
-        std::io::ErrorKind::InvalidData => "invalid-data",
-        std::io::ErrorKind::TimedOut => "timed-out",
-        std::io::ErrorKind::Interrupted => "interrupted",
-        std::io::ErrorKind::UnexpectedEof => "unexpected-eof",
-        std::io::ErrorKind::OutOfMemory => "out-of-memory",
-        _ => "other",
-    }
+fn manifest_shape_limits() -> SerdeShapeLimits {
+    SerdeShapeLimits::new(
+        DepthLimit::new(32).expect("project manifest depth limit is non-zero"),
+        ItemLimit::new(4_096).expect("project manifest node limit is non-zero"),
+        ItemLimit::new(512).expect("project manifest container limit is non-zero"),
+        ByteLimit::new(16 * 1024).expect("project manifest string limit is non-zero"),
+        ByteLimit::new(192 * 1024).expect("project manifest total string limit is non-zero"),
+    )
+}
+
+fn manifest_shape_diagnostic(shape: SerdeShapeError) -> Diagnostic {
+    let (code, summary, maximum) = match shape {
+        SerdeShapeError::DepthExceeded { maximum } => (
+            "project.manifest.depth-limit",
+            "Project manifest nesting exceeds its limit",
+            Some(maximum),
+        ),
+        SerdeShapeError::NodeLimitExceeded { maximum } => (
+            "project.manifest.node-limit",
+            "Project manifest node count exceeds its limit",
+            Some(maximum),
+        ),
+        SerdeShapeError::ContainerItemLimitExceeded { maximum } => (
+            "project.manifest.container-limit",
+            "A project manifest container exceeds its item limit",
+            Some(maximum),
+        ),
+        SerdeShapeError::StringLimitExceeded { maximum } => (
+            "project.manifest.string-limit",
+            "A project manifest string exceeds its byte limit",
+            Some(maximum),
+        ),
+        SerdeShapeError::TotalStringLimitExceeded { maximum } => (
+            "project.manifest.total-string-limit",
+            "Project manifest strings exceed their total byte limit",
+            Some(maximum),
+        ),
+        SerdeShapeError::DuplicateMapKey => (
+            "project.manifest.duplicate-key",
+            "Project manifest contains a duplicate key",
+            None,
+        ),
+    };
+    let diagnostic = with_secret(error(code, summary), "manifest_content");
+    maximum.map_or(diagnostic.clone(), |maximum| {
+        with_public_u64(
+            diagnostic,
+            "limit",
+            u64::try_from(maximum).unwrap_or(u64::MAX),
+        )
+    })
+}
+
+fn manifest_parse_diagnostic(source: &str, offset: Option<usize>) -> Diagnostic {
+    let diagnostic = error(
+        "project.manifest.parse",
+        "Project manifest syntax or structure is invalid",
+    );
+    let diagnostic = with_secret(diagnostic, "manifest_content");
+    let (line, column) = offset.map_or((0, 0), |offset| source_location(source, offset));
+    let diagnostic = with_public_u64(diagnostic, "line", line);
+    with_public_u64(diagnostic, "column", column)
+}
+
+fn manifest_too_large_diagnostic(actual: usize, limit: usize) -> Diagnostic {
+    let diagnostic = error(
+        "project.manifest.too-large",
+        "Project manifest exceeds its byte limit",
+    );
+    let diagnostic = with_public_u64(
+        diagnostic,
+        "actual",
+        u64::try_from(actual).unwrap_or(u64::MAX),
+    );
+    with_public_u64(
+        diagnostic,
+        "limit",
+        u64::try_from(limit).unwrap_or(u64::MAX),
+    )
+}
+
+fn single_diagnostic(diagnostic: Diagnostic) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(diagnostic);
+    diagnostics
 }
 
 fn source_location(source: &str, byte_offset: usize) -> (u64, u64) {
@@ -325,37 +367,4 @@ fn source_location(source: &str, byte_offset: usize) -> (u64, u64) {
         u64::try_from(line).unwrap_or(u64::MAX),
         u64::try_from(column).unwrap_or(u64::MAX),
     )
-}
-
-fn read_manifest_to_string(
-    path: &Path,
-    limit_bytes: u64,
-) -> Result<String, ProjectManifestFileError> {
-    let mut file = File::open(path).map_err(ProjectManifestFileError::Read)?;
-    let metadata = file
-        .metadata()
-        .map_err(ProjectManifestFileError::Metadata)?;
-    let actual_bytes = metadata.len();
-    if actual_bytes > limit_bytes {
-        return Err(ProjectManifestFileError::TooLarge {
-            actual_bytes,
-            limit_bytes,
-        });
-    }
-
-    let mut buffer = Vec::new();
-    file.by_ref()
-        .take(limit_bytes.saturating_add(1))
-        .read_to_end(&mut buffer)
-        .map_err(ProjectManifestFileError::Read)?;
-    if buffer.len() as u64 > limit_bytes {
-        return Err(ProjectManifestFileError::TooLarge {
-            actual_bytes: buffer.len() as u64,
-            limit_bytes,
-        });
-    }
-
-    String::from_utf8(buffer).map_err(|error| {
-        ProjectManifestFileError::Read(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
-    })
 }

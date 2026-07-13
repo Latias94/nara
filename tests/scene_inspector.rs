@@ -1,4 +1,7 @@
-use nara::{diagnostic::DiagnosticValueRef, prelude::*, tooling_prelude::*};
+use nara::{
+    advanced_prelude::*, diagnostic::DiagnosticValueRef, scene::SceneAuthoringHistoryStatus,
+    tooling_prelude::*,
+};
 
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestLabel {

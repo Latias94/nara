@@ -1,4 +1,12 @@
-use nara::{advanced_prelude::*, diagnostic::DiagnosticValueRef};
+use nara::{
+    advanced_prelude::*,
+    diagnostic::DiagnosticValueRef,
+    scene::{
+        SceneExportOptions, SceneSpawnReport, export_scene_with_options,
+        spawn_prefab_with_asset_database, spawn_prefab_with_patch,
+        spawn_prefab_with_patch_and_asset_database, spawn_scene_with_asset_database,
+    },
+};
 
 const PLAYER_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const TILESET_STABLE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";

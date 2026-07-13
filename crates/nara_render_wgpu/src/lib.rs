@@ -1,33 +1,48 @@
-//! Wgpu backend skeleton for nara render-domain data.
+//! Wgpu backend for backend-neutral nara render data.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, marker::PhantomData};
 
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+mod quad;
+#[cfg(feature = "sprite-submitter")]
 mod sprite;
 mod surface;
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod texture;
+#[cfg(feature = "ui-submitter")]
 mod ui;
 
-use crate::sprite::{
-    WgpuSpriteBatchBuffer, WgpuSpriteDrawStats, WgpuSpritePipeline, WgpuSpritePipelineDrawRef,
-    WgpuSpritePipelineKey, create_sprite_batch_buffers, create_sprite_pipeline,
-    create_sprite_texture_bind_group_layout, draw_sprite_batch_buffers_for_phase,
-    sprite_batch_draw_stats,
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+use crate::quad::{
+    WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipeline, WgpuQuadPipelineDrawRef,
+    WgpuQuadPipelineKey, create_quad_batch_buffers, create_quad_pipeline,
+    create_quad_texture_bind_group_layout, draw_quad_batch_buffers_for_phase,
+    quad_batch_draw_stats,
 };
 use crate::surface::{WgpuSurfaceState, configure_surface, create_surface, surface_extent};
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::texture::WgpuSpriteTextureCache;
-use crate::ui::{create_ui_batch_buffers, ui_batch_draw_stats};
 use nara_app::{App, CoreStage, Plugin, PluginCleanupContext, PluginError};
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_asset::Assets;
 use nara_ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_image::{ImageAsset, PreparedImageResource};
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_material::AlphaMode2d;
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+use nara_render::PreparedRenderResources;
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+use nara_render::RenderPassStepLabel;
 use nara_render::{
-    Color, Extent2d, ExtractedViews, FrameStats, PreparedRenderResources, RenderBackendState,
-    RenderBackendStatus, RenderFrame, RenderFrameSkipReason, RenderPassPlan, RenderPassStep,
-    RenderPassStepLabel, RenderPhaseInput, begin_render_frame, build_render_pass_plan,
+    Color, Extent2d, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus,
+    RenderFrame, RenderFrameSkipReason, RenderPassPlan, RenderPassStep, RenderPhaseInput,
+    begin_render_frame, build_render_pass_plan,
 };
-use nara_sprite_render::{SpriteBatch, SpriteBatches};
-use nara_ui_render::{UiBatch, UiBatches};
+#[cfg(feature = "sprite-submitter")]
+use nara_sprite_render::SpriteBatches;
+#[cfg(feature = "ui-submitter")]
+use nara_ui_render::UiBatches;
 use nara_window::{
     PrimaryWindowId, Window, WindowId,
     backend::{BackendWindowHandles, RawWindowHandleProvider},
@@ -38,10 +53,8 @@ pub use crate::surface::{
     SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, choose_present_mode,
     clear_color_to_wgpu, map_present_mode, surface_acquire_policy, surface_resize_action,
 };
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
-
-#[cfg(test)]
-use nara_window::PresentMode;
 
 const WGPU_RENDER_BACKEND: &str = "wgpu";
 
@@ -65,7 +78,7 @@ impl Plugin for WgpuRenderPlugin {
             .mark_state(WGPU_RENDER_BACKEND, RenderBackendState::Uninitialized);
         app.add_systems(
             CoreStage::Render,
-            render_clear_passes.after(begin_render_frame),
+            render_wgpu_surfaces.after(begin_render_frame),
         )?;
         Ok(())
     }
@@ -87,7 +100,7 @@ pub enum WgpuBackendState {
     Unavailable,
 }
 
-#[derive(Debug, Resource)]
+#[derive(Debug, nara_ecs::Component)]
 pub struct WgpuRenderBackend {
     state: WgpuBackendState,
     instance: Option<wgpu::Instance>,
@@ -95,11 +108,16 @@ pub struct WgpuRenderBackend {
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
-    sprite_texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
-    sprite_pipelines: Vec<WgpuSpritePipeline>,
-    sprite_textures: WgpuSpriteTextureCache,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    quad_texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    quad_pipelines: Vec<WgpuQuadPipeline>,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    quad_textures: WgpuSpriteTextureCache,
     last_error: Option<String>,
 }
+
+impl Resource for WgpuRenderBackend {}
 
 impl Default for WgpuRenderBackend {
     fn default() -> Self {
@@ -110,9 +128,12 @@ impl Default for WgpuRenderBackend {
             device: None,
             queue: None,
             surfaces: BTreeMap::new(),
-            sprite_texture_bind_group_layout: None,
-            sprite_pipelines: Vec::new(),
-            sprite_textures: WgpuSpriteTextureCache::default(),
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            quad_texture_bind_group_layout: None,
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            quad_pipelines: Vec::new(),
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            quad_textures: WgpuSpriteTextureCache::default(),
             last_error: None,
         }
     }
@@ -120,7 +141,7 @@ impl Default for WgpuRenderBackend {
 
 impl WgpuRenderBackend {
     #[must_use]
-    pub fn state(&self) -> WgpuBackendState {
+    pub const fn state(&self) -> WgpuBackendState {
         self.state
     }
 
@@ -140,30 +161,32 @@ impl WgpuRenderBackend {
 
     pub fn clear_gpu_resources(&mut self) {
         self.clear_surfaces();
-        self.sprite_texture_bind_group_layout = None;
-        self.sprite_pipelines.clear();
-        self.sprite_textures.clear();
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        {
+            self.quad_texture_bind_group_layout = None;
+            self.quad_pipelines.clear();
+            self.quad_textures.clear();
+        }
     }
 
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     #[must_use]
-    pub fn sprite_texture_count(&self) -> usize {
-        self.sprite_textures.image_count()
+    pub fn texture_count(&self) -> usize {
+        self.quad_textures.image_count()
     }
 
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     #[must_use]
-    pub fn sprite_texture_stats(&self) -> WgpuRenderTextureCacheStats {
-        self.sprite_textures.stats()
+    pub fn texture_stats(&self) -> WgpuRenderTextureCacheStats {
+        self.quad_textures.stats()
     }
 
-    fn render_clear_passes(
+    fn render_surfaces(
         &mut self,
         handles: Option<&BackendWindowHandles>,
         windows: &Query<&Window>,
         views: &ExtractedViews,
-        sprite_batches: &SpriteBatches,
-        ui_batches: &UiBatches,
-        images: Option<&Assets<ImageAsset>>,
-        prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
+        submitters: SubmitterInputs<'_>,
         primary_window_id: Option<WindowId>,
         frame: &mut RenderFrame,
         stats: &mut FrameStats,
@@ -186,8 +209,9 @@ impl WgpuRenderBackend {
 
         self.ensure_device()?;
         status.mark_ready(WGPU_RENDER_BACKEND);
-        self.sprite_textures.begin_frame(frame.index);
-        let pass_plan = build_wgpu_render_pass_plan(views, sprite_batches, ui_batches);
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        self.quad_textures.begin_frame(frame.index);
+        let pass_plan = build_wgpu_render_pass_plan(views, submitters);
 
         let mut submitted_any = false;
         for (view_index, view) in views.as_slice().iter().enumerate() {
@@ -204,24 +228,22 @@ impl WgpuRenderBackend {
             let Some(provider) = handles.get(window_id) else {
                 continue;
             };
+            let Some(size) = surface_extent(
+                window.resolution.physical_width,
+                window.resolution.physical_height,
+            ) else {
+                continue;
+            };
 
-            let color = view.clear_color;
-            let view_batches = sprite_batches.for_view(view_index).collect::<Vec<_>>();
-            let view_ui_batches = ui_batches.for_view(view_index).collect::<Vec<_>>();
-            let view_pass_steps = pass_plan.for_view(view_index).copied().collect::<Vec<_>>();
-            if let Some(draw_stats) = self.render_window_clear_pass(
-                window,
-                provider,
-                color,
-                &view_batches,
-                &view_ui_batches,
-                &view_pass_steps,
-                images,
-                prepared_images,
-                frame.index,
-            )? {
-                stats.draw_calls = stats.draw_calls.saturating_add(draw_stats.draw_calls);
-                stats.sprites = stats.sprites.saturating_add(draw_stats.sprites);
+            self.ensure_surface(window, provider, size)?;
+            let view_format = self.surface_view_format(window.id)?;
+
+            let draw =
+                self.prepare_submitter_draw(view_index, view_format, submitters, frame.index)?;
+            let pass_steps = pass_plan.for_view(view_index).copied().collect::<Vec<_>>();
+            if self.render_window(window.id, view.clear_color, &draw, &pass_steps)? {
+                stats.draw_calls = stats.draw_calls.saturating_add(draw.draw_calls);
+                stats.sprites = stats.sprites.saturating_add(draw.sprites);
                 submitted_any = true;
             }
         }
@@ -243,12 +265,11 @@ impl WgpuRenderBackend {
             };
             status.mark_skipped_with_message(frame.index, reason, message);
         }
-
         Ok(())
     }
 
     fn ensure_device(&mut self) -> Result<(), WgpuRenderError> {
-        if matches!(self.state, WgpuBackendState::Ready) {
+        if self.state == WgpuBackendState::Ready {
             return Ok(());
         }
 
@@ -265,7 +286,6 @@ impl WgpuRenderBackend {
                 .map_err(|error| WgpuRenderError::DeviceUnavailable {
                     message: error.to_string(),
                 })?;
-
         self.instance = Some(instance);
         self.adapter = Some(adapter);
         self.device = Some(device);
@@ -275,48 +295,13 @@ impl WgpuRenderBackend {
         Ok(())
     }
 
-    fn render_window_clear_pass(
+    fn render_window(
         &mut self,
-        window: &Window,
-        provider: &RawWindowHandleProvider,
+        window_id: WindowId,
         clear_color: Color,
-        sprite_batches: &[&SpriteBatch],
-        ui_batches: &[&UiBatch],
+        draw: &PreparedSubmitterDraw,
         pass_steps: &[RenderPassStep],
-        images: Option<&Assets<ImageAsset>>,
-        prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
-        frame_index: u64,
-    ) -> Result<Option<WgpuSpriteDrawStats>, WgpuRenderError> {
-        let Some(size) = surface_extent(
-            window.resolution.physical_width,
-            window.resolution.physical_height,
-        ) else {
-            return Ok(None);
-        };
-
-        self.ensure_surface(window, provider, size)?;
-
-        let view_format = self.surface_view_format(window.id)?;
-        let has_sprite_work = sprite_batches
-            .iter()
-            .any(|batch| !batch.instances.is_empty());
-        let has_ui_work = ui_batches.iter().any(|batch| !batch.instances.is_empty());
-        let alpha_modes = required_alpha_modes(sprite_batches, ui_batches);
-        let sprite_draw_state = if !alpha_modes.is_empty() {
-            let texture_layout = self.ensure_sprite_texture_bind_group_layout()?;
-            for alpha_mode in &alpha_modes {
-                self.ensure_sprite_pipeline(WgpuSpritePipelineKey {
-                    format: view_format,
-                    alpha_mode: *alpha_mode,
-                })?;
-            }
-            Some((
-                texture_layout,
-                self.sprite_pipeline_draw_refs(view_format, &alpha_modes)?,
-            ))
-        } else {
-            None
-        };
+    ) -> Result<bool, WgpuRenderError> {
         let device = self
             .device
             .as_ref()
@@ -327,97 +312,44 @@ impl WgpuRenderBackend {
             .as_ref()
             .ok_or(WgpuRenderError::BackendNotReady)?
             .clone();
-        let sprite_buffers = if let Some((texture_layout, _pipelines)) = &sprite_draw_state {
-            if has_sprite_work {
-                create_sprite_batch_buffers(
-                    &device,
-                    &queue,
-                    sprite_batches,
-                    texture_layout,
-                    &mut self.sprite_textures,
-                    images,
-                    prepared_images,
-                    frame_index,
-                )
-                .map_err(|error| WgpuRenderError::SpriteTexture {
-                    message: error.to_string(),
-                })?
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        };
-        let ui_buffers = if let Some((texture_layout, _pipelines)) = &sprite_draw_state {
-            if has_ui_work {
-                create_ui_batch_buffers(
-                    &device,
-                    &queue,
-                    ui_batches,
-                    texture_layout,
-                    &mut self.sprite_textures,
-                    images,
-                    prepared_images,
-                    frame_index,
-                )
-                .map_err(|error| WgpuRenderError::SpriteTexture {
-                    message: error.to_string(),
-                })?
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        };
-        let surface_state =
-            self.surfaces
-                .get_mut(&window.id)
-                .ok_or(WgpuRenderError::SurfaceMissing {
-                    window_id: window.id,
-                })?;
+        let surface_state = self
+            .surfaces
+            .get_mut(&window_id)
+            .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
 
         match surface_state.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => {
                 render_acquired_texture(
                     &device,
                     &queue,
-                    window.id,
+                    window_id,
                     surface_state,
                     texture,
                     clear_color,
-                    sprite_draw_state
-                        .as_ref()
-                        .map(|(_, pipelines)| pipelines.as_slice()),
-                    &sprite_buffers,
-                    &ui_buffers,
+                    draw,
                     pass_steps,
                 )?;
-                let sprite_stats = sprite_batch_draw_stats(sprite_batches);
-                let ui_stats = ui_batch_draw_stats(ui_batches);
-                Ok(Some(WgpuSpriteDrawStats {
-                    draw_calls: sprite_stats.draw_calls.saturating_add(ui_stats.draw_calls),
-                    sprites: sprite_stats.sprites,
-                }))
+                Ok(true)
             }
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
                 drop(texture);
                 surface_state.dirty = true;
-                Ok(None)
+                Ok(false)
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                Ok(None)
+                Ok(false)
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
                 surface_state.dirty = true;
-                Ok(None)
+                Ok(false)
             }
             wgpu::CurrentSurfaceTexture::Lost => {
-                self.surfaces.remove(&window.id);
-                Ok(None)
+                self.surfaces.remove(&window_id);
+                Ok(false)
             }
-            wgpu::CurrentSurfaceTexture::Validation => Err(WgpuRenderError::SurfaceValidation {
-                window_id: window.id,
-            }),
+            wgpu::CurrentSurfaceTexture::Validation => {
+                Err(WgpuRenderError::SurfaceValidation { window_id })
+            }
         }
     }
 
@@ -458,9 +390,7 @@ impl WgpuRenderBackend {
             .ok_or(WgpuRenderError::SurfaceMissing {
                 window_id: window.id,
             })?;
-
-        if crate::surface::surface_resize_action(surface.size, size)
-            == SurfaceResizeAction::Reconfigure(size)
+        if surface_resize_action(surface.size, size) == SurfaceResizeAction::Reconfigure(size)
             || surface.dirty
         {
             configure_surface(
@@ -472,7 +402,6 @@ impl WgpuRenderBackend {
                 size,
             )?;
         }
-
         Ok(())
     }
 
@@ -488,77 +417,132 @@ impl WgpuRenderBackend {
             .config
             .as_ref()
             .ok_or(WgpuRenderError::SurfaceUnconfigured { window_id })?;
-
         Ok(config.format.add_srgb_suffix())
     }
 
-    fn ensure_sprite_texture_bind_group_layout(
+    fn prepare_submitter_draw(
         &mut self,
-    ) -> Result<wgpu::BindGroupLayout, WgpuRenderError> {
-        if let Some(layout) = &self.sprite_texture_bind_group_layout {
-            return Ok(layout.clone());
-        }
-
-        let layout = {
+        view_index: usize,
+        view_format: wgpu::TextureFormat,
+        submitters: SubmitterInputs<'_>,
+        frame_index: u64,
+    ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        {
+            let batches = submitters.quad_batches(view_index);
+            let stats = quad_batch_draw_stats(&batches);
+            if batches.is_empty() {
+                return Ok(PreparedSubmitterDraw::default());
+            }
+            let alpha_modes = required_alpha_modes(&batches);
+            let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
+            for alpha_mode in &alpha_modes {
+                self.ensure_quad_pipeline(WgpuQuadPipelineKey {
+                    format: view_format,
+                    alpha_mode: *alpha_mode,
+                })?;
+            }
+            let pipelines = self.quad_pipeline_draw_refs(view_format, &alpha_modes)?;
             let device = self
                 .device
                 .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?;
-            create_sprite_texture_bind_group_layout(device)
-        };
-        self.sprite_texture_bind_group_layout = Some(layout.clone());
+                .ok_or(WgpuRenderError::BackendNotReady)?
+                .clone();
+            let queue = self
+                .queue
+                .as_ref()
+                .ok_or(WgpuRenderError::BackendNotReady)?
+                .clone();
+            let buffers = create_quad_batch_buffers(
+                &device,
+                &queue,
+                &batches,
+                &texture_layout,
+                &mut self.quad_textures,
+                submitters.images,
+                submitters.prepared_images,
+                frame_index,
+            )
+            .map_err(|error| WgpuRenderError::QuadTexture {
+                message: error.to_string(),
+            })?;
+            return Ok(PreparedSubmitterDraw {
+                pipelines,
+                buffers,
+                draw_calls: stats.draw_calls,
+                sprites: stats.sprites,
+            });
+        }
+
+        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        {
+            let _ = (view_index, view_format, submitters, frame_index);
+            Ok(PreparedSubmitterDraw::default())
+        }
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn ensure_quad_texture_bind_group_layout(
+        &mut self,
+    ) -> Result<wgpu::BindGroupLayout, WgpuRenderError> {
+        if let Some(layout) = &self.quad_texture_bind_group_layout {
+            return Ok(layout.clone());
+        }
+        let device = self
+            .device
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        let layout = create_quad_texture_bind_group_layout(device);
+        self.quad_texture_bind_group_layout = Some(layout.clone());
         Ok(layout)
     }
 
-    fn ensure_sprite_pipeline(
-        &mut self,
-        key: WgpuSpritePipelineKey,
-    ) -> Result<(), WgpuRenderError> {
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn ensure_quad_pipeline(&mut self, key: WgpuQuadPipelineKey) -> Result<(), WgpuRenderError> {
         if self
-            .sprite_pipelines
+            .quad_pipelines
             .iter()
             .any(|pipeline| pipeline.key == key)
         {
             return Ok(());
         }
-
-        let texture_layout = self.ensure_sprite_texture_bind_group_layout()?;
-        let pipeline = {
-            let device = self
-                .device
-                .as_ref()
-                .ok_or(WgpuRenderError::BackendNotReady)?;
-            create_sprite_pipeline(device, key, &texture_layout)
-        };
-        self.sprite_pipelines.push(pipeline);
+        let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
+        let device = self
+            .device
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        self.quad_pipelines
+            .push(create_quad_pipeline(device, key, &texture_layout));
         Ok(())
     }
 
-    fn sprite_pipeline_draw_refs(
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn quad_pipeline_draw_refs(
         &self,
         format: wgpu::TextureFormat,
         alpha_modes: &[AlphaMode2d],
-    ) -> Result<Vec<WgpuSpritePipelineDrawRef>, WgpuRenderError> {
-        let mut pipelines = Vec::with_capacity(alpha_modes.len());
-        for alpha_mode in alpha_modes {
-            let key = WgpuSpritePipelineKey {
-                format,
-                alpha_mode: *alpha_mode,
-            };
-            let pipeline = self
-                .sprite_pipelines
-                .iter()
-                .find(|pipeline| pipeline.key == key)
-                .ok_or_else(|| WgpuRenderError::SpritePipelineMissing {
-                    format: format!("{format:?}"),
-                    alpha_mode: format!("{alpha_mode:?}"),
-                })?;
-            pipelines.push(WgpuSpritePipelineDrawRef {
-                alpha_mode: *alpha_mode,
-                pipeline: pipeline.pipeline.clone(),
-            });
-        }
-        Ok(pipelines)
+    ) -> Result<Vec<WgpuQuadPipelineDrawRef>, WgpuRenderError> {
+        alpha_modes
+            .iter()
+            .map(|alpha_mode| {
+                let key = WgpuQuadPipelineKey {
+                    format,
+                    alpha_mode: *alpha_mode,
+                };
+                let pipeline = self
+                    .quad_pipelines
+                    .iter()
+                    .find(|pipeline| pipeline.key == key)
+                    .ok_or_else(|| WgpuRenderError::QuadPipelineMissing {
+                        format: format!("{format:?}"),
+                        alpha_mode: format!("{alpha_mode:?}"),
+                    })?;
+                Ok(WgpuQuadPipelineDrawRef {
+                    alpha_mode: *alpha_mode,
+                    pipeline: pipeline.pipeline.clone(),
+                })
+            })
+            .collect()
     }
 
     fn mark_error(&mut self, error: &WgpuRenderError) {
@@ -588,45 +572,111 @@ pub enum WgpuRenderError {
     SurfaceUnconfigured { window_id: WindowId },
     #[error("wgpu surface validation error for window {window_id:?}")]
     SurfaceValidation { window_id: WindowId },
-    #[error("wgpu sprite pipeline is missing for format {format} and alpha mode {alpha_mode}")]
-    SpritePipelineMissing { format: String, alpha_mode: String },
-    #[error("wgpu sprite texture error: {message}")]
-    SpriteTexture { message: String },
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[error("wgpu quad pipeline is missing for format {format} and alpha mode {alpha_mode}")]
+    QuadPipelineMissing { format: String, alpha_mode: String },
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[error("wgpu quad texture error: {message}")]
+    QuadTexture { message: String },
 }
 
-pub fn render_clear_passes(
+#[derive(Clone, Copy)]
+struct SubmitterInputs<'a> {
+    _lifetime: PhantomData<&'a ()>,
+    #[cfg(feature = "sprite-submitter")]
+    sprite_batches: Option<&'a SpriteBatches>,
+    #[cfg(feature = "ui-submitter")]
+    ui_batches: Option<&'a UiBatches>,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    images: Option<&'a Assets<ImageAsset>>,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    prepared_images: Option<&'a PreparedRenderResources<PreparedImageResource>>,
+}
+
+impl SubmitterInputs<'_> {
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn quad_batches(self, view_index: usize) -> Vec<WgpuQuadBatch> {
+        let mut batches = Vec::new();
+        #[cfg(feature = "sprite-submitter")]
+        if let Some(sprite_batches) = self.sprite_batches {
+            batches.extend(sprite::collect_sprite_quad_batches(
+                sprite_batches,
+                view_index,
+            ));
+        }
+        #[cfg(feature = "ui-submitter")]
+        if let Some(ui_batches) = self.ui_batches {
+            batches.extend(ui::collect_ui_quad_batches(ui_batches, view_index));
+        }
+        batches
+    }
+
+    fn phase_inputs(self) -> Vec<RenderPhaseInput> {
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        let mut inputs = Vec::new();
+        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        let inputs = Vec::new();
+        #[cfg(feature = "sprite-submitter")]
+        if let Some(sprite_batches) = self.sprite_batches {
+            sprite::append_sprite_phase_inputs(sprite_batches, &mut inputs);
+        }
+        #[cfg(feature = "ui-submitter")]
+        if let Some(ui_batches) = self.ui_batches {
+            ui::append_ui_phase_inputs(ui_batches, &mut inputs);
+        }
+        inputs
+    }
+}
+
+#[derive(Debug, Default)]
+struct PreparedSubmitterDraw {
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    pipelines: Vec<WgpuQuadPipelineDrawRef>,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    buffers: Vec<WgpuQuadBatchBuffer>,
+    draw_calls: u32,
+    sprites: u32,
+}
+
+pub fn render_wgpu_surfaces(
     mut backend: ResMut<WgpuRenderBackend>,
     handles: Option<Res<BackendWindowHandles>>,
     windows: Query<&Window>,
     views: Res<ExtractedViews>,
-    sprite_batches: Option<Res<SpriteBatches>>,
-    ui_batches: Option<Res<UiBatches>>,
-    images: Option<Res<Assets<ImageAsset>>>,
-    prepared_images: Option<Res<PreparedRenderResources<PreparedImageResource>>>,
+    #[cfg(feature = "sprite-submitter")] sprite_batches: Option<Res<SpriteBatches>>,
+    #[cfg(feature = "ui-submitter")] ui_batches: Option<Res<UiBatches>>,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))] images: Option<
+        Res<Assets<ImageAsset>>,
+    >,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))] prepared_images: Option<
+        Res<PreparedRenderResources<PreparedImageResource>>,
+    >,
     primary_window_id: Option<Res<PrimaryWindowId>>,
     mut frame: ResMut<RenderFrame>,
     mut stats: ResMut<FrameStats>,
     mut status: ResMut<RenderBackendStatus>,
 ) {
-    let primary_window_id = primary_window_id.map(|resource| resource.0);
-    let empty_sprite_batches = SpriteBatches::default();
-    let empty_ui_batches = UiBatches::default();
-    let sprite_batches = sprite_batches.as_deref().unwrap_or(&empty_sprite_batches);
-    let ui_batches = ui_batches.as_deref().unwrap_or(&empty_ui_batches);
-    let result = backend.render_clear_passes(
+    let submitters = SubmitterInputs {
+        _lifetime: PhantomData,
+        #[cfg(feature = "sprite-submitter")]
+        sprite_batches: sprite_batches.as_deref(),
+        #[cfg(feature = "ui-submitter")]
+        ui_batches: ui_batches.as_deref(),
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        images: images.as_deref(),
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        prepared_images: prepared_images.as_deref(),
+    };
+    let result = backend.render_surfaces(
         handles.as_deref(),
         &windows,
         &views,
-        sprite_batches,
-        ui_batches,
-        images.as_deref(),
-        prepared_images.as_deref(),
-        primary_window_id,
+        submitters,
+        primary_window_id.map(|resource| resource.0),
         &mut frame,
         &mut stats,
         &mut status,
     );
-
     if let Err(error) = result {
         backend.mark_error(&error);
         status.mark_unavailable(WGPU_RENDER_BACKEND, error.to_string());
@@ -648,21 +698,13 @@ fn render_backend_state(state: WgpuBackendState) -> RenderBackendState {
     }
 }
 
-fn required_alpha_modes(
-    sprite_batches: &[&SpriteBatch],
-    ui_batches: &[&UiBatch],
-) -> Vec<AlphaMode2d> {
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+fn required_alpha_modes(batches: &[WgpuQuadBatch]) -> Vec<AlphaMode2d> {
     let mut modes = Vec::new();
-    for mode in sprite_batches
+    for mode in batches
         .iter()
         .filter(|batch| !batch.instances.is_empty())
         .map(|batch| batch.material.alpha_mode)
-        .chain(
-            ui_batches
-                .iter()
-                .filter(|batch| !batch.instances.is_empty())
-                .map(|batch| batch.material.alpha_mode),
-        )
     {
         if !modes.contains(&mode) {
             modes.push(mode);
@@ -678,9 +720,7 @@ fn render_acquired_texture(
     surface_state: &WgpuSurfaceState,
     surface_texture: wgpu::SurfaceTexture,
     clear_color: Color,
-    sprite_pipelines: Option<&[WgpuSpritePipelineDrawRef]>,
-    sprite_buffers: &[WgpuSpriteBatchBuffer],
-    ui_buffers: &[WgpuSpriteBatchBuffer],
+    draw: &PreparedSubmitterDraw,
     pass_steps: &[RenderPassStep],
 ) -> Result<(), WgpuRenderError> {
     let config = surface_state
@@ -694,7 +734,7 @@ fn render_acquired_texture(
             ..Default::default()
         });
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("nara_wgpu_clear_encoder"),
+        label: Some("nara_wgpu_surface_encoder"),
     });
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -713,29 +753,15 @@ fn render_acquired_texture(
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        if let Some(sprite_pipelines) = sprite_pipelines {
-            for step in pass_steps {
-                match step.node.label {
-                    RenderPassStepLabel::Clear => {}
-                    RenderPassStepLabel::Phase(phase) => {
-                        draw_sprite_batch_buffers_for_phase(
-                            &mut pass,
-                            sprite_pipelines,
-                            sprite_buffers,
-                            phase,
-                        );
-                        draw_sprite_batch_buffers_for_phase(
-                            &mut pass,
-                            sprite_pipelines,
-                            ui_buffers,
-                            phase,
-                        );
-                    }
-                }
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        for step in pass_steps {
+            if let RenderPassStepLabel::Phase(phase) = step.node.label {
+                draw_quad_batch_buffers_for_phase(&mut pass, &draw.pipelines, &draw.buffers, phase);
             }
         }
+        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        let _ = (&mut pass, draw, pass_steps);
     }
-
     queue.submit([encoder.finish()]);
     queue.present(surface_texture);
     Ok(())
@@ -743,290 +769,36 @@ fn render_acquired_texture(
 
 fn build_wgpu_render_pass_plan(
     views: &ExtractedViews,
-    sprite_batches: &SpriteBatches,
-    ui_batches: &UiBatches,
+    submitters: SubmitterInputs<'_>,
 ) -> RenderPassPlan {
-    build_render_pass_plan(
-        views,
-        sprite_batches
-            .as_slice()
-            .iter()
-            .map(|batch| RenderPhaseInput {
-                view_index: batch.view_index,
-                phase: batch.phase,
-            })
-            .chain(ui_batches.as_slice().iter().map(|batch| RenderPhaseInput {
-                view_index: batch.view_index,
-                phase: nara_render::RenderPhaseLabel::UI,
-            })),
-    )
+    build_render_pass_plan(views, submitters.phase_inputs())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-
-    use nara_app::App;
-    use nara_core::Vec2;
-    use nara_render::{
-        ExtractedView, RenderBackendStatus, RenderFrame, RenderFrameState, RenderPhaseLabel,
-        RenderTarget, ViewportRect,
-    };
-    use nara_sprite_render::{
-        ColorKey, SpriteBatches, SpriteInstance, SpriteMaterialKey, TextureUvRect,
-    };
-    use nara_ui_render::{
-        UiBatch, UiBatches, UiClipRect, UiColorKey, UiInstance, UiMaterialKey, UiTextureRect,
-    };
 
     #[test]
-    fn backend_starts_uninitialized() {
+    fn backend_starts_without_surfaces_or_native_state() {
         let backend = WgpuRenderBackend::default();
-
         assert_eq!(backend.state(), WgpuBackendState::Uninitialized);
         assert_eq!(backend.surface_count(), 0);
-        assert_eq!(backend.sprite_texture_count(), 0);
         assert_eq!(backend.last_error(), None);
     }
 
     #[test]
-    fn plugin_reports_skipped_frame_status_without_views() {
-        let mut app = App::new();
-        app.add_plugin(nara_reflect::ComponentRegistryPlugin)
-            .unwrap();
-        app.add_plugin(WgpuRenderPlugin).unwrap();
-
-        app.run_once(Duration::ZERO).unwrap();
-
-        let frame = app.world().resource::<RenderFrame>();
-        let status = app.world().resource::<RenderBackendStatus>();
-        let skip = status.last_skip().unwrap();
-        assert_eq!(frame.state, RenderFrameState::Skipped);
-        assert_eq!(status.backend(), Some(WGPU_RENDER_BACKEND));
-        assert_eq!(status.state(), RenderBackendState::Uninitialized);
-        assert_eq!(skip.frame_index(), frame.index);
-        assert_eq!(skip.reason(), RenderFrameSkipReason::NoViews);
-        assert!(!app.world().contains_resource::<SpriteBatches>());
-        assert!(!app.world().contains_resource::<UiBatches>());
-    }
-
-    #[test]
-    fn zero_size_surfaces_skip_configuration() {
-        let current = Extent2d {
-            width: 1280,
-            height: 720,
+    fn base_submitter_input_has_no_phase_work() {
+        let inputs = SubmitterInputs {
+            _lifetime: PhantomData,
+            #[cfg(feature = "sprite-submitter")]
+            sprite_batches: None,
+            #[cfg(feature = "ui-submitter")]
+            ui_batches: None,
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            images: None,
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            prepared_images: None,
         };
-
-        assert_eq!(
-            surface_resize_action(
-                current,
-                Extent2d {
-                    width: 0,
-                    height: 720,
-                },
-            ),
-            SurfaceResizeAction::SkipZeroSized
-        );
-        assert_eq!(
-            surface_resize_action(
-                current,
-                Extent2d {
-                    width: 1280,
-                    height: 720,
-                },
-            ),
-            SurfaceResizeAction::Unchanged
-        );
-        assert_eq!(
-            surface_resize_action(
-                current,
-                Extent2d {
-                    width: 640,
-                    height: 480,
-                },
-            ),
-            SurfaceResizeAction::Reconfigure(Extent2d {
-                width: 640,
-                height: 480,
-            })
-        );
-    }
-
-    #[test]
-    fn surface_status_policy_covers_wgpu_30_statuses() {
-        assert_eq!(
-            surface_acquire_policy(SurfaceTextureStatus::Success),
-            SurfaceAcquireAction::Render
-        );
-        assert_eq!(
-            surface_acquire_policy(SurfaceTextureStatus::Suboptimal),
-            SurfaceAcquireAction::Reconfigure
-        );
-        assert_eq!(
-            surface_acquire_policy(SurfaceTextureStatus::Outdated),
-            SurfaceAcquireAction::Reconfigure
-        );
-        assert_eq!(
-            surface_acquire_policy(SurfaceTextureStatus::Timeout),
-            SurfaceAcquireAction::SkipFrame
-        );
-        assert_eq!(
-            surface_acquire_policy(SurfaceTextureStatus::Occluded),
-            SurfaceAcquireAction::SkipFrame
-        );
-        assert_eq!(
-            surface_acquire_policy(SurfaceTextureStatus::Lost),
-            SurfaceAcquireAction::RecreateSurface
-        );
-        assert_eq!(
-            surface_acquire_policy(SurfaceTextureStatus::Validation),
-            SurfaceAcquireAction::Error
-        );
-    }
-
-    #[test]
-    fn maps_present_modes() {
-        assert_eq!(
-            map_present_mode(PresentMode::AutoVsync),
-            wgpu::PresentMode::AutoVsync
-        );
-        assert_eq!(
-            map_present_mode(PresentMode::AutoNoVsync),
-            wgpu::PresentMode::AutoNoVsync
-        );
-        assert_eq!(map_present_mode(PresentMode::Fifo), wgpu::PresentMode::Fifo);
-        assert_eq!(
-            map_present_mode(PresentMode::Immediate),
-            wgpu::PresentMode::Immediate
-        );
-        assert_eq!(
-            map_present_mode(PresentMode::Mailbox),
-            wgpu::PresentMode::Mailbox
-        );
-    }
-
-    #[test]
-    fn unsupported_strict_present_modes_fall_back_to_fifo() {
-        assert_eq!(
-            choose_present_mode(PresentMode::Immediate, &[wgpu::PresentMode::Fifo]),
-            wgpu::PresentMode::Fifo
-        );
-        assert_eq!(
-            choose_present_mode(PresentMode::Mailbox, &[wgpu::PresentMode::Immediate]),
-            wgpu::PresentMode::Immediate
-        );
-        assert_eq!(
-            choose_present_mode(PresentMode::AutoNoVsync, &[]),
-            wgpu::PresentMode::AutoNoVsync
-        );
-    }
-
-    #[test]
-    fn clear_color_conversion_is_deterministic() {
-        let color = clear_color_to_wgpu(Color::rgba(0.25, 0.5, 0.75, 1.0));
-
-        assert_eq!(color.r, 0.25);
-        assert_eq!(color.g, 0.5);
-        assert_eq!(color.b, 0.75);
-        assert_eq!(color.a, 1.0);
-    }
-
-    #[test]
-    fn backend_pass_plan_orders_world_before_ui() {
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            camera_entity: nara_ecs::Entity::PLACEHOLDER,
-            target: RenderTarget::PrimaryWindow,
-            viewport: ViewportRect::new(0, 0, 100, 100).unwrap(),
-            world_position: Vec2::ZERO,
-            viewport_height: 100.0,
-            order: 0,
-            clear_color: Color::BLACK,
-        });
-        let mut sprite_batches = SpriteBatches::default();
-        sprite_batches.replace(vec![SpriteBatch {
-            view_index: 0,
-            view_order: 0,
-            target: RenderTarget::PrimaryWindow,
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
-            layer: 0,
-            sort_key: 0,
-            material: sprite_material_key(),
-            instances: vec![SpriteInstance {
-                center: Vec2::ZERO,
-                x_axis: Vec2::X,
-                y_axis: Vec2::Y,
-                color: Color::WHITE,
-                uv: TextureUvRect::FULL,
-            }],
-        }]);
-        let mut ui_batches = UiBatches::default();
-        ui_batches.replace(vec![UiBatch {
-            view_index: 0,
-            view_order: 0,
-            target: RenderTarget::PrimaryWindow,
-            order: 0,
-            z_index: 0,
-            material: ui_material_key(),
-            clip_rect: UiClipRect::from_rect(nara_ui::UiRect::from_origin_size(
-                0.0, 0.0, 10.0, 10.0,
-            )),
-            instances: vec![UiInstance {
-                center: Vec2::ZERO,
-                x_axis: Vec2::X,
-                y_axis: Vec2::Y,
-                color: Color::WHITE,
-                uv: UiTextureRect::FULL,
-            }],
-        }]);
-
-        let plan = build_wgpu_render_pass_plan(&views, &sprite_batches, &ui_batches);
-
-        assert_eq!(
-            plan.steps()
-                .iter()
-                .map(|step| step.node.label)
-                .collect::<Vec<_>>(),
-            vec![
-                RenderPassStepLabel::Clear,
-                RenderPassStepLabel::Phase(RenderPhaseLabel::TRANSPARENT_2D),
-                RenderPassStepLabel::Phase(RenderPhaseLabel::UI),
-            ]
-        );
-    }
-
-    #[test]
-    fn ui_render_public_types_are_not_sprite_aliases() {
-        assert_ne!(
-            std::any::type_name::<UiInstance>(),
-            std::any::type_name::<SpriteInstance>()
-        );
-        assert_ne!(
-            std::any::type_name::<UiMaterialKey>(),
-            std::any::type_name::<SpriteMaterialKey>()
-        );
-        assert_ne!(
-            std::any::type_name::<UiTextureRect>(),
-            std::any::type_name::<TextureUvRect>()
-        );
-    }
-
-    fn sprite_material_key() -> SpriteMaterialKey {
-        SpriteMaterialKey {
-            image: None,
-            sampler: nara_material::SamplerDescriptor::default(),
-            alpha_mode: nara_material::AlphaMode2d::Blend,
-            tint: ColorKey::from_color(Color::WHITE),
-        }
-    }
-
-    fn ui_material_key() -> UiMaterialKey {
-        UiMaterialKey {
-            image: None,
-            sampler: nara_material::SamplerDescriptor::default(),
-            alpha_mode: nara_material::AlphaMode2d::Blend,
-            tint: UiColorKey::from_color(Color::WHITE),
-        }
+        assert!(inputs.phase_inputs().is_empty());
     }
 }

@@ -144,7 +144,7 @@ raw-path API. This is the project-manifest application of ADR 0070, not a genera
 
 ### Placeholder retirement and crate admission
 
-U32 deletes `nara_audio` from workspace membership, the root facade/prelude, and the lockfile. ADR
+RGF-U3 deletes `nara_audio` from workspace membership, the root facade/prelude, and the lockfile. ADR
 0030 remains the direction for a future audio vertical slice. No empty `audio` capability is
 reserved.
 

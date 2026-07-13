@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
 
-use nara::{advanced_prelude::*, tooling_prelude::*};
+use nara::{
+    advanced_prelude::*,
+    scene::{InMemoryPrefabSourceResolver, PrefabInstance, SceneAuthoringHistoryStatus},
+    tooling_prelude::*,
+};
 
 const PLAYER_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const UNKNOWN_STABLE_ID: &str = "4bf6d3ff-f6c6-47fb-9a39-4ab27598094f";

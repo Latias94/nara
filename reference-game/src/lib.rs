@@ -8,10 +8,12 @@ use std::{error::Error, fmt, time::Duration};
 use nara::{
     app::{AppRunError, PluginCategory, PluginError, PluginId, PluginMetadata},
     ecs::schedule::IntoScheduleConfigs,
+    fs::FileCapability,
     prelude::{
         App, ComponentRegistry, CoreStage, FixedTime, FixedUpdateSet, MinimalPlugins,
-        PersistentComponentProvider, Plugin, StartupStage, Vec2, World,
+        PersistentComponentProvider, Plugin, RuntimeTimeSettings, StartupStage, Vec2, World,
     },
+    project_host::{ProjectCandidateError, ingest_project_manifest},
     reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT,
 };
 
@@ -112,6 +114,7 @@ where
 #[derive(Debug, Clone, PartialEq)]
 pub struct TracerSnapshot {
     pub tick: u64,
+    pub fixed_timestep: Duration,
     pub player_position: Vec2,
     pub player_hit_points: i64,
     pub enemy_position: Vec2,
@@ -126,6 +129,7 @@ impl TracerSnapshot {
     pub fn initial() -> Self {
         Self {
             tick: 0,
+            fixed_timestep: FixedTime::DEFAULT_TIMESTEP,
             player_position: Vec2::ZERO,
             player_hit_points: 20,
             enemy_position: Vec2::new(5.0, 0.0),
@@ -140,6 +144,7 @@ impl TracerSnapshot {
     pub fn after_three_ticks() -> Self {
         Self {
             tick: 3,
+            fixed_timestep: FixedTime::DEFAULT_TIMESTEP,
             player_position: Vec2::new(3.0, 0.0),
             player_hit_points: 20,
             enemy_position: Vec2::new(3.5, 0.0),
@@ -156,13 +161,13 @@ impl TracerSnapshot {
         let weapon = single_component::<Weapon>(world, "Weapon")?;
         let projectile = single_component::<Projectile>(world, "Projectile")?;
         single_component::<RuntimeOnlyTag>(world, "RuntimeOnlyTag")?;
-        let tick = world
+        let fixed_time = world
             .get_resource::<FixedTime>()
-            .ok_or(ReferenceGameError::MissingResource("FixedTime"))?
-            .tick();
+            .ok_or(ReferenceGameError::MissingResource("FixedTime"))?;
 
         Ok(Self {
-            tick,
+            tick: fixed_time.tick(),
+            fixed_timestep: fixed_time.timestep(),
             player_position: player.position,
             player_hit_points: player.hit_points,
             enemy_position: enemy.position,
@@ -178,6 +183,7 @@ impl TracerSnapshot {
 pub enum ReferenceGameError {
     Plugin(PluginError),
     Run(AppRunError),
+    Project(ProjectCandidateError),
     MissingResource(&'static str),
     MissingComponent(&'static str),
     DuplicateComponent(&'static str),
@@ -189,6 +195,7 @@ impl fmt::Display for ReferenceGameError {
         match self {
             Self::Plugin(error) => write!(formatter, "reference-game plugin setup failed: {error}"),
             Self::Run(error) => write!(formatter, "reference-game frame failed: {error}"),
+            Self::Project(error) => write!(formatter, "reference-game project is invalid: {error}"),
             Self::MissingResource(resource) => {
                 write!(
                     formatter,
@@ -217,6 +224,7 @@ impl Error for ReferenceGameError {
         match self {
             Self::Plugin(error) => Some(error),
             Self::Run(error) => Some(error),
+            Self::Project(error) => Some(error),
             Self::MissingResource(_)
             | Self::MissingComponent(_)
             | Self::DuplicateComponent(_)
@@ -237,10 +245,40 @@ impl From<AppRunError> for ReferenceGameError {
     }
 }
 
+impl From<ProjectCandidateError> for ReferenceGameError {
+    fn from(error: ProjectCandidateError) -> Self {
+        Self::Project(error)
+    }
+}
+
 pub fn run_headless_ticks(ticks: u32) -> Result<TracerSnapshot, ReferenceGameError> {
+    run_headless_ticks_with_time(ticks, None)
+}
+
+pub fn run_headless_ticks_from_manifest(
+    manifest: &FileCapability,
+    profile: Option<&str>,
+    ticks: u32,
+) -> Result<TracerSnapshot, ReferenceGameError> {
+    let candidate = ingest_project_manifest(manifest, profile)?;
+    let runtime = candidate.settings().runtime;
+    run_headless_ticks_with_time(
+        ticks,
+        Some((runtime.runtime_time_settings(), runtime.fixed_time())),
+    )
+}
+
+fn run_headless_ticks_with_time(
+    ticks: u32,
+    time: Option<(RuntimeTimeSettings, FixedTime)>,
+) -> Result<TracerSnapshot, ReferenceGameError> {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)?;
     app.add_plugin(ReferenceGamePlugin)?;
+    if let Some((runtime_time, fixed_time)) = time {
+        app.insert_resource(runtime_time)?;
+        app.insert_resource(fixed_time)?;
+    }
 
     let startup = app.run_once(Duration::ZERO)?;
     if startup.status.fixed_steps != 0 {
@@ -250,8 +288,9 @@ pub fn run_headless_ticks(ticks: u32) -> Result<TracerSnapshot, ReferenceGameErr
         });
     }
 
+    let fixed_timestep = app.world().resource::<FixedTime>().timestep();
     for _ in 0..ticks {
-        let outcome = app.run_once(FixedTime::DEFAULT_TIMESTEP)?;
+        let outcome = app.run_once(fixed_timestep)?;
         if outcome.status.fixed_steps != 1 {
             return Err(ReferenceGameError::UnexpectedFixedSteps {
                 expected: 1,

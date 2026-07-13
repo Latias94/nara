@@ -110,7 +110,7 @@ This file provides repo-local guidance for agents working on nara.
 - Format with `cargo fmt --all`.
 - Prefer `cargo nextest run --workspace` for tests.
 - Run `cargo check --workspace` before considering implementation work complete.
-- Check optional backend examples with `cargo check -p nara --features winit,wgpu --example windowed_clear`, `cargo check -p nara --features winit,wgpu --example windowed_sprites`, and `cargo check -p nara --features winit,wgpu --example runtime_ui_panel` when touching platform, input, UI, or render backend code.
+- Check optional backend examples with `cargo check -p nara --no-default-features --features desktop-winit,render-wgpu --example windowed_clear`, `cargo check -p nara --no-default-features --features runtime-2d,desktop-winit,render-wgpu --example windowed_sprites`, and `cargo check -p nara --no-default-features --features runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel` when touching platform, input, UI, or render backend code.
 - Use dependency boundary searches when touching backend crates: `rg -n "winit::|winit =" crates src Cargo.toml` and `rg -n "wgpu::|wgpu =" crates src Cargo.toml`.
 - Use precise commits with Conventional Commit messages.
 - Do not discard or rewrite user changes. Never use `git reset --hard`, `git checkout --`, `git restore`, `git clean`, or stash to remove work unless the user explicitly asks.

@@ -47,18 +47,32 @@ The manifest contract is:
   `server`, `editor`, `dev`, and `release` profiles. Overrides patch manifest values; they do not
   replace the manifest authority.
 
+Canonical version 1 spells product selection as:
+
+```toml
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d", "render-wgpu"]
+```
+
+The runtime preset is one of `minimal`, `local-headless`, or `server`. Capability IDs are the
+coarse ADR 0079 feature names. A profile capability patch replaces the requested set rather than
+merging it, so one manifest plus profile has one auditable request.
+
 Host/composition code opens and bounds `nara.toml` through a host-issued `nara_fs` capability, then
 passes an immutable byte or UTF-8 candidate into `nara_project`. The project crate owns parsing,
 validation diagnostics, profile overlays, and lowering; it exposes no ambient `File::open` or
 authorization-checked raw-path API.
 
-`EffectiveProjectSettings` contains validated domain values. Before `apply_project_settings`
-touches `App`, composition resolves the runtime preset and additive request, proves the normalized
-request fits the compiled product ceiling, proves the resolved plan's required product capabilities
-fit that request, and then closes plugin service requirements/conflicts and group membership. Any
-failure returns a structured `PluginError` with resources, schedules, plugins, group membership, and
-lifecycle state unchanged. Only a valid plan may apply resources and install plugins. `nara_project`
-itself remains side-effect-free.
+`EffectiveProjectSettings` contains validated domain values. The root product host first publishes
+an immutable `ProjectSettingsCandidate` only after the runtime preset and additive request fit the
+compiled product ceiling. RGF-U4 then proves the resolved plan's required product capabilities fit
+that request and closes plugin service requirements/conflicts and group membership before touching
+`App`. Candidate ingest returns `ProjectCandidateError`; plugin closure and installation return
+`PluginError`. Only a valid plan may apply resources and install plugins. `nara_project` itself
+remains side-effect-free.
 
 ```mermaid
 flowchart TD
@@ -81,7 +95,7 @@ flowchart TD
     Runtime --> App[nara_app]
     Tasks --> TaskPlugin[nara_tasks]
     Window --> Winit[nara_winit / nara_window]
-    Closure --> Profile[plugin groups / capability policy]
+    Product --> Profile[plugin groups / capability policy]
 ```
 
 ## Rules

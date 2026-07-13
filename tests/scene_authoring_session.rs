@@ -1,8 +1,8 @@
 use nara::{
     identity::{EntityLookup, SpawnedSceneInstance},
     prelude::*,
-    scene::ScenePatchDocument,
-    scene::ScenePatchOperation,
+    reflect::ComponentValueKind,
+    scene::{SceneAuthoringHistoryStatus, ScenePatchDocument, ScenePatchOperation},
 };
 
 #[derive(Clone, Debug, PartialEq, Component)]

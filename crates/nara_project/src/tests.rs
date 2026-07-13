@@ -7,7 +7,7 @@ use nara_tasks::{
     MAX_TASK_POOL_PENDING_PER_KIND, MAX_TASK_POOL_PENDING_TOTAL, MAX_TASK_POOL_THREADS_PER_KIND,
     MAX_TASK_POOL_THREADS_TOTAL, MAX_TASK_SHUTDOWN_PHASE_TIMEOUT, TaskPoolKind,
 };
-use std::{fs, time::Duration};
+use std::time::Duration;
 
 const MINIMAL_MANIFEST: &str = r#"
 schema_version = 1
@@ -54,7 +54,8 @@ fn minimal_manifest_parses_and_resolves_validated_defaults() {
     assert_eq!(settings.project.name, "Test Game");
     assert_eq!(settings.paths.assets.as_str(), "assets");
     assert_eq!(settings.paths.import_cache.as_str(), ".nara/import-cache");
-    assert_eq!(settings.plugin_plan, ProjectPluginPlan::Minimal);
+    assert_eq!(settings.runtime_preset, RuntimePreset::Minimal);
+    assert!(settings.requested_capabilities.is_empty());
     assert_eq!(
         settings.runtime.fixed_time().max_steps_per_frame(),
         FixedTime::DEFAULT_MAX_STEPS_PER_FRAME
@@ -76,7 +77,11 @@ fn complete_v1_fixture_lowers_every_runtime_and_task_field() {
     assert!(!load.has_errors(), "{:?}", load.diagnostics);
     let settings = load.manifest.unwrap().resolve_profile(None).unwrap();
 
-    assert_eq!(settings.plugin_plan, ProjectPluginPlan::Runtime2d);
+    assert_eq!(settings.runtime_preset, RuntimePreset::Minimal);
+    assert_eq!(
+        settings.requested_capabilities,
+        ProductCapabilitySet::singleton(ProductCapability::Runtime2d)
+    );
     let runtime = settings.runtime.runtime_time_settings();
     assert_eq!(runtime.time_scale(), 0.75);
     assert_eq!(runtime.max_delta(), Duration::from_millis(200));
@@ -397,7 +402,7 @@ max_fixed_debt_steps = {MAX_PROJECT_FIXED_DEBT_STEPS}
 }
 
 #[test]
-fn obsolete_runtime_2d_plugin_plan_alias_is_rejected() {
+fn obsolete_plugin_plan_field_is_rejected() {
     let load = ProjectManifest::parse_toml_str(
         r#"
 schema_version = 1
@@ -406,7 +411,7 @@ schema_version = 1
 name = "Obsolete Plugin Plan"
 
 [runtime]
-plugin_plan = "runtime2d"
+plugin_plan = "runtime-2d"
 "#,
     );
 
@@ -432,7 +437,7 @@ name = "Server Game"
         .resolve_profile(Some("server"))
         .unwrap();
 
-    assert_eq!(settings.plugin_plan, ProjectPluginPlan::Server);
+    assert_eq!(settings.runtime_preset, RuntimePreset::Server);
     assert!(!settings.window.enabled);
     assert_eq!(
         settings.runtime.fixed_time().catch_up_policy(),
@@ -450,7 +455,7 @@ name = "Server Game"
 }
 
 #[test]
-fn final_server_plugin_plan_enforces_server_runtime_invariants_without_named_profile() {
+fn server_preset_enforces_runtime_invariants_without_named_profile() {
     let load = ProjectManifest::parse_toml_str(
         r#"
 schema_version = 1
@@ -459,7 +464,7 @@ schema_version = 1
 name = "Direct Server Plan"
 
 [runtime]
-plugin_plan = "server"
+preset = "server"
 catch_up_policy = "discard-excess"
 max_fixed_debt_steps = 17
 
@@ -469,7 +474,7 @@ enabled = true
     );
     let settings = load.manifest.unwrap().resolve_profile(None).unwrap();
 
-    assert_eq!(settings.plugin_plan, ProjectPluginPlan::Server);
+    assert_eq!(settings.runtime_preset, RuntimePreset::Server);
     assert!(!settings.window.enabled);
     assert_eq!(
         settings.runtime.fixed_time().catch_up_policy(),
@@ -489,7 +494,10 @@ name = "Overlay Game"
 
 [runtime]
 time_scale = 1.0
-plugin_plan = "runtime-2d"
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-2d"]
 
 [startup]
 default_scene = "scenes/main.scene.ron"
@@ -512,7 +520,10 @@ fixed_timestep_seconds = 0.02
 max_fixed_steps_per_frame = 2
 max_fixed_debt_steps = 9
 catch_up_policy = "preserve-debt"
-plugin_plan = "headless-runtime"
+preset = "local-headless"
+
+[profiles.dev.capabilities]
+requested = ["asset-watch"]
 
 [profiles.dev.tasks.io]
 workers = 3
@@ -546,7 +557,11 @@ runtime_capacity = 32
     assert!(!load.has_errors(), "{:?}", load.diagnostics);
     let settings = load.manifest.unwrap().resolve_profile(Some("dev")).unwrap();
 
-    assert_eq!(settings.plugin_plan, ProjectPluginPlan::HeadlessRuntime);
+    assert_eq!(settings.runtime_preset, RuntimePreset::LocalHeadless);
+    assert_eq!(
+        settings.requested_capabilities,
+        ProductCapabilitySet::singleton(ProductCapability::AssetWatch)
+    );
     let runtime = settings.runtime.runtime_time_settings();
     assert!(runtime.paused());
     assert_eq!(runtime.time_scale(), 0.5);
@@ -626,9 +641,12 @@ schema_version = 1
 name = "Hostile Server Game"
 
 [profiles.server.runtime]
-plugin_plan = "desktop-wgpu"
+preset = "minimal"
 catch_up_policy = "discard-excess"
 max_fixed_debt_steps = 7
+
+[profiles.server.capabilities]
+requested = ["desktop-winit", "render-wgpu"]
 
 [profiles.server.tasks.io]
 workers = 4
@@ -644,7 +662,17 @@ enabled = true
         .resolve_profile(Some("server"))
         .unwrap();
 
-    assert_eq!(settings.plugin_plan, ProjectPluginPlan::Server);
+    assert_eq!(settings.runtime_preset, RuntimePreset::Server);
+    assert!(
+        settings
+            .requested_capabilities
+            .contains(ProductCapability::DesktopWinit)
+    );
+    assert!(
+        settings
+            .requested_capabilities
+            .contains(ProductCapability::RenderWgpu)
+    );
     assert!(!settings.window.enabled);
     assert_eq!(
         settings.runtime.fixed_time().catch_up_policy(),
@@ -906,51 +934,78 @@ fn unknown_profile_error_debug_redacts_sensitive_profile_name() {
 }
 
 #[test]
-fn file_loader_enforces_manifest_size_budget() {
-    let temp_root = std::env::temp_dir().join(format!(
-        "nara_project_test_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    fs::create_dir_all(&temp_root).unwrap();
-    let manifest_path = temp_root.join("nara.toml");
-    fs::write(&manifest_path, MINIMAL_MANIFEST).unwrap();
+fn byte_parser_accepts_the_exact_hard_limit_and_rejects_limit_plus_one() {
+    let limit = usize::try_from(DEFAULT_MANIFEST_BYTE_LIMIT).unwrap();
+    let mut exact = MINIMAL_MANIFEST.as_bytes().to_vec();
+    exact.resize(limit, b' ');
+    let exact_load = ProjectManifest::parse_toml_bytes(&exact);
+    assert!(!exact_load.has_errors(), "{:?}", exact_load.diagnostics);
 
-    let load = ProjectManifest::parse_toml_file_with_limit(&manifest_path, 4);
-
-    assert!(load.manifest.is_none());
+    exact.push(b' ');
+    let oversized = ProjectManifest::parse_toml_bytes(&exact);
+    assert!(oversized.manifest.is_none());
     assert_eq!(
-        load.diagnostics.iter().next().unwrap().code().as_str(),
+        oversized.diagnostics.iter().next().unwrap().code().as_str(),
         "project.manifest.too-large"
     );
-
-    fs::remove_dir_all(&temp_root).unwrap();
 }
 
 #[test]
-fn file_loader_diagnostic_redacts_native_manifest_path() {
-    let missing_path = std::env::temp_dir()
-        .join(format!(
-            "nara_password_path_canary_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
-        .join("nara.toml");
-
-    let load = ProjectManifest::parse_toml_file(&missing_path);
+fn invalid_utf8_is_classified_without_retaining_input_bytes() {
+    let canary = b"credential-canary\xff";
+    let load = ProjectManifest::parse_toml_bytes(canary);
     let diagnostic = load.diagnostics.iter().next().unwrap();
 
-    assert_eq!(diagnostic.code().as_str(), "project.manifest.read");
+    assert_eq!(diagnostic.code().as_str(), "project.manifest.utf8");
     assert_eq!(
-        diagnostic_field_class(diagnostic, "manifest_path"),
-        Some(DiagnosticFieldClass::Sensitive)
+        diagnostic_field_class(diagnostic, "manifest_content"),
+        Some(DiagnosticFieldClass::Secret)
     );
-    let path_text = missing_path.to_string_lossy();
-    assert!(!format!("{:?}", load.diagnostics).contains(path_text.as_ref()));
+    assert!(!format!("{load:?}").contains("credential-canary"));
+}
+
+#[test]
+fn duplicate_and_unknown_product_capabilities_are_rejected() {
+    let duplicate = ProjectManifest::parse_toml_str(
+        r#"
+schema_version = 1
+
+[project]
+name = "Duplicate Capabilities"
+
+[capabilities]
+requested = ["runtime-2d", "runtime-2d"]
+"#,
+    );
+    assert!(diagnostic_codes(&duplicate).contains(&"project.capabilities.duplicate"));
+
+    let unknown = ProjectManifest::parse_toml_str(
+        r#"
+schema_version = 1
+
+[project]
+name = "Unknown Capability"
+
+[capabilities]
+requested = ["future-renderer"]
+"#,
+    );
+    assert!(unknown.manifest.is_none());
+    assert!(diagnostic_codes(&unknown).contains(&"project.manifest.parse"));
+}
+
+#[test]
+fn product_capability_iteration_is_stable_and_sorted_by_engine_vocabulary() {
+    let set = ProductCapabilitySet::from_capabilities([
+        ProductCapability::ToolingEgui,
+        ProductCapability::Runtime2d,
+        ProductCapability::RuntimeCore,
+    ]);
+
+    assert_eq!(
+        set.iter()
+            .map(ProductCapability::as_str)
+            .collect::<Vec<_>>(),
+        vec!["runtime-core", "runtime-2d", "tooling-egui"]
+    );
 }

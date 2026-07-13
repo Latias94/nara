@@ -68,7 +68,7 @@ Initial group vocabulary:
 | `RuntimeUiPlugins` | Runtime UI authoring, layout, interaction, and UI submission without sprite/tilemap ownership |
 | `HeadlessRuntimePlugins` | Core runtime plus asset/scene/gameplay-domain systems that can run without window, render, audio-device, editor, or UI toolkit adapters |
 | `ServerPlugins` | Dedicated-server-ready headless composition with deterministic-friendly gameplay stages, diagnostics/metrics, and no networking transport unless an optional networking crate is explicitly added |
-| `DesktopWindowPlugins` | `nara_window` plus desktop `nara_winit` adapter |
+| `DesktopWinitPlugins` | `nara_window` plus desktop `nara_winit` adapter |
 | `WgpuBackendPlugins` | Base wgpu target/backend operation; sprite and UI submitters are available only under their compiled domain/backend features and join a resolved plan only when requested |
 | `ToolingPlugins` | UI-agnostic tooling models and optional adapter groups |
 

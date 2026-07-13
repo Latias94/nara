@@ -1,5 +1,7 @@
 use nara::{
-    identity::EntityLookup, prelude::*, scene::register_scene_components,
+    identity::EntityLookup,
+    prelude::*,
+    scene::{InMemoryPrefabSourceResolver, PrefabInstance, register_scene_components},
     sprite::register_sprite_components,
 };
 

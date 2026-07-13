@@ -50,6 +50,11 @@ fn reference_game_depends_only_on_the_public_root_package() {
     assert!(dependency["kind"].is_null());
     assert!(dependency["target"].is_null());
     assert_eq!(dependency["optional"], false);
+    assert_eq!(dependency["uses_default_features"], false);
+    assert_eq!(
+        dependency["features"],
+        serde_json::json!(["runtime-core", "serde"])
+    );
 
     let dependency_path = dependency["path"]
         .as_str()

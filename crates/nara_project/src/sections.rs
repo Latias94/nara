@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 
 use nara_app::{FixedCatchUpPolicy, FixedTime, RuntimeTimeSettings};
 use nara_core::{ByteLimit, ItemLimit, TimeLimit};
@@ -13,6 +13,7 @@ use nara_tasks::{
 use nara_window::{PresentMode, WindowMode};
 use serde::Deserialize;
 
+use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::defaults::*;
 use crate::effective::{
     EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveRuntimeSettings,
@@ -22,7 +23,8 @@ use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
 use crate::validation::{
     duration_from_positive_seconds, error, validate_duration_seconds, validate_fixed_step_limits,
-    validate_path_field, with_field_path, with_public_bool, with_public_u64,
+    validate_path_field, with_field_path, with_public_bool, with_public_identifier,
+    with_public_u64,
 };
 
 // The manifest keeps entry capacity configurable while reserving enough space for
@@ -73,6 +75,37 @@ pub struct ProjectStartupManifest {
     pub default_scene: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCapabilitiesManifest {
+    #[serde(default)]
+    pub requested: Vec<ProductCapability>,
+}
+
+impl ProjectCapabilitiesManifest {
+    pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+        let mut observed = BTreeSet::new();
+        for capability in &self.requested {
+            if !observed.insert(*capability) {
+                let diagnostic = error(
+                    "project.capabilities.duplicate",
+                    "A product capability is requested more than once",
+                );
+                let diagnostic = with_field_path(diagnostic, &format!("{prefix}.requested"));
+                diagnostics.push(with_public_identifier(
+                    diagnostic,
+                    "capability",
+                    capability.as_str(),
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn lower(&self) -> ProductCapabilitySet {
+        ProductCapabilitySet::from_capabilities(self.requested.iter().copied())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectRuntimeManifest {
@@ -91,7 +124,7 @@ pub struct ProjectRuntimeManifest {
     #[serde(default)]
     pub catch_up_policy: ProjectFixedCatchUpPolicy,
     #[serde(default)]
-    pub plugin_plan: ProjectPluginPlan,
+    pub preset: RuntimePreset,
 }
 
 impl Default for ProjectRuntimeManifest {
@@ -104,7 +137,7 @@ impl Default for ProjectRuntimeManifest {
             max_fixed_steps_per_frame: default_max_fixed_steps_per_frame(),
             max_fixed_debt_steps: default_max_fixed_debt_steps(),
             catch_up_policy: ProjectFixedCatchUpPolicy::default(),
-            plugin_plan: ProjectPluginPlan::default(),
+            preset: RuntimePreset::default(),
         }
     }
 }
@@ -702,25 +735,6 @@ pub(crate) fn runtime_diagnostics_settings(
         .ok_or(ProjectProfileError::InvalidDiagnosticCapacity)?;
     RuntimeDiagnosticsSettings::new(entry_limit, byte_limit)
         .map_err(ProjectProfileError::InvalidDiagnosticSettings)
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub enum ProjectPluginPlan {
-    #[default]
-    #[serde(rename = "minimal")]
-    Minimal,
-    #[serde(rename = "headless-runtime")]
-    HeadlessRuntime,
-    #[serde(rename = "server")]
-    Server,
-    #[serde(rename = "runtime-2d")]
-    Runtime2d,
-    #[serde(rename = "desktop-window")]
-    DesktopWindow,
-    #[serde(rename = "desktop-wgpu")]
-    DesktopWgpu,
-    #[serde(rename = "tooling")]
-    Tooling,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

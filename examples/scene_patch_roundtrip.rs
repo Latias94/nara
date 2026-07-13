@@ -1,5 +1,7 @@
 use nara::{
-    prelude::*, scene::register_scene_components, sprite::register_sprite_components,
+    prelude::*,
+    scene::{ScenePatchDocumentCandidate, register_scene_components},
+    sprite::register_sprite_components,
     transform::register_transform_components,
 };
 

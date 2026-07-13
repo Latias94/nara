@@ -1,8 +1,12 @@
 use nara::{
-    advanced_prelude::{AssetRecord, AssetSourceKind, ProjectAssetDatabase},
+    advanced_prelude::{AssetRecord, AssetRefExportPolicy, AssetSourceKind, ProjectAssetDatabase},
+    diagnostic::Diagnostic,
     prelude::*,
     render::register_render_components,
-    scene::register_scene_components,
+    scene::{
+        SceneDocumentCandidate, SceneExportOptions, export_scene_with_options,
+        register_scene_components,
+    },
     sprite::register_sprite_components,
     tilemap::register_tilemap_components,
     transform::register_transform_components,

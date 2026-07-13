@@ -70,8 +70,9 @@ Depth / Locality / Seam verdict:
 
 The current composition path exposes several separate facts that can drift:
 
-- `apply_project_settings` inserts settings, time resources, diagnostics, and task pools before the
-  selected product plan is known to be valid (`src/lib.rs`).
+- RGF-U3 now produces an immutable `ProjectSettingsCandidate` after manifest and compiled-ceiling
+  validation, but it does not yet resolve plugin slots, services, conflicts, or a publishable
+  runtime candidate (`src/project_host.rs`).
 - root plugin groups maintain static plugin-ID arrays separately from their imperative `build`
   methods (`src/lib.rs`).
 - `PluginGroupBuilder` directly wraps `&mut App`, so group expansion and committed installation are
@@ -408,7 +409,8 @@ The candidates are evaluated by Interface depth rather than implementation size.
 
 | Candidate | Depth | Locality | Authority Honesty | Common-Caller Cost | Decision |
 |---|---|---|---|---|---|
-| Current `apply_project_settings(&mut App)` | Low | Low: validation and mutation knowledge is spread across facade, groups, and plugins | Low: predictable rejection may follow mutation | Low on success, high on failure | Reject |
+| Removed legacy `apply_project_settings(&mut App)` | Low | Low: validation and mutation knowledge was spread across facade, groups, and plugins | Low: predictable rejection could follow mutation | Low on success, high on failure | Removed in RGF-U3 |
+| Current immutable settings/capability candidate | Medium | High for manifest admission, low for plugin closure and publication | High for the compiled/requested capability subset only | Low for manifest callers, incomplete for runtime hosts | Keep as input to RGF-U4 composition |
 | Pure resolve plus public install into an existing App | Medium | High for composition, low for startup publication | Medium: admission is honest, committed failure still poisons caller state | Medium | Keep only as a possible advanced/internal operation |
 | Universal host/builder around project, services, runtime, and driver | Superficially high | Low over time: unrelated authorities converge in one Module | Low: scope and lifetime differences become hidden | Initially low, grows with every domain | Reject |
 | Pure resolved plan plus fresh unpublished candidate | High | High: admission, committed lifecycle, and host authority each have one owner | High: publication is atomic without claiming external rollback | Low on product path, explicit on embedding path | Recommend |

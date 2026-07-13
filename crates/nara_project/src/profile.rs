@@ -6,6 +6,7 @@ use nara_tasks::TaskConfigError;
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::effective::{
     EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveProjectPaths,
     EffectiveProjectSettings, EffectiveRuntimeSettings, EffectiveStartupSettings,
@@ -13,8 +14,8 @@ use crate::effective::{
 };
 use crate::path::{ProjectPath, ProjectPathError};
 use crate::sections::{
-    ProjectFixedCatchUpPolicy, ProjectPluginPlan, ProjectPresentMode, ProjectTaskPoolManifest,
-    ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectWindowMode,
+    ProjectCapabilitiesManifest, ProjectFixedCatchUpPolicy, ProjectPresentMode,
+    ProjectTaskPoolManifest, ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectWindowMode,
     runtime_diagnostics_settings,
 };
 use crate::validation::{
@@ -30,6 +31,8 @@ pub struct ProjectProfileOverlay {
     pub paths: ProjectPathsPatch,
     #[serde(default)]
     pub startup: ProjectStartupPatch,
+    #[serde(default)]
+    pub capabilities: ProjectCapabilitiesPatch,
     #[serde(default)]
     pub runtime: ProjectRuntimePatch,
     #[serde(default)]
@@ -53,6 +56,8 @@ impl ProjectProfileOverlay {
             .validate_into(diagnostics, &format!("{prefix}.paths"));
         self.startup
             .validate_into(diagnostics, &format!("{prefix}.startup"));
+        self.capabilities
+            .validate_into(diagnostics, &format!("{prefix}.capabilities"));
         self.runtime
             .validate_into(diagnostics, &format!("{prefix}.runtime"));
         self.tasks
@@ -71,15 +76,41 @@ impl ProjectProfileOverlay {
     ) -> Result<(), ProjectProfileError> {
         self.paths.apply_to(&mut settings.paths)?;
         self.startup.apply_to(&mut settings.startup)?;
+        self.capabilities
+            .apply_to(&mut settings.requested_capabilities);
         self.runtime.apply_to(&mut settings.runtime)?;
-        if let Some(plugin_plan) = self.runtime.plugin_plan {
-            settings.plugin_plan = plugin_plan;
+        if let Some(preset) = self.runtime.preset {
+            settings.runtime_preset = preset;
         }
         self.tasks.apply_to(&mut settings.tasks)?;
         self.window.apply_to(&mut settings.window);
         self.input.apply_to(&mut settings.input)?;
         self.diagnostics.apply_to(&mut settings.diagnostics)?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCapabilitiesPatch {
+    #[serde(default)]
+    pub requested: Option<Vec<ProductCapability>>,
+}
+
+impl ProjectCapabilitiesPatch {
+    fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+        if let Some(requested) = &self.requested {
+            ProjectCapabilitiesManifest {
+                requested: requested.clone(),
+            }
+            .validate_into(diagnostics, prefix);
+        }
+    }
+
+    fn apply_to(&self, capabilities: &mut ProductCapabilitySet) {
+        if let Some(requested) = &self.requested {
+            *capabilities = ProductCapabilitySet::from_capabilities(requested.iter().copied());
+        }
     }
 }
 
@@ -209,7 +240,7 @@ pub struct ProjectRuntimePatch {
     #[serde(default)]
     pub catch_up_policy: Option<ProjectFixedCatchUpPolicy>,
     #[serde(default)]
-    pub plugin_plan: Option<ProjectPluginPlan>,
+    pub preset: Option<RuntimePreset>,
 }
 
 impl ProjectRuntimePatch {

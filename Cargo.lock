@@ -1530,7 +1530,6 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_asset_watch",
- "nara_audio",
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
@@ -1558,6 +1557,7 @@ dependencies = [
  "nara_winit",
  "ron",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -1593,13 +1593,6 @@ dependencies = [
  "nara_asset",
  "nara_ecs",
  "notify",
-]
-
-[[package]]
-name = "nara_audio"
-version = "0.1.0"
-dependencies = [
- "nara_asset",
 ]
 
 [[package]]
@@ -1787,7 +1780,6 @@ dependencies = [
 name = "nara_render_wgpu"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "bytemuck",
  "nara_app",
  "nara_asset",

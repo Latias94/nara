@@ -51,13 +51,6 @@ pub(crate) fn with_public_u64(diagnostic: Diagnostic, key: &'static str, value: 
     )
 }
 
-pub(crate) fn with_public_i64(diagnostic: Diagnostic, key: &'static str, value: i64) -> Diagnostic {
-    attach_field(
-        diagnostic,
-        DiagnosticField::public_i64(field_key(key), value),
-    )
-}
-
 pub(crate) fn with_public_bool(
     diagnostic: Diagnostic,
     key: &'static str,
