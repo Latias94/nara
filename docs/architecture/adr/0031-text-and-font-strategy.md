@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0042: Runtime Service and Backend Boundary
 
 ## Context
 
@@ -62,4 +63,3 @@ Rules:
 | Text shaping scope explodes | High | High | Start simple but isolate text domain |
 | Font fallback is complex | Medium | High | Add fallback after basic shaping/layout |
 | Glyph atlas backend leaks into UI | Medium | Medium | Keep atlas in render/text backend resources |
-
