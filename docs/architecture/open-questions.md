@@ -195,12 +195,16 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Status**: open
 - **Owner**: platform adapters, product hosts, runtime service domains
 - **Trigger**: The first non-desktop target, or a supported desktop integration, requires lifecycle
-  semantics beyond focus/close: suspend, resume, low-memory, display/session loss, permission,
-  orientation, or platform-requested termination.
+  semantics beyond focus/close: ordered suspend/resume, platform-session loss/recreation, or
+  platform-requested termination.
 - **Related ADRs**: 0013, 0039, 0041, 0042, 0056, 0082, 0084, 0086, 0088
-- **Question**: Which normalized lifecycle states and ordered safe-point events belong to Nara, which
-  services remain alive or must rebuild, and how do time, input, audio, rendering, networking,
-  persistence, and target capability policy react without making one platform adapter authoritative?
+- **Question**: Which normalized lifecycle transition drafts may platform adapters produce, which
+  product-host safe point admits them, and which runtime/service sessions quiesce, survive, rebuild,
+  or terminate without confusing operating-system suspension with ADR 0039 gameplay pause or making
+  one platform adapter authoritative?
+- **Boundary**: Cross-domain response to memory pressure remains OQ-024. Permission requests/results
+  and orientation/safe-area changes are separate platform-capability and display-state contracts to
+  be admitted by concrete target workflows.
 
 ## OQ-024: Cross-Domain Residency and Memory Pressure
 
