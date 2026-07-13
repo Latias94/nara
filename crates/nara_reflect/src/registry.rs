@@ -12,7 +12,7 @@ use bevy_reflect::{GetTypeRegistration, TypeRegistry};
 use nara_ecs::{Component, Entity, Resource, World};
 
 use crate::{
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentValue,
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentValue, PersistentComponentProvider,
     codec::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         FnComponentCodec, PreparedComponent,
@@ -626,6 +626,28 @@ impl ComponentRegistry {
         validate_native_binding::<T>(data, id)
     }
 
+    pub fn validate_persistent_component<T>(&self) -> Result<(), ComponentRegistryError>
+    where
+        T: PersistentComponentProvider,
+    {
+        let schema = T::persistent_component_schema();
+        if self.is_frozen() {
+            return Err(ComponentRegistryError::Frozen);
+        }
+        validate_persistent_registration::<T>(self.data(), &schema)
+    }
+
+    pub fn register_persistent_component<T>(&mut self) -> Result<&mut Self, ComponentRegistryError>
+    where
+        T: PersistentComponentProvider,
+    {
+        self.register_persistent_component_with_codec::<T, _, _>(
+            T::persistent_component_schema(),
+            T::__decode_persistent_component,
+            T::__encode_persistent_component,
+        )
+    }
+
     pub fn register_native_component_with_codec<T, Decode, Encode>(
         &mut self,
         id: &ComponentTypeId,
@@ -728,11 +750,7 @@ impl ComponentRegistry {
     {
         let id = schema.id.clone();
         let data = self.building_mut()?;
-        if data.path_indexes.contains_key(&id) {
-            return Err(ComponentRegistryError::DuplicateComponentId(id));
-        }
-        validate_schema(&schema)?;
-        validate_native_binding::<T>(data, &id)?;
+        validate_persistent_registration::<T>(data, &schema)?;
 
         let rust_type_id = TypeId::of::<T>();
         let path_index = SchemaPathIndex::from_schema(&schema);
@@ -1135,6 +1153,19 @@ fn validate_native_binding<T: Component>(
         });
     }
     Ok(())
+}
+
+fn validate_persistent_registration<T: Component>(
+    data: &RegistryData,
+    schema: &ComponentSchema,
+) -> Result<(), ComponentRegistryError> {
+    if data.path_indexes.contains_key(schema.id()) {
+        return Err(ComponentRegistryError::DuplicateComponentId(
+            schema.id().clone(),
+        ));
+    }
+    validate_schema(schema)?;
+    validate_native_binding::<T>(data, schema.id())
 }
 
 type TypeIndex = BTreeMap<ComponentTypeId, usize>;

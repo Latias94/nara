@@ -5,6 +5,8 @@
 //! narrow public boundary where nara can add conventions without pretending to
 //! own a separate ECS implementation.
 
+pub use nara_ecs_derive::Component;
+
 pub use bevy_ecs::{
     bundle, change_detection, component, entity, event, hierarchy, lifecycle, message, name,
     observer, query, relationship, resource, schedule, system, world,
@@ -13,5 +15,6 @@ pub use bevy_ecs::{
 pub use bevy_ecs::prelude::*;
 
 pub mod prelude {
+    pub use crate::Component;
     pub use bevy_ecs::prelude::*;
 }

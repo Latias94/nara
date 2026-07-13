@@ -1,0 +1,5 @@
+error: missing component `id`
+  --> tests/ui/missing_component_id.rs:11:8
+   |
+11 | struct MissingComponentId {
+   |        ^^^^^^^^^^^^^^^^^^

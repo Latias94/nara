@@ -1,0 +1,3 @@
+# Canonical schema catalogs are byte-for-byte protocol evidence.
+tests/fixtures/schema-catalog/*.json text eol=lf
+reference-game/schema/*.json text eol=lf

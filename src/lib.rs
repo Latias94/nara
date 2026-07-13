@@ -16,6 +16,7 @@ pub use nara_input as input;
 pub use nara_material as material;
 pub use nara_project as project;
 pub use nara_reflect as reflect;
+pub use nara_reflect::PersistentComponent;
 pub use nara_render as render;
 #[cfg(feature = "wgpu")]
 pub use nara_render_wgpu as render_wgpu;
@@ -33,6 +34,11 @@ pub use nara_ui_render as ui_render;
 pub use nara_window as window;
 #[cfg(feature = "winit")]
 pub use nara_winit as winit;
+
+#[doc(hidden)]
+pub mod __macro_support {
+    pub use nara_reflect::__macro_support::*;
+}
 
 use nara_app::{
     App, Plugin, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginGroupMetadata,
@@ -458,7 +464,8 @@ pub mod prelude {
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
         ComponentMigrationError, ComponentRegistry, ComponentRegistryError, ComponentSchema,
         ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-        ComponentValueError, ComponentValueKind, MigratedComponentValue, PreparedComponent,
+        ComponentValueError, ComponentValueKind, MigratedComponentValue, PersistentComponent,
+        PersistentComponentProvider, PreparedComponent,
     };
     pub use nara_render::{
         Camera2d, ClearColor, Extent2d, RenderImage2d, RenderPlugin, RenderTarget, ViewportRect,

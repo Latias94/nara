@@ -8,6 +8,7 @@ description = "A Rust-native, declarative, data-driven game engine foundation."
 
 [workspace]
 resolver = "3"
+exclude = ["reference-game"]
 members = [
     "crates/nara_app",
     "crates/nara_asset",
@@ -16,6 +17,7 @@ members = [
     "crates/nara_core",
     "crates/nara_diagnostic",
     "crates/nara_ecs",
+    "crates/nara_ecs_derive",
     "crates/nara_fs",
     "crates/nara_image",
     "crates/nara_identity",
@@ -24,6 +26,7 @@ members = [
     "crates/nara_material",
     "crates/nara_project",
     "crates/nara_reflect",
+    "crates/nara_reflect_derive",
     "crates/nara_render",
     "crates/nara_render_wgpu",
     "crates/nara_scene",
@@ -54,6 +57,7 @@ nara_audio = { path = "crates/nara_audio" }
 nara_core = { path = "crates/nara_core" }
 nara_diagnostic = { path = "crates/nara_diagnostic" }
 nara_ecs = { path = "crates/nara_ecs" }
+nara_ecs_derive = { path = "crates/nara_ecs_derive" }
 nara_fs = { path = "crates/nara_fs" }
 nara_image = { path = "crates/nara_image" }
 nara_identity = { path = "crates/nara_identity" }
@@ -62,6 +66,7 @@ nara_gameplay = { path = "crates/nara_gameplay" }
 nara_material = { path = "crates/nara_material" }
 nara_project = { path = "crates/nara_project" }
 nara_reflect = { path = "crates/nara_reflect" }
+nara_reflect_derive = { path = "crates/nara_reflect_derive" }
 nara_render = { path = "crates/nara_render" }
 nara_render_wgpu = { path = "crates/nara_render_wgpu" }
 nara_scene = { path = "crates/nara_scene" }
@@ -78,6 +83,7 @@ nara_window = { path = "crates/nara_window" }
 nara_winit = { path = "crates/nara_winit" }
 
 bevy_ecs = "0.19"
+bevy_ecs_macro_logic = "0.19"
 bevy_reflect = { version = "0.19", features = ["glam"] }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
@@ -96,6 +102,11 @@ tracing = "0.1"
 uuid = "1.23.4"
 winit = "=0.30.12"
 pollster = "0.4"
+proc-macro-crate = "3.5"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+trybuild = "1.0.118"
 wgpu = "=30.0.0"
 rustix = "1.1.4"
 windows-sys = "0.61.2"

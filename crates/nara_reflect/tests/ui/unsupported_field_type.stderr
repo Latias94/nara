@@ -1,0 +1,5 @@
+error: unsupported persistent field type; collection and generic fields are deferred
+  --> tests/ui/unsupported_field_type.rs:14:13
+   |
+14 |     values: Vec<i64>,
+   |             ^^^^^^^^

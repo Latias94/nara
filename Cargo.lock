@@ -1045,6 +1045,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
 name = "glow"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1625,7 +1631,18 @@ name = "nara_ecs"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "nara_ecs_derive",
  "serde",
+]
+
+[[package]]
+name = "nara_ecs_derive"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs_macro_logic",
+ "proc-macro-crate",
+ "proc-macro2",
+ "syn",
 ]
 
 [[package]]
@@ -1733,9 +1750,21 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_identity",
+ "nara_reflect_derive",
  "ron",
  "serde",
  "serde_json",
+ "trybuild",
+]
+
+[[package]]
+name = "nara_reflect_derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2948,6 +2977,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "target-triple"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
+
+[[package]]
 name = "termcolor"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3110,6 +3145,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "trybuild"
+version = "1.0.118"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06649c6f63d86604ba0c8950d5a1829fc9a17afd70fc6629f481d75b6a624c78"
+dependencies = [
+ "glob",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "target-triple",
+ "termcolor",
+ "toml",
 ]
 
 [[package]]

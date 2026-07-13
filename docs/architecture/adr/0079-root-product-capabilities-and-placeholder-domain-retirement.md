@@ -160,6 +160,25 @@ Modules may deepen inside an existing crate before these conditions hold. A plac
 deleted when it loses its consumer or cannot justify the boundary; an accepted future ADR alone is
 not an implementation consumer.
 
+#### Proc-macro crate admission evidence
+
+RGF-U2 admits `nara_ecs_derive` and `nara_reflect_derive` through concrete production use rather
+than facade presence:
+
+- engine domains and the independent `reference-game` consume `nara_ecs_derive` through the
+  public `nara_ecs::Component` and root facade exports;
+- the independent `reference-game` uses `nara_reflect_derive` for Player, Enemy, Weapon, and
+  Projectile persistent providers, canonical scene/patch round trips, and catalog lineage;
+- each proc-macro crate isolates `syn`, `quote`, `proc-macro2`, and `proc-macro-crate` from
+  runtime libraries, satisfying dependency isolation;
+- each crate owns independent compile diagnostics and dependency-path resolution pressure. UI tests
+  cover invalid declarations, while `tests/derive_dependency_fixtures.rs` compiles locked
+  independent projects that rename the root `nara` and `nara_ecs` packages.
+
+The root `nara` facade is the distribution boundary, not the production consumer. These derives
+generate native component/provider declarations only; they do not own catalog publication,
+registry state, dynamic ECS storage, scripting schemas, or generated sidecars.
+
 ## Alternatives Considered
 
 ### Option A: Keep flat mandatory root dependencies and adapter-only features

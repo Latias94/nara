@@ -1,0 +1,13 @@
+[package]
+name = "renamed-nara-ecs-derive-fixture"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+substrate = { package = "nara_ecs", path = "../../../../crates/nara_ecs" }

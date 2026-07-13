@@ -1,0 +1,5 @@
+error: field tombstone cannot reactivate an active field ID
+  --> tests/ui/tombstone_reactivation.rs:11:17
+   |
+11 |     tombstone = "value"
+   |                 ^^^^^^^

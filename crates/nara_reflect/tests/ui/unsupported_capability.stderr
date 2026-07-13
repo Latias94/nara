@@ -1,0 +1,5 @@
+error: unsupported canonical-v1 component capability
+ --> tests/ui/unsupported_capability.rs:9:35
+  |
+9 |     component_capabilities(scene, script),
+  |                                   ^^^^^^

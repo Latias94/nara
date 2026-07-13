@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-12
-**Implemented Slice**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12
+**Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
+native Rust derive authoring and public headless consumer on 2026-07-13
 **Refines**: ADR 0011, ADR 0045, ADR 0051
 **Related**: ADR 0034, ADR 0058, ADR 0076
 
@@ -147,6 +148,32 @@ stateDiagram-v2
 - A structural catalog change builds and validates a fresh `RuntimeInstance`; an active runtime is
   never unfrozen or modified in place. Presentation-only UI state may live outside the frozen
   catalog, but catalog aliases themselves change only in a new catalog generation.
+
+### Implemented RGF-U2 Rust Authoring Slice
+
+Native Rust components may derive `PersistentComponent` beside `Component`. The declaration
+provides explicit component and field IDs, aliases, schema version, capabilities, and retained field
+tombstones once; the derive generates the native `PersistentComponentProvider`, schema, decoder,
+and encoder. Runtime-only components continue to derive only `Component` and remain absent from
+the persistent catalog.
+
+Component-owning plugins call `validate_persistent_component::<T>` during read-only preflight and
+`register_persistent_component::<T>` during build. Validation performs the same complete schema
+and binding checks as registration without mutation. The registry owner still freezes the complete
+candidate during plugin finish; the derive cannot publish, replace, or unfreeze a catalog.
+
+The first admitted field types are `i64`, `u64`, `Vec2`, and `EntityReference`.
+Entity references require `entity_ref`; `asset_ref`, collections, generics, enums, tuple
+structs, and arbitrary nested Rust types remain rejected until a production consumer proves their
+codec and schema contract.
+
+The independent `reference-game` is the public production consumer. Its four components use only
+root exports, freeze against a committed predecessor catalog, round-trip through canonical
+`SceneDocument` and stable-ID `ScenePatchDocument` files, and materialize into a live world.
+Locked renamed-dependency fixtures verify root and ECS derive path resolution.
+
+This slice does not admit dynamic non-Rust component storage, a universal schema compiler, generated
+schema sidecars, a scripting ABI, or adapter-owned catalog projection.
 
 ### Persistent File Boundary
 

@@ -1,0 +1,68 @@
+{
+  "kind": "component_schema_catalog",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "generation": 1,
+    "components": [
+      {
+        "id": "nara.test.LineageProbe",
+        "aliases": [
+          "Previous probe"
+        ],
+        "version": 1,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "removed",
+            "aliases": [
+              "Removed value"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "removed"
+              }
+            ],
+            "value_kind": "i64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "value",
+            "aliases": [
+              "Previous value"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "value"
+              }
+            ],
+            "value_kind": "i64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      }
+    ],
+    "type_tombstones": []
+  }
+}

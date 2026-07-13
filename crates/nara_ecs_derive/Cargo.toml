@@ -1,0 +1,15 @@
+[package]
+name = "nara_ecs_derive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+bevy_ecs_macro_logic.workspace = true
+proc-macro-crate.workspace = true
+proc-macro2.workspace = true
+syn.workspace = true
