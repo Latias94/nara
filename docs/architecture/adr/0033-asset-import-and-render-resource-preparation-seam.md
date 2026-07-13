@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0037: Asset Load Request, Cache, and Lifetime Policy; ADR 0040:
+**Refined By**: ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
 Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -36,11 +36,16 @@ Rules:
   source asset.
 - Generated imported artifacts live under `.nara/import-cache/` and are never hand-authored source
   data.
-- Import artifact identity is content-addressed by stable asset ID, source content hash, importer
-  ID/version, import settings hash, and target/import profile when relevant.
+- An import recipe key includes stable asset ID, source content digest, importer ID/version and
+  implementation digest, canonical import settings, every tracked import-input dependency,
+  output schema/format, and target/import profile when relevant. An artifact content digest
+  identifies immutable output bytes and is not the recipe key or durable product identity.
 - Importers produce backend-neutral runtime assets or descriptors, such as image pixels, sprite
   atlas metadata, mesh data, material descriptors, or font atlases. They do not create
   backend-native handles.
+- Importers must not observe untracked ambient files, environment state, clocks, or mutable global
+  ECS state. Dependency discovery and multi-product publication require a bounded tracked import
+  context and an atomically published artifact group.
 - Image assets describe image content and import identity only. Sampler, alpha, tint, and material
   policy live above images in `nara_material`.
 - `nara_render` owns the backend-neutral render resource preparation interface and frame phase
@@ -114,6 +119,8 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   scratch `AssetServer` during component preflight and writes it back to the target `World` only when
   the full scene/prefab preflight succeeds.
 - Editor asset browsers and future hot reload can reuse the same importer/dependency graph data.
+- Cache reuse is valid only when the complete import recipe matches. Equal output bytes may share a
+  content digest without collapsing stable source/product identity or dependency provenance.
 - The next plan should be allowed to add meaningful code and crate structure; avoiding the seam now
   would create more expensive pre-1.0 rewrites.
 
@@ -191,4 +198,4 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 - Render crate boundaries: [0012-render-crate-boundaries.md](0012-render-crate-boundaries.md)
 - Render graph policy: [0017-render-graph-policy.md](0017-render-graph-policy.md)
 - Render backend integration boundary: [0032-render-backend-integration-boundary.md](0032-render-backend-integration-boundary.md)
-- Project layout and package format: [0020-project-layout-and-package-format.md](0020-project-layout-and-package-format.md)
+- Project source layout: [0020-project-layout-and-package-format.md](0020-project-layout-and-package-format.md)

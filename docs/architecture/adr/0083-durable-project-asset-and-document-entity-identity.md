@@ -3,11 +3,13 @@
 **Status**: Proposed
 **Date**: 2026-07-13
 **Owner**: `nara_asset`, `nara_identity`, `nara_scene`, and authoring hosts
-**Admission Trigger**: A reference-game fixture proves asset move, entity rename/reparent, subtree
-duplicate, prefab duplicate, and cross-document reference preservation through public tooling
+**Admission Trigger**: Reference-game fixtures prove asset move, multi-product rename/reorder,
+entity rename/reparent, subtree/prefab duplicate, and cross-document reference preservation through
+public tooling
 **Revisit Trigger**: Measured project scale, merge behavior, or package indexing proves that the
-two-level asset/document identity cannot remain bounded or collision-safe
-**Related**: ADR 0006, ADR 0007, ADR 0011, ADR 0038, ADR 0043, ADR 0051, ADR 0058, ADR 0081
+scoped asset/product/document identity cannot remain bounded or collision-safe
+**Related**: ADR 0006, ADR 0007, ADR 0011, ADR 0038, ADR 0043, ADR 0051, ADR 0058, ADR 0081,
+ADR 0087
 
 ## Context
 
@@ -16,6 +18,8 @@ and native handles. Two persistent identity layers are nevertheless incomplete:
 
 - `StableAssetId` is already a UUID stored by asset metadata, but the metadata also stores the
   current path, creating two authorities for a movable asset.
+- A single source can produce multiple durable products, but names, array indexes,
+  `ArtifactLabel`, and content digests do not provide rename/reorder-stable product identity.
 - `SceneEntityId` is a validated path-like string. Its syntax allows hierarchy-looking values and
   prefab expansion currently constructs `anchor/source_entity` strings in the same type.
 
@@ -31,11 +35,13 @@ rename cost that nara should avoid.
 
 ## Decision
 
-If accepted, nara will use two-level durable project identity:
+If accepted, nara will use scoped durable project identity:
 
 ```mermaid
 flowchart TD
     Meta[Adjacent asset metadata] --> AssetId[StableAssetId: project-wide UUID]
+    AssetId --> ProductId[ImportedProductId: source-local opaque ID]
+    ProductId --> ProductRef[AssetProductRef]
     Source[Scene or prefab document] --> EntityId[SceneEntityId: document-local opaque UUID]
     AssetId --> Document[Document identity scope]
     EntityId --> Document
@@ -52,6 +58,8 @@ The identities have these meanings:
 | Identity | Representation | Scope | Persistent |
 |---|---|---|---:|
 | `StableAssetId` | Non-nil 128-bit UUID | One project asset across moves and renames | Yes |
+| `ImportedProductId` | Primary token or non-nil opaque 128-bit ID | One logical imported product within a source asset | Yes |
+| Product reference | `StableAssetId + ImportedProductId` | Project or package | Yes |
 | `SceneEntityId` | Non-nil opaque 128-bit UUID | One source scene or prefab document | Yes |
 | Local entity reference | `SceneEntityId` | The containing document | Yes |
 | External document entity reference | `StableAssetId + SceneEntityId` | Project or package | Yes |
@@ -86,6 +94,27 @@ Project asset database: StableAssetId <-> current AssetPath
   directory sidecars.
 - The current path may be retained as diagnostic or recovery evidence outside equality and
   resolution authority. It is not duplicated as an authoritative field inside `.meta`.
+
+### Imported Product Identity
+
+`ImportedProductId` identifies one logical output of an importer within its owning
+`StableAssetId`. It supports models, atlases, fonts, compound documents, and other sources that
+produce more than one independently referencable runtime product.
+
+- Every source has a reserved `Primary` product. Additional products use non-nil opaque IDs scoped
+  to that source asset.
+- A persistent product reference is `StableAssetId + ImportedProductId`. Neither half alone
+  identifies an auxiliary product.
+- Display names, source object names, array order, `ArtifactLabel`, cache location, recipe digest,
+  and content digest are projections or cache data, never durable product identity.
+- Reimport preserves product IDs when the importer can prove semantic continuity. Rename and
+  reorder do not change an ID. Ambiguous reconciliation rejects publication or requires an explicit
+  remap; it does not silently bind an old reference to a different product.
+- Duplicating a source asset creates a new `StableAssetId` and may preserve its internal product-ID
+  pattern because the enclosing asset scope changes. Extracting a product into an independent
+  source creates a new asset identity and requires an explicit reference-remap transaction.
+- ADR 0087 owns dependency discovery, importer reconciliation, artifact-group publication, and
+  cache generation. This ADR owns only the persistent product identity semantics.
 
 ### Document-Local Entity Identity
 
@@ -248,6 +277,8 @@ unreliable.
 |---|---:|---|
 | Rename/reparent stability | Entity ID, patch target, and reference bytes remain unchanged | Scene-authoring integration tests |
 | Asset move stability | Moving source plus `.meta` rewrites zero stable references | Project asset-database test |
+| Product stability | Renaming or reordering importer outputs rewrites zero durable product references | Multi-product importer fixture |
+| Product conflict rejection | Duplicate or ambiguous product IDs reject the candidate artifact group | Hostile importer fixture |
 | Duplicate correctness | Every subtree copy has an injective remap and correct internal/external reference partition | Duplicate transaction tests |
 | Prefab distinction | Equal source IDs in two instances produce distinct structured projection locators | Nested-prefab tests |
 | Conflict rejection | Nil/duplicate asset or entity IDs reject publication before document/database mutation | Hostile fixture tests |
@@ -269,31 +300,38 @@ unreliable.
 | Multi-file migration crashes after partial replacement | Critical | Medium | Preflight in memory, stage a generation, journal every replace, commit through one durable marker, and prove old-or-new recovery at each crash point. |
 | Migration becomes a permanent compatibility layer | High | Medium | Use the pre-1.0 canonical reset policy and delete obsolete readers after rewrite. |
 | Stable ID type ownership creates a crate cycle | High | Low | Choose Rust ownership during implementation; freeze semantics, not dependency placement. |
+| Importer reconciliation aliases the wrong product | Critical | Medium | Require explicit continuity evidence, validate the full candidate product set, and reject ambiguity. |
 
 ## Consequences
 
 If accepted:
 
-- this ADR supersedes ADR 0006's path-like `SceneEntityId` encoding and ADR 0038's use of
-  string-composed projection IDs; their scene-document truth and provenance decisions remain valid;
-- this ADR also refines ADR 0038's `AssetRef + SceneEntityId` cross-document contract specifically
-  for entity-bearing references to require `StableAssetId + SceneEntityId`; ordinary asset
-  references retain ADR 0007/`nara_asset` path-or-stable-ID semantics;
-- ADR 0007 retains asset import ownership but `.meta` path duplication is removed;
+- this ADR refines ADR 0006 by replacing only the current path-like wire representation of
+  `SceneEntityId` with a document-local opaque UUID; its dimension-neutral document model remains
+  authoritative;
+- this ADR refines ADR 0038 by replacing only string-composed projection IDs and entity-bearing
+  external `AssetRef + SceneEntityId` references with structured projection provenance and
+  `StableAssetId + SceneEntityId`; its authoring provenance and write-back rules remain
+  authoritative;
+- this ADR refines ADR 0007 by removing current-path authority from `.meta` and adding stable
+  source-local imported-product identity while retaining asset-import ownership and ordinary
+  path-or-stable-ID asset references;
 - ADR 0058 retains runtime identity domains and tombstones; source-document and projection locators
   become explicit inputs to that runtime mapping;
 - ADR 0011 and ADR 0081 schema IDs remain an independent identity space;
 - scene, prefab, patch, tooling-workspace, and golden-fixture data require one coordinated pre-1.0
   rewrite before this proposal may become authoritative.
 
-The old ADRs are not marked `Superseded` while this ADR remains Proposed. Acceptance must add
-bidirectional refinement/supersession metadata and the corresponding migration record.
+No existing ADR is superseded as a whole by this decision. While this ADR remains Proposed it is
+non-authoritative. Acceptance must add `Refines: ADR 0006, ADR 0007, ADR 0038` here, reciprocal
+`Refined By: ADR 0083` metadata to those ADRs, and the corresponding migration record in one
+change.
 
 ## Admission Evidence
 
 Acceptance requires every success metric above, including a committed predecessor/current fixture
-pair for the migration and the independent reference-game product proof. Passing UUID unit tests
-alone is insufficient.
+pair for the migration, a multi-product importer fixture, and the independent reference-game
+product proof. Passing UUID unit tests alone is insufficient.
 
 ## Citations
 

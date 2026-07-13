@@ -68,7 +68,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0017](0017-render-graph-policy.md): Render Graph Policy
 - [ADR 0018](0018-coordinate-units-and-time.md): Coordinate, Units, and Time
 - [ADR 0019](0019-physics-strategy.md): Physics Strategy
-- [ADR 0020](0020-project-layout-and-package-format.md): Project Layout and Package Format
+- [ADR 0020](0020-project-layout-and-package-format.md): Project Source Layout
 - [ADR 0021](0021-scripting-and-wasm-boundary.md): Rust Authoring, Hot Iteration, and Optional Scripting Adapters
 - [ADR 0022](0022-3d-coordinate-system.md): 3D Coordinate System
 - [ADR 0023](0023-event-message-and-command-model.md): Event, Message, and Command Model
@@ -85,7 +85,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0034](0034-editor-play-mode-world-boundary.md): Editor Play Mode World Boundary
 - [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md): Project Manifest and Runtime Settings Authority
 - [ADR 0036](0036-event-message-and-resource-queue-lifetime.md): Event, Message, and Resource Queue Lifetime
-- [ADR 0037](0037-asset-load-request-cache-and-lifetime-policy.md): Asset Load Request, Cache, and Lifetime Policy
+- [ADR 0037](0037-asset-load-request-cache-and-lifetime-policy.md): Runtime Asset Acquisition, Reload, and Lifetime Policy
 - [ADR 0038](0038-scene-prefab-authoring-identity-and-provenance.md): Scene/Prefab Authoring Identity and Provenance
 - [ADR 0039](0039-main-loop-time-pause-and-runtime-state.md): Main Loop, Time Domains, Pause, and Runtime State
 - [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md): Render Resource Lifetime and Submitter Ownership
@@ -119,3 +119,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0083](0083-durable-project-asset-and-document-entity-identity.md): Durable Project Asset and Document Entity Identity
 - [ADR 0084](0084-executable-runtime-ownership-and-isolation.md): Executable Runtime Ownership and Isolation
 - [ADR 0085](0085-hierarchy-transform-and-visibility-semantics.md): Hierarchy, Transform, and Visibility Semantics
+- [ADR 0087](0087-asset-dependency-import-product-and-artifact-publication-graph.md): Asset Dependency, Import Product, and Artifact Publication Graph

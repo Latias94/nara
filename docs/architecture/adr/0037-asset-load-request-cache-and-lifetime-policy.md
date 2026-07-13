@@ -1,4 +1,4 @@
-# ADR 0037: Asset Load Request, Cache, and Lifetime Policy
+# ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy
 
 **Status**: Accepted
 **Date**: 2026-07-09
@@ -12,9 +12,9 @@ stable asset IDs, `.meta` records, importer registry metadata, import artifacts,
 `LoadState`, reload generations, dependency-aware reload requests, async image imports, and backend
 GPU caches.
 
-The missing contract is the public lifetime model: how load/reload requests are represented, how
-failures are observed, when cached runtime values remain alive, how stale task results are rejected,
-and how prepared/render backend resources are evicted.
+The missing contract is the public lifetime model: how runtime acquisition differs from source
+reload, how failures are observed, when cached runtime values remain alive, how stale task results
+are rejected, and how prepared/render backend resources are evicted.
 
 ## Decision
 
@@ -23,18 +23,44 @@ generations, source-change diagnostics, and typed runtime asset tables. Domain a
 decode/import logic and typed value application. Render crates own prepared render resources and
 backend GPU caches.
 
+Runtime acquisition and source reload are separate operations:
+
+```mermaid
+flowchart LR
+    Ref[AssetRef / product reference] --> Resolve[Resolve in source DB or mounted catalog]
+    Resolve --> Acquire[Acquire runtime lease]
+    Acquire --> Deps[Acquire required runtime dependencies]
+    Deps --> Publish[Publish typed value behind stable Handle]
+    Publish --> Release[Release lease]
+    Release --> Evict[Budgeted eviction at safe point]
+
+    Change[Source change] --> Reimport[Reimport affected source closure]
+    Reimport --> Generation[Verified new artifact generation]
+    Generation --> Swap[Reload stable runtime handles]
+    Swap --> Publish
+```
+
 The first lifetime policy is:
 
 - `Handle<T>` is runtime identity. It is stable across reloads but not persistent scene data.
-- `AssetRef` is persistent semantic identity. It resolves to a runtime handle through
-  `ProjectAssetDatabase` and `AssetServer`.
+- `AssetRef` is persistent semantic identity. Authoring hosts resolve it through the project asset
+  database; packaged runtimes resolve it through a validated mounted content catalog. Resolution
+  does not itself imply residency.
+- A runtime acquisition request resolves identity, acquires a lease, loads required runtime
+  dependencies, decodes or materializes a typed value, and publishes it behind a stable handle.
+  Release and budgeted eviction are later lifetime operations.
+- A source reload request represents an already known source/product whose authoring inputs or
+  importer recipe changed. It is not the public runtime load request.
 - `AssetSourceChange` values are coalesced into generation-stamped `AssetReloadRequest` values.
 - Each reload request carries expected asset version and load generation. Domain apply systems must
   reject stale results.
 - A failed first load stores no asset value and sets `LoadState::Failed`.
 - A failed reload preserves the last good typed asset value when one exists, records
   `LoadState::Failed`, and emits a failure event.
-- Removed source assets clear typed runtime values and prepared render resources.
+- In a source-backed authoring database, removing a source clears typed runtime values and
+  prepared render resources derived from that source generation.
+- Removing authoring source is distinct from unmounting a packaged generation. A runtime may keep
+  using a verified mounted artifact even when no authoring tree is present.
 - Source-change translation or scheduling failures produce structured diagnostics; they must not be
   silently dropped.
 - Prepared render resources are backend-neutral cache entries. Backend-native GPU objects remain in
@@ -42,7 +68,7 @@ The first lifetime policy is:
 
 ```mermaid
 sequenceDiagram
-    participant Watch as Watcher / Manual Change
+    participant Watch as Watcher / Manual Source Change
     participant Asset as nara_asset
     participant Domain as Domain Import Plugin
     participant Prepared as nara_render Prepared Resources
@@ -81,6 +107,12 @@ these modes:
 - Domain plugins should drain only the source kinds they own.
 - Stale generation or expected-version mismatches must not overwrite newer runtime asset state.
 - Cache eviction must not invalidate persistent scene data.
+- Runtime acquisition and reload queues have distinct request identities, state, cancellation, and
+  diagnostics. A load miss must not be fabricated as a source-change event.
+- Required dependencies acquire transitively before publication. Soft dependencies remain
+  unresolved until explicitly acquired by product policy.
+- An in-flight acquisition captures one immutable source-database or mount-set snapshot; a later
+  publication cannot redirect it halfway through decode.
 
 ## Alternatives Considered
 
@@ -102,7 +134,7 @@ audio, and future editor tooling.
 
 **Decision**: Rejected.
 
-### Option C: Asset-owned requests/state plus domain apply and backend caches
+### Option C: Asset-owned acquisition/reload state plus domain apply and backend caches
 
 **Pros**: Matches ADR 0033, keeps backend isolation, supports reload failures and stale-task guards,
 and leaves room for cache modes.
@@ -120,6 +152,8 @@ and leaves room for cache modes.
 | Last-good reload | Failed reload preserves previous typed value | Unit tests |
 | Removal cleanup | Removed source clears typed value and prepared resource | Unit tests |
 | Backend isolation | `nara_asset` never stores GPU objects | Dependency search |
+| Request separation | Runtime acquisition neither creates nor consumes `AssetReloadRequest` | API and state-machine tests |
+| Snapshot consistency | One acquisition resolves every required dependency against one immutable database/mount snapshot | Integration tests |
 
 ## Risks and Mitigations
 
@@ -135,12 +169,13 @@ and leaves room for cache modes.
 - ADR 0033 remains the import/render seam. This ADR defines load request and lifetime policy inside
   that seam.
 - `AssetSourceChange` resolution failures must become structured diagnostics.
-- Future public load APIs should lower into `AssetReloadRequest` or a compatible request model
-  rather than creating separate queues.
+- Public runtime load APIs lower into a dedicated resolve/acquire/dependency/publish request model.
+  Source change lowers into reimport/reload generations. The two paths may share typed result and
+  stale-generation helpers, but not request meaning or queues.
 
 ## Open Questions
 
-- What public API shape should synchronous-looking `load` calls expose while still using the request
-  model internally?
+- What public API shape should synchronous-looking `load` calls expose while still returning or
+  retaining an explicit runtime acquisition lease?
 - Which cache mode should be implemented first after automatic retention?
 - Should asset progress be a diagnostic/status resource or a dedicated observable asset-load table?
