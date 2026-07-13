@@ -119,4 +119,9 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0083](0083-durable-project-asset-and-document-entity-identity.md): Durable Project Asset and Document Entity Identity
 - [ADR 0084](0084-executable-runtime-ownership-and-isolation.md): Executable Runtime Ownership and Isolation
 - [ADR 0085](0085-hierarchy-transform-and-visibility-semantics.md): Hierarchy, Transform, and Visibility Semantics
+- [ADR 0086](0086-rust-project-build-and-executable-generation.md): Rust Project Build and Executable Generation
 - [ADR 0087](0087-asset-dependency-import-product-and-artifact-publication-graph.md): Asset Dependency, Import Product, and Artifact Publication Graph
+- [ADR 0088](0088-target-build-cook-package-and-runtime-content-catalog.md): Target Build, Cook, Package, and Runtime Content Catalog
+- [ADR 0089](0089-runtime-scene-instance-loading-activation-unload-and-travel.md): Runtime Scene Instance Loading, Activation, Unload, and Travel
+- [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md): Unavailable Schema and Lossless Authoring
+- [ADR 0091](0091-editor-persistence-recovery-and-concurrent-writer-policy.md): Editor Persistence, Recovery, and Concurrent Writer Policy

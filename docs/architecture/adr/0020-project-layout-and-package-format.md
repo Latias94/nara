@@ -18,6 +18,8 @@ runtime packages, package catalogs, mount precedence, patches, DLC, signing, or 
 Recommended layout:
 
 ```text
+Cargo.toml
+Cargo.lock
 nara.toml
 src/
 assets/
@@ -30,12 +32,16 @@ scripts/
 
 Rules:
 
+- `Cargo.toml` (or an owning workspace manifest) and the application `Cargo.lock` are the Rust
+  package graph, target, dependency, and feature-resolution authority.
 - `nara.toml` is the project manifest.
 - `assets/` holds source assets.
 - `scenes/` and `prefabs/` hold data documents.
 - `.nara/import-cache/` holds generated import artifacts and records and should not be hand-authored.
 - AI-generated projects should be able to produce this layout without editor involvement.
 - The layout is conventional, not a hard requirement for embedded/library use.
+- `nara.toml` does not duplicate Cargo dependencies, version resolution, source lists, or lock
+  state.
 
 ## Alternatives Considered
 

@@ -54,6 +54,9 @@ Rules:
   multi-document transactions with per-document patches and rollback diagnostics.
 - Dirty/saved state is revision-based. A document is dirty when its current authoring revision
   differs from the last successful save revision.
+- A successful save is proven by a persistence receipt bound to the document identity, captured
+  revision, canonical content digest, and required filesystem guarantee tier. A UI/tooling command
+  cannot advance the saved revision without that evidence.
 - External file changes enter as conflict state, not silent overwrite. The editor may offer reload,
   merge, save-as, or keep-local actions, but these are explicit workspace commands.
 - Play Mode is anchored to a document snapshot and workspace mode state. Stop Play still discards
@@ -138,4 +141,3 @@ surface as editor UI, and keeps save/reload/conflict semantics centralized.
   source metadata?
 - What is the minimal external reload conflict workflow before the editor has a full UI?
 - How should project-wide asset documents participate in the same workspace model?
-

@@ -115,6 +115,14 @@ One import candidate contains immutable artifact members plus one manifest mappi
 Artifact groups are generated cache data. They do not contain GPU handles, authored source truth,
 runtime `Handle<T>` values, package signatures, or editor recovery journals.
 
+`nara.asset-artifact-group` is the first persistent import-cache manifest file kind. It uses the
+ADR 0051 envelope (`kind`, `format_version`, `engine_min_version`, `generator`), canonical version
+1, an explicit compatibility matrix, and non-empty golden fixtures. Manifest/member-table decoding
+applies ADR 0049 encoded-byte, shape, count, depth, string, dependency, time, and diagnostic budgets
+before allocating products, opening members, or publishing a candidate. Domain artifact member
+formats either use their own admitted envelope or are length/digest-bounded opaque members named by
+the group manifest.
+
 ## Alternatives Considered
 
 ### Option A: One Source Produces One Unstructured Artifact
@@ -154,6 +162,7 @@ and gives reload/cook one verified immutable publication unit.
 | Stale result safety | Cancelled, timed-out, stale, and superseded jobs publish zero manifests | Task integration tests |
 | Budget safety | Cycle, depth, fan-out, product-count, and byte-limit fixtures terminate within bounds | Hostile importer tests |
 | Backend isolation | Artifacts and graph records contain no GPU/native handles | Schema and dependency audit |
+| Format durability | Current/predecessor manifests migrate or reject according to the compatibility matrix | Golden fixture tests |
 
 ## Risks and Mitigations
 
