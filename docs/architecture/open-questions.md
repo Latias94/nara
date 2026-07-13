@@ -206,17 +206,26 @@ This document contains undecided architecture questions only. Accepted decisions
   and orientation/safe-area changes are separate platform-capability and display-state contracts to
   be admitted by concrete target workflows.
 
-## OQ-024: Cross-Domain Residency and Memory Pressure
+## OQ-024: Cross-Domain Memory-Pressure Coordination
 
 - **Status**: open
-- **Owner**: asset, scene, render, audio, and executable runtime domains
-- **Trigger**: A representative workload or platform pressure signal requires coordinated limits
-  across source acquisition, decoded assets, active/candidate scenes, GPU caches, audio streams, or
-  other native service state.
+- **Owner**: product/executable hosts and residency-owning asset, render, audio, and service domains
+- **Trigger**: At least two implemented residency-owning domains publish bounded ADR 0068 resident
+  and reclaimable-byte observations, and a named supported target/workload proves that independent
+  domain policies cannot meet an explicit process memory ceiling or that an ordered response from
+  multiple domains is required before the runtime may continue. A platform pressure notification
+  alone is not admission evidence.
 - **Related ADRs**: 0037, 0040, 0042, 0054, 0068, 0082, 0088, 0089
-- **Question**: Which domain-owned residency leases, pin/priority vocabulary, aggregate observations,
-  eviction and rehydration contracts, safe points, and fault outcomes coordinate pressure without
-  creating a shallow global allocator or violating last-good publication?
+- **Question**: Which minimal typed pressure episode and request/result contract may a product host
+  admit at a safe point so each domain independently decides what to evict, defer, rehydrate,
+  degrade, or refuse; reports bounded resident/reclaimable bytes and live-lease blockers; and
+  returns continue, degraded, reject, or graceful-stop outcomes without a global allocator,
+  universal priority/fairness policy, or violation of live dependency closures and last-good
+  generations?
+- **Boundary**: Platform adapters only produce normalized pressure drafts. Per-domain cache modes,
+  lease/pin semantics, eviction/rehydration algorithms, and numeric defaults remain domain-owned;
+  OQ-016 owns GPU cache defaults. Active scene/content candidate admission and atomic publication
+  remain with ADR 0088/0089 or a later residency-closure decision.
 
 ## OQ-025: Profiling, Crash Artifacts, and Telemetry Channels
 
@@ -347,3 +356,20 @@ This document contains undecided architecture questions only. Accepted decisions
   reference rules, residency budgets, activation safe points, hierarchy boundaries, and origin
   shifting coordination satisfy the first large-world workflow across rendering, physics,
   navigation, audio, and networking?
+
+## OQ-036: Panic, Abort, and Native Callback Fault Containment
+
+- **Status**: open
+- **Owner**: `nara_app`, executable hosts, `nara_tasks`, and native service/backend adapters
+- **Trigger**: A production executable, task worker, system adapter, or native callback can panic or
+  fault and the product must choose between process termination, runtime-generation failure and
+  fresh restart, or an explicitly proven containment domain.
+- **Related ADRs**: 0003, 0008, 0009, 0042, 0048, 0052, 0068, 0078, 0084, 0086, 0093
+- **Question**: Which build-profile panic strategy, unwind/abort rules, catch boundaries,
+  FFI/native-callback guards, worker failure propagation, invariant invalidation, runtime/process
+  terminal states, crash handoff, and fresh-restart policy contain faults without relying on unwind
+  across FFI or resuming a generation whose `World`, service, or native state may be compromised?
+- **Boundary**: Typed recoverable errors remain the normal contract. Until an admitted containment
+  design proves otherwise, catching a panic does not authorize continued gameplay in the same
+  runtime generation; OQ-025 owns profiling, crash-artifact, and telemetry channels rather than
+  containment semantics.
