@@ -23,7 +23,10 @@ drafts. The current drafts are
 [Runtime Composition Interface Design](runtime-composition-interface-design.md) and
 [Source Extension Package Interface Design](source-extension-package-interface-design.md). The
 [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
-tests both workbenches against one runtime, schema, importer, and editor workflow.
+tests both workbenches against one runtime, schema, importer, and editor workflow. Its two focused
+Interfaces are the
+[Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md) and
+[Asset Import Host Interface Design](asset-import-host-interface-design.md).
 
 nara is unreleased. Incorrect prototype APIs and draft persistent shapes are removed rather than wrapped: the corrected Rust API takes the canonical unsuffixed name, the corrected persistent shape becomes canonical version 1 after in-repository sources are updated, and the deliberate break is recorded in `../migrations/2026-07-engine-foundation.md`.
 

@@ -12,6 +12,8 @@
 
 **Upstream Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Runtime Composition Interface Design](runtime-composition-interface-design.md)
 
+**Focused Interfaces**: [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md)
+
 **Research Context**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
 
 **Related ADRs**: [0003](adr/0003-own-app-plugin-and-schedule-lifecycle.md), [0007](adr/0007-asset-identity-and-import-pipeline.md), [0015](adr/0015-editor-tooling-and-dogfooding-boundary.md), [0016](adr/0016-extension-seams-for-backends-and-domain-modules.md), [0042](adr/0042-runtime-service-and-backend-boundary.md), [0045](adr/0045-component-schema-capability-metadata.md), [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md), [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md), [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md), [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md), [0070](adr/0070-capability-oriented-filesystem-substrate.md), [0080](adr/0080-domain-owned-task-update-integration-sets.md), [0081](adr/0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0082](adr/0082-process-host-authority-and-runtime-construction-topology.md), [0086](adr/0086-rust-project-build-and-executable-generation.md), [0087](adr/0087-asset-dependency-import-product-and-artifact-publication-graph.md), [0090](adr/0090-unavailable-schema-and-lossless-authoring.md), [0093](adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md)
@@ -269,7 +271,7 @@ policy exists.
 | ID | Caller and goal | Required Interface behavior | Primary oracle |
 |---|---|---|---|
 | MT-01 | Game author uses the feature in code-first embedding | One plugin-group call installs the same schema/runtime definitions; no package ceremony is required | Public example and semantic runtime test |
-| MT-02 | Package author exposes all compiled roles | One `package()` registration binds stable typed contribution keys; no per-Host manual order list | Compile fixture and plan snapshot |
+| MT-02 | Package author exposes all compiled roles | One `package()` registration provides stable declaration locators plus typed `BindingClaim<C>` values; final catalog verification privately mints `ContributionKey<C>`; no per-Host manual order list | Compile fixture and plan snapshot |
 | MT-03 | Project user inspects before build | Preview reports identity, source, license, trust evidence, roles, targets, rebuild effects, and unknown binding facts without executing package code | No-execution preview test |
 | MT-04 | Project user adds or updates the package | One CLI/editor action previews Cargo changes and all selected Host effects before explicit consent | Golden UX model |
 | MT-05 | External package renames its Nara dependency | Ordinary Rust helpers and derive paths continue to work without a privileged workspace relationship | Clean-room fixture |
@@ -281,7 +283,7 @@ policy exists.
 |---|---|---|---|
 | MT-10 | Editor opens `SpriteAnimator` fields | Stable schema IDs and capabilities produce a standard Inspector with no custom provider | Inspector model fixture |
 | MT-11 | Editor edits animation intent | Edits become schema-aware patches with revision guards, inverse patches, validation, and undo | Patch/undo integration test |
-| MT-12 | Import Host imports `.nanim` | Job reads only bounded snapshots and tracked image products, then returns a complete artifact-group candidate | Import recipe and artifact fixture |
+| MT-12 | Import Host imports `.nanim` | Job reads only bounded snapshots and tracked image products, records bounded outputs in `ImportContext`, and returns typed success/failure; after physical exit the Host seals the context and privately constructs the complete candidate | Import recipe and artifact fixture |
 | MT-13 | Import source defines several clips | Stable product IDs survive source reordering and unrelated edits; removed products follow explicit reconciliation | Reimport fixture |
 | MT-14 | Runtime consumes an imported clip | Runtime uses typed handles and backend-neutral sprite intent; no importer or filesystem Interface is reachable | Headless semantic test and boundary search |
 | MT-15 | Package provider is unavailable | Editor preserves unavailable component records losslessly; runtime spawn rejects before `World` mutation when a required binding is absent | ADR 0090 fixture |
@@ -400,8 +402,8 @@ flowchart TD
 
 | Module | Interface | Hidden implementation | Must not own | Dependency category |
 |---|---|---|---|---|
-| Leaf extension contract Module | Stable IDs, versioned contract references, bounded envelopes, typed keys, binding receipts, prepared package facts | Canonical parsing, fingerprinting, marker/contract uniqueness, and typed contract slices | Any domain plan, `nara_app`, `nara_asset`, `nara_reflect`, `nara_tooling`, Host mutation, diagnostics dependency cycles | In-process pure computation; domain-independent leaf dependency |
-| Root extension composition Module | Cross-package closure, domain resolver invocation, inspection snapshot, Host-specific activation specifications | Target/trust/requirement closure and assembly of concrete typed projections | Cargo solving, executable authority, active coordinator, universal plan lookup | In-process pure computation above the leaf and all selected domain Modules |
+| Leaf extension contract Module | Stable IDs, versioned contract references, bounded envelopes, private typed keys, binding receipts, prepared package facts | Canonical parsing, fingerprinting, marker/contract uniqueness, and private typed contract slices | Any domain plan, `nara_app`, `nara_asset`, `nara_reflect`, `nara_tooling`, Host mutation, diagnostics dependency cycles | In-process pure computation; domain-independent leaf dependency |
+| Root extension composition Module | Cross-package closure, verified contract-resolution orchestration, inspection snapshot, Host-specific activation specifications | Target/trust/requirement closure and assembly of concrete typed projections | Cargo solving, executable authority, active coordinator, universal plan lookup | In-process pure computation above the leaf and all selected domain Modules |
 | Runtime contribution owner | Repeatable plugin definitions and lowering into the closed product plan | Slot/order/capability closure and fresh plugin declaration checks | Importer, editor, package discovery, runner, native authority | In-process |
 | Schema contribution owner | Stable catalog fragment, native-binding evidence, migrations, typed schema plan | Merge, lineage, validation, Building-to-Frozen candidate | Runtime process identity as durable schema, Inspector UI, package graph | In-process |
 | `nara_asset` Import Host | Importer descriptor/binding plan plus tracked domain job Interface | Import request policy, recipes, tracked-input bookkeeping, stale eligibility, product reconciliation, artifact staging/publication, artifact last-good | Executor mechanics, native filesystem authority, raw paths, private per-asset-type Host loops, runtime `App`, editor workspace | In-process planning; bounded execution through `nara_tasks`; brokered `nara_fs` capabilities and local-substitutable stores |
@@ -465,23 +467,25 @@ The reusable package path has one explicit registration:
 
 ```rust
 pub fn package() -> Result<StaticPackageRegistration, PackageBindingError> {
-    let registration = PackageRegistration::for_manifest(PACKAGE_MANIFEST_FINGERPRINT)
-        .bind(
-            contribution::SCHEMA,
-            nara_reflect::schema_binding(SpriteAnimationSchemas::new),
-        )?
-        .bind(
-            contribution::RUNTIME,
-            nara_app::plugin_binding(SpriteAnimationRuntimePlugin::new),
-        )?;
+    let mut package = PackageRegistration::new(generated::PACKAGE);
+
+    package.add(nara_reflect::extension::schemas(
+        generated::SCHEMA,
+        SpriteAnimationSchemas::new,
+    )?)?;
+
+    package.add(nara_app::extension::plugins(
+        generated::RUNTIME,
+        SpriteAnimationRuntimePlugin::new,
+    )?)?;
 
     #[cfg(feature = "import")]
-    let registration = registration.bind(
-        contribution::IMPORTER,
-        nara_asset::importer_binding(SpriteAnimationImporter::new),
-    )?;
+    package.add(nara_asset::extension::threaded_importer(
+        generated::IMPORTER,
+        SpriteAnimationImporter::new,
+    )?)?;
 
-    registration.finish()
+    package.finish()
 }
 ```
 
@@ -489,9 +493,12 @@ This is illustrative. Its required properties are:
 
 - `package()` is repeatable and performs no I/O, thread start, process start, `App` mutation, or
   Host capability acquisition;
-- one canonical declaration fingerprint is checked against generated or handwritten typed keys;
-- `ContributionKey<C>` binds a contribution ID to its contract type, making common mismatches Rust
-  type errors;
+- generated or handwritten locators are untyped declaration claims whose manifest fingerprint is
+  checked during admission;
+- domain helpers turn claims into `BindingClaim<C>` values, making provider/factory mismatches Rust
+  type errors and contract-locator mismatches structured registration errors;
+- only final catalog verification privately mints `ContributionKey<C>` after proving manifest,
+  target, trust, executable generation, and implementation evidence;
 - domain helpers construct bindings, so adding a contract does not add a package-core method;
 - a factory creates fresh definition state and receives no generic context;
 - package registration is explicit; no linker constructor or global inventory hides inclusion;
@@ -510,94 +517,116 @@ preview, drift, publishing, and authoring costs before ADR adoption.
 
 ### 2. Open Contract Kernel, Domain-Owned Helpers
 
-The central binding operation may be generic, but it is not a universal executable trait:
+The focused
+[Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md)
+supersedes the earlier domain-rich trait sketch. The leaf marker establishes type relationships;
+domain resolution and Host binding remain above it:
 
 ```rust
 pub trait ContributionContract: Sized + 'static {
     const CONTRACT: ContributionContractRef;
 
-    type Declaration: Send + Sync + 'static;
-    type PlanData: Send + Sync + 'static;
+    type Declaration: 'static;
     type Binding: 'static;
-    type BoundPlan: 'static;
-    type Error: 'static;
-
-    fn resolve(
-        slice: ContractSlice<'_, Self>,
-    ) -> Result<(Self::PlanData, Self::BoundPlan), Self::Error>;
+    type DecodeError: 'static;
 }
 
-pub struct ContributionKey<C> {
-    locator: ContributionLocator,
-    contract: ContributionContractRef,
-    declaration_digest: DeclarationDigest,
-    marker: PhantomData<fn() -> C>,
+pub struct ContractDefinition<C, PlanData, ResolveError>
+where
+    C: ContributionContract,
+    PlanData: CanonicalContractPlan,
+{
+    decoders: DescriptorDecoderTable<C>,
+    canonical_declaration_version: DeclarationVersion,
+    resolve: fn(ContractSlice<C>) -> Result<PlanData, ResolveError>,
 }
 
-pub struct ContractBinding<C: ContributionContract> {
-    key: ContributionKey<C>,
-    executable_generation: ExecutableGeneration,
-    implementation_digest: ImplementationDigest,
-    binding: C::Binding,
+pub struct ContractSupport<C, PlanData, ResolveError>
+where
+    C: ContributionContract,
+    PlanData: CanonicalContractPlan,
+{
+    definition: ContractDefinition<C, PlanData, ResolveError>,
+    owner: VerifiedContractOwner<C>,
 }
 
-pub struct ContractSupport<C: ContributionContract> {
-    supported_versions: ContractVersionRange,
-    decode: fn(
-        &DescriptorEnvelope,
-        &DescriptorDecodeLimits,
-    ) -> Result<C::Declaration, C::Error>,
-    summarize: fn(
-        &C::PlanData,
-    ) -> Result<ContractPlanSummary, C::Error>,
+impl PreparedPackageSet {
+    pub fn resolve_contract<C, PlanData, ResolveError>(
+        &self,
+        support: &ContractSupport<C, PlanData, ResolveError>,
+        request: ContractRequest<C>,
+    ) -> Result<
+        ResolvedContract<C, PlanData>,
+        ContractResolveError<C::DecodeError, ResolveError>,
+    >
+    where
+        C: ContributionContract,
+        PlanData: CanonicalContractPlan + 'static,
+        ResolveError: 'static;
 }
 ```
 
-The exact types are illustrative. Key fields are private. A key is created only by a generated
-projection or a fallible manifest lookup that verifies the stable contract ID and version. A Host
-catalog rejects two Rust marker types claiming the same stable contract reference. The typed marker
-prevents local Rust mismatches; the declaration digest and final catalog verification prove
-manifest truth.
+Generated manifest projection produces an untyped `DeclaredContribution`, not a publicly
+constructible typed key. A domain helper turns that locator into `BindingClaim<C>`. Final catalog
+verification alone privately mints `ContributionKey<C>` and `ContractBinding<C>` after checking
+the canonical manifest, declaration digest, Host/target applicability, executable generation, and
+implementation evidence. This avoids teaching the generator Rust marker paths and avoids treating
+generated constants as verified truth.
 
-`ContractSupport<C>` is the explicit compiled support supplied by a domain owner to one root Host.
-The leaf retains only bounded envelopes. The root uses the support value to validate a contract
-version, decode `C::Declaration`, and construct `ContractSlice<C>`. After typed resolution,
-`summarize` returns canonical plan bytes/fingerprint inputs and activation edges in a
-`ContractPlanSummary`; the leaf validates referenced stable IDs and privately constructs the
-`ContractResolutionReceipt`. Neither the support value nor its decoder is exposed as a public
-lookup registry or service locator.
+`ContractDefinition<C, PlanData, ResolveError>` supplies exact wire-version decoders, explicit
+migrations, and one non-capturing pure resolver function pointer. The root-verified support prevents
+callers from pairing its evidence with an arbitrary capturing closure; inventing a stable ID grants
+nothing. It is not an Adapter and cannot activate code or acquire authority. The leaf performs
+common structural preflight before a domain decoder runs, so a decoder cannot ignore the Host's
+byte, shape, string, reference, and diagnostic ceilings.
 
-`PlanData` is pure, fingerprintable, and placement-independent. `BoundPlan` may contain statically
-compiled factories whose thread-affinity rules belong to a concrete Host. The leaf kernel must not
-impose universal `Send + Sync` on executable bindings merely because declaration data can be shared.
+`ContractSlice<C>` contains immutable facts, decoded typed declarations, and a semantic
+binding-presence witness. Implementation/executable evidence stays in the opaque transfer and later
+binding receipt. The slice contains no callable factory/provider, `App`, `World`, workspace,
+file/process/thread/clock authority, renderer, generic executable lookup, or callback that can
+activate code. Matching executable values remain in an opaque inactive transfer retained by the
+leaf until semantic resolution succeeds.
 
-`ContractSlice<C>` contains immutable facts, decoded typed declarations, and verified typed
-bindings. It contains no `App`, `World`, workspace, file/process/thread/clock authority, renderer,
-generic executable lookup, or callback that can activate code.
+The support-owned non-capturing resolution operation hides selection validation, typed binding
+bijection, exact version decode, canonical ordering, private slice-witness retention, plan-summary
+validation, and receipt issuance. `PlanData` is pure, fingerprintable, exact-schema-versioned, and
+placement-independent.
+The leaf returns `ContractResolutionReceipt<C>` plus the sealed transfer. A separate concrete Host
+binder requires `VerifiedHostAdapterSupport<C, H>`, moves inactive wrappers into `BoundPlan`, and
+returns `ContractBindingReceipt<C, H>`. It invokes no factory and the leaf imposes no universal
+`Send + Sync`. Actual placement and activation remain later concrete Host work.
 
-Domain crates may provide extension helpers for author ergonomics. The runtime crate can supply a
-plugin binding helper and the asset crate can supply an importer binding helper without expanding
-the leaf kernel. A third-party contract requires an owning contract crate, a versioned declaration and
-plan, a conformance suite, and an explicitly compiled Host Adapter. Inventing an ID grants nothing.
-
-Resolution is two-stage:
+Semantic resolution and Host binding keep the public stages narrow:
 
 ```text
 leaf contract Module
     -> PreparedPackageSet with bounded envelopes
 root composition Module
-    -> uses explicit ContractSupport<C> to build ContractSlice<C>
-    -> calls each compiled domain resolver and directly owns C::PlanData / C::BoundPlan
+    -> calls leaf resolve_contract with verified ContractSupport<C> and ContractRequest<C>
 leaf contract Module
-    <- validated ContractPlanSummary and ContractResolutionReceipt only
+    -> privately validates selection, binding bijection, versions, and limits
+    -> privately constructs ContractSlice<C> and invokes the support-owned resolver
+    <- returns ResolvedContract<C, PlanData> with PlanData,
+       ContractResolutionReceipt<C>, and opaque InactiveBindingTransfer<C>
+concrete Host binding Module
+    -> verifies exact Adapter/plan-version support
+    -> consumes opaque inactive binding transfer into BoundPlan
+    <- constructs ContractBindingReceipt<C, H>
 ```
 
-`ContractResolutionReceipt` contains the contract reference, plan fingerprint, and activation
-edges, never a plan object. `ContributionContract` is `Sized`; no implementation attempts
+`ContractResolutionReceipt<C>` contains semantic contract/version/plan facts only;
+`ContractBindingReceipt<C, H>` separately contains verified Adapter, implementation, target, and
+affinity evidence. Neither contains a plan object or proves activation. `ContributionContract` is
+`Sized`; no implementation attempts
 `Box<dyn ContributionContract>`. Limited type erasure may route bounded descriptor envelopes and
 binding receipts inside one executable, but erased plan storage, `Any`, public `get<T>()`, and
 string downcasts are forbidden. Domain errors are mapped to structured diagnostics above the leaf
 so the leaf does not create a dependency cycle.
+
+Domain crates provide author-facing helpers without expanding the kernel. A third-party contract
+requires an owner, exact version/decode path, canonical typed plan, conformance suite, and an
+explicitly compiled supporting Host. A stock Host may preview an unknown bounded declaration, but
+required execution fails admission until support is compiled and the Host is rebuilt.
 
 ### 3. Host-Specific Typed Projections
 
@@ -647,35 +676,35 @@ contribution, but it cannot hide schema discovery or mutate a closed package pla
 
 ### 5. Import Contribution And Shared Host
 
-The current `TypedImporter<T>` is useful evidence but is not the final provider catalog. The tracer
-should pressure a future shape similar to:
+The focused [Asset Import Host Interface Design](asset-import-host-interface-design.md) supersedes
+the earlier provider-returned candidate sketch. The current `TypedImporter<T>` remains useful
+evidence but is not the final provider catalog:
 
 ```rust
 pub trait ImportProvider: 'static {
-    type Error: Into<ImportDiagnostic>;
-
-    fn descriptor(&self) -> ImporterDescriptor;
+    type Settings: ImportSettings;
+    type Error: 'static;
 
     fn import(
         &self,
         context: &mut ImportContext<'_>,
-        input: &ImportJobInput,
-    ) -> Result<ArtifactGroupCandidate, Self::Error>;
+        settings: &Self::Settings,
+    ) -> Result<(), Self::Error>;
 }
 ```
 
-The package-author helper remains typed. At registration, `nara_asset` wraps it in a private
-object-safe provider Adapter and maps its error into an asset-domain `ImportProviderFailure`.
-`ImporterCatalog` must not try to store `Box<dyn ImportProvider>` with an unspecified associated
-error type, and the leaf kernel never performs this erasure. A threaded Import Adapter may require a
-`Send + Sync` provider; a local affine Adapter may use a different bound. Placement belongs to the
-concrete Adapter rather than the package kernel.
+Importer metadata comes from the verified package contribution rather than a duplicate
+`descriptor()` method. At registration, the domain helper captures a repeatable factory and typed
+error mapping. A concrete threaded Adapter privately erases associated settings/error types and
+adds `Send + Sync` bounds. A local affine Adapter remains reserved until a real lane-owned registry,
+Send-safe route mailbox, physical-exit receipt, and ADR 0080-equivalent poll snapshot are proven.
+The leaf package kernel performs none of this erasure.
 
 `ImportContext` is a domain-specific seam, not an engine context. It exposes only:
 
 - immutable authorized source bytes and metadata;
-- tracked dependency and imported-product reads;
-- generation-stamped artifact-group staging;
+- tracked source, product, absence, and bounded query observations;
+- typed single/multi-product output plus streaming-capable attempt staging;
 - byte, count, depth, time, and cancellation budgets;
 - privacy-safe structured diagnostics.
 
@@ -688,6 +717,16 @@ bookkeeping, stale-result eligibility, reconciliation, artifact staging/publicat
 last-good policy. It submits bounded work through `nara_tasks` and consumes Host-brokered `nara_fs`
 capabilities and immutable snapshots; it does not own executor mechanics or native filesystem
 authority. The package importer owns decoding and domain validation.
+
+The provider returns only typed success/failure. After its task closure physically returns, the
+Host seals the context and privately constructs `ArtifactGroupCandidate` from the exact observation
+ledger, product continuity claims, dependency drafts, generation/evidence facts, and opaque staged
+member receipts. The provider cannot construct, publish, commit, or reopen a candidate.
+Logical task terminal does not release provider/catalog/staging ownership; a separate per-attempt
+physical-exit receipt does. One artifact authority composes an exact Host writer-lock receipt with
+the unmodified filesystem replace receipt. Cooperative mode covers participating Nara writers
+only; strict mode requires strong CAS or separately proven root exclusion. An in-memory expected
+generation is not cross-process conflict protection.
 
 Once `ImageImporter` is migrated to this shared tracked-input provider contract and the tracer
 implements the same contract, they will provide two real in-process provider implementations. A
@@ -890,9 +929,12 @@ sequenceDiagram
     UX->>Cargo: Resolve and build selected profiles
     Cargo-->>Kernel: Locked graph and compiled binding evidence
     Kernel-->>Compose: Prepared facts and bounded envelopes
-    Domain-->>Compose: Explicit compiled ContractSupport values
-    Compose->>Domain: Typed decode and pure plan resolution
-    Domain-->>Compose: Typed plans, summaries, and receipts or bounded rejection
+    Domain-->>Compose: Explicit contract definitions and Host Adapter declarations
+    Compose->>Kernel: resolve_contract(verified support, typed request)
+    Kernel->>Kernel: Decode, construct private slice, invoke support-owned resolver, verify plan
+    Kernel-->>Compose: ResolvedContract or bounded rejection
+    Compose->>Host: bind_contract(verified Adapter support and Host facts)
+    Host-->>Compose: Concrete typed BoundContract plus binding receipt
     Compose-->>Host: Activation intent and concrete typed projections
     Host->>Host: Retain owner, mint grants, build selected candidates
     alt Candidate preparation or pre-publication retirement fails
@@ -941,7 +983,7 @@ No universal `ExtensionError` should erase the responsible Module or mutation gu
 | Manifest shape, budget, or migration | leaf contract Module | No package code or Nara-issued Host authority | None | Active state unchanged |
 | Unknown required contract or denied policy | root composition Module | Pure rejection | None | Active state unchanged |
 | Missing/extra/wrong/stale binding | compiled catalog plus contract owner | Factory not called | None | Active state unchanged |
-| Factory panic, drift, or ambient side effect | domain binding owner | Nara issues no reservation first; trusted native code may still violate the contract through ambient authority | None | Discard definitions; report non-rollbackable contract breach honestly |
+| Factory panic, drift, or ambient side effect | concrete Host attempt; domain owner supplies error semantics | Nara issues no reservation before pure resolve/bind, but candidate preparation may own reservations; trusted native code may still violate the contract through ambient authority | None | Host retains cleanup ownership, discards the candidate, and reports any non-rollbackable contract breach honestly |
 | Schema merge/freeze failure | `nara_reflect` candidate | Candidate-local memory only | None | Retire prepared siblings |
 | Importer slot/extension conflict | `nara_asset` plan | No job or source grant | None | Active state unchanged |
 | Ordinary import queue pressure, cancellation, decode, or budget failure | `nara_asset` Import Host | `nara_tasks` work and scoped staging may exist | No new artifact group; package cohort unaffected | Preserve artifact last-good; cancel and retire/quarantine staging |
@@ -961,6 +1003,9 @@ No universal `ExtensionError` should erase the responsible Module or mutation gu
 
 `optional` never means ignore malformed data, binding drift, panic, or activation failure. A
 standard-Inspector fallback or target-inapplicable role must be selected during pure resolution.
+For an unknown contract, only a leaf/root-owned common fallback relation targeting an already
+supported contract/contribution can be validated; a fallback hidden in the unknown payload cannot
+make it inactive.
 
 Candidate cleanup follows reverse admitted dependency order. Cancellation is not terminal proof,
 `Drop` is not a successful close receipt, and a timeout may retain a failed owner plus parent
@@ -1004,9 +1049,10 @@ every domain.
 
 ### Option B: Open Contract Kernel And Domain Extensions
 
-The leaf kernel exposes only domain-neutral typed keys, envelopes, and receipts. The root
-composition Module invokes domain resolvers, while domain crates add their own ergonomic helpers
-and typed plans.
+The leaf kernel owns bounded envelopes, claim/private-key validation, opaque inactive transfers,
+and typed phase receipts. Root asks the leaf to run support-owned non-capturing resolution and then
+orchestrates verified concrete Host binding, while domain crates add their own ergonomic helpers and
+typed plans.
 
 **Depth**: High for engine and advanced extension authors. New contracts do not widen the leaf
 kernel.
@@ -1204,9 +1250,11 @@ through their owning ADRs.
 
 1. Direct game-owned `PluginGroup` composition and reusable package composition are separate entry
    paths lowered from one canonical semantic definition source.
-2. A leaf contract Module owns domain-neutral identities, envelopes, typed keys, and receipts; a
-   root composition Module invokes domain resolvers and owns concrete typed projections. Domain
-   Modules own declarations, bindings, plans, errors, conformance suites, and activation semantics.
+2. A leaf contract Module owns domain-neutral identities, envelopes, private typed-key admission,
+   semantic witnesses, opaque inactive transfers, and typed phase receipts. Root composition
+   invokes support-owned non-capturing resolvers and verified Host binders, then owns concrete typed
+   projections. Domain Modules own declarations, binding wrappers, plans, errors, conformance
+   suites, and activation semantics.
 3. Standard schema Inspector behavior is automatic and does not require a contribution wrapper.
 4. Import providers receive tracked bounded `ImportContext`; the `nara_asset` Import Host owns
    domain request/tracking/reconciliation/publication policy, submits bounded work through

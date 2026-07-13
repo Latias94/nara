@@ -7,6 +7,7 @@
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Related Question**: [OQ-031: Source Extension Package and Trust Topology](open-questions.md#oq-031-source-extension-package-and-trust-topology)
 **Validation Harness**: [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
+**Focused Interfaces**: [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md)
 **Related Decisions**: [ADR 0016](adr/0016-extension-seams-for-backends-and-domain-modules.md),
 [ADR 0020](adr/0020-project-layout-and-package-format.md),
 [ADR 0046](adr/0046-plugin-metadata-and-default-plugin-groups.md),
@@ -425,27 +426,32 @@ This concept is closest to the way Unity and Godot expose many specialized edito
 types and Unreal exposes several module/provider interfaces. It differs by keeping common package
 coordination generic while every executable plan remains strongly typed and domain-owned.
 
+The focused
+[Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md)
+supersedes the earlier domain-rich trait sketch. Its leaf marker owns type relationships only:
+
 ```rust
-pub trait ContributionContract: Send + Sync + 'static {
-    const ID: ContributionContractId;
+pub trait ContributionContract: Sized + 'static {
+    const CONTRACT: ContributionContractRef;
 
-    type Declaration: Send + Sync + 'static;
-    type ResolvedPlan: Send + Sync + 'static;
-    type Error: Into<ContributionDiagnostic>;
-
-    fn resolve(
-        facts: &PureResolveFacts<'_>,
-        declarations: &[Self::Declaration],
-        bindings: BindingView<'_, Self>,
-    ) -> Result<Self::ResolvedPlan, Self::Error>;
+    type Declaration: 'static;
+    type Binding: 'static;
+    type DecodeError: 'static;
 }
 ```
+
+Root-verified `ContractSupport<C, PlanData, ResolveError>` owns exact decoders and one
+non-capturing pure resolver function. That resolver receives decoded declarations plus semantic
+binding-presence witnesses, never callable factories/providers. A separate verified concrete Host
+binder later consumes the opaque inactive transfer and produces a typed bound plan plus binding
+receipt.
 
 The exact trait is not frozen. Its required shape is:
 
 - one stable contract ID and independently versioned declaration schema;
-- pure resolution from immutable facts and verified bindings;
-- one typed immutable plan owned by the domain;
+- pure resolution from immutable facts and semantic binding-presence witnesses;
+- one typed immutable semantic plan owned by the domain, followed by a separately typed inactive
+  Host bound plan;
 - domain-specific cardinality, slot, ordering, conflict, error, and fallback semantics;
 - a public conformance suite shared by every supported Adapter;
 - no `App`, `World`, workspace, filesystem capability, compiler process, thread, clock, native
@@ -455,12 +461,15 @@ The common package Module understands only the bounded envelope and cross-packag
 not match every importer, inspector, or cook-provider variant in a central enum. A supporting Host
 catalog explicitly registers the contract Adapter it compiled. Required unknown contracts reject;
 optional unknown contracts become inactive only when the declaration names a semantically valid
-fallback.
+fallback. For an unknown contract, that fallback must use the leaf/root-owned common envelope and
+target an already supported contract/contribution or another engine-owned fallback kind; the Host
+cannot validate fallback semantics hidden inside an unknown descriptor payload.
 
-Internal implementation may use type erasure to store several typed plans in one executable, but
-`Any`, downcast-by-string, and generic `get<T>()` do not enter persistent formats, public authoring
-Interfaces, diagnostics identities, or wire protocols. A concrete Host receives the typed
-projection it owns.
+Internal implementation may use limited private erasure to route bounded envelopes, binding claims
+and receipts, or inspection/audit facts inside one executable. Semantic `PlanData` and Host
+`BoundPlan` remain in concrete typed root/Host projections; they never enter a generic erased plan
+store. `Any`, downcast-by-string, and generic `get<T>()` do not enter persistent formats, public
+authoring Interfaces, diagnostics identities, or wire protocols.
 
 An open contract ID is not automatic support. A third-party package cannot gain editor, build,
 filesystem, or process authority merely by inventing a string. The supporting Adapter must already
@@ -915,8 +924,10 @@ pub fn package() -> PackageRegistration {
 This is closest to Bevy `AssetLoader`, Godot `EditorImportPlugin`, Unity `ScriptedImporter`, and
 Unreal Interchange. The importer never needs a runtime `App` merely to register itself. Its typed
 plan declares source recognition, settings schema, importer/artifact version, products, conflicts,
-and placement. Jobs consume bounded tracked `ImportContext` and return artifact-group candidates;
-the Host owns cache publication, stale-result guards, cancellation, and last-good behavior.
+and placement. Jobs consume bounded tracked `ImportContext`, record typed outputs, and return only
+typed success/failure. After physical exit, the Host seals the context and privately constructs the
+artifact-group candidate; it also owns cache publication, stale-result guards, cancellation, and
+last-good behavior.
 
 If runtime decoding or a custom asset service is also required, the same package declares a
 separate runtime or service contribution. The importer cannot secretly install it.
