@@ -1,9 +1,10 @@
 # ADR 0021: Scripting and WASM Boundary
 
-**Status**: Accepted
+**Status**: Superseded
 **Date**: 2026-07-08
-**Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0045: Component Schema
-Capability Metadata
+**Superseded By**: [ADR 0093](0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md)
+**Refined By**: [ADR 0042](0042-runtime-service-and-backend-boundary.md),
+[ADR 0045](0045-component-schema-capability-metadata.md)
 
 ## Context
 

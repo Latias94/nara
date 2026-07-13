@@ -8,8 +8,8 @@ development/release executables, starts them through ADR 0082/0084, rejects stal
 preserves a launchable last-good activation record after build or startup failure
 **Revisit Trigger**: A proven stable dynamic ABI, remote build system, or generic editor workflow
 requires a different executable activation topology
-**Related**: ADR 0010, ADR 0020, ADR 0021, ADR 0035, ADR 0046, ADR 0052, ADR 0055, ADR 0056,
-ADR 0068, ADR 0070, ADR 0079, ADR 0082, ADR 0084, ADR 0088
+**Related**: ADR 0010, ADR 0020, ADR 0035, ADR 0046, ADR 0052, ADR 0055, ADR 0056,
+ADR 0068, ADR 0070, ADR 0079, ADR 0082, ADR 0084, ADR 0088, ADR 0093
 
 ## Context
 
@@ -130,7 +130,7 @@ compiler result remains unable to publish.
 
 - Game code, engine crates, and native Rust plugins are statically linked in the normal production
   path. Nara does not promise a stable Rust dylib/plugin ABI.
-- Compatible function-body patching remains an explicit development capability under ADR 0021.
+- Compatible function-body patching remains an explicit development capability under ADR 0093.
   Structural, unknown, or capability-changing edits always build a new executable generation.
 - If old and candidate hosts can coexist, the old runtime remains active until the candidate
   runtime is ready. If a platform forbids coexistence, the host retains a complete last-good
@@ -224,7 +224,7 @@ If accepted:
 
 - ADR 0020's source layout includes Cargo authority without turning `nara.toml` into a package
   manager;
-- ADR 0021 remains the iteration strategy and delegates structural edits to this generation flow;
+- ADR 0093 remains the iteration strategy and delegates structural edits to this generation flow;
 - ADR 0079 continues to validate compiled ceiling, project request, and resolved plugin capability
   subsets before mutation;
 - ADR 0082/0084 remain the host/runtime authority; the build coordinator cannot publish a raw

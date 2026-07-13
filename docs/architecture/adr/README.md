@@ -69,7 +69,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0018](0018-coordinate-units-and-time.md): Coordinate, Units, and Time
 - [ADR 0019](0019-physics-strategy.md): Physics Strategy
 - [ADR 0020](0020-project-layout-and-package-format.md): Project Source Layout
-- [ADR 0021](0021-scripting-and-wasm-boundary.md): Rust Authoring, Hot Iteration, and Optional Scripting Adapters
+- [ADR 0021](0021-scripting-and-wasm-boundary.md): Scripting and WASM Boundary (Superseded)
 - [ADR 0022](0022-3d-coordinate-system.md): 3D Coordinate System
 - [ADR 0023](0023-event-message-and-command-model.md): Event, Message, and Command Model
 - [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md): Determinism, Fixed Update, and Replay Policy
@@ -126,3 +126,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md): Unavailable Schema and Lossless Authoring
 - [ADR 0091](0091-editor-persistence-recovery-and-concurrent-writer-policy.md): Editor Persistence, Recovery, and Concurrent Writer Policy
 - [ADR 0092](0092-sdr-color-space-alpha-and-output-encoding.md): SDR Color Space, Alpha, and Output Encoding
+- [ADR 0093](0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md): Rust Authoring, Hot Iteration, and Optional Scripting Adapters

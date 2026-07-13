@@ -61,13 +61,13 @@ This document contains undecided architecture questions only. Accepted decisions
   tombstone, migration, service reconstruction, and transactional restore rules form the first save
   format without serializing an ambient `World` or backend-native state?
 
-## OQ-007: Guest Scripting Runtime
+## OQ-007: Optional Scripting Adapter Contract
 
 - **Status**: open
-- **Owner**: future scripting domain
-- **Trigger**: A real game needs reloadable untrusted behavior that cannot be accepted as in-process native Rust.
-- **Related ADRs**: 0021, 0042, 0045
-- **Question**: Which WASM runtime, capability model, scheduling contract, and component API should form the first guest boundary?
+- **Owner**: a concrete scripting adapter package
+- **Trigger**: A real project deliberately chooses a separately reloadable scripting layer and can name workflows that the complete Rust path does not satisfy.
+- **Related ADRs**: 0042, 0045, 0093
+- **Question**: Which concrete adapter should be trialed first, which lifecycle/data/tooling contracts belong to that adapter, and which contracts have enough independent consumers to move into Nara-owned domain APIs without creating a universal Behavior Host?
 
 ## OQ-008: Authoring-to-Runtime Projection and Baking
 
@@ -171,13 +171,13 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Related ADRs**: 0002, 0003, 0039, 0057, 0076, 0084
 - **Question**: Which stable system identity, topology generation, strict execution mode, open-tick transaction, conditional-breakpoint vocabulary, and failure/discard rules can support system stepping without splitting command acknowledgement or allowing parallel work across a claimed breakpoint?
 
-## OQ-020: Native Rust Code Reload Boundary
+## OQ-020: Rust Hot-Patch Experiment
 
 - **Status**: open
-- **Owner**: future native module/runtime host domain
-- **Trigger**: Measured full rebuild plus isolated Play-host restart misses a real iteration-latency target and a concrete native module boundary can own ABI and state migration.
-- **Related ADRs**: 0021, 0034, 0042, 0076
-- **Question**: Can a narrow native module ABI prove code quiescence, thread/task/callback retirement, native-handle ownership, versioned state extraction/migration, two-phase publication, and rollback strongly enough to justify hot replacement over rebuild-and-restart?
+- **Owner**: optional development tooling and runtime host
+- **Trigger**: The reference game has separate P50/P95 measurements for compatible function-body and structural Rust edits, the last-good rebuild/restart path is reliable, and compatible edits still miss the iteration target.
+- **Related ADRs**: 0034, 0042, 0076, 0093
+- **Question**: Can a pinned Subsecond-like development plugin patch coarse explicit Rust call boundaries only after complete tick/schedule quiescence, classify incompatible layout/signature/static/dependency changes, retain a verified-compatible `World`, and fall back deterministically to the last-good rebuild/restart path across Windows and Linux without claiming a stable native ABI or automatic rollback?
 
 ## OQ-021: HDR, Wide-Gamut, and Tone-Mapping Contract
 
@@ -289,7 +289,7 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Trigger**: An independently versioned module must install a coherent combination of runtime
   plugin, editor tool, importer, content/template, native extension, or user mod, or Cargo-only
   transport creates a measured product-workflow gap.
-- **Related ADRs**: 0016, 0021, 0042, 0046, 0070, 0079, 0086, 0087, 0088
+- **Related ADRs**: 0016, 0042, 0046, 0070, 0079, 0086, 0087, 0088, 0093
 - **Question**: Which source-package unit, resolution/lock/source metadata, declared contributions,
   provenance and trust tiers, capability grants, target restrictions, lifecycle/update policy, and
   optional isolation boundary provide one coherent installation experience without inventing a

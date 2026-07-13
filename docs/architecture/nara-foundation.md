@@ -149,7 +149,7 @@ flowchart TD
   function-body changes may use an optional development hot-patch plugin at a quiescent boundary;
   structural or unknown changes rebuild and start a fresh isolated runtime with explicit validated
   restoration. Optional script adapters own a separate reload contract. See ADR
-  [0021](adr/0021-scripting-and-wasm-boundary.md).
+  [0093](adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md).
 
 ## Runtime Flow
 
