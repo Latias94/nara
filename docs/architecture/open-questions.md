@@ -1,7 +1,7 @@
 # nara Architecture Open Questions
 
 **Status**: Living Draft
-**Updated**: 2026-07-11
+**Updated**: 2026-07-13
 
 This document contains undecided architecture questions only. Accepted decisions belong in ADRs; implementation evidence belongs in `adr/implementation-status.md` and engineering memory. Each question remains open until its trigger creates enough concrete pressure for an ADR.
 
@@ -17,9 +17,11 @@ This document contains undecided architecture questions only. Accepted decisions
 
 - **Status**: open
 - **Owner**: `nara_material`, render domains
-- **Trigger**: A project needs shared material files or more than the current inline 2D descriptor can represent.
-- **Related ADRs**: 0012, 0033, 0040
-- **Question**: Which stable material asset and shader-specialization vocabulary belongs above backend pipelines?
+- **Trigger**: A project needs a reusable material asset, a custom shader interface, or variants that
+  must compile across more than one target capability profile.
+- **Related ADRs**: 0012, 0033, 0040, 0054, 0077
+- **Question**: Which stable shader interface, parameter/binding schema, variant and fallback policy,
+  and logical pipeline/cache key belong above backend-native shader modules and PSOs?
 
 ## OQ-003: Runtime UI Layout Model
 
@@ -37,21 +39,27 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Related ADRs**: 0025, 0041
 - **Question**: How should platform accessibility trees and assistive actions map onto nara focus, navigation, activation, and text semantics?
 
-## OQ-005: Physics Backend Selection
+## OQ-005: Physics Integration Authority and Backend Selection
 
 - **Status**: open
 - **Owner**: future physics domain
-- **Trigger**: The first playable physics vertical slice has collision, query, determinism, and deployment requirements.
-- **Related ADRs**: 0016, 0019, 0042
-- **Question**: Which 2D backend should be adopted first, and what stable component/event boundary keeps the backend replaceable?
+- **Trigger**: The first playable physics vertical slice can name body/control modes, transform
+  writers, contact/query freshness, determinism, and deployment requirements.
+- **Related ADRs**: 0016, 0018, 0019, 0039, 0042, 0057, 0085
+- **Question**: Which 2D backend should be adopted first, when is ECS or the solver authoritative for
+  transforms and velocity, and what teleport/kinematic write, query snapshot, contact ordering,
+  capability, and event contracts keep backend state coherent without promising solver equivalence?
 
-## OQ-006: Save and Replication Record Shape
+## OQ-006: Save-Game Snapshot and Restore Contract
 
 - **Status**: open
-- **Owner**: future save/network domains
-- **Trigger**: U8 stable runtime identity is proven and either save restoration or replication becomes an implementation slice.
-- **Related ADRs**: 0027, 0028
-- **Question**: Which component/field records, authority metadata, and tombstones belong in durable save or replication data?
+- **Owner**: future save/persistence domain
+- **Trigger**: A real game requires save/restore across process restart or scene travel and can name
+  persistent entities, eligible state, service reconstruction, compatibility, and failure behavior.
+- **Related ADRs**: 0027, 0043, 0045, 0051, 0058, 0084, 0089
+- **Question**: Which snapshot/baseline, component/resource records, runtime-created identity,
+  tombstone, migration, service reconstruction, and transactional restore rules form the first save
+  format without serializing an ambient `World` or backend-native state?
 
 ## OQ-007: Guest Scripting Runtime
 
@@ -61,19 +69,23 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Related ADRs**: 0021, 0042, 0045
 - **Question**: Which WASM runtime, capability model, scheduling contract, and component API should form the first guest boundary?
 
-## OQ-008: Incremental Authoring Projection
+## OQ-008: Authoring-to-Runtime Projection and Baking
 
 - **Status**: open
-- **Owner**: `nara_scene`, `nara_tooling`
-- **Trigger**: Measured rebuild-style live projection exceeds the editor interaction budget for a representative scene.
-- **Related ADRs**: 0026, 0038, 0047
-- **Question**: Which patch operations need specialized incremental world commands while preserving document-as-truth and atomic undo?
+- **Owner**: authoring document domains, `nara_scene`, `nara_tooling`
+- **Trigger**: Two independent authoring types need to generate derived runtime components, entities,
+  resources, or dependencies rather than spawning one stored component record to one ECS component.
+- **Related ADRs**: 0006, 0007, 0026, 0038, 0043, 0047, 0081, 0083, 0087
+- **Question**: Which bounded projection/baking contract owns input snapshots, dependency tracking,
+  stable source-to-output provenance, generated identity, failure atomicity, diagnostics, and runtime
+  admission without freezing a universal baker from a single scene workflow?
 
 ## OQ-009: Field-Level Apply Changes
 
 - **Status**: open
 - **Owner**: `nara_reflect`, `nara_tooling`
-- **Trigger**: Whole-component Apply Changes creates destructive conflicts in a real edit workflow after U16 is complete.
+- **Trigger**: The ADR 0034 selected-component Apply Changes baseline is implemented and
+  whole-component write-back creates destructive conflicts in a real edit workflow.
 - **Related ADRs**: 0034, 0045, 0047
 - **Question**: How should field projections, conflict detection, and inverse patches narrow Play Mode write-back?
 
@@ -85,13 +97,16 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Related ADRs**: 0015, 0025, 0041
 - **Question**: Which real editor panel should migrate first, and what usability/performance evidence constitutes success?
 
-## OQ-011: Project Export Side-Effect Adapter
+## OQ-011: Platform Export, Signing, and Store Adapter
 
 - **Status**: open
-- **Owner**: future CLI/editor export consumer
-- **Trigger**: A concrete CLI command or editor workflow consumes U23 export manifest values.
-- **Related ADRs**: 0020, 0035, 0051, 0055
-- **Question**: Which adapter owns package publication, signing hooks, target toolchains, and user-facing recovery once a real consumer exists?
+- **Owner**: product build/export hosts and platform adapters
+- **Trigger**: A supported platform or store consumes ADR 0086/0088 build artifacts and requires an
+  external toolchain, credentials, signing/notarization, or store-specific publication.
+- **Related ADRs**: 0020, 0035, 0051, 0055, 0070, 0086, 0088
+- **Question**: Which adapter owns toolchain discovery, credential capabilities, signing and store
+  steps, progress/cancellation, receipts, and last-good recovery while target planning and package
+  identity remain pure engine contracts?
 
 ## OQ-013: Typed Event and Request Channels
 
@@ -101,13 +116,16 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Related ADRs**: 0023, 0036
 - **Question**: Is a reusable typed channel wrapper justified, and which lifecycle metadata can be shared without creating a global bus?
 
-## OQ-014: Audio Backend and Mixing Boundary
+## OQ-014: Audio Voice, Mixer, and Device Boundary
 
 - **Status**: open
 - **Owner**: future audio domain
-- **Trigger**: The first real game or tool schedules an audio vertical slice with stable intent plus one decoder, mixer, or playback backend consumer.
+- **Trigger**: The first real game or tool schedules an audio slice that needs concurrent voices,
+  buses, streaming, spatial playback, or device suspend/reconnect behavior.
 - **Related ADRs**: 0016, 0030, 0042, 0079
-- **Question**: Which backend and stable command/component boundary should implement the first audio vertical slice?
+- **Question**: Which backend, stable voice identity and command model, bus/mix graph, streaming
+  ownership, spatial intent, and device-session lifecycle implement the first audio slice without
+  placing native handles or callback-thread state in the ECS `World`?
 
 ## OQ-015: Text Shaping and Localization Stack
 
@@ -121,8 +139,9 @@ This document contains undecided architecture questions only. Accepted decisions
 
 - **Status**: open
 - **Owner**: `nara_render_wgpu`
-- **Trigger**: U22 exposes resident-byte pressure and representative projects provide cache reuse/memory measurements.
-- **Related ADRs**: 0040, 0054
+- **Trigger**: ADR 0054 instrumentation and a representative project or constrained target expose
+  measured GPU-resident pressure and cache-reuse behavior.
+- **Related ADRs**: 0037, 0040, 0054, 0068
 - **Question**: Which grace-generation and byte-budget defaults balance reuse, memory pressure, and predictable reclamation?
 
 ## OQ-017: Advanced Raw Platform Event Access
@@ -137,7 +156,9 @@ This document contains undecided architecture questions only. Accepted decisions
 
 - **Status**: open
 - **Owner**: future replay domain and participating runtime services
-- **Trigger**: U8 stable identity, U9 canonical schema/envelope, and U16 isolated runtime host are implemented, and a concrete persistent replay workflow has representative size/latency measurements.
+- **Trigger**: A concrete persistent replay workflow has stable identity/envelope evidence, an
+  admitted isolated runtime host, a named service-outcome coverage set, and representative
+  size/latency measurements.
 - **Related ADRs**: 0024, 0042, 0049, 0051, 0057, 0076
 - **Question**: What canonical artifact fields, checkpoint coverage registry, service outcome catalog, checksum algorithm, cadence, compression, compatibility fingerprint, and bounded retention defaults satisfy the first measured replay workflow?
 
@@ -145,8 +166,9 @@ This document contains undecided architecture questions only. Accepted decisions
 
 - **Status**: open
 - **Owner**: `nara_app`, `nara_ecs`, `nara_tooling`
-- **Trigger**: U16 exact fixed-tick stepping is implemented and a real debugging workflow requires pausing inside a fixed tick rather than observing completed ticks.
-- **Related ADRs**: 0002, 0003, 0039, 0057, 0076
+- **Trigger**: ADR 0076 exact fixed-tick stepping and an admitted ADR 0084 runtime host exist, and a
+  real debugging workflow requires pausing inside a fixed tick rather than observing completed ticks.
+- **Related ADRs**: 0002, 0003, 0039, 0057, 0076, 0084
 - **Question**: Which stable system identity, topology generation, strict execution mode, open-tick transaction, conditional-breakpoint vocabulary, and failure/discard rules can support system stepping without splitting command acknowledgement or allowing parallel work across a claimed breakpoint?
 
 ## OQ-020: Native Rust Code Reload Boundary
@@ -156,3 +178,157 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Trigger**: Measured full rebuild plus isolated Play-host restart misses a real iteration-latency target and a concrete native module boundary can own ABI and state migration.
 - **Related ADRs**: 0021, 0034, 0042, 0076
 - **Question**: Can a narrow native module ABI prove code quiescence, thread/task/callback retirement, native-handle ownership, versioned state extraction/migration, two-phase publication, and rollback strongly enough to justify hot replacement over rebuild-and-restart?
+
+## OQ-023: Platform Application Lifecycle
+
+- **Status**: open
+- **Owner**: platform adapters, product hosts, runtime service domains
+- **Trigger**: The first non-desktop target, or a supported desktop integration, requires lifecycle
+  semantics beyond focus/close: suspend, resume, low-memory, display/session loss, permission,
+  orientation, or platform-requested termination.
+- **Related ADRs**: 0013, 0039, 0041, 0042, 0056, 0082, 0084, 0086, 0088
+- **Question**: Which normalized lifecycle states and ordered safe-point events belong to Nara, which
+  services remain alive or must rebuild, and how do time, input, audio, rendering, networking,
+  persistence, and target capability policy react without making one platform adapter authoritative?
+
+## OQ-024: Cross-Domain Residency and Memory Pressure
+
+- **Status**: open
+- **Owner**: asset, scene, render, audio, and executable runtime domains
+- **Trigger**: A representative workload or platform pressure signal requires coordinated limits
+  across source acquisition, decoded assets, active/candidate scenes, GPU caches, audio streams, or
+  other native service state.
+- **Related ADRs**: 0037, 0040, 0042, 0054, 0068, 0082, 0088, 0089
+- **Question**: Which domain-owned residency leases, pin/priority vocabulary, aggregate observations,
+  eviction and rehydration contracts, safe points, and fault outcomes coordinate pressure without
+  creating a shallow global allocator or violating last-good publication?
+
+## OQ-025: Profiling, Crash Artifacts, and Telemetry Channels
+
+- **Status**: open
+- **Owner**: executable hosts, `nara_app`, tooling, and backend adapters
+- **Trigger**: A measured performance regression or production crash requires high-frequency CPU/GPU
+  timing, schedule/task spans, call stacks, breadcrumbs, or an externally consumable crash artifact
+  that the bounded diagnostics bus cannot represent.
+- **Related ADRs**: 0009, 0036, 0048, 0068, 0076, 0077, 0078, 0084
+- **Question**: Which separate trace, profiler, crash-artifact, and opt-in telemetry contracts provide
+  stable correlation, bounded capture, privacy/redaction, retention, and export without turning
+  `RuntimeDiagnostics` into a high-volume event stream or process-global policy owner?
+
+## OQ-026: Frame-Critical Job Execution Model
+
+- **Status**: open
+- **Owner**: `nara_app`, `nara_ecs`, `nara_tasks`, render domains
+- **Trigger**: Profiling shows a fixed-tick, extraction, preparation, or encoding workload cannot
+  meet its frame budget through ordinary ECS schedule parallelism or the current background task
+  pools without unacceptable latency or synchronization.
+- **Related ADRs**: 0003, 0008, 0039, 0052, 0077, 0078, 0080, 0084
+- **Question**: Does Nara need a distinct bounded frame-job graph, and if so which dependency,
+  work-stealing, affinity, join barrier, panic/cancellation, deterministic-test, and shutdown rules
+  separate it from ECS systems, long-running background tasks, and backend-affine workers?
+
+## OQ-027: Network Authority and Replication Contract
+
+- **Status**: open
+- **Owner**: future networking/replication domain
+- **Trigger**: A playable multiplayer slice can name topology, authority, prediction/reconciliation,
+  interest management, latency, bandwidth, player count, and deployment targets.
+- **Related ADRs**: 0024, 0028, 0042, 0045, 0056, 0057, 0058, 0089
+- **Question**: Which session and entity authority, spawn/despawn, component eligibility, wire
+  compatibility, snapshot/delta, interest, prediction/rollback, command validation, and transport
+  adapter contracts satisfy that slice without coupling durable records to runtime `Entity` values?
+
+## OQ-028: Animation Evaluation and Write Arbitration
+
+- **Status**: open
+- **Owner**: future animation domain and affected component owners
+- **Trigger**: The first animation slice writes a field also controlled by gameplay, hierarchy,
+  physics, UI, or editor tooling, or requires blending, root motion, markers, or event tracks.
+- **Related ADRs**: 0019, 0029, 0039, 0045, 0081, 0085
+- **Question**: Which binding/evaluation phases, writer ownership and priority, blend/accumulation
+  rules, root-motion handoff, marker/event timing, and fixed-versus-render schedule semantics prevent
+  last-writer-wins behavior from becoming the animation contract?
+
+## OQ-029: Gameplay Active and Enabled Semantics
+
+- **Status**: open
+- **Owner**: `nara_app`, hierarchy, gameplay, and service domains
+- **Trigger**: A real workflow must disable an entity or subtree without despawning it and expects
+  defined behavior across systems, physics, animation, audio, input, scripts, and scene travel.
+- **Related ADRs**: 0002, 0023, 0036, 0039, 0085, 0089
+- **Question**: Is activity local, inherited, or domain-specific; how is it scheduled and queried;
+  which enter/exit transitions are emitted; and which identity, hierarchy, service, and authoring
+  state remains retained while activity is disabled?
+
+## OQ-030: Navigation and AI Spatial Query Boundary
+
+- **Status**: open
+- **Owner**: future navigation/AI domain and spatial data owners
+- **Trigger**: A playable AI slice needs a navmesh, grid, pathfinding, dynamic obstacles, crowd
+  movement, or asynchronous spatial queries with named 2D/3D and target constraints.
+- **Related ADRs**: 0016, 0018, 0042, 0052, 0085, 0089
+- **Question**: Which authored/imported navigation data, runtime update/query contract, task and
+  safe-point model, stable identities, backend seam, and headless/deterministic guarantees satisfy
+  that slice without placing a speculative behavior-tree or global navigation server in core ECS?
+
+## OQ-031: Source Extension Package and Trust Topology
+
+- **Status**: open
+- **Owner**: package/build hosts, plugin/editor/importer owners, security adapters
+- **Trigger**: An independently versioned module must install a coherent combination of runtime
+  plugin, editor tool, importer, content/template, native extension, or user mod, or Cargo-only
+  transport creates a measured product-workflow gap.
+- **Related ADRs**: 0016, 0021, 0042, 0046, 0070, 0079, 0086, 0087, 0088
+- **Question**: Which source-package unit, resolution/lock/source metadata, declared contributions,
+  provenance and trust tiers, capability grants, target restrictions, lifecycle/update policy, and
+  optional isolation boundary provide one coherent installation experience without inventing a
+  second Rust package manager or treating native code like validated data?
+
+## OQ-032: Incremental Authoring Projection
+
+- **Status**: open
+- **Owner**: authoring document domains, `nara_scene`, `nara_tooling`
+- **Trigger**: A concrete projection/baking path chosen through OQ-008 is correct, but representative
+  edit latency or generated-output churn exceeds the editor budget under full projection rebuilds.
+- **Related ADRs**: 0026, 0038, 0047, 0081, 0083, 0087
+- **Question**: Which projection dependencies, cached outputs, invalidation granularity, specialized
+  patch operations, provenance remaps, and atomic fallback rules can make baking incremental while
+  preserving document truth, undo, and the exact output of a clean rebuild?
+
+## OQ-033: Structured Data Asset Schema and Authoring
+
+- **Status**: open
+- **Owner**: `nara_asset`, `nara_reflect`, data-owning domains, authoring tooling
+- **Trigger**: A reference game needs editor-authorable, hot-reloadable, migratable structured data
+  such as weapons, enemies, abilities, dialogue, loot tables, or balance configuration shared by
+  multiple scenes/components.
+- **Related ADRs**: 0007, 0011, 0033, 0043, 0045, 0051, 0081, 0083, 0087
+- **Question**: Which typed value/schema boundary, stable asset/subobject identity, inline and
+  external representations, references, migration, validation, editor capabilities, and reload
+  semantics support reusable data assets without treating every value as an ECS component or
+  expanding component reflection into a universal object system?
+
+## OQ-034: Gameplay State Topology and Scoped Lifetime
+
+- **Status**: open
+- **Owner**: `nara_app`, gameplay domains, scene/tooling integration
+- **Trigger**: A reference game simultaneously needs boot/menu/gameplay/pause/game-over states,
+  overlays or orthogonal state domains, and explicit system/entity/resource/message lifetime on
+  state entry and exit.
+- **Related ADRs**: 0003, 0023, 0036, 0039, 0047, 0084, 0089
+- **Question**: Which flat, hierarchical, stacked, or orthogonal typed-state topology is justified;
+  how do schedules and run conditions observe transitions; and which scoped entities, resources,
+  messages, services, persistence, and scene ownership clean up deterministically without creating
+  a hidden global scene tree?
+
+## OQ-035: Spatial World Partition, Streaming, and Origin Policy
+
+- **Status**: open
+- **Owner**: scene, asset, spatial, render, physics, navigation, and runtime host domains
+- **Trigger**: One active scene exceeds memory or frame budgets, coordinate precision becomes
+  visible, or content must stream around a camera/player while cross-region references remain live.
+- **Related ADRs**: 0018, 0037, 0053, 0068, 0083, 0085, 0088, 0089
+- **Question**: Which cell/layer selection, authored and cooked partition data, cross-cell identity and
+  reference rules, residency budgets, activation safe points, hierarchy boundaries, and origin
+  shifting coordination satisfy the first large-world workflow across rendering, physics,
+  navigation, audio, and networking?
