@@ -12,6 +12,8 @@
 
 **Upstream Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md), [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md)
 
+**Concept Guide**: [Extension Package Concept Guide](extension-package-concept-guide.md)
+
 **Related ADRs**: [0007](adr/0007-asset-identity-and-import-pipeline.md), [0033](adr/0033-asset-import-and-render-resource-preparation-seam.md), [0037](adr/0037-asset-load-request-cache-and-lifetime-policy.md), [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md), [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md), [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md), [0068](adr/0068-global-resource-budgets-metrics-and-diagnostic-privacy.md), [0070](adr/0070-capability-oriented-filesystem-substrate.md), [0080](adr/0080-domain-owned-task-update-integration-sets.md), [0083](adr/0083-durable-project-asset-and-document-entity-identity.md), [0087](adr/0087-asset-dependency-import-product-and-artifact-publication-graph.md), [0091](adr/0091-editor-persistence-recovery-and-concurrent-writer-policy.md)
 
 **Research Context**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
@@ -20,8 +22,9 @@
 
 This document narrows the package tracer to the shared asset Import Host Interface. The Host is a
 deep `nara_asset` Module that selects a compiled importer, supplies immutable tracked inputs,
-collects bounded multi-product outputs, rejects stale or invalid work, and atomically publishes one
-artifact group while preserving the previous last-good group on failure.
+collects bounded multi-product outputs, rejects stale or invalid work, and publishes one old-or-new
+artifact group under an explicit cooperative or strict writer policy while preserving the previous
+last-good group on failure.
 
 The design serves two audiences with different Interfaces:
 

@@ -8,6 +8,7 @@
 **Related Question**: [OQ-031: Source Extension Package and Trust Topology](open-questions.md#oq-031-source-extension-package-and-trust-topology)
 **Validation Harness**: [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 **Focused Interfaces**: [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md)
+**Concept Guide**: [Extension Package Concept Guide](extension-package-concept-guide.md)
 **Related Decisions**: [ADR 0016](adr/0016-extension-seams-for-backends-and-domain-modules.md),
 [ADR 0020](adr/0020-project-layout-and-package-format.md),
 [ADR 0046](adr/0046-plugin-metadata-and-default-plugin-groups.md),

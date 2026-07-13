@@ -14,6 +14,8 @@
 
 **Focused Interfaces**: [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md)
 
+**Concept Guide**: [Extension Package Concept Guide](extension-package-concept-guide.md)
+
 **Research Context**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
 
 **Related ADRs**: [0003](adr/0003-own-app-plugin-and-schedule-lifecycle.md), [0007](adr/0007-asset-identity-and-import-pipeline.md), [0015](adr/0015-editor-tooling-and-dogfooding-boundary.md), [0016](adr/0016-extension-seams-for-backends-and-domain-modules.md), [0042](adr/0042-runtime-service-and-backend-boundary.md), [0045](adr/0045-component-schema-capability-metadata.md), [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md), [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md), [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md), [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md), [0070](adr/0070-capability-oriented-filesystem-substrate.md), [0080](adr/0080-domain-owned-task-update-integration-sets.md), [0081](adr/0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0082](adr/0082-process-host-authority-and-runtime-construction-topology.md), [0086](adr/0086-rust-project-build-and-executable-generation.md), [0087](adr/0087-asset-dependency-import-product-and-artifact-publication-graph.md), [0090](adr/0090-unavailable-schema-and-lossless-authoring.md), [0093](adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md)

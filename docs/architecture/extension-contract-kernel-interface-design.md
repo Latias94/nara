@@ -12,6 +12,8 @@
 
 **Upstream Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 
+**Concept Guide**: [Extension Package Concept Guide](extension-package-concept-guide.md)
+
 **Related ADRs**: [0016](adr/0016-extension-seams-for-backends-and-domain-modules.md), [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md), [0079](adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md), [0081](adr/0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0082](adr/0082-process-host-authority-and-runtime-construction-topology.md), [0086](adr/0086-rust-project-build-and-executable-generation.md)
 
 **Research Context**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
@@ -587,7 +589,7 @@ double-panic/drop fixtures for unwind profiles plus documented abort-profile pro
 Game-owned code should continue to use the direct product path:
 
 ```rust
-app.add_group(SpriteAnimationPlugins)?;
+app.add_plugins(SpriteAnimationPlugins)?;
 ```
 
 The direct group and package path lower from one canonical schema/plugin definition source and are
