@@ -12,6 +12,7 @@
 [ADR 0084](adr/0084-executable-runtime-ownership-and-isolation.md)
 **Delivery Evidence**: [Reference-Game-Driven Foundation Plan](../plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md)
 **Upstream Package Design**: [Source Extension Package Interface Design](source-extension-package-interface-design.md)
+**Cross-Domain Validation Harness**: [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 
 ## Purpose
 

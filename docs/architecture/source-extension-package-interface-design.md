@@ -6,6 +6,7 @@
 **Owner**: Source extension packages, contribution catalogs, product/build hosts, and domain owners
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Related Question**: [OQ-031: Source Extension Package and Trust Topology](open-questions.md#oq-031-source-extension-package-and-trust-topology)
+**Validation Harness**: [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 **Related Decisions**: [ADR 0016](adr/0016-extension-seams-for-backends-and-domain-modules.md),
 [ADR 0020](adr/0020-project-layout-and-package-format.md),
 [ADR 0046](adr/0046-plugin-metadata-and-default-plugin-groups.md),
@@ -219,8 +220,9 @@ These are the recommended high-cost boundaries. They remain non-normative until 
     executable/Host/runtime generation. A Rust dynamic ABI is not inferred.
 13. Missing package/schema providers enter degraded authoring under ADR 0090 when safe; source
     files never authorize automatic download, compilation, or execution.
-14. Required Host projections selected by one plan fingerprint form an activation cohort: every
-    required candidate reaches ready-but-unpublished before one cohort activation record publishes.
+14. Required Host projections selected by one concrete activation intent and plan fingerprint form
+    an activation cohort: every selected required candidate reaches ready-but-unpublished before a
+    Host-private cohort record publishes and exposes generation-consistent typed leases.
 15. The direct `App::new().add_plugin(...)` path remains available with its narrower lifecycle
     guarantees and no package-manager ceremony.
 
@@ -680,30 +682,37 @@ still delegating Rust source resolution to Cargo.
 ### 8. Activation Cohorts
 
 Domain generations remain independently owned, but one package-plan update may require several of
-them to agree. A runtime compiled against a new schema/importer set must not observe a new import
-catalog while still running the old package plan.
+them to agree. A runtime compiled against a new schema/importer-provider set must not observe a new
+provider catalog while still running the old package plan. Ordinary asset reimport and
+`ArtifactGroupGeneration` publication remain independent ADR 0087 transactions unless a runtime
+startup plan explicitly selects a required artifact-closure receipt.
 
-Every required projection selected by one `ResolvedProjectPlan` fingerprint therefore belongs to
-one `ActivationCohortId`. Package composition produces the immutable cohort membership/fingerprint;
-an outer executable/project Host owns a private activation coordinator that applies it:
+Every required projection selected by one concrete activation intent and `ResolvedProjectPlan`
+fingerprint therefore belongs to one `ActivationCohortId`. Package composition produces the
+immutable cohort membership/fingerprint; an outer executable/project Host owns a private activation
+coordinator that applies it:
 
 1. each domain constructs and validates a candidate against the same plan/cohort fingerprint;
-2. produced artifacts, import catalogs, editor models, service reservations, and runtimes remain
-   staged or ready-but-unpublished;
+2. selected provider catalogs, editor models, service reservations, runtimes, and any explicitly
+   required startup artifact-closure receipt remain staged or ready-but-unpublished;
 3. only after every required candidate reports `ReadyToPublish` does the Host-owned coordinator
    publish one immutable cohort activation record;
-4. consumers capture one cohort record or retain their previous one, so in-flight work cannot mix
-   package generations;
+4. the activation record remains Host-private; consumers receive generation-consistent typed
+   leases rather than a generic record lookup, so in-flight work cannot mix selected package
+   generations;
 5. a pre-publication sibling failure retires or quarantines every ready candidate in reverse
    admitted dependency order;
 6. a projection may publish outside the cohort only when its contract explicitly proves
    independent compatibility and records that relation in both plans;
 7. publication is still not arbitrary side-effect rollback. If a supposedly infallible activation
-   pointer swap fails, the cohort remains failed/owned and conflicting replacement is blocked.
+   pointer swap fails, the cohort remains failed/owned and conflicting replacement is blocked;
+8. side-by-side activation requires coexistence and budget evidence. An exclusive stop-then-start
+   Host retains launchable last-good inputs but does not promise continuous availability or
+   in-memory rollback.
 
-Cross-process Hosts may adopt the published cohort at different safe points, but they retain their
-old captured cohort until the new one is completely available. They never resolve some dependencies
-through the old cohort and others through the new one.
+The initial guarantee is scoped to logical Host roles inside one concrete executable Host.
+Cross-process prepare/commit/adopt requires its own protocol and conformance evidence; it is not
+implied by `ActivationCohortId`.
 
 ### 9. Trust And Authority
 
@@ -1275,7 +1284,9 @@ Evidence should arrive in this order:
    their named evidence triggers.
 
 The tracer package should be intentionally small but multi-role. A runtime-only hello-world plugin
-cannot prove package/editor/import/build separation.
+cannot prove package/editor/import/build separation. The concrete sprite-animation scenarios,
+Interface alternatives, and evidence sequence live in the
+[multi-role tracer workbench](multi-role-extension-package-tracer-design.md).
 
 ## Open Questions
 
