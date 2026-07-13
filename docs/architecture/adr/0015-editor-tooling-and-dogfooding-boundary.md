@@ -2,8 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0045: Component Schema Capability Metadata; ADR 0047: Editor
-Workspace and Scene Document State
+**Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
+Capability Metadata; ADR 0047: Editor Workspace and Scene Document State
 
 ## Context
 

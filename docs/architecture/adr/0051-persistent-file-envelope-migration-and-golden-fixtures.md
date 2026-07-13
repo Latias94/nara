@@ -4,7 +4,7 @@
 **Date**: 2026-07-09
 **Amended**: 2026-07-10 for the unreleased canonical-version reset policy
 **Implemented Slice**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes
-**Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0043, ADR 0045
+**Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0037, ADR 0043, ADR 0045
 **Refined By**: ADR 0055: Feature Matrix, Boundary Checks, and Compatibility Fixtures;
 ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 

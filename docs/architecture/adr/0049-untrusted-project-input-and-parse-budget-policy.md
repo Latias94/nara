@@ -3,7 +3,9 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0006, ADR 0007, ADR 0009, ADR 0011, ADR 0043
-**Refined By**: ADR 0068: Global Resource Budgets, Metrics, and Diagnostic Privacy
+**Refined By**: ADR 0050: Asset Root, Symlink, Junction, and Package Trust Policy; ADR 0068: Global
+Resource Budgets, Metrics, and Diagnostic Privacy; ADR 0070: Capability-Oriented Filesystem
+Substrate
 
 ## Context
 

@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Refines**: ADR 0023: Event, Message, and Command Model
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041:
 Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0048: Runtime Diagnostics
 and Observability Bus; ADR 0057: Authoritative Fixed-Tick and Command Ingress

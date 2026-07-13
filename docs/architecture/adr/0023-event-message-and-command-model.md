@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0036: Event, Message, and Resource Queue Lifetime
+**Refined By**: ADR 0036: Event, Message, and Resource Queue Lifetime; ADR 0057: Authoritative
+Fixed-Tick and Command Ingress
 
 ## Context
 

@@ -4,8 +4,8 @@
 **Date**: 2026-07-11
 **Refines**: ADR 0034: Editor Play Mode World Boundary; ADR 0038: Scene/Prefab Authoring
 Identity and Provenance; ADR 0056: Headless Runtime and Dedicated Server Readiness
-**Related**: ADR 0057: Authoritative Fixed-Tick and Command Ingress; ADR 0076: Play Runtime
-Debug Control and Observation
+**Refined By**: ADR 0076: Play Runtime Debug Control and Observation
+**Related**: ADR 0057: Authoritative Fixed-Tick and Command Ingress
 
 ## Context
 

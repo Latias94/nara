@@ -2,10 +2,11 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041:
-Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0056: Headless Runtime and
-Dedicated Server Readiness; ADR 0070: Capability-Oriented Filesystem Substrate; ADR 0079: Root
-Product Capabilities and Placeholder Domain Retirement
+**Refines**: ADR 0020: Project Source Layout
+**Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
+Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
+Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0070: Capability-Oriented
+Filesystem Substrate; ADR 0079: Root Product Capabilities and Placeholder Domain Retirement
 
 ## Context
 
