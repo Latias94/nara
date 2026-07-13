@@ -1,4 +1,4 @@
-# ADR 0020: Project Layout and Package Format
+# ADR 0020: Project Source Layout
 
 **Status**: Accepted
 **Date**: 2026-07-08
@@ -11,6 +11,9 @@ nara needs a project shape that works for code-first games, AI-generated project
 ## Decision
 
 nara projects use a simple manifest plus conventional directories.
+
+This ADR defines the authoring/source-tree convention only. It does not define cooked products,
+runtime packages, package catalogs, mount precedence, patches, DLC, signing, or deployment.
 
 Recommended layout:
 
@@ -76,3 +79,11 @@ Rules:
 | Layout becomes too rigid | Medium | Medium | Treat as convention with configurable roots |
 | Cache checked into source accidentally | Low | Medium | Add `.nara/import-cache/` guidance to gitignore/templates |
 | Manifest grows too large | Medium | Medium | Keep manifest project-level; scene/asset data stays in files |
+
+## Consequences
+
+- File-backed projects remain code-first and source-control friendly; embedded use may provide the
+  same settings and content through explicit host configuration.
+- `.nara/import-cache/` is generated importer output, not a distributable runtime package.
+- Target cooking, package publication, and runtime catalogs require their own decision and must not
+  silently accrete into this source layout contract.

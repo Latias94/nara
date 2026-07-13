@@ -2,10 +2,14 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0042: Runtime Service and Backend Boundary
 
 ## Context
 
-Physics is a major extension seam. nara should support replaceable mature physics backends without putting backend-native handles in scene files or core gameplay components.
+Physics is a major extension seam. nara should isolate mature physics backends without putting
+backend-native handles in scene files or core gameplay components. Isolation permits another
+adapter when a real product requires it; it does not make different solvers numerically or
+behaviorally interchangeable.
 
 ## Decision
 
@@ -31,7 +35,13 @@ Rules:
 - Phase 1 does not self-build a complete physics engine.
 - Physics runs on fixed timestep.
 - Scene/prefab files store high-level nara physics components, not backend handles.
-- Backend plugins synchronize ECS data to backend state and emit collision/contact events.
+- Backend plugins negotiate declared capabilities, synchronize ECS data to backend state, and emit
+  collision/contact results at named schedule boundaries.
+- Scene schemas express nara-owned intent. Unsupported required capabilities reject composition;
+  optional capabilities require explicit fallback policy.
+- Changing solver or adapter may change contacts, ordering, stability, determinism, tuning, and
+  serialized backend-specific extension data. Nara does not promise transparent save/replay or
+  behavioral equivalence across backends.
 - 3D physics is a future parallel domain: `nara_physics3d`.
 
 ## Alternatives Considered
@@ -54,7 +64,8 @@ Rules:
 
 ### Option C: High-level physics components plus backend adapters (Chosen)
 
-**Pros**: Mature engine shape, replaceable backend, stable scene data.
+**Pros**: Mature engine shape, backend isolation, explicit capability negotiation, and stable core
+scene data.
 
 **Cons**: Adapter synchronization complexity.
 
@@ -66,7 +77,8 @@ Rules:
 |---|---:|---|
 | Backend neutrality | Scene physics data contains no backend handles | Schema review |
 | Fixed timestep | Physics steps from fixed update only | Future test |
-| Replaceability | At least one fake/test backend can satisfy the interface | Future test |
+| Adapter isolation | A fake/test adapter can satisfy the domain boundary without backend handles in scene data | Future test |
+| Capability rejection | Missing required solver capabilities reject composition before runtime mutation | Future test |
 | Diagnostics | Invalid collider/body combos emit structured diagnostics | Future test |
 
 ## Risks and Mitigations
@@ -77,3 +89,10 @@ Rules:
 | Sync code gets complex | Medium | High | Use generation IDs and clear ownership |
 | Event ordering nondeterministic | Medium | Medium | Emit events at fixed schedule boundaries |
 
+## Consequences
+
+- Nara can admit a second adapter without redesigning scene identity or leaking native handles.
+- Backend selection is an explicit product/profile choice with capability diagnostics, not a claim
+  that every physics scene behaves identically on every solver.
+- Transform authority, contact/query freshness, and write-back timing still require a concrete
+  physics integration decision before the first production adapter freezes those semantics.

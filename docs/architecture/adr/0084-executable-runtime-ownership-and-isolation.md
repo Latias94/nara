@@ -7,6 +7,7 @@
 fault, exact-step, restart, and bounded-stop contract in editor, desktop, and headless products
 **Revisit Trigger**: A concrete embedded or multi-runtime workflow proves that a thin lifecycle owner
 cannot preserve `App` as the sole schedule/world authority
+**Atomic Admission Group**: ADR 0082 and ADR 0084 must be accepted or rejected together
 **Related**: ADR 0003, ADR 0008, ADR 0034, ADR 0039, ADR 0042, ADR 0052, ADR 0057, ADR 0058,
 ADR 0076, ADR 0081, ADR 0082
 
@@ -304,7 +305,8 @@ RGF-U5 may implement an evidence-producing trial of this Proposed contract. Acce
 requires the complete public workflow and every success metric above through a separate admission
 review; the existence of a wrapper does not make the ADR authoritative. A wrapper type, state enum,
 or bare-world adapter without scheduled execution, fault propagation, and finite shutdown is
-insufficient.
+insufficient. ADR 0082 and ADR 0084 form one atomic admission group: neither proposal may become
+Accepted while the other remains Proposed, Rejected, or otherwise non-authoritative.
 
 ## Citations
 

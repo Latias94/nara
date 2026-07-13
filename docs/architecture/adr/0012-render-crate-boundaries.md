@@ -15,7 +15,7 @@ Target crate taxonomy:
 
 ```text
 nara_render
-  View, ExtractedView, render phases, render items, frame stats, backend traits
+  backend-neutral views, frame lifecycle, render phases, render items, plans, and frame stats
 
 nara_render_wgpu
   wgpu instance/device/surface/pipeline/buffer/texture implementation
@@ -52,7 +52,8 @@ Phase 1 may collapse some crates temporarily, but public module responsibilities
 
 ### Option C: Domain/backend split (Chosen)
 
-**Pros**: Keeps authoring data clean, backend replaceable, and 3D expansion additive.
+**Pros**: Keeps authoring data clean, isolates backend-native state, and makes 3D expansion
+additive without inventing a mirrored RHI or speculative universal backend trait.
 
 **Cons**: More crates and integration points.
 
@@ -75,3 +76,11 @@ Phase 1 may collapse some crates temporarily, but public module responsibilities
 | Render traits become too generic | High | Medium | Design from concrete sprite/tilemap and future mesh needs |
 | Backend leaks upward | High | Medium | Enforce dependency direction and tests |
 
+## Consequences
+
+- `nara_render` owns stable semantic render concepts and logical frame planning, not a generic
+  backend API that mirrors wgpu.
+- `nara_render_wgpu` is the only RHI implementation. Backend-native capabilities and handles stay
+  private while project-facing policy uses semantic required/optional/fallback capabilities.
+- A future backend requires a concrete product need and a new decision; this ADR does not promise
+  source-compatible or behaviorally equivalent backend replacement.

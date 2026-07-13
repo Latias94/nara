@@ -230,8 +230,11 @@ stateDiagram-v2
     Failed --> Stopping: dispose requested
     Stopping --> Stopped: bounded cleanup succeeds
     Stopping --> Failed: cleanup fails or times out
-    Stopped --> Starting: external host creates a fresh instance
+    Stopped --> [*]
 ```
+
+After the old instance reaches `Stopped`, the external host/factory may create a distinct fresh
+instance that begins at `Starting`; this is not a transition on the stopped object.
 
 Restart is an external factory action after the old owner reaches Stopped; it is not an in-place transition that reuses mutable runtime state. Desktop Retry is game state and does not appear in this lifecycle.
 

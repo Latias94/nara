@@ -16,7 +16,9 @@ Rules:
 
 - Phase 1 should support simple sprite/frame animation as a first 2D feature.
 - Animation clips are assets.
-- Animation targets are component fields where possible, using registered component schemas.
+- Persistent animation targets use a stable entity selector plus `ComponentTypeId` and
+  `ComponentFieldId`. A schema-aware `ComponentFieldPath` may be resolved while authoring or
+  binding, but path text is not the durable field identity.
 - Runtime animation state is component data.
 - Future animation domains can include timeline curves, skeletal 2D, skeletal 3D, and animation graphs.
 - Animation should run in deterministic-friendly schedules when it affects gameplay state; presentation-only animation may run in frame update.
@@ -43,7 +45,7 @@ Rules:
 
 **Pros**: Works for sprite animation now and grows toward timelines/3D later.
 
-**Cons**: Requires schema-aware field paths and interpolation rules.
+**Cons**: Requires stable schema IDs, a binding phase, and explicit interpolation rules.
 
 **Decision**: Chosen.
 
@@ -52,7 +54,7 @@ Rules:
 | Metric | Target | Measurement |
 |---|---:|---|
 | 2D usefulness | Sprite animation can be expressed as an asset clip | Future example |
-| Schema integration | Animation targets stable component field paths | Design review |
+| Schema integration | Persistent targets use stable component/field IDs and survive field rename | Design review |
 | Future growth | 3D/skeletal animation can be added as new domains | Architecture review |
 | Schedule clarity | Gameplay-affecting animation can run in fixed update | Future tests |
 
@@ -60,6 +62,14 @@ Rules:
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| Field paths break on migrations | High | Medium | Use component schema migrations and validation |
+| Target binding drifts across schema changes | High | Medium | Persist stable IDs, resolve paths only during binding, and validate migrations/tombstones |
 | Animation scope explodes | High | Medium | Start with sprite/frame clips |
 | Interpolation rules are unclear | Medium | Medium | Define per-field animation value traits later |
+
+## Consequences
+
+- Display names and authoring paths can change without rewriting animation target identity.
+- Clip loading must bind stable IDs against a frozen schema catalog before animation writes become
+  active; missing or tombstoned targets produce typed diagnostics.
+- Write arbitration, blend order, root motion, event timing, and gameplay-versus-presentation
+  scheduling remain separate decisions for the first non-trivial animation slice.

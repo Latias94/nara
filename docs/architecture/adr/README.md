@@ -19,6 +19,11 @@ ADR decision status is one of:
 
 New ADRs use the next unassigned monotonic number; IDs reserved by an active accepted plan are not reused for a different decision. ADRs must contain Context, Decision, at least two Alternatives Considered, Consequences, Success Metrics, and Risks and Mitigations. Cross-domain or stateful decisions include a Mermaid flow or state diagram. Refinement and supersession links must be bidirectional.
 
+Mutually dependent proposals may declare an atomic admission group. Every member remains
+non-authoritative until one review accepts the complete group; partial promotion is invalid. Use
+`Refines`/`Refined By` for decisions that replace only part of an ADR. Reserve `Superseded` for a
+replacement that makes the complete earlier decision non-authoritative.
+
 ## Implementation Evidence
 
 The implementation ledger uses these states:

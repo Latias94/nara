@@ -7,6 +7,7 @@
 the public facade without ambient authority or partial runtime publication
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
+**Atomic Admission Group**: ADR 0082 and ADR 0084 must be accepted or rejected together
 **Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079
 
 ## Context
@@ -273,7 +274,9 @@ If accepted:
 
 Acceptance requires all host-authority success metrics owned by RGF-U3 and the outer-host subset of
 RGF-U5, plus a review showing that hosts delegate executable lifecycle to ADR 0084 and no public
-universal host/service API was admitted without a second concrete consumer.
+universal host/service API was admitted without a second concrete consumer. ADR 0082 and ADR 0084
+form one atomic admission group: neither proposal may become Accepted while the other remains
+Proposed, Rejected, or otherwise non-authoritative.
 
 ## Citations
 
