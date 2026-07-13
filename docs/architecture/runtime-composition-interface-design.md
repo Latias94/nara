@@ -11,6 +11,7 @@
 [ADR 0082](adr/0082-process-host-authority-and-runtime-construction-topology.md), and
 [ADR 0084](adr/0084-executable-runtime-ownership-and-isolation.md)
 **Delivery Evidence**: [Reference-Game-Driven Foundation Plan](../plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md)
+**Upstream Package Design**: [Source Extension Package Interface Design](source-extension-package-interface-design.md)
 
 ## Purpose
 
@@ -25,6 +26,10 @@ It is deliberately not another ADR:
 - The reference game and fault-injection tests provide admission evidence.
 - Stable conclusions flow back into the relevant ADRs and implementation ledger.
 - Illustrative type and method names in this document are not compatibility commitments.
+
+Source package discovery, trust, editor/import/build contributions, and package lifecycle are
+designed separately. A package runtime contribution becomes one input to this document's resolved
+plugin plan; `Plugin` does not become the package abstraction.
 
 Every proposed Interface change should identify the scenarios it serves. A public type that serves
 no scenario in this document or an accepted extension should not be added speculatively.

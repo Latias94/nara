@@ -18,9 +18,10 @@ This document summarizes the selected architecture; it is not evidence that ever
 contract is complete. ADR decision status and implementation status are separate. The canonical
 decision catalogue and evidence rules live in `adr/README.md`, per-ADR implementation state lives
 in `adr/implementation-status.md`, and only unresolved trigger-based questions live in
-`open-questions.md`. Scenario-driven, non-normative Interface work may live in a separate design
-draft; the current composition draft is
-[Runtime Composition Interface Design](runtime-composition-interface-design.md).
+`open-questions.md`. Scenario-driven, non-normative Interface work may live in separate design
+drafts. The current drafts are
+[Runtime Composition Interface Design](runtime-composition-interface-design.md) and
+[Source Extension Package Interface Design](source-extension-package-interface-design.md).
 
 nara is unreleased. Incorrect prototype APIs and draft persistent shapes are removed rather than wrapped: the corrected Rust API takes the canonical unsuffixed name, the corrected persistent shape becomes canonical version 1 after in-repository sources are updated, and the deliberate break is recorded in `../migrations/2026-07-engine-foundation.md`.
 
