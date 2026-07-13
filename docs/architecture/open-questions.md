@@ -179,6 +179,17 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Related ADRs**: 0021, 0034, 0042, 0076
 - **Question**: Can a narrow native module ABI prove code quiescence, thread/task/callback retirement, native-handle ownership, versioned state extraction/migration, two-phase publication, and rollback strongly enough to justify hot replacement over rebuild-and-restart?
 
+## OQ-021: HDR, Wide-Gamut, and Tone-Mapping Contract
+
+- **Status**: open
+- **Owner**: `nara_image`, `nara_render`, material domains, render backends, authoring tooling
+- **Trigger**: The first HDR output, wide-gamut asset workflow, tone-mapping/color-grading pipeline,
+  or display-profile-aware authoring workflow is scheduled beyond ADR 0092's SDR compatibility mode.
+- **Related ADRs**: 0005, 0033, 0040, 0077, 0092
+- **Question**: Which scene-referred working space, asset primaries, HDR target formats, exposure,
+  tone-mapping and color-grading ownership, paper-white/UI composition, mastering metadata, and
+  display capability policy extend the SDR path without silently reinterpreting existing content?
+
 ## OQ-023: Platform Application Lifecycle
 
 - **Status**: open

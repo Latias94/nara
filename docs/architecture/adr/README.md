@@ -125,3 +125,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0089](0089-runtime-scene-instance-loading-activation-unload-and-travel.md): Runtime Scene Instance Loading, Activation, Unload, and Travel
 - [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md): Unavailable Schema and Lossless Authoring
 - [ADR 0091](0091-editor-persistence-recovery-and-concurrent-writer-policy.md): Editor Persistence, Recovery, and Concurrent Writer Policy
+- [ADR 0092](0092-sdr-color-space-alpha-and-output-encoding.md): SDR Color Space, Alpha, and Output Encoding
