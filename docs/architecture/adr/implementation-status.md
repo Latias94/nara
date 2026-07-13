@@ -1,7 +1,7 @@
 # ADR Implementation Status
 
 **Status**: Active
-**Last Verified**: 2026-07-12
+**Last Verified**: 2026-07-13
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole active execution contract is the [reference-game-driven foundation plan](../../plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md), which supersedes the engine-foundation completion sequence without erasing its audit evidence. Active successor units use `RGF-U<N>`; `legacy U<N>` names preserved evidence or trigger backlog from the superseded plan and is not active unless an `RGF-U<N>` entry trigger admits the work.
 
@@ -20,6 +20,20 @@ This ledger tracks implementation evidence independently from ADR decision accep
 | Last verified | Date and commit whose repository state was inspected. |
 
 `implemented` requires at least one code/configuration anchor and one verification anchor, with no remaining gap or trigger. The validator proves paths and shape; reviewers still own the semantic judgment that those anchors cover the whole decision. `not-started` must not invent anchors. New ADRs are added by their owning unit before code is changed.
+
+## Proposed Admission Decisions
+
+These rows track high-cost candidate decisions. Proposed ADRs do not override Accepted decisions or
+become product guarantees. An active plan may explicitly perform a bounded evidence-producing trial
+named by the proposal, but code existence does not change decision status; a separate admission
+review must verify the trigger and promote the ADR before its new contract becomes authoritative.
+
+| ADR | Decision | Implementation | Owner | Plan unit | Code anchors | Verification anchors | Remaining gap | Trigger | Last verified |
+|---|---|---|---|---|---|---|---|---|---|
+| [0082](0082-process-host-authority-and-runtime-construction-topology.md) | proposed | not-started | Product composition and executable hosts | RGF-U3/RGF-U5 evidence trial and admission review | - | - | The outer authority scope graph, service-authority admission boundary, runtime-factory delegation, and parent/child lifetime order are proposed but not implemented as one product contract. | RGF-U3 and the outer-host subset of RGF-U5 prove project boot and authority lifetime across editor, desktop, and headless without a speculative public host hub or a parallel runtime publication path. | 2026-07-13 @ proposal |
+| [0083](0083-durable-project-asset-and-document-entity-identity.md) | proposed | not-started | `nara_asset`, `nara_identity`, `nara_scene`, authoring hosts | Future reference-game identity slice | - | - | Assets already have UUID metadata, but scene entities remain path-like, prefab projection identity is string-composed, and `.meta` duplicates path authority. | A reference-game fixture proves asset move, entity rename/reparent, duplicate/remap, nested prefab provenance, cross-document references, and crash-recoverable old-or-new migration. | 2026-07-13 @ proposal |
+| [0084](0084-executable-runtime-ownership-and-isolation.md) | proposed | not-started | `nara_app`, executable hosts, `nara_tooling` | RGF-U5 evidence trial and admission review | - | - | Play owns a bare `World`; executable generation, safe-point control, staged candidate admission, fault escalation, finite close, and fresh restart are not implemented as one lifecycle owner. | RGF-U5 trials the editor/desktop/headless runtime lifecycle and fault matrix; a separate admission review verifies the complete contract without adding a second App/schedule authority. | 2026-07-13 @ proposal |
+| [0085](0085-hierarchy-transform-and-visibility-semantics.md) | proposed | not-started | `nara_scene`, `nara_transform`, `nara_ui`, render extraction | Future hierarchy-consuming slice and 3D/UI spike | - | - | Runtime hierarchy has dual parent/children state, no global transform propagation, ambiguous reparent behavior, duplicated visibility authority, and unstable sibling order. | A future nested-hierarchy product slice plus a focused 3D/UI spike prove the full graph, reparent, propagation, visibility, ordering, and multi-view acceptance matrix; flat RGF-U6 is baseline only. | 2026-07-13 @ proposal |
 
 ## Active Plan Decisions
 

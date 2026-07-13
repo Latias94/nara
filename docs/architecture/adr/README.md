@@ -110,3 +110,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0079](0079-root-product-capabilities-and-placeholder-domain-retirement.md): Root Product Capabilities and Placeholder Domain Retirement
 - [ADR 0080](0080-domain-owned-task-update-integration-sets.md): Domain-Owned TaskUpdate Integration Sets
 - [ADR 0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md): Schema Source, Stable Identity, Catalog, and Runtime Binding
+- [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md): Process Host Authority and Runtime Construction Topology
+- [ADR 0083](0083-durable-project-asset-and-document-entity-identity.md): Durable Project Asset and Document Entity Identity
+- [ADR 0084](0084-executable-runtime-ownership-and-isolation.md): Executable Runtime Ownership and Isolation
+- [ADR 0085](0085-hierarchy-transform-and-visibility-semantics.md): Hierarchy, Transform, and Visibility Semantics
