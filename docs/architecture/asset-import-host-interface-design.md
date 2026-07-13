@@ -132,7 +132,7 @@ format now would create a shallow, ceremony-heavy Interface.
 flowchart TD
     Caller[Editor, CLI, watch resolver, or asset policy] --> Intent[ImportIntent]
     Intent --> Host[nara_asset shared Import Host]
-    Catalog[Immutable importer plan and compiled binding evidence] --> Host
+    Catalog[Active importer-provider catalog and binding receipts] --> Host
     Host --> FS[nara_fs brokered snapshots and staging receipts]
     Host --> Queue[Bounded import-domain queue]
     Queue --> Tasks[nara_tasks worker execution]
@@ -165,18 +165,26 @@ Importer ID, supported extensions, settings schema, semantic version, output pro
 Host/target applicability, and required isolation are declared in the package's data-only import
 contribution. The provider must not repeat them in `descriptor()`.
 
-A package binds the declaration to Rust once:
+A package's common `package::bind` operation includes one typed import claim:
 
 ```rust
-package.add(nara_asset::extension::threaded_importer(
+let import_claim = nara_asset::package::threaded_importer(
     generated::SPRITE_ANIMATION_IMPORTER,
     SpriteAnimationImporter::new,
-)?)?;
+);
 ```
 
+The variable is illustrative: ordinary authors normally place the helper directly in the tuple or
+sealed contribution list passed to `package::bind`.
+
 The helper stores a repeatable factory and type-specific error mapping without invoking the
-provider. Final contract resolution verifies the declaration, implementation digest, executable
-generation, and placement evidence before the Import Host receives an immutable catalog plan.
+provider. Final catalog admission verifies the canonical declaration, compiled binding,
+implementation digest, and executable generation. Pure semantic resolution then produces a
+placement-independent `ImportPlan` and resolution receipt. Domain-specific Host binding verifies
+the exact Adapter, target, and affinity and produces an inactive `BoundImportPlan` plus binding
+receipt without invoking the factory. A concrete Editor/Import Host later prepares and activates
+the importer-provider catalog; only a subsequent admitted `ImportIntent` grants execution
+placement and attempt-scoped authority.
 
 An extension only produces importer candidates. A stable `.meta` selection or explicit pure plan
 chooses the final `ImporterId`. "Last registered wins" and extension-as-global-unique-slot are not
@@ -651,11 +659,14 @@ An audit record loaded from disk must be revalidated and cannot regain process-l
 
 ### 16. Provider Placement And Private Erasure
 
-Typed providers enter a private object-safe Adapter only after contract resolution. A threaded
-catalog can erase providers behind `Send + Sync` bounds. A Host-local catalog must remain owned by
-the affine execution lane and must not be inserted into an ECS resource whose bounds it cannot
-satisfy. A future process route contains an opaque provider key, not a parent-process Rust trait
-object.
+Typed provider factories remain inside inactive wrappers through pure contract resolution.
+Domain-specific Host binding verifies which private execution Adapter accepts them and moves the
+wrappers into `BoundImportPlan` without invoking a factory. Candidate preparation later invokes the
+selected repeatable factories and erases the fresh providers behind a private object-safe catalog.
+A threaded catalog can erase providers behind `Send + Sync` bounds. A Host-local catalog must
+remain owned by the affine execution lane and must not be inserted into an ECS resource whose
+bounds it cannot satisfy. A future process route contains an opaque provider key, not a
+parent-process Rust trait object.
 
 An affine provider route is reserved until one implementation proves a lane-owned registry,
 Send-safe ticket mailbox, cancellation and physical-exit receipts, and ADR 0080-equivalent poll
@@ -669,8 +680,9 @@ Invocation affinity: any supported worker | Host-local lane | named local execut
 Isolation policy: in-process allowed | isolated required
 ```
 
-Compiled binding and Host admission establish these facts. A source manifest cannot grant itself a
-more privileged route.
+Catalog admission and Host binding establish declared support, target, and affinity. A later
+attempt-owned placement receipt proves the execution route actually used. A source manifest cannot
+grant itself a more privileged route.
 
 ## Example: Multi-Product Sprite Animation Importer
 

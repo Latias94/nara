@@ -106,7 +106,8 @@ The comparisons matter because they expose two independent lessons:
 | Subject target | Product platform/profile whose runtime or artifacts the contribution affects | Execution platform or Cargo Host tools |
 | Compiled binding | Static association from a declared contribution ID to a typed repeatable factory/provider | Declaration authority or stable native ABI |
 | Package preview | Pure pre-build inspection result with evidence levels and explicit unknowns | Final binding compatibility, successful compilation, or Host admission |
-| Resolved extension plan | Immutable package selection plus typed Host projections and fingerprints | Active registry, running worker, mutable editor workspace, or global service locator |
+| Resolved extension plan | Immutable pre-binding package selection plus concrete typed semantic contract results and fingerprint | Bound Host projection, active registry, running worker, mutable editor workspace, or global service locator |
+| Concrete typed projection | Product-specific inactive `Bound*Plan` fields assembled only after every selected domain binding succeeds | Semantic plan, public erased plan bag, ready candidate, or active state |
 | Runtime plugin | Trusted in-process Rust contribution that configures one `App` candidate | Package installer, editor extension, importer, or build hook |
 | Runtime content package | Immutable cooked package and catalog artifact owned by ADR 0088 | Source extension package or Cargo package |
 | Trust tier | Honest statement about executable placement and enforcement strength | A claim that all listed permissions sandbox native Rust |
@@ -344,14 +345,15 @@ Three deliberately different Interface shapes were compared:
 
 | Candidate | Optimizes For | Strength | Failure Mode If Used Alone |
 |---|---|---|---|
-| Minimal package resolution | One to three top-level entry points | High Depth for project authors; one immutable plan feeds concrete Hosts | A fixed central contribution enum or one oversized plan owner can become the next bottleneck |
+| Minimal package composition | One to three top-level entry points | High Depth for project authors; one workflow resolves immutable semantics and seals concrete bound projections for Hosts | A fixed central contribution enum or one oversized plan owner can become the next bottleneck |
 | Open contribution contract catalog | Third-party growth and new domains | High Locality; a new contract changes its owner and supporting Host, not package core | Raw contract IDs, descriptor envelopes, and internal type erasure would be hostile as the common author Interface |
 | Ergonomic typed helpers | Fast gameplay/package authoring | Common runtime, inspector, and importer paths remain small and discoverable | Helpers alone do not supply package-wide provenance, deterministic closure, or Host publication guarantees |
 
 The recommendation is a hybrid:
 
-1. Keep the top-level Interface minimal: declare/bind packages, resolve immutable plans, then pass
-   typed projections to existing concrete Hosts.
+1. Keep the top-level Interface minimal: author package binding claims, resolve immutable semantic
+   plans, bind them into concrete typed projections, then pass those projections to existing
+   concrete Hosts.
 2. Use an open, stable contract-ID envelope inside the package composition implementation so new
    domains do not expand a central enum.
 3. Expose typed domain helpers for normal authors. Descriptor envelopes, internal type erasure,
@@ -483,18 +485,27 @@ managed assembly discovery, Godot uses script/GDExtension entry points, and Unre
 registration. Nara's initial Rust path instead makes static binding explicit and verifies drift.
 
 ```rust
-pub fn package_bindings() -> NativePackageBindings {
-    NativePackageBindings::for_manifest(PACKAGE_MANIFEST)
-        .bind::<RuntimePluginContract>(
-            "runtime.main",
-            runtime_plugin_factory(GamePlugin::default),
-        )
-        .bind::<AssetImporterContract>(
-            "import.dialogue",
-            importer_factory(DialogueImporter::default),
-        )
+pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
+    package::bind(
+        generated::PACKAGE,
+        (
+            nara::app::package::plugins(
+                generated::RUNTIME_MAIN,
+                definitions::runtime_plugins,
+            ),
+            nara::asset::package::threaded_importer(
+                generated::IMPORT_DIALOGUE,
+                DialogueImporter::new,
+            ),
+        ),
+    )
 }
 ```
+
+The names and tuple carrier are illustrative. Each domain helper returns a typed
+`BindingClaim<C>` from a generated declaration locator plus a repeatable compiled definition. The
+locator is not a verified key, and the package draft exposes no provider lookup or invocation
+operation. Final catalog admission performs the declaration/evidence join privately.
 
 The binding Interface must guarantee:
 
@@ -515,12 +526,13 @@ coordinator may generate the same inspectable registry. Linker constructors or g
 magic are not part of the contract because they hide inclusion, ordering, target selection, and
 provenance.
 
-### 4. Pure Package Resolution And Typed Projections
+### 4. Pure Package Resolution Before Typed Projections
 
 `ResolvedProjectPlan` is the closest Nara analogue to the useful parts of Bevy's pre-finish
 `PluginGroupBuilder`, Unity's package/assembly selection, and Unreal's target-specific module
-selection. It is intentionally stronger: it is immutable, deterministic, inspectable, and creates
-no executable Host state.
+selection. It is intentionally stronger: it is an immutable, deterministic, inspectable
+pre-binding semantic coordination result and creates no executable Host state. The concrete typed
+Host projections are constructed only after separate domain-specific binding succeeds.
 
 ```rust
 pub fn preview_project_extensions(
@@ -536,13 +548,16 @@ These are two pure phases separated by an explicitly trusted build:
 
 ```text
 source/index facts -> data-only preview -> consent -> Cargo build
-    -> compiled evidence -> data-only final resolution -> Host candidates
+    -> compiled evidence -> final catalog admission -> data-only semantic resolution
+    -> domain-specific binding -> concrete typed projections -> Host candidates
 ```
 
 `PackagePreview` may contain `Unknown` facts and cannot promise that bindings or implementation
 digests are valid. `ResolvedProjectPlan` requires the compiled evidence and is the final
-pre-Host-mutation admission result. Tooling must not describe the latter as available before build
-scripts or proc macros have executed.
+pure semantic result before Host binding. Catalog admission has already proven that matching
+compiled evidence exists, but executable values and provenance remain sealed in opaque inactive
+transfers rather than entering semantic plans or receipts. Tooling must not describe this result as
+available before build scripts or proc macros have executed.
 
 Conceptually, the input captures:
 
@@ -558,38 +573,45 @@ The immutable result contains:
 
 ```text
 ResolvedProjectPlan
-|- package provenance, trust decisions, inactive entries, and fingerprint
-|- runtime: typed contributions for ResolvedProductPlan
-|- schema: typed catalog declarations and bindings
-|- editor: typed model/inspector/UI contribution plan
-|- import: typed importer/processor plan
-|- service: typed Host service Adapter plan
-|- cook/export/artifact: typed subject-target provider plans
+|- package provenance, trust decisions, inactive entries, and semantic fingerprint
+|- runtime: ResolvedContract<RuntimeContract, RuntimePlan>
+|- schema: ResolvedContract<SchemaContract, SchemaPlan>
+|- editor: typed ResolvedContract values for selected tooling contracts
+|- import: ResolvedContract<ImportContract, ImportPlan>
+|- service: typed ResolvedContract values for selected Host-service contracts
+|- cook/export/artifact: typed ResolvedContract values for selected subject-target contracts
 `- content/template/docs: typed source transaction plan
 ```
 
 This tree is conceptual, not a promise that one public struct owns every typed value. The package
-plan is the coordination and inspection authority; each domain plan remains owned and activated by
-its Module. Cross-process Hosts may exchange versioned stable plan projections or fingerprints,
-not Rust trait objects.
+plan is the coordination and inspection authority. Each `ResolvedContract` retains its pure
+semantic plan, `ContractResolutionReceipt`, and sealed inactive transfer, preserving the proof
+chain into later binding. A verified domain binder consumes each sealed transfer into an inactive
+`Bound*Plan`; only then does the root construct an
+`EditorProjectProjection`, `ServerProjectProjection`, or another concrete typed projection. Each
+domain plan remains owned and activated by its Module. Cross-process Hosts may exchange versioned
+stable plan projections or fingerprints, not Rust trait objects.
 
 The plan fingerprint binds at least:
 
 - Cargo lock and selected package/source/feature/execution-target/subject-target facts;
 - source extension manifest fingerprints;
-- compiled contract versions, binding fingerprints, verified executable/tooling artifact digests,
-  and provider implementation/tool digests;
+- admitted contract, declaration, migration, and semantic plan schema versions;
+- semantic binding-presence witnesses, without implementation or executable provenance;
 - normalized Host-role, execution-target, subject-target, and product-capability facts;
 - contribution selection, requirements, conflicts, order, and fallback decisions;
 - trust disclosures and explicit authority decisions;
 - relevant schema/settings/import/tool/cook/export contract versions.
 
-Equal package IDs with different source, lock, manifest, binding, executable/provider
-implementation, execution target, subject target, or policy facts are not the same plan generation.
+Equal package IDs with different source, lock, manifest, semantic selection, execution target,
+subject target, or policy facts are not the same semantic plan generation. A different compiled
+Adapter or provider implementation may retain the same semantic fingerprint, but it must produce a
+different binding receipt and concrete composition generation.
 
-Importer and cook recipe keys consume the verified provider implementation/tool digest required by
-ADRs 0087 and 0088. A path dependency source change therefore cannot reuse an old import plan merely
-because its Cargo version, declaration, and stable IDs did not change.
+Importer and cook recipe keys consume the verified provider implementation/tool digest from the
+binding receipt and active provider catalog as required by ADRs 0087 and 0088. A path dependency
+source change therefore cannot reuse an old bound provider or recipe merely because its semantic
+plan, Cargo version, declaration, and stable IDs did not change.
 
 ### 5. Domain-Owned Contribution Types
 
@@ -678,10 +700,11 @@ An eventual package action should:
 4. ask Cargo to produce the candidate graph and consume versioned `cargo metadata` JSON;
 5. build the selected execution-Host tools and subject-target profiles through ADR 0086 generation
    rules, in two stages where a compiled tool orchestrates a product build;
-6. verify manifest-to-binding plus executable/provider implementation fingerprints and resolve all
-   typed plans;
+6. perform final catalog admission, resolve every selected pure typed semantic plan, and bind each
+   plan to verified inactive implementations before sealing a concrete projection;
 7. preview required project/schema/import migrations and destructive removal blockers;
-8. start and stage fresh Host/runtime/import/tool candidates as required;
+8. start and stage fresh Host/runtime/import/tool candidates from that bound projection as
+   required;
 9. publish one coherent activation cohort only after every required candidate is ready, while
    retaining complete last-good activation evidence.
 
@@ -697,10 +720,12 @@ provider catalog while still running the old package plan. Ordinary asset reimpo
 `ArtifactGroupGeneration` publication remain independent ADR 0087 transactions unless a runtime
 startup plan explicitly selects a required artifact-closure receipt.
 
-Every required projection selected by one concrete activation intent and `ResolvedProjectPlan`
-fingerprint therefore belongs to one `ActivationCohortId`. Package composition produces the
-immutable cohort membership/fingerprint; an outer executable/project Host owns a private activation
-coordinator that applies it:
+Every required projection selected by one concrete activation intent and concrete composition
+fingerprint therefore belongs to one `ActivationCohortId`. The composition fingerprint binds the
+semantic receipts, binding receipts, executable generation, target, and selected cohort membership;
+it is distinct from the pre-binding `ResolvedProjectPlan` semantic fingerprint. Package composition
+produces the immutable cohort membership/fingerprint; an outer executable/project Host owns a
+private activation coordinator that applies it:
 
 1. each domain constructs and validates a candidate against the same plan/cohort fingerprint;
 2. selected provider catalogs, editor models, service reservations, runtimes, and any explicitly
@@ -959,10 +984,14 @@ sequenceDiagram
     participant UX as CLI / Editor Package Adapter
     participant Cargo
     participant Package as Package Composition Module
+    participant Admission as Leaf Final Catalog Admission
+    participant Kernel as Leaf Contract Kernel
     participant Contract as Domain Contract Owners
-    participant Activation as Host-owned Activation Coordinator
-    participant Host as Concrete Host Adapter
+    participant Binder as Domain Binding Modules
+    participant Activation as Concrete Host Activation Coordinator
+    participant Owner as Domain Candidate Owners
     participant Active as Active Generations
+    participant Consumers as Typed Consumers
 
     User->>UX: Inspect add / update / remove request
     UX->>Package: Data-only source and descriptor preview
@@ -970,20 +999,30 @@ sequenceDiagram
     User->>UX: Explicitly approve source/code action
     UX->>Cargo: Resolve locked candidate graph and selected build profile
     Cargo-->>Package: Versioned metadata snapshot and built catalog candidate
-    Package->>Package: Verify manifests, provenance, bindings, implementation digests, targets, grants
-    Package->>Contract: Resolve typed declarations and domain closure
-    Contract-->>Package: Typed immutable plans or bounded rejection
-    Package-->>UX: ResolvedProjectPlan and exact effects
-    UX->>Activation: Start activation cohort from resolved plan
-    Activation->>Host: Start required fresh candidates from typed projections
+    Package->>Package: Select product closure, Host role, targets, and contribution locators
+    Package->>Admission: Join selected declarations, BindingClaims, and compiled evidence
+    Admission-->>Package: Private FinalCatalogAdmission bundles
+    Package->>Kernel: Resolve selected contracts through admitted support and requests
+    Kernel->>Contract: Decode and resolve pure semantic plans
+    Contract-->>Kernel: Typed PlanData or bounded rejection
+    Kernel-->>Package: ResolvedContract values and semantic receipts
+    Package->>Binder: Bind exact Adapters, targets, and affinities without factory invocation
+    Binder-->>Package: Inactive BoundContract values and binding receipts
+    Package->>Activation: Stage private concrete projection and activation intent facts
+    Activation-->>Package: Opaque activation attempt ID
+    Package-->>UX: Post-build inspection, exact effects, and attempt ID
+    UX->>Activation: Start approved activation attempt by ID
+    Activation->>Owner: Start required fresh candidates
     alt Every required Host candidate succeeds
-        Host-->>Activation: ReadyToPublish for one cohort fingerprint
+        Owner-->>Activation: ReadyToPublish for one cohort fingerprint
         Activation->>Active: Publish immutable cohort activation record
-        Active-->>Host: Adopt complete cohort at declared safe points
-        Host-->>UX: Success and retirement obligations
+        Active-->>Consumers: Typed generation leases become visible at the record exchange
+        Activation->>Owner: Retain predecessor retirement obligations
+        Activation-->>UX: Success and retirement obligations
     else Build, migration, admission, activation, or cleanup fails
-        Activation->>Host: Retire or quarantine every ready sibling candidate
-        Host-->>UX: Failure, retained candidate owner, last-good status
+        Activation->>Owner: Retire or quarantine every ready sibling candidate
+        Owner-->>Activation: Failure and retained cleanup state
+        Activation-->>UX: Failure, retained candidate owner, last-good status
         Note over Active: Existing published generations are not replaced
     end
 ```
@@ -1002,8 +1041,9 @@ No universal `ExtensionError` should absorb domain facts or stringify arbitrary 
 |---|---|---|---|
 | package source/inspection error | package UX/Cargo Adapter | No package code or Host candidate has run | Source, metadata, descriptor, license, provenance, or budget could not be inspected |
 | `PackagePlanError` | package composition | No editor/import/runtime/tool Host mutation | Package identity, Host role, execution/subject target, trust, cross-contribution graph, cohort, or common policy is invalid |
-| `ContributionBindingError` | compiled catalog plus contract owner | No contribution factory or native authority has started | Manifest, contract, static binding, or factory declaration drifted |
+| `ContributionBindingError` | leaf final catalog admission; contract and Adapter owners supply immutable evidence only | No contribution factory or native authority has started | Manifest, contract, static binding, implementation, or executable evidence drifted |
 | domain plan error | runtime/schema/editor/import/service/build owner | No owning-domain candidate mutation | Contract-specific cardinality, slot, format, schema, dependency, or order is invalid |
+| `ContractBindError` | domain-specific binding Module | No factory, placement, reservation, or candidate authority has started | The admitted semantic plan does not match the exact Adapter version, target, affinity, or shared generation seal |
 | executable/build failure | ADR 0086 build coordinator | No new executable/Host/runtime publication | Compiler, linker, artifact, provenance, or stale-generation validation failed |
 | domain activation failure | concrete Host/domain candidate | No required cohort publication; ready siblings retire/quarantine and cleanup ownership may remain | Plugin, editor, importer, service, cook, migration, or startup work failed after commit began |
 | live contribution/runtime fault | published domain/runtime owner | Published state may be partially mutated; first fault is sticky | Stop/observe/discard according to the owning lifecycle; never retry in place by default |
@@ -1162,7 +1202,7 @@ Tests cross the same package and typed domain Interfaces as real callers.
 |---|---|---|
 | Descriptor/inspection fixtures | PX-03 through PX-08, PX-23, PX-28 | Bounded parse, canonical fingerprint, provenance/trust presentation, no code execution |
 | Cargo/independent workspace fixtures | PX-02, PX-05, PX-07, PX-21, PX-22 | Structured metadata, locked graph, target/feature selection, editor/server dependency absence |
-| Pure package resolution | PX-04, PX-20 through PX-27 | Deterministic typed projections, stable rejection, zero Host/native mutation |
+| Pure package resolution | PX-04, PX-20 through PX-27 | Deterministic typed semantic results and receipts, stable rejection, zero Host/native mutation |
 | Contract conformance suites | PX-10 through PX-19, PX-25 | Domain cardinality/order/fallback, typed plans, no hidden cross-domain registration |
 | Static binding fault matrix | PX-10, PX-23, PX-26, PX-32 | Missing/extra/wrong-kind/drifted factory rejection before authority |
 | Runtime composition | PX-10, PX-17, PX-31, PX-32, PX-34 | Existing RC scenarios plus package provenance and fresh generation identity |

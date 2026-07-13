@@ -65,6 +65,11 @@ An inactive package-authoring result containing declared contribution claims bef
 verification and Host selection.
 _Avoid_: Resolved package, active package, verified catalog
 
+**Contribution Locator**:
+A stable generated reference to one canonical package declaration. It identifies what must be
+verified but is not itself a verified key, executable lookup handle, or authority.
+_Avoid_: Runtime registry key, verified contribution key, capability
+
 **Binding Claim**:
 A typed claim that associates one declared contribution locator with a compiled domain
 implementation while conferring no authority to execute it.
@@ -82,10 +87,17 @@ _Avoid_: Domain owner, universal plugin, package resolver
 
 ## Contract Resolution
 
+**Final Catalog Admission**:
+The private Leaf operation that joins a root-selected canonical declaration, typed binding claim,
+and compiled contract/Adapter evidence into one sealed admission bundle without invoking a
+provider/factory or acquiring Host authority.
+_Avoid_: Package installation, dynamic loading, Host activation
+
 **Leaf Contract Kernel**:
-The domain-independent Module that validates common declaration/binding structure and produces typed
-semantic results without interpreting domain policy or depending on runtime, import, schema,
-tooling, or native Hosts.
+The domain-independent Module that validates common declaration/binding structure, including the
+private final catalog admission operation, and delegates domain meaning to catalog-verified pure
+decoders and resolvers. It invokes no package provider or factory, grants no Host authority, and
+depends on no runtime, import, schema, tooling, or native Host implementation.
 _Avoid_: Operating-system kernel, package manager, plugin registry
 
 **Semantic Plan**:
@@ -97,6 +109,11 @@ _Avoid_: Active registry, mutable builder, executable plan
 A non-authoritative proof that a specific set of declarations was validated into a specific
 semantic plan.
 _Avoid_: Capability, activation token, serialized authority
+
+**Opaque Inactive Transfer**:
+A move-only carrier that retains verified compiled implementation values across pure resolution.
+Only an admitted domain binder may consume it, and no public operation can inspect or invoke it.
+_Avoid_: Provider registry, callback bag, execution capability
 
 ## Product Composition
 

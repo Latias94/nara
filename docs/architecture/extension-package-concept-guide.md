@@ -65,7 +65,9 @@ Imagine preparing a machine from separately supplied parts:
 2. **Concrete root composition is the assembly coordinator.** The Editor, server, and cook tool
    select different subsets and supply the facts needed by the next checks.
 3. **The leaf contract kernel is the independent common verifier.** For each selected rulebook, it
-   checks identities, versions, limits, and structural evidence without running supplied code.
+   checks identities, versions, limits, and structural evidence. It may invoke catalog-verified,
+   non-capturing domain decoders and pure resolvers, but it invokes no package provider or factory
+   and acquires no Host authority.
 4. **Domain-specific implementation binding matches each part to one socket.** The formal design
    calls this Host binding; the implementation is selected, but it is still powered off.
 5. **Concrete domain owners prepare candidates; the owning Host publishes the selected unit.** Only
@@ -136,19 +138,35 @@ The separation is intentional: inspect and reject first; acquire authority and m
 | Contribution | One declared role from that package, such as runtime playback or `.nanim` import |
 | Contract | The versioned rulebook defining what one contribution kind means |
 | Declaration | Inspectable data saying what the package intends to contribute |
+| Locator | A generated stable reference to one canonical declaration; it is not a runtime lookup key, verified identity, or permission |
+| Binding claim | A typed author assertion that one compiled definition matches one locator; final catalog admission must still verify it |
+| Catalog | A bounded inventory owned by a named stage and generation; compiled-support, schema, and importer-provider catalogs are different authorities, not one global registry |
+| Final catalog admission | The private Leaf operation that joins root-selected declarations and claims to compiled evidence and returns sealed typed evidence for resolve and bind; it invokes no provider/factory and acquires no Host authority |
 | Implementation or provider | Compiled Rust code that can perform the role later |
-| Adapter | Domain-specific glue that joins a semantic plan and implementation to one owner role or execution placement |
+| Adapter | Domain-specific glue that states how a semantic plan and implementation fit one owner role or execution-affinity class; binding selects it without performing placement |
+| Semantic plan | A pure typed result describing selected meaning, order, and fallback, with no callable provider or Host authority |
+| Bound plan | A semantic plan joined to an exact compiled Adapter, target, and affinity while remaining inactive |
 | Authority | A scoped ability to read or change protected state, such as tracked source bytes or a candidate `World` |
 | Candidate | An unpublished prospective state that may still be preparing, ready, or failed |
 | Receipt | Proof that one validation or join completed; it is not permission to perform the next operation |
 | Generation | A non-reused identity distinguishing one compiled, candidate, or active state from stale predecessors |
+| Cardinality / bijection | The required counts and one-to-one match: every selected declaration has exactly one matching claim, with none missing, duplicated, or extra |
+| Fingerprint | A deterministic summary of canonical facts used to detect drift; matching bytes do not grant authority |
+| Opaque inactive transfer | A move-only carrier that keeps compiled values unreachable during pure resolution and can be consumed only by the admitted binder |
+| Lineage | The explicit predecessor and migration ancestry that explains how one schema or declaration version derives from another |
+| Activation intent | A concrete Host request naming exactly which candidates must become visible together, such as Editor catalog activation or Play activation |
+| Activation cohort | The complete ready-but-unpublished candidate set selected by one activation intent and plan fingerprint |
+| Activation | The domain lifecycle change that makes fully prepared runtime or tool state active |
+| Publication | The visibility and authority transition that makes one immutable verified record authoritative; it may linearize an activation but is not a synonym for activation |
+| Publication axis | One independently versioned authority stream, such as Editor provider topology, Play runtime, imported content, or saved documents |
 
 Three actors also stay distinct:
 
 | Actor | Who supplies it | Responsibility |
 |---|---|---|
 | Provider | Package or domain code | Performs one specialized job only through its narrow Interface |
-| Domain owner / Host | Nara domain implementation | Owns policy, authority, candidate lifecycle, cleanup, and active state; "Host" is the precise name only where the domain defines that role |
+| Domain owner | Nara domain implementation | Prepares and retains one domain's candidates, policy, authority, cleanup, and retirement obligations |
+| Concrete Host | One executable or concrete lifecycle owner | Selects an activation intent, waits for every required domain candidate, and linearizes the cohort's visibility; one concrete Runtime or Import implementation may also perform its domain-owner role |
 | Composition root | One concrete executable | Coordinates selection and typed assembly; it does not own every domain's active state |
 
 In formal generic types, a `HostBindingKind` or `H` is a type-level marker for the destination owner
@@ -238,19 +256,25 @@ tool. It validates project capability and package-level closure, selects contrib
 the Host and product targets, and constructs the immutable request for each known contract.
 
 Before the domain resolver can run, the concrete root invokes the final catalog verifier. That
-verifier performs the raw evidence join below and alone mints the private verified key, witness,
-and inactive transfer. The leaf `resolve_contract` operation then checks those admitted values
-against the root's selected request before it invokes the pure domain resolver. These operations
-form one private verifier chain, not another public method that package authors must call, but their
-ownership remains distinct:
+verifier performs the raw evidence join below and alone creates one sealed route-specific
+`FinalCatalogAdmission` bundle. The leaf `resolve_contract` operation then borrows only the admitted
+resolve view; later binding borrows only the matching bind view. These operations form one private
+verifier chain, not another public method that package authors must call. Their phases remain
+distinct even when one physical leaf/common Module implements both admission and resolution:
 
 ```text
 package-authored BindingClaim<C>
     + canonical declaration
-    + compiled implementation and executable evidence
-    -> private verified ContributionKey<C>
-       + semantic binding witness
-       + opaque inactive implementation transfer
+    + compiled contract, Adapter, implementation, and executable evidence
+    + root-selected Host / target facts
+    -> private FinalCatalogAdmission<C, H, ...>
+       |- verified ContributionKey<C>
+       |- ContractSupport<C, ...>
+       |- VerifiedHostAdapterSupport<C, H, ...>
+       |- VerifiedHostBindingFacts<H>
+       |- semantic binding witness
+       |- opaque inactive implementation transfer
+       `- one shared private composition-generation seal
 ```
 
 Think of `BindingClaim<C>` as an application form and `ContributionKey<C>` as an internal verified
@@ -468,8 +492,9 @@ ahead:
 | Leaf + domain resolver | Semantic resolution | Domain conflict or invalid fallback | No plan, resolution receipt, or inactive transfer escapes |
 | Root composition | Product closure | Editor plan requires a capability not requested or compiled | No concrete projection and no Host mutation |
 | Domain binding | Adapter binding | Adapter does not support the exact plan version or affinity | No binding receipt and no factory invocation |
-| Domain owner | Candidate preparation | Plugin, schema merge, or importer staging fails | Existing active state remains authoritative; the candidate or attempt-owned resources are retired or retained for cleanup |
-| Concrete Host or independent publication authority | Activation/publication | A selected cohort sibling is not ready, the expected generation changed, or writer authority changed | No partial cohort becomes visible; the prior activation or domain-specific last-good generation remains authoritative |
+| Domain owner | Activation candidate preparation | Runtime plugin construction, schema merge, importer-provider catalog construction, or tooling-provider construction fails | No selected cohort becomes visible; the prior activation remains authoritative if one exists, otherwise that product capability remains unavailable; failed resources are retired or retained for cleanup |
+| Import Host | Per-source import attempt | Provider decode, staging, reconciliation, or verification fails | The prior artifact group remains authoritative if one exists; a first import failure leaves the asset unavailable, and no provider-catalog activation is implied |
+| Concrete Host or independent publication authority | Activation/publication | A selected cohort sibling is not ready, the expected generation changed, or writer authority changed | No partial cohort becomes visible; the prior activation or domain-specific last-good generation remains authoritative if one exists, otherwise the domain remains unavailable |
 
 This is why resolution receipts, binding receipts, placement evidence, and activation/publication
 evidence are separate. A receipt proves one completed join; it is not a capability and cannot be
@@ -482,10 +507,19 @@ No mature engine has an exact equivalent of the whole Nara flow. The useful comp
 | Nara concept | Bevy | Godot | Unity | Unreal |
 |---|---|---|---|---|
 | Source extension package | Usually a Cargo crate plus an ecosystem listing | Addon metadata and, separately, GDExtension metadata | UPM `package.json` above Runtime/Editor assemblies | `.uplugin` above Runtime/Editor/Program modules |
+| Contribution | One `Plugin`, `AssetLoader`, reflected type registration, or other specialized role | One importer, Inspector extension, class registration, or editor role | One importer, custom editor, runtime assembly role, or build hook | One module/provider/translator/customization role |
 | Domain contribution contract | `Plugin`, `AssetLoader`, reflection type data, and other specialized traits | `EditorImportPlugin`, `EditorInspectorPlugin`, GDExtension class registration | `ScriptedImporter`, `CustomEditor`, build interfaces | Module types, `IAssetTools`, Interchange translators/pipelines/providers |
 | Atomic package authoring | Explicit Rust `PluginGroup` composition is the closest ergonomic analogy | One addon can register several editor extension kinds | One package declares several assemblies and specialized classes | One plugin descriptor declares several target-scoped modules |
+| Minimal leaf contract kernel | No direct equivalent; typed trait checks and some `PluginGroupBuilder` validation are partial analogies | No direct equivalent; addon and extension admission is distributed | No direct equivalent; package, assembly, and importer validation is distributed | No direct equivalent; descriptor, target, and module validation is distributed |
+| Semantic plan | `PluginGroupBuilder` is a partial analogy but still holds live plugin values | Selected metadata and initialization rules are usually not exposed as one pure typed value | Package/assembly/import selection is usually framework state rather than one pure typed value | Target/module resolution is the closest build-time analogy |
 | Concrete composition root | Application code builds one `App` | Editor, running project, export tool, and initialization levels assemble different capabilities | Editor, Player, import, and build pipelines select different assemblies | Editor, Game, Server, Program, commandlet, and build targets select modules |
+| Domain-specific Host binding / Bound plan | No separate public phase; application code normally inserts live Rust values into `App` | Registration and activation are commonly combined by engine entry points | Reflection discovery, construction, and registration are commonly combined | Module loading and provider registration commonly combine several phases |
 | Concrete domain owner | `App`, `AssetServer`, and specialized registries | Scene runtime, resource importer, editor registries | Player, Asset Database/import pipeline, editor serialization/tooling | Game runtime, Editor, commandlets, Asset Tools and Interchange |
+
+These are analogies only. Bevy `PluginGroup`, a Godot addon, a Unity package, and an Unreal plugin
+can each group multiple roles, but none promises Nara's typed all-or-error `PackageDraft` followed
+by separately inspectable semantic resolution, inactive binding, candidate preparation, and
+publication phases.
 
 ### What Nara Takes From Bevy
 

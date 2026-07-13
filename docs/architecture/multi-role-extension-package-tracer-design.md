@@ -296,7 +296,7 @@ policy exists.
 | ID | Caller and goal | Required Interface behavior | Primary oracle |
 |---|---|---|---|
 | MT-20 | Resolver receives equivalent inputs | Declaration order permutations produce the same typed plans and fingerprints | Repeated property test |
-| MT-21 | Package binds an importer to a runtime key | Typed key mismatch fails to compile where expressible | Compile-fail fixture |
+| MT-21 | Package passes a runtime declaration locator to the importer helper | Contract-locator mismatch returns a bounded authoring error; an incompatible provider/factory type fails to compile where expressible; no package-authored typed key exists | Compile-fail and author-report fixtures |
 | MT-22 | Manifest and static catalog disagree | Missing, extra, wrong-contract, stale-generation, or digest-drift binding rejects before factory construction | Binding fault matrix |
 | MT-23 | Another package claims `.nanim` | Importer domain reports an explicit conflict; registration order never selects a winner | Import plan test |
 | MT-24 | Editor Host compiles import code for a native build machine | Execution target and subject product target remain separate in preview, plan, recipe, and diagnostics | Cross-target plan fixture |
@@ -402,15 +402,17 @@ flowchart TD
 
 ### Ownership Table
 
-| Module | Interface | Hidden implementation | Must not own | Dependency category |
+| Owner or operation | Interface | Hidden implementation | Must not own | Dependency category |
 |---|---|---|---|---|
-| Leaf extension contract Module | Stable IDs, versioned contract references, bounded envelopes, private typed keys, binding receipts, prepared package facts | Canonical parsing, fingerprinting, marker/contract uniqueness, and private typed contract slices | Any domain plan, `nara_app`, `nara_asset`, `nara_reflect`, `nara_tooling`, Host mutation, diagnostics dependency cycles | In-process pure computation; domain-independent leaf dependency |
+| Leaf extension contract Module | Root-selected bounded package facts, typed claims, compiled evidence, and contract/Adapter declarations in; prepared requests and pure `ResolvedContract<C, PlanData>` plus semantic receipts out | Final catalog admission, private key/support/witness/transfer construction, canonical parsing, version decode orchestration, stable graph checks, plan summary, and private typed slices | Binding receipts, domain plan policy, Host mutation, or diagnostics dependency cycles | In-process pure computation; domain-independent leaf dependency |
+| Final catalog admission operation | Selected canonical declarations, `BindingClaim<C>` values, compiled support/evidence, and immutable Host/target facts in; one private `FinalCatalogAdmission` bundle containing keys, both verified supports, verified Host facts, semantic witnesses, opaque inactive transfers, and one shared generation seal out | Exact declaration/claim/evidence bijection, implementation and executable drift rejection, and private constructor authority | Domain semantic resolution, factory invocation, candidate authority, or publication | Private operation of the leaf/common verifier after root selection; not a separate public service or required crate |
 | Root extension composition Module | Cross-package closure, verified contract-resolution orchestration, inspection snapshot, Host-specific activation specifications | Target/trust/requirement closure and assembly of concrete typed projections | Cargo solving, executable authority, active coordinator, universal plan lookup | In-process pure computation above the leaf and all selected domain Modules |
+| Domain-specific binding Module | `ResolvedContract`, verified Adapter support, and verified Host binding facts in; inactive `BoundContract` plus binding receipt out | Exact plan-version/Adapter/target/affinity join and transfer consumption | Factory invocation, native placement, candidate readiness, or activation | In-process typed composition between semantic resolution and concrete Host candidates |
 | Runtime contribution owner | Repeatable plugin definitions and lowering into the closed product plan | Slot/order/capability closure and fresh plugin declaration checks | Importer, editor, package discovery, runner, native authority | In-process |
 | Schema contribution owner | Stable catalog fragment, native-binding evidence, migrations, typed schema plan | Merge, lineage, validation, Building-to-Frozen candidate | Runtime process identity as durable schema, Inspector UI, package graph | In-process |
 | `nara_asset` Import Host | Importer descriptor/binding plan plus tracked domain job Interface | Import request policy, recipes, tracked-input bookkeeping, stale eligibility, product reconciliation, artifact staging/publication, artifact last-good | Executor mechanics, native filesystem authority, raw paths, private per-asset-type Host loops, runtime `App`, editor workspace | In-process planning; bounded execution through `nara_tasks`; brokered `nara_fs` capabilities and local-substitutable stores |
 | Inspector/tooling contribution owner | Stable target predicate, immutable model, typed intent lowering | Provider selection, revision guards, validation, command composition | `&mut World`, mutable workspace, egui/render handles, direct document writes | In-process |
-| Concrete Editor/Project Host | High-level stage/poll/outcome operation over one resolved activation intent | Candidate owner registry, Nara-issued capability minting, readiness barrier, cleanup obligations, predecessor active cohort, publication | Package resolution policy, artifact last-good, or another domain's semantics | Concrete executable Host, not a public generic port |
+| Concrete Editor/Project Host | High-level stage/poll/outcome operation over one resolved activation intent | Retained domain-owner registry, Nara-issued capability minting, readiness barrier, cleanup coordination, predecessor active cohort, and publication | Domain candidate internals, package resolution policy, artifact last-good, or another domain's semantics | Concrete executable Host, not a public generic port |
 | UI Adapter | Render tooling models and submit tooling intents | Toolkit widgets, layout, input translation | Document truth, undo stack, schema mutation, package admission | One concrete egui Adapter today; general seam waits for a second implementation |
 
 The split between the leaf contract Module and root composition Module is a dependency invariant,
@@ -468,26 +470,25 @@ behavior of `App::add_plugins`.
 The reusable package path has one explicit registration:
 
 ```rust
-pub fn package() -> Result<StaticPackageRegistration, PackageBindingError> {
-    let mut package = PackageRegistration::new(generated::PACKAGE);
-
-    package.add(nara_reflect::extension::schemas(
-        generated::SCHEMA,
-        SpriteAnimationSchemas::new,
-    )?)?;
-
-    package.add(nara_app::extension::plugins(
-        generated::RUNTIME,
-        SpriteAnimationRuntimePlugin::new,
-    )?)?;
-
-    #[cfg(feature = "import")]
-    package.add(nara_asset::extension::threaded_importer(
-        generated::IMPORTER,
-        SpriteAnimationImporter::new,
-    )?)?;
-
-    package.finish()
+pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
+    package::bind(
+        generated::PACKAGE,
+        (
+            nara_reflect::package::schemas(
+                generated::SCHEMA,
+                SpriteAnimationSchemas::new,
+            ),
+            nara_app::package::plugins(
+                generated::RUNTIME,
+                SpriteAnimationRuntimePlugin::new,
+            ),
+            #[cfg(feature = "import")]
+            nara_asset::package::threaded_importer(
+                generated::IMPORTER,
+                SpriteAnimationImporter::new,
+            ),
+        ),
+    )
 }
 ```
 
@@ -570,10 +571,12 @@ impl PreparedPackageSet {
 
 Generated manifest projection produces an untyped `DeclaredContribution`, not a publicly
 constructible typed key. A domain helper turns that locator into `BindingClaim<C>`. Final catalog
-verification alone privately mints `ContributionKey<C>` and `ContractBinding<C>` after checking
+verification alone returns the private kernel-defined `FinalCatalogAdmission` bundle after checking
 the canonical manifest, declaration digest, Host/target applicability, executable generation, and
-implementation evidence. This avoids teaching the generator Rust marker paths and avoids treating
-generated constants as verified truth.
+implementation evidence. The bundle carries private `ContributionKey<C>` values, both verified
+support types, verified Host binding facts, semantic witnesses, opaque inactive transfer, and one
+shared composition-generation seal. This avoids teaching the generator Rust marker paths, treating
+generated constants as verified truth, or letting root combine evidence from different admissions.
 
 `ContractDefinition<C, PlanData, ResolveError>` supplies exact wire-version decoders, explicit
 migrations, and one non-capturing pure resolver function pointer. The root-verified support prevents
@@ -638,25 +641,25 @@ arbitrary plans. Concrete Hosts receive only their typed projections. Conceptual
 ```rust
 struct EditorProjectProjection {
     inspection: ExtensionInspectionSnapshot,
-    schemas: SchemaContributionPlan,
-    importers: ImporterContributionPlan,
-    tooling: ToolingContributionPlan,
-    play_runtime: ResolvedProductPlan,
+    schemas: BoundSchemaPlan,
+    importers: BoundImportPlan,
+    tooling: Option<BoundToolingPlan>,
+    play_runtime: BoundRuntimePlan,
     cohort: ActivationCohortSpec,
 }
 
 struct ServerProjectProjection {
     inspection: ExtensionInspectionSnapshot,
-    schemas: SchemaContributionPlan,
-    runtime: ResolvedProductPlan,
+    schemas: BoundSchemaPlan,
+    runtime: BoundRuntimePlan,
     cohort: ActivationCohortSpec,
 }
 ```
 
 These names and fields are illustrative. Editor, server, import, and release-tool Interfaces are
 allowed to differ. A universal `EngineHost` would hide meaningful lifecycle and authority
-differences. Public tooling inspects a stable snapshot; it does not navigate private executable
-plan storage.
+differences. Every `Bound*Plan` remains inactive and proves no candidate readiness or publication.
+Public tooling inspects a stable snapshot; it does not navigate private executable plan storage.
 
 ### 4. Schema Contribution
 
@@ -830,12 +833,14 @@ Activation intent is explicit:
 The selected internal order is:
 
 1. verify expected project, source, lock, executable, and active revisions;
-2. construct definitions that receive no Nara-issued authority and verify declarations, bindings,
-   and implementation digests;
-3. complete common and domain plan admission;
+2. perform final catalog admission over the selected declarations, `BindingClaim<C>` values, and
+   compiled implementation/executable evidence without invoking a factory;
+3. complete common and domain semantic plan resolution, then domain-specific binding; neither
+   phase invokes a factory or receives candidate authority;
 4. choose and budget an admitted publication mode;
 5. mint scoped one-shot grants or reservations only for admitted candidates;
-6. build only the schema, importer-provider, tooling, or runtime candidates selected by the intent;
+6. invoke only the admitted repeatable factories and build the schema, importer-provider, tooling,
+   or runtime candidates selected by the intent;
 7. capture a `RequiredStartupArtifactClosureReceipt` only when a runtime start actually depends on
    a specific complete artifact closure;
 8. wait until every selected required member is `ReadyToPublish`;
@@ -861,8 +866,10 @@ tools.
 ### 9. Activation Intents And Publication Axes
 
 Package composition owns only immutable activation membership, dependency edges, compatibility
-decisions, and fingerprints. The concrete Host owns every prepared candidate, cleanup obligation,
-readiness barrier, and publication operation.
+decisions, and fingerprints. Domain owners own their prepared candidates and cleanup obligations.
+The concrete Host retains those owners, coordinates their declared cleanup obligations, owns the
+readiness barrier, and performs the single publication operation; it does not take over each
+domain's candidate internals.
 
 Package/provider topology and imported content have different publication axes:
 
@@ -920,6 +927,8 @@ sequenceDiagram
     participant Compose as Root Composition Module
     participant Cargo
     participant Domain as Domain Contract Owners
+    participant Admission as Leaf Final Catalog Admission
+    participant Binder as Domain Binding Modules
     participant Host as Concrete Editor / Project Host
     participant Active as Private Cohort Root
     participant Asset as Independent Artifact Root
@@ -928,15 +937,17 @@ sequenceDiagram
     UX->>Kernel: Bounded source and manifest facts
     Kernel-->>UX: Preview, trust evidence, targets, roles, unknowns
     User->>UX: Explicit consent for trusted build
+    UX->>Compose: Approved bounded manifests and project request
     UX->>Cargo: Resolve and build selected profiles
-    Cargo-->>Kernel: Locked graph and compiled binding evidence
-    Kernel-->>Compose: Prepared facts and bounded envelopes
+    Cargo-->>Compose: Locked graph and compiled binding evidence
     Domain-->>Compose: Explicit contract definitions and Host Adapter declarations
-    Compose->>Kernel: resolve_contract(verified support, typed request)
+    Compose->>Admission: Selected declarations, BindingClaims, support declarations, Host/target facts, and compiled evidence
+    Admission-->>Compose: Private typed FinalCatalogAdmission bundles
+    Compose->>Kernel: resolve_contract(admitted ContractSupport and typed request)
     Kernel->>Kernel: Decode, construct private slice, invoke support-owned resolver, verify plan
     Kernel-->>Compose: ResolvedContract or bounded rejection
-    Compose->>Host: bind_contract(verified Adapter support and Host facts)
-    Host-->>Compose: Concrete typed BoundContract plus binding receipt
+    Compose->>Binder: bind_contract(admitted Adapter support and Host facts)
+    Binder-->>Compose: Concrete typed BoundContract plus binding receipt
     Compose-->>Host: Activation intent and concrete typed projections
     Host->>Host: Retain owner, mint grants, build selected candidates
     alt Candidate preparation or pre-publication retirement fails
@@ -984,8 +995,8 @@ No universal `ExtensionError` should erase the responsible Module or mutation gu
 |---|---|---|---|---|
 | Manifest shape, budget, or migration | leaf contract Module | No package code or Nara-issued Host authority | None | Active state unchanged |
 | Unknown required contract or denied policy | root composition Module | Pure rejection | None | Active state unchanged |
-| Missing/extra/wrong/stale binding | compiled catalog plus contract owner | Factory not called | None | Active state unchanged |
-| Factory panic, drift, or ambient side effect | concrete Host attempt; domain owner supplies error semantics | Nara issues no reservation before pure resolve/bind, but candidate preparation may own reservations; trusted native code may still violate the contract through ambient authority | None | Host retains cleanup ownership, discards the candidate, and reports any non-rollbackable contract breach honestly |
+| Missing/extra/wrong/stale or digest-drift binding | leaf final catalog admission; contract and Adapter owners supply immutable evidence only | Factory not called | None | Active state unchanged |
+| Factory panic or ambient side effect during candidate preparation | concrete Host attempt; domain owner supplies error semantics | Pure resolve/bind already succeeded and candidate preparation may own reservations; trusted native code may still violate the contract through ambient authority | None | Host retains cleanup ownership, discards the candidate, and reports any non-rollbackable contract breach honestly |
 | Schema merge/freeze failure | `nara_reflect` candidate | Candidate-local memory only | None | Retire prepared siblings |
 | Importer slot/extension conflict | `nara_asset` plan | No job or source grant | None | Active state unchanged |
 | Ordinary import queue pressure, cancellation, decode, or budget failure | `nara_asset` Import Host | `nara_tasks` work and scoped staging may exist | No new artifact group; package cohort unaffected | Preserve artifact last-good; cancel and retire/quarantine staging |
@@ -1051,10 +1062,10 @@ every domain.
 
 ### Option B: Open Contract Kernel And Domain Extensions
 
-The leaf kernel owns bounded envelopes, claim/private-key validation, opaque inactive transfers,
-and typed phase receipts. Root asks the leaf to run support-owned non-capturing resolution and then
-orchestrates verified concrete Host binding, while domain crates add their own ergonomic helpers and
-typed plans.
+The leaf kernel owns bounded envelopes, final catalog claim/private-key validation, opaque inactive
+transfers, and semantic resolution receipts. Root asks the leaf to run support-owned non-capturing
+resolution and then orchestrates verified concrete Host binding, whose binding receipts remain
+outside the leaf. Domain crates add their own ergonomic helpers and typed plans.
 
 **Depth**: High for engine and advanced extension authors. New contracts do not widen the leaf
 kernel.
@@ -1186,7 +1197,7 @@ storage, builder map layout, internal tuple order, or concrete candidate enum va
 
 | Test layer | Scenarios | Observable assertions |
 |---|---|---|
-| Compile fixtures | MT-01, MT-02, MT-05, MT-06, MT-21 | Common calls compile; wrong typed bindings fail; no required proc macro |
+| Compile fixtures | MT-01, MT-02, MT-05, MT-06, MT-21 | Common calls compile; wrong provider/helper types fail at compile time where expressible; wrong locator contracts return a bounded author report; no required proc macro |
 | Pure preview/plan | MT-03, MT-20 through MT-26 | Stable snapshots, explicit unknowns, no executable or Host mutation |
 | Schema/Inspector | MT-10, MT-11, MT-15, MT-16, MT-51, MT-52 | Stable identity, capability filtering, lossless unavailable data, validated patch/undo |
 | Import conformance | MT-12, MT-13, MT-23, MT-33, MT-35 | Tracked inputs, bounded jobs, stable products, independent publication, artifact last-good |
@@ -1253,10 +1264,10 @@ through their owning ADRs.
 1. Direct game-owned `PluginGroup` composition and reusable package composition are separate entry
    paths lowered from one canonical semantic definition source.
 2. A leaf contract Module owns domain-neutral identities, envelopes, private typed-key admission,
-   semantic witnesses, opaque inactive transfers, and typed phase receipts. Root composition
-   invokes support-owned non-capturing resolvers and verified Host binders, then owns concrete typed
-   projections. Domain Modules own declarations, binding wrappers, plans, errors, conformance
-   suites, and activation semantics.
+   semantic witnesses, opaque inactive transfers, and semantic resolution receipts. Root
+   composition invokes support-owned non-capturing resolvers and verified Host binders, then owns
+   concrete typed projections. Binding receipts remain with the binding operation; Domain Modules
+   own declarations, binding wrappers, plans, errors, conformance suites, and activation semantics.
 3. Standard schema Inspector behavior is automatic and does not require a contribution wrapper.
 4. Import providers receive tracked bounded `ImportContext`; the `nara_asset` Import Host owns
    domain request/tracking/reconciliation/publication policy, submits bounded work through

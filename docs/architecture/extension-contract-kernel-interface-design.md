@@ -31,7 +31,8 @@ string-keyed service locator or a claim that arbitrary native Rust code can load
 The type names and Rust sketches are illustrative. The durable subject is the ownership split:
 
 - the leaf kernel owns bounded envelopes, stable contract identity, typed joins, common structural
-  validation, canonical receipt construction, and no Host authority;
+  validation, the domain-independent final catalog admission operation, canonical semantic receipt
+  construction, and no Host authority;
 - each domain owns its declaration semantics, pure typed plan, errors, conformance tests, and
   domain-specific binding rules;
 - root composition selects the contracts compiled into one executable and directly owns their
@@ -44,9 +45,12 @@ The recommended shape is a minimal leaf with one support-owned semantic resoluti
 followed by a separate verified concrete Host-binding operation:
 
 ```text
-bounded prepared declarations
-    + verified compiled binding evidence
-    + explicit ContractSupport<C>
+root-selected bounded declarations
+    + typed BindingClaim<C> values
+    + compiled implementation, executable, contract-owner, and Adapter evidence
+    -> final catalog admission verifies the join without invoking factories
+    -> verified ContractSupport<C>, verified Host Adapter support and binding facts,
+       semantic witnesses, and opaque inactive transfer
     -> leaf validates and builds ContractSlice<C>
     -> domain resolver produces pure PlanData without executable factories
     -> leaf canonicalizes PlanData and validates stable edges
@@ -149,7 +153,7 @@ The following comparisons introduce the Nara concepts. Each analogy is deliberat
 |---|---|---|---|---|---|
 | Contribution contract | Specialized traits such as `Plugin` or `AssetLoader` | Specialized extension classes such as `EditorImportPlugin` | Base classes, interfaces, and attributes such as `ScriptedImporter` | Module types and provider Interfaces | Nara separates inspectable stable declaration data from the compiled Rust binding and pure typed plan |
 | `ContractSupport<C>` | A loader/plugin implementation explicitly compiled into an `App` | Engine/editor code compiled with support for one extension class | An Editor or Player assembly containing the relevant extension point | A target-selected module/provider implementation | It grants no lifecycle or Host authority; it proves verified ownership and exact descriptor decode support, while the pure resolver remains explicit |
-| `ContractSlice<C>` | `PluginGroupBuilder` metadata before it mutates `App` is the nearest planning analogy | A filtered registry of one specialized plugin kind | Target/platform-selected assembly and attribute candidates | Target-selected module/provider candidates | It contains immutable declarations and binding evidence, not callable implementation factories |
+| `ContractSlice<C>` | `PluginGroupBuilder` metadata before it mutates `App` is the nearest planning analogy | A filtered registry of one specialized plugin kind | Target/platform-selected assembly and attribute candidates | Target-selected module/provider candidates | It contains immutable declarations and semantic binding-presence witnesses, not implementation provenance or callable factories |
 | Pure typed plan | Ordered plugin metadata and group intent | No single equivalent value | Assembly/platform resolution and import/build plans | Target/module and Interchange pipeline selection | Nara requires deterministic canonical plan facts as a first-class result |
 | Bound plan | Stored Rust plugin/loader factories | Bound script/native extension implementation | Reflected method/class binding in the selected assembly | Bound module/provider implementation | It is still inactive and carries no native Host authority |
 | `ContractResolutionReceipt<C>` | No direct public equivalent | Import/cache metadata is only a partial provenance analogy | Compilation/import records are only a partial analogy | Module/build provenance is only a partial analogy | It proves the declaration/evidence/semantic-plan join only |
@@ -164,22 +168,31 @@ importer and Inspector contracts are preferable to copying its broad `EditorPlug
 
 ```mermaid
 flowchart TD
-    Descriptor[Bounded contribution envelopes] --> Leaf[Contract leaf kernel]
-    Claims[Compiled binding claims] --> Leaf
-    Evidence[Immutable Host, target, trust, and build evidence] --> Leaf
-    Definition[Domain ContractDefinition C] --> Support[Verified ContractSupport C]
+    Descriptor[Bounded contribution envelopes] --> Select[Concrete root selection]
+    Claims[Typed BindingClaim values] --> Admission[Final catalog admission inside the leaf/common verifier]
+    Compiled[Compiled implementation and executable evidence] --> Admission
+    Select --> Admission
+    Definition[Domain ContractDefinition and owner evidence] --> Admission
+    Adapter[Compiled Host Adapter declaration and conformance evidence] --> Admission
+    Admission --> Admitted[Private FinalCatalogAdmission bundle with one shared generation seal]
+    Admitted --> Support[Verified ContractSupport C]
+    Admitted --> AdapterSupport[Verified Host Adapter support]
+    Admitted --> HostFacts[Verified Host binding facts]
+    Admitted --> Request[Selected ContractRequest with semantic witnesses and opaque inactive transfer]
+    Select --> Request
+    Request --> Leaf[Contract leaf kernel]
     Support --> Leaf
-    Leaf --> Slice[ContractSlice C with declarations and evidence]
+    Leaf --> Slice[ContractSlice C with declarations and semantic witnesses]
     Slice --> Domain[Pure domain resolver]
     Domain --> Plan[Pure PlanData]
     Plan --> Leaf
-    Leaf --> Semantic[ResolvedContract C PlanData plus semantic receipt]
-    Semantic --> Binder[Concrete Host binder with verified Adapter support]
-    Claims --> Transfer[Opaque inactive binding transfer]
-    Transfer --> Binder
+    Leaf --> Semantic[ResolvedContract with PlanData, semantic receipt, and sealed inactive transfer]
+    Semantic --> Binder[Concrete Host binder]
+    AdapterSupport --> Binder
+    HostFacts --> Binder
     Binder --> Bound[BoundContract C H PlanData BoundPlan plus binding receipt]
-    Bound --> Root[Concrete typed root projection]
-    Root --> Host[Later concrete Host candidate and activation]
+    Bound --> Projection[Concrete typed root projection]
+    Projection --> Host[Later concrete Host candidate and activation]
 ```
 
 Dependency categories are simple at this seam:
@@ -232,7 +245,25 @@ let importer = nara_asset::extension::threaded_importer(
 The helper verifies that the declared stable contract reference matches its domain contract and
 captures a repeatable factory/provider binding. Final admission later verifies the canonical
 manifest, Host/target applicability, executable generation, implementation digest, and exact
-binding cardinality before privately minting `ContributionKey<C>` and `ContractBinding<C>`.
+binding cardinality before returning one private `FinalCatalogAdmission` bundle.
+
+The admission operation returns one sealed bundle rather than unrelated values that a root caller
+could mix:
+
+```text
+FinalCatalogAdmission<C, H, PlanData, BoundPlan>
+|- private ContributionKey<C> values for the admitted selection
+|- SemanticBindingWitness<C>
+|- InactiveBindingTransfer<C>
+|- ContractSupport<C, PlanData, ResolveError>
+|- VerifiedHostAdapterSupport<C, H, PlanData, BoundPlan, BindError>
+|- VerifiedHostBindingFacts<H>
+`- one shared private CompositionGenerationSeal across every member
+```
+
+The exact generic carrier is illustrative. The invariant is not: root orchestration may borrow only
+the typed resolve and bind views issued from this bundle. It cannot construct, replace, or combine
+members from different admission generations.
 
 Ordinary package authors should not see `ContributionKey<C>`, `ContractSlice<C>`, or receipts.
 Their common path remains generated names, domain helpers, and one explicit `package()`
@@ -490,23 +521,28 @@ The operation follows one fixed order:
    and canonical package fingerprints.
 2. Root composition resolves Host role, execution target, subject target, trust, requirements,
    conflicts, optional fallback, and selected contributions.
-3. `resolve_contract` verifies that the selection belongs to the prepared set and canonicalizes
-   order by stable locator.
-4. It verifies exact contract version support and compiled owner evidence.
-5. It joins each declaration to exactly one semantic witness/compiled-transfer pair and rejects
-   missing, extra, duplicate, wrong-contract, stale-generation, or digest-drift claims. The
-   transfer and its implementation/executable evidence remain private and are not placed in
+3. Final catalog admission joins the selected canonical declarations, `BindingClaim<C>` values,
+   verified contract/Adapter support, and compiled implementation/executable evidence. It alone
+   mints private contribution keys, semantic witnesses, opaque inactive transfers, and shared
+   composition-generation seals; it invokes no factory.
+4. `resolve_contract` verifies that the admitted selection belongs to the prepared set and
+   canonicalizes order by stable locator.
+5. It verifies exact contract version support and the private admission seals without exposing
+   compiled owner or implementation evidence to the domain resolver.
+6. It joins each declaration to exactly one admitted semantic witness/opaque-transfer pair and
+   rejects missing, extra, duplicate, wrong-contract, stale-generation, or digest-drift values.
+   The transfer and its implementation/executable evidence remain private and are not placed in
    `ContractSlice<C>` or the semantic receipt.
-6. Only then does the domain decoder run on bounded prepared values.
-7. The domain resolver sees declarations plus binding evidence and produces pure `PlanData`; it
-   receives no callable binding or Host authority.
-8. The leaf validates the exact plan schema, canonical summary, and semantic edges against its
+7. Only then does the domain decoder run on bounded prepared values.
+8. The domain resolver sees declarations plus semantic binding-presence witnesses and produces
+   pure `PlanData`; it receives no callable binding or Host authority.
+9. The leaf validates the exact plan schema, canonical summary, and semantic edges against its
    private slice witness.
-9. Only complete semantic success constructs `ContractResolutionReceipt<C>` and returns
+10. Only complete semantic success constructs `ContractResolutionReceipt<C>` and returns
    `ResolvedContract<C, PlanData>` with its sealed inactive transfer.
-10. The concrete Host binder verifies `VerifiedHostAdapterSupport<C, H>` for the exact plan version
+11. The concrete Host binder verifies `VerifiedHostAdapterSupport<C, H>` for the exact plan version
     and target, consumes the inactive transfer into `BoundPlan`, and invokes no factory.
-11. Only complete binding success constructs `ContractBindingReceipt<C, H>` and the concrete typed
+12. Only complete binding success constructs `ContractBindingReceipt<C, H>` and the concrete typed
     root projection. Candidate preparation and factory invocation happen later in the Host.
 
 A semantic failure returns neither receipt. A later binding failure may retain the immutable
@@ -598,28 +634,30 @@ checked for equivalent fingerprints and schedule placement.
 ### Reusable Package Author
 
 ```rust
-pub fn package() -> Result<StaticPackageRegistration, PackageBindingError> {
-    let mut package = PackageRegistration::new(generated::PACKAGE);
-
-    package.add(nara_reflect::extension::schemas(
-        generated::SCHEMA,
-        definitions::schemas,
-    )?)?;
-
-    package.add(nara_app::extension::plugins(
-        generated::RUNTIME,
-        definitions::runtime_plugins,
-    )?)?;
-
-    #[cfg(feature = "import")]
-    package.add(nara_asset::extension::threaded_importer(
-        generated::IMPORTER,
-        SpriteAnimationImporter::new,
-    )?)?;
-
-    package.finish()
+pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
+    package::bind(
+        generated::PACKAGE,
+        (
+            nara_reflect::package::schemas(
+                generated::SCHEMA,
+                definitions::schemas,
+            ),
+            nara_app::package::plugins(
+                generated::RUNTIME,
+                definitions::runtime_plugins,
+            ),
+            #[cfg(feature = "import")]
+            nara_asset::package::threaded_importer(
+                generated::IMPORTER,
+                SpriteAnimationImporter::new,
+            ),
+        ),
+    )
 }
 ```
+
+The tuple carrier is illustrative and remains an open ergonomic detail. The stable Interface is one
+all-or-error draft operation over typed domain claims.
 
 No proc macro, linker inventory, global constructor, `Any`, or universal context is required.
 Optional proc macros may become syntax sugar only after this ordinary Rust path is complete.
