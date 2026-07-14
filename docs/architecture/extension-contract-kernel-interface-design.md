@@ -54,10 +54,11 @@ root-selected bounded declarations
     -> leaf validates and builds ContractSlice<C>
     -> domain resolver produces pure PlanData without executable factories
     -> leaf canonicalizes PlanData and validates stable edges
-    -> leaf returns ResolvedContract<C, PlanData>
-       + ContractResolutionReceipt<C>
-       + opaque inactive binding transfer
-    -> concrete Host binder consumes verified Adapter evidence and opaque transfer
+    -> leaf returns PendingContractBinding<C, H, PlanData, BoundPlan, BindError>
+       |- ContractResolutionBundle with pure resolved snapshot and opaque continuation
+       |- verified Host Adapter support
+       `- verified Host binding facts, all carrying the same private seal
+    -> concrete Host binder consumes the complete pending binding
     -> BoundContract<C, H, PlanData, BoundPlan>
        + ContractBindingReceipt<C, H>
 ```
@@ -178,18 +179,23 @@ flowchart TD
     Admitted --> Support[Verified ContractSupport C]
     Admitted --> AdapterSupport[Verified Host Adapter support]
     Admitted --> HostFacts[Verified Host binding facts]
-    Admitted --> Request[Selected ContractRequest with semantic witnesses and opaque inactive transfer]
-    Select --> Request
+    Admitted --> Transfer[Semantic witnesses and opaque inactive transfer]
+    Select --> Request[Typed semantic ContractRequest]
     Request --> Leaf[Contract leaf kernel]
     Support --> Leaf
+    Transfer --> Leaf
     Leaf --> Slice[ContractSlice C with declarations and semantic witnesses]
     Slice --> Domain[Pure domain resolver]
     Domain --> Plan[Pure PlanData]
     Plan --> Leaf
-    Leaf --> Semantic[ResolvedContract with PlanData, semantic receipt, and sealed inactive transfer]
-    Semantic --> Binder[Concrete Host binder]
-    AdapterSupport --> Binder
-    HostFacts --> Binder
+    Leaf --> Semantic[Pure ResolvedContract snapshot]
+    Leaf --> Continuation[Opaque binding continuation]
+    Semantic --> Bundle[Root-only ContractResolutionBundle]
+    Continuation --> Bundle
+    Bundle --> Pending[PendingContractBinding with one shared seal]
+    AdapterSupport --> Pending
+    HostFacts --> Pending
+    Pending --> Binder[Concrete Host binder]
     Binder --> Bound[BoundContract C H PlanData BoundPlan plus binding receipt]
     Bound --> Projection[Concrete typed root projection]
     Projection --> Host[Later concrete Host candidate and activation]
@@ -231,19 +237,22 @@ by `cfg`, and when a third party owns the contract marker.
 A domain helper upgrades the claim into a typed binding claim:
 
 ```rust
-let runtime = nara_app::extension::plugins(
+let runtime = nara_app::package::plugins(
     generated::RUNTIME,
     definitions::runtime_plugins,
-)?;
+);
 
-let importer = nara_asset::extension::threaded_importer(
+let importer = nara_asset::package::importer(
     generated::IMPORTER,
     SpriteAnimationImporter::new,
-)?;
+);
 ```
 
-The helper verifies that the declared stable contract reference matches its domain contract and
-captures a repeatable factory/provider binding. Final admission later verifies the canonical
+Each helper returns a diagnostic-bearing package part rather than forcing an immediate `?`. The
+outer `package::define` operation evaluates every part, aggregates bounded authoring failures, and
+returns no `PackageDefinition` unless all parts are valid. A helper verifies that the declared
+stable contract reference matches its domain contract and captures a repeatable factory/provider
+binding. Final admission later verifies the canonical
 manifest, Host/target applicability, executable generation, implementation digest, and exact
 binding cardinality before returning one private `FinalCatalogAdmission` bundle.
 
@@ -251,7 +260,7 @@ The admission operation returns one sealed bundle rather than unrelated values t
 could mix:
 
 ```text
-FinalCatalogAdmission<C, H, PlanData, BoundPlan>
+FinalCatalogAdmission<C, H, PlanData, BoundPlan, ResolveError, BindError>
 |- private ContributionKey<C> values for the admitted selection
 |- SemanticBindingWitness<C>
 |- InactiveBindingTransfer<C>
@@ -265,9 +274,9 @@ The exact generic carrier is illustrative. The invariant is not: root orchestrat
 the typed resolve and bind views issued from this bundle. It cannot construct, replace, or combine
 members from different admission generations.
 
-Ordinary package authors should not see `ContributionKey<C>`, `ContractSlice<C>`, or receipts.
-Their common path remains generated names, domain helpers, and one explicit `package()`
-registration.
+Ordinary package authors should not see `BindingClaim<C>`, `ContributionKey<C>`,
+`ContractSlice<C>`, continuations, or receipts. Their common path remains generated names, domain
+helpers, and one explicit `package()` definition.
 
 ### 2. Leaf Contract Marker
 
@@ -278,7 +287,7 @@ pub trait ContributionContract: Sized + 'static {
     const CONTRACT: ContributionContractRef;
 
     type Declaration: 'static;
-    type Binding: 'static;
+    type CompiledDefinition: 'static;
     type DecodeError: 'static;
 }
 ```
@@ -350,47 +359,61 @@ duplicate-key, stable-reference, and diagnostic limits. A decoder receives a bou
 view, not an unlimited `serde_json::Value` or raw byte stream. Contract-specific semantic limits
 may tighten the Host ceiling but cannot raise it.
 
-### 5. One Support-Owned Semantic Resolution Operation
+### 5. One Sealed Semantic Resolution Operation
 
 The leaf exposes one deep semantic operation rather than separate public `decode`, `join`, `seal`,
 and `receipt` steps:
 
 ```rust
 impl PreparedPackageSet {
-    pub fn resolve_contract<C, PlanData, ResolveError>(
+    pub fn resolve_contract<C, H, PlanData, BoundPlan, ResolveError, BindError>(
         &self,
-        support: &ContractSupport<C, PlanData, ResolveError>,
+        admission: FinalCatalogAdmission<
+            C,
+            H,
+            PlanData,
+            BoundPlan,
+            ResolveError,
+            BindError,
+        >,
         request: ContractRequest<C>,
     ) -> Result<
-        ResolvedContract<C, PlanData>,
+        PendingContractBinding<C, H, PlanData, BoundPlan, BindError>,
         ContractResolveError<C::DecodeError, ResolveError>,
     >
     where
         C: ContributionContract,
+        H: HostBindingKind,
         PlanData: CanonicalContractPlan + 'static,
-        ResolveError: 'static;
+        BoundPlan: 'static,
+        ResolveError: 'static,
+        BindError: 'static;
 }
 ```
 
-`ContractRequest<C>` owns selected stable locators, immutable Host/target facts, effective limits,
-verified `SemanticBindingWitness<C>`, and the matching executable values plus implementation and
-generation evidence in a private `InactiveBindingTransfer<C>`. The leaf privately verifies their
-bijection and drift, but retains the transfer while the resolver runs and does not copy its
-executable provenance into the semantic slice or semantic receipt.
+`ContractRequest<C>` owns only typed semantic request inputs and effective limits. It carries no
+compiled definition, executable value, verified Adapter support, Host binding fact, or inactive
+transfer. The consumed `FinalCatalogAdmission` supplies the selected stable locators, verified
+semantic witnesses, matching executable values, implementation/generation evidence, Adapter
+support, Host facts, and shared private seal. The leaf privately verifies their bijection and drift,
+but retains the transfer while the resolver runs and does not copy executable provenance into the
+semantic slice or semantic receipt.
 
 `ContractSlice<C>` contains canonical decoded declarations and a
 `SemanticBindingWitnessSlice<C>` only. The witness proves stable locator, declared contract,
 declaration digest, cardinality, and declared semantic requirements. It intentionally omits
 implementation digest and executable generation. It has no factory/provider invocation method and
-does not expose `C::Binding` values.
+does not expose `C::CompiledDefinition` values.
 
 The leaf invokes only the non-capturing resolver stored in the verified support. That function may
 still call trusted native globals through ambient Rust authority, but the Interface does not let a
 root caller capture a raw binding, factory, or Host authority in an arbitrary closure.
 
 `PlanData` is pure, inspectable, placement-independent, canonical, and `'static`, so it cannot
-borrow the short-lived slice. On complete success the leaf returns the plan, semantic receipt, and
-the still-opaque inactive transfer inside `ResolvedContract<C, PlanData>`.
+borrow the short-lived slice. On complete success the leaf constructs a root-only
+`ContractResolutionBundle<C, PlanData>` and moves it together with the admission's verified Adapter
+support and Host facts into one `PendingContractBinding`. No caller can retain the support/facts or
+pair the resolution with evidence from another admission generation.
 
 ### 6. Canonical Plan Sink
 
@@ -418,7 +441,7 @@ A hash cannot turn trusted native owner code into an adversarial security bounda
 
 ### 7. Semantic Resolution And Host Binding Results
 
-The semantic result preserves contract identity in its type:
+The pure semantic result preserves contract identity in its type:
 
 ```rust
 pub struct ResolvedContract<C, PlanData>
@@ -428,9 +451,35 @@ where
 {
     plan_data: PlanData,
     receipt: ContractResolutionReceipt<C>,
-    bindings: InactiveBindingTransfer<C>,
+}
+
+pub struct ContractResolutionBundle<C, PlanData>
+where
+    C: ContributionContract,
+    PlanData: CanonicalContractPlan,
+{
+    resolved: ResolvedContract<C, PlanData>,
+    continuation: InactiveBindingTransfer<C>,
+}
+
+pub struct PendingContractBinding<C, H, PlanData, BoundPlan, BindError>
+where
+    C: ContributionContract,
+    H: HostBindingKind,
+    PlanData: CanonicalContractPlan,
+{
+    resolution: ContractResolutionBundle<C, PlanData>,
+    support: VerifiedHostAdapterSupport<C, H, PlanData, BoundPlan, BindError>,
+    facts: VerifiedHostBindingFacts<H>,
 }
 ```
+
+`ResolvedContract` is immutable, inspectable semantic data. `ContractResolutionBundle` is a
+move-only resolution carrier nested inside `PendingContractBinding`. The pending binding is the
+root-private linear owner of the resolution, exact verified Adapter support, and Host facts. Neither
+carrier is serializable, cloneable, persistable, or exposed to package/provider authors. Inspection
+APIs may borrow or project the pure `ResolvedContract`, but cannot recover the continuation,
+support, or Host facts from an inspection snapshot.
 
 `ContractResolutionReceipt<C>` contains only stable semantic audit facts:
 
@@ -447,9 +496,7 @@ A separate root/domain binding Module then requires catalog-verified Adapter sup
 
 ```rust
 pub fn bind_contract<C, H, PlanData, BoundPlan, E>(
-    resolved: ResolvedContract<C, PlanData>,
-    support: &VerifiedHostAdapterSupport<C, H, PlanData, BoundPlan, E>,
-    facts: VerifiedHostBindingFacts<H>,
+    pending: PendingContractBinding<C, H, PlanData, BoundPlan, E>,
 ) -> Result<BoundContract<C, H, PlanData, BoundPlan>, ContractBindError<E>>
 where
     C: ContributionContract,
@@ -473,11 +520,11 @@ the same private process-local `CompositionGenerationSeal`; `bind_contract` chec
 opening the transfer. The stable semantic audit fields still omit executable provenance, while the
 binding receipt records it.
 
-Only the generic binding coordinator may destructure `ResolvedContract` and open its opaque
-transfer, and only after validating this support value. The coordinator can remain domain-neutral:
-root supplies a private compiled-catalog evidence receipt to verify an Adapter claim, while the
-verified support stores the domain binding function. There is no public `into_bindings()` escape
-hatch.
+Only the generic binding coordinator may destructure `PendingContractBinding`, validate the common
+seal, and then open its nested opaque continuation. The coordinator can remain domain-neutral: the
+verified support stored in the same carrier owns the domain binding function. Root code cannot
+supply or replace a support value, Host fact, or binder closure at this stage. There is no public
+`into_bindings()` escape hatch.
 
 `InactiveBindingTransfer<C>` is a move-only domain wrapper with no public generic invoke, lookup,
 or downcast operation. Domain binding code may transfer its factory/provider wrappers into
@@ -538,10 +585,12 @@ The operation follows one fixed order:
    pure `PlanData`; it receives no callable binding or Host authority.
 9. The leaf validates the exact plan schema, canonical summary, and semantic edges against its
    private slice witness.
-10. Only complete semantic success constructs `ContractResolutionReceipt<C>` and returns
-   `ResolvedContract<C, PlanData>` with its sealed inactive transfer.
-11. The concrete Host binder verifies `VerifiedHostAdapterSupport<C, H>` for the exact plan version
-    and target, consumes the inactive transfer into `BoundPlan`, and invokes no factory.
+10. Only complete semantic success constructs `ContractResolutionReceipt<C>` and returns one
+    `PendingContractBinding` containing the `ContractResolutionBundle`, verified Adapter support,
+    verified Host facts, and their unchanged shared seal.
+11. The concrete Host binder consumes that complete carrier, verifies exact plan-version/target
+    support and every shared seal, moves the inactive transfer into `BoundPlan`, and invokes no
+    factory.
 12. Only complete binding success constructs `ContractBindingReceipt<C, H>` and the concrete typed
     root projection. Candidate preparation and factory invocation happen later in the Host.
 
@@ -634,8 +683,8 @@ checked for equivalent fingerprints and schedule placement.
 ### Reusable Package Author
 
 ```rust
-pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
-    package::bind(
+pub fn package() -> Result<PackageDefinition, PackageAuthorReport> {
+    package::define(
         generated::PACKAGE,
         (
             nara_reflect::package::schemas(
@@ -647,7 +696,7 @@ pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
                 definitions::runtime_plugins,
             ),
             #[cfg(feature = "import")]
-            nara_asset::package::threaded_importer(
+            nara_asset::package::importer(
                 generated::IMPORTER,
                 SpriteAnimationImporter::new,
             ),
@@ -657,21 +706,38 @@ pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
 ```
 
 The tuple carrier is illustrative and remains an open ergonomic detail. The stable Interface is one
-all-or-error draft operation over typed domain claims.
+all-or-error definition operation over domain helpers. Typed binding claims remain behind those
+helpers. Each helper yields a diagnostic-bearing package part; `package::define` aggregates all
+part failures into one bounded `PackageAuthorReport` instead of requiring per-helper `?` and
+returning only the first error.
 
 No proc macro, linker inventory, global constructor, `Any`, or universal context is required.
 Optional proc macros may become syntax sugar only after this ordinary Rust path is complete.
 
 ### Domain Contract Author
 
-A domain author supplies:
+A domain contract author supplies:
 
 1. one stable contract semantic line;
 2. exact bounded descriptor decoders and migrations;
-3. canonical typed plan data and conformance fixtures;
-4. domain binding helpers and typed errors;
-5. explicit root/Host support wiring;
-6. no change to the leaf kernel.
+3. canonical typed plan data, a pure resolver, typed semantic errors, and conformance fixtures;
+4. domain authoring helpers that hide typed binding claims from ordinary package authors;
+5. no change to the leaf kernel.
+
+### Adapter And Root/Host Maintainer
+
+A concrete Adapter and root/Host maintainer separately supplies:
+
+1. the concrete Host binding kind, accepted plan versions, target/affinity constraints, and typed
+   inactive bound plan;
+2. explicit compiled Adapter-support registration in each product root that supports the contract;
+3. candidate preparation, authority, cleanup, and publication behavior plus Adapter conformance
+   fixtures;
+4. no universal Host trait and no change to the leaf kernel.
+
+One third party may implement both roles, but the contract kit must not require Host placement or
+root wiring. Conversely, inventing a contract ID does not make a stock executable support it; a
+root maintainer must deliberately compile and register the matching Adapter support.
 
 This is intentionally more ceremony than ordinary package authoring. Defining an ecosystem
 contract is an advanced engine-extension task, not the common game-author path.

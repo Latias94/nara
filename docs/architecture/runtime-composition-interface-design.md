@@ -2,7 +2,7 @@
 
 **Status**: Design Draft
 **Created**: 2026-07-13
-**Last Updated**: 2026-07-13
+**Last Updated**: 2026-07-14
 **Owner**: Root product composition, `nara_app`, executable hosts, and the reference game
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Related Decisions**: [ADR 0010](adr/0010-plugin-lifecycle-dependencies-and-failure.md),
@@ -644,6 +644,12 @@ each slice explicit:
    only after complete startup.
 5. Later desktop work proves the winit driver and target lifetime without changing composition
    policy.
+
+The data-only group step is a prerequisite for the package runtime role. Package helpers must not
+wrap the current `PluginGroupBuilder<'_>` as though it were a pure plan: that builder immediately
+mutates `App`, while root groups still duplicate membership in static plugin-ID arrays. U4 must
+derive membership and order from one immutable registration collection, validate it before committed
+App mutation, and only then preserve the direct `App::add_plugins` ergonomics as a lowering.
 
 ## Open Questions
 

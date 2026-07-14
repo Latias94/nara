@@ -143,10 +143,11 @@ This document uses three evidence labels so a future sketch is not confused with
 
 | Area | Evidence | Current limitation exposed by the tracer |
 |---|---|---|
-| `nara_app` plugin lifecycle | Implemented: fallible `preflight`, `build`, `finish`, poison, and reverse once-only cleanup | Current plugin groups mutate `App`; they are not yet closed data-only product plans |
-| `nara_reflect` registry | Implemented: a frozen registry containing native codecs and migrations, plus an immutable public snapshot that currently exposes only the schema catalog | Package-projected schema plans, fresh-runtime structural replacement, and snapshot-based tooling consumption remain incomplete |
+| `nara_app` plugin lifecycle | Implemented: fallible `preflight`, `build`, `finish`, poison, and reverse once-only cleanup | Current plugin groups mutate `App`, keep a parallel metadata member list, and are not yet closed data-only product plans; package runtime helpers must wait for U4 |
+| `nara_reflect` registry | Implemented: a frozen registry containing native codecs and migrations, plus an immutable public snapshot that currently exposes only the schema catalog | The registry still combines schema catalog, native binding, codec/migration, and App lifecycle concerns; package schema helpers must target an immutable fragment/candidate seam instead of the mutable registry |
 | Standard scene Inspector | Implemented: schema-driven models, capability filtering, patch commands, and undo path | No general custom Inspector provider catalog exists |
-| Importer descriptor and registry | Implemented in part: importer identity, extensions, conflict rejection, and artifact record selection | The registry stores untyped live importers; typed multi-product tracked publication is not implemented |
+| Importer descriptor and registry | Implemented in part: importer identity, extensions, conflict rejection, and artifact record selection | The registry stores untyped live importers, repeats metadata authority, and is transitional; the target associated-type `Importer`/`ImportContext` Interface replaces both current importer traits and later deletes this lookup seam |
+| Editor workspace ownership | Transitional: workspace and Play state are currently exposed through tooling resources and World-facing helpers | The intended concrete Editor Host must own workspace/document authority outside the simulation World; package Inspector/tooling providers must not use the current resource/plugin as their seam |
 | Image reload jobs | Transitional implementation | `nara_image` privately owns job queues and currently performs direct filesystem reads; this must not become the third-party importer pattern |
 | Filesystem capability substrate | Settled, pending overall; implemented primitives include handle-relative open, scoped identity, digest, lock, temp/replace, and sync receipts | Enumeration, rename/unlink recovery, Host trust binding, and domain migration remain incomplete; Import consumes brokered capabilities/snapshots |
 | Runtime composition plan | Proposed by the runtime composition workbench | Current root settings application can mutate before all product admission succeeds |
@@ -241,7 +242,7 @@ nara_sprite_animation
 |- data       stable IDs, SpriteAnimator, clip asset values
 |- runtime    systems and runtime Plugin definitions
 |- import     importer definition and typed job logic
-|- package    manifest binding keys and package registration
+|- package    generated declaration locators and PackageDefinition assembly
 `- tooling    absent initially; optional later custom Inspector model
 ```
 
@@ -273,7 +274,7 @@ policy exists.
 | ID | Caller and goal | Required Interface behavior | Primary oracle |
 |---|---|---|---|
 | MT-01 | Game author uses the feature in code-first embedding | One plugin-group call installs the same schema/runtime definitions; no package ceremony is required | Public example and semantic runtime test |
-| MT-02 | Package author exposes all compiled roles | One `package()` registration provides stable declaration locators plus typed `BindingClaim<C>` values; final catalog verification privately mints `ContributionKey<C>`; no per-Host manual order list | Compile fixture and plan snapshot |
+| MT-02 | Package author exposes all compiled roles | One `package()` registration uses stable declaration locators plus domain helpers; the helpers privately construct typed binding claims and final catalog verification privately mints contribution keys; no per-Host manual order list | Compile fixture and plan snapshot |
 | MT-03 | Project user inspects before build | Preview reports identity, source, license, trust evidence, roles, targets, rebuild effects, and unknown binding facts without executing package code | No-execution preview test |
 | MT-04 | Project user adds or updates the package | One CLI/editor action previews Cargo changes and all selected Host effects before explicit consent | Golden UX model |
 | MT-05 | External package renames its Nara dependency | Ordinary Rust helpers and derive paths continue to work without a privileged workspace relationship | Clean-room fixture |
@@ -411,10 +412,11 @@ flowchart TD
 
 | Owner or operation | Interface | Hidden implementation | Must not own | Dependency category |
 |---|---|---|---|---|
-| Leaf extension contract Module | Root-selected bounded package facts, typed claims, compiled evidence, and contract/Adapter declarations in; prepared requests and pure `ResolvedContract<C, PlanData>` plus semantic receipts out | Final catalog admission, private key/support/witness/transfer construction, canonical parsing, version decode orchestration, stable graph checks, plan summary, and private typed slices | Binding receipts, domain plan policy, Host mutation, or diagnostics dependency cycles | In-process pure computation; domain-independent leaf dependency |
+| Package Definition Module | One all-or-error `PackageDefinition` from canonical declaration locators and domain helpers | Claim aggregation, bounded author reports, duplicate checks, and opaque member storage | Product selection, final admission, Host ordering, candidate state, or publication | In-process pure computation; depends only on the leaf package-definition vocabulary |
+| Leaf extension contract Module | Root-selected bounded package facts, typed claims, compiled evidence, and contract/Adapter declarations in; root-private `PendingContractBinding` values containing borrowable pure `ResolvedContract<C, PlanData>` snapshots out | Final catalog admission, private key/support/witness/transfer construction, canonical parsing, version decode orchestration, stable graph checks, plan summary, and private typed slices | Binding receipts, domain plan policy, Host mutation, or diagnostics dependency cycles | In-process pure computation; domain-independent leaf dependency |
 | Final catalog admission operation | Selected canonical declarations, `BindingClaim<C>` values, compiled support/evidence, and immutable Host/target facts in; one private `FinalCatalogAdmission` bundle containing keys, both verified supports, verified Host facts, semantic witnesses, opaque inactive transfers, and one shared generation seal out | Exact declaration/claim/evidence bijection, implementation and executable drift rejection, and private constructor authority | Domain semantic resolution, factory invocation, candidate authority, or publication | Private operation of the leaf/common verifier after root selection; not a separate public service or required crate |
-| Root extension composition Module | Cross-package closure, verified contract-resolution orchestration, inspection snapshot, Host-specific activation specifications | Target/trust/requirement closure and assembly of concrete typed projections | Cargo solving, executable authority, active coordinator, universal plan lookup | In-process pure computation above the leaf and all selected domain Modules |
-| Domain-specific binding Module | `ResolvedContract`, verified Adapter support, and verified Host binding facts in; inactive `BoundContract` plus binding receipt out | Exact plan-version/Adapter/target/affinity join and transfer consumption | Factory invocation, native placement, candidate readiness, or activation | In-process typed composition between semantic resolution and concrete Host candidates |
+| Root extension composition Module | Cross-package closure, target/trust/requirement selection, verified admission/resolution/binding orchestration, inspection snapshot, concrete typed projections, and immutable activation specifications | Closure algorithms, cross-contract bridge validation, and concrete projection assembly | Cargo solving, executable authority, candidate state, publication, active coordinator, or universal plan lookup | In-process pure computation above the leaf and all selected domain Modules |
+| Domain-specific binding Module | One `PendingContractBinding` owning the resolution bundle, verified Adapter support, and verified Host facts in; inactive `BoundContract` plus binding receipt out | Exact plan-version/Adapter/target/affinity join, shared-seal verification, and continuation consumption | Factory invocation, native placement, candidate readiness, or activation | In-process typed composition between semantic resolution and concrete Host candidates |
 | Runtime contribution owner | Repeatable plugin definitions and lowering into the closed product plan | Slot/order/capability closure and fresh plugin declaration checks | Importer, editor, package discovery, runner, native authority | In-process |
 | Schema contribution owner | Stable catalog fragment, native-binding evidence, migrations, typed schema plan | Merge, lineage, validation, Building-to-Frozen candidate | Runtime process identity as durable schema, Inspector UI, package graph | In-process |
 | `nara_asset` Import Host | Importer descriptor/binding plan plus tracked domain job Interface | Import request policy, recipes, tracked-input bookkeeping, stale eligibility, product reconciliation, artifact staging/publication, artifact last-good | Executor mechanics, native filesystem authority, raw paths, private per-asset-type Host loops, runtime `App`, editor workspace | In-process planning; bounded execution through `nara_tasks`; brokered `nara_fs` capabilities and local-substitutable stores |
@@ -422,12 +424,13 @@ flowchart TD
 | Concrete Editor/Project Host | High-level stage/poll/outcome operation over one resolved activation intent | Retained domain-owner registry, Nara-issued capability minting, readiness barrier, cleanup coordination, predecessor active cohort, and publication | Domain candidate internals, package resolution policy, artifact last-good, or another domain's semantics | Concrete executable Host, not a public generic port |
 | UI Adapter | Render tooling models and submit tooling intents | Toolkit widgets, layout, input translation | Document truth, undo stack, schema mutation, package admission | One concrete egui Adapter today; general seam waits for a second implementation |
 
-The split between the leaf contract Module and root composition Module is a dependency invariant,
-not necessarily two new crates on day one. Domain crates may depend on the leaf to implement typed
-helpers. The root depends on that leaf plus the domain crates to assemble Host projections. The
-leaf therefore cannot depend back on any domain or on a diagnostic crate whose dependency graph
-would create a cycle. If external consumers prove the split, a small leaf crate becomes justified;
-until then, tests should enforce the logical dependency direction.
+The split between the leaf package-definition/contract Modules and root composition is a dependency
+invariant, not necessarily new crates on day one. Domain crates may depend on the leaf vocabulary to
+implement typed helpers. The root depends on that leaf plus the domain crates to assemble Host
+projections. The leaf therefore cannot depend back on any domain or on a diagnostic crate whose
+dependency graph would create a cycle. When the tracer gives the leaf multiple real production
+consumers, a small leaf crate becomes justified; until then, tests should enforce the logical
+dependency direction without creating a placeholder crate.
 
 ## Progressive Disclosure
 
@@ -437,7 +440,8 @@ until then, tests should enforce the logical dependency direction.
 | Package author | Declare stable roles and return one ordinary-Rust `package()` registration | Package/contribution identity, domain registration helpers, exceptional target applicability | Contract slices, receipts, bound plans, Host order, candidate staging, publication | The package defines a new contract rather than using an engine-owned one |
 | Domain provider author | Implement one typed Importer, Inspector, or other domain Interface | Typed settings, errors, owner-issued context, and outputs | Contract admission, task-pool mechanics, native authority internals, candidate/cohort publication | The provider defines a new domain contract or execution Adapter |
 | Project user | Preview and approve one add/update/remove action | Source, version, license, trust evidence, selected roles, targets, rebuild/restart and migration effects | Rust traits, factory types, typed plans, cohort mechanics | Advanced diagnostics or an explicit policy override is required |
-| Contract/Host author | Register one versioned contract owner and supporting concrete Host Adapter | Declaration schema, typed slices/plans, conformance suite, authority and lifecycle | Unrelated domain plans and private Host candidates | A second Adapter or process placement proves another seam |
+| Contract/domain author | Define one versioned contract owner, typed plan, resolver, and conformance suite | Declaration schema, `PlanData`, semantic rules, and conformance | Host placement, candidate state, cleanup, publication, and unrelated domain plans | A new contract is needed rather than an engine-owned one |
+| Root/Host maintainer | Compose one concrete Editor/server/cook projection and own its candidate lifecycle | Product/target selection, typed projections, authority, lifecycle, and publication | Unrelated domain semantics and public universal Host traits | A second product root or placement Adapter proves another seam |
 
 The conceptual project-user flow is deliberately shorter than the architecture behind it:
 
@@ -463,10 +467,12 @@ let mut app = App::new();
 app.add_plugins(SpriteAnimationPlugins::default())?;
 ```
 
-The direct entry is one `PluginGroup`, not an overloaded package `Plugin`. A private canonical
-definition source owns the schema fragment, plugin declaration, runtime configuration defaults,
-and stable IDs. The direct group and package bindings are two lowerings of that source. They do not
-maintain parallel semantic declarations.
+The direct entry is one `PluginGroup`, not an overloaded package `Plugin`. One canonical compiled
+domain definition owns the schema fragment, plugin declaration, and runtime configuration defaults.
+The source manifest separately owns durable package/contribution declarations and stable locators.
+The direct group and package helper are two lowerings of the compiled domain definition; final
+admission verifies that the package locator and compiled definition agree. This is one authority per
+fact kind, not a claim that every fact lives in one file.
 
 Conformance tests compare the schema fragment fingerprint, plugin ID/declaration, schedule
 placement, and headless semantic snapshot produced by both lowerings. Importer/editor roles and
@@ -478,8 +484,8 @@ behavior of `App::add_plugins`.
 The reusable package path has one explicit registration:
 
 ```rust
-pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
-    package::bind(
+pub fn package() -> Result<PackageDefinition, PackageAuthorReport> {
+    package::define(
         generated::PACKAGE,
         (
             nara_reflect::package::schemas(
@@ -491,7 +497,7 @@ pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
                 SpriteAnimationRuntimePlugin::new,
             ),
             #[cfg(feature = "import")]
-            nara_asset::package::threaded_importer(
+            nara_asset::package::importer(
                 generated::IMPORTER,
                 SpriteAnimationImporter::new,
             ),
@@ -538,7 +544,7 @@ pub trait ContributionContract: Sized + 'static {
     const CONTRACT: ContributionContractRef;
 
     type Declaration: 'static;
-    type Binding: 'static;
+    type CompiledDefinition: 'static;
     type DecodeError: 'static;
 }
 
@@ -562,18 +568,28 @@ where
 }
 
 impl PreparedPackageSet {
-    pub fn resolve_contract<C, PlanData, ResolveError>(
+    pub fn resolve_contract<C, H, PlanData, BoundPlan, ResolveError, BindError>(
         &self,
-        support: &ContractSupport<C, PlanData, ResolveError>,
+        admission: FinalCatalogAdmission<
+            C,
+            H,
+            PlanData,
+            BoundPlan,
+            ResolveError,
+            BindError,
+        >,
         request: ContractRequest<C>,
     ) -> Result<
-        ResolvedContract<C, PlanData>,
+        PendingContractBinding<C, H, PlanData, BoundPlan, BindError>,
         ContractResolveError<C::DecodeError, ResolveError>,
     >
     where
         C: ContributionContract,
+        H: HostBindingKind,
         PlanData: CanonicalContractPlan + 'static,
-        ResolveError: 'static;
+        BoundPlan: 'static,
+        ResolveError: 'static,
+        BindError: 'static;
 }
 ```
 
@@ -604,10 +620,12 @@ The support-owned non-capturing resolution operation hides selection validation,
 bijection, exact version decode, canonical ordering, private slice-witness retention, plan-summary
 validation, and receipt issuance. `PlanData` is pure, fingerprintable, exact-schema-versioned, and
 placement-independent.
-The leaf returns `ContractResolutionReceipt<C>` plus the sealed transfer. A separate concrete Host
-binder requires `VerifiedHostAdapterSupport<C, H>`, moves inactive wrappers into `BoundPlan`, and
-returns `ContractBindingReceipt<C, H>`. It invokes no factory and the leaf imposes no universal
-`Send + Sync`. Actual placement and activation remain later concrete Host work.
+The leaf consumes one `FinalCatalogAdmission` and returns a `PendingContractBinding` containing the
+pure `ResolvedContract<C, PlanData>` snapshot, root-private sealed continuation, verified Adapter
+support, and verified Host facts under the same seal. A separate concrete Host binder consumes that
+whole value, moves inactive wrappers into the domain-specific inner `BoundPlan`, and returns a full
+`BoundContract` with `ContractBindingReceipt<C, H>`. It invokes no factory. Actual placement and
+activation remain later concrete Host work.
 
 Semantic resolution and Host binding keep the public stages narrow:
 
@@ -615,16 +633,18 @@ Semantic resolution and Host binding keep the public stages narrow:
 leaf contract Module
     -> PreparedPackageSet with bounded envelopes
 root composition Module
-    -> calls leaf resolve_contract with verified ContractSupport<C> and ContractRequest<C>
+    -> calls leaf resolve_contract with one FinalCatalogAdmission and ContractRequest<C>
 leaf contract Module
     -> privately validates selection, binding bijection, versions, and limits
     -> privately constructs ContractSlice<C> and invokes the support-owned resolver
-    <- returns ResolvedContract<C, PlanData> with PlanData,
-       ContractResolutionReceipt<C>, and opaque InactiveBindingTransfer<C>
+    <- returns PendingContractBinding<C, H, PlanData, BoundPlan, BindError>
+       |- ContractResolutionBundle with pure ResolvedContract and opaque continuation
+       |- verified Adapter support
+       `- verified Host facts under the same private seal
 concrete Host binding Module
-    -> verifies exact Adapter/plan-version support
-    -> consumes opaque inactive binding transfer into BoundPlan
-    <- constructs ContractBindingReceipt<C, H>
+    -> consumes the complete pending binding and verifies every shared seal
+    -> moves the opaque inactive transfer into the domain-specific BoundPlan payload
+    <- constructs BoundContract<C, H, PlanData, BoundPlan> with both receipts
 ```
 
 `ContractResolutionReceipt<C>` contains semantic contract/version/plan facts only;
@@ -643,30 +663,49 @@ required execution fails admission until support is compiled and the Host is reb
 
 ### 3. Host-Specific Typed Projections
 
-`ResolvedProjectPlan` is a product-facing inspection and coordination result, not a public bag of
-arbitrary plans. Concrete Hosts receive only their typed projections. Conceptually:
+`ResolvedProjectSemanticsView<'_>` is a root-private borrowed inspection and coordination view over
+the nested resolved fields inside the move-only pending bindings, not a second owner or a public bag
+of arbitrary plans. Concrete roots return only their typed projections. Conceptually:
 
 ```rust
 struct EditorProjectProjection {
     inspection: ExtensionInspectionSnapshot,
-    schemas: BoundSchemaPlan,
-    importers: BoundImportPlan,
-    tooling: Option<BoundToolingPlan>,
-    play_runtime: BoundRuntimePlan,
+    schemas: BoundSchemaContract,
+    importers: BoundImportContract,
+    tooling: Option<BoundToolingContract>,
+    play_runtime: BoundRuntimeContract,
     cohort: ActivationCohortSpec,
 }
 
 struct ServerProjectProjection {
     inspection: ExtensionInspectionSnapshot,
-    schemas: BoundSchemaPlan,
-    runtime: BoundRuntimePlan,
+    schemas: BoundSchemaContract,
+    runtime: BoundRuntimeContract,
     cohort: ActivationCohortSpec,
 }
 ```
 
+The root derives the bounded owned `ExtensionInspectionSnapshot` by borrowing the semantic view and
+canonicalizing author-visible facts. It does not clone typed `PlanData`. Binding then consumes each
+complete pending value. Every `Bound*Contract` field denotes the full
+`BoundContract<C, H, PlanData, BoundPlan>` owner, not only its private domain-specific `BoundPlan`
+payload, and therefore retains the original plan value plus both receipts.
+
+The advanced product-root Interface is concrete and root-specific:
+
+```rust
+let projection = editor_root.compose(request, packages)?;
+let attempt_id = editor_host.stage_extension_update(intent, projection, snapshot)?;
+```
+
+`compose` completes admission, semantic resolution, inactive binding, and typed projection. It does
+not prepare candidates, own cancellation, or publish a cohort. `ResolvedProjectSemanticsView<'_>`
+and `PendingContractBinding` remain advanced root-internal values.
+
 These names and fields are illustrative. Editor, server, import, and release-tool Interfaces are
 allowed to differ. A universal `EngineHost` would hide meaningful lifecycle and authority
-differences. Every `Bound*Plan` remains inactive and proves no candidate readiness or publication.
+differences. Every `Bound*Contract` remains inactive and proves no candidate readiness or
+publication.
 Public tooling inspects a stable snapshot; it does not navigate private executable plan storage.
 
 ### 4. Schema Contribution
@@ -694,22 +733,31 @@ the earlier provider-returned candidate sketch. The current `TypedImporter<T>` r
 evidence but is not the final provider catalog:
 
 ```rust
-pub trait ImportProvider: 'static {
-    type Settings: ImportSettings;
-    type Error: 'static;
+pub trait Importer: Send + Sync + 'static {
+    type Settings: ImportSettings + Send + Sync + 'static;
+    type Error: Send + 'static;
 
     fn import(
         &self,
         context: &mut ImportContext<'_>,
         settings: &Self::Settings,
     ) -> Result<(), Self::Error>;
+
+    fn map_error(
+        error: &Self::Error,
+        sink: &mut ImporterFailureSink<'_>,
+    );
 }
 ```
 
 Importer metadata comes from the verified package contribution rather than a duplicate
-`descriptor()` method. At registration, the domain helper captures a repeatable factory and typed
-error mapping. A concrete threaded Adapter privately erases associated settings/error types and
-adds `Send + Sync` bounds. A local affine Adapter remains reserved until a real lane-owned registry,
+`descriptor()` method. The target trait replaces the current `Importer` / `TypedImporter<T>` pair
+rather than adding a third path. Required `map_error` writes through a bounded Host-owned sink, so
+error mapping has one explicit source and cannot stringify arbitrary payloads. The first
+`package::importer` helper captures a repeatable `Fn() -> I + Send + Sync + 'static` factory for
+`I: Importer`; the concrete threaded Adapter privately erases associated settings/error types while
+retaining those already-proven bounds. A local affine or process Adapter requires a distinct
+advanced compiled-binding helper/marker and remains reserved until a real lane-owned registry,
 Send-safe route mailbox, physical-exit receipt, and ADR 0080-equivalent poll snapshot are proven.
 The leaf package kernel performs none of this erasure.
 
@@ -759,8 +807,6 @@ associated intent type that cannot enter a heterogeneous catalog. An illustrativ
 
 ```rust
 pub trait InspectorProvider: 'static {
-    fn target(&self) -> InspectorTarget;
-
     fn project(
         &self,
         input: ComponentInspectorRead<'_>,
@@ -770,21 +816,30 @@ pub trait InspectorProvider: 'static {
         &self,
         input: ComponentInspectorRead<'_>,
         intent: InspectorIntentEnvelope,
-    ) -> Result<SceneInspectorCommand, InspectorProviderFailure>;
+    ) -> Result<InspectorEditBatch, InspectorProviderFailure>;
 }
 ```
 
-`InspectorIntentEnvelope` is tooling-owned and versioned by provider ID, operation ID, bounded
-arguments, and expected document revision. It is not a central operation enum and cannot carry
-`Any`. If existing `SceneInspectorCommand` values can express the real custom interaction directly,
-the extra envelope and `lower` step should be deleted. Main-thread affinity is likewise a concrete
+Target schema/field predicates, provider identity, and operation schema belong to the canonical
+package contribution and verified tooling plan; the provider must not repeat them through a
+`target()` method. `InspectorIntentEnvelope` is tooling-owned and versioned by provider ID,
+operation ID, bounded arguments, authorized document/selection identity, and expected document
+revision. It is not a central operation enum and cannot carry `Any`. `InspectorEditBatch` is an
+illustrative bounded carrier containing only allowlisted Inspector edit intents or
+`ScenePatchDocument` operations constrained to the authorized target set and schema-field
+predicate. It cannot contain arbitrary `EditorWorkspaceCommand` values such as close, save-state,
+or Play controls. The Editor Host revalidates target identity, revision, schema capabilities, and
+operation limits before translating accepted edits through the normal workspace validation and undo
+path. If a target-scoped patch can express the first real custom interaction directly, the extra
+envelope, batch, and `lower` step should be deleted. Main-thread affinity is likewise a concrete
 Editor Adapter constraint, not a universal package-contract bound.
 
 The exact trait is deferred. Its stable constraints are:
 
 - selection targets stable schema IDs and field IDs, not Rust ownership or `TypeId`;
 - reads are immutable, revisioned, capability-filtered projections;
-- writes return normal commands or patches and pass existing validation/undo;
+- writes return allowlisted, target-scoped Inspector edit intents or patches; only the Editor Host
+  may translate them into normal workspace commands after revision/capability validation;
 - package B can customize package A without implementing a trait on A's Rust type;
 - no mutable workspace, `World`, filesystem capability, egui context, render target, or driver is
   exposed;
@@ -814,19 +869,22 @@ admission, fresh candidate containment, and publication guarantees.
 A concrete Editor/Project Host may expose a high-level operation:
 
 ```rust
-let plan = resolve_project_extensions(request)?;
-let attempt_id = editor.stage_extension_update(intent, plan, project_snapshot)?;
+let projection = editor_root.compose(request, packages)?;
+let attempt_id = editor_host.stage_extension_update(intent, projection, project_snapshot)?;
 
-while editor.poll_extension_update(attempt_id)?.is_pending() {
-    editor.remain_responsive()?;
+while editor_host.poll_extension_update(attempt_id)?.is_pending() {
+    editor_host.remain_responsive()?;
 }
 
-let outcome = editor.extension_update_outcome(attempt_id)?;
+let outcome = editor_host.extension_update_outcome(attempt_id)?;
 ```
 
-This sketch does not justify public `ExtensionHost`, `CandidatePort`, or mock-host traits. The
-concrete Host retains the stateful `ActivationAttemptOwner` in an internal registry. The caller
-holds only an ID or control handle. Dropping that handle, returning early, or losing an Editor UI
+`editor_root.compose` has already completed product selection, final catalog admission, pure
+semantic resolution, exact Adapter binding, inspection projection, and concrete typed projection.
+It has prepared no candidate and holds no activation authority. This sketch does not justify public
+`ExtensionHost`, `CandidatePort`, or mock-host traits. The concrete Host retains the stateful
+`ActivationAttemptOwner` in an internal registry. The caller holds only an ID or control handle.
+Dropping that handle, returning early, or losing an Editor UI
 panel neither cancels cleanup nor releases parent authority. Domain Modules own how their candidates
 prepare and retire; the Host owns when a complete selected set may become visible.
 
@@ -838,23 +896,20 @@ Activation intent is explicit:
 | `PlayRuntimeActivation` | genuinely prepared runtime from compatible package/schema and selected artifact receipts | A blueprint alone is never a ready runtime member |
 | linked structural replacement | only the catalog/runtime members proven to require one coordinated structural switch | Not used for ordinary compatible reimport |
 
-The selected internal order is:
+The concrete Host attempt starts only after composition and follows this internal order:
 
-1. verify expected project, source, lock, executable, and active revisions;
-2. perform final catalog admission over the selected declarations, `BindingClaim<C>` values, and
-   compiled implementation/executable evidence without invoking a factory;
-3. complete common and domain semantic plan resolution, then domain-specific binding; neither
-   phase invokes a factory or receives candidate authority;
-4. choose and budget an admitted publication mode;
-5. mint scoped one-shot grants or reservations only for admitted candidates;
-6. invoke only the admitted repeatable factories and build the schema, importer-provider, tooling,
-   or runtime candidates selected by the intent;
-7. capture a `RequiredStartupArtifactClosureReceipt` only when a runtime start actually depends on
+1. verify the projection's expected project/source/lock/executable generation and current active
+   revision without reopening package selection or binding;
+2. choose and budget an admitted publication mode;
+3. mint scoped one-shot grants or reservations only for admitted candidates;
+4. invoke only the projection's repeatable factories and build the schema, importer-provider,
+   tooling, or runtime candidates selected by the intent;
+5. capture a `RequiredStartupArtifactClosureReceipt` only when a runtime start actually depends on
    a specific complete artifact closure;
-8. wait until every selected required member is `ReadyToPublish`;
-9. preallocate and validate the complete Host-private activation record;
-10. publish with an expected-generation check or perform the admitted stop-then-start transition;
-11. retain or retire predecessor owners according to captured leases and terminal cleanup evidence.
+6. wait until every selected required member is `ReadyToPublish`;
+7. preallocate and validate the complete Host-private activation record;
+8. publish with an expected-generation check or perform the admitted stop-then-start transition;
+9. retain or retire predecessor owners according to captured leases and terminal cleanup evidence.
 
 Trusted in-process Rust can violate the factory contract by using ambient process authority. Nara
 can prove that it issued no capability, `App`, worker, or artifact staging before admission; it
@@ -936,6 +991,7 @@ sequenceDiagram
     participant Kernel as Leaf Contract Module
     participant Cargo
     participant Domain as Domain Contract Owners
+    participant Catalog as Compiled Product Adapter Catalog
     participant Admission as Leaf Final Catalog Admission
     participant Binder as Domain Binding Modules
     participant Host as Concrete Editor / Project Host
@@ -948,17 +1004,19 @@ sequenceDiagram
     User->>UX: Explicit consent for trusted build
     UX->>Cargo: Resolve and build selected profiles
     UX->>Compose: Approved request and preview fingerprint
-    Cargo-->>Compose: Locked graph and compiled binding evidence
-    Domain-->>Compose: Explicit contract definitions and Host Adapter declarations
+    Cargo-->>Compose: Locked graph and compiled package evidence
+    Domain-->>Compose: Explicit contract definitions
+    Catalog-->>Compose: Host Adapter support declarations and compiled evidence
     Compose->>Compose: Select product / Host / target closure
     Compose->>Admission: Selected declarations, BindingClaims, support declarations, Host/target facts, and compiled evidence
     Admission-->>Compose: Private typed FinalCatalogAdmission bundles
-    Compose->>Kernel: resolve_contract(admitted ContractSupport and typed request)
+    Compose->>Kernel: resolve_contract(complete FinalCatalogAdmission and typed request)
     Kernel->>Kernel: Decode, construct private slice, invoke support-owned resolver, verify plan
-    Kernel-->>Compose: ResolvedContract or bounded rejection
-    Compose->>Binder: bind_contract(admitted Adapter support and Host facts)
+    Kernel-->>Compose: PendingContractBinding or bounded rejection
+    Compose->>Binder: bind_contract(complete pending binding)
     Binder-->>Compose: Concrete typed BoundContract plus binding receipt
-    Compose-->>Host: Activation intent and concrete typed projections
+    Compose-->>UX: Inspection and concrete typed projection ready
+    UX->>Host: Stage approved activation intent and projection
     Host->>Host: Retain owner, mint grants, build selected candidates
     alt Candidate preparation or pre-publication retirement fails
         Host->>Host: Retire or quarantine in reverse dependency order
@@ -1128,6 +1186,30 @@ Candidate authority and publication: Option D
 This combination maximizes leverage for callers, keeps domain changes local, and places the only
 cross-domain stateful seam at the concrete Host that actually owns process authority.
 
+### Module Boundary Verdict
+
+```text
+domain helpers -> Package Definition Module -> PackageDefinition
+                                                |
+compiled domains + product policy -> concrete Product Root composition
+                                                |
+                                      concrete typed projection
+                                                |
+                                      concrete Host attempt
+                                                |
+                                  candidates -> private publication
+```
+
+Package definition and product composition are two deep Modules joined by an opaque
+`PackageDefinition`; they are not one public manager. Domain crates depend down on the leaf package
+definition vocabulary to expose helpers, while each concrete product root depends on that leaf plus
+the selected domain crates. Merging the two would either create a dependency cycle or widen the
+Interface into a central domain switch.
+
+The composition seam ends at an inactive concrete typed projection. The Host seam begins when an
+attempt receives authority and owns candidate preparation, cancellation, physical retirement,
+last-good state, and publication. No `compose` operation may silently cross that line.
+
 ## Rejected Alternatives
 
 ### Treat Every Role As A Runtime Plugin
@@ -1199,7 +1281,7 @@ serialization, cancellation, and containment cost before semantics are proven.
 | Host-feature registration | Runtime-only and server artifacts call the same `package()` entry while omitting unselected bindings; selected missing roles reject final admission | Compile and catalog fixtures |
 | External viability | Locked clean-room local-path package builds with renamed Nara dependencies and ordinary Rust helpers | Independent workspace test |
 | Runtime overhead | No per-frame package registry lookup, contract ID dispatch, or plan resolution | Profiling and code review |
-| Diagnostic quality | Failures name stable package, contribution, contract, Host, target, cohort, and phase facts without sensitive payloads | Golden diagnostic fixtures |
+| Diagnostic quality | Primary failures name stable package/role or contribution, target, rejected action, and correction in author-domain language; contract, Host, cohort, and phase facts remain bounded opt-in audit detail; neither surface carries sensitive payloads | Golden diagnostic fixtures |
 | Iteration evidence | Record P50/P95 for data edit, component edit, function-body edit, structural Rust edit, Editor restart, and runtime restart; data/component edits invoke no Cargo build | Tracer workflow measurements |
 
 ## Test Strategy
@@ -1310,8 +1392,8 @@ through their owning ADRs.
    does a running Play replacement join an explicit linked structural transaction?
 7. What measured standard-Inspector limitation, if any, justifies the first custom Inspector
    provider Interface?
-8. Can a custom Inspector return existing `SceneInspectorCommand` values without expanding the
-   closed workspace command vocabulary, or is a typed intent-lowering seam required?
+8. Can a custom Inspector lower directly to an authorized target-scoped `ScenePatchDocument`, or is
+   a separate bounded `InspectorEditBatch` of allowlisted edit intents required?
 9. Which real isolation, crash, or throughput requirement justifies the first process Import
    Adapter?
 

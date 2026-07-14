@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-13
+**Last Updated**: 2026-07-14
 
 **Owner**: `nara_asset`, importer-owning domains, concrete authoring Hosts, `nara_tasks`, and `nara_fs`
 
@@ -28,7 +28,8 @@ last-good group on failure.
 
 The design serves two audiences with different Interfaces:
 
-- importer authors implement one typed provider method and use a narrow `ImportContext`;
+- importer authors implement one familiar typed `Importer` Interface and use a narrow
+  `ImportContext`;
 - editor, CLI, file-watch, and asset Modules request, cancel, and inspect import attempts without
   seeing task queues, filesystem capabilities, staging handles, or publication internals.
 
@@ -112,7 +113,7 @@ These comparisons introduce the Nara terms and state where each analogy ends.
 
 | Nara concept | Bevy comparison | Godot comparison | Unity comparison | Unreal comparison | Deliberate Nara difference |
 |---|---|---|---|---|---|
-| `ImportProvider` | Typed `AssetLoader` with associated asset/settings/error types | `ResourceImporter` / `EditorImportPlugin` | `ScriptedImporter` | Interchange translator/provider | It produces backend-neutral imported products for an authoring cache, not runtime handles, editor objects, or native packages |
+| `Importer` | Typed `AssetLoader` with associated asset/settings/error types | `ResourceImporter` / `EditorImportPlugin` | `ScriptedImporter` | Interchange translator/provider | It produces backend-neutral imported products for an authoring cache, not runtime handles, editor objects, or native packages |
 | `ImportContext` | `LoadContext` tracked loader dependencies and labeled assets | Import callback plus generated-file/dependency lists | `AssetImportContext` dependency and object collection | Interchange source/pipeline context | It exposes no raw filesystem path, `AssetServer`, object database, editor workspace, or publish operation; every supported observation is tracked automatically |
 | `ImportedProductId` | Labeled sub-asset handle is the nearest partial analogy | Resource UID and generated resource entries are partial analogies | Asset GUID plus local file ID | Object/package identity inside imported assets | Nara uses an opaque durable product ID; label, name, index, and content hash are display or reconciliation evidence only |
 | `ArtifactGroupCandidate` | A completed `LoadedAsset` plus labeled assets is a partial analogy | Importer's output files before cache registration | All objects submitted during one `OnImportAsset` call | One Interchange import result | The Host constructs it from tracked observations and staged receipts, then verifies the complete set before publication |
@@ -137,8 +138,8 @@ flowchart TD
     Host --> Queue[Bounded import-domain queue]
     Queue --> Tasks[nara_tasks worker execution]
     Tasks --> Context[Attempt-scoped ImportContext]
-    Context --> Provider[Typed ImportProvider]
-    Provider --> Context
+    Context --> Importer[Typed Importer]
+    Importer --> Context
     Context --> Candidate[Host-finalized ArtifactGroupCandidate]
     Candidate --> Verify[Reconcile and verify complete group]
     Verify --> Publish[Policy-scoped publication authority]
@@ -153,7 +154,7 @@ Dependency classification:
 | Selection, recipe, graph, reconciliation, generation, stale checks, last-good, publication state | In-process | Hidden inside the `nara_asset` deep Module |
 | `nara_tasks` | In-process execution substrate | Use bounded spawn, cancellation, first terminal, ordered integration, and shutdown; do not add asset policy to tasks |
 | `nara_fs` and local artifact store | Local-substitutable | Exercise real Host-issued temporary capabilities and receipts in tests; do not expose a public filesystem port solely for mocking |
-| `ImportProvider` | Real extension seam after Image plus the tracer use it | Typed public author Interface with private erasure in a concrete Adapter |
+| `Importer` | Real extension seam after Image plus the tracer use it | Typed public author Interface with private erasure in the first threaded Adapter |
 | Future child-process importer | Remote-but-owned | Define a protocol port only when a real isolated Adapter exists; do not freeze wire bytes now |
 | Decoder library | Provider-private in-process dependency | Domain owns decode behavior and typed errors |
 
@@ -162,26 +163,28 @@ Dependency classification:
 ### 1. Import Contribution And Compiled Binding
 
 Importer ID, supported extensions, settings schema, semantic version, output product constraints,
-Host/target applicability, and required isolation are declared in the package's data-only import
-contribution. The provider must not repeat them in `descriptor()`.
+Host/target applicability, and any exceptional required-isolation policy are declared in the
+package's data-only import contribution. The provider must not repeat them in `descriptor()`.
 
-A package's common `package::bind` operation includes one typed import claim:
+A package's common `package::define` operation includes one typed import contribution:
 
 ```rust
-let import_claim = nara_asset::package::threaded_importer(
+let import_part = nara_asset::package::importer(
     generated::SPRITE_ANIMATION_IMPORTER,
     SpriteAnimationImporter::new,
 );
 ```
 
 The variable is illustrative: ordinary authors normally place the helper directly in the tuple or
-sealed contribution list passed to `package::bind`.
+sealed contribution list passed to `package::define`. The helper privately creates the typed
+binding claim; ordinary authors do not manipulate that claim.
 
-The helper stores a repeatable factory and type-specific error mapping without invoking the
-provider. Final catalog admission verifies the canonical declaration, compiled binding,
-implementation digest, and executable generation. Pure semantic resolution then produces a
-placement-independent `ImportPlan` and resolution receipt. Domain-specific Host binding verifies
-the exact Adapter, target, and affinity and produces an inactive `BoundImportPlan` plus binding
+The helper stores a repeatable factory and the `Importer::map_error` function without invoking the
+importer or selecting a particular worker, executor instance, or process. Final catalog admission verifies the
+canonical declaration, compiled binding, implementation digest, and executable generation. Pure
+semantic resolution then produces a placement-independent `ImportPlan` and resolution receipt.
+Domain-specific Host binding verifies
+the exact Adapter, target, and affinity and produces an inactive `BoundImportContract` plus binding
 receipt without invoking the factory. A concrete Editor/Import Host later prepares and activates
 the importer-provider catalog; only a subsequent admitted `ImportIntent` grants execution
 placement and attempt-scoped authority.
@@ -190,34 +193,50 @@ An extension only produces importer candidates. A stable `.meta` selection or ex
 chooses the final `ImporterId`. "Last registered wins" and extension-as-global-unique-slot are not
 supported replacement policies.
 
-### 2. Typed Provider
+### 2. Typed Importer
 
 ```rust
-pub trait ImportProvider: 'static {
-    type Settings: ImportSettings;
-    type Error: 'static;
+pub trait Importer: Send + Sync + 'static {
+    type Settings: ImportSettings + Send + Sync + 'static;
+    type Error: Send + 'static;
 
     fn import(
         &self,
         context: &mut ImportContext<'_>,
         settings: &Self::Settings,
     ) -> Result<(), Self::Error>;
+
+    fn map_error(
+        error: &Self::Error,
+        sink: &mut ImporterFailureSink<'_>,
+    );
 }
 ```
 
-The base trait does not require `Send + Sync`. The threaded binding helper requires appropriate
-bounds on the provider, settings, error, and factory. A future Host-local binding may accept an
-affine provider without wrapping `!Send` state in a mutex and pretending it is thread-safe.
+This target Interface intentionally reuses the familiar `Importer` name after the current
+`Importer` / `TypedImporter<T>` registry Interfaces are deleted; it is a replacement, not a wrapper
+or third parallel path. The first ordinary `package::importer` helper constructs a compiled
+threaded in-process definition, so Rust must prove these bounds before any heterogeneous private
+erasure. Its factory is likewise `Fn() -> I + Send + Sync + 'static` for `I: Importer`. The helper
+name does not force authors to choose a task pool or thread, but the first compiled definition
+honestly guarantees that the Host may run it on any supported worker.
+
+A future Host-local affine or process Adapter cannot recover missing thread-safety evidence after
+erasure and cannot transparently reinterpret this compiled definition. It requires a distinct
+advanced binding helper or marker, with its own conformance evidence, after a real implementation
+proves the need. An exceptional isolation requirement may still be declared as package data.
 
 The first Interface is synchronous and runs inside a bounded `nara_tasks` closure. This matches the
 current execution substrate and keeps async runtime or process IPC choices out of importer
 semantics. A future remote Adapter may implement asynchronous transport behind the Host without
-changing the provider's semantic transcript.
+changing the importer's semantic transcript.
 
-`type Error` remains domain-owned. The binding helper receives or derives an explicit mapping into
-`ImportProviderFailure`. That mapping produces stable engine/domain codes, static summaries, and
-classified fields. It must not lower arbitrary `Display`, `Debug`, panic payloads, paths, URLs, or
-environment values into diagnostics.
+`type Error` remains domain-owned, while required `map_error` supplies the one explicit lowering
+path into a Host-owned bounded `ImporterFailureSink`. The sink accepts stable engine/domain codes,
+static summaries, and classified fields only; it rejects incomplete or over-budget reports. It has
+no `Display`/`Debug` ingestion method, so arbitrary error text, panic payloads, paths, URLs, or
+environment values cannot be lowered accidentally. The Host maps an invalid mapper transcript to a
+stable generic engine failure without stringifying the source error.
 
 ### 3. Narrow Tracked Context
 
@@ -657,16 +676,17 @@ handles, or an operation that can republish it.
 
 An audit record loaded from disk must be revalidated and cannot regain process-local authority.
 
-### 16. Provider Placement And Private Erasure
+### 16. Importer Placement And Private Erasure
 
 Typed provider factories remain inside inactive wrappers through pure contract resolution.
 Domain-specific Host binding verifies which private execution Adapter accepts them and moves the
-wrappers into `BoundImportPlan` without invoking a factory. Candidate preparation later invokes the
-selected repeatable factories and erases the fresh providers behind a private object-safe catalog.
-A threaded catalog can erase providers behind `Send + Sync` bounds. A Host-local catalog must
-remain owned by the affine execution lane and must not be inserted into an ECS resource whose
-bounds it cannot satisfy. A future process route contains an opaque provider key, not a
-parent-process Rust trait object.
+wrappers into `BoundImportContract` without invoking a factory. Candidate preparation later invokes
+the selected repeatable factories and erases the fresh importers behind a private object-safe
+provider catalog. The first catalog retains the `Send + Sync` proof established by `Importer` and
+`package::importer`. A future Host-local catalog must use a separately admitted affine compiled
+definition, remain owned by its lane, and never enter an ECS resource whose bounds it cannot
+satisfy. A future process route contains an opaque provider key, not a parent-process Rust trait
+object.
 
 An affine provider route is reserved until one implementation proves a lane-owned registry,
 Send-safe ticket mailbox, cancellation and physical-exit receipts, and ADR 0080-equivalent poll
@@ -690,7 +710,7 @@ This example exists to pressure product identity and tracked product reads. It i
 implement `.nanim` next.
 
 ```rust
-impl ImportProvider for SpriteAnimationImporter {
+impl Importer for SpriteAnimationImporter {
     type Settings = SpriteAnimationImportSettings;
     type Error = SpriteAnimationImportError;
 
@@ -727,17 +747,24 @@ impl ImportProvider for SpriteAnimationImporter {
         context.set_primary(SpriteAnimationLibraryArtifact { clips })?;
         Ok(())
     }
+
+    fn map_error(
+        error: &Self::Error,
+        sink: &mut ImporterFailureSink<'_>,
+    ) {
+        error.write_bounded_report(sink);
+    }
 }
 ```
 
-The provider knows source data, typed settings, tracked product views, domain validation, product
+The importer knows source data, typed settings, tracked product views, domain validation, product
 continuity evidence, and semantic dependency edges. It does not know task generation, active
 manifest version, artifact path, filesystem authority, publication order, last-good policy, or
 runtime residency.
 
 ## Error And Diagnostic Contract
 
-Provider errors should remain structured and domain-specific:
+Importer errors should remain structured and domain-specific:
 
 ```rust
 enum SpriteAnimationImportError {
@@ -1015,12 +1042,14 @@ None of these questions justifies provider-owned publication, ambient filesystem
    unmodified filesystem replace receipt; cooperative mode covers participating Nara writers only,
    while strict mode requires strong CAS or proven root exclusion. An in-memory generation check
    never authorizes cross-process replacement.
-8. The base provider trait imposes no universal affinity. Threaded execution is admitted first;
-   local or process placement requires its own real Adapter evidence.
+8. The first public `Importer` and `package::importer` compiled definition encode the bounds needed
+   by threaded in-process execution without asking authors to choose a scheduler. Local-affine or
+   process placement requires a distinct advanced compiled-binding Interface and real Adapter
+   evidence; it is never inferred after erasure.
 9. Runtime/server products must omit unselected importer code, but physical crate splitting waits
    for measured product-closure pressure.
 10. A process protocol, async runtime, and multi-stage DCC pipeline remain future Adapters, not the
-   initial provider Interface.
+    initial `Importer` Interface.
 
 ## References
 

@@ -26,7 +26,8 @@ maintainers need shared terms. It is not a list of concepts every extension auth
 | Game author | `App`, `Plugin`, ECS data/systems, assets, and scenes | No |
 | Reusable package author | One `package()` function plus engine-owned domain helpers | No |
 | Importer, Inspector, or other provider author | One narrow domain trait/context with typed settings, errors, and outputs | No |
-| Contract, product-root, or Host maintainer | Versioned contracts, resolution, binding, candidate ownership, and publication | Yes, only for the owned layer |
+| Contract/domain maintainer | Versioned declarations, typed plans, resolvers, and conformance | Yes, only for the owned contract |
+| Product-root/Host maintainer | Product selection, typed projections, candidate ownership, cleanup, and publication | Yes, only for the owned product/Host |
 
 Leaf-kernel, receipt, seal, inactive-transfer, candidate, and cohort vocabulary describes engine
 internals. It must not become a required workflow, broad-prelude surface, or primary diagnostic
@@ -58,7 +59,7 @@ known contract, asks domain binders to bind the results, and only then seals the
 projection.
 
 ```text
-package draft
+package definition
     -> composition root selects product / Host / target facts
        -> final catalog admission joins declarations to compiled evidence
           -> leaf resolves each selected contract
@@ -241,8 +242,8 @@ contribution merely to make every row look alike.
 The intended common authoring shape is approximately:
 
 ```rust
-pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
-    package::bind(
+pub fn package() -> Result<PackageDefinition, PackageAuthorReport> {
+    package::define(
         generated::PACKAGE,
         (
             nara::reflect::package::schemas(
@@ -254,7 +255,7 @@ pub fn package() -> Result<PackageDraft, PackageAuthorReport> {
                 definitions::runtime_plugins,
             ),
             #[cfg(feature = "import")]
-            nara::asset::package::threaded_importer(
+            nara::asset::package::importer(
                 generated::IMPORTER,
                 SpriteAnimationImporter::new,
             ),
@@ -277,8 +278,11 @@ not yet verified truth and cannot invoke the definition. The generated locator i
 typed key. Final catalog verification must still prove the source manifest, contract, executable
 generation, implementation evidence, target, and cardinality.
 
-On success, `package::bind` returns an opaque **package draft**. On failure, it returns one bounded
-author report. A draft has no `execute`, `publish`, `get<T>()`, or Host-authority method.
+On success, `package::define` returns an opaque **package definition**. On failure, it returns one
+bounded author report. A definition has no `execute`, `publish`, `get<T>()`, or Host-authority
+method. Internal typed binding claims still exist, but the domain helpers hide them from ordinary
+package authors. Helpers yield diagnostic-bearing parts; `package::define` evaluates every part and
+aggregates failures rather than requiring one `?` per helper and losing later authoring errors.
 
 ### Stage 2: Root Selection, Catalog Admission, And Leaf Resolution
 
@@ -343,24 +347,38 @@ RuntimePlan = selected plugin IDs, requirements, ordering, and capabilities
 ImportPlan  = selected importer semantics, settings shape, products, and conflicts
 ```
 
-These are ordinary typed immutable values, not entries in an `Any` map. The kernel returns each plan
-with a semantic resolution receipt and an opaque inactive transfer containing the compiled values.
+These are ordinary typed immutable values, not entries in an `Any` map. The kernel returns each one
+inside a root-only, move-only carrier:
+
+```text
+PendingContractBinding
+|- resolution: ContractResolutionBundle
+|  |- resolved: pure ResolvedContract snapshot and semantic receipt
+|  `- continuation: opaque inactive compiled transfer
+|- verified Adapter support
+`- verified Host binding facts, all carrying the same private seal
+```
+
+The pending carrier owns one copy of every value needed by binding. It prevents root code from
+mixing a semantic result, implementation continuation, Adapter support, or Host facts from different
+admission generations.
 
 ### Stage 3: Semantic Results Return To The Root
 
-The leaf returns known typed semantic results to the same composition root. At this point they are
-still unbound:
+The leaf returns known typed pending bindings to the same composition root. The root may borrow
+their nested pure resolved fields as a semantic view while they are still unbound:
 
 ```rust
-struct EditorSemanticResolution {
-    schemas: ResolvedSchemaContract,
-    runtime: ResolvedRuntimeContract,
-    import: ResolvedImportContract,
+struct EditorSemanticResolution<'a> {
+    schemas: &'a ResolvedSchemaContract,
+    runtime: &'a ResolvedRuntimeContract,
+    import: &'a ResolvedImportContract,
 }
 ```
 
-This is illustrative internal orchestration, not necessarily a stored struct. Its fields remain
-concrete typed results. There is no public `Vec<Box<dyn Any>>`, string plan lookup, or universal
+This is an illustrative borrow-scoped view, not a second stored copy. The matching
+`PendingContractBinding` values remain the sole owners of the resolution bundles, verified support,
+and Host facts. There is no public `Vec<Box<dyn Any>>`, string plan lookup, or universal
 `EngineHostPlan`.
 
 The root can now validate cross-contract bridges that were not owned by one contract. It still has
@@ -374,28 +392,29 @@ compiled Adapter for one concrete owner role. The detailed design calls this **H
 it does not require a live Host or process:
 
 ```text
-RuntimePlan + verified App Adapter       -> inactive BoundRuntimePlan
-ImportPlan  + verified threaded Adapter -> inactive BoundImportPlan
-SchemaPlan  + verified catalog Adapter  -> inactive BoundSchemaPlan
+Pending runtime binding -> inactive BoundRuntimeContract
+Pending import binding  -> inactive BoundImportContract
+Pending schema binding  -> inactive BoundSchemaContract
 ```
 
 This sprite-animation package has no custom tooling contribution. Its standard Inspector is derived
 later from the schema; there is no `ToolingPlan` in this example. Another package may add a separate
 tooling contract.
 
-Binding proves that the semantic plan version, compiled implementation, executable generation,
-target, and execution affinity agree. It still does not call a factory or provider. The result
-remains inactive because candidate preparation may need reservations, threads, filesystem
-capabilities, native handles, or cleanup ownership that binding must not possess.
+Binding consumes each complete pending carrier and proves that the semantic plan version, compiled
+implementation, executable generation, target, and execution affinity agree. It still does not call
+a factory or provider. The result remains inactive because candidate preparation may need
+reservations, threads, filesystem capabilities, native handles, or cleanup ownership that binding
+must not possess.
 
 Only after all selected bindings and root-owned bridge checks succeed does the composition root
 seal a product-specific projection. An Editor executable might produce:
 
 ```rust
 struct EditorProjectProjection {
-    schemas: BoundSchemaPlan,
-    runtime: BoundRuntimePlan,
-    import: BoundImportPlan,
+    schemas: BoundSchemaContract,
+    runtime: BoundRuntimeContract,
+    import: BoundImportContract,
 }
 ```
 
@@ -403,12 +422,15 @@ A dedicated server might produce a different type:
 
 ```rust
 struct ServerProjectProjection {
-    schemas: BoundSchemaPlan,
-    runtime: BoundRuntimePlan,
+    schemas: BoundSchemaContract,
+    runtime: BoundRuntimeContract,
 }
 ```
 
-The exact fields are illustrative. Unsupported domains are absent from the type and product closure.
+The exact fields are illustrative. Each `Bound*Contract` name denotes the complete typed
+`BoundContract<C, H, PlanData, BoundPlan>` wrapper that owns the semantic plan, private
+domain-specific `BoundPlan` payload, and both receipts. It is not merely the inner `BoundPlan`.
+Unsupported domains are absent from the type and product closure.
 
 The root also checks product rules, for example:
 
@@ -476,11 +498,11 @@ The nearest mature-engine concepts are local analogies, not exact equivalents:
 
 ```mermaid
 flowchart TD
-    Author[Package author] --> Draft[Atomic PackageDraft]
+    Author[Package author] --> Definition[Atomic PackageDefinition]
     Source[Bounded package declarations] --> Root[Concrete Editor composition root]
     Catalog[Compiled catalog evidence] --> Root
     Project[Project capability and target facts] --> Root
-    Draft --> Root
+    Definition --> Root
     Root --> Admission[Final catalog admission]
     Admission --> Kernel[Leaf contract resolution]
     Kernel --> Plans[Typed semantic results and resolution receipts]
@@ -518,7 +540,7 @@ ahead:
 
 | Concept layer | Checkpoint | Example | What does not happen |
 |---|---|---|---|
-| Package authoring | Claim assembly | Runtime locator is paired with an importer helper | No package draft is returned |
+| Package authoring | Claim assembly | Runtime locator is paired with an importer helper | No package definition is returned |
 | Root + catalog admission | Evidence join | Manifest fingerprint, version, or binding cardinality drifts | No verified contribution key or semantic witness is minted |
 | Leaf + domain resolver | Semantic resolution | Domain conflict or invalid fallback | No plan, resolution receipt, or inactive transfer escapes |
 | Root composition | Product closure | Editor plan requires a capability not requested or compiled | No concrete projection and no Host mutation |
@@ -548,7 +570,7 @@ No mature engine has an exact equivalent of the whole Nara flow. The useful comp
 | Concrete domain owner | `App`, `AssetServer`, and specialized registries | Scene runtime, resource importer, editor registries | Player, Asset Database/import pipeline, editor serialization/tooling | Game runtime, Editor, commandlets, Asset Tools and Interchange |
 
 These are analogies only. Bevy `PluginGroup`, a Godot addon, a Unity package, and an Unreal plugin
-can each group multiple roles, but none promises Nara's typed all-or-error `PackageDraft` followed
+can each group multiple roles, but none promises Nara's typed all-or-error `PackageDefinition` followed
 by separately inspectable semantic resolution, inactive binding, candidate preparation, and
 publication phases.
 
@@ -608,7 +630,9 @@ The reader route above is a public Interface constraint, not only a documentatio
 5. Primary errors use the author's domain language and a concrete next action. Internal phase,
    receipt, and fingerprint evidence may appear only in advanced inspection details.
 6. Direct `App`/`PluginGroup` authoring and reusable package registration lower from one canonical
-   definition source; hiding internals must not create two semantic authorities.
+   compiled domain definition. The source manifest remains the declaration authority, and final
+   admission verifies that the two projections agree; hiding internals must not create duplicate
+   authorities for either fact kind.
 
 If an ordinary game, package, importer, or Inspector recipe must explain admission, binding,
 candidate, or cohort mechanics, the public Interface has failed this boundary.
@@ -727,7 +751,7 @@ fields, match arms, or domain-specific orchestration.
 
 ## Open Interface Detail
 
-One low-cost authoring detail remains intentionally open: the carrier used by `package::bind`.
+One low-cost authoring detail remains intentionally open: the carrier used by `package::define`.
 
 ```text
 tuple

@@ -57,13 +57,14 @@ _Avoid_: Cargo feature, Rust ABI, Host interface
 
 **Atomic Package Authoring**:
 The authoring rule that all compiled contribution claims for one package are submitted as one
-package draft or rejected together.
+package definition or rejected together.
 _Avoid_: Atomic artifact publication, runtime activation transaction
 
-**Package Draft**:
-An inactive package-authoring result containing declared contribution claims before final catalog
-verification and Host selection.
-_Avoid_: Resolved package, active package, verified catalog
+**Package Definition**:
+An inactive package-authoring result that joins canonical declaration locators to compiled domain
+definitions before product selection and final catalog admission. It grants no execution or Host
+authority.
+_Avoid_: Cargo package, resolved product, active package, verified catalog
 
 **Contribution Locator**:
 A stable generated reference to one canonical package declaration. It identifies what must be
@@ -193,12 +194,12 @@ _Avoid_: Workspace state owner, saved-document publisher, UI toolkit
 **Candidate**:
 A domain-owned unpublished prospective state that may be preparing, ready, or failed; only a ready
 candidate may activate or publish.
-_Avoid_: Package draft, readiness receipt, active generation
+_Avoid_: Package definition, readiness receipt, active generation
 
 **Activation Intent**:
 A concrete Host request that names exactly which required candidates must become visible together,
 such as an Editor provider-catalog activation or a Play runtime activation.
-_Avoid_: Package draft, semantic plan, global package transaction
+_Avoid_: Package definition, semantic plan, global package transaction
 
 **Activation Cohort**:
 The required ready-but-unpublished candidates selected by one activation intent and plan
