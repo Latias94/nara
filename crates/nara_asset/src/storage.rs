@@ -3,10 +3,12 @@ use std::{
     fmt::{self, Debug, Formatter},
     hash::{Hash, Hasher},
     marker::PhantomData,
+    sync::Arc,
 };
 
 use nara_ecs::Resource;
 
+use crate::revision::{RevisionCounter, RevisionIdentity};
 use crate::{
     AssetError, AssetEventKind, AssetEvents, AssetId, AssetServer, AssetStateError, AssetStates,
     AssetVersion, ImportArtifactDigest, SourceHash,
@@ -67,15 +69,42 @@ impl<T> Hash for Handle<T> {
     }
 }
 
+/// Opaque identity of one typed asset store and the latest mutation to one slot.
+///
+/// The identity changes for insertion, mutable access, replacement, and removal. Removal retains a
+/// tombstone identity so an empty-slot ABA cannot revive an older publication admission. A never-
+/// populated slot still carries the store identity, preventing publication into another newly
+/// constructed store whose slot is also absent.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AssetSlotRevision(RevisionIdentity);
+
+impl AssetSlotRevision {
+    fn new(store: &Arc<()>, entry: Option<&RevisionCounter>) -> Self {
+        Self(RevisionIdentity::capture(store, entry))
+    }
+}
+
+impl Debug for AssetSlotRevision {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AssetSlotRevision")
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Resource)]
 pub struct Assets<T: Asset> {
+    store_revision: Arc<()>,
     values: HashMap<AssetId, T>,
+    slot_revisions: HashMap<AssetId, RevisionCounter>,
 }
 
 impl<T: Asset> Default for Assets<T> {
     fn default() -> Self {
         Self {
+            store_revision: Arc::new(()),
             values: HashMap::new(),
+            slot_revisions: HashMap::new(),
         }
     }
 }
@@ -91,12 +120,14 @@ impl<T: Asset> Assets<T> {
             if let std::collections::hash_map::Entry::Vacant(entry) = self.values.entry(handle.id())
             {
                 entry.insert(value);
+                self.touch_slot(handle.id());
                 return Ok(handle);
             }
         }
     }
 
     pub fn insert(&mut self, handle: Handle<T>, value: T) -> Option<T> {
+        self.touch_slot(handle.id());
         self.values.insert(handle.id(), value)
     }
 
@@ -111,13 +142,11 @@ impl<T: Asset> Assets<T> {
     ) -> Result<AssetVersion, AssetStateError> {
         let id = handle.id();
         let version = states.next_version(id)?;
-        let event_kind = if self.values.contains_key(&id) {
+        let event_kind = if self.insert(handle, value).is_some() {
             AssetEventKind::Modified
         } else {
             AssetEventKind::Added
         };
-
-        self.values.insert(id, value);
         states.set_loaded_at(id, version, source_hash, import_hash);
         events.push(id, version, event_kind);
         Ok(version)
@@ -157,8 +186,8 @@ impl<T: Asset> Assets<T> {
         message: impl Into<String>,
     ) -> Result<AssetVersion, AssetStateError> {
         let id = handle.id();
-        self.values.remove(&id);
         let version = states.set_failed(id, message.into())?;
+        self.remove(handle);
         events.push(id, version, AssetEventKind::LoadFailed);
         Ok(version)
     }
@@ -171,7 +200,7 @@ impl<T: Asset> Assets<T> {
     ) -> Result<Option<T>, AssetStateError> {
         let id = handle.id();
         let version = states.next_version(id)?;
-        let removed = self.values.remove(&id);
+        let removed = self.remove(handle);
         states.set_removed_at(id, version);
         events.push(id, version, AssetEventKind::Removed);
         Ok(removed)
@@ -183,11 +212,33 @@ impl<T: Asset> Assets<T> {
     }
 
     pub fn get_mut(&mut self, handle: Handle<T>) -> Option<&mut T> {
-        self.values.get_mut(&handle.id())
+        let value = self.values.get_mut(&handle.id())?;
+        self.slot_revisions
+            .entry(handle.id())
+            .and_modify(RevisionCounter::advance)
+            .or_default();
+        Some(value)
     }
 
     pub fn remove(&mut self, handle: Handle<T>) -> Option<T> {
-        self.values.remove(&handle.id())
+        let removed = self.values.remove(&handle.id());
+        if removed.is_some() {
+            self.touch_slot(handle.id());
+        }
+        removed
+    }
+
+    fn touch_slot(&mut self, id: AssetId) {
+        self.slot_revisions
+            .entry(id)
+            .and_modify(RevisionCounter::advance)
+            .or_default();
+    }
+
+    /// Returns this store's identity plus the latest slot mutation identity.
+    #[must_use]
+    pub fn slot_revision(&self, handle: Handle<T>) -> AssetSlotRevision {
+        AssetSlotRevision::new(&self.store_revision, self.slot_revisions.get(&handle.id()))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Handle<T>, &T)> + '_ {
@@ -204,5 +255,65 @@ impl<T: Asset> Assets<T> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slot_revision_changes_for_every_mutable_value_path_and_survives_removal() {
+        let mut server = AssetServer::new();
+        let mut assets = Assets::default();
+        let handle = assets.add(&mut server, String::from("first")).unwrap();
+        let added = assets.slot_revision(handle);
+
+        assets.get_mut(handle).unwrap().push_str("-changed");
+        let mutably_borrowed = assets.slot_revision(handle);
+        assert_ne!(mutably_borrowed, added);
+
+        assets.insert(handle, String::from("replacement"));
+        let replaced = assets.slot_revision(handle);
+        assert_ne!(replaced, mutably_borrowed);
+
+        assert_eq!(assets.remove(handle).as_deref(), Some("replacement"));
+        let removed = assets.slot_revision(handle);
+        assert_ne!(removed, replaced);
+
+        assets.insert(handle, String::from("reinserted"));
+        assert_ne!(assets.slot_revision(handle), removed);
+    }
+
+    #[test]
+    fn absent_slot_revisions_bind_candidates_to_one_store() {
+        let handle = Handle::<String>::new(AssetId::from_raw(7));
+        let first = Assets::<String>::default();
+        let second = Assets::<String>::default();
+
+        assert_ne!(first.slot_revision(handle), second.slot_revision(handle));
+    }
+
+    #[test]
+    fn failed_load_failure_transition_preserves_the_existing_slot() {
+        let mut server = AssetServer::new();
+        let mut assets = Assets::default();
+        let handle = assets.add(&mut server, String::from("last-good")).unwrap();
+        let revision = assets.slot_revision(handle);
+        let mut states = AssetStates::default();
+        let mut events = AssetEvents::default();
+
+        assert!(matches!(
+            assets.record_load_failure(
+                handle,
+                &mut states,
+                &mut events,
+                "image.import-test-failure",
+            ),
+            Err(AssetStateError::UnknownAsset { .. })
+        ));
+        assert_eq!(assets.get(handle).map(String::as_str), Some("last-good"));
+        assert_eq!(assets.slot_revision(handle), revision);
+        assert!(events.drain().is_empty());
     }
 }

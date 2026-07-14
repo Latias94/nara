@@ -22,31 +22,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             255, 255, 0, 255,
         ],
     )?;
-    let imported = ImageImporter::default().import_job(&ImportJobInput::new(
-        record.clone(),
-        png_bytes,
-        ImportDependencyDigest::empty(),
-        ImportSettingsHash::default(),
-        ImportProfile::default(),
-    ))?;
-
     let mut asset_server = AssetServer::new();
     let texture = AssetRef::stable_id(TEXTURE_STABLE_ID)?
         .resolve_with_database::<ImageAsset>(&mut asset_server, &database)?;
 
-    let source_hash = imported.value().source().source_hash();
-    let artifact_hash = imported.artifact().key().digest();
     let mut images = Assets::<ImageAsset>::default();
     let mut states = AssetStates::default();
     let mut events = AssetEvents::default();
-    images.commit_loaded(
+    let imported = ImageImporter::default().import_image(
+        ImageBytesImportRequest::new(
+            record.clone(),
+            png_bytes.into_boxed_slice(),
+            ImportDependencyDigest::empty(),
+            ImportSettingsHash::default(),
+            ImportProfile::default(),
+        ),
         texture,
-        imported.into_value(),
-        &mut states,
-        &mut events,
-        Some(source_hash),
-        Some(artifact_hash),
+        AssetVersion::ZERO,
+        &asset_server,
+        &images,
+        &states,
     )?;
+    imported.commit(&asset_server, &mut images, &mut states, &mut events)?;
 
     let mut app = App::new();
     app.add_plugins(Runtime2dPlugins)?;

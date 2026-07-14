@@ -249,7 +249,7 @@ mod product {
             group.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
             group.add_plugin_if_missing(nara_tilemap::TilemapPlugin)?;
             group.add_plugin_if_missing(nara_render::RenderPlugin)?;
-            group.add_plugin_if_missing(nara_image::ImagePlugin)?;
+            group.add_plugin_if_missing(nara_image::ImagePlugin::default())?;
             group.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
             Ok(())
         }
@@ -286,7 +286,7 @@ mod product {
         fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
             group.add_plugins(MinimalPlugins)?;
             group.add_plugin_if_missing(nara_render::RenderPlugin)?;
-            group.add_plugin_if_missing(nara_image::ImagePlugin)?;
+            group.add_plugin_if_missing(nara_image::ImagePlugin::default())?;
             group.add_plugin_if_missing(nara_ui::UiPlugin)?;
             group.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
             Ok(())
@@ -527,9 +527,14 @@ pub mod advanced_prelude {
     };
     #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
     pub use nara_image::{
-        ImageImportError, ImageImportedAsset, ImageImporter, ImagePreparePlugin, ImagePrepareStats,
-        ImageReloadError, ImageReloadStats, ImageSourceMetadata, PreparedImageResource,
-        image_descriptor_hash, image_resource_key, prepare_images,
+        AdmittedImageImport, IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageBytesImportRequest,
+        ImageFileImportRequest, ImageImportBudgetError, ImageImportBudgetHost,
+        ImageImportBudgetSnapshot, ImageImportError, ImageImportLimitKind, ImageImportLimits,
+        ImageImportLimitsError, ImageImportMemoryPlan, ImageImportStage, ImageImportedAsset,
+        ImageImporter, ImageImporterCreateError, ImagePngFailureKind, ImagePreparePlugin,
+        ImagePrepareStats, ImagePublicationFailureKind, ImageReloadError, ImageReloadStats,
+        ImageSourceDirectory, ImageSourceFailureKind, ImageSourceMetadata, ImageUnsupportedFeature,
+        PreparedImageResource, image_descriptor_hash, image_resource_key, prepare_images,
     };
     #[cfg(any(
         feature = "runtime-2d",

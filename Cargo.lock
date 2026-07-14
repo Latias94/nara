@@ -1686,11 +1686,16 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
+ "nara_fs",
  "nara_reflect",
  "nara_render",
  "nara_tasks",
+ "png",
  "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

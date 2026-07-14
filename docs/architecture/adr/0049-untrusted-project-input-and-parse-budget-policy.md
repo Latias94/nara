@@ -50,8 +50,56 @@ patch-work limits before publishing a file candidate. Candidate publication rema
 frozen-registry semantic validation and target mutation.
 
 This slice does not authorize how a host obtains those bytes. Host-issued bounded file reads,
-image encoded/decoded/in-flight budgets, asset metadata, import artifacts, project-manifest ingest,
-and ADR 0048 runtime diagnostic bridges remain owned by their later safety or product-host units.
+asset metadata, import artifacts, project-manifest ingest, and ADR 0048 runtime diagnostic bridges
+remain owned by their later safety or product-host units.
+
+### Implemented RGF-U10 Slice
+
+`FileCapability::read_to_end_bounded` performs a checked `limit + 1` sentinel read from an
+already-authorized handle without retaining an ambient path. `nara_image` pins `png` 0.18.1 and
+supports one audited static, non-interlaced PNG path. Before constructing the decoder it performs a
+non-allocating signature/IHDR/chunk preflight, rejects Adam7 and `eXIf`, and checks encoded bytes,
+width, height, pixels, RGBA bytes, and decoder-work bytes. APNG is rejected during bounded decoder
+metadata inspection before pixel buffers are allocated. The importer then atomically reserves the
+complete versioned modeled peak before decode.
+
+`ImageBytesImportRequest` owns a fixed-length `Box<[u8]>`. Its caller's earlier acquisition and
+allocation are outside this importer model; admission checks the length before PNG scanning and
+charges the retained encoded length plus the captured last-good image's actual RGBA length. File
+imports own a `FileCapability` and, before dispatch, reserve
+`max_encoded_bytes + captured publication overlap`. The bounded read result remains the importer's
+single encoded buffer, so no read-to-box duplicate is modeled.
+After header preflight, both paths atomically resize the reservation to encoded allocation,
+decoder work, new RGBA output, and the captured replacement overlap.
+
+Both paths privately capture the target stable binding, expected version, O(1)
+`AssetStateRevision`, and persistent `AssetSlotRevision`. The resulting `ImageImportedAsset` owns
+that admission and exposes one
+`commit` operation, which revalidates the target and chooses initial load or reload internally
+before releasing its charge. A changed or missing last-good value rejects publication, including a
+same-length content replacement. An existing value larger than the configured overlap ceiling is
+not admitted. A failed initial load publishes no value; a failed reload preserves the last-good
+handle, value, source hash, and `AssetVersion` while publishing a static diagnostic code with
+classified bounded fields.
+
+`ImageImportBudgetHost` coordinates cloned or separately constructed importers when a process host
+explicitly injects the same host-scoped owner. No global or static image-budget owner exists. Its
+configured overlap ceiling remains the worst-case admission bound shared by attached importers;
+each accepted candidate charges only the immutable prior slot length captured by its revision.
+RAII reservations expose aggregate and per-category active/high-water statistics and prove exact
+modeled-charge release across success, decode rejection, cancellation, task rejection, panic,
+stale completion, and publication failure.
+
+This evidence is PNG-specific. `png::Limits` is defense in depth for decoder-tracked allocations,
+not an allocator-capacity, fragmentation, heap, or OS/RSS hard limit; the Nara formula accounts for
+requested logical payloads with explicit conservative decoder slack and rejects unbounded decoder
+metadata before decode. Other codecs, U4 plugin-slot configuration, U12 startup content
+closure/residency, and ADR 0048 runtime-pressure publication remain unproved. Built-in importer
+version 2 invalidates version-1 image artifacts; the migration guide requires cache rebuild.
+Direct `ImageAsset::new`, serde construction, and raw `Assets<ImageAsset>` mutation are advanced
+in-memory paths rather than file-ingest APIs; their callers own any prior allocation budget. Every
+state write and value-slot mutation still advances an opaque revision, so those paths invalidate an
+in-flight official import candidate instead of silently reusing its publication admission.
 
 ## Alternatives Considered
 
@@ -84,10 +132,11 @@ and ADR 0048 runtime diagnostic bridges remain owned by their later safety or pr
 | Metric | Target | Measurement |
 |---|---:|---|
 | Bounded documents | Oversized scene/prefab/patch/component values fail before world mutation | Loader tests |
-| Bounded images | Images exceeding pixel or decoded-byte limits fail before large RGBA allocation | Importer tests |
+| Bounded images | PNG encoded/dimension/pixel/RGBA/work/aggregate exact limits pass and limit+1 fails before additional unreserved importer-owned allocation | Owner, facade, and reference-game tests |
 | Repairable failures | Budget diagnostics include code, limit, and safe context | Diagnostic tests |
-| Consistent policy | Initial load and reload use the same budget defaults | Integration tests |
+| Consistent policy | Initial load and reload use one owned request, reservation, candidate, and commit path | Integration tests |
 | No partial mutation | Budget failures leave target runtime/project state unchanged | Transaction tests |
+| Exact release | Every terminal path returns active charges to zero and reserved bytes equal released bytes | Budget snapshot tests |
 
 ## Risks and Mitigations
 
@@ -101,11 +150,13 @@ and ADR 0048 runtime diagnostic bridges remain owned by their later safety or pr
 ## Consequences
 
 - Scene, prefab, patch, asset metadata, import artifact, image, and schema catalog loaders should receive budget context.
-- Image import should stop treating full-file read plus immediate RGBA decode as the long-term contract.
+- Static PNG import uses bounded capability reads, decoder-before-allocation preflight, and a
+  reservation-bearing publication transaction; new codecs require their own audited formula.
 - Budget defaults should be recorded before project manifest settings expose overrides.
 
 ## Open Questions
 
 - Which crate owns the shared `ProjectInputBudget` type?
 - Should budget profiles be named `dev`, `editor`, `package`, and `headless`, or derive from project profiles later?
-- Which image formats can report dimensions without full decode in the selected decoder stack?
+- Which additional image codec has a concrete product consumer and can prove an equivalent bounded
+  metadata/decode/publication contract?

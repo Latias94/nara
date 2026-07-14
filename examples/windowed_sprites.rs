@@ -92,31 +92,29 @@ fn import_demo_texture(
         ],
     )
     .unwrap();
-    let imported = ImageImporter::default()
-        .import_job(&ImportJobInput::new(
-            record.clone(),
-            png_bytes,
-            ImportDependencyDigest::empty(),
-            ImportSettingsHash::default(),
-            ImportProfile::default(),
-        ))
-        .unwrap();
     let texture = AssetRef::stable_id(WINDOW_TEXTURE_STABLE_ID)
         .unwrap()
         .resolve_with_database::<ImageAsset>(asset_server, &database)
         .unwrap();
-    let source_hash = imported.value().source().source_hash();
-    let artifact_hash = imported.artifact().key().digest();
-    let mut events = AssetEvents::default();
-    images
-        .commit_loaded(
+    let imported = ImageImporter::default()
+        .import_image(
+            ImageBytesImportRequest::new(
+                record.clone(),
+                png_bytes.into_boxed_slice(),
+                ImportDependencyDigest::empty(),
+                ImportSettingsHash::default(),
+                ImportProfile::default(),
+            ),
             texture,
-            imported.into_value(),
+            states.version(texture.id()).unwrap_or(AssetVersion::ZERO),
+            asset_server,
+            images,
             states,
-            &mut events,
-            Some(source_hash),
-            Some(artifact_hash),
         )
+        .unwrap();
+    let mut events = AssetEvents::default();
+    imported
+        .commit(asset_server, images, states, &mut events)
         .unwrap();
     texture
 }

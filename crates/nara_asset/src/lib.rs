@@ -5,6 +5,7 @@ mod database;
 mod identity;
 mod import;
 mod reload;
+mod revision;
 mod server;
 mod state;
 mod storage;
@@ -42,9 +43,9 @@ pub use reload::{
 pub use server::{AssetError, AssetServer};
 pub use state::{
     AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEvents, AssetState, AssetStateError,
-    AssetStates, AssetVersion, LoadState,
+    AssetStateRevision, AssetStates, AssetVersion, LoadState,
 };
-pub use storage::{Asset, Assets, Handle};
+pub use storage::{Asset, AssetSlotRevision, Assets, Handle};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AssetRefExportPolicy {

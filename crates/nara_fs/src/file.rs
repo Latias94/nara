@@ -110,6 +110,83 @@ impl FileCapability {
         })
     }
 
+    /// Reads at most `limit` bytes from this already-authorized file.
+    ///
+    /// The opened handle length selects one exact allocation. Early EOF detects shrinkage and a
+    /// stack sentinel detects growth. If the observed length changes while reading, the previous
+    /// allocation is dropped before a bounded geometric retry so reallocations never overlap in
+    /// memory. Same-length concurrent content replacement is outside this byte-limit contract.
+    pub fn read_to_end_bounded(&self, limit: u64) -> Result<Vec<u8>, FsError> {
+        const MAX_SNAPSHOT_ATTEMPTS: usize = 8;
+
+        let allocation_limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        let mut target = self.bounded_handle_len(limit)?;
+        for _ in 0..MAX_SNAPSHOT_ATTEMPTS {
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(target)
+                .map_err(|_| bounded_read_allocation_error())?;
+            bytes.resize(target, 0);
+
+            let mut reader = self.reader()?;
+            let mut filled = 0;
+            while filled < target {
+                let read = reader
+                    .read(&mut bytes[filled..])
+                    .map_err(|source| FsError::io(FsOperation::Read, source))?;
+                if read == 0 {
+                    break;
+                }
+                filled = filled
+                    .checked_add(read)
+                    .ok_or_else(bounded_read_allocation_error)?;
+            }
+
+            if filled < target {
+                drop(bytes);
+                target = filled;
+                continue;
+            }
+
+            let mut sentinel = [0_u8; 1];
+            let grew = reader
+                .read(&mut sentinel)
+                .map_err(|source| FsError::io(FsOperation::Read, source))?
+                != 0;
+            if !grew {
+                return Ok(bytes);
+            }
+            if target == allocation_limit {
+                return Err(FsError::ByteLimitExceeded { limit });
+            }
+
+            drop(bytes);
+            let observed = self.bounded_handle_len(limit)?;
+            let geometric = target.max(1).saturating_mul(2).min(allocation_limit);
+            target = observed.max(geometric).min(allocation_limit);
+        }
+
+        Err(FsError::io(
+            FsOperation::Read,
+            io::Error::new(
+                io::ErrorKind::Interrupted,
+                "opened file length changed repeatedly during bounded read",
+            ),
+        ))
+    }
+
+    fn bounded_handle_len(&self, limit: u64) -> Result<usize, FsError> {
+        let len = self
+            .file
+            .metadata()
+            .map_err(|source| FsError::io(FsOperation::Read, source))?
+            .len();
+        if len > limit {
+            return Err(FsError::ByteLimitExceeded { limit });
+        }
+        usize::try_from(len).map_err(|_| bounded_read_allocation_error())
+    }
+
     pub fn digest(&self, limit: u64) -> Result<ContentDigest, FsError> {
         let mut reader = self.reader()?;
         let mut hasher = blake3::Hasher::new();
@@ -163,6 +240,16 @@ impl FileCapability {
         platform::try_lock(&self.file, mode)?;
         Ok(FileLock::new(&self.file, mode))
     }
+}
+
+fn bounded_read_allocation_error() -> FsError {
+    FsError::io(
+        FsOperation::Read,
+        io::Error::new(
+            io::ErrorKind::OutOfMemory,
+            "bounded file read allocation failed",
+        ),
+    )
 }
 
 impl Debug for FileCapability {

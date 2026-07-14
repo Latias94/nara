@@ -2,10 +2,12 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
+    sync::Arc,
 };
 
 use nara_ecs::Resource;
 
+use crate::revision::{RevisionCounter, RevisionIdentity};
 use crate::{AssetId, ImportArtifactDigest, SourceHash, StableAssetId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -29,6 +31,28 @@ impl AssetVersion {
 impl Display for AssetVersion {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, formatter)
+    }
+}
+
+/// Opaque identity of one asset-state store and the latest write to one entry.
+///
+/// Unlike `AssetVersion`, this changes for same-version transitions such as Loading to Failed. An
+/// absent entry still carries the store identity, so a candidate captured from one runtime cannot
+/// be published into a newly constructed state store whose entry is also absent.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AssetStateRevision(RevisionIdentity);
+
+impl AssetStateRevision {
+    fn new(store: &Arc<()>, entry: Option<&RevisionCounter>) -> Self {
+        Self(RevisionIdentity::capture(store, entry))
+    }
+}
+
+impl fmt::Debug for AssetStateRevision {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AssetStateRevision")
+            .finish_non_exhaustive()
     }
 }
 
@@ -101,9 +125,21 @@ impl Default for AssetState {
     }
 }
 
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Resource)]
 pub struct AssetStates {
+    store_revision: Arc<()>,
     states: BTreeMap<AssetId, AssetState>,
+    state_revisions: BTreeMap<AssetId, RevisionCounter>,
+}
+
+impl Default for AssetStates {
+    fn default() -> Self {
+        Self {
+            store_revision: Arc::new(()),
+            states: BTreeMap::new(),
+            state_revisions: BTreeMap::new(),
+        }
+    }
 }
 
 impl AssetStates {
@@ -115,6 +151,12 @@ impl AssetStates {
     #[must_use]
     pub fn state(&self, id: AssetId) -> Option<&AssetState> {
         self.states.get(&id)
+    }
+
+    /// Returns this store's identity plus the latest runtime-state write identity for this asset.
+    #[must_use]
+    pub fn state_revision(&self, id: AssetId) -> AssetStateRevision {
+        AssetStateRevision::new(&self.store_revision, self.state_revisions.get(&id))
     }
 
     #[must_use]
@@ -156,21 +198,20 @@ impl AssetStates {
         source_hash: Option<SourceHash>,
         import_hash: Option<ImportArtifactDigest>,
     ) {
-        self.states.insert(
+        self.insert_state(
             id,
             AssetState::new(version, LoadState::Loaded, source_hash, import_hash),
         );
     }
 
     pub(crate) fn set_removed_at(&mut self, id: AssetId, version: AssetVersion) {
-        self.states
-            .insert(id, AssetState::new(version, LoadState::Removed, None, None));
+        self.insert_state(id, AssetState::new(version, LoadState::Removed, None, None));
     }
 
     pub fn set_loading(&mut self, id: AssetId) -> AssetVersion {
         let current = self.state(id).cloned().unwrap_or_default();
         let version = current.version();
-        self.states.insert(
+        self.insert_state(
             id,
             AssetState::new(
                 version,
@@ -191,7 +232,7 @@ impl AssetStates {
             .state(id)
             .cloned()
             .ok_or(AssetStateError::UnknownAsset { id })?;
-        self.states.insert(
+        self.insert_state(
             id,
             AssetState::new(
                 current.version(),
@@ -201,6 +242,14 @@ impl AssetStates {
             ),
         );
         Ok(current.version())
+    }
+
+    fn insert_state(&mut self, id: AssetId, state: AssetState) {
+        self.states.insert(id, state);
+        self.state_revisions
+            .entry(id)
+            .and_modify(RevisionCounter::advance)
+            .or_default();
     }
 
     #[must_use]
@@ -447,6 +496,38 @@ mod tests {
             AssetSourceKind::Image,
         );
         server.reserve_record::<String>(&record).unwrap()
+    }
+
+    #[test]
+    fn state_revision_changes_across_same_version_loading_aba() {
+        let handle = handle();
+        let mut states = AssetStates::default();
+        let version = states.set_loading(handle.id());
+        let loading = states.state_revision(handle.id());
+
+        states
+            .set_failed(handle.id(), String::from("test-failure"))
+            .unwrap();
+        let failed = states.state_revision(handle.id());
+        assert_ne!(failed, loading);
+
+        assert_eq!(states.set_loading(handle.id()), version);
+        assert_eq!(states.version(handle.id()), Some(version));
+        assert_eq!(
+            states.state(handle.id()).unwrap().load_state(),
+            &LoadState::Loading
+        );
+        assert_ne!(states.state_revision(handle.id()), failed);
+        assert_ne!(states.state_revision(handle.id()), loading);
+    }
+
+    #[test]
+    fn absent_state_revisions_bind_candidates_to_one_store() {
+        let id = handle().id();
+        let first = AssetStates::default();
+        let second = AssetStates::default();
+
+        assert_ne!(first.state_revision(id), second.state_revision(id));
     }
 
     #[test]

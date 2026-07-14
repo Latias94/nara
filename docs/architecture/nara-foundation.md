@@ -109,7 +109,7 @@ flowchart TD
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker pools with pending-only coalescing, panic isolation, first-terminal cancellation, finite drain/cancel/join, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
-| `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; unsupported platform primitives remain explicit |
+| `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, checked `limit + 1` bounded reads, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; unsupported platform primitives remain explicit |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
 | `nara_ecs_derive` | `Component` derive behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, declaration diagnostics, and renamed-package path resolution |
 | `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, and stable non-`Entity` observation vocabulary |
@@ -117,11 +117,11 @@ flowchart TD
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, runtime-independent `ComponentSchemaCatalog`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, atomic Building-to-Frozen publication, asset-aware scene preflight, schema/capability export, and migrations |
 | `nara_reflect_derive` | `PersistentComponent` derive and generated native `PersistentComponentProvider` | Proc-macro dependency isolation, schema/codec declaration diagnostics, and direct/renamed dependency resolution |
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
-| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, hot reload scheduling, dependency graph, reload generations |
+| `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, `.meta` records, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, O(1) state and persistent slot revisions, hot reload scheduling, dependency graph, reload generations |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, semantic watch event queue, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | `Name`, `Parent`, `Children`, `SceneDocument`, `PrefabDocument`, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, explicit pass planning, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary |
-| `nara_image` | `ImageAsset`, `ImageImporter`, `ImagePlugin`, prepared image resources, image reload stats | Typed PNG import, async image reload jobs, backend-neutral image content preparation, and image asset load failure/removal handling; no sampler/material policy |
+| `nara_image` | `ImageAsset`, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, async image reload jobs, candidate-owned publication, last-good reload preservation, and backend-neutral image content preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, `Material2dKey` | Backend-neutral 2D material intent shared by sprites, tilemaps, runtime UI images, and future material assets |
 | `nara_sprite` | `Sprite`, `SpriteMaterial`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` material image binding | Sprite authoring component data with material-first image/sampler/alpha/tint; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileSetMaterial`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data with material-first tilesets that lower into textured quads now and chunked cached render data later |
@@ -172,6 +172,7 @@ sequenceDiagram
     participant Tasks as nara_tasks::TaskPools
     participant ECS as nara_ecs::World
     participant Asset as nara_asset::AssetServer
+    participant FS as nara_fs::FileCapability
     participant Image as nara_image::ImagePlugin
     participant Render as nara_render
     participant SpriteRender as nara_sprite_render
@@ -185,8 +186,11 @@ sequenceDiagram
         App->>Asset: TaskUpdate / AssetTaskUpdateSet::Poll
         Tasks-->>Image: expose terminal IDs in the poller's entry snapshot
         Asset->>Asset: ResolveSourceChanges into reload requests
-        Image->>Tasks: SpawnJobs attempts bounded image work
-        Image->>Asset: ApplyResults commits eligible outcomes
+        Image->>FS: capture target and reserve conservative file admission
+        FS-->>Image: bounded read into Vec, then fixed Box bytes
+        Image->>Image: preflight PNG and resize to modeled decode/publication peak
+        Image->>Tasks: SpawnJobs transfers the admitted reservation owner
+        Image->>Asset: ApplyResults calls candidate.commit before releasing overlap
         Note over Tasks,Image: readiness after the poller snapshot waits for next frame
         App->>ECS: PreUpdate / Update / PostUpdate
         Image->>Render: prepare backend-neutral image resource snapshots
@@ -336,7 +340,8 @@ second real adapter or stronger isolation pressure.
 - Asset reload scheduling coalesces same-frame source changes by last semantic event, walks dependent source edges transitively, and combines generation checks with expected-version guards before domain apply systems mutate runtime asset state.
 - Asset source-change scheduling failures are structured diagnostics rather than discarded errors. Asset reload policy preserves last-good typed values on failed reload, records failed first loads without inventing values, and keeps GPU objects in backend caches rather than imported artifacts.
 - Scene/prefab authoring identity is provenance-aware. Scene-local entities patch the scene, prefab source entities patch the prefab source, prefab anchors patch the scene instance, and prefab-expanded projections must write back only through explicit override or convert-to-local flows.
-- `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, admits bounded reload tasks, polls typed terminals, orders each asset stream across frames, sorts ready streams by task key, preserves last-good values on failure, and never leaves rejection/panic/cancellation silently loading. Sampler, alpha, and tint policy live in `nara_material`, not in image assets.
+- `nara_image::ImagePlugin` is the first async asset domain plugin. It registers `ImageImporter`, admits bounded reload tasks, polls typed terminals, orders each asset stream across frames, sorts ready streams by task key, preserves last-good values on failure, and never leaves rejection/panic/cancellation silently loading. The current importer accepts a fixed-length `Box<[u8]>` request or opens through `ImageSourceDirectory` into a host-issued `FileCapability`. Before reading or scanning it privately captures the target stable binding, expected version, O(1) `AssetStateRevision`, and persistent `AssetSlotRevision`; it validates the prior image against the shared host overlap ceiling but charges only that captured slot's actual RGBA length. File admission reserves one encoded ceiling because the bounded `Vec` remains the decoder input. It performs a no-allocation signature/IHDR/chunk preflight, rejects Adam7 and unbounded `eXIf` metadata before decoder construction, rejects APNG during bounded decoder metadata inspection, and atomically resizes to the versioned modeled encoded/decoder-work/RGBA/publication peak before pixel decode. `ImageImportedAsset::commit` revalidates the admission and internally chooses initial load or reload before releasing the charge; initial failure publishes no value, while reload failure preserves the handle, value, source hash, and asset version. Importers share accounting only through an explicitly injected `ImageImportBudgetHost`, and importer version 2 invalidates version-1 artifacts. This is a static non-interlaced PNG-specific logical allocation contract, not an arbitrary-codec, allocator-capacity, fragmentation, heap, or OS/RSS guarantee. Sampler, alpha, and tint policy live in `nara_material`, not in image assets.
+- Direct `ImageAsset::new`, serde construction, and raw image-storage mutation are advanced in-memory paths, not bounded file-ingest APIs; their callers own prior allocation policy. State and slot revisions still invalidate any in-flight official candidate across those mutations.
 - `nara_sprite_render` sorts and batches by `SpriteMaterialKey`, which contains image render resource key plus sampler, alpha mode, and tint. `nara_render_wgpu` caches GPU image textures by prepared image snapshot and caches sampler bind groups by material key.
 - `nara_asset_watch` is an optional desktop watcher adapter behind the root `asset-watch` feature. It owns `notify`, validates its root against `AssetSourceRoot`, preserves in-root rename sides, and translates raw filesystem events into semantic `AssetSourceChange` values without leaking watcher types into `nara_asset`.
 - `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit events.
@@ -434,8 +439,10 @@ second real adapter or stronger isolation pressure.
 - Runtime diagnostics use a shared observational bus for asset/watch/task/render/window/service
   problems while retaining domain-specific detail and explicit tracing bridges. See ADR
   [0048](adr/0048-runtime-diagnostics-and-observability-bus.md).
-- File-backed project data is untrusted input. Scene, prefab, patch, component value, image,
-  metadata, and artifact loaders need parse/decode budgets before mutating runtime or project state.
+- File-backed project data is untrusted input. Scene, prefab, patch, component-schema catalog,
+  project-manifest, and the audited static PNG path enforce their implemented parse/decode budgets
+  before publication. Asset metadata, imported artifacts, additional codecs, and newly admitted
+  file-backed workflows require equivalent owned budgets before mutating runtime or project state.
   See ADR [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md).
 - Asset roots require handle-bound authority beyond logical path validation. Symlinks, mounts,
   Windows reparse points, hard links, live-object identity, replacement, and durability proof tiers
@@ -487,8 +494,8 @@ second real adapter or stronger isolation pressure.
    override write-back, and edit-while-playing merge semantics are designed.
 10. Design reusable material assets and custom shader specialization after inline
    `Material2dDescriptor` has enough runtime/UI pressure.
-11. Add untrusted-input budgets and asset-root containment tests before loading downloaded packages
-    or widening file-backed editor workflows.
+11. Extend the implemented untrusted-input and asset-root containment evidence to every additional
+    format before loading downloaded packages or widening file-backed editor workflows.
 12. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
     formats again.
 13. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor

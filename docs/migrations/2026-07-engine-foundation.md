@@ -38,6 +38,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U1-1 | RGF-U1 | `RGF-U1` | `rust-api/persistent-shape` | Component/field identity, registry lifecycle, durable field patches, and canonical scene/prefab/patch/catalog files | Assign permanent field IDs, build/freeze the registry before use, rewrite experimental files to the canonical envelopes, and load file bytes through candidates. |
 | RGF-U3-1 | RGF-U3 | `RGF-U3` | `cargo-feature/rust-api/persistent-shape` | Root product capabilities, plugin bundles/preludes, and `nara.toml` product selection | Select the new coarse features, import advanced/tooling/backend names explicitly, replace plugin-plan data with runtime preset plus requested capabilities, and open manifests through a host-issued file capability. |
 | RGF-U11-1 | RGF-U11 | `RGF-U11` | `rust-api/behavior` | Native window handle providers and surface/window shutdown | Replace raw-handle providers with an owning source, handle fallible registration/retirement, and let the platform runner complete renderer-acknowledged teardown. |
+| RGF-U10-1 | RGF-U10 | `RGF-U10` | `rust-api/behavior/safety/cache` | Image importer input, bounded file reads, PNG decode/publication, reload failure semantics, and image artifact identity | Supply owned bytes or an opened capability, use the audited bounded PNG importer, and publish only through the reservation-bearing candidate; rebuild image import caches. |
 
 ## Entry Contract
 
@@ -1050,6 +1051,143 @@ sticky external destruction, surface-loss provider retention, runner-scoped clea
 device-loss/partial-init invalidation, resize reconfiguration, backend Drop fallback, and native
 main-thread execution. `examples/window_surface_retirement_smoke.rs` supplies the presented-window
 and resource-removal platform paths.
+
+## RGF-U10-1: Bounded PNG Ingest and Publication
+
+**Removed contract**:
+
+- Image reload jobs that rebuilt ambient filesystem paths from `AssetSourceRoot` and called
+  `std::fs::read` without an encoded-byte ceiling.
+- Generic `image::load_from_memory` plus `to_rgba8`, which decoded and expanded before Nara could
+  reserve the complete versioned modeled peak.
+- `ImageImporter::import_job(&ImportJobInput)` and imported candidates that exposed raw
+  `into_value`, allowing publication-overlap accounting to end before asset commit.
+- Implicit deep cloning of `ImageAsset` pixel storage and cloning/equality of
+  `ImageImportedAsset`. Imported candidates now carry a unique RAII reservation and are
+  intentionally move-only.
+- Unit-style `ImagePlugin` construction and generic/free-text image import errors, which could not
+  carry validated limits or privacy-safe failure classification.
+- Public imported-candidate construction that allowed callers to forge publication state.
+- Importer version 1 image artifacts, whose identity described the removed decode path.
+
+**Canonical replacement or deletion rationale**: `FileCapability::read_to_end_bounded` performs a
+checked `limit + 1` sentinel read from an already-authorized handle. `ImageImporter` accepts either
+an owned `ImageBytesImportRequest` or an `ImageFileImportRequest` containing that handle. Owned-byte
+requests constrain importer/decode work from admission onward; they do not retroactively account
+for allocations made before constructing the fixed-length `Box<[u8]>` request. File admission
+reserves one encoded ceiling because the bounded `Vec` remains the decoder input. Both paths
+privately capture the stable target, expected version, O(1) `AssetStateRevision`, and persistent
+`AssetSlotRevision`, validate any prior image against the host overlap ceiling, and charge its
+captured RGBA length before PNG scanning or task dispatch.
+
+The lockfile-pinned `png` 0.18.1 path supports only static, non-interlaced PNG. It preflights
+signature, IHDR, chunks, dimensions, pixels, RGBA bytes, and decoder-work bytes; rejects Adam7 and
+unbounded `eXIf` metadata before decoder construction; rejects APNG during bounded metadata
+inspection; and atomically resizes to the versioned modeled encoded/decoder-work/RGBA/publication
+peak before pixel decode. `ImageImportBudgetHost` freezes aggregate and publication-overlap
+ceilings. Importers may use smaller RGBA limits, but each candidate validates its captured prior
+slot against the shared host ceiling and charges only that slot's actual RGBA length. Importers
+requiring a larger ceiling are rejected at configuration time. Sharing occurs only by explicitly
+injecting the same host; there is no global or static image-budget owner.
+
+`ImageImportedAsset` retains its publication charge and exposes one `commit` operation; its private
+constructor, target admission, and raw value extraction prevent callers from pairing a decoded
+value with another handle or reload token. Commit revalidates both revisions in O(1),
+chooses initial load or reload internally, and releases the modeled charge only after returning.
+Initial rejection publishes no value. Reload rejection preserves the existing handle, image,
+source hash, and `AssetVersion` while recording only an engine-owned diagnostic code and classified
+fields. This is a PNG-specific logical allocation contract, not an arbitrary-codec,
+allocator-capacity, fragmentation, heap, or OS/RSS hard limit. The importer version is now 2, so
+old image artifacts are not reusable. Direct `ImageAsset::new`, serde construction, and raw image
+storage mutation remain advanced in-memory paths whose callers own prior allocation policy; their
+state/slot revisions still invalidate any in-flight official candidate.
+
+**Before**:
+
+```rust
+let imported = ImageImporter::default().import_job(&ImportJobInput::new(
+    record,
+    png_bytes,
+    dependency_digest,
+    settings_hash,
+    profile,
+))?;
+images.commit_loaded(
+    handle,
+    imported.into_value(),
+    &mut states,
+    &mut events,
+    Some(source_hash),
+    Some(artifact_hash),
+)?;
+```
+
+**After**:
+
+```rust
+let importer = ImageImporter::with_limits(image_limits)?;
+let handle = asset_server.reserve_record::<ImageAsset>(&record)?;
+let expected_version = states.version(handle.id()).unwrap_or(AssetVersion::ZERO);
+let imported = importer.import_image(
+    ImageBytesImportRequest::new(
+        record,
+        png_bytes.into_boxed_slice(),
+        dependency_digest,
+        settings_hash,
+        profile,
+    ),
+    handle,
+    expected_version,
+    &asset_server,
+    &images,
+    &states,
+)?;
+imported.commit(&asset_server, &mut images, &mut states, &mut events)?;
+```
+
+File-backed hosts instead open the source through `DirectoryCapability`, construct
+`ImageFileImportRequest` with the resulting `FileCapability`, and call `admit_file` with the same
+handle, expected version, server, values, and states before task dispatch. The admitted job owns
+both the file and reservation. Hosts do not reconstruct an ambient `Path` inside `nara_image`.
+
+**Affected examples and fixtures**: `examples/asset_import_texture.rs`,
+`examples/runtime_ui_panel.rs`, and `examples/windowed_sprites.rs` use the owned request and
+candidate commit APIs. The independent reference game imports
+`reference-game/assets/textures/player.png` through an opened capability. Root hostile fixtures
+cover exact and limit+1 encoded/dimension cases, Adam7, `eXIf`, invalid CRC, truncation, and a
+truncated oversized ancillary declaration. Crate tests additionally construct a complete CRC-valid
+8 MiB+1 `eXIf` chunk and cover APNG, pixel/RGBA/work/aggregate limits and every task/publication terminal path.
+
+**User action**: replace ambient image reads and generic `ImportJobInput` calls with an already
+bounded owned request or a host-opened file request. Keep the candidate alive until its commit
+method succeeds or fails, and explicitly inject one `ImageImportBudgetHost` wherever multiple
+importers must observe one host-scoped image budget and publication ceiling. Construct
+`ImagePlugin::default()` or
+`ImagePlugin::with_limits(...)` and handle the typed image import/reload errors instead of matching
+decoder or host error strings. Keep runtime image values behind `Handle<ImageAsset>` or borrow
+them from `Assets<ImageAsset>` instead of cloning their pixel buffers. Pass `ImageImportedAsset`
+by ownership into `commit`; dropping it cancels publication and releases its reservation.
+
+**Source action**: `manual-rewrite`.
+
+**Cache action**: delete or rebuild `.nara/import-cache` image artifacts. Importer version 1 and 2
+artifact identities intentionally differ.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the complete RGF-U10 change and rebuild image artifacts. Do not restore an
+ambient unbounded loader, a generic decode shortcut, or raw candidate extraction as a compatibility
+shim.
+
+**Verification anchors**: `crates/nara_fs/tests/filesystem_contract.rs`,
+`crates/nara_asset/src/storage.rs#tests`, `crates/nara_image/src/tests.rs`,
+`crates/nara_image/tests/image_import_limits.rs`, `tests/image_import_limits.rs`, and
+`reference-game/tests/image_asset_safety.rs` prove bounded reads, O(1) state and persistent slot
+revisions, pre-decode rejection, shared-host publication ceilings, exact release, candidate
+publication, importer-version cache identity, and last-good reload. The three affected examples
+compile through the public path.
+Source gates reject `std::fs::read`, ambient path loading, `load_from_memory`, and `to_rgba8` in
+`nara_image`.
 
 ## Persistent Format Matrix
 

@@ -22,6 +22,30 @@ and `TimeLimit`. Each producer domain owns its budget structure, admission polic
 outcome. `nara_diagnostic` owns bounded privacy-safe diagnostic aggregation and independent numeric
 pressure snapshots; it never enforces producer policy.
 
+### Implemented RGF-U10 Image Pattern
+
+`nara_image` demonstrates the domain-owned form of this decision. `ImageImportLimits` composes
+shared scalar units with PNG-specific encoded, dimension, pixel, RGBA, decoder-work, and aggregate
+ceilings. `ImageImportBudgetHost` owns one atomically shared RAII budget for every importer it is
+explicitly given; constructing an importer with limits creates an independent owner, while
+`with_budget_host` is the explicit host-scoped sharing path. The host freezes one publication
+ceiling: importers requiring a larger ceiling are rejected, while accepted candidates charge the
+actual prior-slot RGBA length protected by their captured revision. No global or static owner exists.
+Fixed-length owned inputs charge their encoded length, while file admission charges one encoded
+ceiling because the bounded `Vec` remains the decoder input. Both add captured publication overlap
+and later resize to the versioned modeled decode peak.
+`ImageImportBudgetSnapshot` reports aggregate plus encoded, decoder-work, RGBA, and
+publication-overlap active/high-water values without deciding admission policy for another domain.
+Those values account for requested logical payload categories; they are not allocator-capacity,
+fragmentation, heap, or RSS measurements.
+
+Image rejection remains a typed local outcome. The asset reload bridge lowers it to an engine-owned
+static code and summary plus classified project-relative, identifier, numeric, boolean, or redacted
+fields; decoder, OS, panic, and host-path strings have no diagnostic storage path. This direct
+`AssetReloadDiagnostics` bridge is implemented, but publication into ADR 0048
+`RuntimeDiagnostics`/`RuntimePressureSnapshots` is not. The ADR therefore remains partial and does
+not introduce a global manager or cross-domain fairness policy.
+
 ```mermaid
 flowchart LR
     Units[nara_core scalar units] --> Task[Task policy]
@@ -150,6 +174,9 @@ runtime strings and secrets into dedupe/logging.
 - `nara_diagnostic` directly depends on `nara_core` scalar limits but does not own a global budget
   policy.
 - Producer migrations must replace dynamic messages with stable summaries and classified fields.
+- Resource-heavy domains may expose their own shared budget owner and typed snapshot, as
+  `ImageImportBudgetHost` does; this does not move enforcement into `nara_core` or
+  `nara_diagnostic`.
 - Tooling can inspect pressure without parsing diagnostics or requiring tracing.
 - U31 remains required before ADR 0048's named domain coverage is complete.
 - Privacy failures are API-design failures, not sink configuration mistakes; tests cover Debug,
@@ -166,6 +193,7 @@ runtime strings and secrets into dedupe/logging.
 | Atomic pressure | Rejected replacement preserves the prior source snapshot | Unit tests |
 | Headless operation | Resources and cleanup work without UI/tracing/backend | App integration test |
 | Domain coverage | Named producers publish classified bridges and metrics | U31 integration tests |
+| Image admission | Modeled image charges never exceed aggregate/category reservations, and accounting returns to zero on every terminal path | RGF-U10 owner/facade tests |
 
 ## Risks and Mitigations
 

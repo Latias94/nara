@@ -146,8 +146,18 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 - `ImagePlugin` composes `ImagePreparePlugin` rather than registering a parallel prepare path. This
   keeps prepare stats and render-resource invalidation single-pass even when sprite rendering also
   depends on image preparation.
-- `ImageImporter` receives owned `ImportJobInput` and returns `ImportedAsset<ImageAsset>`. It does
-  not read global ECS state and does not create GPU resources.
+- `ImageBytesImportRequest` owns a fixed-length `Box<[u8]>`; file requests own an admitted
+  host-issued `FileCapability`. `ImageImporter::{import_image, admit_file}` privately capture the
+  target stable binding, expected version, O(1) `AssetStateRevision`, and persistent
+  `AssetSlotRevision`.
+  They validate the captured last-good value against the budget host's publication-overlap ceiling
+  and charge its actual RGBA length; an independently constructed importer sets the ceiling from
+  `max_rgba_bytes`. The reservation-bearing `ImageImportedAsset` exposes one `commit` operation, which
+  revalidates that admission, chooses initial load or reload internally, and releases its modeled
+  charge only after commit returns. Accounting is shared only through an explicitly injected
+  `ImageImportBudgetHost`; no global or static owner exists. Built-in importer version 2
+  intentionally invalidates version-1 image artifacts. The importer does not read ambient paths or
+  create GPU resources.
 - Image reload preserves stable handles while changing `AssetVersion`, `LoadState`, asset events,
   prepared-resource invalidation, and source dependency edges behind those handles.
 - Removed source assets clear `Assets<ImageAsset>` state and prepared image resources. Failed first

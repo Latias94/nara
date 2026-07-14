@@ -592,6 +592,29 @@ fn streaming_digest_is_bounded_and_mismatch_is_structured() {
 }
 
 #[test]
+fn bounded_read_accepts_exact_length_and_rejects_one_sentinel_byte() {
+    let root = TestRoot::new();
+    let payload = (0..=(64 * 1024))
+        .map(|index| (index % 251) as u8)
+        .collect::<Vec<_>>();
+    fs::write(root.path().join("asset.bin"), &payload).unwrap();
+    fs::write(root.path().join("empty.bin"), []).unwrap();
+    let capability = portable_read_only(&root);
+    let file = capability.open_file(&relative("asset.bin")).unwrap();
+    let empty = capability.open_file(&relative("empty.bin")).unwrap();
+
+    assert_eq!(
+        file.read_to_end_bounded(payload.len() as u64).unwrap(),
+        payload
+    );
+    assert!(matches!(
+        file.read_to_end_bounded((payload.len() - 1) as u64),
+        Err(FsError::ByteLimitExceeded { limit }) if limit == (payload.len() - 1) as u64
+    ));
+    assert_eq!(empty.read_to_end_bounded(0).unwrap(), Vec::<u8>::new());
+}
+
+#[test]
 fn readers_use_independent_positional_offsets() {
     let root = TestRoot::new();
     fs::write(root.path().join("asset.bin"), b"abcdef").unwrap();
