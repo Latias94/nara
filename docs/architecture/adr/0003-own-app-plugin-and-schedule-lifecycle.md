@@ -2,7 +2,9 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness
+**Last Revised**: 2026-07-14
+**Refined By**: ADR 0010: Plugin Lifecycle, Dependencies, and Failure Containment; ADR 0046:
+Plugin Metadata and Default Plugin Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness
 
 ## Context
 
@@ -54,9 +56,9 @@ pub trait Plugin {
 }
 ```
 
-Plugin setup is fallible. Duplicate unique plugins, installation after finish, missing
-prerequisites, and setup failures return structured `PluginError` values instead of panic-based
-helpers.
+Plugin setup is fallible. Pure group/slot/duplicate/prerequisite closure returns structured
+`PluginPlanError` values before App mutation. App-level preflight/build/finish failures return
+structured `PluginError` values instead of panic-based helpers, as refined by ADRs 0010 and 0046.
 
 ## Alternatives Considered
 

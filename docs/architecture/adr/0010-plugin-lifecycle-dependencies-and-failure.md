@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-10
+**Last Revised**: 2026-07-14
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
 
@@ -15,9 +15,9 @@ failure as retryable can run a partially configured application. The previous `p
 boolean also allowed a failed `finish` pass to discard cleanup hooks and report success on the next
 call.
 
-The lifecycle must preserve the first committed failure, prevent schedule execution after that
-failure, and retain enough ownership to clean every committed plugin exactly once. Expected setup
-conflicts must remain ordinary structured errors rather than panics.
+The lifecycle must preserve the first poison-causing attempt/lifecycle failure, prevent schedule
+execution after that failure, and retain enough ownership to clean every committed plugin exactly
+once. Expected setup conflicts must remain ordinary structured errors rather than panics.
 
 ## Decision
 
@@ -38,36 +38,75 @@ explicit cleanup remain available. Cleanup of a poisoned app returns to `Poisone
 
 ### Hook Classification
 
-- `metadata` and `preflight(&App)` execute before a plugin is committed. `preflight` only receives a
-  shared app reference. Its ordinary `Err`, or an isolated panic in either pre-mutation hook, is
-  retryable and does not create a failure report.
+- `Plugin::declaration()` is a static, type-owned declaration available without constructing an
+  instance. Replayable definitions capture it before factory invocation; direct callers may have
+  already constructed their one-shot instance. Data-only plugin-group expansion, slot/dependency
+  resolution, and repeatable-factory preparation where applicable execute before App mutation or
+  native authority acquisition. Their typed errors are plan or preparation failures, not plugin
+  lifecycle failures, and do not poison an App.
+- `preflight(&PluginPreflightContext)` executes immediately before its plugin is committed. Its
+  narrow context exposes immutable installed-plan/structural snapshots, not `World`, arbitrary
+  resources, runner mutation, or native authority. A typed `Err` is retryable only when this pure
+  contract is obeyed and the current top-level plan commit has not already committed an entry. If an
+  earlier entry has built, the enclosing attempt is already partially committed and the App is
+  poisoned even though the rejecting plugin never became a cleanup owner. A preflight unwind always
+  poisons a caller-owned App or marks a product candidate failed/unpublishable regardless of
+  position; the candidate owner remains retained through terminal cleanup.
 - `build(&mut App)` and `finish(&mut App)` are committed on entry. Their `Err` or unwind panic
-  poisons the app, records the first failure, and triggers cleanup after the outermost active hook
-  returns.
-- nara does not currently expose a prepared-but-uncommitted token. A future preparation API may be
-  retryable only if its type owns a registered teardown action and proves that no world, schedule,
-  service, or external mutation was committed. Adding such a token requires an ADR revision and a
-  real consumer. Arbitrary mutable hooks never receive that classification.
-- Hook panics are isolated with `catch_unwind` and converted to stable `PluginError` values. This
+  poisons a caller-owned App or marks a product candidate failed/unpublishable, records the first
+  failure, and triggers cleanup after the outermost active hook returns. A product candidate remains
+  owned until cleanup reaches an observable terminal result.
+- The product path may use a private one-attempt prepared plugin transfer after all repeatable
+  factories succeed. The transfer preserves each complete admitted definition key; typed factory
+  erasure fixes the concrete plugin type but does not claim to prove that trusted code used every
+  config field. It is not a public generic `install_into(App)` API, owns no App/native authority,
+  and is not permission to run mutable hooks. Arbitrary mutable preparation callbacks remain
+  invalid.
+- Hook panics are isolated with `catch_unwind` and converted to stable `PluginError` values. Every
+  hook unwind poisons the caller-owned App or marks the retained product candidate failed. This
   containment applies only to `panic = "unwind"`; aborting builds cannot run Rust cleanup code and
   make no in-process recovery guarantee.
 
-The first committed failure is immutable. Later cleanup errors and cleanup panics are appended to
-`PluginFailureReport::cleanup_failures`; they never replace the primary error and never stop later
-cleanup hooks.
+The first poison-causing attempt/lifecycle failure is immutable. Later cleanup errors and cleanup
+panics are appended to `PluginFailureReport::cleanup_failures`; they never replace the primary error
+and never stop later cleanup hooks.
 
 ### Installation and Dependency Rules
 
-- A plugin is retained for cleanup before its `build` hook is entered. Successful nested dependency
-  builds are ordered before the dependent plugin for finish, and cleanup uses the reverse order.
-- Stable plugin and plugin-group installation stacks reject recursive dependency cycles with the
-  complete stable-ID chain instead of recursing indefinitely.
-- Unique plugin IDs and group IDs are rejected before mutation. Declared prerequisites,
-  capabilities, and conflicts are checked before custom preflight; a conflict declared by either
-  the new or an installed plugin rejects the pair independent of installation order.
-- `PluginGroup::build` receives `PluginGroupBuilder`, not `&mut App`. A group may only compose
-  plugins or other groups; it cannot create unowned world or schedule mutations. Group build is
-  committed on entry because members may already have installed when a later member fails.
+- Top-level `App::add_plugins` accepts direct plugin instances, data-only groups, edited groups, and
+  tuples through one sealed collection Interface. Collection, complete closure validation,
+  deterministic ordering, and repeatable-factory preparation finish before lifecycle commit.
+- For a caller-owned App configured through several top-level calls, the actual committed order is
+  an immutable prefix. A later plan may append entries and depend on that prefix; any edit or order
+  edge that would disable, replace, reconfigure, or move a committed entry is rejected before
+  mutation.
+- New plan/group/provenance snapshots and provenance merged onto the immutable prefix remain staged
+  until the attempt's first plugin commit. An earlier typed preflight rejection discards all staged
+  inspection changes. Once commit begins, actual committed entries and attempt evidence remain
+  inspectable on failure, but an installed-group snapshot publishes only after the complete group
+  succeeds. A fully validated batch with no new plugin suffix may atomically publish matching
+  group/provenance inspection metadata without entering the plugin lifecycle.
+- A plugin is retained for cleanup before its `build` hook is entered. Finish follows resolved
+  order, and cleanup uses the strict reverse of actual committed order.
+- Stable plugin/group IDs, inactive nested-group expansion, and the ordering graph reject recursive
+  dependency cycles with complete bounded stable-ID chains before App mutation.
+- A resolved plan contains one record per plugin/group ID. Duplicate plugin occurrences converge
+  only under ADR 0046's occurrence/definition-key equality; duplicate groups converge only under
+  the same intrinsic group-definition fingerprint. Divergent duplicates reject. Declared
+  prerequisites, capabilities, and conflicts are checked before custom preflight; a conflict
+  declared by either the new or an installed plugin rejects the pair independent of installation
+  order.
+- `PluginGroup::build` produces a data-only `PluginGroupBuilder`. The builder records stable slots,
+  repeatable definitions, nested groups, and order intent; it has no `App`, `finish(App)`, native
+  authority, or public installation callback. Group membership and order derive from the resolved
+  registration collection rather than a parallel static plugin-ID list.
+- `Plugin::build` and `Plugin::finish` may never add a plugin or group. An attempted nested install
+  is a sticky committed contract violation that poisons the App even when the plugin ignores the
+  returned error. Dependencies belong in declarations and selected groups; nested groups expand
+  only during pure collection.
+- Every public plugin/group installation entry checks for an active hook and records this sticky
+  violation before lifecycle-state, duplicate/already-installed, declaration, group expansion, or
+  skip logic. No apparent no-op or earlier error may bypass the poison rule.
 - Built-in component plugins inspect an existing `ComponentRegistry` during preflight with the same
   stable-ID and Rust-type uniqueness checks used at commit. Registration remains fallible and maps
   `ComponentRegistryError` to a plugin/component-contextual `PluginError`; no recoverable
@@ -83,8 +122,10 @@ cleanup hooks.
   runner.
 - Cleanup is reverse-order, best-effort, panic-isolated, and once-only. A hook is marked attempted
   before invocation, so a cleanup panic cannot cause a second call during `Drop`.
-- Lifecycle-control reentry from committed build or finish hooks is rejected. Nested plugin/group
-  installation remains supported and is the only intentional committed-hook nesting.
+- Lifecycle-control reentry and plugin/group installation from committed build or finish hooks are
+  rejected. No intentional committed-hook nesting remains.
+- `App::set_runner` is likewise rejected as a sticky violation from plugin hooks. Top-level
+  code-first callers or concrete Host/driver Adapters own runner selection; product plugins do not.
 - `Drop` performs best-effort cleanup without unwinding, including when another panic is already
   unwinding. Callers that need cleanup evidence use `App::cleanup_plugins` or `App::run`.
 
@@ -116,6 +157,12 @@ Explicit ownership and reverse cleanup are honest; implicit snapshot rollback is
 Rejected. It permits mutations with no retained cleanup owner. Narrow builders/contexts make the
 ownership rule enforceable by the Rust API.
 
+### Permit nested installation only for direct code-first Apps
+
+Rejected. The same plugin would have different dependency and failure semantics when used directly
+versus through a package or product plan. Groups, tuples, and static declarations preserve concise
+code-first composition without retaining an open committed hook.
+
 ### Fully asynchronous plugin lifecycle
 
 Deferred. Device, window, and importer startup do not justify forcing every plugin hook to be async.
@@ -124,10 +171,14 @@ Long-running services remain behind runners, task pools, and explicit backend st
 ## Implementation Notes
 
 - Canonical types are `PluginLifecycleState`, `PluginHook`, `PluginFailure`,
-  `PluginFailureReport`, `PluginCleanupContext`, and `PluginGroupBuilder`.
-- Plugin and group metadata remain stable and inspectable after successful installation. A failed
-  group is never published as installed; already committed member metadata remains inspectable on
-  the terminal app.
+  `PluginFailureReport`, `PluginCleanupContext`, `PluginGroupBuilder`, `PluginPlanError`,
+  `PluginPrepareError`, and the private prepared-plan transfer.
+- Static declaration and group-definition failures are plan/preparation failures, not lifecycle
+  hooks. They do not use `PluginHook::Metadata` or `PluginFailureSubject::Group`; those transitional
+  variants are removed when U4 replaces the imperative group path.
+- Plugin declarations and resolved group provenance remain stable and inspectable after successful
+  installation. Group definition/plan failure publishes no installed group. If lifecycle commit
+  later fails, actual committed entries remain inspectable on the terminal App.
 - Cleanup-only failures use a report with no primary setup failure. `cleanup_complete` means every
   retained hook was attempted, not that every hook succeeded.
 - Runtime diagnostics may later bridge failure reports, but logs are not lifecycle authority.
@@ -136,11 +187,17 @@ Long-running services remain behind runners, task pools, and explicit backend st
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Preflight retry | Rejection leaves `Configuring` app unmodified | `nara_app` lifecycle tests |
+| Preflight boundary | Pure typed rejection before the attempt's first commit is retryable; later rejection or any unwind poisons | `nara_app` plan-commit lifecycle tests |
 | Committed failure | Build/finish error or panic permanently prevents schedules | `nara_app` lifecycle tests |
 | Cleanup ownership | Every committed hook runs once in reverse order | cleanup order and unwind tests |
 | Failure fidelity | Primary error survives cleanup errors/panics | failure-report tests |
 | Dependency safety | Plugin/group cycles terminate with stable chains | cycle tests |
+| Closed commit | Hook-time nested installation always poisons and never installs a hidden entry | ignored-error contract tests |
+| Group purity | Group/slot/dependency rejection leaves App fingerprints unchanged | plan fault tests |
+| Incremental direct order | Later top-level additions append or reject before mutation; committed prefix never reorders | direct App order tests |
+| Early preflight staging | Retryable rejection leaves installed entry/group/provenance snapshots byte-for-byte unchanged | snapshot fault tests |
+| Metadata-only batch | Matching empty-suffix group/provenance changes publish atomically or leave inspection unchanged | direct App snapshot tests |
+| Driver authority | Plugin hooks cannot set/replace the runner | ignored-error and static boundary tests |
 | Runner shutdown | Prior runner, runner teardown, and plugin cleanup failures remain separately observable | runner cleanup and teardown aggregation tests |
 | Built-in registration | Duplicate component registration is a contextual error, not panic | component plugin tests |
 
@@ -148,7 +205,7 @@ Long-running services remain behind runners, task pools, and explicit backend st
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---:|---:|---|
-| Plugin ignores a nested installation error | High | Medium | Nested failure poisons the app independently; outer success cannot publish it |
+| Plugin ignores a forbidden nested installation error | High | Medium | The attempt records a sticky violation before returning; outer success cannot clear it |
 | Cleanup itself fails | High | Medium | Mark attempted first, aggregate separately, continue reverse cleanup |
 | Panic abort configuration skips cleanup | High | Low | Document unwind-only containment; process supervision handles abort builds |
 | Compatibility wrappers preserve unsafe entry points | High | Medium | Pre-1.0 breaking migration removes old signatures and stale callers |

@@ -41,12 +41,12 @@ The existing 335-test baseline is useful regression evidence but does not cover 
 
 - R1. ADRs must distinguish decision status from implementation status and link implemented claims to code and verification evidence.
 - R2. Breaking replacements must remove obsolete APIs and update every in-repo caller, example, facade export, and document without compatibility shims.
-- R3. Root Cargo features must define coarse compiled product capabilities; the required product capabilities of a resolved plugin plan must be a subset of the normalized project request, which must be a subset of that compiled ceiling. Plugin service requirements/conflicts close separately, and any product or service closure failure must return structured `PluginError` before `App` mutation. The default compiles only `runtime-core` and remains backend-free, while `ServerPlugins` remains free of window, render, audio-device, editor, toolkit, and raw-input resources.
+- R3. Root Cargo features must define coarse compiled product capabilities; the required product capabilities of a resolved plugin plan must be a subset of the normalized project request, which must be a subset of that compiled ceiling. Plugin service requirements/conflicts close separately; product admission returns `CompositionError` and pure plugin-plan closure returns `PluginPlanError` before `App` mutation. The default compiles only `runtime-core` and remains backend-free, while `ServerPlugins` remains free of window, render, audio-device, editor, toolkit, and raw-input resources.
 
 **App lifecycle, time, commands, and tasks**
 
 - R4. Plugin lifecycle must distinguish pre-mutation rejection, prepared-but-uncommitted failure, committed-plugin failure, and cleanup failure. Built-ins may retry only when a registered preparation/teardown token proves no mutation committed; otherwise `App` becomes terminally poisoned, preserves the first setup error, aggregates cleanup errors separately, cleans committed plugins once in reverse order, and never executes a schedule.
-- R5. All built-in plugin and codec prerequisite failures must return contextual `PluginError` values rather than panic.
+- R5. Pure plugin prerequisite closure must return contextual `PluginPlanError`; App-level plugin/codec hook failures must return contextual `PluginError` rather than panic.
 - R6. Fixed update must expose a monotonic tick, per-tick delta and elapsed time, bounded catch-up debt, interpolation remainder below one tick, and explicit schedule/flush ordering.
 - R7. Each completed app frame must establish a Bevy ECS tracker boundary, including removal retention and direct change tracker cleanup.
 - R8. Gameplay commands must be admitted to an authoritative tick, ordered deterministically, retained across zero-tick frames, consumed exactly once, and reject invalid, duplicate, late, non-finite, or over-budget payloads.
@@ -111,7 +111,7 @@ The existing 335-test baseline is useful regression evidence but does not cover 
 - AE18. Given a desktop 2D project with one imported image, sprite, camera, and runtime UI panel, when it starts and the image reloads, then the window renders the last-good asset through the normal import/prepare/material path without direct filesystem or backend-handle shortcuts.
 - AE19. Given an editor user opens a scene, edits and saves it, enters Play, pauses and steps once, stops, closes, and reopens the project, then the saved edit state is restored, Play mutations are absent, and no false dirty/saved state appears.
 - AE20. Given a public Rust API or persistent-format replacement, when a downstream developer reads the migration note, then every removed symbol/shape has a named replacement or explicit deletion rationale and all in-repo examples demonstrate only the new contract.
-- AE21. Given a project requests a product capability absent from the compiled Cargo feature ceiling, when composition is resolved, then a structured `PluginError` is returned before any resource, plugin, group membership, schedule, or lifecycle state is mutated.
+- AE21. Given a project requests a product capability absent from the compiled Cargo feature ceiling, when composition is resolved, then a structured `CompositionError` is returned before any resource, plugin, group membership, schedule, or lifecycle state is mutated.
 - AE22. Given a current-generation, expected-version eligible, predecessor-unblocked asset terminal ready before its poller captures the entry snapshot, a worker terminal that becomes ready after that snapshot, and an eligible synchronous rejection produced during SpawnJobs, when `TaskUpdate` runs, then the first and third must apply before same-frame `PreUpdate`/`Prepare`, while the second cannot be observed or applied before the next frame. Completion during the Poll set but after that poller's snapshot follows the second case; an observed outcome that becomes stale before ApplyResults is retired once rather than buffered or retried.
 
 ### Primary Users and Success Journeys
@@ -248,15 +248,15 @@ flowchart LR
   Cargo[Compiled Cargo product ceiling] --> Ceiling{Normalized request available?}
   Manifest[Project preset plus additive capability request] --> Normalize[Normalize implied capabilities]
   Normalize --> Ceiling
-  Ceiling -->|no| Reject[Structured PluginError; App unchanged]
+  Ceiling -->|no| ProductReject[CompositionError; App unchanged]
   Ceiling -->|yes| Plan[Resolve required product capabilities]
   Normalize --> Requested{Plan requirements fit request?}
   Plan --> Requested
-  Requested -->|no| Reject
+  Requested -->|no| ProductReject
   Requested -->|yes| Closure[Close plugin service requirements, conflicts, and groups]
   Closure --> Validate{Service closure valid?}
-  Validate -->|no| Reject
-  Validate -->|yes| Install[Apply settings and install plugins]
+  Validate -->|no| PlanReject[PluginPlanError; App unchanged]
+  Validate -->|yes| Install[Prepare definitions, then commit plugins]
 ```
 
 ```mermaid
@@ -280,8 +280,8 @@ sequenceDiagram
 
 | Failure phase | Mutation evidence | Retry | Cleanup and terminal result |
 |---|---|---|---|
-| Pre-mutation validation | No mutation token was committed | Allowed after correcting input | No cleanup; return contextual `PluginError` |
-| Prepared, uncommitted built-in | Preparation token proves owned resources can be discarded | Allowed after teardown succeeds | Tear down prepared resources; teardown failure becomes terminal while preserving the setup error |
+| Pre-mutation validation | No mutation token was committed | Allowed after correcting a typed input error | No cleanup; return contextual `CompositionError`, `PluginPlanError`, or `PluginPrepareError` by phase |
+| Private typed plugin preparation | No `App`, native authority, or candidate-owned reservation exists | Allowed after correcting a typed factory error | Drop the one-attempt transfer; no cleanup owner exists, and an unwind has no same-process retry guarantee |
 | Committed build/finish | World, schedule, registry, or external state may have changed | Forbidden | Poison app; reverse-clean committed plugins once; preserve first setup error and aggregate cleanup errors |
 | Cleanup hook failure or panic | Cleanup progress is recorded per plugin | Forbidden | Continue best-effort reverse cleanup without rerunning completed hooks; expose cleanup failures separately from the primary terminal cause |
 

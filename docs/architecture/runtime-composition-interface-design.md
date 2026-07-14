@@ -90,8 +90,8 @@ a deep execution Module.
 ## Goals
 
 1. Resolve product capabilities, plugin entries, group membership, service requirements,
-   conflicts, supported replacements, disabling, and ordering without mutating an App or acquiring
-   native authority.
+   conflicts, supported slot configuration/disabling/ordering, and later admitted replacements
+   without mutating an App or acquiring native authority.
 2. Make one immutable resolved plan the source for inspection and committed installation.
 3. Preserve Rust-native custom plugins without introducing a dynamic plugin ABI.
 4. Construct product runtimes as fresh unpublished candidates and publish only complete success.
@@ -128,12 +128,25 @@ claim that Proposed ADRs already have implementation evidence.
    membership.
 8. A committed resolved-plan installation cannot add plugins or groups that were absent from the
    resolved plan.
-9. Stable versioned slot identity is distinct from the installed plugin's `PluginId`.
-10. Only named slots with concrete conformance evidence are replaceable.
+9. Stable slot identity is distinct from the installed plugin's `PluginId`.
+10. U4 supports same-plugin configuration and optional-slot disable. Cross-plugin replacement and
+    its public slot-contract version remain trigger backlog until a second concrete `PluginId` and
+    public conformance suite exist.
 11. Runtime recipes contain reconstructible immutable inputs and repeatable plugin factories, not
     plugin instances, Worlds, active tasks, native handles, or one-shot closures.
 12. The process runner/driver is owned by a concrete host Adapter, not selected as a hidden side
     effect of plugin build.
+13. `Plugin::declaration()` is the single authority for stable plugin identity and dependency
+    metadata. A stable versioned definition ID identifies one admitted construction policy;
+    instance configuration is explicit, immutable, and fingerprinted separately.
+14. Every plugin lifecycle commit is closed. `Plugin::build` and `Plugin::finish` cannot install a
+    plugin or group, including on the direct code-first path.
+15. A `PluginId` identifies exactly one installed entry in a plan. A future proven multi-instance
+    requirement must introduce explicit stable entry identity rather than weakening `PluginId`.
+16. A caller-owned App may accept several top-level plugin batches only as immutable-prefix plus
+    append. Later batches cannot reorder, replace, disable, or reconfigure committed entries.
+17. `App::set_runner` is top-level code-first/Host authority. Plugin hooks cannot select or replace
+    the process driver.
 
 ## Module And Seam Placement
 
@@ -184,10 +197,13 @@ The names below describe roles. Exact Rust names remain illustrative.
 |---|---|
 | Product request | Runtime preset, additive requested product capabilities, settings, and supported plan edits |
 | Compiled ceiling | Product capabilities compiled into the root binary; read from the root catalog, never asserted by project data |
-| Plugin slot | Stable versioned position and conformance contract in a named first-party group |
+| Plugin slot | Stable position in a named group; a versioned cross-plugin replacement contract exists only after a real conformance consumer admits it |
 | Plugin ID | Identity of the concrete plugin installed into an App |
-| Plugin registration | Slot/provenance plus one authoritative declaration and a repeatable factory |
+| Plugin declaration | Static type-owned identity, dependencies, capabilities, conflicts, and category |
+| Plugin definition | Stable versioned definition identity plus one declaration, explicit immutable configuration, and one admitted repeatable typed factory |
+| Plugin registration | One occurrence of a definition at a stable slot/entry with ordering intent and provenance |
 | Resolved product plan | Immutable ordered entries after every pure product/plugin/service validation succeeds |
+| Prepared plugin plan | Private one-attempt carrier containing fresh instances and the exact resolved definition/occurrence keys |
 | Project blueprint | Replayable project revision, resolved plan, content snapshots, and startup intent |
 | Runtime candidate | Fresh unpublished owner for one attempted generation and every acquired cleanup obligation |
 | Runtime | Successfully published executable owner around one App generation |
@@ -213,31 +229,34 @@ future Interface proposals.
 
 | ID | Caller And Goal | Required Interface Behavior | Primary Oracle |
 |---|---|---|---|
-| RC-10 | Game configures title and dimensions | Replace the versioned window slot with a conforming configured first-party plugin | Public window-slot conformance suite |
+| RC-10 | Game configures title and dimensions | Configure the existing first-party window slot with the same `WindowPlugin` ID and explicit settings | Window settings plan/smoke test |
 | RC-11 | 2D game does not use tilemaps | Disable the optional tilemap slot before resolution; no tilemap plugin or dependency remains | Resolved and installed snapshots agree |
 | RC-12 | Game installs its Rust gameplay plugin | Insert a repeatable factory relative to the supported gameplay slot without editing Nara source | Independent reference-game composition test |
 | RC-13 | Tooling explains the selected product | Inspect normalized capabilities, groups, slots, actual plugin IDs, requirements, and order from one plan | Golden plan snapshot |
 | RC-14 | Test injects a configured failure plugin | Add a test registration through the same staged plan Interface, without a production-only DI seam | Fault-injection integration test |
+| RC-15 | Embedded App adds another top-level plugin batch | Existing committed order is an immutable prefix; the new batch appends or rejects any backward order/edit before mutation | Direct App order/installed-snapshot test |
+| RC-16 | Later product substitutes a different plugin in a named slot | Only root/domain-admitted slot-contract version and conformance evidence authorize a different `PluginId` | Trigger-specific public replacement conformance suite |
 
 ### Pre-Mutation Admission Failure
 
 | ID | Failure | Required Result | Retry Oracle |
 |---|---|---|---|
 | RC-20 | Project requests a capability outside the compiled ceiling | Typed composition rejection before App or native authority exists | Corrected request resolves in the same process |
-| RC-21 | A replacement requires a compiled but unrequested product capability | Typed rejection identifies required and requested capability sets | Adding the capability resolves successfully |
+| RC-21 | A later admitted replacement requires a compiled but unrequested product capability | Typed rejection identifies required and requested capability sets | Adding the capability resolves successfully |
 | RC-22 | Missing plugin/service requirement, conflict, or dependency cycle | Typed stable-ID error with bounded cycle chain; no partial plan publication | Corrected graph resolves successfully |
-| RC-23 | Duplicate, missing, disabled-required, or wrong-version slot | Typed slot error before plugin factory commit | Corrected edit resolves successfully |
-| RC-24 | Plugin factory output metadata differs from the resolved declaration | Startup admission rejects before reservation or App creation | Corrected factory can start a fresh attempt |
+| RC-23 | Duplicate, missing, disabled-required, or later wrong-contract-version slot | Typed slot error before plugin factory commit | Corrected edit resolves successfully |
+| RC-24 | One definition ID/version is bound to divergent declarations, config schemas, or typed factory bindings | Admission rejects before factory invocation, reservation, or App creation | Corrected canonical binding resolves successfully |
 | RC-25 | Desktop/headless driver does not satisfy the plan | Typed driver mismatch; driver may not add capabilities or plugins | Matching Adapter accepts the same plan |
+| RC-26 | Typed plugin factory returns a preparation error or unwinds | No reservation, App, or runtime publication; unwind containment makes no same-process retry claim | Corrected typed failure can prepare a fresh attempt |
 
 ### Candidate Construction Failure
 
 | ID | Failure Point | Required Result | Cleanup Oracle |
 |---|---|---|---|
-| RC-30 | Plugin factory, build, or finish fails or unwinds | No runtime publication; first failure is preserved | Every committed cleanup owner attempted once in reverse order |
+| RC-30 | Plugin preflight, build, or finish fails or unwinds | No runtime publication; first lifecycle/attempt failure is preserved | Every committed cleanup owner attempted once in reverse order |
 | RC-31 | Registry freeze, service activation, scene preflight/materialization, or startup fails | No Running runtime; old published runtime remains unchanged | Candidate retires all admitted dependencies |
 | RC-32 | Candidate cleanup is pending or times out | Failure retains an observable owner; parent authority cannot disappear or publish a conflicting replacement | Host can poll terminal close state and diagnostics |
-| RC-33 | Plugin attempts nested installation during resolved-plan commit | Candidate is rejected/poisoned as a contract violation; resolved plan remains authoritative | No hidden plugin appears in installed snapshot |
+| RC-33 | Plugin attempts nested installation during any build/finish commit | App is poisoned by a sticky contract violation; a product candidate is never published | No hidden plugin appears in installed snapshot |
 | RC-34 | First attempt fails and a second attempt succeeds | Retry constructs a fresh candidate and generation, never reuses the poisoned App | Attempt IDs and mutable authority epochs differ |
 
 ### Driver And Workspace Flows
@@ -259,15 +278,23 @@ input owned by the root catalog, not a value supplied by untrusted project data.
 ```rust
 pub fn resolve_product(
     request: ProductRequest,
-) -> Result<ResolvedProductPlan, CompositionError>;
+) -> Result<ResolvedProductPlan, ResolveProductError>;
+
+pub enum ResolveProductError {
+    Composition(CompositionError),
+    Plugins(PluginPlanError),
+}
 ```
+
+The public sum error preserves whether product-capability admission or plugin-plan closure failed;
+it does not flatten both into `PluginError`.
 
 `ProductRequest` conceptually contains:
 
 - one execution-policy preset: minimal, local headless, or server;
 - additive product capabilities;
 - validated semantic settings;
-- supported slot replacement/disable/relative-order edits;
+- supported same-plugin configuration/disable/relative-order edits and later admitted replacement;
 - repeatable custom plugin registrations.
 
 Desktop and editor are not mutually exclusive runtime presets. They are capability and Adapter
@@ -278,7 +305,10 @@ World, active task, native handle, open event loop, or service session. At minim
 exposes:
 
 - compiled, requested, normalized, and required product capability sets;
-- ordered plugin entries with slot ID/version, actual Plugin ID, group provenance, and declaration;
+- ordered plugin entries with occurrence identity, slot ID, later replacement-contract version when
+  applicable, actual Plugin ID, definition ID/version, group provenance, and declaration;
+- configuration identity through a versioned digest subject to disclosure policy; raw canonical
+  configuration remains private;
 - plugin and service requirements/conflicts;
 - disabled optional slots;
 - a deterministic plan fingerprint.
@@ -295,61 +325,329 @@ Plugin/service closure is validated separately from this product subset.
 
 ### 2. Data-Only Plugin Groups
 
-`PluginGroupBuilder` should build data rather than wrap `&mut App`:
+Nara should preserve Bevy's small group-authoring shape while changing what the builder owns:
 
 ```rust
-pub trait PluginGroup: Send + Sync + 'static {
-    fn group_id(&self) -> PluginGroupId;
-    fn build(self) -> Result<PluginPlanDraft, PluginPlanError>;
+pub trait PluginGroup: Sized + Send + Sync + 'static {
+    const ID: PluginGroupId;
+
+    fn build(self) -> PluginGroupBuilder;
+
+    fn edit(self) -> EditedPluginGroup<Self> {
+        EditedPluginGroup::new(self)
+    }
+}
+
+pub struct PluginGroupBuilder {
+    // Private stable slots, entries, nested groups, and order intent.
+}
+
+impl PluginGroupBuilder {
+    pub fn new() -> Self;
+
+    pub fn add(self, definition: PluginDefinition) -> Self;
+
+    pub fn add_slot(
+        self,
+        slot: PluginSlot,
+        definition: PluginDefinition,
+    ) -> Self;
+
+    pub fn add_group(self, group: impl PluginGroup) -> Self;
 }
 ```
 
-The exact signature may change, but these invariants may not:
+`build` deliberately has no `App` parameter and no `finish(&mut App)` operation. Builder methods
+record intent; expected duplicate, slot, dependency, conflict, and ordering errors are returned by
+the resolver rather than panicking during chaining. `add_group` stores an inactive nested group for
+resolver-controlled expansion, so a stable group stack can detect `A -> B -> A` before Rust
+recursion or App mutation.
+
+The builder contains no root group identity. The sealed collector wraps the returned contents with
+the invoked `G::ID`, so `Foo::build` cannot accidentally or deliberately claim `Bar::ID`. The same
+identity-free contents function can therefore lower through a direct group or a package runtime
+contribution without becoming a second group-ID authority.
+
+A bare builder does not implement the ordinary `Plugins` input trait, because installing
+`MyGroup.build()` would silently discard `MyGroup::ID` provenance. Direct callers pass the group or
+its lazy edited wrapper. The package helper has a separate explicit Adapter for canonical
+identity-free contents and supplies package contribution provenance.
+
+The common configurable path is lazy and keeps third-party group code inside resolver containment:
+
+```rust
+app.add_plugins(
+    Runtime2dPlugins
+        .edit()
+        .disable(TILEMAP_SLOT)
+        .insert_after(
+            GAMEPLAY_EXTENSION_SLOT,
+            my_game::plugin_definition(settings),
+        ),
+)?;
+```
+
+Calling `build` directly remains possible for group authors, but ordinary callers use `edit` so
+group expansion and unwind containment happen inside `add_plugins`. Under `panic = "unwind"`, the
+resolver maps an invoked group panic to a stable `PluginPlanError` without retaining the panic
+payload. Abort builds make no in-process recovery promise.
+
+These invariants may not change:
 
 - group expansion performs no App mutation or native acquisition;
 - one ordered entry collection is the source for both membership inspection and installation;
 - group membership is derived after edits, not copied from a parallel static ID array;
-- disable, replace, and relative ordering address stable slot IDs, not vector indexes;
+- configure, disable, and relative ordering address stable slot IDs, not vector indexes;
 - nested groups preserve provenance while flattening to one deterministic install order;
 - unsupported replacement is rejected rather than inferred from matching metadata.
 
-This borrows Bevy's useful idea that a plugin group first produces an ordered builder, while keeping
-Nara's stable identities, typed failure, capability validation, and candidate containment.
+A U4 slot records stable ID, required/optional presence, and the expected plugin type/ID. Ordinary
+`configure` changes that same plugin's definition/configuration. Replacing it with a different
+plugin ID additionally requires a public slot-contract version, root/domain-owned conformance
+evidence, and a public conformance suite. That surface remains trigger backlog until a second
+concrete plugin implementation exists. A third party cannot self-certify replacement by repeating
+a capability string.
 
-### 3. Repeatable Plugin Registration
+Group inclusion is not ownership of an installed instance. Edits apply to stable registration
+occurrences before any merge. Exact duplicates merge only when they name the same slot ID (and later
+contract version when one exists) or are un-slotted registrations with the same unique `PluginId`,
+and in either case carry the same complete admitted definition key. One resolved entry may then
+retain provenance from several groups. The same `PluginId` appearing at two different slots is an
+error rather than an ambiguous merge, so disabling one slot has one meaning.
 
-A runtime recipe cannot retain a one-shot plugin instance. It needs a repeatable constructor for
-each generation:
+The resolver owns one deterministic sequence:
+
+```text
+expand inactive groups and retain provenance
+    -> apply supported slot/entry edits
+    -> validate slot identity/presence and any admitted replacement conformance
+    -> merge identical occurrence identity + admitted definition key
+    -> validate plugin/service requirements and conflicts
+    -> build dependency and explicit-order edges
+    -> stable topological sort
+    -> freeze snapshot, private definitions, and plan fingerprint
+```
+
+Declaration order is a stable preference, not an implicit dependency. Declared plugin prerequisites
+and explicit before/after relations are hard edges; stable entry identity is the final tie-break.
+Capability requirements validate the already selected closure and never choose an arbitrary
+provider. The resolver computes a `PluginGroupDefinitionFingerprint` from canonical expanded
+occurrence identities, admitted definition keys, order intent, and nested group fingerprints while
+excluding outer edits and accumulated provenance. Duplicate group IDs are idempotent only when this
+intrinsic fingerprint matches; divergent definitions fail rather than selecting first or last.
+
+### 3. One Declaration Authority And Repeatable Definitions
+
+Stable declaration facts belong to the plugin type rather than to a constructed instance or a
+registration copy:
 
 ```rust
-pub trait PluginFactory: Send + Sync + 'static {
-    fn create(&self) -> Result<Box<dyn Plugin>, PluginFactoryError>;
-}
+pub trait Plugin: Send + Sync + 'static {
+    fn declaration() -> &'static PluginDeclaration
+    where
+        Self: Sized;
 
-pub struct PluginRegistration {
-    // Illustrative fields only.
-    slot: PluginSlotId,
-    contract_version: PluginSlotVersion,
-    declaration: PluginDeclaration,
-    factory: Arc<dyn PluginFactory>,
+    fn preflight(
+        &self,
+        _context: &PluginPreflightContext<'_>,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError>;
+
+    fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn cleanup(
+        &self,
+        _context: &mut PluginCleanupContext<'_>,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
 }
 ```
 
-The factory contract is intentionally narrow:
+The `Self: Sized` declaration method preserves object safety. Private erased carriers retain the
+canonical declaration reference before turning a fresh `P` into `dyn Plugin`; the trait object does
+not grow a second metadata source. Dependency-relevant facts cannot vary with instance settings.
+If a setting changes closure, the group must select a different plugin type/static declaration or
+an additional explicit companion entry/group. A second definition ID for the same `P` cannot change
+requirements or conflicts hidden behind `metadata(&self)`.
 
-- it is repeatable (`Fn` semantics), not one-shot (`FnOnce` semantics);
-- each invocation creates a fresh plugin definition for one candidate;
+`PluginPreflightContext` is a narrow immutable view of the installed-plan prefix and the specific
+structural snapshots proven necessary by current preflight consumers. It exposes no `World`, raw
+resource access, runner mutation, or native authority. A typed `Err` is retryable before the
+attempt's first commit only under this no-side-effect contract. A preflight unwind always poisons a
+caller-owned App or marks a product candidate failed/unpublishable; the candidate owner remains
+retained through terminal cleanup. Catch-unwind provides diagnostics/cleanup opportunity, not proof
+that trusted code left process state intact.
+
+A runtime blueprint cannot retain a one-shot plugin instance. Group and package paths use an opaque
+repeatable definition created through typed helpers:
+
+```rust
+pub struct PluginDefinition {
+    // Private stable DefinitionId/version, declaration reference, canonical config,
+    // config fingerprint, and one admitted typed repeatable factory binding.
+}
+
+core::plugin_definition()
+
+window::plugin_definition(window_settings)
+```
+
+Exact config trait and derive names wait for U4 implementation evidence. The contract is fixed:
+
+- one stable versioned `PluginDefinitionId` identifies one canonical construction policy; a domain
+  helper hides this advanced identity from normal game/package callers;
+- canonical configuration and the repeatable factory binding are `Send + Sync + 'static`, so an
+  immutable definition/blueprint can be shared across Host attempts;
+- configuration is explicit immutable data with a deterministic canonical fingerprint, never only
+  a captured closure;
+- typed construction returns `Result<P, PluginCreateError>` for one concrete `P: Plugin`, so the
+  static declaration cannot be swapped after erasure; infallible domain helpers adapt `P` to
+  `Ok(P)`;
+- construction is repeatable (`Fn` semantics), not one-shot (`FnOnce` semantics);
+- each invocation creates a fresh plugin instance for one candidate;
 - it receives no App, World, host authority, or generic context;
 - it does not start threads, open files, create native sessions, or mutate process-global state;
-- candidate construction verifies the fresh plugin metadata against the resolved plan before App
+- preparation preserves the resolved definition key on the fresh private carrier before App
   mutation;
 - violation by trusted Rust code is a plugin contract breach, not something Nara claims to sandbox.
 
-Whether the authoritative declaration lives on `Plugin`, `PluginFactory`, or a registration record
-remains an open type-level choice. The invariant is one authoritative declaration plus drift
-detection, never two unchecked metadata copies.
+The domain definition helper maps its typed construction error into a stable, classified
+`PluginPrepareError`; arbitrary `Display` text is not plan identity or a diagnostic summary.
 
-### 4. Replayable Blueprint And Fresh Candidate
+The definition key contains definition ID/version plus the canonical config fingerprint. It proves
+which admitted construction policy and immutable input were selected and transferred; it cannot
+prove that arbitrary trusted factory code actually uses every field. Domain conformance tests cover
+that behavioral obligation. Typed factory erasure makes changing the concrete plugin type
+unrepresentable on the public path.
+
+The resolver retains a private canonical config representation (or typed equality witness) and
+uses it after any digest match; a hash collision never merges distinct configurations. Public plan
+snapshots expose only a versioned digest when disclosure policy permits. The digest algorithm and
+canonical encoding version are part of the definition-key format rather than ambient defaults.
+
+The private erased factory implementation is not a public `PluginFactory` extension trait and does
+not use `Any`, string downcasts, or a service locator. First-party domain helpers and a package's
+canonical definitions module hide it from normal game and package authors.
+
+A `PluginRegistration` is then an occurrence, not another declaration authority. It associates a
+definition with a stable slot or entry, order intent, and provenance. Duplicate registrations merge
+only when occurrence identity and the complete admitted definition key both match. Reusing a
+definition ID with a divergent declaration, config schema/version, or factory binding is an
+admission error, not behavioral equivalence. There is no first-wins, last-wins, or public
+`add_plugin_if_missing` rule.
+
+All plugin IDs are unique in U4. The current unused `non_unique` metadata option should be removed.
+If a real multi-instance plugin lifecycle appears, it must introduce a stable `PluginEntryId` and
+define ordering, cleanup, inspection, and configuration identity explicitly.
+
+### 4. One-Line App Ergonomics, One Resolver
+
+Nara should adopt Bevy's sealed marker technique for single plugins, groups, edited groups, and
+tuples:
+
+```rust
+pub trait Plugins<Marker>: sealed::Plugins<Marker> {}
+
+impl App {
+    pub fn add_plugins<M>(
+        &mut self,
+        plugins: impl Plugins<M>,
+    ) -> Result<&mut Self, AddPluginsError>;
+}
+```
+
+The ordinary call remains one line:
+
+```rust
+app.add_plugins((MinimalPlugins, MyGamePlugin::new(settings)))?;
+```
+
+A raw `P: Plugin` is a one-attempt inactive instance for that caller-owned App. It does not require
+`Clone`, does not enter a replayable blueprint, and cannot be exported as a package definition.
+Groups and packages contain only repeatable definitions. Both inputs reuse the same collection,
+closure, ordering, and commit implementation; the type system prevents the one-shot input from
+being presented as a replayable `ResolvedPluginPlan`.
+
+The direct instance contributes its static declaration but makes no durable configuration
+fingerprint promise. A direct input that collides with an existing/planned `PluginId` is therefore
+an explicit duplicate error rather than an implicit equality merge. Tooling may inspect that an
+opaque one-shot entry was selected, but it cannot claim the entry is reconstructible.
+
+`add_plugins` is the primary public entry. The current singular `add_plugin` may be removed or kept
+only as a thin alias with identical semantics; `add_plugin_if_missing` is not retained as a public
+composition mechanism. Tuple collection happens before resolution rather than installing each
+element immediately.
+
+Every top-level commit is closed. Calls to `add_plugin`, `add_plugins`, or group installation from a
+plugin's `build` or `finish` are sticky contract violations and poison the current App even if the
+plugin ignores the returned error. Dependencies must appear in declarations and selected groups;
+the resolver validates the selected closure but never chooses a hidden provider.
+
+The active-hook guard runs before lifecycle, duplicate/already-installed, declaration, group
+expansion, or no-op logic. A plugin therefore cannot avoid sticky poison by attempting to add an
+existing ID, using a skip helper, passing a bad group, or installing during `finish`. The same guard
+rejects `App::set_runner`; only a top-level code-first caller or concrete Host/driver Adapter owns
+runner selection.
+
+Several top-level calls on one caller-owned App use immutable-prefix semantics. The resolver treats
+actual committed entries/order as hard input, validates only an appendable suffix, and rejects any
+later disable, replacement, reconfiguration, or ordering edge that would move an installed entry.
+Product composition avoids this constraint by resolving one complete plan for a fresh App.
+
+New group/provenance and plan-snapshot changes remain staged until the first plugin commit. A
+retryable early preflight rejection discards them and leaves installed inspection fingerprints
+unchanged. After commit begins, a terminal App retains actual committed entries and attempt evidence;
+it never publishes a failed group as successfully installed. If a fully validated later batch has
+an empty plugin suffix and only adds matching group/provenance inspection facts, those facts publish
+atomically as one metadata-only commit with no lifecycle transition.
+
+```mermaid
+flowchart LR
+    Game[Game author<br/>App::add_plugins] --> Collect
+    Group[Group author<br/>PluginGroup + domain helpers] --> Collect
+    Package[Package author<br/>package::plugins helper] --> Collect
+    Collect[Private input collection] --> Resolve[Pure resolve<br/>slots, closure, order]
+    Resolve --> Prepare[Private prepare<br/>fresh instances]
+    Prepare --> Commit[Closed lifecycle commit]
+    Commit --> App[Caller App or fresh candidate]
+```
+
+Game authors see the first line. Group authors see the second line and the small builder vocabulary.
+Resolver graphs, factory erasure, prepared carriers, commit permits, and candidate publication stay
+inside engine/package infrastructure.
+
+A reusable package and its direct group lower from one compiled definitions function rather than
+maintaining two member lists:
+
+```rust
+impl PluginGroup for SpriteAnimationPlugins {
+    const ID: PluginGroupId = SPRITE_ANIMATION_GROUP;
+
+    fn build(self) -> PluginGroupBuilder {
+        definitions::runtime_plugins()
+    }
+}
+
+package::define(
+    generated::PACKAGE,
+    nara_app::package::plugins(
+        generated::RUNTIME,
+        definitions::runtime_plugins,
+    ),
+)
+```
+
+The package helper privately adapts that repeatable data-only definition into the runtime contract.
+It does not wrap the current App-mutating builder or expose plan/admission/candidate vocabulary to
+the package author.
+
+### 5. Replayable Blueprint And Fresh Candidate
 
 Composition resolution and runtime startup are separate Modules:
 
@@ -363,32 +661,41 @@ The exact public types wait for U12 and U5 evidence. The Interface contract is a
 
 - the blueprint contains only immutable, reconstructible, versioned inputs;
 - a concrete host Adapter creates an empty attempt owner;
-- plugin instances are created and checked before reservation or App creation;
+- the resolved plugin plan privately prepares all fresh instances and verifies their carriers
+  before reservation or App creation;
 - only then does the host mint one-shot inactive reservations and a fresh App candidate;
 - build, finish, registry freeze, service activation, scene materialization, and startup occur inside
   the unpublished candidate;
 - success publishes exactly one new runtime generation;
 - failure publishes none and retains cleanup ownership until terminal evidence exists.
 
-### 5. Code-First App Path
+`PreparedPluginPlan` is a private one-attempt transfer. No public
+`ResolvedProductPlan::install_into(existing_app)` operation is admitted until a concrete embedding
+consumer proves why `App::add_plugins` and the concrete product Hosts are insufficient.
+
+### 6. Code-First App Path
 
 The low-level embedded path remains intentionally direct:
 
 ```rust
 let mut app = App::new();
-app.add_plugin(MyPlugin)?;
+app.add_plugins((MinimalPlugins, MyPlugin))?;
 ```
 
 This Interface is not a second product composition system. It is an explicit escape hatch for
 embedded applications and focused tests:
 
 - callers own ordering and selected plugins;
-- preflight rejection may remain retryable while the App is unchanged;
+- collection, resolution, and preparation rejection leave the App unchanged;
+- a typed plugin preflight rejection is retryable only while the current top-level commit has not
+  committed an entry and the narrow preflight contract was obeyed; a later rejection poisons the
+  partially committed App, and any preflight unwind poisons regardless of position;
 - committed build/finish failure poisons the App under ADR 0010;
+- plugin hooks cannot perform nested installation on this path either;
 - callers do not receive runtime blueprint, fresh-generation, or atomic-publication claims;
 - project-facing examples should use the product path once it exists.
 
-### 6. Driver Placement
+### 7. Driver Placement
 
 Composition selects required capabilities and runtime-side integration. It does not select process
 driver authority as a plugin build side effect.
@@ -411,7 +718,7 @@ The candidates are evaluated by Interface depth rather than implementation size.
 |---|---|---|---|---|---|
 | Removed legacy `apply_project_settings(&mut App)` | Low | Low: validation and mutation knowledge was spread across facade, groups, and plugins | Low: predictable rejection could follow mutation | Low on success, high on failure | Removed in RGF-U3 |
 | Current immutable settings/capability candidate | Medium | High for manifest admission, low for plugin closure and publication | High for the compiled/requested capability subset only | Low for manifest callers, incomplete for runtime hosts | Keep as input to RGF-U4 composition |
-| Pure resolve plus public install into an existing App | Medium | High for composition, low for startup publication | Medium: admission is honest, committed failure still poisons caller state | Medium | Keep only as a possible advanced/internal operation |
+| Pure resolve plus public install into an existing App | Medium | High for composition, low for startup publication | Medium: admission is honest, committed failure still poisons caller state | Medium | Omit the public operation; use private prepared transfer inside existing entry points |
 | Universal host/builder around project, services, runtime, and driver | Superficially high | Low over time: unrelated authorities converge in one Module | Low: scope and lifetime differences become hidden | Initially low, grows with every domain | Reject |
 | Pure resolved plan plus fresh unpublished candidate | High | High: admission, committed lifecycle, and host authority each have one owner | High: publication is atomic without claiming external rollback | Low on product path, explicit on embedding path | Recommend |
 
@@ -430,6 +737,7 @@ The deletion test supports the recommended seams:
 sequenceDiagram
     participant Caller
     participant Resolve as Root Composition
+    participant Prepare as Plugin Preparation
     participant Host as Concrete Host Adapter
     participant Candidate
     participant App
@@ -441,23 +749,30 @@ sequenceDiagram
     Resolve-->>Caller: ResolvedProductPlan
     Note over Caller,Resolve: No App or native authority exists
 
-    Caller->>Host: Blueprint + resolved plan
+    Caller->>Host: start(blueprint + resolved plan)
     Host->>Candidate: Create empty fresh attempt owner
-    Candidate->>Candidate: Instantiate plugins and verify declarations
-    Candidate->>Host: Acquire inactive typed reservations
-    Candidate->>App: Create fresh App and commit ordered plugin lifecycle
-    Candidate->>Candidate: Freeze, activate services, materialize scene, run startup
-    alt Complete success
-        Candidate-->>Consumer: Publish new runtime generation
-    else Any required phase fails
-        Candidate->>Candidate: Retire admitted owners in reverse dependency order
-        Candidate-->>Host: Startup failure and retained close state
+    Candidate->>Prepare: Instantiate typed factories and preserve definition keys
+    alt Preparation fails
+        Prepare-->>Candidate: PluginPrepareError
+        Candidate-->>Host: Startup failure; no reservation or App exists
+    else Preparation succeeds
+        Prepare-->>Candidate: Private one-attempt prepared transfer
+        Candidate->>Host: Acquire inactive typed reservations
+        Candidate->>App: Create fresh App and commit ordered plugin lifecycle
+        Candidate->>Candidate: Freeze, activate services, materialize scene, run startup
+        alt Complete startup succeeds
+            Candidate-->>Consumer: Publish new runtime generation
+        else Any later required phase fails
+            Candidate->>Candidate: Retire admitted owners in reverse dependency order
+            Candidate-->>Host: Startup failure and retained close state
+        end
     end
 ```
 
 The resolved plan is closed before committed installation. A plugin cannot extend it from `build`
-or `finish`. This removes hidden dependency selection from runtime mutation and makes group
-inspection truthful.
+or `finish`. The same rule applies to direct App commits, so a plugin has one lifecycle meaning in
+code-first, package, and product paths. This removes hidden dependency selection from runtime
+mutation and makes group inspection truthful.
 
 ## Error Model
 
@@ -466,19 +781,33 @@ Do not force every phase into the current `PluginError` enum.
 | Error Class | Owner | Mutation Guarantee | Retry Meaning |
 |---|---|---|---|
 | Project parse/profile error | `nara_project` | No composition or App state | Correct source/settings and parse again |
-| `CompositionError` | root composition | No App, lease, native session, or published plan | Correct the request/edit/factory and resolve again |
-| `PluginPlanError` | `nara_app` plan mechanics | No committed App mutation | Correct group/plugin closure and resolve again |
-| `PluginError` | committed App plugin lifecycle | Candidate may be mutated and is poisoned on committed failure | Never retry the same App after committed failure |
+| `CompositionError` | root composition | No App, lease, native session, or published plan | Correct the request or product edit and resolve again |
+| `PluginPlanError` | `nara_app` plan mechanics | No committed App mutation | Correct a typed group/plugin closure error and resolve again; unwind has no same-process retry claim |
+| `PluginPrepareError` | private plugin preparation | Existing direct App remains unchanged; product path has no App, reservation, or native session yet | Correct a typed factory error and prepare again; unwind has no same-process retry claim |
+| `PluginError` | App plugin hook / closed commit | A typed pure-preflight rejection before this attempt's first commit may be retryable; later rejection or any hook unwind poisons | Never retry an App after a committed/partial-attempt failure or hook unwind |
 | `RuntimeStartFailure` | runtime candidate/factory | No runtime publication; external effects require owned cleanup | Build a fresh candidate only after retirement policy permits |
 | `RuntimeFault` | published executable runtime | Runtime may be partially mutated; first fault is sticky | Observe, stop, discard generation; never in-place rollback |
 
-This likely requires refining ADR 0079's wording that all composition failures return
-`PluginError`. Product capability and slot errors belong to root composition, while plugin hook
-failures remain owned by `nara_app`.
+ADR 0079 now reflects this split: product capability errors belong to root composition, plugin
+plan errors belong to `nara_app` plan mechanics, and App-level plugin hook failures remain owned by
+the lifecycle Module.
+
+`App::add_plugins` exposes one `AddPluginsError` wrapper over plan, prepare, and App-level
+lifecycle failures so the ordinary call still needs only one `?`. The variants must preserve the
+mutation guarantee rather than flattening every phase back into `PluginError`.
+
+```rust
+pub enum AddPluginsError {
+    Plan(PluginPlanError),
+    Prepare(PluginPrepareError),
+    Lifecycle(PluginError),
+}
+```
 
 Panic containment does not strengthen these guarantees. Under unwind builds, catch may provide a
 diagnostic and cleanup opportunity. It does not prove that arbitrary native or process-global
-invariants remain valid, and abort builds cannot return an in-process error.
+invariants remain valid, and abort builds cannot return an in-process error. Typed pure-plan,
+preparation, or preflight errors have the documented retry meaning; an unwind does not inherit it.
 
 ## Performance Contract
 
@@ -501,9 +830,9 @@ private builder state, or incidental concrete type names.
 | Test Layer | Scenarios | Observable Assertions |
 |---|---|---|
 | Pure composition tests | RC-10 through RC-23 | Structured result, deterministic plan snapshot, zero App/native creation |
-| Candidate admission tests | RC-24, RC-25 | Factory/driver mismatch before reservation or App creation |
-| `nara_app` lifecycle tests | RC-30, RC-33, RC-34 | Poison after committed failure and reverse once-only cleanup |
-| Root integration tests | RC-02 through RC-14 | Requested/required/compiled subset, group-slot-plugin bijection, no hidden dependencies |
+| Plugin preparation/candidate admission tests | RC-24 through RC-26 | Definition binding/factory/driver mismatch before reservation or App creation |
+| `nara_app` lifecycle tests | RC-15, RC-30, RC-33, RC-34 | Immutable-prefix append/rejection, poison after committed failure, and reverse once-only cleanup |
+| Root integration tests | RC-02 through RC-14 | Requested/required/compiled subset, one-to-one resolved/installed entries, many-to-one group provenance, no hidden dependencies |
 | Independent reference game | RC-02, RC-03, RC-10 through RC-13, RC-34 | Public dependency only, no facade edits or manual product ordering |
 | Runtime candidate fault matrix | RC-30 through RC-34 | No Running publication, exact cleanup ownership, fresh retry generation |
 | Tooling integration | RC-06, RC-32, RC-41 | Blueprint outside World, stop-first restart, failed owner retained |
@@ -541,7 +870,8 @@ and installation remain separate truths; product retry semantics are false.
 **Cons**: Committed plugin failure still poisons the caller's App; it cannot provide atomic runtime
 publication or safe editor restart on its own.
 
-**Decision**: Retained as a possible advanced/internal operation, not the default product path.
+**Decision**: Retain only as private lowering inside `App::add_plugins` and concrete product Hosts.
+Do not expose a generic public `install_into` operation without another proven embedding consumer.
 
 ### Option C: Journal And Roll Back App Mutation
 
@@ -571,34 +901,48 @@ and platform-specific constraints harder to express honestly.
 
 **Decision**: Rejected until multiple concrete hosts prove a shared replaceable seam.
 
+### Option F: Permit Nested Installation Only On The Direct App Path
+
+**Pros**: Preserves current Bevy-like convenience and some existing dependency tests.
+
+**Cons**: The same plugin can succeed when added directly but fail when used by a package or closed
+product plan. Plugin authors must learn two lifecycle meanings, dependency inspection becomes
+path-dependent, and `nara_app` retains separate open/closed commit modes indefinitely.
+
+**Decision**: Rejected. Pre-1.0 migration moves dependencies into declarations, groups, and tuples;
+all plugin hook commits use one closed rule.
+
 ## Mature Engine Reference
 
-Bevy's data-only `PluginGroupBuilder` is useful prior art: membership and order live together before
-`finish` mutates an App (`repo-ref/bevy/crates/bevy_app/src/plugin_group.rs`). Nara should retain
-that ergonomics while adding stable IDs, typed errors, capability closure, plan provenance, and
-candidate containment. Bevy's group finish and plugin build paths do not roll back partial App
-mutation, so their failure semantics are not Nara's product contract.
+The comparison is about responsibility, not name matching. Full source and primary-documentation
+evidence is recorded in
+[Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md).
 
-Godot delays publication of some locally constructed objects, but its main setup is a process-global
-staged initialization with manually ordered teardown (`repo-ref/godot/main/main.cpp`). It is not a
-replayable multi-generation runtime construction model.
+| Engine concept | Useful precedent | Boundary Nara does not copy | Nara U4 counterpart |
+|---|---|---|---|
+| Bevy `Plugins<Marker>`, tuple support, and `PluginGroupBuilder` | One `add_plugins(...)` call accepts a plugin, group, or tuple; membership and order exist before `finish(app)` | `TypeId` identity, one-shot boxed instances, panic-oriented group edits, `finish` into an existing App, and hidden installs from plugin build | Keep the caller ergonomics; use stable IDs, repeatable definitions, typed pure resolution, and closed commit |
+| Godot module/GDExtension initialization levels | Explicit levels initialize upward and deinitialize downward, making lifecycle staging visible | Process-global staged startup is not a replayable plan or fresh runtime generation, and extension-map iteration is not a general reverse-registration guarantee | Resolved order plus strict reverse actual-commit cleanup inside an unpublished candidate |
+| Unity package manifest and assembly definitions | Package/assembly selection, target scope, and dependencies are resolved before runtime/editor callbacks | Package resolution is not a typed Rust plugin plan, and initialization callbacks do not provide candidate publication | Package runtime role lowers into a closed typed plugin plan; package remains above `Plugin` |
+| Unreal plugin descriptor, module type/loading phase, and `StartupModule`/`ShutdownModule` | Descriptor-level module selection is distinct from module lifecycle callbacks | Loading phases and shutdown hooks do not imply rollback of arbitrary startup side effects | Stable slot/order resolution is distinct from committed plugin hooks and failure containment |
 
-Nara's fresh unpublished candidate is therefore intentionally stronger than both references. The
-cost is justified by editor restart, headless/desktop parity, and explicit service lifetime goals.
+Nara's additional concepts are internal consequences of editor restart, server/desktop parity,
+package inspection, and last-good publication. They are not additional chores for the normal game
+author: that surface remains `Plugin`, `PluginGroup`, tuple, and `App::add_plugins`.
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
 | Pure rejection safety | 100% of RC-20 through RC-25 leave App/native fingerprints unchanged | Fault matrix |
-| Plan truth | Resolved ordered entries, group snapshot, slot snapshot, and installed plugin IDs form a bijection | Snapshot/integration tests |
+| Plan truth | Every installed entry matches exactly one resolved entry; each resolved entry retains all contributing group provenance | Snapshot/integration tests |
 | Deterministic resolution | 100 repeated resolutions of identical input produce the same plan fingerprint and order | Property/regression test |
-| Hidden dependency removal | No production plugin `build` installs another plugin during resolved-plan commit | Static search and contract test |
+| Hidden dependency removal | No plugin `build` or `finish` installs another plugin/group on any path | Static search and sticky-violation contract test |
+| Incremental direct order | Every later direct batch appends to the actual committed prefix or rejects before mutation | Order-edge and edit fault tests |
 | Capability fidelity | Every tested plan satisfies `required <= requested <= compiled` | Feature/composition matrix |
 | Candidate publication | Every injected startup failure publishes zero Running runtimes | Runtime factory fault matrix |
 | Cleanup ownership | Every committed owner is attempted exactly once in reverse dependency order | Instrumented failure tests |
 | Fresh retry | Failed-first/success-second attempts share no mutable runtime generation state | Generation-isolation test |
-| Public leverage | Reference game performs window replacement, tilemap disable, and game-plugin placement without Nara source edits | Independent workspace test |
+| Public leverage | Reference game configures first-party settings, disables tilemap, and places its game plugin without Nara source edits | Independent workspace test |
 | Host parity | Headless, editor, and desktop consume the same resolved plan/blueprint contract | Cross-host semantic tests |
 | Frame overhead | Zero composition resolution, factory construction, or plan lookup in steady-state frames | Profiling and static review |
 
@@ -607,14 +951,15 @@ cost is justified by editor restart, headless/desktop parity, and explicit servi
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Factory performs hidden authority-bearing work | High | Medium | Narrow factory Interface, trusted-code contract, creation fault tests, move native work into typed domain reservations |
-| Declaration and plugin metadata drift | High | Medium | One authoritative declaration plus pre-App instantiation fingerprint check |
+| Definition ID is rebound or a private carrier loses its key | High | Medium | One admitted typed factory binding per definition ID/version and exact key preservation into preparation |
+| Trusted factory ignores canonical config | High | Low | Treat behavior as a conformance obligation; do not claim fingerprint self-verification |
 | Slot vocabulary becomes a generic plugin marketplace | High | Medium | Admit only named first-party slots with a real replacement and public conformance suite |
 | Direct App and product startup claims are confused | High | Medium | Separate docs/examples and error types; never promise atomic publication for direct App mutation |
 | Failed candidate is dropped before cleanup finishes | Critical | Medium | Failure retains owner and parent authority until terminal close evidence |
 | Driver silently widens requested capabilities | High | Medium | Driver validates plan compatibility and returns typed mismatch without editing it |
 | Plan order depends on hash iteration or registration race | High | Low | Stable IDs, deterministic collections, explicit tie-breaks, fingerprint tests |
 | Composition Module becomes a universal host | High | Medium | Keep filesystem, event loop, services, runtime drive, and World outside pure resolver |
-| Existing nested plugin convenience is expensive to remove | Medium | High | Migrate first-party groups and metadata in one breaking pre-1.0 slice; keep compile-time migration errors clear |
+| Existing nested plugin convenience is expensive to remove | Medium | High | Migrate first-party dependencies into groups/tuples in one breaking pre-1.0 slice; keep compile-time migration errors clear |
 | Blueprint captures mutable attempt state | High | Medium | Restrict to immutable versioned data and repeatable factories; assert generation isolation |
 
 ## Requirements Traceability
@@ -636,8 +981,9 @@ This design does not reorder the reference-game plan. It makes the Interface evi
 each slice explicit:
 
 1. U3 produces truthful compiled capabilities and a normalized project request.
-2. U4 introduces the data-only plugin group/slot plan, pure resolution, supported edits, and
-   complete pre-mutation validation.
+2. U4 introduces static plugin declarations, repeatable definitions, the data-only group/slot
+   builder, sealed plugin/group/tuple inputs, pure resolution, supported edits, private preparation,
+   and closed commit.
 3. U12 combines the resolved plan with authorized immutable project/content inputs in a replayable
    blueprint.
 4. U5 consumes the blueprint through a fresh candidate and publishes the first executable runtime
@@ -649,22 +995,36 @@ The data-only group step is a prerequisite for the package runtime role. Package
 wrap the current `PluginGroupBuilder<'_>` as though it were a pure plan: that builder immediately
 mutates `App`, while root groups still duplicate membership in static plugin-ID arrays. U4 must
 derive membership and order from one immutable registration collection, validate it before committed
-App mutation, and only then preserve the direct `App::add_plugins` ergonomics as a lowering.
+App mutation, remove hook-time nested installation, and only then preserve direct
+`App::add_plugins` ergonomics as a lowering. Root static plugin-ID arrays,
+`PluginGroupBuilder::app`, public `add_plugin_if_missing`, and unused non-unique metadata are
+migration targets rather than compatibility constraints.
 
-## Open Questions
+## U4 Decisions And Remaining Questions
 
-1. Which type owns the single authoritative plugin declaration: `Plugin`, a repeatable factory, or
-   the registration record?
-2. Should an advanced `ResolvedProductPlan::install_into(App)` operation be public, crate-private,
-   or omitted until an embedding consumer proves it?
-3. What is the smallest failure-owner shape that can represent pending candidate retirement without
+U4 closes these high-cost choices:
+
+- `Plugin::declaration()` is the single stable declaration authority.
+- `PluginDefinition` privately combines that declaration with explicit canonical configuration and
+  a repeatable typed factory; registration records do not copy declaration truth.
+- Bevy-style sealed plugin/group/tuple ergonomics lower through one resolver.
+- prepared plugin transfer and product installation remain private; no generic public
+  `install_into(App)` operation is admitted.
+- all plugin build/finish commits reject nested plugin/group installation.
+- group membership is derived from resolved registration provenance, never a parallel static array.
+
+The remaining questions belong to later candidate/tooling/driver slices or implementation evidence:
+
+1. What is the smallest failure-owner shape that can represent pending candidate retirement without
    freezing a universal async runtime?
-4. Where should resolved plan snapshots live for runtime/tooling inspection if they must not become
+2. Where should resolved plan snapshots live for runtime/tooling inspection if they must not become
    mutable gameplay resources?
-5. Should direct `App::add_plugin` reject all nested installation, or only installation performed
-   under a closed resolved plan?
-6. Which parts of `App::runner` remain useful for code-first embedding after product drivers move to
+3. Which parts of `App::runner` remain useful for code-first embedding after product drivers move to
    concrete host Adapters?
+4. Which canonical config encoding and derive/helper surface proves deterministic fingerprints
+   without forcing ordinary game authors to implement infrastructure traits?
+5. What concrete second implementation, if any, justifies cross-plugin slot replacement rather
+   than same-plugin configuration replacement?
 
 These questions should be answered by the named scenarios, not by adding generality in advance.
 

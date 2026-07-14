@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-07-14
 **Refines**: ADR 0020: Project Source Layout
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
@@ -70,9 +71,11 @@ authorization-checked raw-path API.
 an immutable `ProjectSettingsCandidate` only after the runtime preset and additive request fit the
 compiled product ceiling. RGF-U4 then proves the resolved plan's required product capabilities fit
 that request and closes plugin service requirements/conflicts and group membership before touching
-`App`. Candidate ingest returns `ProjectCandidateError`; plugin closure and installation return
-`PluginError`. Only a valid plan may apply resources and install plugins. `nara_project` itself
-remains side-effect-free.
+`App`. Candidate ingest returns `ProjectCandidateError`. Root product closure returns
+`CompositionError`, and plugin group/slot/dependency closure returns `PluginPlanError`, before
+mutation. App-level plugin hooks return `PluginError`. Only a valid resolved plan may create a
+private prepared transfer and enter closed plugin commit. `nara_project` itself remains
+side-effect-free.
 
 ```mermaid
 flowchart TD
@@ -82,8 +85,8 @@ flowchart TD
     Validate --> Product[Resolve compiled/requested/required product subsets]
     Product --> Services[Close plugin service requirements/conflicts and groups]
     Services --> Gate{Both closures valid?}
-    Gate -->|no| Reject[PluginError; App unchanged]
-    Gate -->|yes| Apply[Apply settings and install plugins]
+    Gate -->|no| Reject[CompositionError / PluginPlanError; App unchanged]
+    Gate -->|yes| Apply[Prepare definitions, then apply settings and commit plugins]
     Apply --> Paths[Project paths / AssetSourceRoot / import cache]
     Apply --> Startup[Startup scene / entry settings]
     Apply --> Runtime[FixedTime / pause / background policy]

@@ -109,6 +109,7 @@ The comparisons matter because they expose two independent lessons:
 | Semantic resolution view | Root-private borrowed view of immutable pre-binding package selection, typed semantic contract results, and fingerprint | Owned plan registry, bound Host projection, active registry, or runnable blueprint |
 | Concrete typed projection | Product-specific inactive `Bound*Contract` fields assembled only after every selected domain binding succeeds | Semantic view, public erased plan bag, ready candidate, or active state |
 | Runtime plugin | Trusted in-process Rust contribution that configures one `App` candidate | Package installer, editor extension, importer, or build hook |
+| Plugin definition | Stable versioned identity for one admitted typed runtime-plugin construction policy plus canonical configuration | Package contribution identity, installed plugin identity, or product slot identity |
 | Runtime content package | Immutable cooked package and catalog artifact owned by ADR 0088 | Source extension package or Cargo package |
 | Trust tier | Honest statement about executable placement and enforcement strength | A claim that all listed permissions sandbox native Rust |
 
@@ -119,7 +120,9 @@ Cargo package ID/source/version
     != SourcePackageId/release
     != ContributionId
     != ContributionContractId/version
-    != PluginId or plugin slot ID
+    != PluginDefinitionId/version
+    != PluginId
+    != PluginSlotId
     != schema/component/field ID
     != executable/runtime/import/cook generation
     != ADR 0088 runtime content package digest
@@ -127,6 +130,13 @@ Cargo package ID/source/version
 
 Display names, Rust type paths, crate aliases, file paths, and registry URLs are not durable
 substitutes for these identities.
+
+A runtime `ContributionId` selects one package-declared runtime role. Its compiled binding invokes
+one canonical data-only definitions source, which may yield several `PluginDefinitionId` values.
+Each definition ID/version admits one typed construction policy; `PluginId` identifies the concrete
+plugin installed from it, while `PluginSlotId` identifies named product placement and the unique
+`PluginId` identifies an un-slotted custom registration.
+Final admission verifies these joins. None of the four identities is inferred from another.
 
 ## Problem
 
@@ -226,7 +236,7 @@ These are the recommended high-cost boundaries. They remain non-normative until 
 14. Required Host projections selected by one concrete activation intent and plan fingerprint form
     an activation cohort: every selected required candidate reaches ready-but-unpublished before a
     Host-private cohort record publishes and exposes generation-consistent typed leases.
-15. The direct `App::new().add_plugin(...)` path remains available with its narrower lifecycle
+15. The direct `App::new().add_plugins(...)` path remains available with its narrower lifecycle
     guarantees and no package-manager ceremony.
 
 ## Module And Seam Placement
@@ -940,7 +950,7 @@ The fastest path remains ordinary Rust:
 
 ```rust
 let mut app = App::new();
-app.add_plugin(MyGamePlugin)?;
+app.add_plugins(MyGamePlugin)?;
 ```
 
 This is closest to Bevy and intentionally does not require package metadata. Product-level atomic

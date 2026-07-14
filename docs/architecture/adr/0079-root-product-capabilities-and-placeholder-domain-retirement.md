@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
+**Last Revised**: 2026-07-14
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
 
@@ -38,15 +39,21 @@ flowchart LR
     Cargo[Compiled Cargo product capabilities] --> Ceiling{Normalized request is available}
     Project[Runtime preset plus additive project request] --> Normalize[Normalize implied capabilities]
     Normalize --> Ceiling
-    Ceiling -->|no| Reject[Structured PluginError; App unchanged]
+    Ceiling -->|no| ProductReject[CompositionError; App unchanged]
     Ceiling -->|yes| Plan[Resolve groups and required product capabilities]
     Normalize --> Requested{Plan requirements fit request}
     Plan --> Requested
-    Requested -->|no| Reject
+    Requested -->|no| ProductReject
     Requested -->|yes| Services[Close plugin services, conflicts, and groups]
     Services --> Validate{Service closure is valid}
-    Validate -->|no| Reject
-    Validate -->|yes| Install[Apply settings and install plugins]
+    Validate -->|no| PlanReject[PluginPlanError; App unchanged]
+    Validate -->|yes| Prepare[Create private prepared transfer]
+    Prepare --> Prepared{Preparation succeeds?}
+    Prepared -->|no| PrepareReject[PluginPrepareError; no App]
+    Prepared -->|yes| Commit[Commit App plugin lifecycle]
+    Commit --> CommitResult{Hooks succeed?}
+    CommitResult -->|no| CommitReject[PluginError; candidate failed, retained through cleanup]
+    CommitResult -->|yes| Ready[Continue runtime startup]
 ```
 
 After normalization, the product-capability invariant is:
@@ -113,9 +120,12 @@ plugin installation, or lifecycle transition it validates:
 - platform adapters have their required backend-neutral domains;
 - the selected runtime preset obeys headless/server exclusions.
 
-Any failure returns a structured, matchable `PluginError` that identifies the unavailable or invalid
-capability. The same `App` remains usable for a later valid composition attempt. Diagnostics and task
-settings are not installed early as a workaround because that would already be mutation.
+Product capability failure returns a structured, matchable `CompositionError`; plugin group/slot,
+dependency, conflict, and ordering failure returns `PluginPlanError`. `PluginError` remains the
+App-level plugin hook error, while repeatable factory preparation returns `PluginPrepareError`.
+Pure composition, plan, and typed preparation rejection leave the same direct `App` usable for a
+later valid attempt. Diagnostics and task settings are not installed early as a workaround because
+that would already be mutation.
 
 ### Product plugin groups
 

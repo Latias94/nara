@@ -150,7 +150,7 @@ This document uses three evidence labels so a future sketch is not confused with
 | Editor workspace ownership | Transitional: workspace and Play state are currently exposed through tooling resources and World-facing helpers | The intended concrete Editor Host must own workspace/document authority outside the simulation World; package Inspector/tooling providers must not use the current resource/plugin as their seam |
 | Image reload jobs | Transitional implementation | `nara_image` privately owns job queues and currently performs direct filesystem reads; this must not become the third-party importer pattern |
 | Filesystem capability substrate | Settled, pending overall; implemented primitives include handle-relative open, scoped identity, digest, lock, temp/replace, and sync receipts | Enumeration, rename/unlink recovery, Host trust binding, and domain migration remain incomplete; Import consumes brokered capabilities/snapshots |
-| Runtime composition plan | Proposed by the runtime composition workbench | Current root settings application can mutate before all product admission succeeds |
+| Runtime composition plan | Settled, pending by ADRs 0010/0046/0079 and the runtime composition workbench | Static declarations, data-only groups, definition keys, pure closure, and closed commit remain unimplemented |
 | Package manifest, compiled bindings, typed package plans, cohort | Proposed by the source extension package workbench | No source type should be described as implemented or compatibility-stable |
 
 The implemented reference-game pattern, where a plugin preflights schemas, registers them, and adds
@@ -354,8 +354,8 @@ The first tracer Definition of Done is deliberately smaller than this document:
 
 1. one private canonical definition source lowers into both the direct plugin group and package
    registration;
-2. schema fragment fingerprints, plugin declarations, schedule placement, and headless semantic
-   snapshots agree across those two paths;
+2. schema fragment fingerprints, complete admitted plugin definition keys, schedule placement, and
+   headless semantic snapshots agree across those two paths;
 3. the standard Inspector edits `SpriteAnimator` through existing patch and undo behavior without a
    custom provider;
 4. a minimal shared Import Host replaces asset-type-owned filesystem/task/publication loops for the
@@ -468,14 +468,15 @@ app.add_plugins(SpriteAnimationPlugins::default())?;
 ```
 
 The direct entry is one `PluginGroup`, not an overloaded package `Plugin`. One canonical compiled
-domain definition owns the schema fragment, plugin declaration, and runtime configuration defaults.
+domain definition owns the schema fragment, plugin declaration, stable definition ID/version,
+factory binding, and runtime configuration defaults.
 The source manifest separately owns durable package/contribution declarations and stable locators.
 The direct group and package helper are two lowerings of the compiled domain definition; final
 admission verifies that the package locator and compiled definition agree. This is one authority per
 fact kind, not a claim that every fact lives in one file.
 
-Conformance tests compare the schema fragment fingerprint, plugin ID/declaration, schedule
-placement, and headless semantic snapshot produced by both lowerings. Importer/editor roles and
+Conformance tests compare the schema fragment fingerprint, complete admitted plugin definition key,
+schedule placement, and headless semantic snapshot produced by both lowerings. Importer/editor roles and
 product lifecycle guarantees are intentionally different. The direct group does not install
 importer, editor, or cook roles and does not promise package preview, multi-Host activation,
 last-good publication, or fresh-runtime restart. Those are product-path guarantees, not hidden
@@ -494,7 +495,7 @@ pub fn package() -> Result<PackageDefinition, PackageAuthorReport> {
             ),
             nara_app::package::plugins(
                 generated::RUNTIME,
-                SpriteAnimationRuntimePlugin::new,
+                definitions::runtime_plugins,
             ),
             #[cfg(feature = "import")]
             nara_asset::package::importer(
@@ -1064,15 +1065,16 @@ No universal `ExtensionError` should erase the responsible Module or mutation gu
 | Manifest shape, budget, or migration | source package/preview Module | No package code or Nara-issued Host authority | None | Active state unchanged |
 | Unknown required contract or denied policy | root composition Module | Pure rejection | None | Active state unchanged |
 | Missing/extra/wrong/stale or digest-drift binding | leaf final catalog admission; contract and Adapter owners supply immutable evidence only | Factory not called | None | Active state unchanged |
-| Factory panic or ambient side effect during candidate preparation | concrete Host attempt; domain owner supplies error semantics | Pure resolve/bind already succeeded and candidate preparation may own reservations; trusted native code may still violate the contract through ambient authority | None | Host retains cleanup ownership, discards the candidate, and reports any non-rollbackable contract breach honestly |
+| Factory panic or ambient side effect during candidate preparation | concrete Host attempt; domain owner supplies error semantics | Pure resolve/bind already succeeded and candidate preparation may own reservations; trusted native code may still violate the contract through ambient authority | None | Host marks the candidate failed, retains it through terminal cleanup, then releases it while reporting any non-rollbackable contract breach honestly |
 | Schema merge/freeze failure | `nara_reflect` candidate | Candidate-local memory only | None | Retire prepared siblings |
 | Importer slot/extension conflict | `nara_asset` plan | No job or source grant | None | Active state unchanged |
 | Ordinary import queue pressure, cancellation, decode, or budget failure | `nara_asset` Import Host | `nara_tasks` work and scoped staging may exist | No new artifact group; package cohort unaffected | Preserve artifact last-good; cancel and retire/quarantine staging |
 | Import failure in an explicitly linked startup transaction | concrete runtime Host plus `nara_asset` | Required startup closure is not ready | No linked runtime activation | Preserve independent artifact/package predecessors; retire selected candidates |
 | Stale or superseded import result | `nara_asset` Import Host | Result cannot enter active artifact manifest | None | Reject by task/source/artifact generation |
 | Custom Inspector construction failure | `nara_tooling` candidate | Candidate-local model only | None when selected required | Retire prepared siblings; fallback only if preselected in plan |
-| Plugin preflight failure | runtime candidate | The rejected plugin is not committed; earlier admitted plugins may already have mutated the unpublished candidate | None | Discard the whole candidate; release/retire candidate-owned reservations |
-| Plugin build/finish failure or panic | `nara_app` candidate | Poisoned candidate `App` | None | `nara_app` reports reverse once-only cleanup; external/native retirement retention is a proposed Host obligation |
+| Typed plugin preflight rejection before the attempt's first commit | runtime candidate or caller-owned `App` | No plugin or staged plan/provenance metadata committed | None | End the attempt and discard staged inspection metadata; no cleanup owner exists, and a caller-owned `App` remains reusable |
+| Plugin preflight rejection after an earlier commit, or any preflight unwind | runtime candidate | Earlier admitted plugins may have mutated the unpublished candidate; unwind is poison-causing even before the first commit | None | Mark failed/unpublishable and retain the candidate owner through reverse once-only terminal cleanup before release |
+| Plugin build/finish failure or panic | `nara_app` candidate | Poisoned candidate `App` | None | Retain the candidate owner; `nara_app` reports reverse once-only cleanup, and external/native retirement remains owned until its terminal result |
 | User cancel before publication | concrete Host | Cooperative request; work may still run | None | Gate ingress, reject late results, prove retirement |
 | UI controller is dropped or panics | concrete Host | Host registry still owns the attempt | None by itself | Continue cleanup or retain owner; controller lifetime is irrelevant |
 | Expected active generation changed | concrete Host | No active exchange | None | Retire stale candidate |

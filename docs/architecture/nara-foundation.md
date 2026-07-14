@@ -179,7 +179,7 @@ sequenceDiagram
     participant UiRender as nara_ui_render
     participant Wgpu as nara_render_wgpu
 
-    Game->>App: add_plugin / add_systems
+    Game->>App: add_plugins / add_systems
     App->>ECS: run startup schedules once
     loop frame
         App->>Asset: TaskUpdate / AssetTaskUpdateSet::Poll
@@ -257,10 +257,12 @@ second real adapter or stronger isolation pressure.
 
 ## Implemented Authoring Foundations
 
-- `nara_app` owns an explicit terminal plugin lifecycle. Read-only preflight rejection is retryable;
-  build/finish entry is committed, and error or unwind panic poisons the app, preserves the first
-  error, aggregates reverse once-only cleanup failures, and prevents schedule execution. Plugin
-  groups receive a composition-only builder, cleanup receives a world-only context, runners borrow
+- `nara_app` owns an explicit terminal plugin lifecycle. Current read-only preflight rejection is
+  retryable only before the current top-level attempt has committed a member; build/finish entry is
+  committed, and later preflight failure or build/finish error/unwind panic poisons the app,
+  preserves the first error, aggregates reverse once-only cleanup failures, and prevents schedule
+  execution. Plugin groups receive a composition-only builder, cleanup receives a world-only
+  context, runners borrow
   the app so shutdown remains observable, and mutable app entry points are fallible. Built-in
   component registration conflicts are checked during preflight and return contextual
   `PluginError` values rather than panic.
@@ -396,9 +398,11 @@ second real adapter or stronger isolation pressure.
   replication, scripting, diagnostics, and runtime-only state do not reserve speculative wire
   values. Capabilities gate domain participation but do not replace domain policy. See ADR
   [0045](adr/0045-component-schema-capability-metadata.md).
-- Plugins expose stable IDs, declared capabilities, requirements/conflicts, and inspectable group
-  membership. Default plugin groups are explicit product bundles, and `MinimalPlugins` stays
-  headless/minimal. See ADR
+- The settled U4 plugin target uses one static declaration with stable ID, capabilities,
+  requirements, and conflicts; stable definition keys carry repeatable construction/config
+  identity. Data-only groups derive inspectable membership/provenance through pure resolution, and
+  hook commit is closed against nested installation/runner selection. Default groups remain
+  explicit product bundles, and `MinimalPlugins` stays headless/minimal. See ADR
   [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md).
 - Root Cargo features form coarse compiled product-capability ceilings. The required product
   capabilities of a resolved plugin plan must fit the normalized project request, which must fit
