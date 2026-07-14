@@ -37,7 +37,7 @@ The type names and Rust sketches are illustrative. The durable subject is the ow
   domain-specific binding rules;
 - root composition selects the contracts compiled into one executable and directly owns their
   concrete typed results;
-- concrete Hosts own candidate construction, placement, activation, cleanup, and active state.
+- concrete Hosts own candidate construction, placement, activation, retirement, and active state.
 
 ## Decision Summary
 
@@ -197,8 +197,8 @@ flowchart TD
     HostFacts --> Pending
     Pending --> Binder[Concrete Host binder]
     Binder --> Bound[BoundContract C H PlanData BoundPlan plus binding receipt]
-    Bound --> Projection[Concrete typed root projection]
-    Projection --> Host[Later concrete Host candidate and activation]
+    Bound --> Composition[Concrete typed root composition]
+    Composition --> Host[Later concrete Host candidate and activation]
 ```
 
 Dependency categories are simple at this seam:
@@ -551,8 +551,8 @@ compiled binding implementation/executable evidence, selected target, and declar
 Actual thread, executor, process, native authority, candidate readiness, and activation remain
 later Host-owned receipts.
 
-Root composition stores bound results as concrete fields in `EditorProjectProjection`,
-`ServerProjectProjection`, or another concrete Host projection. It never inserts them into a
+Root composition stores bound results as concrete fields in `EditorExtensionComposition`,
+`ServerExtensionComposition`, or another concrete Host composition. It never inserts them into a
 public `get<T>()` plan registry.
 
 Neither receipt contains a plan object, provider, factory, `TypeId`, pointer, native handle,
@@ -592,7 +592,7 @@ The operation follows one fixed order:
     support and every shared seal, moves the inactive transfer into `BoundPlan`, and invokes no
     factory.
 12. Only complete binding success constructs `ContractBindingReceipt<C, H>` and the concrete typed
-    root projection. Candidate preparation and factory invocation happen later in the Host.
+    root composition. Candidate preparation and factory invocation happen later in the Host.
 
 A semantic failure returns neither receipt. A later binding failure may retain the immutable
 semantic receipt for diagnostics but returns no binding receipt. Neither phase performs Host
@@ -606,15 +606,15 @@ The Interface distinguishes three edge owners:
 |---|---|
 | Contract-internal order, slot, and fallback edge | Domain contract owner |
 | Package presence, requirement, conflict, and cross-contract bridge | Root composition |
-| Candidate authority, startup, ready, cleanup, and active publication edge | Concrete Host |
+| Candidate authority, startup, readiness, retirement, and active publication edge | Concrete Host |
 
 The contract plan may propose stable edge drafts. The leaf/root validates selected endpoints,
 generation/fingerprint matches, allowed bridge kinds, bounded cycles, engine-owned phase limits,
 and whether the static dependency topology has a valid reverse order. A third-party contract may
 define namespaced internal phases but cannot invent a process-wide lifecycle phase by string.
 
-The concrete Host derives its cleanup DAG from the admitted dependency topology, executes reverse
-retirement, and proves the actual cleanup order through a Host-owned cleanup receipt. The leaf
+The concrete Host derives its retirement DAG from the admitted dependency topology, executes reverse
+retirement, and proves the actual order through a Host-owned retirement receipt. The leaf
 cannot prove candidate owner behavior before a candidate exists.
 
 The receipt records admitted edge facts. It does not execute them.
@@ -627,7 +627,7 @@ accept a local affine bound plan. Actual placement produces a Host-owned placeme
 
 Likewise, `ContractSupport`, its non-capturing resolver, the concrete binder, and `BoundPlan` do not
 gain filesystem, process, GPU, window, editor, runtime, or task authority during composition. A
-concrete Host prepares a fresh candidate after the complete project projection is admitted.
+concrete Host prepares a fresh candidate after the complete project composition is admitted.
 
 ### 11. Error And Diagnostic Bridge
 
@@ -663,7 +663,7 @@ presented as sandboxed.
 
 In `panic = "abort"` builds, no in-process recovery is possible. The operation cannot return a
 typed failure, and the only honest guarantee is that an in-progress receipt had not yet been
-issued. The concrete Host attempt remains the lifecycle/cleanup owner; domain Modules own only
+issued. The concrete Host attempt remains the lifecycle/retirement owner; domain Modules own only
 phase-specific error semantics. Conformance includes decoder, resolver, summarizer, binder, and
 double-panic/drop fixtures for unwind profiles plus documented abort-profile process tests.
 
@@ -731,7 +731,7 @@ A concrete Adapter and root/Host maintainer separately supplies:
 1. the concrete Host binding kind, accepted plan versions, target/affinity constraints, and typed
    inactive bound plan;
 2. explicit compiled Adapter-support registration in each product root that supports the contract;
-3. candidate preparation, authority, cleanup, and publication behavior plus Adapter conformance
+3. candidate preparation, authority, retirement, and publication behavior plus Adapter conformance
    fixtures;
 4. no universal Host trait and no change to the leaf kernel.
 
@@ -867,7 +867,7 @@ binding result
     = inactive Host-specific BoundPlan + typed binding receipt
 
 concrete Host
-    = placement + authority + candidate + activation + cleanup
+    = placement + authority + candidate + activation + retirement
 ```
 
 ## Test Strategy
@@ -916,7 +916,7 @@ private erased capsules, sort buffers, or slice witnesses.
 | Leaf gains a domain dependency cycle | Critical | Medium | Keep domain errors typed and diagnostic lowering above the leaf; enforce dependency audits |
 | Generated locator is mistaken for verified truth | High | Medium | Keep it untyped and claim-only; mint typed keys only after final catalog verification |
 | Semantic receipt overclaims Adapter/affinity evidence | Critical | Medium | Keep `ContractResolutionReceipt<C>` semantic-only; require separate verified support and `ContractBindingReceipt<C, H>` |
-| Receipt is mistaken for activation or security proof | Critical | Medium | Private constructors, explicit phase scope, and separate binding, Host placement, cleanup, and activation receipts |
+| Receipt is mistaken for activation or security proof | Critical | Medium | Private constructors, explicit phase scope, and separate binding, Host placement, retirement, and activation receipts |
 | Pure resolver invokes implementation code | Critical | Medium | Give slices evidence only; retain callable bindings in opaque transfer until a visibility/typestate-restricted Host binder moves them without invocation |
 | Plan fingerprint omits behavior-affecting fields | High | Medium | Constrained canonical sink plus golden and semantic conformance tests per contract |
 | Generic Interface harms ordinary author ergonomics | High | Medium | Hide it behind domain helpers and one package registration; expose advanced kit only to contract authors |

@@ -48,7 +48,7 @@ For every proposed package or contribution Interface:
 2. State which Host role consumes it, where its code executes, and which product target it affects.
 3. Compare the closest Bevy, Godot, Unity, and Unreal concepts and state where the analogy ends.
 4. List everything the caller must know: declaration, ordering, compatibility, trust, errors,
-   rebuild effects, and cleanup.
+   rebuild effects, and retirement.
 5. Keep discovery and resolution data-only. Identify the later seam where executable code gains
    authority.
 6. Test through the same Interface used by package authors, project authors, CLI, and editor.
@@ -106,8 +106,8 @@ The comparisons matter because they expose two independent lessons:
 | Subject target | Product platform/profile whose runtime or artifacts the contribution affects | Execution platform or Cargo Host tools |
 | Compiled binding | Static association from a declared contribution ID to a typed repeatable factory/provider | Declaration authority or stable native ABI |
 | Package preview | Pure pre-build inspection result with evidence levels and explicit unknowns | Final binding compatibility, successful compilation, or Host admission |
-| Semantic resolution view | Root-private borrowed view of immutable pre-binding package selection, typed semantic contract results, and fingerprint | Owned plan registry, bound Host projection, active registry, or runnable blueprint |
-| Concrete typed projection | Product-specific inactive `Bound*Contract` fields assembled only after every selected domain binding succeeds | Semantic view, public erased plan bag, ready candidate, or active state |
+| Semantic resolution view | Root-private borrowed view of immutable pre-binding package selection, typed semantic contract results, and fingerprint | Owned plan registry, bound Host composition, active registry, or runtime recipe |
+| Concrete typed composition | Product-specific inactive `Bound*Contract` fields assembled only after every selected domain binding succeeds | Semantic view, public erased plan bag, ready candidate, or active state |
 | Runtime plugin | Trusted in-process Rust contribution that configures one `App` candidate | Package installer, editor extension, importer, or build hook |
 | Plugin definition | Stable versioned identity for one admitted typed runtime-plugin construction policy plus canonical configuration | Package contribution identity, installed plugin identity, or product slot identity |
 | Runtime content package | Immutable cooked package and catalog artifact owned by ADR 0088 | Source extension package or Cargo package |
@@ -135,7 +135,7 @@ A runtime `ContributionId` selects one package-declared runtime role. Its compil
 one canonical data-only definitions source, which may yield several `PluginDefinitionId` values.
 Each definition ID/version admits one typed construction policy; `PluginId` identifies the concrete
 plugin installed from it, while `PluginSlotId` identifies named product placement and the unique
-`PluginId` identifies an un-slotted custom registration.
+`PluginId` identifies an un-slotted custom entry.
 Final admission verifies these joins. None of the four identities is inferred from another.
 
 ## Problem
@@ -174,13 +174,13 @@ instead of hiding them behind `dynamic plugin`, `permission`, or `hot reload` la
    iteration effects, and explicit unknowns before executing package code; verify compiled facts
    before executable Host mutation.
 4. Keep Cargo metadata and the application lockfile authoritative for the Rust graph.
-5. Resolve deterministic immutable Host projections before `App`, editor, importer, worker, or
+5. Resolve deterministic immutable Host compositions before `App`, editor, importer, worker, or
    native authority mutation.
 6. Let domain owners add typed contribution contracts without expanding one central enum, error
    type, or universal context.
 7. Exclude editor/import/build-only code from shipping runtime and server dependency closures.
 8. Preserve last-good executable/runtime/editor/import state across failed candidate activation,
-   and prevent required projections from publishing as a mixed package-plan cohort, without
+   and prevent required compositions from publishing as a mixed package-plan cohort, without
    claiming arbitrary filesystem or native rollback.
 9. Make native trust, isolation, permissions, rebuild, reimport, restart, and migration effects
    visible in both CLI and editor.
@@ -233,7 +233,7 @@ These are the recommended high-cost boundaries. They remain non-normative until 
     executable/Host/runtime generation. A Rust dynamic ABI is not inferred.
 13. Missing package/schema providers enter degraded authoring under ADR 0090 when safe; source
     files never authorize automatic download, compilation, or execution.
-14. Required Host projections selected by one concrete activation intent and plan fingerprint form
+14. Required Host compositions selected by one concrete activation intent and plan fingerprint form
     an activation cohort: every selected required candidate reaches ready-but-unpublished before a
     Host-private cohort record publishes and exposes generation-consistent typed leases.
 15. The direct `App::new().add_plugins(...)` path remains available with its narrower lifecycle
@@ -260,7 +260,7 @@ flowchart TD
     Import[Bound importer-catalog contract]
     Build[Bound cook / export contract]
     Content[Content / template transaction plan]
-    Projection[Root-sealed concrete typed projection]
+    Composition[Root-sealed concrete typed composition]
     Host[Concrete Host attempt]
     Candidate[Domain-owned candidates]
     Publish[Host-private publication]
@@ -283,12 +283,12 @@ flowchart TD
     Bind --> Import
     Bind --> Build
     Selection --> Content
-    Runtime --> Projection
-    Editor --> Projection
-    Import --> Projection
-    Build --> Projection
-    Content --> Projection
-    Projection --> Host
+    Runtime --> Composition
+    Editor --> Composition
+    Import --> Composition
+    Build --> Composition
+    Content --> Composition
+    Composition --> Host
     Host --> Candidate --> Publish
 ```
 
@@ -296,12 +296,12 @@ flowchart TD
 |---|---|---|
 | Cargo Adapter | Structured metadata invocation/ingest, selected package/feature/execution-target/subject-target facts, lock provenance | A second resolver, Nara contribution semantics, active Host state |
 | package definition | One all-or-error authoring operation that joins canonical declaration locators to compiled domain definitions through domain helpers | Product selection, contract resolution, Host ordering, candidate state, or publication |
-| concrete product root composition | Host/target/trust selection, cross-package closure, orchestration of admission/resolution/binding, concrete typed projection, and immutable activation-cohort specification | `App`, `World`, candidate readiness, cleanup ownership, active pointer, or publication |
+| concrete product root composition | Host/target/trust selection, cross-package closure, orchestration of admission/resolution/binding, concrete typed composition, and immutable activation-cohort specification | `App`, `World`, candidate readiness, shutdown ownership, active pointer, or publication |
 | leaf contract Module | Bounded envelopes, final catalog admission, common structural checks, semantic receipts, and sealed binding continuations | Domain plan policy, candidate construction, Host authority, or active state |
 | contract owner | Typed descriptor schema, domain closure/order, plan, diagnostics, conformance suite | Package acquisition, unrelated contracts, universal Host context |
 | domain binding Module | Exact plan-version/Adapter/target/affinity join and inactive bound plan | Factory invocation, placement, candidate readiness, or publication |
 | compiled binding catalog | Declared ID to static typed factory/provider binding, declaration fingerprint, verified executable generation, and provider implementation digest | Dynamic library compatibility claim, package declaration authority |
-| concrete Host Adapter | Process/platform authority, candidate construction, activation, drive, publication, finite cleanup evidence or a retained failed owner | Package resolution policy or another domain's lifecycle |
+| concrete Host Adapter | Process/platform authority, candidate construction, activation, drive, publication, finite shutdown evidence or a retained failed owner | Package resolution policy or another domain's lifecycle |
 | package UX Adapter | CLI/editor presentation, preview, explicit consent, generated source changes | Dependency solving, silent code execution, hidden permission widening |
 
 Both package definition and concrete root composition have real Depth. Deleting the first would
@@ -321,7 +321,7 @@ Scenario IDs are stable references for future Interface reviews and conformance 
 | ID | Caller And Goal | Required Interface Behavior | Primary Oracle |
 |---|---|---|---|
 | PX-01 | Game author experiments with a local gameplay module | Direct systems or game-owned `Plugin` require no package descriptor | Minimal code-first compile/smoke |
-| PX-02 | Project adds a runtime-only local/Git/registry package | One explicit package action/registration produces a preview and runtime projection without manual plugin order | Independent workspace install/boot |
+| PX-02 | Project adds a runtime-only local/Git/registry package | One explicit package action produces a preview and runtime composition without manual plugin order | Independent workspace install/boot |
 | PX-03 | User inspects a package before building it | Identity, source, license, compatibility, contributions, execution/subject targets, claimed/observed native-build-proc-macro trust evidence, unknowns, and iteration effects are visible without executing package code | No-build inspection fixture |
 | PX-04 | Package offers default and optional contributions | Defaults are explicit in the plan; advanced selection appears only when requested | Golden plan and generated docs |
 | PX-05 | User updates a package | Preview reports Cargo diff, contract/schema changes, permission widening, rebuild/reimport/restart/migration effects | Candidate update fault matrix |
@@ -333,14 +333,14 @@ Scenario IDs are stable references for future Interface reviews and conformance 
 
 | ID | Caller And Goal | Required Interface Behavior | Closest Mature Concepts | Primary Oracle |
 |---|---|---|---|---|
-| PX-10 | Package provides runtime behavior | Runtime contribution lowers to repeatable `PluginRegistration` and the closed `ResolvedProductPlan` | Bevy `Plugin`; Unreal Runtime module | Runtime composition scenarios RC-12/RC-24 |
+| PX-10 | Package provides runtime behavior | Runtime contribution resolves to `RuntimeContributionPlan`; concrete root composition lowers it with first-party/profile policy into closed `PluginPlan` and `RuntimePlan` values | Bevy `Plugin`; Unreal Runtime module | Runtime composition scenarios RC-12/RC-24 |
 | PX-11 | Package provides ordinary editable schemas | Standard inspector derives from schema capabilities with no custom editor code | Bevy reflection; Unity serialized inspector; Unreal reflected properties | Schema/inspector golden fixture |
 | PX-12 | Package customizes a foreign type's inspector | Registration targets stable schema IDs and emits allowlisted, target-scoped edit intents that the Editor Host validates and lowers through normal workspace commands, avoiding Rust orphan-rule coupling and broad workspace authority | Godot `EditorInspectorPlugin`; Unity `CustomEditor`; Unreal details customization | Cross-package inspector/undo test |
 | PX-13 | Package adds a UI-agnostic editor tool | Tool contributes models, commands, selection predicates, and state outside runtime `World` | Unity Editor assembly; Unreal Editor module | Same command test through CLI/AI/UI adapters |
 | PX-14 | Package adds toolkit-specific editor UI | UI contribution is explicitly bound to one toolkit Adapter and cannot own document mutation | Godot dock/control plugin; Unity custom Editor window | Toolkit dependency and command-route audit |
 | PX-15 | Package imports a new source format | Import contribution declares extensions/options/version and runs through tracked bounded `ImportContext` | Bevy `AssetLoader`; Godot `EditorImportPlugin`; Unity `ScriptedImporter`; Unreal Interchange | Import conformance and conflict tests |
 | PX-16 | Package adds project settings | Namespaced schema/default/validation lowers through `nara_project`; package cannot create another persistent config authority | Unity package settings; Godot project/editor settings plugins | Manifest overlay/unknown-setting fixtures |
-| PX-17 | Package pairs runtime intent with native service authority | Separate service Adapter and runtime contribution join one validated requirement graph; plugin build cannot acquire Host authority | Unreal module/provider split; Godot server/native extension levels | Service admission/cleanup test |
+| PX-17 | Package pairs runtime intent with native service authority | Separate service Adapter and runtime contribution join one validated requirement graph; plugin build cannot acquire Host authority | Unreal module/provider split; Godot server/native extension levels | Service admission/retirement test |
 | PX-18 | Package adds cook/export/artifact behavior | A previously compiled tool-Host provider consumes immutable declared inputs and publishes staged outputs; it cannot affect the build that produced itself | Godot export plugin; Unity build callback; Unreal cook/commandlet modules | Determinism, stale job, bootstrap, and output audit |
 | PX-19 | Package contains templates, samples, docs, or content only | Non-code contribution has provenance/license/install/remove policy and never needs an empty runtime plugin | Unity Samples/Documentation; Unreal content plugin; Godot addon content | Content-only install/remove fixture |
 
@@ -348,7 +348,7 @@ Scenario IDs are stable references for future Interface reviews and conformance 
 
 | ID | Situation | Required Result | Primary Oracle |
 |---|---|---|---|
-| PX-20 | Editor opens a package with runtime/import/inspector/UI contributions | One package set resolves separate typed Host projections from the same provenance snapshot | Projection fingerprint matrix |
+| PX-20 | Editor opens a package with runtime/import/inspector/UI contributions | One package set resolves separate typed Host compositions from the same provenance snapshot | Composition fingerprint matrix |
 | PX-21 | Dedicated server uses a package that also has editor/renderer code | Forbidden contributions and their dependencies are absent from the compiled and resolved server closure | Cargo tree and runtime resource audit |
 | PX-22 | Host builds runtime for another target | Import/editor/build tools compile for the Host target; runtime contributions compile for the product target | Cross-target metadata fixture |
 | PX-23 | Package names an unknown required contract | Stable pre-execution rejection identifies package, contribution, contract, Host, and supported versions | Old-Host/new-package compatibility test |
@@ -368,7 +368,7 @@ Scenario IDs are stable references for future Interface reviews and conformance 
 | PX-32 | Package dependency, feature, schema, layout, or contribution topology changes | New executable/Host/runtime candidate; no Rust ABI hot swap | Generation identity test |
 | PX-33 | Importer implementation/options/version change | Affected artifact recipes invalidate and reimport; unrelated last-good products remain | Import dependency graph fixture |
 | PX-34 | New package candidate fails build, migration, binding, or activation | No required member of its activation cohort publishes; ready siblings retire/quarantine, and source-edit state plus last-good activation are reported separately | Multi-stage fault matrix |
-| PX-35 | Editor extension crashes in process | Next launch can enter recovery mode from a journal; no claim that abort-time cleanup ran | Crash/recovery integration test |
+| PX-35 | Editor extension crashes in process | Next launch can enter recovery mode from a journal; no claim that abort-time retirement ran | Crash/recovery integration test |
 | PX-36 | Isolated import/cook worker crashes or times out | Its candidate/job faults; late results and staged outputs quarantine, and replacement waits for proven terminate/reap/lease retirement while the Host remains responsive | Worker containment/crash/timeout fixture |
 | PX-37 | Package is missing on one workstation or branch | Editor preserves bounded unavailable records under ADR 0090; runtime remains strict | Degraded open/save/recovery test |
 
@@ -378,7 +378,7 @@ Three deliberately different Interface shapes were compared:
 
 | Candidate | Optimizes For | Strength | Failure Mode If Used Alone |
 |---|---|---|---|
-| Minimal package composition | One to three top-level entry points | High Depth for project authors; one workflow resolves immutable semantics and seals concrete bound projections for Hosts | A fixed central contribution enum or one oversized plan owner can become the next bottleneck |
+| Minimal package composition | One to three top-level entry points | High Depth for project authors; one workflow resolves immutable semantics and seals concrete bound compositions for Hosts | A fixed central contribution enum or one oversized plan owner can become the next bottleneck |
 | Open contribution contract catalog | Third-party growth and new domains | High Locality; a new contract changes its owner and supporting Host, not package core | Raw contract IDs, descriptor envelopes, and internal type erasure would be hostile as the common author Interface |
 | Ergonomic typed helpers | Fast gameplay/package authoring | Common runtime, inspector, and importer paths remain small and discoverable | Helpers alone do not supply package-wide provenance, deterministic closure, or Host publication guarantees |
 
@@ -387,7 +387,7 @@ The recommendation is a hybrid:
 1. Keep package authoring minimal: `package::define` aggregates domain helpers into one opaque
    `PackageDefinition`; ordinary authors do not manipulate binding claims.
 2. Let each concrete Editor/server/cook root select, admit, resolve, bind, and return its typed
-   inactive projection. Candidate preparation and publication remain in the concrete Host.
+   inactive composition. Candidate preparation and publication remain in the concrete Host.
 3. Use an open, stable contract-ID envelope inside the composition implementation so new
    domains do not expand a central enum.
 4. Expose typed domain helpers for normal authors. Descriptor envelopes, internal type erasure,
@@ -504,7 +504,7 @@ cannot validate fallback semantics hidden inside an unknown descriptor payload.
 
 Internal implementation may use limited private erasure to route bounded envelopes, binding claims
 and receipts, or inspection/audit facts inside one executable. Semantic `PlanData` and Host
-`BoundPlan` remain in concrete typed root/Host projections; they never enter a generic erased plan
+`BoundPlan` remain in concrete typed root/Host compositions; they never enter a generic erased plan
 store. `Any`, downcast-by-string, and generic `get<T>()` do not enter persistent formats, public
 authoring Interfaces, diagnostics identities, or wire protocols.
 
@@ -571,7 +571,7 @@ provenance.
 pre-finish `PluginGroupBuilder`, Unity's package/assembly selection, and Unreal's target-specific
 module selection. It is intentionally stronger: it is an immutable, deterministic, inspectable
 borrowed view of pure semantic results and creates no executable Host state. It is a root-private
-intermediate, not a project-user workflow result and not a runnable blueprint.
+intermediate, not a project-user workflow result and not a runtime recipe.
 
 ```rust
 pub fn preview_project_extensions(
@@ -587,15 +587,15 @@ impl EditorProductRoot {
         &self,
         request: EditorExtensionRequest,
         packages: impl IntoIterator<Item = PackageDefinition>,
-    ) -> Result<EditorProjectProjection, EditorCompositionReport>;
+    ) -> Result<EditorExtensionComposition, EditorCompositionReport>;
 }
 ```
 
-The concrete Editor, server, and cook roots may expose different request, projection, and error
+The concrete Editor, server, and cook roots may expose different request, composition, and error
 types. This is deliberate. `compose` is an advanced root Interface hidden behind normal CLI/editor
 package actions; it is not a universal `ProductRoot`, `EngineHost`, or generic plan lookup trait.
 It performs root selection, final catalog admission, semantic resolution, inactive domain binding,
-and concrete typed projection in one fallible operation. It performs no candidate preparation or
+and concrete typed composition in one fallible operation. It performs no candidate preparation or
 publication.
 
 Preview and root-private composition are two non-mutating phases separated by an explicitly trusted
@@ -604,7 +604,7 @@ build. Each domain resolver inside the latter phase remains pure:
 ```text
 source/index facts -> data-only preview -> consent -> Cargo build
     -> compiled evidence -> final catalog admission -> data-only semantic resolution
-    -> domain-specific binding -> concrete typed projections -> Host candidates
+    -> domain-specific binding -> concrete typed compositions -> Host candidates
 ```
 
 `PackagePreview` may contain `Unknown` facts and cannot promise that bindings or implementation
@@ -645,7 +645,7 @@ The result can be borrowed as:
 ```text
 ResolvedProjectSemanticsView<'a>
 |- package provenance, trust decisions, inactive entries, and semantic fingerprint
-|- runtime: &ResolvedContract<RuntimeContract, RuntimePlan>
+|- runtime: &ResolvedContract<RuntimeContract, RuntimeContributionPlan>
 |- schema: &ResolvedContract<SchemaContract, SchemaPlan>
 |- editor: borrowed typed ResolvedContract values for selected tooling contracts
 |- import: &ResolvedContract<ImportContract, ImportPlan>
@@ -662,9 +662,9 @@ resulting `BoundContract` becomes the sole owner of the original plan data and s
 Before that move, the root may derive a bounded owned
 `ExtensionInspectionSnapshot` containing canonical projections and fingerprints, never a duplicate
 `PlanData` or a continuation. Only after every bind succeeds does the root construct an
-`EditorProjectProjection`, `ServerProjectProjection`, or another concrete typed projection. Each
-domain plan remains owned and activated by its Module. Cross-process Hosts may exchange versioned
-stable plan projections or fingerprints, not Rust trait objects.
+`EditorExtensionComposition`, `ServerExtensionComposition`, or another concrete typed composition.
+Each domain plan remains owned and activated by its Module. Cross-process Hosts may exchange
+versioned stable plan projections or fingerprints, not Rust trait objects.
 
 The plan fingerprint binds at least:
 
@@ -694,10 +694,10 @@ The comparison is behavioral prior art, not an inheritance hierarchy.
 
 | Nara contract | Closest established concepts | Typed plan and activation owner | Key Nara constraint |
 |---|---|---|---|
-| Runtime plugin | Bevy `Plugin`; Unreal Runtime module | `nara_app`/root composition lowers a repeatable factory into `ResolvedProductPlan` | Closed plan, fresh candidate, no hidden package or Host authority acquisition |
+| Runtime plugin | Bevy `Plugin`; Unreal Runtime module | Runtime contract owns `RuntimeContributionPlan`; `nara_app`/root composition lowers it into `PluginPlan` and the profile `RuntimePlan` | Closed plan, fresh candidate, no hidden package or Host authority acquisition |
 | Schema/type provider | Bevy type data; Godot ClassDB; Unity serialization metadata; Unreal UHT | `nara_reflect` builds an immutable catalog candidate and runtime binding set | Stable schema IDs are independent from Rust paths; editor can inspect catalog without running gameplay |
 | Inspector/property provider | Godot `EditorInspectorPlugin`; Unity `CustomEditor`; Unreal details customization | `nara_tooling` inspector Module resolves stable schema predicates to UI-neutral models/commands | Standard schema inspector is default; custom provider emits validated commands/patches, never direct `World` mutation |
-| Editor tool model | Unity Editor assembly; Unreal Editor module; Godot editor tool | `nara_tooling` owns models, commands, selection, state, and cleanup | No toolkit handle or mutable workspace escape hatch in the general contract |
+| Editor tool model | Unity Editor assembly; Unreal Editor module; Godot editor tool | `nara_tooling` owns models, commands, selection, state, and retirement | No toolkit handle or mutable workspace escape hatch in the general contract |
 | Editor UI Adapter | Godot dock/control; Unity editor window; Unreal Slate/editor UI | Concrete egui/Nara-UI Adapter renders tooling models and submits commands | Toolkit dependency and compatibility are explicit; UI does not become document authority |
 | Asset importer/processor | Bevy `AssetLoader`; Godot `EditorImportPlugin`; Unity `ScriptedImporter`; Unreal Interchange | `nara_asset` resolves an immutable importer catalog; import Host runs bounded tracked jobs | Source extensions/options/artifact version/conflicts resolve before jobs; no runtime `App` registration path |
 | Project setting provider | Unity package/editor settings; Godot project setting integration | `nara_project` validates namespaced schema/default/profile lowering | `nara.toml` remains the only project settings authority and cannot enable uncompiled code |
@@ -751,7 +751,7 @@ authored package intent
     -> structured locked Cargo graph snapshot
     -> compiled contribution catalog / executable generation
     -> root-private semantic view and pending bindings
-    -> concrete typed projection
+    -> concrete typed composition
     -> ready required candidates for one activation cohort
     -> active editor/import/runtime/tool generations
 ```
@@ -761,7 +761,7 @@ These are distinct publication axes:
 - editing `Cargo.toml` records author intent, not a successful active extension;
 - a new `Cargo.lock` records a resolved source graph, not a compiled or compatible Host;
 - successful compilation records a candidate executable/catalog, not runtime/editor publication;
-- each domain owns its generation lifecycle, but required projections selected by one plan do not
+- each domain owns its generation lifecycle, but required compositions selected by one plan do not
   publish independently before their activation cohort is ready;
 - failure may leave authoring source ahead of the last-good activation, and tooling must show that
   state instead of claiming global rollback.
@@ -776,9 +776,9 @@ An eventual package action should:
 5. build the selected execution-Host tools and subject-target profiles through ADR 0086 generation
    rules, in two stages where a compiled tool orchestrates a product build;
 6. perform final catalog admission, resolve every selected pure typed semantic plan, and bind each
-   plan to verified inactive implementations before sealing a concrete projection;
+   plan to verified inactive implementations before sealing a concrete composition;
 7. preview required project/schema/import migrations and destructive removal blockers;
-8. start and stage fresh Host/runtime/import/tool candidates from that bound projection as
+8. start and stage fresh Host/runtime/import/tool candidates from that bound composition as
    required;
 9. publish one coherent activation cohort only after every required candidate is ready, while
    retaining complete last-good activation evidence.
@@ -795,7 +795,7 @@ provider catalog while still running the old package plan. Ordinary asset reimpo
 `ArtifactGroupGeneration` publication remain independent ADR 0087 transactions unless a runtime
 startup plan explicitly selects a required artifact-closure receipt.
 
-Every required projection selected by one concrete activation intent and concrete composition
+Every required domain composition selected by one concrete activation intent and concrete root
 fingerprint therefore belongs to one `ActivationCohortId`. The composition fingerprint binds the
 semantic receipts, binding receipts, executable generation, target, and selected cohort membership;
 it is distinct from the pre-binding semantic fingerprint exposed by
@@ -813,7 +813,7 @@ private activation coordinator that applies it:
    generations;
 5. a pre-publication sibling failure retires or quarantines every ready candidate in reverse
    admitted dependency order;
-6. a projection may publish outside the cohort only when its contract explicitly proves
+6. a domain may publish outside the cohort only when its contract explicitly proves
    independent compatibility and records that relation in both plans;
 7. publication is still not arbitrary side-effect rollback. If a supposedly infallible activation
    pointer swap fails, the cohort remains failed/owned and conflicting replacement is blocked;
@@ -960,7 +960,7 @@ publication, package inspection, or multi-Host activation are not implied.
 
 The desired project-user experience is one Cargo/package action and, where source registration is
 not generated from project data, at most one explicit `combat::package()` registration. The user
-does not resolve plans, choose a runtime blueprint, or reproduce registration per Host.
+does not resolve plans, choose a runtime recipe, or reproduce entry wiring per Host.
 
 The desired CLI/editor action is conceptually:
 
@@ -970,8 +970,8 @@ nara package add games.acme.combat
 
 The exact public Rust product-entry syntax remains deferred. Internally, that entry point must
 still perform root selection, final catalog admission, semantic resolution, fallible inactive
-binding, concrete typed projection, and candidate preparation in that order. A
-`ResolvedProjectSemanticsView<'_>` is not a runnable blueprint, and neither a getter nor
+binding, concrete typed composition, and candidate preparation in that order. A
+`ResolvedProjectSemanticsView<'_>` is not a runtime recipe, and neither a getter nor
 `headless::start` may silently absorb the missing binding step.
 
 It is closest to Unity Package Manager or enabling an Unreal/Godot plugin, but Cargo performs Rust
@@ -1120,9 +1120,9 @@ sequenceDiagram
     Contract-->>Kernel: Typed PlanData or bounded rejection
     Kernel-->>Root: PendingContractBinding values with borrowable pure snapshots
     Root->>Binder: Consume exact pending bindings without factory invocation
-    Binder-->>Root: Concrete typed projection and binding receipts
-    Root-->>UX: Post-build inspection, exact effects, and projection ready
-    UX->>Activation: Stage approved projection and activation intent facts
+    Binder-->>Root: Concrete typed composition and binding receipts
+    Root-->>UX: Post-build inspection, exact effects, and composition ready
+    UX->>Activation: Stage approved composition and activation intent facts
     Activation-->>UX: Opaque activation attempt ID
     UX->>Activation: Start approved activation attempt by ID
     Activation->>Owner: Start required fresh candidates
@@ -1132,16 +1132,16 @@ sequenceDiagram
         Active-->>Consumers: Typed generation leases become visible at the record exchange
         Activation->>Owner: Retain predecessor retirement obligations
         Activation-->>UX: Success and retirement obligations
-    else Candidate preparation, activation, or cleanup fails
+    else Candidate preparation, activation, or retirement fails
         Activation->>Owner: Retire or quarantine every ready sibling candidate
-        Owner-->>Activation: Failure and retained cleanup state
+        Owner-->>Activation: Failure and retained retirement state
         Activation-->>UX: Failure, retained candidate owner, last-good status
         Note over Active: Existing published generations are not replaced
     end
 ```
 
 The sequence does not promise rollback across Cargo source files, compiler processes, editor state,
-runtime state, caches, and external systems. It does require required Host projections to stage
+runtime state, caches, and external systems. It does require required Host compositions to stage
 against one cohort fingerprint and expose only a complete cohort. Each authority/publication axis
 remains visible, last-good activation remains captured, and partial mutation is never called a
 rollback.
@@ -1158,7 +1158,7 @@ No universal `ExtensionError` should absorb domain facts or stringify arbitrary 
 | domain plan error | runtime/schema/editor/import/service/build owner | No owning-domain candidate mutation | Contract-specific cardinality, slot, format, schema, dependency, or order is invalid |
 | `ContractBindError` | domain-specific binding Module | No factory, placement, reservation, or candidate authority has started | The admitted semantic plan does not match the exact Adapter version, target, affinity, or shared generation seal |
 | executable/build failure | ADR 0086 build coordinator | No new executable/Host/runtime publication | Compiler, linker, artifact, provenance, or stale-generation validation failed |
-| domain activation failure | concrete Host/domain candidate | No required cohort publication; ready siblings retire/quarantine and cleanup ownership may remain | Plugin, editor, importer, service, cook, migration, or startup work failed after commit began |
+| domain activation failure | concrete Host/domain candidate | No required cohort publication; ready siblings retire/quarantine and shutdown ownership may remain | Plugin, editor, importer, service, cook, migration, or startup work failed after commit began |
 | live contribution/runtime fault | published domain/runtime owner | Published state may be partially mutated; first fault is sticky | Stop/observe/discard according to the owning lifecycle; never retry in place by default |
 
 Primary diagnostics use stable package/role or contribution, target, rejected action, corrective
@@ -1256,7 +1256,7 @@ model itself.
 features quickly.
 
 **Cons**: The Interface grows with every editor/runtime/import/build authority, creates a service
-locator, makes automated testing depend on a complete editor, and spreads cleanup/order knowledge.
+locator, makes automated testing depend on a complete editor, and spreads retirement/order knowledge.
 
 **Decision**: Rejected. Nara may offer convenience builders that group typed contributions, but
 the executable seams remain narrow.
@@ -1437,11 +1437,11 @@ premature registry, ABI, toolkit, or migration framework from becoming the archi
 This draft does not justify building a package manager before the current reference-game plan.
 Evidence should arrive in this order:
 
-1. Finish runtime composition U3/U4 so a runtime contribution can lower into a truthful closed
-   `ResolvedProductPlan`.
+1. Finish runtime composition U3/U4 so a `RuntimeContributionPlan` can lower into truthful closed
+   `PluginPlan` and profile `RuntimePlan` values.
 2. Build the reference game through public Cargo/static bindings and record iteration baselines.
 3. Create one in-repository package declaration that contributes runtime behavior plus one real
-   schema or importer contract, using an explicit registration if necessary.
+   schema or importer contract, using one explicit package binding if necessary.
 4. Move that package to an independent local-path workspace and prove clean-room Cargo, binding,
    target, diagnostics, docs, license, update, and removal workflows.
 5. Add one editor inspector/tool contribution only when editor dogfooding provides a real model and
@@ -1463,7 +1463,7 @@ Interface alternatives, and evidence sequence live in the
 2. Should one source extension package be anchored to exactly one Cargo facade package, or may it
    name contribution bindings from an already resolved multi-crate Cargo closure?
 3. What is the smallest owned `ExtensionInspectionSnapshot` projection that tooling needs, given
-   that the move-only contract bundles and later bound projections remain the sole typed-plan owners?
+   that the move-only contract bundles and later bound compositions remain the sole typed-plan owners?
 4. How are optional contribution selection and trusted build-profile features related without
    letting `nara.toml` enable uncompiled code?
 5. What is the smallest stable inspector model/command contract that supports a foreign schema,

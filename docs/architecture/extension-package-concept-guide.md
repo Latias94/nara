@@ -27,7 +27,7 @@ maintainers need shared terms. It is not a list of concepts every extension auth
 | Reusable package author | One `package()` function plus engine-owned domain helpers | No |
 | Importer, Inspector, or other provider author | One narrow domain trait/context with typed settings, errors, and outputs | No |
 | Contract/domain maintainer | Versioned declarations, typed plans, resolvers, and conformance | Yes, only for the owned contract |
-| Product-root/Host maintainer | Product selection, typed projections, candidate ownership, cleanup, and publication | Yes, only for the owned product/Host |
+| Product-root/Host maintainer | Product selection, typed compositions, candidate ownership, shutdown, and publication | Yes, only for the owned product/Host |
 
 Leaf-kernel, receipt, seal, inactive-transfer, candidate, and cohort vocabulary describes engine
 internals. It must not become a required workflow, broad-prelude surface, or primary diagnostic
@@ -56,7 +56,7 @@ Those labels are for architecture and implementation review, not public workflow
 That stack is an ownership map, not the exact call order. The composition root coordinates the
 middle of the operation: it selects the product and target, asks the leaf kernel to resolve each
 known contract, asks domain binders to bind the results, and only then seals the final concrete
-projection.
+composition.
 
 ```text
 package definition
@@ -66,7 +66,7 @@ package definition
           <- typed semantic results
        -> domain-specific implementation binders
        <- typed inactive bound results
-    <- composition root seals one concrete typed projection
+    <- composition root seals one concrete typed composition
     -> concrete domain owners prepare candidates
 ```
 
@@ -108,9 +108,9 @@ registry.
 |---|---|---|
 | Atomic package authoring | Give Nara all compiled contribution claims for one package in one all-or-error authoring operation | Atomic disk replacement, activation, or rollback of arbitrary Rust side effects |
 | Common contract validation (internally owned by the `Leaf Contract Kernel`) | The smallest domain-independent validation shared by runtime, schema, import, and tooling contracts | OS kernel, package downloader, dynamic plugin loader, or global registry |
-| Concrete root composition | One executable coordinates selection, resolution, binding, and final typed projection assembly | Repository root, universal extension manager, or `get<T>()` service locator |
+| Concrete root composition | One executable coordinates selection, resolution, binding, and final typed composition assembly | Repository root, universal extension manager, or `get<T>()` service locator |
 | Domain-specific implementation binding | Join a pure plan to an exact compiled implementation for one owner role and target, while keeping it inactive; formally called Host binding | Calling the factory, opening files, mutating `World`, or publishing state |
-| Concrete domain owner | The real Module that owns candidate construction, scoped authority, readiness, cleanup, and domain policy; a concrete Host may coordinate visibility for a multi-domain cohort | One common trait implemented by every engine subsystem, or permission to publish a selected cohort member independently |
+| Concrete domain owner | The real Module that owns candidate construction, scoped authority, readiness, retirement, and domain policy; a concrete Host may coordinate visibility for a multi-domain cohort | One common trait implemented by every engine subsystem, or permission to publish a selected cohort member independently |
 
 Three words cause most confusion:
 
@@ -197,7 +197,7 @@ Three actors also stay distinct:
 | Actor | Who supplies it | Responsibility |
 |---|---|---|
 | Provider | Package or domain code | Performs one specialized job only through its narrow Interface |
-| Domain owner | Nara domain implementation | Prepares and retains one domain's candidates, policy, authority, cleanup, and retirement obligations |
+| Domain owner | Nara domain implementation | Prepares and retains one domain's candidates, policy, authority, and retirement obligations |
 | Concrete Host | One executable or concrete lifecycle owner | Selects an activation intent, waits for every required domain candidate, and linearizes the cohort's visibility; one concrete Runtime or Import implementation may also perform its domain-owner role |
 | Composition root | One concrete executable | Coordinates selection and typed assembly; it does not own every domain's active state |
 
@@ -211,7 +211,7 @@ Most Rust names in the walkthrough are proposed. Read each row independently:
 | Area | Evidence status |
 |---|---|
 | `App`, `Plugin`, plugin groups, and plugin lifecycle | Implemented in substantial part |
-| Fresh product runtime constructed from a complete package projection | Proposed; the full package-fed `RuntimeCandidate` path is not implemented |
+| Fresh product runtime constructed from a complete package composition | Proposed; the full package-fed runtime-start path is not implemented |
 | `ComponentRegistry` build, validation, and freeze lifecycle | Implemented in substantial part |
 | Package-fed schema contribution candidate and binding | Proposed |
 | UI-neutral editor workspace models and commands | Implemented in substantial part |
@@ -342,9 +342,9 @@ executable generations, or a callable runtime plugin/import provider.
 For the example, the results might conceptually be:
 
 ```text
-SchemaPlan  = selected component schemas and lineage
-RuntimePlan = selected plugin IDs, requirements, ordering, and capabilities
-ImportPlan  = selected importer semantics, settings shape, products, and conflicts
+SchemaPlan              = selected component schemas and lineage
+RuntimeContributionPlan = selected package plugin definitions, requirements, and order intent
+ImportPlan              = selected importer semantics, settings shape, products, and conflicts
 ```
 
 These are ordinary typed immutable values, not entries in an `Any` map. The kernel returns each one
@@ -369,7 +369,7 @@ The leaf returns known typed pending bindings to the same composition root. The 
 their nested pure resolved fields as a semantic view while they are still unbound:
 
 ```rust
-struct EditorSemanticResolution<'a> {
+struct ResolvedProjectSemanticsView<'a> {
     schemas: &'a ResolvedSchemaContract,
     runtime: &'a ResolvedRuntimeContract,
     import: &'a ResolvedImportContract,
@@ -382,10 +382,10 @@ and Host facts. There is no public `Vec<Box<dyn Any>>`, string plan lookup, or u
 `EngineHostPlan`.
 
 The root can now validate cross-contract bridges that were not owned by one contract. It still has
-no completed product projection and has mutated no `App`, task pool, importer catalog, schema
+no completed product composition and has mutated no `App`, task pool, importer catalog, schema
 catalog, or workspace.
 
-### Stage 4: Domain-Specific Implementation Binding And Final Projection
+### Stage 4: Domain-Specific Implementation Binding And Final Composition
 
 Semantic plans describe meaning, not executable placement. Binding joins each plan to a verified
 compiled Adapter for one concrete owner role. The detailed design calls this **Host binding**, but
@@ -404,14 +404,14 @@ tooling contract.
 Binding consumes each complete pending carrier and proves that the semantic plan version, compiled
 implementation, executable generation, target, and execution affinity agree. It still does not call
 a factory or provider. The result remains inactive because candidate preparation may need
-reservations, threads, filesystem capabilities, native handles, or cleanup ownership that binding
+reservations, threads, filesystem capabilities, native handles, or retirement ownership that binding
 must not possess.
 
 Only after all selected bindings and root-owned bridge checks succeed does the composition root
-seal a product-specific projection. An Editor executable might produce:
+seal a product-specific composition. An Editor executable might produce:
 
 ```rust
-struct EditorProjectProjection {
+struct EditorExtensionComposition {
     schemas: BoundSchemaContract,
     runtime: BoundRuntimeContract,
     import: BoundImportContract,
@@ -421,7 +421,7 @@ struct EditorProjectProjection {
 A dedicated server might produce a different type:
 
 ```rust
-struct ServerProjectProjection {
+struct ServerExtensionComposition {
     schemas: BoundSchemaContract,
     runtime: BoundRuntimeContract,
 }
@@ -444,7 +444,7 @@ This is similar to checking that a plug fits a socket while leaving the power of
 
 ### Stage 5: Concrete Domain Owners, Candidates, And Publication Axes
 
-The bound projection now goes to the real owner for each selected domain. Projection membership
+The bound composition now goes to the real owner for each selected domain. Composition membership
 does not mean that every row activates together: one concrete **activation intent** selects the
 required candidate set, and each publication axis retains its own authority.
 
@@ -460,7 +460,7 @@ These owners share a pattern, not a universal trait:
 ```text
 inactive bound plan
     -> domain owner prepares a candidate or attempt-owned state
-    -> domain owner validates readiness and retains cleanup ownership
+    -> domain owner validates readiness and retains retirement ownership
     -> concrete Host publishes one selected activation cohort
        OR an independent domain publication authority publishes its own axis
     -> domain owner retires the predecessor later under domain policy
@@ -510,12 +510,12 @@ flowchart TD
     Root --> RuntimeBind[Runtime implementation binding]
     Root --> ImportBind[Import implementation binding]
     Root --> SchemaBind[Schema implementation binding]
-    RuntimeBind --> Projection[Root seals EditorProjectProjection]
-    ImportBind --> Projection
-    SchemaBind --> Projection
-    Projection --> RuntimeOwner[Runtime Host prepares candidate]
-    Projection --> ImportCatalogOwner[Import Host prepares provider catalog candidate]
-    Projection --> SchemaOwner[Schema owner freezes candidate]
+    RuntimeBind --> Composition[Root seals EditorExtensionComposition]
+    ImportBind --> Composition
+    SchemaBind --> Composition
+    Composition --> RuntimeOwner[Runtime Host prepares candidate]
+    Composition --> ImportCatalogOwner[Import Host prepares provider catalog candidate]
+    Composition --> SchemaOwner[Schema owner freezes candidate]
     ImportCatalogOwner --> EditorHost[Concrete Editor Host readiness barrier]
     SchemaOwner --> EditorHost
     EditorHost --> EditorCatalog[One EditorCatalogActivation record]
@@ -543,9 +543,9 @@ ahead:
 | Package authoring | Claim assembly | Runtime locator is paired with an importer helper | No package definition is returned |
 | Root + catalog admission | Evidence join | Manifest fingerprint, version, or binding cardinality drifts | No verified contribution key or semantic witness is minted |
 | Leaf + domain resolver | Semantic resolution | Domain conflict or invalid fallback | No plan, resolution receipt, or inactive transfer escapes |
-| Root composition | Product closure | Editor plan requires a capability not requested or compiled | No concrete projection and no Host mutation |
+| Root composition | Product closure | Editor plan requires a capability not requested or compiled | No concrete composition and no Host mutation |
 | Domain binding | Adapter binding | Adapter does not support the exact plan version or affinity | No binding receipt and no factory invocation |
-| Domain owner | Activation candidate preparation | Runtime plugin construction, schema merge, importer-provider catalog construction, or tooling-provider construction fails | No selected cohort becomes visible; the prior activation remains authoritative if one exists, otherwise that product capability remains unavailable; failed resources are retired or retained for cleanup |
+| Domain owner | Activation candidate preparation | Runtime plugin construction, schema merge, importer-provider catalog construction, or tooling-provider construction fails | No selected cohort becomes visible; the prior activation remains authoritative if one exists, otherwise that product capability remains unavailable; failed resources are retired or retained for continued retirement |
 | Import Host | Per-source import attempt | Provider decode, staging, reconciliation, or verification fails | The prior artifact group remains authoritative if one exists; a first import failure leaves the asset unavailable, and no provider-catalog activation is implied |
 | Concrete Host or independent publication authority | Activation/publication | A selected cohort sibling is not ready, the expected generation changed, or writer authority changed | No partial cohort becomes visible; the prior activation or domain-specific last-good generation remains authoritative if one exists, otherwise the domain remains unavailable |
 
@@ -629,7 +629,7 @@ The reader route above is a public Interface constraint, not only a documentatio
    never enters a broad prelude.
 5. Primary errors use the author's domain language and a concrete next action. Internal phase,
    receipt, and fingerprint evidence may appear only in advanced inspection details.
-6. Direct `App`/`PluginGroup` authoring and reusable package registration lower from one canonical
+6. Direct `App`/`PluginGroup` authoring and reusable package composition lower from one canonical
    compiled domain definition. The source manifest remains the declaration authority, and final
    admission verifies that the two projections agree; hiding internals must not create duplicate
    authorities for either fact kind.
@@ -671,7 +671,7 @@ retroactively sandbox native code.
 ### "Why Not Put Every Plan In One Registry?"
 
 A public registry would make composition appear extensible while moving type errors, ownership,
-ordering, and authority checks into every caller. Concrete typed projections keep those rules local
+ordering, and authority checks into every caller. Concrete typed compositions keep those rules local
 and make unsupported product combinations harder to represent.
 
 ## Alternatives Considered
@@ -701,7 +701,7 @@ registry becomes a service locator and typed domain plans become hard to audit.
 ### Option C: Atomic Authoring, Minimal Kernel, Concrete Roots
 
 Submit typed claims together, resolve common invariants in a domain-independent leaf, and assemble
-known domain plans into concrete product projections.
+known domain plans into concrete product compositions.
 
 **Strengths**: Small common author Interface, strong type preservation, inspectable failures,
 explicit product closure, and delayed authority.
@@ -713,7 +713,7 @@ explicit root support until stronger ecosystem evidence justifies route-program 
 
 ### Option D: Contract-Owned Host Route Programs
 
-Let external contract and Adapter crates route typed plans directly into Host-specific projections,
+Let external contract and Adapter crates route typed plans directly into Host-specific compositions,
 leaving root with only sealed audit and activation membership.
 
 **Strengths**: Highest locality for many third-party contracts and Hosts.
@@ -733,8 +733,8 @@ fields, match arms, or domain-specific orchestration.
 | Public complexity firewall | Game, package, importer, and Inspector fixtures compile without importing receipts, seals, transfers, bound plans, candidates, cohorts, or Host integration types; the broad prelude exports none of them | Independent compile fixtures, rustdoc/API audit, and primary-diagnostic goldens |
 | Kernel independence | Zero runtime/import/schema/tooling/ECS/Host dependencies | Dependency audit and public-surface search |
 | Phase authority | Resolve and bind tests invoke zero factories and acquire zero Host capabilities | Counter/canary tests and compile-fail fixtures |
-| Typed composition | Editor/server projections contain concrete domain fields and no public `Any`/string plan lookup | Type-level fixtures and public-surface audit |
-| Domain ownership | Domain owners retain candidate cleanup; a required sibling failure exposes no partial cohort, while independent import/document axes preserve their own last-good state | Candidate, cohort, and fault-injection tests |
+| Typed composition | Editor/server compositions contain concrete domain fields and no public `Any`/string plan lookup | Type-level fixtures and public-surface audit |
+| Domain ownership | Domain owners retain candidate retirement; a required sibling failure exposes no partial cohort, while independent import/document axes preserve their own last-good state | Candidate, cohort, and fault-injection tests |
 | Product isolation | Runtime/server artifacts contain no unselected importer, editor toolkit, or process Adapter code | Separate Cargo closure and binary audits |
 
 ## Risks And Mitigations
@@ -744,7 +744,7 @@ fields, match arms, or domain-specific orchestration.
 | Terminology becomes architecture ceremony for ordinary game authors | High | Medium | Keep gameplay authoring on `App`/`Plugin`; expose package concepts only to reusable package authors |
 | "Host" expands into a universal trait | Critical | Medium | Name concrete owners explicitly and require two real Adapters before standardizing a seam |
 | "Atomic" is mistaken for artifact or runtime transactionality | High | Medium | Always qualify it as package authoring; keep import publication and runtime activation contracts separate |
-| Pure plan and bound plan collapse into one executable registry | Critical | Medium | Keep callable values opaque through resolution and concrete typed projections through root composition |
+| Pure plan and bound plan collapse into one executable registry | Critical | Medium | Keep callable values opaque through resolution and concrete typed compositions through root composition |
 | Stable IDs are mistaken for dynamic loading authority | Critical | Medium | Require verified compiled support and rebuild unsupported native contracts |
 | Advanced types leak into the gameplay prelude | Medium | Medium | Use package- and contract-specific modules; keep receipts, seals and permits private or narrowly exported |
 | Documentation outruns implementation | High | High in the early project | Preserve evidence labels, link tracer gates, and delete or update sketches when the Interface changes |

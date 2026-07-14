@@ -338,6 +338,7 @@ eventual real resource graph.
 | Template reuse | Unchanged recipe, provider, schema, shader-interface, and semantic-capability generations do not revalidate or recompile the static template each frame | Compile-count instrumentation test |
 | Expansion bounds | Encoded and decoded recipe expansion limits reject oversized candidates before backend allocation | Boundary and hostile-input matrix tests |
 | Escape containment | The normal raw-pass API exposes no device, queue, target lease, cloneable resource view, or owned engine handle; undeclared/stale keys and escaped facade borrows are rejected | API review, runtime scope checks, and compile-fail tests where practical |
+| Third-party feature parity | Independent packages can contribute extraction/packet data, material/queue policy, post-process passes, and editor-only gizmo/overlay work without editing `nara_render_wgpu` or requiring a public second render World | Clean-room external-package tracer and dependency/API audit |
 
 ## Risks and Mitigations
 
@@ -357,6 +358,8 @@ eventual real resource graph.
 - `RenderPassPlan` remains valid for the current renderer but is explicitly transitional.
 - The next submitter-extension work should target provider/packet contributions rather than add
   sprite/UI/text/3D parameters directly to `nara_render_wgpu` systems.
+- Omitting a public Bevy-style `RenderApp` is justified only after the third-party feature-parity
+  tracer proves equivalent extension capability through Nara's provider/packet/graph seams.
 - The first real graph implementation must be driven by at least two concrete target/resource
   flows, such as the current SDR surface path plus HDR/offscreen editor composition.
 - Project-facing pipeline data can evolve independently from wgpu versions and native backends.

@@ -12,11 +12,11 @@ nara owns its application and plugin lifecycle. Plugins are trusted Rust engine 
 systems, resources, codecs, services, and backend adapters. They are not sandboxed project
 extensions. A plugin hook may fail or panic after mutating the world or schedules, so treating every
 failure as retryable can run a partially configured application. The previous `plugins_finished`
-boolean also allowed a failed `finish` pass to discard cleanup hooks and report success on the next
+boolean also allowed a failed `finish` pass to discard shutdown hooks and report success on the next
 call.
 
 The lifecycle must preserve the first poison-causing attempt/lifecycle failure, prevent schedule
-execution after that failure, and retain enough ownership to clean every committed plugin exactly
+execution after that failure, and retain enough ownership to shut down every committed plugin exactly
 once. Expected setup conflicts must remain ordinary structured errors rather than panics.
 
 ## Decision
@@ -24,17 +24,17 @@ once. Expected setup conflicts must remain ordinary structured errors rather tha
 `App` uses the following explicit lifecycle:
 
 ```text
-Configuring -> Finishing -> Ready -> Cleaning -> Cleaned
-      |            |                    ^
-      +------------+----> Poisoned -----+
-                           |     ^
-                           +-----+
-                    cleanup returns to Poisoned
+Configuring -> Finishing -> Ready -> ShuttingDown -> ShutdownComplete
+      |            |                        ^
+      +------------+----> Poisoned ---------+
+                           |         ^
+                           +---------+
+                    shutdown returns to Poisoned
 ```
 
 `Poisoned` is terminal for build, finish, mutation, and run entry points. Read-only inspection and
-explicit cleanup remain available. Cleanup of a poisoned app returns to `Poisoned`, with
-`cleanup_complete = true`; it never makes the app runnable again.
+explicit shutdown remain available. Shutdown of a poisoned app returns to `Poisoned`, with
+`shutdown_complete = true`; it never makes the app runnable again.
 
 ### Hook Classification
 
@@ -49,13 +49,13 @@ explicit cleanup remain available. Cleanup of a poisoned app returns to `Poisone
   resources, runner mutation, or native authority. A typed `Err` is retryable only when this pure
   contract is obeyed and the current top-level plan commit has not already committed an entry. If an
   earlier entry has built, the enclosing attempt is already partially committed and the App is
-  poisoned even though the rejecting plugin never became a cleanup owner. A preflight unwind always
+  poisoned even though the rejecting plugin never became a shutdown owner. A preflight unwind always
   poisons a caller-owned App or marks a product candidate failed/unpublishable regardless of
-  position; the candidate owner remains retained through terminal cleanup.
+  position; the candidate owner remains retained through terminal shutdown.
 - `build(&mut App)` and `finish(&mut App)` are committed on entry. Their `Err` or unwind panic
   poisons a caller-owned App or marks a product candidate failed/unpublishable, records the first
-  failure, and triggers cleanup after the outermost active hook returns. A product candidate remains
-  owned until cleanup reaches an observable terminal result.
+  failure, and triggers shutdown after the outermost active hook returns. A product candidate remains
+  owned until shutdown reaches an observable terminal result.
 - The product path may use a private one-attempt prepared plugin transfer after all repeatable
   factories succeed. The transfer preserves each complete admitted definition key; typed factory
   erasure fixes the concrete plugin type but does not claim to prove that trusted code used every
@@ -64,12 +64,12 @@ explicit cleanup remain available. Cleanup of a poisoned app returns to `Poisone
   invalid.
 - Hook panics are isolated with `catch_unwind` and converted to stable `PluginError` values. Every
   hook unwind poisons the caller-owned App or marks the retained product candidate failed. This
-  containment applies only to `panic = "unwind"`; aborting builds cannot run Rust cleanup code and
+  containment applies only to `panic = "unwind"`; aborting builds cannot run Rust shutdown code and
   make no in-process recovery guarantee.
 
-The first poison-causing attempt/lifecycle failure is immutable. Later cleanup errors and cleanup
-panics are appended to `PluginFailureReport::cleanup_failures`; they never replace the primary error
-and never stop later cleanup hooks.
+The first poison-causing attempt/lifecycle failure is immutable. Later shutdown errors and shutdown
+panics are appended to `PluginFailureReport::shutdown_failures`; they never replace the primary
+error and never stop later shutdown hooks.
 
 ### Installation and Dependency Rules
 
@@ -86,8 +86,8 @@ and never stop later cleanup hooks.
   inspectable on failure, but an installed-group snapshot publishes only after the complete group
   succeeds. A fully validated batch with no new plugin suffix may atomically publish matching
   group/provenance inspection metadata without entering the plugin lifecycle.
-- A plugin is retained for cleanup before its `build` hook is entered. Finish follows resolved
-  order, and cleanup uses the strict reverse of actual committed order.
+- A plugin is retained for shutdown before its `build` hook is entered. Finish follows resolved
+  order, and shutdown uses the strict reverse of actual committed order.
 - Stable plugin/group IDs, inactive nested-group expansion, and the ordering graph reject recursive
   dependency cycles with complete bounded stable-ID chains before App mutation.
 - A resolved plan contains one record per plugin/group ID. Duplicate plugin occurrences converge
@@ -99,7 +99,7 @@ and never stop later cleanup hooks.
 - `PluginGroup::build` produces a data-only `PluginGroupBuilder`. The builder records stable slots,
   repeatable definitions, nested groups, and order intent; it has no `App`, `finish(App)`, native
   authority, or public installation callback. Group membership and order derive from the resolved
-  registration collection rather than a parallel static plugin-ID list.
+  entry collection rather than a parallel static plugin-ID list.
 - `Plugin::build` and `Plugin::finish` may never add a plugin or group. An attempted nested install
   is a sticky committed contract violation that poisons the App even when the plugin ignores the
   returned error. Dependencies belong in declarations and selected groups; nested groups expand
@@ -112,31 +112,36 @@ and never stop later cleanup hooks.
   `ComponentRegistryError` to a plugin/component-contextual `PluginError`; no recoverable
   registration path uses `expect`.
 
-### Mutation and Cleanup Ownership
+### Mutation and Shutdown Ownership
 
 - Public mutable app entry points return `Result` and return the preserved primary plugin error when
   the app is poisoned. `App::update` is the only zero-delta convenience update and is fallible;
   the panic-based update path and `try_update` split are removed.
-- `Plugin::cleanup` is fallible and receives a narrow `PluginCleanupContext` rather than `&mut App`.
-  Cleanup can access the world to release owned resources but cannot add plugins, schedules, or a
-  runner.
-- Cleanup is reverse-order, best-effort, panic-isolated, and once-only. A hook is marked attempted
-  before invocation, so a cleanup panic cannot cause a second call during `Drop`.
+- `Plugin::shutdown` is fallible and receives a narrow `PluginShutdownContext` rather than
+  `&mut App`. Shutdown can access the world to release owned resources but cannot add plugins,
+  schedules, or a runner.
+- Shutdown is reverse-order, best-effort, panic-isolated, and once-only. A hook is marked attempted
+  before invocation, so a shutdown panic cannot cause a second call during `Drop`.
 - Lifecycle-control reentry and plugin/group installation from committed build or finish hooks are
   rejected. No intentional committed-hook nesting remains.
 - `App::set_runner` is likewise rejected as a sticky violation from plugin hooks. Top-level
   code-first callers or concrete Host/driver Adapters own runner selection; product plugins do not.
-- `Drop` performs best-effort cleanup without unwinding, including when another panic is already
-  unwinding. Callers that need cleanup evidence use `App::cleanup_plugins` or `App::run`.
+- `Drop` performs best-effort shutdown without unwinding, including when another panic is already
+  unwinding. Callers that need shutdown evidence use `App::shutdown_plugins` or `App::run`.
+
+`shutdown` is deliberately not named `cleanup`. In Bevy, `Plugin::cleanup` is a startup hook that
+runs after `finish` and before the first update; nara's hook is terminal reverse-order teardown.
+Nara also has a per-frame `CoreStage::Cleanup`. Reusing `cleanup` for all three meanings would make
+plugin lifecycle code ambiguous to both Bevy users and nara maintainers.
 
 ### Runner Ownership
 
 `RunnerFn` borrows `&mut App`; it does not consume the app. `App::run` therefore regains control when
-the runner exits and performs explicit cleanup. If running and cleanup both fail,
+the runner exits and performs explicit shutdown. If running and shutdown both fail,
 `AppRunError::Shutdown` preserves the prior run error and the separate plugin failure report. A
 runner that has its own fallible teardown uses `AppRunError::RunnerTeardown` to preserve the prior
 run error and the distinct teardown error without pretending either is a plugin failure. If plugin
-cleanup also fails, `AppRunError::Shutdown` remains the outer error and retains that combined runner
+shutdown also fails, `AppRunError::Shutdown` remains the outer error and retains that combined runner
 error as its prior cause. A finish failure is returned with its inspectable report before any runner
 executes.
 
@@ -150,11 +155,11 @@ running would expose a partially configured app.
 ### Roll back arbitrary world and schedule mutation
 
 Rejected. Native resources and external services are not generally cloneable or transactional.
-Explicit ownership and reverse cleanup are honest; implicit snapshot rollback is not.
+Explicit ownership and reverse shutdown are honest; implicit snapshot rollback is not.
 
-### Keep full `&mut App` access during group build and cleanup
+### Keep full `&mut App` access during group build and shutdown
 
-Rejected. It permits mutations with no retained cleanup owner. Narrow builders/contexts make the
+Rejected. It permits mutations with no retained shutdown owner. Narrow builders/contexts make the
 ownership rule enforceable by the Rust API.
 
 ### Permit nested installation only for direct code-first Apps
@@ -171,15 +176,15 @@ Long-running services remain behind runners, task pools, and explicit backend st
 ## Implementation Notes
 
 - Canonical types are `PluginLifecycleState`, `PluginHook`, `PluginFailure`,
-  `PluginFailureReport`, `PluginCleanupContext`, `PluginGroupBuilder`, `PluginPlanError`,
-  `PluginPrepareError`, and the private prepared-plan transfer.
+  `PluginFailureReport`, `PluginShutdownContext`, `PluginGroupBuilder`, `PluginPlanError`,
+  `PluginPrepareError`, and the private `PluginCommitBatch` transfer.
 - Static declaration and group-definition failures are plan/preparation failures, not lifecycle
   hooks. They do not use `PluginHook::Metadata` or `PluginFailureSubject::Group`; those transitional
   variants are removed when U4 replaces the imperative group path.
 - Plugin declarations and resolved group provenance remain stable and inspectable after successful
   installation. Group definition/plan failure publishes no installed group. If lifecycle commit
   later fails, actual committed entries remain inspectable on the terminal App.
-- Cleanup-only failures use a report with no primary setup failure. `cleanup_complete` means every
+- Shutdown-only failures use a report with no primary setup failure. `shutdown_complete` means every
   retained hook was attempted, not that every hook succeeded.
 - Runtime diagnostics may later bridge failure reports, but logs are not lifecycle authority.
 
@@ -189,8 +194,8 @@ Long-running services remain behind runners, task pools, and explicit backend st
 |---|---:|---|
 | Preflight boundary | Pure typed rejection before the attempt's first commit is retryable; later rejection or any unwind poisons | `nara_app` plan-commit lifecycle tests |
 | Committed failure | Build/finish error or panic permanently prevents schedules | `nara_app` lifecycle tests |
-| Cleanup ownership | Every committed hook runs once in reverse order | cleanup order and unwind tests |
-| Failure fidelity | Primary error survives cleanup errors/panics | failure-report tests |
+| Shutdown ownership | Every committed hook runs once in reverse order | shutdown order and unwind tests |
+| Failure fidelity | Primary error survives shutdown errors/panics | failure-report tests |
 | Dependency safety | Plugin/group cycles terminate with stable chains | cycle tests |
 | Closed commit | Hook-time nested installation always poisons and never installs a hidden entry | ignored-error contract tests |
 | Group purity | Group/slot/dependency rejection leaves App fingerprints unchanged | plan fault tests |
@@ -198,7 +203,7 @@ Long-running services remain behind runners, task pools, and explicit backend st
 | Early preflight staging | Retryable rejection leaves installed entry/group/provenance snapshots byte-for-byte unchanged | snapshot fault tests |
 | Metadata-only batch | Matching empty-suffix group/provenance changes publish atomically or leave inspection unchanged | direct App snapshot tests |
 | Driver authority | Plugin hooks cannot set/replace the runner | ignored-error and static boundary tests |
-| Runner shutdown | Prior runner, runner teardown, and plugin cleanup failures remain separately observable | runner cleanup and teardown aggregation tests |
+| Runner shutdown | Prior runner, runner teardown, and plugin shutdown failures remain separately observable | runner shutdown and teardown aggregation tests |
 | Built-in registration | Duplicate component registration is a contextual error, not panic | component plugin tests |
 
 ## Risks and Mitigations
@@ -206,6 +211,6 @@ Long-running services remain behind runners, task pools, and explicit backend st
 | Risk | Severity | Likelihood | Mitigation |
 |---|---:|---:|---|
 | Plugin ignores a forbidden nested installation error | High | Medium | The attempt records a sticky violation before returning; outer success cannot clear it |
-| Cleanup itself fails | High | Medium | Mark attempted first, aggregate separately, continue reverse cleanup |
-| Panic abort configuration skips cleanup | High | Low | Document unwind-only containment; process supervision handles abort builds |
+| Shutdown itself fails | High | Medium | Mark attempted first, aggregate separately, continue reverse shutdown |
+| Panic abort configuration skips shutdown | High | Low | Document unwind-only containment; process supervision handles abort builds |
 | Compatibility wrappers preserve unsafe entry points | High | Medium | Pre-1.0 breaking migration removes old signatures and stale callers |

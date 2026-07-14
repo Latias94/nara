@@ -2,12 +2,16 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
+**Last Revised**: 2026-07-14
 **Refines**: [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md),
 [ADR 0034](0034-editor-play-mode-world-boundary.md),
 [ADR 0039](0039-main-loop-time-pause-and-runtime-state.md),
 [ADR 0042](0042-runtime-service-and-backend-boundary.md),
 [ADR 0057](0057-authoritative-fixed-tick-and-command-ingress.md), and
 [ADR 0058](0058-stable-runtime-identity-and-entity-references.md)
+**Proposed Refinement Under Evaluation**: ADR 0082 and ADR 0084 jointly propose concrete Host-owned
+runtime/start-attempt authority; that owner split and its state names are not current authority while
+either ADR remains Proposed.
 
 ## Context
 
@@ -66,9 +70,13 @@ nara adopts a layered Play-runtime debugging contract. Complete fixed-tick contr
 observation, domain instruction cursors, historical recovery, and native code iteration are related
 user experiences but remain separate engine capabilities.
 
+The Host node in the following diagram is the proposed ADR 0082/0084 owner. The accepted debugging
+layers do not depend on that proposal being current authority.
+
 ```mermaid
 flowchart LR
-    UI[Tooling or remote UI] --> Host[nara_tooling runtime host]
+    UI[Tooling or remote UI] --> Models[nara_tooling commands and views]
+    Models --> Host[Concrete Editor or remote Host]
     Host --> Control[nara_app runtime control]
     Control --> Tick[Complete fixed tick]
     Tick --> Commands[nara_gameplay Capture]
@@ -87,8 +95,12 @@ flowchart LR
 
 ### Runtime control
 
-`nara_app` owns the execution semantics. `nara_tooling` owns host lifecycle commands and projections;
-UI adapters only submit commands and render models.
+`nara_app` owns the accepted execution semantics. The current implementation keeps the local Play
+controller in `nara_tooling`. Under the joint ADR 0082/0084 proposal, a concrete
+Editor/headless/remote Host would instead own the live runtime and any unpublished start attempt,
+while `nara_tooling` would own UI-neutral lifecycle commands, views, observation policy, and
+projections. Tooling data would contain no `RuntimeInstance`, start-attempt owner, native lease, or
+process handle. RGF-U17 must prove this split before it can replace the current authority.
 
 The stable semantic operations are:
 
@@ -112,17 +124,28 @@ The stable semantic operations are:
   includes gameplay command `Admit -> Consume -> Capture -> Acknowledge`, rotates trackers at the
   declared app boundary exactly once, preserves the configured paused/time-scale state, and
   returns to paused.
-- **Stop** requests finite service shutdown and runtime disposal. A host reports `Stopped` only
-  after its bounded close contract succeeds; timeout or cleanup failure remains inspectable as
-  `Stopping` or `Failed` rather than pretending that the runtime stopped cleanly.
+- **Stop** requests finite service shutdown and runtime disposal. A host reports clean completion
+  only after its bounded close contract succeeds. Under ADR 0084's proposed state vocabulary,
+  timeout or shutdown failure remains `Stopping` or `CloseIncomplete` rather than pretending that
+  the runtime reached `Stopped`.
 
 Control commands take effect only at nara-owned main-thread safe points. The first product slice
 does not pause inside an executing Rust system and does not expose render-frame stepping as fixed
 simulation stepping.
 
-RGF-U5 retains the lifecycle states `Starting`, `Running`, `Paused`, `Stepping`, `Stopping`, `Stopped`,
-and `Failed`. Exact Rust type names may change, but illegal transitions must reject without partial
-state mutation.
+As an ADR 0084 evidence target, RGF-U5 keeps unpublished start-attempt states separate from
+published runtime states. A proposed start attempt owns `Starting`, `Retiring`, and
+`RetirementIncomplete`; only success yields a `RuntimeInstance`. The proposed published runtime
+owns `Running`, `Paused`, `Stepping`, `Faulted`, `Stopping`, `CloseIncomplete`, and `Stopped`.
+These names do not become current authority until joint ADR 0082/0084 acceptance.
+
+Runtime Inspector edits use generation-stamped, schema-gated safe-point commands. The first form is
+a one-shot runtime component patch whose value may be overwritten by later simulation; it is not a
+retained "override" layer. Persistent write-back remains ADR 0034's explicit Apply Changes flow:
+under the proposed owner split, the Host requests a bounded scene/edit-capable export at a safe
+point; the current local controller performs the equivalent export directly. In either topology,
+tooling derives a candidate `ScenePatchDocument`, and normal revision validation and undo apply it
+to the edit document. No UI or tooling model receives unrestricted `World` access.
 
 ### Observation snapshots and timelines
 
@@ -310,12 +333,16 @@ demonstrates that rebuild-and-restart misses its latency target. That decision m
 stability, code quiescence, worker/thread and callback retirement, native-handle ownership,
 versioned state extraction/migration, two-phase publication, and failure rollback.
 
-### Ownership summary
+### Proposed Ownership Refinement
+
+The first row below is accepted. The concrete Host/tooling split is the non-authoritative ADR
+0082/0084 target that RGF-U17 must prove before it replaces the current local tooling controller.
 
 | Owner | Owns | Must not own |
 |---|---|---|
 | `nara_app` | Pause/resume/time-scale execution semantics, exact complete fixed-tick step, safe points, app lifecycle and bounded close | Timeline UI, component-history policy, replay file format |
-| `nara_tooling` | Runtime-host orchestration, commands, bounded snapshots/diffs/timelines, filters and presentation models | Direct scheduler mutation, arbitrary world serialization, native backend state |
+| Concrete Editor/headless/remote Host (proposed) | Live runtime/start-attempt ownership, platform/process authority, driving, stop-first replacement | Tooling presentation policy, second schedule authority, mutable document truth |
+| `nara_tooling` (after proposed split) | UI-neutral commands and views, bounded snapshots/diffs/timelines, filters, disclosure policy, and Apply Changes models | Live runtime/start-attempt ownership, direct scheduler mutation, arbitrary world serialization, native backend state |
 | `nara_gameplay` | Immutable admitted command batch and `Capture` seam | Debugger lifecycle or replay persistence |
 | `nara_identity` | World/instance/persistent identity vocabulary, allocator/index, bidirectional lookup, remap and tombstones | Snapshot/history retention, debugger UI or replay file policy |
 | `nara_reflect` | Stable component IDs, schema capabilities, canonical component encoding | Sampling cadence, history retention or causality policy |

@@ -2,8 +2,12 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-07-14
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0058: Stable Runtime
 Identity and Entity References; ADR 0076: Play Runtime Debug Control and Observation
+**Proposed Refinement Under Evaluation**: ADR 0082 and ADR 0084 jointly propose concrete Host-owned
+runtime construction; that ownership model is not current authority while either ADR remains
+Proposed.
 
 ## Context
 
@@ -36,8 +40,9 @@ The editor has three distinct state categories:
 1. **Edit document**: the authoritative `SceneDocument` / `PrefabDocument` plus undo/redo stacks.
 2. **Edit preview world**: a live projection owned by `SceneAuthoringSession` for inspection,
    gizmos, preview rendering, and debug tooling.
-3. **Play world**: a separate runtime `World` fork spawned from the current validated document
-   snapshot when Play starts.
+3. **Play world**: a separate runtime `World` projection spawned from the current validated
+   document snapshot. The joint ADR 0082/0084 proposal would wrap this projection in a concrete
+   Editor Host-owned `RuntimeInstance` around one `App`.
 
 Rules:
 
@@ -46,8 +51,15 @@ Rules:
 - The Play world is isolated from the edit preview world and must not share runtime `Entity`
   identities with it.
 - Pressing Play snapshots the current edit document, validates it, expands prefab sources, then
-  spawns a fresh Play world.
-- Pressing Stop despawns or drops the Play world. Runtime changes are discarded by default.
+  spawns a fresh Play world. Under the joint proposal, the concrete Host would perform this through
+  an exact `RuntimeRecipe` and a fresh runtime generation.
+- If ADRs 0082/0084 are accepted, the concrete Editor Host would own the unpublished start attempt,
+  published runtime, platform/process authority, and stop-first replacement intent.
+  `nara_tooling` would retain only UI-neutral commands, views, observations, and Apply Changes
+  models; neither tooling nor UI adapters would retain the live runtime owner or unrestricted
+  `World` access.
+- Pressing Stop discards the isolated Play world and runtime changes by default. The joint proposal
+  strengthens this into finite shutdown with retained incomplete-shutdown ownership.
 - Runtime changes write back to the edit document only through an explicit **Apply Changes**
   operation that produces `ScenePatchDocument` values and runs the normal patch validation/undo
   path.
@@ -58,16 +70,22 @@ Rules:
 - Save games remain separate from scene authoring data. Play Mode runtime state should not silently
   become scene data.
 
+The following diagram shows the proposed ADR 0082/0084 ownership refinement, not the currently
+accepted implementation authority:
+
 ```mermaid
 flowchart TD
     Doc[Edit SceneDocument] --> Session[SceneAuthoringSession]
     Session --> Preview[Edit Preview World]
-    Doc --> PlayStart[Start Play: validate + expand + spawn]
-    PlayStart --> PlayWorld[Isolated Play World]
-    PlayWorld --> RuntimeCommands[Runtime WorldCommand / Systems]
+    Doc --> PlayStart[Start Play: validate + prepare recipe]
+    PlayStart --> Host[Concrete Editor Host]
+    Host --> Runtime[RuntimeInstance]
+    Runtime --> PlayWorld[Isolated Play World]
+    PlayWorld --> RuntimeCommands[Safe-point runtime commands / systems]
     RuntimeCommands --> PlayWorld
-    PlayWorld --> Stop[Stop Play]
-    Stop --> Drop[Drop Play World by default]
+    Runtime --> Stop[Host requests finite Stop]
+    Stop --> Stopped[Runtime reaches Stopped]
+    Stopped --> Discard[Discard runtime changes by default]
     PlayWorld --> Apply[Explicit Apply Changes]
     Apply --> Diff[Derive ScenePatchDocument]
     Diff --> Validate[Validate Patch]
@@ -87,13 +105,17 @@ EditorMode
 
 The exact Rust names can evolve, but these semantics should remain stable.
 
-Current implementation:
+Current transitional implementation:
 
 - `nara_scene::SceneAuthoringRevision` is the source revision stamp.
 - `nara_tooling::SceneEditorMode` represents `Edit`, `Play`, and `Paused`.
 - `nara_tooling::SceneEditorState` owns the first UI-agnostic lifecycle controller.
 - `nara_tooling::ScenePlaySession` stores the isolated runtime `World`, `SceneEntityMap`, and
   source revision.
+
+These ownership bullets are current evidence. RGF-U17 is the evidence trial for the non-authoritative
+ADR 0082/0084 refinement: concrete Editor Host ownership with tooling commands/views and stable
+document/runtime identity.
 
 Important invariants:
 
@@ -105,7 +127,10 @@ Important invariants:
 - Persistent scene IDs (`SceneEntityId`) are the only durable bridge for deriving apply-back
   patches; runtime `Entity` values never cross the persistence boundary.
 
-## Start Play Flow
+## Proposed Host-Owned Start Flow
+
+This flow is conditional on joint ADR 0082/0084 acceptance. The accepted invariant today is the
+fresh isolated Play world and unchanged authoring state on failure.
 
 ```mermaid
 sequenceDiagram
@@ -113,14 +138,18 @@ sequenceDiagram
     participant Session as SceneAuthoringSession
     participant Resolver as PrefabSourceResolver
     participant Registry as ComponentRegistry
-    participant Play as Play World
+    participant Host as Concrete Editor Host
+    participant Play as Play Runtime
 
-    UI->>Session: Request Start Play
+    UI->>Host: Request Start Play for document revision
+    Host->>Session: Capture validated authoring snapshot
     Session->>Registry: Validate authoring document
     Session->>Resolver: Resolve and expand prefab sources
     Resolver-->>Session: Expanded SceneDocument or diagnostics
-    Session->>Play: Spawn fresh isolated World
-    Play-->>UI: Play started with diagnostics + entity map
+    Session-->>Host: Snapshot or diagnostics
+    Host->>Host: Prepare recipe and drive start attempt
+    Host->>Play: Publish fresh isolated runtime
+    Host-->>UI: Play view with diagnostics + stable identity map
 ```
 
 Failure rules:
@@ -130,18 +159,23 @@ Failure rules:
 - Failed Play start must not mutate the edit document, undo stack, or existing edit preview world.
 - Diagnostics should identify scene entity IDs, component IDs, field paths, and asset references.
 
-## Stop Play Flow
+## Proposed Host-Owned Stop Flow
+
+This flow is conditional on joint ADR 0082/0084 acceptance. The accepted invariant today is that
+Stop discards Play state and never writes it into the edit document.
 
 ```mermaid
 sequenceDiagram
     participant UI as Editor UI
-    participant Play as Play World
+    participant Host as Concrete Editor Host
+    participant Play as Play Runtime
     participant Session as SceneAuthoringSession
 
-    UI->>Play: Request Stop Play
-    Play-->>UI: Optional runtime diagnostics / stats
-    UI->>Play: Drop Play World
-    UI->>Session: Return to Edit mode
+    UI->>Host: Request Stop Play
+    Host->>Play: Request finite close at safe point
+    Play-->>Host: Stopped or CloseIncomplete
+    Host-->>UI: Status, diagnostics, and legal controls
+    Host->>Session: Return to Edit only after Stopped
     Session-->>UI: Edit document and preview remain authoritative
 ```
 
@@ -151,16 +185,22 @@ Default Stop never writes runtime state back to the edit document.
 
 Apply Changes is explicit and conservative:
 
+The Host transport in this diagram is the proposed ADR 0082/0084 path. The accepted contract is
+the explicit bounded export, `ScenePatchDocument` validation, and undo path; the current
+`SceneEditorState`/`ScenePlaySession` controller performs it locally.
+
 ```mermaid
 sequenceDiagram
     participant UI as Editor UI
-    participant Play as Play World
+    participant Host as Concrete Editor Host
+    participant Play as Play Runtime
     participant Export as Export/Diff
     participant Patch as ScenePatchDocument
     participant Session as SceneAuthoringSession
 
-    UI->>Play: Request Apply Changes
-    Play->>Export: Export patchable runtime subset by SceneEntityId
+    UI->>Host: Request Apply Changes
+    Host->>Play: Export at a runtime safe point
+    Play->>Export: Export bounded patchable subset by SceneEntityId
     Export-->>Patch: Candidate ScenePatchDocument
     Patch->>Session: Apply through normal validation
     Session-->>UI: Patch report + undo entry or diagnostics
@@ -170,6 +210,9 @@ Rules:
 
 - The current implementation supports the first narrow Apply Changes subset: one selected
   `SceneEntityId` plus explicitly requested registered scene/edit-capable component IDs.
+- The proposed runtime Interface uses a generation-stamped, schema-aware safe-point export request.
+  The current direct local Play-world export is transitional implementation evidence, not the
+  long-term authority boundary.
 - `SceneEditorState::export_apply_changes*` encodes requested Play world components through
   `ComponentRegistry` and `ComponentEncodeContext`, compares them with the authoring document, and
   returns a candidate `ScenePatchDocument` without mutating `SceneAuthoringSession`.
@@ -184,6 +227,10 @@ Rules:
   and duplicate component requests produce diagnostics instead of best-effort serialization.
 - Supported no-op requests return no patch and do not create undo entries.
 - Apply Changes enters undo history as normal patch transactions.
+- Runtime Inspector editing is separate from Apply Changes. It submits a one-shot,
+  generation-stamped component patch at a runtime safe point; later simulation may overwrite the
+  value. A retained override layer would require separate lifetime/priority/clear semantics and is
+  not implied by this ADR.
 - If the edit document changed after Play started, apply-back must detect the revision mismatch and
   either reject with diagnostics or require a merge UI. It must not silently overwrite edits.
 - Whole-scene runtime diffing, field-level diff minimization, prefab override write-back, and
@@ -228,14 +275,15 @@ automatic persistence the default.
 
 ## Consequences
 
-- `nara_tooling` currently owns UI-agnostic mode state and Play world lifecycle. A future
-  `nara_editor` crate should take over only when viewport scheduling, input routing, render
-  integration, hot reload streaming, or multiple simultaneous Play worlds require editor-owned
-  orchestration.
+- `nara_tooling` currently owns the UI-agnostic Play controller, mode state, commands, and views.
+  If ADRs 0082/0084 are accepted, a concrete Editor Host will take Play runtime lifecycle and
+  authority while `nara_tooling` keeps only commands/views; this does not require a universal
+  `nara_editor` trait or public Host abstraction.
 - `nara_scene` should continue treating documents as persistent data and worlds as projections.
 - `nara_tooling` must expose mode-aware models rather than assuming every inspector command is
   persistent.
-- `WorldCommand` remains useful for runtime mutation, but scene persistence still requires patches.
+- Typed generation-stamped runtime commands remain useful for safe-point mutation, but scene
+  persistence still requires patches; no unrestricted mutable-World command surface is implied.
 - Hot reload conflict handling can reason about source document revisions and Play world source
   revisions separately.
 - Save-game systems stay separate from scene editing and Play Mode apply-back.

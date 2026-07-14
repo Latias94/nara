@@ -27,7 +27,7 @@ The initial lifecycle should stay small:
 
 ```mermaid
 flowchart TD
-    Build[App::new / add_plugin / add_system] --> Startup[Startup schedules]
+    Build[App::new / add_plugins / add_systems] --> Startup[Startup schedules]
     Startup --> Frame[Frame loop]
     Frame --> First[First]
     First --> TaskUpdate[TaskUpdate]
@@ -47,6 +47,25 @@ Recommended stage vocabulary:
 |---|---|---|
 | Startup | `Core`, `Platform`, `Runtime`, `Scene`, `Tooling` | One-time initialization order |
 | Frame | `First`, `TaskUpdate`, `PreUpdate`, `FixedUpdate`, `Update`, `PostUpdate`, `Extract`, `Prepare`, `Queue`, `Sort`, `Render`, `Cleanup`, `Last` | Repeated runtime flow |
+
+These labels define the engine-owned schedules that the standard runner drives automatically; they
+are not the only schedules an `App` may contain. The schedule registry must accept arbitrary typed
+`ScheduleLabel` values and expose one `add_systems(label, systems)` shape for startup, frame, and
+custom schedules. It must also support type-safe set configuration and explicit custom-schedule
+initialization/inspection without exposing Bevy `NodeId` values as durable identity.
+
+A custom schedule is inert until an owner explicitly runs it. This ADR does not let third-party
+code splice arbitrary schedules into the standard main loop: the engine-owned automatic order
+remains closed until a concrete domain proves an insertion policy. Keeping the registry open while
+the automatic driver stays closed preserves extension capability without making frame order an
+ambient plugin side effect.
+
+```rust
+app.add_systems(StartupStage::Scene, load_level)?;
+app.add_systems(CoreStage::Update, gameplay)?;
+app.add_systems(MyDomainSchedule, domain_work)?;
+app.configure_sets(MyDomainSchedule, DomainSet::Simulate)?;
+```
 
 Plugin shape:
 
@@ -92,6 +111,8 @@ schedule vocabulary.
 
 - `nara_app` is the owner of engine startup and frame semantics.
 - `nara_app` can use `bevy_ecs::Schedule` internally or through `nara_ecs`.
+- Built-in startup/frame schedules and arbitrary custom schedules share one type-directed authoring
+  Interface; only built-in schedules are automatically driven by default.
 - Window, renderer, audio, input, and tooling integrations should arrive as nara plugins.
 - Headless and test runners should be first-class enough that engine systems can run without a
   window.
@@ -105,6 +126,8 @@ schedule vocabulary.
 | Headless support | Core schedules can run without winit/wgpu | Unit or smoke test |
 | Product boundary | `nara_app` does not depend on `bevy_app` | `cargo tree -p nara_app` |
 | Schedule clarity | All built-in stages are documented | Public docs and ADR |
+| Schedule extension | A third-party domain can register systems and sets in its own typed schedule without modifying `nara_app` | Public compile and schedule-run test |
+| Driver authority | A custom schedule does not enter the automatic frame order without an explicit admitted owner | Order and negative tests |
 | Backend readiness | Renderer/window plugins can own fallible init later | Interface review |
 
 ## Risks and Mitigations
@@ -112,6 +135,8 @@ schedule vocabulary.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Lifecycle becomes too Bevy-like without the ecosystem benefits | Medium | Medium | Keep stage set small and document nara-specific reasons |
+| Closed built-in stages become a closed extension ecosystem | High | Medium | Keep the schedule registry open while separating registration from automatic-drive admission |
+| Arbitrary custom schedules silently perturb frame order | High | Medium | Custom schedules are inert by default; add automatic insertion only through an explicit future contract |
 | Plugins need dependency ordering earlier than expected | Medium | Medium | Add plugin labels/dependencies only when real plugins need them |
 | Fallible backend initialization conflicts with `Plugin::build` | Medium | Medium | Reserve a later `Runner`/backend init phase rather than overloading ECS setup |
 | Fixed timestep policy becomes hard to change | Medium | Low | Keep fixed update as an app policy, not a renderer policy |

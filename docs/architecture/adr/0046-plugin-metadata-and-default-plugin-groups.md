@@ -28,11 +28,11 @@ nara plugins expose lightweight metadata and nara provides explicit default plug
 
 ```mermaid
 flowchart TD
-    Group[Data-only PluginGroup] --> Entries[Stable slots and registrations]
+    Group[Data-only PluginGroup] --> Entries[Stable slots and entry drafts]
     Declaration[Static Plugin declaration] --> Definition[Repeatable typed definition]
     Definition --> Entries
-    Entries --> Plan[Pure resolved plugin plan]
-    Plan --> Prepare[Private prepared instances]
+    Entries --> Plan[Pure PluginPlan]
+    Plan --> Prepare[Private PluginCommitBatch]
     Prepare --> Build[Closed fallible lifecycle commit]
     Build --> App[App resources/schedules/systems]
     App --> Diagnostics[plugin graph diagnostics]
@@ -41,7 +41,7 @@ flowchart TD
 The plugin metadata contract is:
 
 - Every plugin type owns one static `Plugin::declaration()` containing a stable `PluginId` suitable
-  for diagnostics, generated docs, and project inspection. Constructed instances and registration
+  for diagnostics, generated docs, and project inspection. Constructed instances and entry drafts
   records do not provide competing metadata authorities. Rust `TypeId` may support private typed
   erasure, but it is not a public or persistent identity.
 - Plugins declare provided capabilities, required capabilities/plugins, conflicts, and a short
@@ -52,15 +52,17 @@ The plugin metadata contract is:
 - A repeatable `PluginDefinition` combines a stable versioned `PluginDefinitionId`, the canonical
   declaration, explicit immutable configuration, its canonical representation/versioned digest,
   and one admitted private typed factory binding. A raw direct plugin instance remains one-shot and
-  cannot enter a replayable product blueprint.
+  cannot enter a replayable runtime recipe. `PluginDefinition` is an opaque advanced authoring
+  value returned by typed domain helpers; ordinary authors do not construct definition IDs,
+  fingerprints, canonical bytes, or erased factories.
 - Metadata is declarative and diagnostic first. Composition closes declared capabilities,
   requirements, conflicts, and group membership into one inspectable plan; this is validation, not
   a general-purpose dependency solver.
 - Plugin groups are data-only ordered product bundles. Their builder records stable slots,
   repeatable definitions, nested groups, disable/configure/relative-order intent, and no `App`
-  mutation. One resolved registration collection derives membership, order, slot state, and full
+  mutation. One resolved entry collection derives membership, order, slot state, and full
   group provenance; there is no parallel static member array.
-- Duplicate registrations may merge provenance during pure resolution only when their stable
+- Duplicate entry drafts may merge provenance during pure resolution only when their stable
   slot occurrence identity (or the same un-slotted unique `PluginId`) and complete admitted
   definition key match. Configuration
   equality compares private canonical representations after a digest match; hash equality alone is
@@ -76,6 +78,16 @@ The plugin metadata contract is:
 - `App::add_plugins` preserves a Bevy-like single/group/tuple call through a sealed input trait, but
   all inputs lower through collection, resolution, optional private preparation, and closed commit.
   Plugin build/finish hooks cannot install hidden dependencies.
+- Ordinary Rust callers edit groups by plugin type or by a typed definition helper, for example
+  `.disable::<TilemapPlugin>()` and `.configure(window::plugin(settings))`. Stable slot IDs remain
+  the durable authority for project data, tooling, and later admitted cross-plugin replacement,
+  but common same-plugin configuration and disable flows must not require handwritten slot
+  constants. Advanced slot-directed methods remain available outside the gameplay prelude.
+- The ordinary concept budget is `App`, `Plugin`, `PluginGroup`, tuple, and `add_plugins`.
+  Declaration helpers should generate stable boilerplate; `PluginDefinition`, entry drafts,
+  `PluginPlan`, commit batches, definition keys, and fingerprints stay in advanced or private
+  modules. One `AddPluginsError` preserves internal phase guarantees while allowing one `?` at the
+  call site.
 - Optional backend adapters stay feature-gated. Enabling a feature exposes the plugin, but it does
   not silently install it unless a chosen group includes it.
 - Render submitter ownership follows ADR 0040: device/surface backend plugins are separate from
@@ -137,7 +149,7 @@ authorities. Instance-owned metadata also requires construction before product p
 ### Option D: Keep Bevy ergonomics over a stable data-only plan
 
 **Pros**: Preserves `add_plugins(plugin/group/tuple)` and chained group editing while making one
-registration collection authoritative, replayable, inspectable, deterministic, and closed before
+entry collection authoritative, replayable, inspectable, deterministic, and closed before
 App mutation.
 
 **Cons**: Requires a breaking migration to static declarations, repeatable definitions, pure group
@@ -155,6 +167,7 @@ immediate-install semantics.
 | Backend decoupling | wgpu device/surface setup does not permanently auto-own sprite/UI/text submitters | Plugin tests |
 | Diagnostics | Missing prerequisites/conflicts produce structured errors with plugin IDs before mutation | Unit tests |
 | Docs/tooling | Plugin groups can be listed for docs/editor/AI tooling | Snapshot/API test |
+| Author concept budget | Common code-first examples use only App, Plugin, PluginGroup, tuples, typed group edits, and one `?` | Clean-room compile fixtures |
 | Product separation | Runtime 2D installs no runtime UI; runtime UI pulls no sprite/tilemap group | Group and dependency tests |
 | Deterministic plan | Identical inputs produce identical order and fingerprint | Repeated/property tests |
 | Closed dependencies | No build/finish hook installs a plugin/group | Static and ignored-error contract tests |
@@ -163,12 +176,13 @@ immediate-install semantics.
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| Definition key is rebound or transferred inconsistently | High | Medium | Admit one typed factory binding per stable definition ID/version and preserve the complete key into the private prepared carrier. |
+| Definition key is rebound or transferred inconsistently | High | Medium | Admit one typed factory binding per stable definition ID/version and preserve the complete key into the private commit batch. |
 | Trusted factory ignores canonical config | High | Low | Do not claim runtime self-verification; require domain conformance tests and keep native/authority work outside the factory. |
-| Group names overfit early architecture | Low | Medium | Keep groups product-level and allow pre-1.0 breaking cleanup. |
+| Group names overfit early architecture | Low | Medium | Keep groups product-level and allow pre-1.0 breaking refactoring. |
 | Users expect automatic dependency solving | Medium | Low | Document that composition validates a declared closure; it does not choose arbitrary plugins. |
 | Convenience examples get more verbose | Low | Medium | Provide clear group presets instead of hidden installs. |
-| Group membership drifts from installation | High | Medium | Derive both resolved group snapshots and committed installation from one ordered registration collection. |
+| Group membership drifts from installation | High | Medium | Derive both resolved group snapshots and committed installation from one ordered entry collection. |
+| Stable infrastructure leaks into ordinary authoring | High | Medium | Keep definition keys, fingerprints, entry drafts, plans, and commit batches out of the gameplay prelude; provide typed helpers and group edits. |
 
 ## Consequences
 
@@ -176,11 +190,14 @@ immediate-install semantics.
   conflicts; group membership is resolved provenance rather than plugin-owned metadata.
 - `PluginGroupBuilder` is data-only, and `App::add_plugins` lowers plugin/group/tuple inputs through
   the same resolver and closed lifecycle commit.
+- Pre-resolution occurrences use private entry-draft vocabulary; resolved inspection exposes
+  `PluginPlanEntry`. `PluginRegistration` is not a public type because no active registration has
+  occurred during pure planning.
 - `WgpuRenderPlugin` no longer unconditionally installs or compiles sprite/UI submitters; product
   capability closure selects the base backend and each submitter independently.
 - Runtime 2D and runtime UI are separate groups, and desktop window plus wgpu composition is
   additive rather than fixed in `DesktopWgpuPlugins`.
-- Root facade/prelude cleanup exposes group names deliberately rather than exporting backend/plugin
+- Root facade/prelude refinement exposes group names deliberately rather than exporting backend/plugin
   internals through the gameplay prelude.
 
 ## Open Questions

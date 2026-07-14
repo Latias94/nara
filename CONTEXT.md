@@ -107,6 +107,12 @@ An immutable, typed description of selected domain behavior produced without exe
 or Host authority.
 _Avoid_: Active registry, mutable builder, executable plan
 
+**Runtime Contribution Plan**:
+The runtime contract's Semantic Plan for selected package-provided plugin definitions,
+requirements, and order intent. Concrete root composition combines it with first-party/profile
+policy to produce a Plugin Plan and Runtime Plan.
+_Avoid_: Complete runtime-profile plan, plugin instances, Host activation
+
 **Resolution Receipt**:
 A non-authoritative proof that a specific set of declarations was validated into a specific
 semantic plan.
@@ -121,13 +127,49 @@ _Avoid_: Provider registry, callback bag, execution capability
 
 **Concrete Root Composition**:
 The executable-specific assembly step that selects supported contracts and builds concrete typed
-projections for one product such as the Editor, a server, or a cook tool.
+compositions for one product such as the Editor, a server, or a cook tool.
 _Avoid_: Repository root, universal Host, generic plan registry
 
-**Concrete Projection**:
-A typed, inactive product result whose fields correspond to the domain plans supported by one
-specific executable.
-_Avoid_: Type-erased plan bag, active engine state
+**Concrete Composition**:
+A typed, inactive product result that owns the bound domain contracts selected for one specific
+executable. `Composition` means assembled ownership; borrowed inspection results remain views or
+projections.
+_Avoid_: Type-erased plan bag, borrowed inspection view, active engine state
+
+**Plugin Plan**:
+An immutable, validated order of plugin entries produced without constructing plugin instances or
+mutating an `App`. The plan retains stable identity, dependency, configuration, and provenance
+facts needed for inspection and a later one-attempt commit.
+_Avoid_: Plugin instances, installed-plugin registry, runtime plan
+
+The following runtime-construction names are provisional design vocabulary for the joint ADR 0082
+and ADR 0084 proposal and its RGF evidence units. They make the proposal discussable; they do not
+establish current product authority while either ADR remains Proposed.
+
+**Runtime Plan**:
+A concrete root's immutable result for one runtime profile after product-capability, plugin, and
+service closure succeeds. It contains a Plugin Plan but no project-content snapshot, native
+authority, or active runtime state.
+_Avoid_: Complete Editor product composition, runtime recipe, active runtime
+
+**Runtime Recipe**:
+A private replayable value that combines one exact validated project/content revision, one Runtime
+Plan, and startup intent. It is sufficient to construct fresh attempts but contains no `World`,
+active service, native handle, source authority, or one-shot closure.
+_Avoid_: Project template, Unreal Blueprint, runtime candidate
+
+**Runtime Start Attempt**:
+The concrete Host-owned, one-attempt owner for unpublished runtime admission, cancellation, and
+retirement. It owns any private Candidate and shutdown obligation until it yields one Runtime
+Instance or reaches a terminal non-publication result.
+This is Host-integration vocabulary, not a game-author or tooling-view concept.
+_Avoid_: Cargo build handle, cloneable runtime reference, active runtime
+
+**Runtime Instance**:
+One published executable generation and its lifecycle owner around exactly one `App`. It owns
+control, fault, and finite-close state but does not become a second schedule, plugin, or time
+authority.
+_Avoid_: Runtime recipe, unpublished candidate, universal runtime trait
 
 **Domain-Specific Host Binding**:
 The verified association of a semantic plan with one compiled domain implementation and one

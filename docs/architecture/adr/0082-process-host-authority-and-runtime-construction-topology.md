@@ -2,9 +2,11 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
+**Last Revised**: 2026-07-14
 **Owner**: Product composition and executable hosts
-**Admission Trigger**: RGF-U3 and RGF-U5 prove one project-boot and fresh-runtime workflow through
-the public facade without ambient authority or partial runtime publication
+**Admission Trigger**: RGF-U3/RGF-U5 prove project boot and headless fresh-runtime ownership, then
+RGF-U17 and RGF-U13 prove the same parent/child authority rules for Editor and desktop Hosts;
+RGF-U23 reviews both this ADR and ADR 0084 atomically
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
 **Atomic Admission Group**: ADR 0082 and ADR 0084 must be accepted or rejected together
@@ -49,9 +51,11 @@ flowchart TD
     Process[Process and platform authority scope]
     Project[Project authoring or session owner]
     Revision[Immutable validated project revision]
-    Plan[Resolved product, plugin, and service plan]
+    Plan[Runtime plan for one concrete profile]
     Recipe[Replayable runtime recipe]
     Services[Domain-owned native service authorities]
+    Start[Host-owned runtime start attempt]
+    Prepare[Authority-free plugin preparation]
     Admission[Candidate admission reservations or leases]
     Candidate[Unpublished isolated runtime candidate]
     Runtime[Published executable runtime]
@@ -65,9 +69,12 @@ flowchart TD
     Revision --> Recipe
     Plan --> Recipe
     Process --> Services
+    Recipe --> Start
+    Start --> Prepare
+    Prepare --> Admission
     Services --> Admission
     Admission --> Candidate
-    Recipe --> Candidate
+    Start --> Candidate
     Candidate --> Runtime
     Runtime --> App
     App --> World
@@ -93,14 +100,15 @@ must remain observable even when the implementation is compact.
 
 ### Host Admission and Runtime Delegation
 
-The host prepares authority-bearing inputs and delegates candidate construction as one operation:
+The Host prepares validated immutable inputs, begins one owned construction attempt, and issues
+authority only when that attempt requests it:
 
 ```mermaid
 sequenceDiagram
     participant Host as Executable host
     participant Project as Project authority
     participant Service as Domain services
-    participant Factory as ADR 0084 runtime factory
+    participant Start as ADR 0084 runtime start attempt
     participant Consumer as Editor / runner
 
     Host->>Project: Read bounded bytes through host-issued capability
@@ -108,12 +116,17 @@ sequenceDiagram
     Host->>Host: Resolve capability, plugin, service, conflict, and order closure
     Host->>Service: Pure service admission preflight
     Service-->>Host: Validated dependency DAG and admission requirements
-    Host->>Service: Reserve inactive candidate admission tokens or leases
-    Host->>Factory: Revision, plan, recipe, and host-issued reservations
+    Host->>Start: Begin with recipe and immutable admission requirements
+    Start->>Start: Prepare repeatable plugin instances without Host authority
+    loop Each required reservation
+        Start->>Start: Open an attempt-owned acquisition guard
+        Start->>Service: Request one inactive reservation through a concrete Host Adapter
+        Service-->>Start: Atomically fill that guard or return typed rejection
+    end
     alt ADR 0084 publishes a runtime
-        Factory-->>Consumer: Published executable runtime generation
+        Start-->>Consumer: Yield published executable runtime generation
     else ADR 0084 candidate startup fails
-        Factory-->>Host: Typed startup and cleanup report; publish nothing
+        Start-->>Host: Typed startup and shutdown report; publish nothing
     end
 ```
 
@@ -122,15 +135,26 @@ sequenceDiagram
 - Compiled capability, project request, implied capability, plugin/service requirement, conflict,
   replacement, ordering, and service-admission closure are pure inspectable candidates before
   `App` mutation or candidate lease acquisition.
+- The Host creates the `RuntimeStartAttempt` before any candidate reservation. The attempt first
+  completes authority-free plugin preparation, then requests inactive reservations through the
+  concrete Host's domain Adapters. Before each fallible request, the attempt opens the acquisition
+  guard that will own the result. Success fills that guard atomically, so every earlier owner is
+  already attempt-owned if a later acquisition rejects.
 - Host-issued candidate reservations are inactive authority tokens or leases. They reserve required
   external capacity and affinity but do not start gameplay-facing service work. ADR 0084 owns their
-  binding, activation, runtime-scoped session retirement, and failure cleanup.
+  binding, activation, runtime-scoped session retirement, and failure shutdown.
 - The host has no parallel path that constructs or publishes a runnable `App`. It delegates the
-  complete unpublished-candidate transaction to the ADR 0084 runtime factory.
+  complete unpublished-candidate transaction to one ADR 0084 runtime start attempt.
 - Atomic runtime publication and the internal ordering among plugin lifecycle, registry freeze,
   service activation, scene spawn, and startup are exclusively defined by ADR 0084.
 - The same immutable revision and recipe may construct a later runtime generation. Mutable world,
   queue, task, clock, identity-domain, backend-session, and control state are never reused.
+
+This ADR does not require a public object-safe `RuntimeFactory`. The first concrete headless,
+desktop, and Editor roots may begin attempts directly from their private `RuntimeRecipe`. A factory
+Interface becomes justified only when two genuinely substitutable producers share one caller; a
+test double or three loops consuming the same concrete root is not that evidence. In-process versus
+child-process Play remains an Adapter/deployment choice behind the concrete Editor Host.
 
 ### Service Sessions and Sharing
 
@@ -234,7 +258,7 @@ justified.
 | Metric | Target | Measurement |
 |---|---:|---|
 | Pre-mutation project rejection | Every invalid manifest/composition candidate fails before `App` or service-session creation | RGF-U3 project-composition tests |
-| Runtime delegation | Every host passes one complete revision/plan/reservation set through the ADR 0084 factory; no host publishes a raw `App` | Host integration and static API audit |
+| Runtime delegation | Every Host begins one owned ADR 0084 start attempt from a complete recipe/admission-requirement set; the attempt owns every later reservation and no Host publishes a raw `App` | Host integration and static API audit |
 | Parent lifetime | Project and process/service authorities remain alive until every child runtime is `Stopped` and every issued lease retires; failed retirement retains its parent | Instrumented host lifetime test |
 | Cross-host parity | Editor, desktop, and headless hosts drive the same declared frame/fixed-tick contract | Reference-game semantic snapshot tests |
 | Least privilege | Server composition creates no window, render, audio-device, editor, or raw-input session | Feature/service boundary tests |
@@ -246,11 +270,11 @@ justified.
 |---|---|---:|---|
 | Conceptual scopes become a giant public `EngineHost` | High | Medium | Keep names conceptual; admit public types only through concrete product workflows. |
 | Host and runtime both become scheduler authorities | Critical | Medium | Keep schedules, time, plugins, and `World` mutation exclusively in one `App`. |
-| Atomic publication is mistaken for external rollback | High | Medium | Specify unpublished candidate plus cleanup evidence, not arbitrary side-effect rollback. |
+| Atomic publication is mistaken for external rollback | High | Medium | Specify unpublished candidate plus shutdown evidence, not arbitrary side-effect rollback. |
 | Shared services leak mutable state across runtimes | High | Medium | Default to isolation; require generation-stamped typed sessions for admitted sharing. |
 | Outer authority is released around a failed runtime close | High | Medium | Retain parent scopes until ADR 0084 reports `Stopped` and every child lease has retired. |
 | Recipe captures runtime-only state | High | Medium | Restrict recipes to validated immutable inputs and reconstructible factories. |
-| Scope graph over-designs products not yet built | Medium | Medium | Bind acceptance to RGF-U3/U5 and keep service placement and public APIs unfrozen. |
+| Scope graph over-designs products not yet built | Medium | Medium | Bind acceptance to RGF-U3/U5/U17/U13 and keep service placement and public APIs unfrozen. |
 
 ## Consequences
 
@@ -272,9 +296,10 @@ If accepted:
 
 ## Admission Evidence
 
-Acceptance requires all host-authority success metrics owned by RGF-U3 and the outer-host subset of
-RGF-U5, plus a review showing that hosts delegate executable lifecycle to ADR 0084 and no public
-universal host/service API was admitted without a second concrete consumer. ADR 0082 and ADR 0084
+Acceptance requires all Host-authority success metrics owned by RGF-U3/RGF-U5 plus the Editor and
+desktop outer-host subsets of RGF-U17/RGF-U13. RGF-U23 performs the independent review showing that Hosts delegate executable
+lifecycle to ADR 0084 and no public universal Host/service Interface was admitted without a second
+concrete consumer. ADR 0082 and ADR 0084
 form one atomic admission group: neither proposal may become Accepted while the other remains
 Proposed, Rejected, or otherwise non-authoritative.
 
