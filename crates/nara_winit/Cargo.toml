@@ -11,5 +11,7 @@ nara_core.workspace = true
 nara_ecs.workspace = true
 nara_input.workspace = true
 nara_window.workspace = true
-raw-window-handle.workspace = true
 winit.workspace = true
+
+[dev-dependencies]
+raw-window-handle.workspace = true

@@ -488,6 +488,11 @@ pub enum AppRunError {
     },
     #[error("app runner failed: {message}")]
     Runner { message: String },
+    #[error("app runner and teardown both failed: prior={prior}; teardown={teardown}")]
+    RunnerTeardown {
+        prior: Box<AppRunError>,
+        teardown: Box<AppRunError>,
+    },
     #[error("time frame planning failed: {error}")]
     Time { error: TimeFrameError },
     #[error("app shutdown reported plugin cleanup failures")]
@@ -514,6 +519,14 @@ impl AppRunError {
     }
 
     #[must_use]
+    pub fn runner_teardown(prior: AppRunError, teardown: AppRunError) -> Self {
+        Self::RunnerTeardown {
+            prior: Box::new(prior),
+            teardown: Box::new(teardown),
+        }
+    }
+
+    #[must_use]
     pub const fn time(error: TimeFrameError) -> Self {
         Self::Time { error }
     }
@@ -522,6 +535,10 @@ impl AppRunError {
     pub const fn plugin_error(&self) -> Option<&PluginError> {
         match self {
             Self::Plugin { error, .. } => Some(error),
+            Self::RunnerTeardown { prior, teardown } => match prior.plugin_error() {
+                Some(error) => Some(error),
+                None => teardown.plugin_error(),
+            },
             Self::Runner { .. } | Self::Time { .. } | Self::Shutdown { .. } => None,
         }
     }
@@ -531,6 +548,9 @@ impl AppRunError {
         match self {
             Self::Plugin { report, .. } => report.as_deref(),
             Self::Shutdown { report, .. } => Some(report.as_ref()),
+            Self::RunnerTeardown { prior, teardown } => prior
+                .plugin_failure_report()
+                .or_else(|| teardown.plugin_failure_report()),
             Self::Runner { .. } | Self::Time { .. } => None,
         }
     }
@@ -3500,6 +3520,82 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn run_preserves_runner_teardown_when_plugin_cleanup_also_fails() {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mut app = App::new();
+        app.add_plugin(LifecycleProbePlugin {
+            id: PROBE_A_PLUGIN_ID,
+            behavior: ProbeBehavior {
+                fail_cleanup: true,
+                ..ProbeBehavior::default()
+            },
+            trace: Arc::clone(&trace),
+        })
+        .unwrap();
+        let runner_error = AppRunError::runner_teardown(
+            AppRunError::runner("runner failed"),
+            AppRunError::runner("native teardown failed"),
+        );
+        let expected_runner_error = runner_error.clone();
+        app.set_runner(move |_app| Err(runner_error)).unwrap();
+
+        let error = app.run().unwrap_err();
+
+        let AppRunError::Shutdown { prior, report } = &error else {
+            panic!("runner, teardown, and cleanup failures should remain nested");
+        };
+        assert_eq!(prior.as_deref(), Some(&expected_runner_error));
+        assert!(report.primary().is_none());
+        assert_eq!(report.cleanup_failures().len(), 1);
+        assert_eq!(error.plugin_failure_report(), Some(report.as_ref()));
+        assert_eq!(
+            trace
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, hook)| *hook == PluginHook::Cleanup)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn runner_teardown_accessors_search_both_nested_errors() {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let mut report_app = App::new();
+        report_app
+            .add_plugin(LifecycleProbePlugin {
+                id: PROBE_A_PLUGIN_ID,
+                behavior: ProbeBehavior {
+                    fail_cleanup: true,
+                    ..ProbeBehavior::default()
+                },
+                trace,
+            })
+            .unwrap();
+        let PluginCleanupError::Failure(report) = report_app.cleanup_plugins().unwrap_err() else {
+            panic!("test plugin should produce a cleanup report");
+        };
+        let report = *report;
+        let plugin_error = report.cleanup_failures()[0].error().clone();
+        let nested_plugin = AppRunError::plugin(plugin_error.clone(), Some(report.clone()));
+
+        for error in [
+            AppRunError::runner_teardown(
+                nested_plugin.clone(),
+                AppRunError::runner("teardown failed"),
+            ),
+            AppRunError::runner_teardown(
+                AppRunError::runner("runner failed"),
+                nested_plugin.clone(),
+            ),
+        ] {
+            assert_eq!(error.plugin_error(), Some(&plugin_error));
+            assert_eq!(error.plugin_failure_report(), Some(&report));
+        }
     }
 
     #[test]

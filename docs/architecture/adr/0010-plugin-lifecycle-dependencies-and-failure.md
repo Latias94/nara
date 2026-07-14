@@ -93,7 +93,11 @@ cleanup hooks.
 `RunnerFn` borrows `&mut App`; it does not consume the app. `App::run` therefore regains control when
 the runner exits and performs explicit cleanup. If running and cleanup both fail,
 `AppRunError::Shutdown` preserves the prior run error and the separate plugin failure report. A
-finish failure is returned with its inspectable report before any runner executes.
+runner that has its own fallible teardown uses `AppRunError::RunnerTeardown` to preserve the prior
+run error and the distinct teardown error without pretending either is a plugin failure. If plugin
+cleanup also fails, `AppRunError::Shutdown` remains the outer error and retains that combined runner
+error as its prior cause. A finish failure is returned with its inspectable report before any runner
+executes.
 
 ## Alternatives Considered
 
@@ -137,7 +141,7 @@ Long-running services remain behind runners, task pools, and explicit backend st
 | Cleanup ownership | Every committed hook runs once in reverse order | cleanup order and unwind tests |
 | Failure fidelity | Primary error survives cleanup errors/panics | failure-report tests |
 | Dependency safety | Plugin/group cycles terminate with stable chains | cycle tests |
-| Runner shutdown | Prior runner error and cleanup report are both observable | runner cleanup test |
+| Runner shutdown | Prior runner, runner teardown, and plugin cleanup failures remain separately observable | runner cleanup and teardown aggregation tests |
 | Built-in registration | Duplicate component registration is a contextual error, not panic | component plugin tests |
 
 ## Risks and Mitigations

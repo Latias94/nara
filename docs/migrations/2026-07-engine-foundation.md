@@ -37,6 +37,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | U18-1 | U18 | `6a70847` | `rust-api/behavior` | Diagnostic construction, reports, runtime observations, pressure snapshots, and diagnostic plugin composition | Migrate to validated/classified bounded observations and reduce any `diagnostics.runtime_capacity` above 4,096. |
 | RGF-U1-1 | RGF-U1 | `RGF-U1` | `rust-api/persistent-shape` | Component/field identity, registry lifecycle, durable field patches, and canonical scene/prefab/patch/catalog files | Assign permanent field IDs, build/freeze the registry before use, rewrite experimental files to the canonical envelopes, and load file bytes through candidates. |
 | RGF-U3-1 | RGF-U3 | `RGF-U3` | `cargo-feature/rust-api/persistent-shape` | Root product capabilities, plugin bundles/preludes, and `nara.toml` product selection | Select the new coarse features, import advanced/tooling/backend names explicitly, replace plugin-plan data with runtime preset plus requested capabilities, and open manifests through a host-issued file capability. |
+| RGF-U11-1 | RGF-U11 | `RGF-U11` | `rust-api/behavior` | Native window handle providers and surface/window shutdown | Replace raw-handle providers with an owning source, handle fallible registration/retirement, and let the platform runner complete renderer-acknowledged teardown. |
 
 ## Entry Contract
 
@@ -952,6 +953,103 @@ file loading, the broad prelude, or the audio placeholder as compatibility shims
 `nara_render_wgpu` submitter feature checks, minimal desktop example checks, and
 `reference-game/tests/project_manifest_ingest.rs` prove feature/dependency truth, explicit surface
 imports, authorized bounded ingest, product request rejection, and actual settings consumption.
+
+## RGF-U11-1: Owning Native Surface and Window Retirement
+
+**Removed contract**:
+
+- `RawWindowHandleProvider`, its unsafe raw-handle constructor, raw getters, and manual
+  `Send`/`Sync` implementations.
+- Unconditional `BackendWindowHandles::remove` and infallible provider insertion.
+- Freely cloneable `WindowHandleProvider`, `BackendWindowHandles::get`, and the split
+  `get`-then-activate sequence that could create untracked native-window owners.
+- Winit exit paths that could destroy a native window before a live wgpu surface was retired.
+- Public lifecycle mutations that could mark a surface active or dropped without owning the unique
+  surface binding.
+- Direct public `WinitRunner::run` calls that bypassed `App::run` plugin finalization and cleanup.
+- The hand-written `WgpuRenderBackend: Resource` marker that omitted Bevy ECS resource-cache hooks
+  and left the backend unavailable to render systems at runtime.
+
+**Canonical replacement or deletion rationale**: `WindowHandleProvider::new(Arc<T>)` accepts a
+typed source implementing `HasWindowHandle + HasDisplayHandle + Send + Sync + 'static` and is
+consumed by registration. `BackendWindowHandles::acquire_surface` atomically issues one non-
+cloneable `WindowSurfaceHandleSource` plus one control `WindowSurfaceLease`. The wgpu adapter passes
+the source to safe `Instance::create_surface`, which retains it for the surface lifetime; source
+`Drop` acknowledges actual owner release and the lease can only request retirement or verify that
+release. Each acquisition has a non-reused per-target generation, so stale leases cannot affect a
+replacement surface. Exclusivity is enforced within the `BackendWindowHandles` authority shared by
+the executable's platform and renderer adapters; custom hosts must register each native target once
+instead of creating independent authorities for the same target. `BackendWindowHandles` owns the
+target state `Active -> RetireRequested -> SurfaceRetired -> ProviderReleased -> NativeDestroyed`,
+while premature native destruction records a sticky `ExternallyDestroyed` fault.
+`WgpuSurfaceState` drops its safe surface before lease confirmation in both explicit and resource-
+removal paths. Wgpu registers a backend-neutral scoped retirement driver, so Winit retires only
+targets it registered without invoking global plugin cleanup. The current native render system and
+retirement driver are main-thread operations.
+
+**Before**:
+
+```rust
+let provider = unsafe {
+    RawWindowHandleProvider::new(raw_window_handle, raw_display_handle, platform_guard)
+};
+handles.insert(window_id, provider);
+handles.remove(window_id);
+```
+
+**After**:
+
+```rust
+let provider = WindowHandleProvider::new(platform_window);
+handles.insert(window_id, provider)?;
+let (handle_source, lease) = handles.acquire_surface(window_id)?.into_parts();
+let surface = instance.create_surface(handle_source)?;
+handles.request_retirement(window_id)?;
+drop(surface); // Actual owner drop records the acknowledgement.
+lease.confirm_owner_dropped()?;
+handles.release_provider(window_id)?;
+handles.mark_native_destroyed(window_id)?;
+```
+
+Platform adapters should normally let their runner drive this sequence instead of invoking the
+individual transitions. Renderer adapters register `WindowSurfaceRetirementDriver`; platform
+runners submit only their owned target IDs and must not use `App::cleanup_plugins` as a local
+retirement operation. Callers handle `WindowTargetError` and may inspect `WindowTargetSnapshot` for
+tooling/tests.
+
+**Affected examples and fixtures**: `nara_winit` constructs providers directly from
+`Arc<winit::window::Window>`; `nara_render_wgpu` uses only safe owning surface creation and the shared
+retirement authority. Root lifecycle tests and window/winit/wgpu unit tests cover controlled exit,
+runner cleanup, duplicate and stale lease rejection, repeated transitions, external destruction,
+target isolation, surface loss, device-loss invalidation through the production render system,
+partial surface/device initialization cleanup, missing-target frame skips, resize reconfiguration,
+backend resource removal, main-thread placement, and distinct primary-runner plus native-teardown
+failure reporting.
+
+**User action**: custom native platform adapters must replace raw-handle snapshots with an owning
+typed source and implement provider/native release through the lifecycle authority. Code that
+removed providers directly must request retirement and wait for `SurfaceRetired` first. Install a
+runner through `WinitPlugin::new(WinitRunner::new(...))` and invoke `App::run`; direct
+`WinitRunner::run` is removed so plugin cleanup cannot be bypassed. Custom runners with a fallible
+native teardown should return `AppRunError::runner_teardown(prior, teardown)` when both phases fail;
+plugin cleanup remains owned and aggregated by `App::run`. Exhaustive `AppRunError` matches must add
+the `RunnerTeardown` arm.
+
+**Source action**: `manual-rewrite`.
+
+**Cache action**: `rebuild`; no persistent project data or imported artifact changes.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the complete RGF-U11 change. Do not restore unsafe raw-handle construction or
+provider removal that bypasses a live surface lease.
+
+**Verification anchors**: `tests/window_surface_retirement.rs`, `crates/nara_winit/src/lib.rs#tests`,
+and `crates/nara_render_wgpu/src/backend.rs#tests` prove owning-source retention, exact controlled order,
+sticky external destruction, surface-loss provider retention, runner-scoped cleanup ordering,
+device-loss/partial-init invalidation, resize reconfiguration, backend Drop fallback, and native
+main-thread execution. `examples/window_surface_retirement_smoke.rs` supplies the presented-window
+and resource-removal platform paths.
 
 ## Persistent Format Matrix
 

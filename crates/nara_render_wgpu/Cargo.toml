@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+bevy_ecs.workspace = true
 bytemuck = { workspace = true, optional = true }
 nara_app.workspace = true
 nara_asset = { workspace = true, optional = true }
@@ -24,6 +25,7 @@ wgpu.workspace = true
 nara_core.workspace = true
 nara_reflect.workspace = true
 nara_ui.workspace = true
+raw-window-handle.workspace = true
 
 [features]
 default = []

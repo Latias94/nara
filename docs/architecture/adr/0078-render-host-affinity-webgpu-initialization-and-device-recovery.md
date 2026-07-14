@@ -25,10 +25,11 @@ and presentation also have target-local lifetime rules. Device loss is distinct 
 a lost surface may be recreated, while a lost device invalidates every device-domain pipeline,
 bind group, texture, buffer, encoder, cache entry, and configured surface state.
 
-The current backend records surface outcomes, but a generic backend error marks the backend
-unavailable and the next frame may create a new device without first clearing old device-domain
-objects. That can mix resources from different devices. The architecture must make affinity,
-initialization, target transactions, recovery, and teardown one coherent ownership contract.
+Before RGF-U11, the backend recorded surface outcomes, but a generic backend error marked the
+backend unavailable and a later frame could create a new device without first clearing old device-
+domain objects. That could mix resources from different devices. The architecture must make
+affinity, initialization, target transactions, recovery, and teardown one coherent ownership
+contract.
 
 ## Decision
 
@@ -158,7 +159,9 @@ stateDiagram-v2
   not as invented surface-acquisition variants. The host processes the surface and device channels
   independently even when both report during the same target frame; device policy then determines
   how any concurrently acquired texture is retired.
-- Platform target leases keep the underlying window/canvas authority alive. Surfaces and acquired
+- Platform target leases keep the underlying window/canvas authority alive. The native baseline
+  records `Active -> RetireRequested -> SurfaceRetired -> ProviderReleased -> NativeDestroyed`;
+  premature native destruction is a sticky `ExternallyDestroyed` fault. Surfaces and acquired
   textures are retired before the lease or platform window is released.
 
 ### Device epoch and recovery
@@ -235,6 +238,46 @@ entire device domain, even when the surface still exists.
   placement or quiescent migration follows the platform adapter's declared authority rules.
 - Plugin cleanup remains fallible and finite under ADR 0010. Cleanup failure is reported without
   pretending that backend-native resources remain reusable.
+
+### Current native baseline
+
+RGF-U11 implements the first narrow native subset without claiming the complete host:
+
+- `nara_window::backend::WindowHandleProvider` owns a typed window/display handle source and is
+  consumed by registration. Atomic surface acquisition internally clones the source guard exactly
+  once into a non-cloneable `WindowSurfaceHandleSource` plus a control lease. The wgpu adapter passes
+  that source by value to safe `Instance::create_surface`; no freely cloneable native owner,
+  raw-handle snapshot, or manual `Send`/`Sync` implementation remains.
+- `BackendWindowHandles` is the shared target lifecycle authority. The surface handle source records
+  actual release from `Drop`; its paired lease requests retirement and verifies the release. A
+  second acquisition is rejected atomically, and every successful acquisition carries a non-reused
+  per-target generation so an older lease cannot retire or acknowledge a replacement. This
+  uniqueness is scoped to one shared authority and `WindowId`; the executable/platform host is
+  responsible for registering each native target once rather than constructing independent
+  authorities for the same target. Winit releases the provider and native target only after that
+  acknowledgement and scopes shutdown to its own registered targets. Surface loss drops only
+  surface ownership and leaves a valid provider available for recreation.
+- The current native render system uses the ECS main-thread executor marker. `WgpuRenderPlugin`
+  registers a backend-neutral `WindowSurfaceRetirementDriver`; Winit invokes it only for target IDs
+  that Winit registered. Global plugin cleanup remains the once-only `App::run` responsibility and
+  drops any remaining backend surfaces without inventing platform retirement intent. Unsolicited
+  `Destroyed` records `ExternallyDestroyed`, disables acquisition, and cannot report a controlled-
+  retirement success.
+- `WgpuSurfaceState` owns the control lease next to an optional safe surface whose internal handle
+  source is the native owner. Explicit retirement and its Drop fallback destroy that owner before
+  lease confirmation, so direct backend resource removal or replacement cannot strand an active
+  first-party binding. Existing surfaces still run resize/dirty configuration every frame rather
+  than only on initial creation.
+- The native device installs a loss callback that invalidates the current backend state and exposes
+  the combined invalidation/cleanup failure through `RenderBackendStatus`. This is detection and
+  full native-state invalidation only. `Unavailable` remains terminal for that backend instance and
+  later frames skip without re-entering device initialization; reconstruction or a future explicit
+  retry contract is required. This is not the epoch-correlated bounded recovery contract.
+- `WgpuRenderBackend` uses the ECS `Resource` derive so its resource-cache hook is installed; plugin
+  tests prove the backend and required render resources are queryable before the first frame.
+- This slice does not implement browser-local storage, async WebGPU initialization, device epochs,
+  bounded device recovery, owned frame packets, generalized target coordination, or a public
+  `WgpuRenderHost` type.
 
 ### Native parallelism
 
@@ -364,6 +407,7 @@ and comprehensive target/device recovery tests.
 - [wgpu 30 feature definitions](https://github.com/gfx-rs/wgpu/blob/v30/wgpu/Cargo.toml)
 - [wgpu 30 browser backend Send/Sync policy](https://github.com/gfx-rs/wgpu/blob/v30/wgpu/src/backend/webgpu.rs)
 - [wgpu 30 example framework initialization](https://github.com/gfx-rs/wgpu/blob/v30/examples/features/src/framework.rs)
+- [wgpu 30 safe owning surface creation](https://docs.rs/wgpu/30.0.0/wgpu/struct.Instance.html#method.create_surface)
 - [wgpu 30 device-loss reasons](https://docs.rs/wgpu/30.0.0/wgpu/enum.DeviceLostReason.html)
 - [WebGPU adapter request](https://www.w3.org/TR/webgpu/#dom-gpu-requestadapter)
 - [WebGPU device request](https://www.w3.org/TR/webgpu/#dom-gpuadapter-requestdevice)

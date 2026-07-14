@@ -142,6 +142,7 @@ nara_winit = { workspace = true, optional = true }
 [dev-dependencies]
 bevy_ecs.workspace = true
 image.workspace = true
+raw-window-handle.workspace = true
 ron.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
@@ -212,6 +213,11 @@ serde = [
 [[example]]
 name = "windowed_clear"
 path = "examples/windowed_clear.rs"
+required-features = ["desktop-winit", "render-wgpu"]
+
+[[example]]
+name = "window_surface_retirement_smoke"
+path = "examples/window_surface_retirement_smoke.rs"
 required-features = ["desktop-winit", "render-wgpu"]
 
 [[example]]
@@ -308,3 +314,8 @@ required-features = ["runtime-2d"]
 name = "stable_runtime_identity"
 path = "tests/stable_runtime_identity.rs"
 required-features = ["tooling"]
+
+[[test]]
+name = "window_surface_retirement"
+path = "tests/window_surface_retirement.rs"
+required-features = ["desktop-winit", "render-wgpu"]

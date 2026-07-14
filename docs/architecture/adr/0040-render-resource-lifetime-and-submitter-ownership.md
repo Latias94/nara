@@ -4,7 +4,9 @@
 **Date**: 2026-07-09
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
-Culling, and Tilemap Render Cache; ADR 0054: GPU Upload Budget and Buffer Allocation Policy
+Culling, and Tilemap Render Cache; ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
+0077: Render Pipeline Recipes, Graph Compilation, and Backend Encoding; ADR 0078: Render Host
+Affinity, WebGPU Initialization, and Device Recovery
 
 ## Context
 
@@ -45,6 +47,12 @@ Rules:
   resource keys. They never store `wgpu` handles.
 - Backend caches own GPU textures, buffers, samplers, bind groups, pipelines, and surface-specific
   objects.
+- Backend surface ownership participates in the window target lifecycle. Surface loss may discard
+  and recreate only the surface while retaining a valid provider; controlled shutdown must drop
+  every acquired target and surface before the platform adapter releases its provider. A target
+  atomically admits only one non-cloneable surface owner plus control lease. The owner's `Drop`
+  records actual release, and first-party backend resource replacement uses that same surface-first
+  fallback rather than allowing a caller to fabricate acknowledgement.
 - Cache identity is based on prepared resource identity plus descriptor/generation data, not raw
   file paths or runtime entity IDs.
 - Resource invalidation is generation-based and observable. Reload failure preserves last-good typed
@@ -56,7 +64,8 @@ Rules:
 - Upload work is budgeted per frame and reported through render diagnostics or backend status
   resources, with details refined by ADR 0054.
 - Device loss clears backend-native caches, but prepared backend-neutral resources remain the source
-  for rebuilding after recovery.
+  for rebuilding after recovery. The current native baseline detects device loss and invalidates the
+  current backend generation; epoch-correlated bounded recovery remains future work.
 - `RenderPassPlan` remains the static pass-order contract. `RenderPassDependency` is an assertion
   that required earlier pass inputs exist in the static plan, not a general topological sorter. If
   nara needs computed ordering, transient graph resources, or pass-produced resource lifetimes, that
@@ -106,6 +115,7 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 | Cache stability | Unused-for-one-frame resources are not eagerly reuploaded by policy | Unit/smoke tests |
 | Reload behavior | Asset reload invalidates prepared/gpu resources by generation | Reload tests |
 | Plugin decoupling | UI/sprite/text submitters can be enabled independently from device/surface setup | Plugin tests |
+| Surface retirement | Surface loss retains provider ownership; shutdown and backend replacement retire surface ownership before provider/native target ownership | Window/wgpu lifecycle and platform smoke tests |
 | Graph trigger clarity | Need for topological ordering or transient resource lifetimes points to `RenderGraph` work | Design review |
 
 ## Risks and Mitigations
@@ -116,6 +126,7 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 | Static pass dependencies are mistaken for a graph | Medium | Medium | Document `RenderPassDependency` as validation only until graph promotion. |
 | Submitter plugins become tedious for examples | Low | Medium | Provide convenience plugin groups while keeping individual plugins explicit. |
 | Device loss recovery is under-tested | High | Low | Keep backend-neutral prepared resources rebuildable and add recovery smoke tests when supported. |
+| Surface cleanup races native window teardown | Critical | Medium | Use the shared target lifecycle and require renderer acknowledgement before provider release. |
 
 ## Consequences
 

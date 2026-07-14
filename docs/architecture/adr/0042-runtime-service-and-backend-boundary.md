@@ -5,8 +5,9 @@
 **Refines**: ADR 0008, ADR 0016, ADR 0019, ADR 0021, ADR 0028, ADR 0030, ADR 0031
 **Refined By**: ADR 0048: Runtime Diagnostics and Observability Bus; ADR 0052: Task
 Backpressure, Cancellation, and Long-Running Diagnostics; ADR 0056: Headless Runtime and Dedicated
-Server Readiness; ADR 0076: Play Runtime Debug Control and Observation; ADR 0080: Domain-Owned
-TaskUpdate Integration Sets
+Server Readiness; ADR 0076: Play Runtime Debug Control and Observation; ADR 0078: Render Host
+Affinity, WebGPU Initialization, and Device Recovery; ADR 0080: Domain-Owned TaskUpdate
+Integration Sets
 
 ## Context
 
@@ -39,6 +40,11 @@ Rules:
   physics body pointers, font-cache pointers, or script VM handles.
 - A service/backend owns native handles, worker threads, external runtime state, queues, and
   backend-specific diagnostics.
+- When ownership crosses adapters, the stable boundary is a narrow lifecycle authority rather than
+  an untyped service locator. The window adapter owns providers/native targets, the render backend
+  owns surfaces, and one unique typed lease orders their teardown. First-party surface owners retain
+  that lease through explicit cleanup and an RAII fallback; a platform runner acts only on targets
+  it registered.
 - Background work must not mutate `World` directly. It submits typed results, commands, events, or
   diagnostics that integrate on the main thread at declared stages.
 - Every service declares its schedule sets, time domain, pause behavior, replay/determinism policy,
@@ -61,6 +67,7 @@ Rules:
 | Text | font refs, text runs, shaping intent | font cache, shaping cache, atlas state | glyph runs / prepared resources |
 | Scripting | script refs, exported component data, commands | VM/runtime, module cache, sandboxes | validated commands/events |
 | Networking | replication components, channels, snapshots | sockets, protocol sessions, buffers | received commands/state reconciliation |
+| Rendering target | window/target identity, retirement intent, scoped retirement driver | platform provider, non-cloneable surface owner, surface, acquired texture | owner-Drop acknowledgement before provider/native teardown |
 
 ## Alternatives Considered
 

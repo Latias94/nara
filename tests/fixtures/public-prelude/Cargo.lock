@@ -838,6 +838,7 @@ dependencies = [
  "nara_app",
  "nara_ecs",
  "raw-window-handle",
+ "thiserror",
 ]
 
 [[package]]

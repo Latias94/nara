@@ -130,9 +130,9 @@ flowchart TD
 | `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, UI-owned material/instance/UV types, image/color material queueing, clipping, sort, and batching for the UI render phase |
 | `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized input state, frame-transient action outcome resolution, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
 | `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonically ordered fixed-tick admission with reserved local-action authority, pending/active/quarantine accounting, terminal fail-closed lifecycle state, and action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
-| `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events | Raw platform windows, winit event loop |
-| `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that updates window resources plus keyboard, mouse-button, and pointer state |
-| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
+| `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
+| `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that owns native windows, updates normalized input/window state, invokes scoped renderer retirement only for its targets, performs provider/native teardown after owner-drop acknowledgement, and preserves distinct primary-runner and native-teardown failures |
+| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
 | `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldIdentitySnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, stable identity-only snapshots, open scene document slots, active document, selection sets, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
@@ -307,6 +307,16 @@ second real adapter or stronger isolation pressure.
   cursor-based sink. `RuntimePressureSnapshots` is a separate bounded numeric resource and never
   decides producer admission, defer, coalesce, or eviction policy.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and `RenderPassPlan`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource and consumes the explicit pass plan for clear/world/UI/gizmo order.
+- Native window targets use an owning provider plus an explicit lifecycle authority. Atomic surface
+  acquisition issues one non-cloneable handle source and one control lease; safe wgpu surface
+  creation consumes the handle source, whose `Drop` acknowledges actual owner release. Controlled
+  exit and runner failure call the renderer's backend-neutral retirement driver only for Winit-owned
+  targets before provider and native-window ownership are released. Premature platform destruction
+  is a sticky fault that disables acquisition. Direct first-party backend replacement uses the same
+  surface-owner Drop fallback, and surface loss alone keeps the registered provider live for
+  recreation. Global plugin cleanup remains owned by `App::run`.
+- `WgpuRenderBackend` is registered through the ECS resource derive rather than a hand-written
+  marker, so the backend and its render resources are queryable before the first native frame.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from
@@ -363,6 +373,10 @@ second real adapter or stronger isolation pressure.
   non-reused host/device epoch. The fragile WASM Send/Sync feature is not an ownership shortcut. See
   ADR
   [0078](adr/0078-render-host-affinity-webgpu-initialization-and-device-recovery.md).
+  The current native Winit/wgpu slice implements safe owning surfaces, unique target leases,
+  main-thread execution, resize/dirty reconfiguration, device-loss detection with full local
+  invalidation, no implicit reinitialization from `Unavailable`, and target retirement. It does not
+  yet implement the complete host, packet, browser, device epoch, or bounded recovery contract.
 - Input is layered through normalized events, retained device state, routing decisions, action maps,
   text/IME streams, UI focus/pointer capture, and future accessibility semantics. See ADR
   [0041](adr/0041-input-routing-actions-text-focus-and-accessibility.md).

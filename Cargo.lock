@@ -1555,6 +1555,7 @@ dependencies = [
  "nara_ui_render",
  "nara_window",
  "nara_winit",
+ "raw-window-handle",
  "ron",
  "serde_json",
  "tracing",
@@ -1780,6 +1781,7 @@ dependencies = [
 name = "nara_render_wgpu"
 version = "0.1.0"
 dependencies = [
+ "bevy_ecs",
  "bytemuck",
  "nara_app",
  "nara_asset",
@@ -1794,6 +1796,7 @@ dependencies = [
  "nara_ui_render",
  "nara_window",
  "pollster",
+ "raw-window-handle",
  "thiserror 2.0.18",
  "wgpu",
 ]
@@ -1958,6 +1961,7 @@ dependencies = [
  "nara_ecs",
  "raw-window-handle",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

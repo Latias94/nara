@@ -1,14 +1,140 @@
 use nara_render::{Color, Extent2d};
-use nara_window::{PresentMode, WindowId, backend::RawWindowHandleProvider};
+use nara_window::{
+    PresentMode, WindowId,
+    backend::{WindowSurfaceHandleSource, WindowSurfaceLease},
+};
+
+#[cfg(test)]
+use nara_window::backend::WindowSurfaceBinding;
 
 use crate::WgpuRenderError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SurfaceDropReason {
+    TargetShutdown,
+    BackendCleanup,
+    SurfaceOrDeviceLost,
+}
+
+impl SurfaceDropReason {
+    pub(crate) const fn requests_target_retirement(self) -> bool {
+        matches!(self, Self::TargetShutdown)
+    }
+}
+
+#[derive(Debug)]
+enum SurfaceOwner {
+    Wgpu(wgpu::Surface<'static>),
+    #[cfg(test)]
+    LeaseOnly {
+        _handle_source: WindowSurfaceHandleSource,
+    },
+}
+
+#[derive(Debug)]
+struct LiveSurface {
+    owner: SurfaceOwner,
+    lease: WindowSurfaceLease,
+}
+
 #[derive(Debug)]
 pub(crate) struct WgpuSurfaceState {
-    pub(crate) surface: wgpu::Surface<'static>,
+    live: Option<LiveSurface>,
     pub(crate) config: Option<wgpu::SurfaceConfiguration>,
     pub(crate) size: Extent2d,
     pub(crate) dirty: bool,
+}
+
+impl WgpuSurfaceState {
+    pub(crate) fn new(
+        surface: wgpu::Surface<'static>,
+        target: WindowSurfaceLease,
+        size: Extent2d,
+    ) -> Self {
+        Self {
+            live: Some(LiveSurface {
+                owner: SurfaceOwner::Wgpu(surface),
+                lease: target,
+            }),
+            config: None,
+            size,
+            dirty: true,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lease_only(binding: WindowSurfaceBinding, size: Extent2d) -> Self {
+        let (handle_source, target) = binding.into_parts();
+        Self {
+            live: Some(LiveSurface {
+                owner: SurfaceOwner::LeaseOnly {
+                    _handle_source: handle_source,
+                },
+                lease: target,
+            }),
+            config: None,
+            size,
+            dirty: true,
+        }
+    }
+
+    pub(crate) fn can_acquire_frame(&self) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.lease.can_acquire_frame())
+    }
+
+    pub(crate) fn retirement_requested(&self) -> Result<bool, WgpuRenderError> {
+        self.live
+            .as_ref()
+            .map(|live| live.lease.retirement_requested())
+            .transpose()
+            .map(Option::unwrap_or_default)
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn surface(
+        &self,
+        window_id: WindowId,
+    ) -> Result<&wgpu::Surface<'static>, WgpuRenderError> {
+        match self.live.as_ref().map(|live| &live.owner) {
+            Some(SurfaceOwner::Wgpu(surface)) => Ok(surface),
+            #[cfg(test)]
+            Some(SurfaceOwner::LeaseOnly { .. }) => {
+                Err(WgpuRenderError::SurfaceMissing { window_id })
+            }
+            None => Err(WgpuRenderError::SurfaceMissing { window_id }),
+        }
+    }
+
+    pub(crate) fn retire(mut self, reason: SurfaceDropReason) -> Result<(), WgpuRenderError> {
+        self.retire_inner(reason.requests_target_retirement())
+    }
+
+    fn retire_inner(&mut self, request_target_retirement: bool) -> Result<(), WgpuRenderError> {
+        let Some(LiveSurface { owner, lease }) = self.live.take() else {
+            return Ok(());
+        };
+
+        let request_result = if request_target_retirement {
+            lease.request_retirement().map(|_| ()).map_err(Into::into)
+        } else {
+            Ok(())
+        };
+
+        drop(owner);
+        let acknowledgement = lease
+            .confirm_owner_dropped()
+            .map(|_| ())
+            .map_err(Into::into);
+        request_result.and(acknowledgement)
+    }
+}
+
+impl Drop for WgpuSurfaceState {
+    fn drop(&mut self) {
+        let _ = self.retire_inner(false);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,23 +241,15 @@ pub(crate) fn surface_extent(width: u32, height: u32) -> Option<Extent2d> {
 
 pub(crate) fn create_surface(
     instance: &wgpu::Instance,
-    provider: &RawWindowHandleProvider,
+    handle_source: WindowSurfaceHandleSource,
     window_id: WindowId,
 ) -> Result<wgpu::Surface<'static>, WgpuRenderError> {
-    // SAFETY: `provider` stores a strong guard for the platform window object.
-    // `WgpuRenderPlugin::cleanup` drops surfaces before app/world teardown drops
-    // the backend handle providers.
-    unsafe {
-        instance
-            .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(provider.display_handle()),
-                raw_window_handle: provider.window_handle(),
-            })
-            .map_err(|error| WgpuRenderError::SurfaceCreation {
-                window_id,
-                message: error.to_string(),
-            })
-    }
+    instance
+        .create_surface(handle_source)
+        .map_err(|error| WgpuRenderError::SurfaceCreation {
+            window_id,
+            message: error.to_string(),
+        })
 }
 
 pub(crate) fn configure_surface(
@@ -142,18 +260,15 @@ pub(crate) fn configure_surface(
     present_mode: PresentMode,
     size: Extent2d,
 ) -> Result<(), WgpuRenderError> {
-    let capabilities = surface_state.surface.get_capabilities(adapter);
-    let Some(mut config) =
-        surface_state
-            .surface
-            .get_default_config(adapter, size.width, size.height)
-    else {
+    let surface = surface_state.surface(window_id)?;
+    let capabilities = surface.get_capabilities(adapter);
+    let Some(mut config) = surface.get_default_config(adapter, size.width, size.height) else {
         return Err(WgpuRenderError::SurfaceUnsupported { window_id });
     };
 
     config.present_mode = choose_present_mode(present_mode, &capabilities.present_modes);
     config.view_formats = vec![config.format.add_srgb_suffix()];
-    surface_state.surface.configure(device, &config);
+    surface.configure(device, &config);
     surface_state.size = size;
     surface_state.config = Some(config);
     surface_state.dirty = false;

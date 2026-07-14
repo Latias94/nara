@@ -379,100 +379,7 @@ fn clear_window_frame_events(
     close_requests.clear();
 }
 
-pub mod backend {
-    use std::{any::Any, collections::BTreeMap, fmt, sync::Arc};
-
-    use nara_ecs::Resource;
-    use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
-
-    use crate::WindowId;
-
-    #[derive(Clone)]
-    pub struct RawWindowHandleProvider {
-        window_handle: RawWindowHandle,
-        display_handle: RawDisplayHandle,
-        _guard: Arc<dyn Any + Send + Sync>,
-    }
-
-    impl fmt::Debug for RawWindowHandleProvider {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("RawWindowHandleProvider")
-                .field("window_handle", &self.window_handle)
-                .field("display_handle", &self.display_handle)
-                .finish_non_exhaustive()
-        }
-    }
-
-    // SAFETY: Raw handles are inert platform identifiers here. The provider also
-    // stores a strong guard for the platform window object; backend users must
-    // still honor platform thread rules when creating or using surfaces.
-    unsafe impl Send for RawWindowHandleProvider {}
-
-    // SAFETY: See the `Send` safety note. Sharing this provider does not grant
-    // permission to use the underlying platform window on invalid threads.
-    unsafe impl Sync for RawWindowHandleProvider {}
-
-    impl RawWindowHandleProvider {
-        /// Creates a backend handle provider.
-        ///
-        /// # Safety
-        ///
-        /// `guard` must keep the platform object that produced the raw handles
-        /// alive until every backend surface created from this provider has been
-        /// dropped.
-        pub unsafe fn new(
-            window_handle: RawWindowHandle,
-            display_handle: RawDisplayHandle,
-            guard: Arc<dyn Any + Send + Sync>,
-        ) -> Self {
-            Self {
-                window_handle,
-                display_handle,
-                _guard: guard,
-            }
-        }
-
-        #[must_use]
-        pub const fn window_handle(&self) -> RawWindowHandle {
-            self.window_handle
-        }
-
-        #[must_use]
-        pub const fn display_handle(&self) -> RawDisplayHandle {
-            self.display_handle
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Resource)]
-    pub struct BackendWindowHandles {
-        providers: BTreeMap<WindowId, RawWindowHandleProvider>,
-    }
-
-    impl BackendWindowHandles {
-        pub fn insert(&mut self, window_id: WindowId, provider: RawWindowHandleProvider) {
-            self.providers.insert(window_id, provider);
-        }
-
-        #[must_use]
-        pub fn get(&self, window_id: WindowId) -> Option<&RawWindowHandleProvider> {
-            self.providers.get(&window_id)
-        }
-
-        #[must_use]
-        pub fn contains(&self, window_id: WindowId) -> bool {
-            self.providers.contains_key(&window_id)
-        }
-
-        pub fn remove(&mut self, window_id: WindowId) -> Option<RawWindowHandleProvider> {
-            self.providers.remove(&window_id)
-        }
-
-        #[must_use]
-        pub fn is_empty(&self) -> bool {
-            self.providers.is_empty()
-        }
-    }
-}
+pub mod backend;
 
 #[cfg(test)]
 mod tests {
@@ -504,9 +411,9 @@ mod tests {
             WindowId::PRIMARY
         );
         assert!(
-            app.world()
+            !app.world()
                 .resource::<backend::BackendWindowHandles>()
-                .is_empty()
+                .is_registered(WindowId::PRIMARY)
         );
 
         let world = app.world_mut().expect("app should allow world mutation");
@@ -618,7 +525,6 @@ mod tests {
     fn backend_handle_registry_starts_empty() {
         let handles = backend::BackendWindowHandles::default();
 
-        assert!(handles.is_empty());
-        assert!(!handles.contains(WindowId::PRIMARY));
+        assert!(!handles.is_registered(WindowId::PRIMARY));
     }
 }
