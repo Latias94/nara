@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-13
+**Last Updated**: 2026-07-14
 
 **Owner**: source package composition, runtime, schema, asset import, tooling, and concrete product Hosts
 
@@ -371,17 +371,24 @@ Inspector, process isolation, preview tooling, cook, and compatible body patchin
 ```mermaid
 flowchart TD
     User[Project user or package author] --> UX[CLI / Editor package UX Adapter]
-    UX --> Kernel[Leaf extension contract Module]
-    Cargo[Cargo metadata and compiled static catalog] --> Kernel
-    Kernel --> Prepared[Prepared package facts and bounded envelopes]
-    Prepared --> Compose[Root extension composition Module]
-    Support[Compiled domain ContractSupport values] --> Compose
+    UX --> Root[Root extension composition Module]
+    Cargo[Cargo metadata and compiled static catalog] --> Root
+    Root --> Selection[Select product / Host / target closure]
+    Selection --> Admission[Leaf final catalog admission]
+    Cargo --> Admission
+    ContractSupport[Compiled domain ContractSupport values] --> Admission
+    AdapterSupport[Compiled domain Adapter support values] --> Admission
+    Admission --> Resolve[Leaf contract resolution]
+    Resolve --> Bind[Domain-specific inactive binding]
+    Admission --> Bind
+    Bind --> Projection[Concrete typed product projection]
+    Selection --> Projection
 
-    Compose --> Common[Inspection snapshot and activation specifications]
-    Compose --> RuntimePlan[Runtime contribution plan]
-    Compose --> SchemaPlan[Schema contribution plan]
-    Compose --> ImportPlan[Importer contribution plan]
-    Compose --> ToolPlan[Optional tooling contribution plan]
+    Projection --> Common[Inspection snapshot and activation specifications]
+    Projection --> RuntimePlan[Runtime contribution plan]
+    Projection --> SchemaPlan[Schema contribution plan]
+    Projection --> ImportPlan[Importer contribution plan]
+    Projection --> ToolPlan[Optional tooling contribution plan]
 
     RuntimePlan --> App[nara_app runtime candidate Adapter]
     SchemaPlan --> Reflect[nara_reflect catalog Adapter]
@@ -427,7 +434,8 @@ until then, tests should enforce the logical dependency direction.
 | Caller | Minimum action | Visible concepts | Hidden concepts | Escalation trigger |
 |---|---|---|---|---|
 | Game author | Add one plugin group and author `SpriteAnimator` data | `App`, Plugin group, component fields, typed asset reference | Package manifest, contract IDs, bindings, plans, Host roles, cohorts | The code becomes an independently distributed package |
-| Package author | Declare stable roles and return one ordinary-Rust `package()` registration | Package/contribution IDs, domain binding helpers, Host/target applicability | Erased routing, cross-package graph, candidate staging, publication | The package defines a new contract rather than using an engine-owned one |
+| Package author | Declare stable roles and return one ordinary-Rust `package()` registration | Package/contribution identity, domain registration helpers, exceptional target applicability | Contract slices, receipts, bound plans, Host order, candidate staging, publication | The package defines a new contract rather than using an engine-owned one |
+| Domain provider author | Implement one typed Importer, Inspector, or other domain Interface | Typed settings, errors, owner-issued context, and outputs | Contract admission, task-pool mechanics, native authority internals, candidate/cohort publication | The provider defines a new domain contract or execution Adapter |
 | Project user | Preview and approve one add/update/remove action | Source, version, license, trust evidence, selected roles, targets, rebuild/restart and migration effects | Rust traits, factory types, typed plans, cohort mechanics | Advanced diagnostics or an explicit policy override is required |
 | Contract/Host author | Register one versioned contract owner and supporting concrete Host Adapter | Declaration schema, typed slices/plans, conformance suite, authority and lifecycle | Unrelated domain plans and private Host candidates | A second Adapter or process placement proves another seam |
 
@@ -923,8 +931,9 @@ artifact rules but does not inherit single-process atomic publication without a 
 sequenceDiagram
     participant User
     participant UX as CLI / Editor UX Adapter
-    participant Kernel as Leaf Contract Module
+    participant Preview as Package / Root Preview Module
     participant Compose as Root Composition Module
+    participant Kernel as Leaf Contract Module
     participant Cargo
     participant Domain as Domain Contract Owners
     participant Admission as Leaf Final Catalog Admission
@@ -934,13 +943,14 @@ sequenceDiagram
     participant Asset as Independent Artifact Root
 
     User->>UX: Inspect add, update, or remove
-    UX->>Kernel: Bounded source and manifest facts
-    Kernel-->>UX: Preview, trust evidence, targets, roles, unknowns
+    UX->>Preview: Bounded source/index/manifest facts and project request
+    Preview-->>UX: Preview, trust evidence, targets, roles, unknowns
     User->>UX: Explicit consent for trusted build
-    UX->>Compose: Approved bounded manifests and project request
     UX->>Cargo: Resolve and build selected profiles
+    UX->>Compose: Approved request and preview fingerprint
     Cargo-->>Compose: Locked graph and compiled binding evidence
     Domain-->>Compose: Explicit contract definitions and Host Adapter declarations
+    Compose->>Compose: Select product / Host / target closure
     Compose->>Admission: Selected declarations, BindingClaims, support declarations, Host/target facts, and compiled evidence
     Admission-->>Compose: Private typed FinalCatalogAdmission bundles
     Compose->>Kernel: resolve_contract(admitted ContractSupport and typed request)
@@ -993,7 +1003,7 @@ No universal `ExtensionError` should erase the responsible Module or mutation gu
 
 | Failure point | Owner | Mutation or authority state | New publication | Last-good and cleanup |
 |---|---|---|---|---|
-| Manifest shape, budget, or migration | leaf contract Module | No package code or Nara-issued Host authority | None | Active state unchanged |
+| Manifest shape, budget, or migration | source package/preview Module | No package code or Nara-issued Host authority | None | Active state unchanged |
 | Unknown required contract or denied policy | root composition Module | Pure rejection | None | Active state unchanged |
 | Missing/extra/wrong/stale or digest-drift binding | leaf final catalog admission; contract and Adapter owners supply immutable evidence only | Factory not called | None | Active state unchanged |
 | Factory panic or ambient side effect during candidate preparation | concrete Host attempt; domain owner supplies error semantics | Pure resolve/bind already succeeded and candidate preparation may own reservations; trusted native code may still violate the contract through ambient authority | None | Host retains cleanup ownership, discards the candidate, and reports any non-rollbackable contract breach honestly |
@@ -1173,7 +1183,9 @@ serialization, cancellation, and containment cost before semantics are proven.
 |---|---|---|
 | Ordinary game author cost | One plugin-group call and no package manifest for game-owned code | Public compile fixture |
 | Reusable package author cost | One explicit package registration; no per-Host registration list | External package fixture |
+| Domain provider author cost | One narrow typed domain Interface and zero imports from admission, binding, candidate, task-pool, native-authority, or publication internals | Independent Importer and Inspector compile fixtures |
 | Clean-room task surface | Game author edits one Rust call site plus normal data; package author edits one canonical declaration source plus one registration Module | Scripted task diary with concepts and files touched |
+| Public complexity firewall | Game, package, and provider fixtures import no Host-integration types; broad preludes expose no internal phase evidence; primary diagnostics use author-domain language | Compile fixtures, rustdoc/API audit, and diagnostic goldens |
 | Dual-path equivalence | Direct and package lowerings have equal schema fingerprints, plugin declarations, schedule placement, and headless semantic snapshots | Cross-path conformance fixture |
 | Standard Inspector leverage | `SpriteAnimator` is inspectable/editable with zero custom Inspector code | Model, patch, and undo tests |
 | Pure plan determinism | 100 repeated resolutions and all declaration-order permutations yield equal snapshots/fingerprints | Property test |
@@ -1197,7 +1209,7 @@ storage, builder map layout, internal tuple order, or concrete candidate enum va
 
 | Test layer | Scenarios | Observable assertions |
 |---|---|---|
-| Compile fixtures | MT-01, MT-02, MT-05, MT-06, MT-21 | Common calls compile; wrong provider/helper types fail at compile time where expressible; wrong locator contracts return a bounded author report; no required proc macro |
+| Compile fixtures | MT-01, MT-02, MT-05, MT-06, MT-21 | Common calls compile without kernel/Host imports; provider fixtures use one narrow domain Interface; wrong provider/helper types fail at compile time where expressible; wrong locator contracts return a bounded author report; no required proc macro |
 | Pure preview/plan | MT-03, MT-20 through MT-26 | Stable snapshots, explicit unknowns, no executable or Host mutation |
 | Schema/Inspector | MT-10, MT-11, MT-15, MT-16, MT-51, MT-52 | Stable identity, capability filtering, lossless unavailable data, validated patch/undo |
 | Import conformance | MT-12, MT-13, MT-23, MT-33, MT-35 | Tracked inputs, bounded jobs, stable products, independent publication, artifact last-good |

@@ -2,7 +2,7 @@
 
 **Status**: Design Draft
 **Created**: 2026-07-13
-**Last Updated**: 2026-07-13
+**Last Updated**: 2026-07-14
 **Owner**: Source extension packages, contribution catalogs, product/build hosts, and domain owners
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Related Question**: [OQ-031: Source Extension Package and Trust Topology](open-questions.md#oq-031-source-extension-package-and-trust-topology)
@@ -882,22 +882,21 @@ publication, package inspection, or multi-Host activation are not implied.
 
 ### Path B: Reusable Runtime Package
 
-The desired consumer experience is one Cargo/package action and one explicit registration, not one
-manual registration per Host:
+The desired project-user experience is one Cargo/package action and, where source registration is
+not generated from project data, at most one explicit `combat::package()` registration. The user
+does not resolve plans, choose a runtime blueprint, or reproduce registration per Host.
 
-```rust
-let project = ProjectRequest::new()
-    .with_package(combat::package());
-
-let plan = resolve_project_extensions(project)?;
-let runtime = headless::start(plan.runtime_blueprint())?;
-```
-
-The desired future CLI/editor action is conceptually:
+The desired CLI/editor action is conceptually:
 
 ```text
 nara package add games.acme.combat
 ```
+
+The exact public Rust product-entry syntax remains deferred. Internally, that entry point must
+still perform root selection, final catalog admission, semantic resolution, fallible inactive
+binding, concrete typed projection, and candidate preparation in that order. A
+`ResolvedProjectPlan` is not a runnable blueprint, and neither a getter nor `headless::start` may
+silently absorb the missing binding step.
 
 It is closest to Unity Package Manager or enabling an Unreal/Godot plugin, but Cargo performs Rust
 resolution underneath. The preview shows source/lock change, license, trust, selected Host
@@ -975,6 +974,16 @@ separate runtime or service contribution. The importer cannot secretly install i
 7. Tooling states whether an edit used reload, reimport, patch, rebuild, Host restart, runtime
    restart, or migration. It never reports undifferentiated `hot reload`.
 8. CLI, editor, and AI automation consume the same immutable preview and diagnostics model.
+9. Game-owned examples import no package, contract, binding, or Host-integration modules. Ordinary
+   package authors cannot construct contract slices, contribution keys, receipts, bound plans,
+   candidates, cohorts, or Host order.
+10. Provider authors implement one domain-owned trait/context and typed settings, errors, and
+    outputs. Owner task scheduling, native capabilities, candidate preparation, and publication do
+    not leak into that Interface unless the domain contract explicitly grants one scoped operation.
+11. Broad preludes export no receipt, seal, transfer, bound-plan, candidate, cohort, or activation
+    permit types. Advanced audit types remain in narrowly named modules.
+12. Primary diagnostics describe the author's package, role, target, settings, or output and give a
+    next action. Internal phase and fingerprint evidence is an opt-in inspection detail.
 
 ## Resolution And Publication Sequence
 
@@ -1221,6 +1230,8 @@ worker timeout, process crash, and a referenced package removed from the current
 | Metric | Target | Measurement |
 |---|---:|---|
 | Simple Rust path | Runtime-only package needs one Cargo/package action and at most one explicit package registration; game-owned Plugin needs neither | Clean-room authoring task |
+| Provider path | An importer or Inspector author implements one narrow domain Interface and imports zero admission, receipt, binding, candidate, task-pool, filesystem-authority, or publication types | Independent provider fixtures and public API audit |
+| Public complexity firewall | Game, package, and provider examples compile without Host-integration types; broad preludes expose no internal phase evidence and primary diagnostics use author-domain language | Compile fixtures, rustdoc/API audit, and diagnostic goldens |
 | Staged trust evidence | Every trust fact carries `IndexClaimed`, `SourceObserved`, `CargoResolved`, `CompiledVerified`, or `RuntimeObserved`; unavailable behavior is explicit `Unknown` before execution | Preview snapshots, metadata fixtures, compiled catalog audit |
 | Plan determinism | 100 repeated resolutions of equal inputs produce identical package and typed-plan fingerprints/order | Property/regression test |
 | Contract locality | Adding a test contribution contract changes its domain/supporting Host registration but zero package-core matches or central variants | Diff/API review |

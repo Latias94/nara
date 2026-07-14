@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-13
+**Last Updated**: 2026-07-14
 
 **Owner**: extension contract leaf kernel, domain contract owners, root composition, and concrete Hosts
 
@@ -676,6 +676,19 @@ A domain author supplies:
 This is intentionally more ceremony than ordinary package authoring. Defining an ecosystem
 contract is an advanced engine-extension task, not the common game-author path.
 
+### Public Surface Rule
+
+The complete kernel Interface is an advanced contract/root/Host integration surface. Domain
+helpers must absorb it so a game author, ordinary package author, or provider author never manually
+creates or transports a `ContributionKey`, `ContractRequest`, contract slice, semantic/binding
+receipt, generation seal, inactive transfer, bound plan, candidate, cohort, or activation permit.
+Those types stay private or in narrowly named advanced modules and never enter `nara::prelude`.
+
+The same rule applies to errors: ordinary diagnostics name the package role, domain settings,
+target, or missing support and provide a corrective action. Kernel phase names and fingerprints
+belong in opt-in audit details. A clean-room provider fixture must be able to implement its typed
+domain trait without importing this module.
+
 ## Open Contract, Closed Executable
 
 "Open contract vocabulary" means a third party can define a new contract owner, stable ID,
@@ -798,7 +811,7 @@ private erased capsules, sort buffers, or slice witnesses.
 
 | Layer | Required evidence |
 |---|---|
-| Compile-pass | Macro-free external contract/package, renamed Nara dependency, runtime-only and import-enabled feature sets, local-affine bound plan |
+| Compile-pass | Macro-free external contract/package, renamed Nara dependency, runtime-only and import-enabled feature sets, local-affine bound plan, and domain provider importing zero kernel types |
 | Compile-fail | Wrong domain helper, `FnOnce` factory, borrowed plan escape, cross-contract result mix, public receipt/key construction, opening opaque transfer, invoking inactive factory without Host permit, `dyn ContributionContract`, incorrect threaded affinity |
 | Pure property tests | Declaration and binding permutations produce identical slices, plans, and receipts; duplicate and conflicting facts reject deterministically |
 | Version matrix | Exact descriptor migration, exact plan schema, and Host Adapter conformance mismatch reject deterministically |
@@ -811,6 +824,7 @@ private erased capsules, sort buffers, or slice witnesses.
 | Dependency audit | The leaf has no dependency on app, asset, reflect, tooling, diagnostic, ECS, filesystem, task, window, or render crates |
 | Product graph audit | Release/server artifacts omit unselected importer, editor, and contract Adapter code |
 | Performance audit | Contract resolution occurs only during composition; frame execution performs zero contract ID lookup or dynamic activation |
+| Public-surface audit | `nara::prelude` and ordinary game/package/provider rustdoc expose no receipt, seal, transfer, bound-plan, candidate, cohort, or activation-permit types; primary errors use domain vocabulary |
 
 ## Success Metrics
 
@@ -823,6 +837,7 @@ private erased capsules, sort buffers, or slice witnesses.
 | Pre-authority guarantee | Prepare, resolve, and bind acquire or mutate zero Host authorities and invoke zero factories | Instrumented Host fixture |
 | Type safety | Wrong domain binding, borrowed plan, and illegal threaded placement fail at compile time where representable | Compile-fail fixtures |
 | External ergonomics | A macro-free package with a renamed Nara dependency registers runtime, schema, and importer claims through one `package()` function | Independent workspace fixture |
+| Complexity firewall | Game, package, and provider fixtures complete their normal tasks without importing kernel or Host-integration types | Independent compile fixtures and rustdoc/API audit |
 | Receipt integrity | Typed semantic and binding receipts contain only evidence for their own phase and no plan, payload, `TypeId`, path, pointer, provider, or native handle | Schema/golden audit |
 | Dependency direction | Leaf dependency audit reports zero forbidden domain/backend crates | `cargo metadata` and boundary search |
 | Runtime cost | Frame profiles contain zero contract dispatch, registry lookup, or plan resolution | Profiling and code review |

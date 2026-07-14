@@ -98,6 +98,7 @@ The domain-independent Module that validates common declaration/binding structur
 private final catalog admission operation, and delegates domain meaning to catalog-verified pure
 decoders and resolvers. It invokes no package provider or factory, grants no Host authority, and
 depends on no runtime, import, schema, tooling, or native Host implementation.
+This is internal architecture vocabulary, not a public authoring Interface.
 _Avoid_: Operating-system kernel, package manager, plugin registry
 
 **Semantic Plan**:

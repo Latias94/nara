@@ -5,7 +5,7 @@ types remain proposed
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-13
+**Last Updated**: 2026-07-14
 
 **Audience**: Game authors, package authors, engine contributors, and future Host integrators who
 do not already know Nara's extension architecture vocabulary
@@ -16,21 +16,41 @@ do not already know Nara's extension architecture vocabulary
 
 **Detailed Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 
+## Reader Route
+
+This guide contains the full internal ownership model because contract, product-root, and Host
+maintainers need shared terms. It is not a list of concepts every extension author must learn.
+
+| Audience | Normal Interface | Internal model required for normal work? |
+|---|---|---|
+| Game author | `App`, `Plugin`, ECS data/systems, assets, and scenes | No |
+| Reusable package author | One `package()` function plus engine-owned domain helpers | No |
+| Importer, Inspector, or other provider author | One narrow domain trait/context with typed settings, errors, and outputs | No |
+| Contract, product-root, or Host maintainer | Versioned contracts, resolution, binding, candidate ownership, and publication | Yes, only for the owned layer |
+
+Leaf-kernel, receipt, seal, inactive-transfer, candidate, and cohort vocabulary describes engine
+internals. It must not become a required workflow, broad-prelude surface, or primary diagnostic
+language for the first three audiences.
+
 ## Why This Guide Exists
 
 The detailed extension documents use terms such as "leaf kernel", "root composition", "binding",
 "Host", "candidate", and "receipt" precisely. They are useful for architecture review, but they
 are difficult to read before those terms have a shared meaning.
 
-The recommended concepts are often abbreviated as a downward stack:
+The ownership flow can first be read without the formal internal names:
 
 ```text
-atomic package authoring
-    -> minimal leaf contract kernel
-    -> concrete root composition
-    -> domain-specific Host binding
-    -> concrete domain owners and candidates
+package declares its roles
+    -> engine validates the selected roles
+    -> the concrete product composes them
+    -> each domain binds its implementation
+    -> the owning domain prepares and publishes replacement state
 ```
+
+The detailed design calls those responsibilities atomic package authoring, the Leaf Contract
+Kernel, concrete root composition, domain-specific binding, and candidate/publication ownership.
+Those labels are for architecture and implementation review, not public workflow steps.
 
 That stack is an ownership map, not the exact call order. The composition root coordinates the
 middle of the operation: it selects the product and target, asks the leaf kernel to resolve each
@@ -64,8 +84,8 @@ Imagine preparing a machine from separately supplied parts:
    one package at once.
 2. **Concrete root composition is the assembly coordinator.** The Editor, server, and cook tool
    select different subsets and supply the facts needed by the next checks.
-3. **The leaf contract kernel is the independent common verifier.** For each selected rulebook, it
-   checks identities, versions, limits, and structural evidence. It may invoke catalog-verified,
+3. **Common contract validation checks shared rules.** For each selected rulebook, it checks
+   identities, versions, limits, and structural evidence. It may invoke catalog-verified,
    non-capturing domain decoders and pure resolvers, but it invokes no package provider or factory
    and acquires no Host authority.
 4. **Domain-specific implementation binding matches each part to one socket.** The formal design
@@ -81,12 +101,12 @@ The analogy ends at authority. Nara's actual design uses typed Rust values, stab
 bounded data, explicit generations, and domain-specific failure rules rather than a physical parts
 registry.
 
-## Five Terms Without Jargon
+## Five Internal Responsibilities In Plain Language
 
 | Term | Plain meaning | What it must not mean |
 |---|---|---|
 | Atomic package authoring | Give Nara all compiled contribution claims for one package in one all-or-error authoring operation | Atomic disk replacement, activation, or rollback of arbitrary Rust side effects |
-| Minimal leaf contract kernel | The smallest domain-independent verifier shared by runtime, schema, import, and tooling contracts | OS kernel, package downloader, dynamic plugin loader, or global registry |
+| Common contract validation (internally owned by the `Leaf Contract Kernel`) | The smallest domain-independent validation shared by runtime, schema, import, and tooling contracts | OS kernel, package downloader, dynamic plugin loader, or global registry |
 | Concrete root composition | One executable coordinates selection, resolution, binding, and final typed projection assembly | Repository root, universal extension manager, or `get<T>()` service locator |
 | Domain-specific implementation binding | Join a pure plan to an exact compiled implementation for one owner role and target, while keeping it inactive; formally called Host binding | Calling the factory, opening files, mutating `World`, or publishing state |
 | Concrete domain owner | The real Module that owns candidate construction, scoped authority, readiness, cleanup, and domain policy; a concrete Host may coordinate visibility for a multi-domain cohort | One common trait implemented by every engine subsystem, or permission to publish a selected cohort member independently |
@@ -128,6 +148,17 @@ Nara therefore separates four kinds of facts:
 | Authority and active state | "This provider may read tracked source bytes and publish this artifact group" | Concrete Import Host attempt |
 
 The separation is intentional: inspect and reject first; acquire authority and mutate later.
+
+Bevy usually collapses these responsibilities into Cargo, `rustc`, static linking, application
+`main`, `App::add_plugins`, and process startup. A simple Bevy plugin can be only `fn(&mut App)`; a
+group author sees enable/disable and relative order; an `AssetLoader` author sees typed
+`Asset`/`Settings`/`Error` plus `load`. Its public `Plugins` adapter accepts a plugin, group, or
+tuple while a sealed implementation hides dispatch and add-to-`App` plumbing, and a blanket
+implementation adapts the typed loader to type-erased machinery normally hidden from loader
+authors. That is an excellent authoring baseline when composition is code-owned and startup
+failure may stop the process. Nara needs separately inspectable internal stages only if the tracer
+proves integrated package preview, target-specific multi-role composition, pre-mutation rejection,
+and last-good replacement. None of those stages is a prerequisite for ordinary gameplay authoring.
 
 ## Basic Vocabulary For The Example
 
@@ -510,7 +541,7 @@ No mature engine has an exact equivalent of the whole Nara flow. The useful comp
 | Contribution | One `Plugin`, `AssetLoader`, reflected type registration, or other specialized role | One importer, Inspector extension, class registration, or editor role | One importer, custom editor, runtime assembly role, or build hook | One module/provider/translator/customization role |
 | Domain contribution contract | `Plugin`, `AssetLoader`, reflection type data, and other specialized traits | `EditorImportPlugin`, `EditorInspectorPlugin`, GDExtension class registration | `ScriptedImporter`, `CustomEditor`, build interfaces | Module types, `IAssetTools`, Interchange translators/pipelines/providers |
 | Atomic package authoring | Explicit Rust `PluginGroup` composition is the closest ergonomic analogy | One addon can register several editor extension kinds | One package declares several assemblies and specialized classes | One plugin descriptor declares several target-scoped modules |
-| Minimal leaf contract kernel | No direct equivalent; typed trait checks and some `PluginGroupBuilder` validation are partial analogies | No direct equivalent; addon and extension admission is distributed | No direct equivalent; package, assembly, and importer validation is distributed | No direct equivalent; descriptor, target, and module validation is distributed |
+| Common contract validation (`Leaf Contract Kernel`) | No direct equivalent; typed trait checks and some `PluginGroupBuilder` validation are partial analogies | No direct equivalent; addon and extension admission is distributed | No direct equivalent; package, assembly, and importer validation is distributed | No direct equivalent; descriptor, target, and module validation is distributed |
 | Semantic plan | `PluginGroupBuilder` is a partial analogy but still holds live plugin values | Selected metadata and initialization rules are usually not exposed as one pure typed value | Package/assembly/import selection is usually framework state rather than one pure typed value | Target/module resolution is the closest build-time analogy |
 | Concrete composition root | Application code builds one `App` | Editor, running project, export tool, and initialization levels assemble different capabilities | Editor, Player, import, and build pipelines select different assemblies | Editor, Game, Server, Program, commandlet, and build targets select modules |
 | Domain-specific Host binding / Bound plan | No separate public phase; application code normally inserts live Rust values into `App` | Registration and activation are commonly combined by engine entry points | Reflection discovery, construction, and registration are commonly combined | Module loading and provider registration commonly combine several phases |
@@ -559,20 +590,28 @@ makes Host-finalized artifact candidates and exact publication evidence explicit
 Nara does not introduce Unreal-sized module/build machinery or a universal Interchange graph before
 two real implementations prove each seam.
 
-## Who Needs To Learn Which Interface
+## Public Complexity Firewall
 
-| Audience | Normal Interface | Concepts they should not need |
-|---|---|---|
-| Game author | `App`, `Plugin`, ECS data/systems, assets, scenes | Package receipts, contract slices, catalog seals, Host binding |
-| Reusable package author | One `package()` function plus domain helpers | Candidate construction, task pools, filesystem capabilities, private contribution keys |
-| Contract author | Exact declaration versions, typed semantic plan, resolver, summary, conformance tests | Universal Host context or unrelated domain lifecycle |
-| Product/root integrator | Concrete Editor/server/cook composition operations and typed projections | Public erased plan registry or dynamic Rust ABI |
-| Host/domain maintainer | One domain's binder, candidate lifecycle, authority and cleanup | Another domain's internal state machine |
+The reader route above is a public Interface constraint, not only a documentation preference:
 
-`nara::prelude` remains gameplay-first. Package authoring belongs under a package-specific module or
-prelude. Contract-author and Host-integration types are advanced, module-specific Interfaces.
-Private receipts, generation seals, inactive transfers, and activation permits should not be added
-to a broad prelude.
+1. Game-owned examples use `App`, `Plugin`, ECS, assets, and scenes without importing package,
+   contract, binding, or Host-integration modules.
+2. Reusable package authors declare roles through one `package()` function and domain helpers.
+   They cannot construct contribution keys, contract requests/slices, bound plans, receipts,
+   generation seals, transfers, candidates, cohorts, or Host ordering.
+3. Importer, Inspector, and other provider authors implement one narrow domain Interface. Task
+   pools, filesystem capabilities, candidate construction, and publication stay behind the owner
+   context unless that exact capability is deliberately part of the domain contract.
+4. `nara::prelude` remains gameplay-first. Package authoring uses a package-specific module;
+   contract and Host integration use advanced module-specific Interfaces. Private phase evidence
+   never enters a broad prelude.
+5. Primary errors use the author's domain language and a concrete next action. Internal phase,
+   receipt, and fingerprint evidence may appear only in advanced inspection details.
+6. Direct `App`/`PluginGroup` authoring and reusable package registration lower from one canonical
+   definition source; hiding internals must not create two semantic authorities.
+
+If an ordinary game, package, importer, or Inspector recipe must explain admission, binding,
+candidate, or cohort mechanics, the public Interface has failed this boundary.
 
 ## Common Misunderstandings
 
@@ -665,8 +704,9 @@ fields, match arms, or domain-specific orchestration.
 
 | Metric | Target | Evidence |
 |---|---|---|
-| Reader comprehension | A new contributor can explain declaration, semantic plan, binding, candidate, and activation as separate stages | Design review using the sprite-animation walkthrough |
+| Role-specific comprehension | A game author completes the direct Plugin path, a package/provider author completes one narrow registration task, and only contract/root/Host maintainers must explain the complete internal stages | Clean-room tasks plus design review using the sprite-animation walkthrough |
 | Common author surface | One package function plus domain helpers; no per-Host order list | Macro-free external package fixture |
+| Public complexity firewall | Game, package, importer, and Inspector fixtures compile without importing receipts, seals, transfers, bound plans, candidates, cohorts, or Host integration types; the broad prelude exports none of them | Independent compile fixtures, rustdoc/API audit, and primary-diagnostic goldens |
 | Kernel independence | Zero runtime/import/schema/tooling/ECS/Host dependencies | Dependency audit and public-surface search |
 | Phase authority | Resolve and bind tests invoke zero factories and acquire zero Host capabilities | Counter/canary tests and compile-fail fixtures |
 | Typed composition | Editor/server projections contain concrete domain fields and no public `Any`/string plan lookup | Type-level fixtures and public-surface audit |
@@ -703,8 +743,9 @@ dependencies, conditional import roles, invalid locators, aggregate diagnostics,
 
 - [Nara Engine Architecture Language](../../CONTEXT.md)
 - [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
-- [Bevy `Plugin` and `PluginGroupBuilder`](../../repo-ref/bevy/crates/bevy_app/src/)
-- [Bevy asset loader and load context](../../repo-ref/bevy/crates/bevy_asset/src/)
+- [Bevy `Plugin` and sealed `Plugins`](../../repo-ref/bevy/crates/bevy_app/src/plugin.rs)
+- [Bevy `PluginGroupBuilder`](../../repo-ref/bevy/crates/bevy_app/src/plugin_group.rs)
+- [Bevy typed `AssetLoader` and internal erasure](../../repo-ref/bevy/crates/bevy_asset/src/loader.rs)
 - [Godot editor plugin and import extension sources](../../repo-ref/godot/editor/)
 - [Unity package and assembly definitions](https://docs.unity3d.com/6000.0/Documentation/Manual/cus-layout.html)
 - [Unity `ScriptedImporter`](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/AssetImporters.ScriptedImporter.html)
