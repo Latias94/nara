@@ -2,14 +2,15 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-14
+**Last Revised**: 2026-07-15
 **Owner**: `nara_app` and concrete executable hosts
-**Admission Trigger**: RGF-U5 proves the headless runtime core, RGF-U17 replaces the bare Play
-`World` through concrete Editor Host ownership, and RGF-U13 proves the same drive/close contract in
-the desktop product; RGF-U23 reviews this ADR and ADR 0082 atomically
+**Admission Trigger**: RGF-U5 proves the code-first runtime core; RGF-U26 freezes the task-equivalent
+manual counterfactual before RGF-U24 proves unpublished candidate construction and headless Host
+publication; RGF-U25 challenges the ownership model before RGF-U17 replaces the bare Play `World`
+and RGF-U13 proves desktop drive/close parity; RGF-U23 then decides this ADR independently before
+checking compatibility with the accepted outer-Host decision
 **Revisit Trigger**: A concrete embedded or multi-runtime workflow proves that a thin lifecycle owner
 cannot preserve `App` as the sole schedule/world authority
-**Atomic Admission Group**: ADR 0082 and ADR 0084 must be accepted or rejected together
 **Related**: ADR 0003, ADR 0008, ADR 0034, ADR 0039, ADR 0042, ADR 0052, ADR 0057, ADR 0058,
 ADR 0076, ADR 0081, ADR 0082
 
@@ -45,9 +46,12 @@ flowchart TD
     Host[Editor / desktop / headless host]
     Recipe[Validated replayable runtime recipe]
     Start[Host-owned runtime start attempt]
+    Ledger[Attempt ownership / obligation ledger]
     Prepare[Authority-free plugin preparation]
     Reservations[Host-issued inactive service reservations]
+    Commit[Fresh App closed commit and seal]
     Candidate[Private unpublished runtime candidate]
+    Publish[Atomic infallible publish-and-promote]
     Runtime[Executable runtime: generation, state, control, fault, close]
     App[One nara_app::App]
     World[One live simulation World]
@@ -57,21 +61,27 @@ flowchart TD
     Host --> Recipe
     Host --> Start
     Recipe --> Start
-    Start --> Prepare
+    Start --> Ledger
+    Ledger --> Prepare
     Prepare --> Reservations
     Host -->|issues through domain Adapters| Reservations
-    Reservations --> Start
-    Start --> Candidate
-    Candidate --> Runtime
-    Runtime --> App
+    Reservations --> Commit
+    Commit --> Candidate
+    Ledger --> Candidate
+    Candidate -->|owns before startup| App
+    Candidate --> Publish
+    Publish --> Runtime
+    Candidate -->|owns before publication| Sessions
+    Runtime -->|owns after publication| App
     App --> World
     Runtime --> Sessions
     Host -->|single driver authority| Runtime
     Docs -->|immutable validated snapshot| Recipe
 ```
 
-The conceptual name `RuntimeInstance` may be used by implementation and plans, but this ADR
-freezes the ownership contract, not the final public type name or module layout.
+The conceptual names `RuntimeCandidate` and `RuntimeInstance` may be used by implementation and
+plans, but this ADR freezes their unpublished/published ownership contract, not final public type
+names or module layout.
 
 The conceptual name `RuntimeStartAttempt` denotes the unique Host-owned operation that contains the
 private candidate until publication or terminal retirement. It is not a Cargo build handle, a
@@ -80,15 +90,23 @@ type private or advanced; ordinary game authors and `nara_tooling` models do not
 
 ### Ownership
 
-- The executable runtime exclusively owns one `App`. `App` remains the only owner of schedules,
-  plugin lifecycle, time domains, and simulation-`World` mutation.
+- An unpublished `RuntimeCandidate` exclusively owns one sealed, unstarted `App` plus every
+  explicitly registered runtime close obligation. Admission rejects an active hook, an
+  already-started App, a raw runner that can bypass runtime driving, or a first-party
+  obligation-bearing declaration whose owner was not registered. Arbitrary App/World resources are
+  caller-owned by default; the runtime cannot infer shutdown semantics from their Rust types.
+  After successful startup and every fallible publication precondition, one atomic, infallible
+  publish-and-promote move makes the same owner the Host-visible executable runtime. No
+  promoted-but-unpublished owner or fallible hook exists across that boundary. `App` remains the
+  only owner of schedules, plugin lifecycle, time domains, and simulation-`World` mutation.
 - The executable runtime does not register systems or plugins, expose a second scheduler, or keep a
   second time model. It delegates frame/fixed execution to its `App`.
 - The host owns project/edit documents, validated settings, the runtime recipe, and reconstruction
   authority. Those values do not become mutable runtime ECS state.
-- Each runtime has a non-reused generation. Runtime-local identity domains, time debt, command and
+- Each runtime has a non-reused generation. Runtime-owned identity domains, time debt, command and
   task queues, mutable assets, backend sessions, control requests, and faults are not shared across
-  generations.
+  generations. Deliberately shared caller-owned resources remain outside the runtime's isolation and
+  `Stopped` proof unless the caller explicitly transfers a close obligation at App sealing.
 - Immutable, version-stamped project/schema/catalog snapshots may be shared only when the runtime
   recipe proves the same project revision and every consumer treats them as immutable.
 - Active runtime inspection and mutation use bounded observation and safe-point commands. Tooling
@@ -98,39 +116,58 @@ type private or advanced; ordinary game authors and `nara_tooling` models do not
   Changes models; it does not store either authority-bearing owner. This leaves in-process and
   child-process Play as replaceable Host Adapters rather than public tooling topologies.
 - The platform event loop remains host-owned. It supplies events and elapsed real time through the
-  same drive contract rather than becoming a second runtime owner.
+  runtime drive contract rather than becoming a second runtime owner. It does not retain `&mut App`
+  or invoke `App::run_once` behind runtime control, fault, and close state.
 
 ### Construction and Publication
 
-ADR 0082 supplies an immutable validated project revision, resolved composition plan, replayable
-recipe, and immutable service-admission requirements. The concrete Host begins one
-`RuntimeStartAttempt`; this ADR then owns the complete staged admission DAG and creates an
-unpublished candidate only after preparation and reservation succeed:
+On the integrated product path, ADR 0082 or an explicit successor supplies one lineage-compatible
+immutable project revision, resolved composition plan, replayable recipe, and immutable
+service-admission requirements. A code-first caller may instead supply a directly configured sealed
+App without adopting those outer scopes. In either path, the concrete owner begins one
+`RuntimeStartAttempt`, reserves its exclusive logical publication slot/epoch, and establishes one
+ownership/obligation ledger before the first fallible preparation, hook, or acquisition. This ADR
+then owns the complete staged admission DAG and admits a sealed App plus that ledger into an
+unpublished candidate before registry/scene/startup work:
 
 1. verify that revision, plan, recipe, compiled capabilities, and service requirements describe one
    generation and the already validated dependency DAG;
-2. prepare every repeatable plugin instance and preserve its exact definition key without Host
-   authority, reservation, `App`, or candidate creation;
+2. under the existing ledger, privately materialize a fresh move-only plugin owner from every
+   repeatable definition, preserve its exact definition/configuration key, and retain no
+   installed/live plugin object in the recipe;
 3. request host-issued and runtime-local inactive reservations through concrete domain Adapters,
    transferring each successful acquisition directly into the start attempt;
-4. construct one fresh candidate and `App`, commit plugin build/finish, and freeze required
-   schema/registry state;
-5. bind and initialize required service sessions from the reserved authorities in dependency order;
-6. preflight and spawn the selected scene snapshot;
-7. complete startup schedules and publish initial diagnostics/status inside the candidate;
-8. publish the runtime generation only after every required predecessor succeeds.
+4. construct one fresh `App`, commit plugin build/finish, seal it, then move it and the complete
+   registered ledger into one unpublished `RuntimeCandidate`;
+5. freeze required schema/registry state through candidate-scoped admission;
+6. bind and initialize required service sessions from the reserved authorities in dependency order;
+7. preflight and spawn the selected scene snapshot;
+8. complete startup schedules, initial diagnostics/status, stale-revision checks, and every other
+   fallible publication precondition inside the candidate;
+9. atomically and infallibly publish-and-promote the candidate into the Host's visible runtime slot
+   only after every required predecessor succeeds.
 
 These are dependency stages, not permission to consume a service early. Plugin build/finish may
 declare service requirements but cannot use an active gameplay-facing session; scene spawn and
 startup may consume a session only after its activation predecessor has succeeded. A future domain
-may subdivide a stage, but it must preserve the pure-validation -> plugin-preparation ->
-inactive-reservation -> candidate/App/freeze -> service-activation -> scene -> startup ->
-publication dependency edges.
+may subdivide a stage, but it must preserve the ledger -> pure-validation/plugin-preparation ->
+inactive-reservation -> App commit/seal -> candidate/freeze -> service-activation -> scene -> startup/
+publication-preflight -> atomic publish-and-promote dependency edges.
 
 Failure before publication returns a typed startup and shutdown report. It publishes no runnable
-session. Activated sessions, inactive reservations, `App` work, and other candidate resources
-retire in reverse admitted dependency order while the same start attempt retains ownership.
-Publication atomicity does not claim that arbitrary external effects are reversible.
+session. Activated sessions, inactive reservations, `App` work, and other candidate resources all
+retire through the same ledger in reverse admitted dependency order while the start attempt retains
+the `RuntimeCandidate`. The final boundary is one ownership and visibility cut: it consumes the
+candidate directly into the Host's visible `RuntimeInstance` slot, keeps the complete ledger and
+`App` under that owner, and leaves the attempt with access to neither. There is no separately
+fallible promotion or final-publication phase. Publication atomicity does not claim that arbitrary
+external effects are reversible, and the ledger remains shutdown/fault traversal rather than a
+service locator.
+
+That cut compare-consumes the attempt's non-reused publication epoch and exclusive slot exactly
+once. A stale epoch, duplicate call, conflicting slot owner, cancelled attempt, or completion that
+arrives after cancellation rejects before consuming the candidate and cannot make a runtime
+visible.
 
 ### Start-Attempt and Runtime State Machines
 
@@ -145,11 +182,12 @@ stateDiagram-v2
     Retiring --> Retired: every attempt-owned obligation retires
     Retiring --> RetirementIncomplete: shutdown error or deadline
     RetirementIncomplete --> Retiring: drive remaining retirement
-    Ready --> [*]: yield RuntimeInstance
+    Ready --> [*]: atomic publish-and-promote RuntimeInstance
     Retired --> [*]: return failure or cancellation
 ```
 
-`Ready` is consumed exactly once into the only published runtime generation. A
+`Ready` is consumed exactly once by the atomic publish-and-promote boundary into the only visible
+runtime generation. A
 `RetirementIncomplete` attempt remains owned and cannot yield a runtime or permit a conflicting child
 lease until retirement succeeds or the process authority is torn down.
 
@@ -303,15 +341,19 @@ an equivalent private optimization later.
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Startup publication | Failure in plugin/freeze/startup/spawn/service phases publishes no runtime session | Start-attempt fault-injection tests |
+| Startup publication | Failure in plugin/freeze/startup/spawn/service/publication-preflight phases publishes no runtime session; the final publish-and-promote cut is infallible and compare-consumes one current attempt epoch | Start-attempt fault-injection, stale/duplicate/late-epoch, and binary publication-cut tests |
+| Ownership handoff | Every registered obligation is owned exactly once: retired with the candidate or moved by the atomic publication cut into the visible runtime | Candidate-admission, publication-cut, and close-order tests |
+| App admission | Unsealed, already-started, raw-runner, or declared obligation-bearing Apps without registration reject before candidate admission; arbitrary resources remain caller-owned | Code-first admission tests |
 | Play execution | Editor Play runs startup and scheduled systems through `App`, with no bare-`World` session owner | Tooling integration and static API audit |
 | Driver parity | Editor, desktop, and headless use one frame/fixed transaction for the same command stream | Reference-game semantic snapshot tests |
+| Driver authority | Platform and custom runners drive `RuntimeInstance` and cannot call raw `App::run_once` behind it | Runner-boundary tests and static audit |
 | Exact step | One accepted request advances exactly one complete fixed/gameplay transaction and returns to `Paused` | RGF-U5 exact-step tests |
 | Fault closure | Every named gameplay/system/task/service failure reaches sticky runtime `Faulted` | Fault matrix tests |
 | Runtime isolation | Two generations share no mutable World/queue/task/time/service/backend/identity state | Reconstruction tests |
 | Finite close | Never-completing shutdown does not block the host and never reports `Stopped` | Deadline/shutdown fixture |
 | Stop-first workspace | Close/reload/restart/second Play/editor exit cannot silently drop or replace a live/failed owner | Workspace state-machine tests |
 | API authority | Runtime wrapper exposes no system/plugin registration or independent schedule/time API | Public API and dependency review |
+| Early ownership value | The minimal candidate/runtime path closes named fault/ownership gaps without exceeding precommitted public-concept, caller-glue, or lifecycle-state limits against the independently frozen manual counterfactual | RGF-U26 baseline plus RGF-U25 counterevidence review |
 
 ## Risks and Mitigations
 
@@ -320,11 +362,14 @@ an equivalent private optimization later.
 | Runtime wrapper becomes a second `App` | Critical | Medium | Prohibit schedule/plugin/time ownership; delegate exactly one `App`. |
 | Plugin and runtime states drift | High | Medium | Treat plugin lifecycle as a startup/close sub-state, not a second product state machine. |
 | Startup atomicity is mistaken for rollback | High | Medium | Promise unpublished candidate plus shutdown report, not reversal of external effects. |
+| Candidate admission or publication loses or double-owns a close obligation | Critical | Medium | Establish one ledger before fallible work, move it once with the sealed App into the candidate, and atomically publish-and-promote the same owner; the attempt retains no published copy or intermediate owner. |
 | Faulted system leaves a partially mutated World | High | Medium | Stop execution, preserve first fault, observe if safe, and discard the generation. |
 | Direct tooling access bypasses safe points | High | High | Replace unrestricted Play-world mutation with commands and bounded observations. |
 | Shutdown freezes editor or server | High | Medium | Use pollable close participants and deadlines; keep host pumping. |
 | Recipe captures one-shot/runtime data | High | Medium | Restrict it to validated immutable inputs and reconstructible factories. |
 | Platform event-loop constraints leak into runtime | Medium | Medium | Keep the event loop in the host/driver and pass normalized input/time/control. |
+| Embedded shared resources invalidate isolation claims | High | Medium | Treat arbitrary resources as caller-owned, require explicit transfer for runtime close obligations, and scope isolation/Stopped evidence to registered runtime-owned state. |
+| The wrapper adds more concepts than the failures justify | High | Medium | Freeze U26's task-equivalent manual raw-App path before Host implementation, then run U25 on the same current source, content, plan, toolchain, and environment class before Editor/desktop diffusion; reject or simplify on a failed precommitted complexity gate. |
 
 ## Consequences
 
@@ -340,22 +385,25 @@ If accepted:
   this ADR becomes the canonical runtime lifecycle subset;
 - ADR 0081 structural catalog replacement uses a fresh runtime recipe/generation rather than
   unfreezing an active registry;
-- ADR 0082 remains the sole authority for outer process/project scopes, service-authority placement,
-  and parent/child lifetimes. This ADR is the sole authority for its executable-runtime node:
-  candidate stages, publication, runtime-scoped session retirement, fault, close, and restart.
+- an Accepted ADR 0082 or explicit successor remains the authority for outer process/project scopes,
+  service-authority placement, and parent/child lifetimes. This ADR is independently authoritative
+  for its executable-runtime node: candidate stages, publication, runtime-scoped session retirement,
+  fault, close, and restart.
 
 No existing ADR is marked superseded while this proposal remains non-authoritative. Acceptance
 must add reciprocal refinement metadata and update implementation evidence.
 
 ## Admission Evidence
 
-RGF-U5 may implement the headless evidence-producing trial. Acceptance still requires RGF-U17's
-Editor command/view ownership and RGF-U13's desktop Adapter evidence plus every success metric above
-through the independent RGF-U23 admission review; the existence of a wrapper does not make the ADR authoritative.
-A wrapper type, state enum, or bare-world adapter without scheduled execution, fault propagation,
-and finite shutdown is insufficient. ADR 0082 and ADR 0084 form one atomic admission group: neither
-proposal may become Accepted while the other remains Proposed, Rejected, or otherwise
-non-authoritative.
+RGF-U5 may implement the code-first candidate/runtime trial and RGF-U24 may implement the concrete
+headless Host/candidate trial. Acceptance also requires U26's pre-Host baseline, U25's early counterevidence verdict,
+RGF-U17's Editor command/view ownership, RGF-U13's desktop Adapter evidence, and every success metric
+above through the independent RGF-U23 review; the existence of a wrapper does not make the ADR
+authoritative. A wrapper type, state enum, or bare-world adapter without scheduled execution, fault
+propagation, explicit obligation ownership, and finite shutdown is insufficient. ADR 0082 may be
+accepted or rejected independently. Product use with an outer Host requires an Accepted ADR 0082 or
+explicit Accepted successor plus compatibility evidence; a failure there does not erase otherwise
+valid code-first runtime evidence.
 
 ## Citations
 

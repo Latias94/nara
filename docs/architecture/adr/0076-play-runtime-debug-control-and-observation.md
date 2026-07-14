@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-14
+**Last Revised**: 2026-07-15
 **Refines**: [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md),
 [ADR 0034](0034-editor-play-mode-world-boundary.md),
 [ADR 0039](0039-main-loop-time-pause-and-runtime-state.md),
@@ -23,7 +23,8 @@ nara already has several foundations for a high-quality runtime debugging experi
   acknowledgement;
 - isolated Play Mode world creation, stable scene authoring IDs, reflected component schemas,
   structured diagnostics, and bounded background work;
-- a planned RGF-U5 runtime host whose paused single-step contract is exactly one complete fixed tick.
+- a planned RGF-U5 thin runtime whose paused single-step contract is exactly one complete fixed tick,
+  plus RGF-U24's separate unpublished start-attempt/Host evidence.
 
 The legacy U8 identity slice removed allocator-local entity observations: `ScenePlaySession` now retains a
 stable scene-instance handle and tooling captures a bounded `WorldIdentitySnapshot`. The Play
@@ -133,11 +134,14 @@ Control commands take effect only at nara-owned main-thread safe points. The fir
 does not pause inside an executing Rust system and does not expose render-frame stepping as fixed
 simulation stepping.
 
-As an ADR 0084 evidence target, RGF-U5 keeps unpublished start-attempt states separate from
-published runtime states. A proposed start attempt owns `Starting`, `Retiring`, and
-`RetirementIncomplete`; only success yields a `RuntimeInstance`. The proposed published runtime
+As ADR 0084 evidence targets, RGF-U24 keeps unpublished start-attempt states and its U5
+`RuntimeCandidate` owner separate from RGF-U5's published runtime states. A proposed start attempt
+owns `Starting`, `Retiring`, and `RetirementIncomplete`; only ADR 0084's atomic, infallible
+publish-and-promote boundary yields a visible `RuntimeInstance`. The proposed published runtime
 owns `Running`, `Paused`, `Stepping`, `Faulted`, `Stopping`, `CloseIncomplete`, and `Stopped`.
-These names do not become current authority until joint ADR 0082/0084 acceptance.
+The runtime/candidate vocabulary becomes authoritative only if ADR 0084 is accepted; outer Host
+topology depends separately on ADR 0082, and the integrated product path still requires a compatible
+accepted pair or successor.
 
 Runtime Inspector edits use generation-stamped, schema-gated safe-point commands. The first form is
 a one-shot runtime component patch whose value may be overwritten by later simulation; it is not a
@@ -311,9 +315,9 @@ segment and preserves the last valid one.
 
 The persistent artifact envelope, exact checkpoint contents, cadence, compression, checksum
 algorithm, service outcome catalog, storage budget, and crash-recovery policy remain deferred. The
-legacy U8 identity and RGF-U1 schema/envelope prerequisites are implemented; RGF-U5 runtime-host
-work and a concrete persistent replay workflow with representative size and latency measurements
-are still required.
+legacy U8 identity and RGF-U1 schema/envelope prerequisites are implemented; RGF-U5 runtime
+control, RGF-U24 Host/start evidence, and a concrete persistent replay workflow with representative
+size and latency measurements are still required.
 
 ### Native Rust code iteration
 
@@ -400,7 +404,7 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
 |---|---:|---|
 | Exact single step | One request from `Paused` completes exactly one fixed tick and returns to `Paused` | RGF-U5 integration tests |
 | Command integrity | A stepped tick completes `Admit -> Consume -> Capture -> Acknowledge` exactly once | `nara_gameplay`/host integration tests |
-| Lifecycle honesty | Stop timeout/failure never reports `Stopped`; startup failure publishes no host | RGF-U5 state-machine tests |
+| Lifecycle honesty | Stop timeout/failure never reports `Stopped`; startup failure publishes no runtime | RGF-U5 close tests plus RGF-U24 start-attempt tests |
 | Stable observation | Snapshot/diff/remote records contain no runtime `Entity`, Bevy `NodeId`, or backend handle | `nara_tooling` snapshot tests and `tests/stable_runtime_identity.rs` |
 | Bounded/privacy-safe capture | Every observation path enforces declared count/byte/depth/retention and field capability limits | Hostile/budget tests |
 | Cursor honesty | A subject is highlighted only from a domain-provided stable cursor/source map | Domain/tooling tests |
@@ -426,9 +430,10 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
   cursors/checkpoints without fixing allocator width or persistent replay format prematurely.
 - RGF-U1 exposes conservative `inspect` eligibility and canonical component encoding to the local
   Inspector. It does not authorize arbitrary or remote component-state capture.
-- RGF-U5 must replace the bare Play `World` with an isolated `App`, add an exact single-fixed-tick
-  execution path independent of existing debt, preserve always-on real-time work, and close services
-  finitely.
+- RGF-U5 must add the sealed-App runtime, exact single-fixed-tick execution independent of existing
+  debt, always-on real-time work, and finite published close. RGF-U24 must prove unpublished startup
+  and atomic publication. RGF-U17 must replace the tooling bare Play `World` through the concrete
+  Editor Host without moving runtime authority into tooling.
 - `WorldSnapshot` is removed. `WorldIdentitySnapshot` is the bounded identity-only base; a future
   host-owned observation slice may add disclosure-filtered schema-aware component values rather
   than restoring a raw-entity view.

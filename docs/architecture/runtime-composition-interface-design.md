@@ -119,34 +119,39 @@ claim that Proposed ADRs already have implementation evidence.
 
 1. Product composition does not start from an arbitrary caller-mutated App.
 2. Pure admission failure creates no App, lease, thread, watcher, GPU object, or native session.
-3. Product startup always uses a fresh unpublished App candidate.
+3. Product startup always commits a fresh App, seals it, and transfers it into a fresh unpublished
+   runtime candidate before registry/scene/startup work.
 4. A committed plugin hook failure poisons only that candidate and never becomes a rollback claim.
 5. A failed candidate is not published and remains owned until admitted shutdown reaches an
-   observable terminal result.
-6. A direct code-first App remains supported but does not receive product-level atomic publication
+   observable terminal result. The start attempt establishes its obligation ledger before the
+   first fallible preparation, hook, or acquisition.
+6. After all fallible startup and publication-preflight work succeeds, one atomic, infallible
+   publish-and-promote move transfers the candidate directly into the Host's visible runtime slot;
+   there is no promoted-but-unpublished owner or later publication failure point.
+7. A direct code-first App remains supported but does not receive product-level atomic publication
    guarantees.
-7. Plugin groups describe data before installation. They do not mutate App while declaring
+8. Plugin groups describe data before installation. They do not mutate App while declaring
    membership.
-8. A committed resolved-plan installation cannot add plugins or groups that were absent from the
+9. A committed resolved-plan installation cannot add plugins or groups that were absent from the
    resolved plan.
-9. Stable slot identity is distinct from the installed plugin's `PluginId`.
-10. U4 supports same-plugin configuration and optional-slot disable. Cross-plugin replacement and
+10. Stable slot identity is distinct from the installed plugin's `PluginId`.
+11. U4 supports same-plugin configuration and optional-slot disable. Cross-plugin replacement and
     its public slot-contract version remain trigger backlog until a second concrete `PluginId` and
     public conformance suite exist.
-11. Runtime recipes contain reconstructible immutable inputs and repeatable plugin factories, not
+12. Runtime recipes contain reconstructible immutable inputs and repeatable plugin factories, not
     plugin instances, Worlds, active tasks, native handles, or one-shot closures.
-12. The process runner/driver is owned by a concrete host Adapter, not selected as a hidden side
+13. The process runner/driver is owned by a concrete host Adapter, not selected as a hidden side
     effect of plugin build.
-13. `Plugin::declaration()` is the single authority for stable plugin identity and dependency
+14. `Plugin::declaration()` is the single authority for stable plugin identity and dependency
     metadata. A stable versioned definition ID identifies one admitted construction policy;
     instance configuration is explicit, immutable, and fingerprinted separately.
-14. Every plugin lifecycle commit is closed. `Plugin::build` and `Plugin::finish` cannot install a
+15. Every plugin lifecycle commit is closed. `Plugin::build` and `Plugin::finish` cannot install a
     plugin or group, including on the direct code-first path.
-15. A `PluginId` identifies exactly one installed entry in a plan. A future proven multi-instance
+16. A `PluginId` identifies exactly one installed entry in a plan. A future proven multi-instance
     requirement must introduce explicit stable entry identity rather than weakening `PluginId`.
-16. A caller-owned App may accept several top-level plugin batches only as immutable-prefix plus
+17. A caller-owned App may accept several top-level plugin batches only as immutable-prefix plus
     append. Later batches cannot reorder, replace, disable, or reconfigure committed entries.
-17. `App::set_runner` is top-level code-first/Host authority. Plugin hooks cannot select or replace
+18. `App::set_runner` is top-level code-first/Host authority. Plugin hooks cannot select or replace
     the process driver.
 
 ## Module And Seam Placement
@@ -711,18 +716,25 @@ let mut start = headless.begin_start(recipe)?;
 let runtime = drive_until_ready(&mut start)?;
 ```
 
-The exact public visibility and module layout wait for U12 and U5 evidence. The architecture names
+The exact public visibility and module layout wait for U4, U12, U5, and U24 evidence. The architecture names
 and Interface contract are clear:
 
 - the `RuntimeRecipe` contains only immutable, reconstructible, versioned inputs;
 - a concrete Host creates and owns one `RuntimeStartAttempt`;
+- that attempt creates one obligation ledger and reserves its exclusive logical publication
+  slot/epoch before the first fallible preparation, hook, or acquisition;
 - the resolved plugin plan privately prepares all fresh instances and verifies their carriers
-  before reservation, candidate, or App creation;
+  under that existing ledger before reservation, candidate, or App creation;
 - only then does the attempt request one-shot inactive reservations through concrete Host/domain
-  Adapters and create a fresh App candidate;
-- build, finish, registry freeze, service activation, scene materialization, and startup occur inside
-  the unpublished candidate;
-- success publishes exactly one new runtime generation;
+  Adapters, with every first-party close obligation explicitly registered into one ledger;
+- the attempt creates a fresh App, commits build/finish, seals it, and moves that App plus ledger into
+  U5's unpublished `RuntimeCandidate` before registry freeze, service activation, scene
+  materialization, or startup;
+- after every fallible startup and publication-preflight step succeeds, one atomic, infallible
+  publish-and-promote move installs exactly one visible runtime generation with no intermediate
+  promoted owner;
+- that move compare-consumes the non-reused attempt epoch and exclusive publication slot, so stale,
+  duplicate, conflicting, cancelled, or late completions reject before candidate consumption;
 - failure publishes none and the same start attempt retains shutdown ownership until terminal
   evidence exists.
 
@@ -749,7 +761,10 @@ embedded applications and focused tests:
   partially committed App, and any preflight unwind poisons regardless of position;
 - committed build/finish failure poisons the App under ADR 0010;
 - plugin hooks cannot perform nested installation on this path either;
-- callers do not receive runtime recipe, fresh-generation, or atomic-publication claims;
+- arbitrary caller resources remain caller-owned; a caller explicitly transfers any obligation it
+  wants the candidate/runtime to include in finite-close and `Stopped` evidence;
+- callers do not receive product recipe or Host claims, but may seal the App and use U5's generic
+  candidate/runtime lifecycle for fresh-generation driving and close;
 - project-facing examples should use the product path once it exists.
 
 ### 7. Driver Placement
@@ -809,10 +824,11 @@ sequenceDiagram
 
     Caller->>Host: begin_start(RuntimeRecipe)
     Host->>Start: Create one fresh start-attempt owner
-    Start->>Prepare: Instantiate typed factories and preserve definition keys
+    Start->>Start: Establish obligation ledger and reserve logical publication slot/epoch
+    Start->>Prepare: Instantiate typed factories under ledger and preserve definition keys
     alt Preparation fails
         Prepare-->>Start: PluginPrepareError
-        Start-->>Host: Startup failure; no reservation, candidate, or App exists
+        Start-->>Host: Retire ledger; no candidate, App, or runtime publication exists
     else Preparation succeeds
         Prepare-->>Start: Private PluginCommitBatch
         loop Each required reservation
@@ -823,11 +839,12 @@ sequenceDiagram
         alt Reservation fails
             Start->>Start: Retire already-owned guards; publish nothing
         else Reservation succeeds
-            Start->>Candidate: Create private unpublished candidate
-            Candidate->>App: Create fresh App and commit ordered plugin lifecycle
-            Candidate->>Candidate: Freeze, activate services, materialize scene, run startup
+            Start->>App: Create fresh App, commit ordered plugin lifecycle, and seal
+            Start->>Candidate: Move sealed App and registered ledger into unpublished candidate
+            Candidate->>Candidate: Freeze, activate services, materialize scene, run startup and publication preflight
             alt Complete startup succeeds
-                Candidate-->>Consumer: Publish new runtime generation
+                Candidate-->>Host: Atomic infallible publish-and-promote into visible runtime slot
+                Host-->>Consumer: Return the published runtime generation
             else Any later required phase fails
                 Candidate->>Candidate: Retire admitted owners in reverse dependency order
                 Candidate-->>Host: Startup failure and retained retirement state
@@ -1033,7 +1050,7 @@ author: that surface remains `Plugin`, `PluginGroup`, tuple, and `App::add_plugi
 | Hidden dependency removal | No plugin `build` or `finish` installs another plugin/group on any path | Static search and sticky-violation contract test |
 | Incremental direct order | Every later direct batch appends to the actual committed prefix or rejects before mutation | Order-edge and edit fault tests |
 | Capability fidelity | Every tested plan satisfies `required <= requested <= compiled` | Feature/composition matrix |
-| Candidate publication | Every injected startup failure publishes zero Running runtimes | Runtime start-attempt fault matrix |
+| Candidate publication | Every injected pre-boundary failure publishes zero Running runtimes; the final ownership/visibility cut is atomic and infallible | Runtime start-attempt fault matrix and binary publication-cut test |
 | Shutdown ownership | Every committed owner is attempted exactly once in reverse dependency order | Instrumented failure tests |
 | Fresh retry | Failed-first/success-second attempts share no mutable runtime generation state | Generation-isolation test |
 | Public leverage | Reference game uses type-directed group edits, places its game plugin, and configures systems without stable infrastructure vocabulary or Nara source edits | Independent clean-room workspace test |
@@ -1068,24 +1085,37 @@ author: that surface remains `Plugin`, `PluginGroup`, tuple, and `App::add_plugi
 | ADR 0079 | Compiled/requested/required product subsets and supported slots | RC-03 through RC-05, RC-10 through RC-25 |
 | ADRs 0082/0084 | Replayable runtime recipe, Host-owned start attempt, unpublished candidate, runtime publication and fresh restart | RC-06, RC-30 through RC-42 |
 | Plan U3 | Compiled capability ceiling and project request normalization | RC-02 through RC-05, RC-20, RC-21 |
-| Plan U4 | Configurable plugin slots and complete pure closure | RC-10 through RC-25, RC-33 |
-| Plan U12 | Authorized reusable project/content snapshot for a later runtime recipe | RC-02, RC-04, RC-06, RC-31 |
-| Plan U5 | Runtime candidate, publication, fault, close, and restart | RC-06, RC-30 through RC-42 |
+| Plan U4 | Configurable plugin slots, provider/schema input, obligation declarations, and complete pure closure | RC-10 through RC-25, RC-33 |
+| Plan U12 | Authorized lineage-bound project/content snapshot consuming U4's schema input | RC-02, RC-04, RC-06, RC-31 |
+| Plan U5 | Sealed-App candidate admission, runtime control, driver, fault, and published close | RC-35 through RC-42 |
+| Plan U26 | Pre-Host task-equivalent manual raw-App tracer, caller-glue/owner inventory, and frozen counterfactual identity | RC-30 through RC-34 comparison baseline |
+| Plan U24 | Lineage-checked recipe, registered ledger, start attempt, candidate-scoped startup, and fresh reconstruction | RC-06, RC-30 through RC-34 |
 
 ## Implementation Sequence
 
-This design does not reorder the reference-game plan. It makes the Interface evidence expected from
-each slice explicit:
+This design follows the reference-game plan's revised dependency order and makes the Interface
+evidence expected from each slice explicit:
 
 1. U3 produces truthful compiled capabilities and a normalized project request.
 2. U4 introduces static plugin declarations, repeatable definitions, the data-only group/slot
    builder, sealed plugin/group/tuple inputs, pure resolution, type-directed common edits, private
-   preparation, terminal `shutdown` naming, and closed commit. It also keeps the schedule registry
-   open without opening the automatic frame order.
-3. U12 produces the authorized immutable project/content snapshot; it does not own runtime policy.
-4. U5 combines that snapshot with the `RuntimePlan` in a private `RuntimeRecipe`, owns a
-   `RuntimeStartAttempt`, and publishes the first `RuntimeInstance` only after complete startup.
-5. Later desktop work proves the winit driver and target lifetime without changing composition
+   fresh preparation, provider/schema input resolution, explicit obligation-bearing declarations,
+   terminal `shutdown` naming, hook-time runner prohibition, and closed commit. It also keeps the
+   schedule registry open without opening the automatic frame order.
+3. U12 consumes U4's provider/schema input and U3 lineage to produce the authorized immutable
+   project/content snapshot; it does not own runtime policy or native bindings.
+4. In parallel with U12, U5 admits a sealed, unstarted App plus registered ledger into an
+   unpublished candidate and owns generic runtime driving, exact control, fault, and published close
+   without loading project content or reconstructing a product generation.
+5. After U12 and before U24, U26 freezes an independently reviewed task-equivalent manual raw-App
+   tracer plus its caller-glue, state, fault, owner, and shutdown inventory.
+6. U24 checks plan/content lineage and schema fingerprints, creates the registered ledger before
+   fallible work, moves it with the sealed App into U5's candidate before startup, and atomically
+   publishes-and-promotes that same owner only after complete startup and publication preflight,
+   without semantically rewriting U26.
+7. U25 challenges the minimal Host/candidate path against U26 on the same current source, content,
+   plan, toolchain, and environment class before diffusion.
+8. Later desktop work proves the winit driver calls the runtime boundary and preserves target lifetime without changing composition
    policy.
 
 The data-only group step is a prerequisite for the package runtime role. Package helpers must not
