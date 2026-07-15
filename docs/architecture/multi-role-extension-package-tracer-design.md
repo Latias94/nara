@@ -14,6 +14,8 @@
 
 **Focused Interfaces**: [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md)
 
+**Separate Render Harness**: [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
+
 **Concept Guide**: [Extension Package Concept Guide](extension-package-concept-guide.md)
 
 **Research Context**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
@@ -124,6 +126,9 @@ that failures identify Interface problems rather than animation-feature complexi
 - Implement a package registry, marketplace, signing infrastructure, or dependency solver.
 - Define a stable Rust dylib ABI, linker inventory, or universal process extension protocol.
 - Build Aseprite support, a full animation editor, a renderer viewport, or a runtime UI toolkit.
+- Prove complete render-extension parity. This sprite-animation tracer does not validate a custom
+  Pipeline Family, pre-device raw interop, replacement Render Host, semantic editor outputs, or an
+  alternate Platform/Runner; those require the separate render capability matrix.
 - Add a custom Inspector merely to prove that a callback can be registered.
 - Add a no-op cook provider when the normal artifact-to-runtime-content path is sufficient.
 - Promise in-place hot reload for structural Rust, schema, feature, or package-graph changes.
@@ -1027,7 +1032,7 @@ sequenceDiagram
     UX->>Compose: Approved request and preview fingerprint
     Cargo-->>Compose: Locked graph and compiled package evidence
     Domain-->>Compose: Explicit contract definitions
-    Catalog-->>Compose: Host Adapter support declarations and compiled evidence
+    Catalog-->>Compose: Contract-binding Adapter support declarations and compiled evidence
     Compose->>Compose: Select product / Host / target closure
     Compose->>Admission: Selected declarations, BindingClaims, support declarations, Host/target facts, and compiled evidence
     Admission-->>Compose: Private typed FinalCatalogAdmission bundles
@@ -1302,6 +1307,7 @@ serialization, cancellation, and containment cost before semantics are proven.
 | Shipping isolation | Release/server Cargo closures contain zero unselected importer, tooling, egui, winit, or wgpu dependencies | `cargo tree` and boundary checks |
 | Host-feature registration | Runtime-only and server artifacts call the same `package()` entry while omitting unselected bindings; selected missing roles reject final admission | Compile and catalog fixtures |
 | External viability | Locked clean-room local-path package builds with renamed Nara dependencies and ordinary Rust helpers | Independent workspace test |
+| Scope honesty | This tracer makes no renderer-parity claim; advanced render and runner promises reference separate PX-40 through PX-45/RE scenarios | Cross-document traceability review |
 | Runtime overhead | No per-frame package registry lookup, contract ID dispatch, or plan resolution | Profiling and code review |
 | Diagnostic quality | Primary failures name stable package/role or contribution, target, rejected action, and correction in author-domain language; contract, Host, cohort, and phase facts remain bounded opt-in audit detail; neither surface carries sensitive payloads | Golden diagnostic fixtures |
 | Iteration evidence | Record P50/P95 for data edit, component edit, function-body edit, structural Rust edit, Editor restart, and runtime restart; data/component edits invoke no Cargo build | Tracer workflow measurements |
@@ -1340,7 +1346,7 @@ protocol, containment, cancellation, kill/reap, quarantine, and late-result case
 | One crate or unconditional `package()` binding leaks editor/import code into release | High | Medium | Host-feature-aware aggregation, runtime-only compile fixture, `cargo tree` audits, split crates only when measured pressure proves need |
 | Required cohort membership is too broad | High | Medium | Select members per concrete activation intent and typed compatibility edges; do not make every package role globally atomic |
 | Custom Inspector becomes a UI DSL or mutable editor gateway | High | Medium | Standard Inspector first; stable schema targets; immutable models and normal commands; separate preview tools |
-| Contract proliferation fragments UX | High | Medium | One owner, version, conformance suite, docs, and compiled Host Adapter per contract; keep advanced kit unstable |
+| Contract proliferation fragments UX | High | Medium | One owner, version, conformance suite, docs, and compiled contract-binding Adapter per contract; keep advanced kit unstable |
 | Native trust UI implies sandboxing | Critical | Medium | Separate disclosure/evidence from capability grants; state ambient in-process authority honestly |
 | Static binding worsens iteration | Medium | High | Measure edit categories separately; data reload directly; incremental build and fresh runtime; optional proven body patch |
 | Staging doubles memory/disk pressure | Medium | Medium | Explicit budgets, bounded artifact groups, pressure diagnostics, and retirement policy |

@@ -99,6 +99,20 @@ These are scopes and roles, not required public structs, traits, crates, or fiel
 binary may collapse several scopes into one private owner. The ownership rules and lifetime order
 must remain observable even when the implementation is compact.
 
+Concrete root composition also closes exclusive authority roles before it starts a runtime:
+
+- one Platform/Runner Adapter drives each process/runtime-driver scope and supplies platform events,
+  elapsed time, wake/close behavior, and any process-affine target authority;
+- one Render Host Adapter owns each selected GPU device domain under ADR 0078;
+- zero or more domain service Adapters own separately declared service authorities.
+
+Those cardinalities belong to their domain contracts, not ordinary plugin replacement slots. A
+first-party default and an external compiled candidate use the same explicit selection and
+conformance role; neither a crate path nor a first-party ID is admission policy. One package may
+aggregate a Platform/Runner, Render Host, service, and runtime-plugin closure so ordinary users make
+one product-level choice. The exact split between platform display/window ownership and runtime
+driving must be proven by concrete Adapters rather than frozen as one giant trait.
+
 ### Host Admission and Runtime Delegation
 
 The Host prepares validated immutable inputs, begins one owned construction attempt, and issues
@@ -141,6 +155,10 @@ sequenceDiagram
   `App` mutation or candidate lease acquisition. A resolved plugin plan stores static declarations,
   canonical configuration, and repeatable typed materializers, never an installed/live plugin
   object. Each start attempt privately materializes fresh plugin owners.
+- Root selection resolves external Platform/Runner, Render Host, and service candidates before
+  authority acquisition. A normal runtime plugin cannot change those choices from `build`, but an
+  external package can provide them through their typed contribution roles without modifying the
+  stock root or receiving a first-party allowlist.
 - The Host creates the `RuntimeStartAttempt`, its obligation ledger, and its exclusive logical
   publication reservation before any fallible plugin preparation or candidate reservation. The
   attempt completes authority-free plugin preparation under that ledger, then requests inactive
@@ -165,6 +183,11 @@ desktop, and Editor roots may begin attempts directly from their private `Runtim
 Interface becomes justified only when two genuinely substitutable producers share one caller; a
 test double or three loops consuming the same concrete root is not that evidence. In-process versus
 child-process Play remains an Adapter/deployment choice behind the concrete Editor Host.
+
+The integrated runtime path has exactly one driver route: the selected Platform/Runner Adapter
+drives `RuntimeInstance`. The separate code-first `App::set_runner`/`App::run` path may remain for
+direct embedding, but an App carrying that raw runner is not also admitted into ADR 0084's managed
+runtime path.
 
 ### Service Sessions and Sharing
 
@@ -223,6 +246,10 @@ This proposal does not select:
 - an asset-database sharing and residency policy;
 - a dynamic plugin ABI, script VM, physics API, or audio backend API.
 
+It also does not freeze one universal `PlatformRunnerAdapter` or `RenderHostAdapter` Rust trait.
+Their external availability, explicit selection, cardinality, and lifecycle/conformance outcomes
+are fixed; the first independent clean-room implementations choose the smallest concrete API.
+
 Those choices require concrete consumers. They may be implemented privately without changing the
 scope and lifetime rules in this ADR.
 
@@ -278,6 +305,7 @@ justified.
 | Cross-host parity | Editor, desktop, and headless hosts drive the same declared frame/fixed-tick contract | Reference-game semantic snapshot tests |
 | Least privilege | Server composition creates no window, render, audio-device, editor, or raw-input session | Feature/service boundary tests |
 | Embedded path | A code-first minimal `App` runs without a project file or public universal host object | Standalone compile/runtime test |
+| External authority parity | Clean-room external Platform/Runner and Render Host candidates can be explicitly selected without stock-root package matches or first-party allowlists; each is the sole owner of its declared authority | Renamed-dependency Host fixtures, source-diff gates, and domain conformance suites |
 
 ## Risks and Mitigations
 

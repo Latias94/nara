@@ -124,14 +124,19 @@ need it.
 - The platform event loop remains host-owned. It supplies events and elapsed real time through the
   runtime drive contract rather than becoming a second runtime owner. It does not retain `&mut App`
   or invoke `App::run_once` behind runtime control, fault, and close state.
+- The selected Platform/Runner Adapter may be first-party or external. It is chosen before runtime
+  candidate construction, drives `RuntimeInstance` through the same public control/drive/close
+  contract, and cannot be replaced from a plugin hook. External candidates are not filtered by
+  crate path or first-party ID.
 
 ### Construction and Publication
 
 On the integrated product path, ADR 0082 or an explicit successor supplies one lineage-compatible
 immutable project revision, resolved composition plan, replayable recipe, and immutable
 service-admission requirements. A code-first caller may instead supply a directly configured sealed
-App without adopting those outer scopes. In either path, the concrete owner begins one
-`RuntimeStartAttempt`, reserves its exclusive logical publication slot/epoch, and establishes one
+App without a raw installed runner and without adopting those outer scopes. In either path, the
+concrete owner begins one `RuntimeStartAttempt`, reserves its exclusive logical publication
+slot/epoch, and establishes one
 ownership/obligation ledger before the first fallible preparation, hook, or acquisition. This ADR
 then owns the complete staged admission DAG and admits a sealed App plus that ledger into an
 unpublished candidate before registry/scene/startup work:
@@ -304,6 +309,11 @@ This proposal does not define:
 - concurrent multi-driver execution;
 - a second render ECS world or Bevy `SubApp` as the Play runtime boundary.
 
+This does not defer external runner reachability. The managed path guarantees explicit
+Platform/Runner Adapter selection and one driver authority; only the exact trait/object/factory
+shape remains evidence-driven. Direct `App::set_runner` plus `App::run` is a separate embedding path
+and cannot be combined with managed-runtime admission for the same App.
+
 ## Alternatives Considered
 
 ### Option A: Make `App` the Complete Runtime Owner
@@ -354,7 +364,7 @@ an equivalent private optimization later.
 | App admission | Unsealed, already-started, raw-runner, or declared obligation-bearing Apps without registration reject before candidate admission; arbitrary resources remain caller-owned | Code-first admission tests |
 | Play execution | Editor Play runs startup and scheduled systems through `App`, with no bare-`World` session owner | Tooling integration and static API audit |
 | Driver parity | Editor, desktop, and headless use one frame/fixed transaction for the same command stream | Reference-game semantic snapshot tests |
-| Driver authority | Platform and custom runners drive `RuntimeInstance` and cannot call raw `App::run_once` behind it | Runner-boundary tests and static audit |
+| Driver authority | First-party and renamed-dependency external Platform/Runner Adapters are explicitly selected, drive `RuntimeInstance`, and cannot call raw `App::run_once` behind it or coexist with an installed raw App runner | Clean-room runner, boundary, mutual-exclusion, and static-audit tests |
 | Exact step | One accepted request advances exactly one complete fixed/gameplay transaction and returns to `Paused` | RGF-U5 exact-step tests |
 | Fault closure | Every named gameplay/system/task/service failure reaches sticky runtime `Faulted` | Fault matrix tests |
 | Runtime isolation | Two generations share no mutable World/queue/task/time/service/backend/identity state | Reconstruction tests |

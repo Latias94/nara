@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-07-15
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0044: Root Facade
 and Prelude Layering Policy; ADR 0053: Visibility, Culling, and Tilemap Render Cache; ADR 0077:
 Render Pipeline Recipes, Graph Compilation, and Backend Encoding; ADR 0078: Render Host Affinity,
@@ -27,22 +28,34 @@ Rules:
   the lease may request retirement and verify that acknowledgement but cannot fabricate it. This
   exclusivity is enforced per shared target authority and `WindowId`; the executable/platform host
   must not register one native target in independent authorities.
-- `nara_winit` is the only crate that depends on `winit`; it owns live platform windows, registers
-  owning handle providers, and releases provider/native ownership only after surface retirement.
-  Each runner calls the backend-neutral retirement driver and waits only for targets it successfully
-  registered. It does not invoke global plugin cleanup to drive a local target transition.
+- Backend-neutral app, window, input, and render crates do not depend on `winit`. `nara_winit` is the
+  first-party desktop integration and current direct-dependency gateway: it owns live platform
+  windows, registers owning handle providers, and releases provider/native ownership only after
+  surface retirement. An external Platform/Runner may use another platform stack or a future public
+  exact-version `nara_winit` bridge. The first docking/multi-viewport or external-winit tracer decides
+  whether an exact direct dependency is also required; external runner reachability is not a
+  first-party reservation. Each runner calls the backend-neutral retirement driver and waits only
+  for targets it successfully registered. It does not invoke global plugin cleanup to drive a local
+  target transition.
 - `nara_render` owns graph-ready render targets, viewport rectangles, extracted views, render phase labels, and frame lifecycle data, but no `wgpu` types.
 - `nara_render` owns the backend-neutral `RenderBackendStatus` resource for backend name,
   readiness state, last error, and skipped-frame reason. This status resource is the current
   backend observation seam, not a speculative render backend trait.
 - Extracted render data is frame-local, rebuilt or cleared during `Extract`, not serialized, and not exported through the gameplay prelude initially.
-- `nara_render_wgpu` is the only crate that depends on `wgpu`; it consumes
-  `nara_window::backend` non-cloneable surface handle sources by value through wgpu's safe owning
-  surface path, registers the scoped retirement driver, and writes wgpu skipped-frame/backend-error
-  state into `RenderBackendStatus`. The actual handle owner acknowledges from `Drop`, including when
-  the backend resource is removed or replaced; the paired lease then verifies the transition. The
-  current native surface system and retirement driver are main-thread operations; broader host
-  placement remains governed by ADR 0078.
+- Backend-neutral engine, gameplay, domain-render, packet, recipe, and tooling crates do not depend
+  on `wgpu`. `nara_render_wgpu` is the first-party wgpu Host Adapter and the only stock crate that
+  owns exact wgpu device/queue/target execution. An explicitly selected external wgpu extension or
+  Render Host Adapter may bind Nara's exact supported wgpu API through the advanced backend contract
+  in ADRs 0077 and 0078; this is dependency isolation, not a first-party crate allowlist and not
+  permission to introduce another RHI or wgpu version. The first interop/Host tracer decides whether
+  that version lock is expressed by an advanced `nara_render_wgpu` re-export/gateway or an exact
+  direct Cargo dependency.
+- The stock `nara_render_wgpu` Adapter consumes `nara_window::backend` non-cloneable surface handle
+  sources by value through wgpu's safe owning surface path, registers the scoped retirement driver,
+  and writes wgpu skipped-frame/backend-error state into `RenderBackendStatus`. The actual handle
+  owner acknowledges from `Drop`, including when the backend resource is removed or replaced; the
+  paired lease then verifies the transition. The current native surface system and retirement
+  driver are main-thread operations; broader host placement remains governed by ADR 0078.
 - The root `nara` facade keeps `winit` and `wgpu` behind explicit optional features. Default `MinimalPlugins` stays headless and backend-free.
 
 wgpu initialization may use `pollster` for the first native-desktop slice.
@@ -86,7 +99,7 @@ The backend should still model `Uninitialized`, `Initializing`, `Ready`, and `Un
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Backend isolation | `winit` appears only in `nara_winit`; `wgpu` appears only in `nara_render_wgpu` | Dependency and import search |
+| Backend isolation | Winit dependency/import authority remains isolated to the platform Adapter boundary and exact wgpu dependency/import authority remains isolated to the advanced backend boundary; neither enters backend-neutral/core/domain crates, while external runner/interop/Host fixtures still receive their promised capability | Dependency/import search plus selected-Adapter fixtures |
 | Default facade cost | Root facade without default features does not include `winit` or `wgpu` | `cargo tree -p nara --no-default-features` |
 | Surface safety | Safe surface creation owns a tracked non-cloneable handle source; scoped retirement plus owner-Drop fallback prove surface -> provider -> native target ordering | Lifecycle, replacement, and platform smoke tests |
 | Extraction locality | Extracted render data is cleared or rebuilt each frame and stays out of gameplay prelude | Unit tests and API review |
@@ -99,7 +112,7 @@ The backend should still model `Uninitialized`, `Initializing`, `Ready`, and `Un
 | Raw handle lifetime is modeled unsafely | High | Medium | Atomically issue a tracked non-cloneable owner to safe `create_surface`; enforce scoped surface -> provider -> native target retirement |
 | Main-world extracted data becomes gameplay API | High | Medium | Keep `Extracted*` out of prelude and mark it renderer-domain/frame-local |
 | Blocking GPU init freezes platform loop | Medium | Medium | Restrict `pollster` to native desktop and model backend initialization states |
-| Feature gates leak backend dependencies | Medium | Medium | Add facade feature and cargo-tree checks |
+| Feature gates leak backend dependencies | Medium | Medium | Add facade feature, selected-Adapter, and cargo-tree checks; ordinary runtime/render-feature packages must remain backend-neutral |
 | Backend status becomes wgpu-shaped | Medium | Medium | Keep public status categories backend-neutral; backend-specific detail remains a string or adapter-owned type |
 
 ## Citations

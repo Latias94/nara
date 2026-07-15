@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-07-15
 **Refines**: ADR 0008, ADR 0016, ADR 0019, ADR 0021, ADR 0028, ADR 0030, ADR 0031
 **Refined By**: ADR 0048: Runtime Diagnostics and Observability Bus; ADR 0052: Task
 Backpressure, Cancellation, and Long-Running Diagnostics; ADR 0056: Headless Runtime and Dedicated
@@ -49,9 +50,18 @@ Rules:
   diagnostics that integrate on the main thread at declared stages.
 - Every service declares its schedule sets, time domain, pause behavior, replay/determinism policy,
   request/result retention, and diagnostics surface.
-- Replaceable backends are plugin-installed resources/systems first. Public adapter traits should
-  be introduced only when at least two real implementations or a test adapter create concrete
-  pressure.
+- A runtime-local backend may begin as plugin-installed resources/systems when it needs no
+  process/platform authority and its complete lifetime is owned by one runtime generation. A
+  backend that needs exclusive device/event-loop ownership, thread or JavaScript-agent affinity,
+  Host-issued native authority, waitable startup/close, or an independent process is selected and
+  retained by the concrete Host through a domain Adapter; `Plugin::build` may declare the
+  requirement but cannot acquire that authority.
+- First-party and external Adapters for one supported domain use the same public selection,
+  lifecycle, diagnostics, and conformance boundary. "Trusted" means the user explicitly selected
+  native in-process Rust, not that the implementation is first-party or allowlisted. Exact traits
+  should still be proven by a fake or second implementation, but the ability to supply an external
+  Adapter must not remain behind a private first-party hook when Nara promises replacement for that
+  domain.
 - Domain data is stable even when backend choice changes. For example, high-level physics
   components should survive replacing Rapier/Box2D/Avian; audio authoring components should survive
   replacing the playback backend.
@@ -105,6 +115,7 @@ existing task/app scheduling decisions.
 | Persistent data safety | Scene/prefab/save schemas contain no native handles | Serialization tests/review |
 | Main-thread ownership | Background jobs never mutate `World` directly | Code review and tests |
 | Backend replaceability | At least one domain can add a fake/test backend without changing authoring components | Adapter test |
+| External Adapter parity | A clean-room external Adapter for a supported domain can be selected without a package-specific core match or first-party allowlist and must pass the same lifecycle/diagnostic conformance suite | Independent workspace and Host integration fixture |
 | Diagnostics | Service failures are observable as structured diagnostics | Unit/integration tests |
 | Pause/time clarity | Services declare real/virtual/fixed time behavior | ADR/API review |
 
@@ -123,6 +134,9 @@ existing task/app scheduling decisions.
   boundary vocabulary.
 - Existing asset/watch/render backend seams are examples of this pattern and should stay aligned
   with it.
+- Domain-specific Host Adapter selection is an explicit composition operation. It does not make a
+  normal runtime plugin less capable inside ECS, and it does not make `Plugin::build` a universal
+  native-authority callback.
 - Runtime services must document their pause/time behavior when introduced.
 
 ## Open Questions

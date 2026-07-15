@@ -87,6 +87,13 @@ The plugin metadata contract is:
   Import, editor/tooling, render, cook, and Host-authority roles still use their owning contribution
   contracts. A known runtime/domain contribution must not require a first-party ID allowlist or an
   edit to Nara core merely because its crate is external.
+- Moving exclusive authority out of `Plugin::build` is not permission to reserve it for Nara.
+  `PluginGroup` may aggregate runtime-plugin companions only. A `PackageDefinition`, product preset,
+  or typed root helper may aggregate those runtime plugins with separately declared render-family,
+  raw-wgpu, Render Host, service, or platform/runner contributions so the user still selects one
+  coherent product entry. Root composition chooses every exclusive Host/runner slot explicitly,
+  and external candidates use the same public slot and conformance contract as the first-party
+  default.
 - Ordinary Rust callers edit groups by plugin type or by a typed definition helper, for example
   `.disable::<TilemapPlugin>()` and `.configure(window::plugin(settings))`. Stable slot IDs remain
   the durable authority for project data, tooling, and later admitted cross-plugin replacement,
@@ -98,8 +105,10 @@ The plugin metadata contract is:
   `PluginPlan`, commit batches, definition keys, and fingerprints stay in advanced or private
   modules. One `AddPluginsError` preserves internal phase guarantees while allowing one `?` at the
   call site.
-- Optional backend adapters stay feature-gated. Enabling a feature exposes the plugin, but it does
-  not silently install it unless a chosen group includes it.
+- Optional runtime-side backend bridge plugins stay feature-gated. Enabling a feature exposes the
+  plugin, but it does not silently install it unless a chosen group includes it. A Render Host,
+  Platform/Runner, or other exclusive Host contribution is registered and selected by product/root
+  composition rather than installed through `PluginGroup`.
 - Render submitter ownership follows ADR 0040: device/surface backend plugins are separate from
   sprite, UI, text, gizmo, and future 3D submitter plugins. Convenience groups may combine them.
 
@@ -116,7 +125,7 @@ Initial group vocabulary:
 | `HeadlessRuntimePlugins` | Core runtime plus asset/scene/gameplay-domain systems that can run without window, render, audio-device, editor, or UI toolkit adapters |
 | `ServerPlugins` | Dedicated-server-ready headless composition with deterministic-friendly gameplay stages, diagnostics/metrics, and no networking transport unless an optional networking crate is explicitly added |
 | `DesktopWinitPlugins` | `nara_window` plus desktop `nara_winit` adapter |
-| `WgpuBackendPlugins` | Base wgpu target/backend operation; sprite and UI submitters are available only under their compiled domain/backend features and join a resolved plan only when requested |
+| `WgpuBackendPlugins` | Transitional runtime integration for the already selected stock wgpu Host; it does not select or replace Render Host authority. Sprite and UI submitters are available only under their compiled domain/backend features and join a resolved plan only when requested. |
 | `ToolingPlugins` | UI-agnostic tooling models and optional adapter groups |
 
 `MinimalPlugins` should remain small and headless. It should not grow into "everything a sample game
@@ -179,6 +188,7 @@ immediate-install semantics.
 | Docs/tooling | Plugin groups can be listed for docs/editor/AI tooling | Snapshot/API test |
 | Author concept budget | Common code-first examples use only App, Plugin, PluginGroup, tuples, typed group edits, and one `?` | Clean-room compile fixtures |
 | Runtime extension freedom | A renamed-dependency external crate uses the same public Interfaces as first-party code to add its own ECS data, resources, systems, sets, typed custom schedule, and runtime-local known-domain registration with zero Nara source edits or first-party allowlist | Independent workspace compile/run and static source audit |
+| Explicit authority upgrade | An external package/product helper can pair ordinary runtime plugins with separately declared Host/runner or backend contributions and expose one user-facing selection without pretending `PluginGroup` owns those roles or acquiring authority from a hook | Clean-room package plan, exclusive-slot, and negative hidden-install tests |
 | Product separation | Runtime 2D installs no runtime UI; runtime UI pulls no sprite/tilemap group | Group and dependency tests |
 | Deterministic plan | Identical inputs produce identical order and fingerprint | Repeated/property tests |
 | Closed dependencies | No build/finish hook installs a plugin/group | Static and ignored-error contract tests |
@@ -211,6 +221,9 @@ immediate-install semantics.
   additive rather than fixed in `DesktopWgpuPlugins`.
 - Root facade/prelude refinement exposes group names deliberately rather than exporting backend/plugin
   internals through the gameplay prelude.
+- Closed plugin hooks limit hidden timing and ownership, not reachable engine capability. Advanced
+  external packages escalate through explicit domain/Host contributions instead of private
+  first-party callbacks.
 
 ## Open Questions
 

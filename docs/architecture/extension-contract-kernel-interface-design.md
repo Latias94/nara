@@ -52,14 +52,14 @@ root-selected bounded declarations
     + typed BindingClaim<C> values
     + compiled implementation, executable, contract-owner, and Adapter evidence
     -> final catalog admission verifies the join without invoking factories
-    -> verified ContractSupport<C>, verified Host Adapter support and binding facts,
+    -> verified ContractSupport<C>, verified contract-binding Adapter support and binding facts,
        semantic witnesses, and opaque inactive transfer
     -> leaf validates and builds ContractSlice<C>
     -> domain resolver produces pure PlanData without executable factories
     -> leaf canonicalizes PlanData and validates stable edges
     -> leaf returns PendingContractBinding<C, H, PlanData, BoundPlan, BindError>
        |- ContractResolutionBundle with pure resolved snapshot and opaque continuation
-       |- verified Host Adapter support
+       |- verified contract-binding Adapter support
        `- verified Host binding facts, all carrying the same private seal
     -> concrete Host binder consumes the complete pending binding
     -> BoundContract<C, H, PlanData, BoundPlan>
@@ -71,7 +71,7 @@ This recommendation combines the strongest parts of three independent Interface 
 - keep the leaf smaller than the domain contracts;
 - keep one explicit `package()` definition close to Bevy's explicit Rust ergonomics;
 - keep pure plan data separate from Host-specific executable bindings;
-- keep Host Adapters and authority outside the leaf;
+- keep contract-binding Adapters and execution authority outside the leaf;
 - keep the contract set open in source, but statically closed per compiled Host executable.
 
 ## Evidence Labels
@@ -138,16 +138,21 @@ Any candidate Interface must preserve all of these constraints:
 6. Rust `TypeId` may detect process-local marker collisions, but never becomes persistent identity,
    a canonical fingerprint input, or a cross-process protocol value.
 7. A semantic resolution receipt proves declaration/evidence/plan facts only. A separate typed
-   binding receipt proves verified Host Adapter and inactive binding facts. Neither is an
+   binding receipt proves verified contract-binding Adapter and inactive binding facts. Neither is an
    activation handle, capability, rollback token, signature, or security boundary.
-8. `Send + Sync` and thread affinity belong to concrete domain/Host Adapters, not to every contract
-   binding or bound plan.
+8. `Send + Sync` and thread affinity belong to concrete domain/execution Adapters, not to every
+   contract binding or bound plan.
 9. Root composition maps typed errors into structured diagnostics. The leaf cannot depend on the
    current `nara_diagnostic -> nara_app` direction.
 10. Resolution runs at composition time. No per-frame contract ID dispatch or registry lookup is
     admitted.
 11. The pure resolver cannot receive a callable factory/provider. Executable bindings remain in a
     private opaque transfer until a concrete Host binder moves them into an inactive bound plan.
+
+Terminology qualifier: `contract-binding Adapter` means compiled support for binding one
+contribution contract to a concrete consumer kind. It is not a GPU `Render Host Adapter`, a process
+`Platform/Runner Adapter`, or a `Domain Service Adapter`. These independent roles must not collapse
+into one universal Host trait.
 
 ## Mature-Engine Crosswalk
 
@@ -161,7 +166,7 @@ The following comparisons introduce the Nara concepts. Each analogy is deliberat
 | Pure typed plan | Ordered plugin metadata and group intent | No single equivalent value | Assembly/platform resolution and import/build plans | Target/module and Interchange pipeline selection | Nara requires deterministic canonical plan facts as a first-class result |
 | Bound plan | Stored Rust plugin/loader factories | Bound script/native extension implementation | Reflected method/class binding in the selected assembly | Bound module/provider implementation | It is still inactive and carries no native Host authority |
 | `ContractResolutionReceipt<C>` | No direct public equivalent | Import/cache metadata is only a partial provenance analogy | Compilation/import records are only a partial analogy | Module/build provenance is only a partial analogy | It proves the declaration/evidence/semantic-plan join only |
-| `ContractBindingReceipt<C, H>` | Explicit plugin/loader construction evidence is a partial analogy | Native/script implementation binding is a partial analogy | Selected assembly and reflected method binding | Target-selected module/provider binding | It additionally proves exact Host Adapter support, implementation evidence, target, and semantic affinity, but still not activation |
+| `ContractBindingReceipt<C, H>` | Explicit plugin/loader construction evidence is a partial analogy | Native/script implementation binding is a partial analogy | Selected assembly and reflected method binding | Target-selected module/provider binding | It additionally proves exact contract-binding Adapter support, implementation evidence, target, and semantic affinity, but still not activation |
 
 Bevy supplies the closest desired Rust authoring ergonomics, but its `PluginGroupBuilder` uses
 process-local Rust types and eventually mutates `App`. Unity and Unreal provide stronger precedent
@@ -177,10 +182,10 @@ flowchart TD
     Compiled[Compiled implementation and executable evidence] --> Admission
     Select --> Admission
     Definition[Domain ContractDefinition and owner evidence] --> Admission
-    Adapter[Compiled Host Adapter declaration and conformance evidence] --> Admission
+    Adapter[Compiled contract-binding Adapter declaration and conformance evidence] --> Admission
     Admission --> Admitted[Private FinalCatalogAdmission bundle with one shared generation seal]
     Admitted --> Support[Verified ContractSupport C]
-    Admitted --> AdapterSupport[Verified Host Adapter support]
+    Admitted --> AdapterSupport[Verified contract-binding Adapter support]
     Admitted --> HostFacts[Verified Host binding facts]
     Admitted --> Transfer[Semantic witnesses and opaque inactive transfer]
     Select --> Request[Typed semantic ContractRequest]
@@ -346,7 +351,7 @@ The Interface keeps four version axes distinct:
 | Contract semantic line | Stable contract ID plus explicit major line |
 | Descriptor wire shape | Exact integer descriptor version |
 | Canonical declaration/plan shape | Exact schema version |
-| Concrete Host Adapter conformance | Explicit supported plan-version evidence |
+| Concrete contract-binding Adapter conformance | Explicit supported plan-version evidence |
 
 `DescriptorDecoderTable<C>` maps exact wire versions to a bounded decode and explicit migration
 chain. It must not implement an implicit "highest common version" negotiation. Adding a newer
@@ -493,7 +498,7 @@ support, or Host facts from an inspection snapshot.
 - validated contract/package dependency-edge facts and target facts that affected semantic
   planning.
 
-It does not claim Host Adapter, affinity, placement, or activation evidence.
+It does not claim contract-binding Adapter, affinity, placement, or activation evidence.
 
 A separate root/domain binding Module then requires catalog-verified Adapter support:
 
@@ -763,7 +768,8 @@ domain trait without importing this module.
 ## Open Contract, Closed Executable
 
 "Open contract vocabulary" means a third party can define a new contract owner, stable ID,
-declaration, typed plan, binding rules, and supporting Host Adapter without editing a leaf enum.
+declaration, typed plan, binding rules, and supporting contract-binding Adapter without editing a
+leaf enum.
 It does not mean a stock executable can execute an unknown contract by discovering its ID.
 
 ```text
@@ -852,7 +858,7 @@ typed.
 | Candidate | Depth | Locality | Seam placement | Verdict |
 |---|---|---|---|---|
 | Minimal support-owned leaf | High: one operation hides join, validation, and receipt issuance | High for common invariants; domain semantics remain local | Correctly between prepared package facts and typed domain resolution | Base recommendation |
-| Flexible static support set plus generic Host Adapter | High for advanced contract authors | High, but risks moving Host binding vocabulary into the leaf | Host Adapter seam is real, but should remain above the leaf | Keep static support and plan/bind lessons; reject leaf-owned universal Adapter |
+| Flexible static support set plus generic contract-binding Adapter | High for advanced contract authors | High, but risks moving Host binding vocabulary into the leaf | The binding Adapter seam is real, but should remain above the leaf | Keep static support and plan/bind lessons; reject leaf-owned universal Adapter |
 | Ergonomic generated typed keys | High for happy-path package code | Medium because generator must know Rust marker paths and feature layout | Places trust too early in generated projection | Replace with untyped declaration projection plus typed domain binding claim |
 | String registry | Superficially small, actually shallow | Low; every caller reconstructs domain checks | Seam is placed at lookup rather than ownership | Reject |
 
@@ -885,7 +891,7 @@ private erased capsules, sort buffers, or slice witnesses.
 | Compile-pass | Macro-free external contract/package, renamed Nara dependency, runtime-only and import-enabled feature sets, local-affine bound plan, and domain provider importing zero kernel types |
 | Compile-fail | Wrong domain helper, `FnOnce` factory, borrowed plan escape, cross-contract result mix, public receipt/key construction, opening opaque transfer, invoking inactive factory without Host permit, `dyn ContributionContract`, incorrect threaded affinity |
 | Pure property tests | Declaration and binding permutations produce identical slices, plans, and receipts; duplicate and conflicting facts reject deterministically |
-| Version matrix | Exact descriptor migration, exact plan schema, and Host Adapter conformance mismatch reject deterministically |
+| Version matrix | Exact descriptor migration, exact plan schema, and contract-binding Adapter conformance mismatch reject deterministically |
 | Unknown-contract matrix | Required unknown, optional with valid fallback, optional with missing fallback, and optional with invalid fallback produce the specified admission result |
 | Fault matrix | Unsupported version, decode budget, missing/extra/duplicate/wrong/stale binding, marker collision, invalid edge, domain error, summary error, and invalid optional fallback produce no applicable receipt |
 | Panic matrix | Decoder, resolver, summarizer, and binder panics produce fixed payload-free phase failures and no phase receipt in unwind builds; abort behavior is process-tested |
@@ -927,7 +933,7 @@ private erased capsules, sort buffers, or slice witnesses.
 | Generic Interface harms ordinary author ergonomics | High | Medium | Hide it behind domain helpers and one explicit `package()` definition; expose advanced kit only to contract authors |
 | Static support set increases compile time or binary size | Medium | Medium | Measure contract count and monomorphization; retain static dispatch until evidence justifies a different execution technology |
 | Marker collision is presented as namespace security | High | Medium | Describe collision checks as drift/conflict protection only; do not claim malicious native isolation |
-| A universal Host Adapter trait becomes a lowest common denominator | High | Medium | Keep concrete Host binding above the leaf and require a second real Adapter before standardizing a reusable seam |
+| A universal contract-binding Adapter trait becomes a lowest common denominator | High | Medium | Keep concrete Host binding above the leaf and require a second real Adapter before standardizing a reusable seam |
 
 ## Evolution Sequence
 
@@ -979,7 +985,7 @@ context, or stable Rust dynamic ABI now.
    and explicitly closed.
 6. Unknown contracts never self-authorize by stable ID.
 7. Domain and Host results stay typed; only bounded data and audit facts may be privately erased.
-8. Exact Host Adapter and affinity evidence enter a typed binding receipt after pure resolution;
+8. Exact contract-binding Adapter and affinity evidence enter a typed binding receipt after pure resolution;
    actual placement and native authority remain later Host receipts.
 9. The common package author path remains one registration built from domain helpers; the advanced
    contract-author kit may be more explicit.

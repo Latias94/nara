@@ -13,6 +13,7 @@
 **Delivery Evidence**: [Reference-Game-Driven Foundation Plan](../plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md)
 **Upstream Package Design**: [Source Extension Package Interface Design](source-extension-package-interface-design.md)
 **Cross-Domain Validation Harness**: [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
+**Render Capability Harness**: [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
 
 ## Purpose
 
@@ -155,8 +156,9 @@ claim that Proposed ADRs already have implementation evidence.
     requirement must introduce explicit stable entry identity rather than weakening `PluginId`.
 17. A caller-owned App may accept several top-level plugin batches only as immutable-prefix plus
     append. Later batches cannot reorder, replace, disable, or reconfigure committed entries.
-18. `App::set_runner` is top-level code-first/Host authority. Plugin hooks cannot select or replace
-    the process driver.
+18. `App::set_runner` is top-level code-first authority. Plugin hooks cannot select or replace the
+    process driver. A raw-runner App uses direct `App::run`; a managed runtime admits only an App
+    without a raw runner and is driven by the root-selected Platform/Runner Adapter.
 
 ## Module And Seam Placement
 
@@ -770,8 +772,9 @@ embedded applications and focused tests:
 - plugin hooks cannot perform nested installation on this path either;
 - arbitrary caller resources remain caller-owned; a caller explicitly transfers any obligation it
   wants the candidate/runtime to include in finite-close and `Stopped` evidence;
-- callers do not receive product recipe or Host claims, but may seal the App and use U5's generic
-  candidate/runtime lifecycle for fresh-generation driving and close;
+- callers do not receive product recipe or Host claims. They either install a raw runner and use
+  direct `App::run`, or seal an App without a raw runner and use U5's managed candidate/runtime
+  lifecycle; the two routes are mutually exclusive for one App;
 - project-facing examples should use the product path once it exists.
 
 ### 7. Driver Placement
@@ -785,9 +788,12 @@ runtime start attempt constructs what may be published
 host Adapter decides who drives it and when
 ```
 
-Headless, editor, and winit are concrete Adapters over the same runtime drive Interface. A universal
-`RuntimeDriver` trait is not required until a second implementation needs the same replaceable seam.
-The current `WinitPlugin::build -> App::set_runner` route is transitional for the product path.
+Headless, editor, winit, and an external compiled runner are concrete Adapters over the same runtime
+drive outcome. Root composition explicitly selects one per driver scope, and external candidates
+must not require a package-specific root match or first-party allowlist. A universal
+`RuntimeDriver` trait is not required until concrete implementations prove its smallest reusable
+shape. The current `WinitPlugin::build -> App::set_runner` route is transitional for the product
+path.
 
 ## Interface Evaluation
 
@@ -1016,7 +1022,8 @@ three classes:
 | Intentional trade-off | Concrete Host owns runner and fresh publication | Keep; provide one-call/one-click product entry points so authors do not assemble Host plumbing |
 | Unacceptable gap | App schedule registry accepts only built-in `CoreStage`/`StartupStage` labels | Open registration and set configuration to arbitrary `ScheduleLabel`; keep automatic main-loop insertion closed |
 | Unacceptable gap | Common group edits require slot constants or infrastructure definitions | Provide type-directed disable/configure/order facades; retain stable slots for durable/advanced use |
-| Unacceptable gap | Third-party render features cannot prove custom extraction, material/queue, post-process, gizmo, and overlay paths without editing backend core | Require concrete tracer evidence through ADR 0077's packet/provider/graph seams; equal capability matters, not a public Bevy `RenderApp` clone |
+| Unacceptable gap | Third-party rendering stops at feature/pass decoration and cannot supply a complete family, raw interop, or replacement Host | Require separate ADR 0077/0078 clean-room tracers for typed packet/feature, HDR-like family, epoch-scoped wgpu/native work, and whole-Host selection; feature parity alone is not renderer parity |
+| Unacceptable gap | Integrated products can use only first-party Render Host or Platform/Runner candidates | Require explicit domain-owned exclusive slots, external compiled registration, and the same conformance suites without package-specific root matches or first-party allowlists |
 | Unacceptable gap | Local setup requires a formal replayable plugin definition | Preserve direct `add_systems` and ordinary App methods; admit a direct-only configure helper if reference-game evidence needs it |
 | Naming defect | `Plugin::cleanup` means terminal teardown while Bevy uses the same name before first update | Use `Plugin::shutdown` / `PluginShutdownContext`; keep per-frame `CoreStage::Cleanup` distinct |
 | Evidence-triggered defer | Multi-instance plugin | Wait for a real consumer, then add stable entry identity and lifecycle semantics |
@@ -1042,7 +1049,11 @@ The freedom split is:
 | Specialized package roles | Importer, schema, Inspector/tool, render feature/pass, cook/export, and content | Use the owning typed contribution contract; a runtime plugin must not hide another role inside `build` |
 | Runtime-local service freedom | Physics, audio, networking, or another runtime-generation-local service session may begin as plugin-installed resources/systems plus a private session | First-party and third-party plugins use the same App/domain Interfaces and retain explicit shutdown ownership; introduce a public service Adapter only when a fake/second implementation proves the seam |
 | Host-authority service split | A service needs Host-issued authority, thread affinity, waitable startup, an independent process, or platform permission | Use a separately declared domain Adapter/contribution and register its typed close obligation; `Plugin::build` may declare the requirement but cannot acquire that authority |
-| Scoped rendering escape hatch | Custom extraction, packet data, material/queue policy, post-process, gizmo, overlay, and declared encoding work | ADR 0077 provider/packet/graph Interfaces must prove equivalent results without ordinary `Device`/`Queue` ownership or backend-core edits |
+| Portable render Feature/Pass | Custom extraction, typed packet sections, material/queue policy, post-process, gizmo, overlay, and declared scoped encoding work | ADR 0077 provider/packet/graph Interfaces; many contributions compose under one selected family and Host |
+| Complete Pipeline Family | Define material/lighting/view assumptions, feature compatibility, default frame topology, device semantics, and editor outputs | Many families may be registered; each recipe/view selects one through the same first-party/external catalog path |
+| Wgpu/native interop | Use exact Device/controlled Queue/native APIs, persistent epoch resources, compute, vendor SDK, XR, or external images inside a selected Host-supported slot | Explicit trusted-native contribution, Host/interop compatibility admission, pre-device requirements, declared resource access and queue mode, epoch invalidation, and finite close; arbitrary target/submission ownership upgrades to Render Host |
+| Render Host replacement | Own Device/Queue, target acquisition, encoding/submission/present, recovery, and placement for one device domain | Exactly one explicitly selected Render Host Adapter; external and stock candidates use the same conformance role |
+| Platform/runner replacement | Own process/event-loop driving, platform events/time/wake/close, and platform-affine target authority | Exactly one selected driver per scope; it drives `RuntimeInstance`, while raw `App::set_runner/run` remains a mutually exclusive code-first path |
 | New contribution under a known contract | Another runtime plugin, importer, Inspector, render provider, or service Adapter under an existing contract | Add the package, compiled binding, and explicit composition entry; the stock root must not gain a package-specific match arm or `ProductCapability` |
 | New contract kind or Host authority | A genuinely new product role, execution affinity, protocol, or privileged operation | Requires a contract owner plus supporting Host registration and rebuild; the leaf kernel remains unchanged, and an old executable rejects it honestly |
 
@@ -1053,8 +1064,8 @@ when the product root must plan, bind, publish, or grant a genuinely new cross-H
 authority.
 
 This contract does not currently claim full implementation parity. Arbitrary typed schedules,
-data-only group editing, the shared Import Host, third-party render providers, tooling UI Adapters,
-and Host-authority service lifecycle tracers remain evidence gates. Multi-instance plugins,
+data-only group editing, the shared Import Host, third-party render families/interop/Hosts, tooling
+UI Adapters, and Host-authority service lifecycle tracers remain evidence gates. Multi-instance plugins,
 universal async plugin readiness, and public `SubApp`/`RenderApp` are also not current guarantees. If first-party
 code can ship a supported-domain feature only through a private root/backend hook that an external
 package cannot replace with a public typed Interface, that is a blocker gap rather than an
@@ -1066,6 +1077,21 @@ set/disable/order operations (`repo-ref/bevy/crates/bevy_app/src/plugin_group.rs
 direct plugins (`repo-ref/bevy/crates/bevy_app/src/plugin.rs`), and render plugins can extend a
 separate render App. Nara need not copy those implementations, but ordinary author leverage and
 third-party domain capability are parity floors rather than optional polish.
+
+The capability layers are package-author and Host-maintainer concepts, not a tax on game authors.
+One coherent renderer package should lower all internal roles behind a product-facing shape no more
+complex than:
+
+```rust
+nara::desktop()
+    .renderer(aurora_hdr::renderer(HdrProfile::High))
+    .add_plugins(MyGamePlugin)
+    .run()
+```
+
+This syntax is illustrative. The durable requirement is one explicit renderer selection plus one
+normal gameplay-plugin path; ordinary users do not manually construct family catalogs, device
+plans, epoch sessions, binding receipts, or Host candidates.
 
 ## Mature Engine Reference
 
@@ -1099,7 +1125,7 @@ author: that surface remains `Plugin`, `PluginGroup`, tuple, and `App::add_plugi
 | Fresh retry | Failed-first/success-second attempts share no mutable runtime generation state | Generation-isolation test |
 | Public leverage | Reference game uses type-directed group edits, places its game plugin, and configures systems without stable infrastructure vocabulary or Nara source edits | Independent clean-room workspace test |
 | Schedule extension | A third-party domain owns a typed custom schedule without modifying built-in stage enums; it remains inert until explicitly driven | Public compile/run and negative order tests |
-| Extension outcome parity | External clean-room packages prove runtime/custom-schedule, importer, render-feature, and native-service/tooling paths through public Interfaces with zero edits to their owning Nara core/backend crates; explicit package/Host registration and rebuild remain allowed and audited | Renamed-dependency workspaces, source-diff gate, compile-fail authority tests, and domain conformance suites |
+| Extension outcome parity | External clean-room packages separately prove runtime/custom-schedule, importer, portable render-feature, complete Pipeline Family, epoch-scoped wgpu/native interop, replacement Render Host, alternate Platform/Runner, and native-service/tooling paths through public Interfaces with zero edits to owning Nara core/stock-backend crates; explicit package/root selection and rebuild remain allowed and audited | Renamed-dependency workspaces, source-diff gates, exclusive-authority tests, and domain conformance suites |
 | Tooling authority | Editor/tooling commands and views contain no live Runtime Instance, Start Attempt, native lease, or process handle | Static boundary tests |
 | Host parity | Headless, editor, and desktop consume the same runtime-plan/recipe contract | Cross-host semantic tests |
 | Frame overhead | Zero composition resolution, factory construction, or plan lookup in steady-state frames | Profiling and static review |
