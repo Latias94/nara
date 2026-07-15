@@ -312,6 +312,27 @@ second real adapter or stronger isolation pressure.
   `DiagnosticsPlugin` performs retention in `CoreStage::First`, while tracing is an explicit
   cursor-based sink. `RuntimePressureSnapshots` is a separate bounded numeric resource and never
   decides producer admission, defer, coalesce, or eviction policy.
+- RGF-U22 defines a separate offline first-playable evidence contract. One canonical protocol and
+  digest bind semantic subjects, independently reviewed pre-target product constraints, sample
+  floors, cold/warm populations, environment-equivalence classes, union-based source invalidation,
+  and Stop/Redirect/Continue rules before the measured Host/runtime path exists. Empirical baselines
+  remain descriptions of observed implementations rather than retroactive sources for these
+  constraints. Its untrusted envelope checks transfer bytes
+  and digest, serde shape, pre-typed-decode record/field/raw-log budgets, independently expected
+  generator/identity/environment/raw-log values, subject-owned semantic catalogues, and canonical
+  payload digest before returning an unpublished candidate. Identifier grammar alone grants no
+  disclosure authority. Sensitive/secret markers carry no value and raw logs remain
+  retention-bounded external artifacts.
+  Cross-revision reuse is admitted only by a clean exact-root Git proof of HEAD, ancestry,
+  merge-base, and the complete NUL-delimited change manifest. The ownership suite has a dedicated
+  admission that binds the exact U26 metric denominator, U24 candidate, baseline, correctness,
+  fault, lifecycle, and reviewer digests; generic aggregation and decision paths reject it. Its
+  lifecycle graph starts at `candidate`, makes `stopped` terminal, and requires total start and
+  termination reachability.
+  Future PowerShell collectors emit typed records only; U14/U20/U25/U26 Rust policy gates reuse the
+  collector-neutral test oracle for validation, aggregation, and decisions. This test-only policy is
+  not a runtime diagnostics bridge, pressure histogram, production evidence facade, CLI, or
+  benchmark runner.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and `RenderPassPlan`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource and consumes the explicit pass plan for clear/world/UI/gizmo order.
 - Native window targets use an owning provider plus an explicit lifecycle authority. Atomic surface
   acquisition issues one non-cloneable handle source and one control lease; safe wgpu surface
@@ -437,12 +458,16 @@ second real adapter or stronger isolation pressure.
   commands are implemented as UI-toolkit-agnostic `EditorWorkspace` state and reports. See ADR
   [0047](adr/0047-editor-workspace-and-scene-document-state.md).
 - Runtime diagnostics use a shared observational bus for asset/watch/task/render/window/service
-  problems while retaining domain-specific detail and explicit tracing bridges. See ADR
+  problems while retaining domain-specific detail and explicit tracing bridges. Offline product
+  evidence remains a distinct expected-identity and retention boundary. See ADR
   [0048](adr/0048-runtime-diagnostics-and-observability-bus.md).
 - File-backed project data is untrusted input. Scene, prefab, patch, component-schema catalog,
   project-manifest, and the audited static PNG path enforce their implemented parse/decode budgets
   before publication. Asset metadata, imported artifacts, additional codecs, and newly admitted
   file-backed workflows require equivalent owned budgets before mutating runtime or project state.
+  Offline collector output follows the same pre-decode principle through a separate bounded
+  transfer/shape/identity/payload contract; U14/U20 still own real artifact acquisition and
+  temporary-root handling.
   See ADR [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md).
 - Asset roots require handle-bound authority beyond logical path validation. Symlinks, mounts,
   Windows reparse points, hard links, live-object identity, replacement, and durability proof tiers

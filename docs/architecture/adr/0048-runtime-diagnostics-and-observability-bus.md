@@ -59,6 +59,11 @@ Rules:
   two-times-live bound between operations.
 - Consumers can iterate, filter, or obtain a bounded serialization-only snapshot. There is no public
   arbitrary `clear` API.
+- RGF-U22 offline evidence envelopes are a separate trust and retention domain. A collector may
+  lower selected diagnostic or pressure observations into the protocol's preclassified typed
+  fields, but a runtime snapshot is never itself an evidence envelope. Offline evidence does not
+  write back into this bus, participate in gameplay or overload decisions, or move evidence
+  ownership into `nara_diagnostic`.
 - A tracing sink emits one safe entry or only entries after a caller-owned cursor. The bus does not
   offer an emit-entire-history loop that repeats retained events on every frame, and field values are
   not logged.
@@ -114,6 +119,8 @@ errors depend upward.
 - Domain crates keep typed error ownership; `nara_diagnostic` does not become an error-string sink.
 - U31 must add and verify each producer bridge after its typed outcomes stabilize.
 - Metrics and pressure values remain outside the event buffer under ADR 0068.
+- Offline product evidence remains outside both runtime observation resources and crosses its own
+  bounded expected-identity boundary before trusted publication.
 
 ## Success Metrics
 

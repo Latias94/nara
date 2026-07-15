@@ -1,0 +1,304 @@
+{
+  "kind": "nara.evidence",
+  "format_version": 1,
+  "generator": "nara_evidence_v1",
+  "identity": {
+    "run_provider": "local",
+    "run_id": "2026071501",
+    "run_attempt": 1,
+    "repository": "latias94/nara",
+    "source_revision": "09695166d16d4c9411c53fe68a86ebed177bcda7",
+    "protocol_digest": {
+      "bytes": 50376,
+      "blake3": "82986505c1074833e87c05feae3189e985165bc04adb7bfd9769724c4452cc03"
+    },
+    "subject": "u22.calibration_review",
+    "environment_class": "portable_correctness_v1"
+  },
+  "payload_digest": {
+    "bytes": 3672,
+    "blake3": "b8007e6fcc8a9f9878be2005f18ead461f659c42649a878d2ab6e35d828738e0"
+  },
+  "payload": {
+    "context_receipts": [],
+    "environment": [
+      {
+        "key": "build_class",
+        "value": {
+          "type": "identifier",
+          "value": "debug_incremental_v1"
+        }
+      },
+      {
+        "key": "collector_class",
+        "value": {
+          "type": "identifier",
+          "value": "u22_calibration_review_v1"
+        }
+      },
+      {
+        "key": "cpu_class",
+        "value": {
+          "type": "identifier",
+          "value": "x86_64_desktop_v1"
+        }
+      },
+      {
+        "key": "gpu_stack_class",
+        "value": {
+          "type": "identifier",
+          "value": "not_applicable"
+        }
+      },
+      {
+        "key": "os_class",
+        "value": {
+          "type": "identifier",
+          "value": "windows_11_x86_64"
+        }
+      },
+      {
+        "key": "runner_image_class",
+        "value": {
+          "type": "identifier",
+          "value": "local_workstation_v1"
+        }
+      },
+      {
+        "key": "toolchain_class",
+        "value": {
+          "type": "identifier",
+          "value": "rustc_1_97_0_x86_64_pc_windows_msvc"
+        }
+      }
+    ],
+    "records": [
+      {
+        "kind": "calibration_review",
+        "id": "strategy_productivity_v1",
+        "fields": [
+          {
+            "key": "approved",
+            "value": {
+              "type": "bool",
+              "value": true
+            }
+          },
+          {
+            "key": "review_digest",
+            "value": {
+              "type": "digest",
+              "value": {
+                "bytes": 1625,
+                "blake3": "1b2edb4b949b51cb7e86f7a1984d74733dcae189c2b67efe0e003469d0e7b815"
+              }
+            }
+          },
+          {
+            "key": "review_id",
+            "value": {
+              "type": "identifier",
+              "value": "first_playable_product_budget_review_v1"
+            }
+          },
+          {
+            "key": "reviewer_class",
+            "value": {
+              "type": "identifier",
+              "value": "independent_pre_u4"
+            }
+          },
+          {
+            "key": "source_digest",
+            "value": {
+              "type": "digest",
+              "value": {
+                "bytes": 39621,
+                "blake3": "fe7bf66ad90fef9838ede7acc7c7849849611c4f4b32b66793e2906b781ca0ce"
+              }
+            }
+          },
+          {
+            "key": "source_id",
+            "value": {
+              "type": "identifier",
+              "value": "strategy_productivity_v1"
+            }
+          },
+          {
+            "key": "source_path",
+            "value": {
+              "type": "project_relative",
+              "value": "docs/benchmarks/data/sources/v1/first-playable-product-budgets.json"
+            }
+          },
+          {
+            "key": "source_revision",
+            "value": {
+              "type": "identifier",
+              "value": "09695166d16d4c9411c53fe68a86ebed177bcda7"
+            }
+          },
+          {
+            "key": "target_results_seen",
+            "value": {
+              "type": "bool",
+              "value": false
+            }
+          }
+        ]
+      },
+      {
+        "kind": "calibration_review",
+        "id": "strategy_runtime_v1",
+        "fields": [
+          {
+            "key": "approved",
+            "value": {
+              "type": "bool",
+              "value": true
+            }
+          },
+          {
+            "key": "review_digest",
+            "value": {
+              "type": "digest",
+              "value": {
+                "bytes": 1625,
+                "blake3": "1b2edb4b949b51cb7e86f7a1984d74733dcae189c2b67efe0e003469d0e7b815"
+              }
+            }
+          },
+          {
+            "key": "review_id",
+            "value": {
+              "type": "identifier",
+              "value": "first_playable_product_budget_review_v1"
+            }
+          },
+          {
+            "key": "reviewer_class",
+            "value": {
+              "type": "identifier",
+              "value": "independent_pre_u4"
+            }
+          },
+          {
+            "key": "source_digest",
+            "value": {
+              "type": "digest",
+              "value": {
+                "bytes": 39621,
+                "blake3": "fe7bf66ad90fef9838ede7acc7c7849849611c4f4b32b66793e2906b781ca0ce"
+              }
+            }
+          },
+          {
+            "key": "source_id",
+            "value": {
+              "type": "identifier",
+              "value": "strategy_runtime_v1"
+            }
+          },
+          {
+            "key": "source_path",
+            "value": {
+              "type": "project_relative",
+              "value": "docs/benchmarks/data/sources/v1/first-playable-product-budgets.json"
+            }
+          },
+          {
+            "key": "source_revision",
+            "value": {
+              "type": "identifier",
+              "value": "09695166d16d4c9411c53fe68a86ebed177bcda7"
+            }
+          },
+          {
+            "key": "target_results_seen",
+            "value": {
+              "type": "bool",
+              "value": false
+            }
+          }
+        ]
+      },
+      {
+        "kind": "calibration_review",
+        "id": "zero_tolerance_contract_v1",
+        "fields": [
+          {
+            "key": "approved",
+            "value": {
+              "type": "bool",
+              "value": true
+            }
+          },
+          {
+            "key": "review_digest",
+            "value": {
+              "type": "digest",
+              "value": {
+                "bytes": 1625,
+                "blake3": "1b2edb4b949b51cb7e86f7a1984d74733dcae189c2b67efe0e003469d0e7b815"
+              }
+            }
+          },
+          {
+            "key": "review_id",
+            "value": {
+              "type": "identifier",
+              "value": "first_playable_product_budget_review_v1"
+            }
+          },
+          {
+            "key": "reviewer_class",
+            "value": {
+              "type": "identifier",
+              "value": "independent_pre_u4"
+            }
+          },
+          {
+            "key": "source_digest",
+            "value": {
+              "type": "digest",
+              "value": {
+                "bytes": 39621,
+                "blake3": "fe7bf66ad90fef9838ede7acc7c7849849611c4f4b32b66793e2906b781ca0ce"
+              }
+            }
+          },
+          {
+            "key": "source_id",
+            "value": {
+              "type": "identifier",
+              "value": "zero_tolerance_contract_v1"
+            }
+          },
+          {
+            "key": "source_path",
+            "value": {
+              "type": "project_relative",
+              "value": "docs/benchmarks/data/sources/v1/first-playable-product-budgets.json"
+            }
+          },
+          {
+            "key": "source_revision",
+            "value": {
+              "type": "identifier",
+              "value": "09695166d16d4c9411c53fe68a86ebed177bcda7"
+            }
+          },
+          {
+            "key": "target_results_seen",
+            "value": {
+              "type": "bool",
+              "value": false
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "restricted_raw_logs": []
+}

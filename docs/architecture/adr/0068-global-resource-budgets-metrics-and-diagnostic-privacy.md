@@ -130,6 +130,33 @@ flowchart LR
   `DiagnosticCleanupSet::Retention`. The plugin installs neither a tracing subscriber nor a global
   panic hook.
 
+### Offline Evidence Measurements
+
+RGF-U22's first-playable evidence protocol owns offline raw samples, P50/P95/P99 aggregation,
+environment-equivalence classes, sourced ranges, and Continue/Redirect/Stop decisions. Those values
+are bounded evidence-tooling records, not `RuntimePressureSnapshots`, and do not add histograms,
+exporters, or decision policy to the foundation runtime. A collector may read a runtime gauge or
+counter, but it must lower it into the protocol's stable metric/unit and preclassified typed fields
+before crossing the evidence boundary.
+
+The version-1 ranges are pre-target normative product constraints, not observed baselines or
+industry-performance claims. Their exact source revision and digest are independently attested by
+separate performance-measurement and protocol-provenance reviews before Host/runtime results exist.
+Observed baselines continue to describe the implementation that produced them; a result-informed
+constraint change creates a new version and cannot decide that source result.
+
+The ownership decision is a stricter cohort than an ordinary metric suite. Its only decision entry
+requires one digest-bound U26 baseline covering the exact ownership denominator, one trusted U24
+candidate digest, the frozen correctness/fault/lifecycle contracts, and an independent review
+attestation. Generic aggregation and decision entry points reject that suite. The lifecycle graph
+starts at `candidate`, makes `stopped` terminal, and requires every declared state both to be
+reachable from the start and able to terminate.
+
+Offline ingestion has independent encoded-byte, shape, record, field, string, identity, digest, and
+retention limits. Arbitrary logs remain restricted artifacts; committed records contain no host
+paths, URLs, credentials, free text, or value-bearing sensitive/secret fields. The runtime bus and
+pressure resources neither ingest offline envelopes nor publish their decisions.
+
 ### Non-goals
 
 - No global budget manager, global admission policy, or cross-domain fairness algorithm.
@@ -194,6 +221,7 @@ runtime strings and secrets into dedupe/logging.
 | Headless operation | Resources and cleanup work without UI/tracing/backend | App integration test |
 | Domain coverage | Named producers publish classified bridges and metrics | U31 integration tests |
 | Image admission | Modeled image charges never exceed aggregate/category reservations, and accounting returns to zero on every terminal path | RGF-U10 owner/facade tests |
+| Offline evidence separation | Percentiles and evidence decisions remain outside runtime pressure state and accept only bounded preclassified records | RGF-U22 policy tests |
 
 ## Risks and Mitigations
 

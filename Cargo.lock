@@ -1557,6 +1557,7 @@ dependencies = [
  "nara_winit",
  "raw-window-handle",
  "ron",
+ "serde",
  "serde_json",
  "tracing",
 ]

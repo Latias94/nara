@@ -101,6 +101,34 @@ in-memory paths rather than file-ingest APIs; their callers own any prior alloca
 state write and value-slot mutation still advances an opaque revision, so those paths invalidate an
 in-flight official import candidate instead of silently reusing its publication admission.
 
+### Implemented RGF-U22 Evidence Transfer Slice
+
+Offline benchmark and workflow evidence crosses an untrusted collector-to-review boundary even
+when the collector had no credentials. The version-1 evidence policy checks an encoded-byte ceiling
+and caller-supplied outer transfer digest before serde work, then preflights depth, nodes, container
+items, single and total string bytes, and duplicate keys. A bounded generic JSON pass enforces
+record, per-record field, aggregate field, and raw-log-reference budgets before strict typed decode.
+
+The trusted caller supplies the expected transfer path/table, generator, run, source revision,
+protocol digest, subject, complete environment fields, and exact raw-log references independently
+of collector bytes. The envelope cannot route itself. Ingestion then validates the subject-owned
+record-kind, metric, population, peer, typed-field, and safe-relative-path catalogues, canonical
+payload bytes, and the payload digest. Identifier syntax alone is not a privacy guarantee. Sensitive
+and secret fields are value-free markers; arbitrary text is rejected instead of heuristically
+redacted. Any failure returns no trusted publication.
+
+The only trusted publication entry combines transfer-table preflight with envelope validation. It
+accepts only the exact expected regular entry and byte count and rejects links, special files,
+traversal, aliases, and unexpected entries before a future extractor may run.
+Evidence reuse additionally requires a clean Git-backed opaque revision admission bound to the
+explicit repository root, exact HEAD, ancestor/merge-base proof, and complete NUL-delimited change
+manifest. Collector bytes cannot self-assert current-source status. Legal Git path spelling is
+preserved independently from the envelope's narrower identifier grammar; an unrepresentable path
+invalidates all affected evidence rather than enabling selective reuse.
+RGF-U22 supplies language-independent fixtures and test-only policy functions, not an archive
+parser, network fetcher, production evidence facade, or benchmark framework. U14/U20 own real
+artifact acquisition and temporary-root handling.
+
 ## Alternatives Considered
 
 ### Option A: Trust local project files
@@ -137,6 +165,7 @@ in-flight official import candidate instead of silently reusing its publication 
 | Consistent policy | Initial load and reload use one owned request, reservation, candidate, and commit path | Integration tests |
 | No partial mutation | Budget failures leave target runtime/project state unchanged | Transaction tests |
 | Exact release | Every terminal path returns active charges to zero and reserved bytes equal released bytes | Budget snapshot tests |
+| Bounded evidence | Every envelope byte/shape/domain limit passes exactly and rejects at limit+1 before trusted publication | `tests/evidence_envelope.rs` |
 
 ## Risks and Mitigations
 

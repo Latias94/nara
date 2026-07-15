@@ -1,0 +1,1086 @@
+{
+  "kind": "nara.first_playable_product_budgets",
+  "format_version": 1,
+  "revision": "first_playable_product_budgets_v1",
+  "target_results_seen": false,
+  "adoption": {
+    "decision_id": "u22_product_constraints_v1",
+    "decision_kind": "pre_target_normative_constraints",
+    "adopted_at_utc": "2026-07-15T03:00:51Z",
+    "adopted_by": "codex_session_019f4ede_b40a_77c3_8336_c6f713f3fa86",
+    "authority_path": "docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md",
+    "authority_revision": "09695166d16d4c9411c53fe68a86ebed177bcda7",
+    "baseline_policy": {
+      "observed_baselines_describe_current_performance": true,
+      "normative_constraints_precede_target_results": true,
+      "result_informed_revision_requires_new_version": true,
+      "revised_constraints_cannot_decide_source_results": true
+    }
+  },
+  "correctness_contract": {
+    "id": "first_playable_correctness_v1",
+    "baseline_subject": "u26.manual_counterfactual",
+    "candidate_subject": "u25.ownership_comparison",
+    "task_steps": [
+      "01_resolve_frozen_runtime_plan_v1",
+      "02_consume_frozen_content_snapshot_v1",
+      "03_start_first_fixed_tick_v1",
+      "04_observe_authoritative_result_v1",
+      "05_request_bounded_stop_v1",
+      "06_prove_registered_obligation_retirement_v1"
+    ],
+    "fault_cases": [
+      "01_plugin_prepare_failure_v1",
+      "02_registry_freeze_failure_v1",
+      "03_scene_spawn_failure_v1",
+      "04_startup_hook_failure_v1",
+      "05_fixed_tick_queue_fault_v1",
+      "06_cancellation_during_admission_v1",
+      "07_shutdown_deadline_v1",
+      "08_provider_retirement_failure_v1"
+    ],
+    "initial_lifecycle_state": "candidate",
+    "lifecycle_states": [
+      "candidate",
+      "close_incomplete",
+      "faulted",
+      "paused",
+      "retirement_incomplete",
+      "running",
+      "starting",
+      "stepping",
+      "stopped",
+      "stopping"
+    ],
+    "lifecycle_transitions": [
+      {
+        "from": "candidate",
+        "to": "starting"
+      },
+      {
+        "from": "candidate",
+        "to": "stopping"
+      },
+      {
+        "from": "close_incomplete",
+        "to": "stopping"
+      },
+      {
+        "from": "faulted",
+        "to": "stopping"
+      },
+      {
+        "from": "paused",
+        "to": "running"
+      },
+      {
+        "from": "paused",
+        "to": "stepping"
+      },
+      {
+        "from": "paused",
+        "to": "stopping"
+      },
+      {
+        "from": "retirement_incomplete",
+        "to": "stopping"
+      },
+      {
+        "from": "running",
+        "to": "faulted"
+      },
+      {
+        "from": "running",
+        "to": "paused"
+      },
+      {
+        "from": "running",
+        "to": "stopping"
+      },
+      {
+        "from": "starting",
+        "to": "retirement_incomplete"
+      },
+      {
+        "from": "starting",
+        "to": "running"
+      },
+      {
+        "from": "starting",
+        "to": "stopping"
+      },
+      {
+        "from": "stepping",
+        "to": "faulted"
+      },
+      {
+        "from": "stepping",
+        "to": "paused"
+      },
+      {
+        "from": "stepping",
+        "to": "stopping"
+      },
+      {
+        "from": "stopping",
+        "to": "close_incomplete"
+      },
+      {
+        "from": "stopping",
+        "to": "stopped"
+      }
+    ],
+    "coverage_denominator": "public_engine_calls_in_frozen_slice_v1",
+    "comparison_baseline": "relative_to_u26_v1",
+    "independent_review_required": true,
+    "rubrics": [
+      {
+        "metric_id": "ownership.caller_glue_regressions",
+        "rule_id": "positive_host_minus_manual_glue_delta_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.false_stopped",
+        "rule_id": "stopped_requires_all_registered_obligations_retired_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.invalid_transitions",
+        "rule_id": "transition_outside_frozen_lifecycle_graph_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.missed_fault_boundaries",
+        "rule_id": "fault_matrix_case_not_observed_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.private_imports",
+        "rule_id": "non_public_engine_dependency_count_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.shutdown_leaks",
+        "rule_id": "registered_obligation_not_retired_by_deadline_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.undocumented_interventions",
+        "rule_id": "operator_action_outside_frozen_task_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.unjustified_extra_concepts",
+        "rule_id": "host_only_concept_without_closed_gap_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.unowned_states",
+        "rule_id": "state_without_exactly_one_owner_v1",
+        "ambiguity_outcome": "redirect"
+      },
+      {
+        "metric_id": "ownership.unreachable_states",
+        "rule_id": "declared_state_unreachable_from_candidate_v1",
+        "ambiguity_outcome": "redirect"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "id": "strategy_productivity_v1",
+      "kind": "strategy_budget",
+      "basis_id": "first_playable_author_flow_product_constraint_v1",
+      "metrics": [
+        {
+          "id": "build.cold_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 1200000000000
+          },
+          "rationale_id": "cold_build_must_fit_one_reference_task_window_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "cold",
+            "workload_id": "locked_reference_game_workspace_v1",
+            "start_boundary_id": "clean_build_command_started_v1",
+            "end_boundary_id": "build_process_success_v1",
+            "method_id": "monotonic_wall_clock_v1",
+            "required_context": [
+              "cargo_command_v1",
+              "dependency_cache_state_v1",
+              "empty_target_directory_v1",
+              "source_revision_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "build.incremental_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 120000000000
+          },
+          "rationale_id": "incremental_build_must_not_break_author_feedback_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "warm",
+            "workload_id": "locked_reference_game_workspace_v1",
+            "start_boundary_id": "incremental_build_command_started_v1",
+            "end_boundary_id": "build_process_success_v1",
+            "method_id": "monotonic_wall_clock_v1",
+            "required_context": [
+              "changed_file_class_v1",
+              "existing_target_directory_v1",
+              "source_revision_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "iteration.body.p50_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 15000000000
+          },
+          "rationale_id": "typical_body_edit_preserves_short_feedback_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p50",
+            "population": "warm",
+            "workload_id": "compatible_rust_body_edit_v1",
+            "start_boundary_id": "body_edit_committed_v1",
+            "end_boundary_id": "authoritative_result_observed_v1",
+            "method_id": "edit_to_result_monotonic_v1",
+            "required_context": [
+              "collector_version_v1",
+              "edit_patch_digest_v1",
+              "result_digest_v1",
+              "runtime_recovery_path_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "iteration.body.p95_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 30000000000
+          },
+          "rationale_id": "tail_body_edit_preserves_short_feedback_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "warm",
+            "workload_id": "compatible_rust_body_edit_v1",
+            "start_boundary_id": "body_edit_committed_v1",
+            "end_boundary_id": "authoritative_result_observed_v1",
+            "method_id": "edit_to_result_monotonic_v1",
+            "required_context": [
+              "collector_version_v1",
+              "edit_patch_digest_v1",
+              "result_digest_v1",
+              "runtime_recovery_path_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "iteration.data.p50_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 2000000000
+          },
+          "rationale_id": "typical_data_edit_remains_interactive_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p50",
+            "population": "warm",
+            "workload_id": "persistent_component_data_edit_v1",
+            "start_boundary_id": "data_edit_committed_v1",
+            "end_boundary_id": "authoritative_result_observed_v1",
+            "method_id": "edit_to_result_monotonic_v1",
+            "required_context": [
+              "collector_version_v1",
+              "edit_patch_digest_v1",
+              "result_digest_v1",
+              "runtime_recovery_path_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "iteration.data.p95_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 5000000000
+          },
+          "rationale_id": "tail_data_edit_remains_interactive_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "warm",
+            "workload_id": "persistent_component_data_edit_v1",
+            "start_boundary_id": "data_edit_committed_v1",
+            "end_boundary_id": "authoritative_result_observed_v1",
+            "method_id": "edit_to_result_monotonic_v1",
+            "required_context": [
+              "collector_version_v1",
+              "edit_patch_digest_v1",
+              "result_digest_v1",
+              "runtime_recovery_path_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "iteration.structural.p50_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 30000000000
+          },
+          "rationale_id": "typical_structural_edit_fits_short_restart_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p50",
+            "population": "warm",
+            "workload_id": "rust_structural_schema_edit_v1",
+            "start_boundary_id": "structural_edit_committed_v1",
+            "end_boundary_id": "authoritative_result_observed_v1",
+            "method_id": "edit_to_result_monotonic_v1",
+            "required_context": [
+              "collector_version_v1",
+              "edit_patch_digest_v1",
+              "result_digest_v1",
+              "runtime_recovery_path_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "iteration.structural.p95_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 60000000000
+          },
+          "rationale_id": "tail_structural_edit_fits_bounded_restart_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "warm",
+            "workload_id": "rust_structural_schema_edit_v1",
+            "start_boundary_id": "structural_edit_committed_v1",
+            "end_boundary_id": "authoritative_result_observed_v1",
+            "method_id": "edit_to_result_monotonic_v1",
+            "required_context": [
+              "collector_version_v1",
+              "edit_patch_digest_v1",
+              "result_digest_v1",
+              "runtime_recovery_path_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "journey.clean_to_desktop_playable_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 1800000000000
+          },
+          "rationale_id": "clean_desktop_journey_fits_first_session_v1",
+          "measurement": {
+            "subject": "u14.desktop_product",
+            "environment_class": "desktop_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "cold",
+            "workload_id": "docs_only_clean_desktop_journey_v1",
+            "start_boundary_id": "clean_checkout_ready_v1",
+            "end_boundary_id": "manual_desktop_terminal_state_observed_v1",
+            "method_id": "monotonic_wall_clock_v1",
+            "required_context": [
+              "dependency_cache_state_v1",
+              "instructions_revision_v1",
+              "runner_class_v1",
+              "source_revision_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "journey.clean_to_headless_wave_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 1200000000000
+          },
+          "rationale_id": "clean_headless_journey_fits_first_session_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "cold",
+            "workload_id": "docs_only_clean_headless_journey_v1",
+            "start_boundary_id": "clean_checkout_ready_v1",
+            "end_boundary_id": "headless_wave_terminal_state_observed_v1",
+            "method_id": "monotonic_wall_clock_v1",
+            "required_context": [
+              "dependency_cache_state_v1",
+              "instructions_revision_v1",
+              "runner_class_v1",
+              "source_revision_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "module.add.time_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 900000000000
+          },
+          "rationale_id": "public_module_composition_fits_focused_task_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "cold",
+            "workload_id": "documented_add_module_task_v1",
+            "start_boundary_id": "module_task_presented_v1",
+            "end_boundary_id": "new_module_public_test_passed_v1",
+            "method_id": "monotonic_wall_clock_v1",
+            "required_context": [
+              "module_task_definition_v1",
+              "source_revision_v1",
+              "workspace_lock_digest_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "slot.configure.time_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 300000000000
+          },
+          "rationale_id": "supported_slot_configuration_fits_small_task_v1",
+          "measurement": {
+            "subject": "u14.desktop_product",
+            "environment_class": "desktop_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "cold",
+            "workload_id": "documented_window_slot_task_v1",
+            "start_boundary_id": "slot_task_presented_v1",
+            "end_boundary_id": "configured_desktop_launch_succeeded_v1",
+            "method_id": "monotonic_wall_clock_v1",
+            "required_context": [
+              "slot_task_definition_v1",
+              "source_revision_v1",
+              "workspace_lock_digest_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        }
+      ]
+    },
+    {
+      "id": "strategy_runtime_v1",
+      "kind": "strategy_budget",
+      "basis_id": "narrow_2d_pc_product_constraint_v1",
+      "metrics": [
+        {
+          "id": "candidate.size_bytes",
+          "target": {
+            "kind": "maximum",
+            "value": 268435456
+          },
+          "rationale_id": "compressed_candidate_remains_practical_to_distribute_v1",
+          "measurement": {
+            "subject": "u20.release_candidate",
+            "environment_class": "portable_correctness_v1",
+            "value_kind": "bytes",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "exact_approved_candidate_archive_v1",
+            "start_boundary_id": "archive_first_byte_v1",
+            "end_boundary_id": "archive_last_byte_v1",
+            "method_id": "exact_file_length_v1",
+            "required_context": [
+              "archive_codec_and_level_v1",
+              "archive_digest_v1",
+              "candidate_identity_v1",
+              "source_revision_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "candidate.startup_p95_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 10000000000
+          },
+          "rationale_id": "standalone_candidate_reaches_playable_state_promptly_v1",
+          "measurement": {
+            "subject": "u20.release_candidate",
+            "environment_class": "desktop_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p95",
+            "population": "warm",
+            "workload_id": "paired_candidate_startup_v1",
+            "start_boundary_id": "child_process_spawn_requested_v1",
+            "end_boundary_id": "slower_of_headless_first_tick_and_desktop_first_present_v1",
+            "method_id": "paired_monotonic_max_v1",
+            "required_context": [
+              "candidate_digest_v1",
+              "desktop_start_boundary_v1",
+              "headless_start_boundary_v1",
+              "process_creation_api_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "candidate.unpacked_size_bytes",
+          "target": {
+            "kind": "maximum",
+            "value": 536870912
+          },
+          "rationale_id": "installed_candidate_remains_practical_to_retain_v1",
+          "measurement": {
+            "subject": "u20.release_candidate",
+            "environment_class": "portable_correctness_v1",
+            "value_kind": "bytes",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "exact_approved_candidate_tree_v1",
+            "start_boundary_id": "validated_staging_tree_root_v1",
+            "end_boundary_id": "validated_staging_tree_complete_v1",
+            "method_id": "regular_file_length_sum_v1",
+            "required_context": [
+              "archive_digest_v1",
+              "candidate_identity_v1",
+              "regular_file_table_digest_v1",
+              "source_revision_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "frame.p99_ns",
+          "target": {
+            "kind": "maximum",
+            "value": 16666667
+          },
+          "rationale_id": "narrow_2d_reference_wave_targets_sixty_hz_v1",
+          "measurement": {
+            "subject": "u14.desktop_product",
+            "environment_class": "desktop_timing_v1",
+            "value_kind": "nanoseconds",
+            "statistic": "p99",
+            "population": "warm",
+            "workload_id": "reference_game_pressure_frame_1080p_v1",
+            "start_boundary_id": "frame_work_begin_v1",
+            "end_boundary_id": "submitted_gpu_work_complete_v1",
+            "method_id": "cpu_gpu_frame_duration_v1",
+            "required_context": [
+              "adapter_and_driver_v1",
+              "enemy_projectile_counts_v1",
+              "present_mode_v1",
+              "resolution_1920x1080_v1",
+              "vsync_disabled_v1",
+              "warmup_600_frames_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "runtime.gpu_resource_bytes",
+          "target": {
+            "kind": "maximum",
+            "value": 536870912
+          },
+          "rationale_id": "backend_owned_gpu_resources_remain_bounded_v1",
+          "measurement": {
+            "subject": "u14.desktop_product",
+            "environment_class": "desktop_timing_v1",
+            "value_kind": "bytes",
+            "statistic": "p95",
+            "population": "warm",
+            "workload_id": "reference_game_pressure_wave_v1",
+            "start_boundary_id": "desktop_runtime_published_v1",
+            "end_boundary_id": "terminal_wave_frame_presented_v1",
+            "method_id": "backend_tracked_gpu_resource_peak_v1",
+            "required_context": [
+              "adapter_and_driver_v1",
+              "backend_resource_categories_v1",
+              "device_epoch_v1",
+              "excludes_unobservable_driver_residency_v1",
+              "resolution_1920x1080_v1",
+              "sampling_interval_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "runtime.memory_bytes",
+          "target": {
+            "kind": "maximum",
+            "value": 1073741824
+          },
+          "rationale_id": "reference_wave_process_memory_remains_bounded_v1",
+          "measurement": {
+            "subject": "u14.desktop_product",
+            "environment_class": "desktop_timing_v1",
+            "value_kind": "bytes",
+            "statistic": "p95",
+            "population": "warm",
+            "workload_id": "reference_game_pressure_wave_v1",
+            "start_boundary_id": "desktop_runtime_published_v1",
+            "end_boundary_id": "terminal_wave_frame_presented_v1",
+            "method_id": "platform_process_peak_memory_v1",
+            "required_context": [
+              "excludes_device_local_gpu_resources_v1",
+              "linux_rss_high_water_v1",
+              "sampling_interval_v1",
+              "windows_peak_working_set_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        }
+      ]
+    },
+    {
+      "id": "zero_tolerance_contract_v1",
+      "kind": "zero_tolerance_contract",
+      "basis_id": "correctness_hard_stop_v1",
+      "metrics": [
+        {
+          "id": "gameplay.desktop_playable_success",
+          "target": {
+            "kind": "exact",
+            "value": 1
+          },
+          "rationale_id": "desktop_product_path_must_be_manually_playable_v1",
+          "measurement": {
+            "subject": "u14.desktop_product",
+            "environment_class": "portable_correctness_v1",
+            "value_kind": "boolean",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "manual_reference_wave_v1",
+            "start_boundary_id": "desktop_runtime_published_v1",
+            "end_boundary_id": "terminal_wave_state_observed_v1",
+            "method_id": "terminal_state_contract_v1",
+            "required_context": [
+              "authoritative_state_digest_v1",
+              "input_sequence_digest_v1",
+              "public_path_inventory_digest_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "gameplay.headless_wave_success",
+          "target": {
+            "kind": "exact",
+            "value": 1
+          },
+          "rationale_id": "headless_authoritative_wave_is_hard_checkpoint_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "portable_correctness_v1",
+            "value_kind": "boolean",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "deterministic_headless_reference_wave_v1",
+            "start_boundary_id": "headless_runtime_published_v1",
+            "end_boundary_id": "terminal_wave_state_observed_v1",
+            "method_id": "terminal_state_contract_v1",
+            "required_context": [
+              "authoritative_state_digest_v1",
+              "command_sequence_digest_v1",
+              "public_path_inventory_digest_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "module.add.success",
+          "target": {
+            "kind": "exact",
+            "value": 1
+          },
+          "rationale_id": "documented_module_extension_must_complete_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "cpu_timing_v1",
+            "value_kind": "boolean",
+            "statistic": "exact",
+            "population": "cold",
+            "workload_id": "documented_add_module_task_v1",
+            "start_boundary_id": "module_task_presented_v1",
+            "end_boundary_id": "new_module_public_test_passed_v1",
+            "method_id": "task_completion_contract_v1",
+            "required_context": [
+              "module_task_definition_v1",
+              "source_revision_v1",
+              "workspace_lock_digest_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "ownership.caller_glue_regressions",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "host_must_not_add_unjustified_caller_glue_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_ownership_task_v1",
+            "start_boundary_id": "u26_inventory_loaded_v1",
+            "end_boundary_id": "paired_inventory_review_complete_v1",
+            "method_id": "positive_host_minus_manual_glue_delta_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.false_stopped",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "stopped_state_requires_retirement_proof_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_ownership_task_v1",
+            "start_boundary_id": "u26_inventory_loaded_v1",
+            "end_boundary_id": "paired_inventory_review_complete_v1",
+            "method_id": "stopped_requires_all_registered_obligations_retired_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.invalid_transitions",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "runtime_must_not_use_transitions_outside_frozen_graph_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_runtime_lifecycle_graph_v1",
+            "start_boundary_id": "frozen_lifecycle_graph_loaded_v1",
+            "end_boundary_id": "observed_transition_inventory_compared_v1",
+            "method_id": "transition_outside_frozen_lifecycle_graph_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.missed_fault_boundaries",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "every_frozen_fault_case_must_be_observed_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_ownership_task_v1",
+            "start_boundary_id": "u26_inventory_loaded_v1",
+            "end_boundary_id": "paired_inventory_review_complete_v1",
+            "method_id": "fault_matrix_case_not_observed_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.private_imports",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "production_slice_must_use_public_engine_surface_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_ownership_task_v1",
+            "start_boundary_id": "u26_inventory_loaded_v1",
+            "end_boundary_id": "paired_inventory_review_complete_v1",
+            "method_id": "non_public_engine_dependency_count_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.shutdown_leaks",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "registered_obligations_must_retire_by_deadline_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_ownership_task_v1",
+            "start_boundary_id": "u26_inventory_loaded_v1",
+            "end_boundary_id": "paired_inventory_review_complete_v1",
+            "method_id": "registered_obligation_not_retired_by_deadline_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.undocumented_interventions",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "frozen_task_must_not_need_hidden_operator_actions_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_ownership_task_v1",
+            "start_boundary_id": "u26_inventory_loaded_v1",
+            "end_boundary_id": "paired_inventory_review_complete_v1",
+            "method_id": "operator_action_outside_frozen_task_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.unjustified_extra_concepts",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "host_only_concepts_require_closed_failure_gap_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_ownership_task_v1",
+            "start_boundary_id": "u26_inventory_loaded_v1",
+            "end_boundary_id": "paired_inventory_review_complete_v1",
+            "method_id": "host_only_concept_without_closed_gap_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.unowned_states",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "every_lifecycle_state_requires_exact_owner_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_ownership_task_v1",
+            "start_boundary_id": "u26_inventory_loaded_v1",
+            "end_boundary_id": "paired_inventory_review_complete_v1",
+            "method_id": "state_without_exactly_one_owner_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "ownership.unreachable_states",
+          "target": {
+            "kind": "exact",
+            "value": 0
+          },
+          "rationale_id": "every_declared_lifecycle_state_must_be_reachable_v1",
+          "measurement": {
+            "subject": "u25.ownership_comparison",
+            "environment_class": "paired_ownership_v1",
+            "value_kind": "count",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_runtime_lifecycle_graph_v1",
+            "start_boundary_id": "frozen_lifecycle_graph_loaded_v1",
+            "end_boundary_id": "lifecycle_reachability_analysis_complete_v1",
+            "method_id": "declared_state_unreachable_from_candidate_v1",
+            "required_context": [
+              "independent_reviewer_attestation_v1",
+              "u22_correctness_contract_v1",
+              "u22_fault_matrix_v1",
+              "u22_lifecycle_graph_v1",
+              "u24_candidate_digest_v1",
+              "u26_baseline_digest_v1"
+            ],
+            "reuse_policy": "current_revision_only"
+          }
+        },
+        {
+          "id": "public.production.coverage_basis_points",
+          "target": {
+            "kind": "minimum",
+            "value": 10000
+          },
+          "rationale_id": "frozen_slice_has_no_private_or_unexercised_product_path_v1",
+          "measurement": {
+            "subject": "u14.headless_iteration",
+            "environment_class": "portable_correctness_v1",
+            "value_kind": "basis_points",
+            "statistic": "exact",
+            "population": "not_applicable",
+            "workload_id": "frozen_public_production_slice_v1",
+            "start_boundary_id": "public_call_inventory_frozen_v1",
+            "end_boundary_id": "both_terminal_wave_paths_complete_v1",
+            "method_id": "executed_public_calls_over_frozen_denominator_v1",
+            "required_context": [
+              "denominator_inventory_digest_v1",
+              "executed_call_inventory_digest_v1",
+              "private_import_count_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        },
+        {
+          "id": "slot.configure.success",
+          "target": {
+            "kind": "exact",
+            "value": 1
+          },
+          "rationale_id": "documented_slot_configuration_must_complete_v1",
+          "measurement": {
+            "subject": "u14.desktop_product",
+            "environment_class": "desktop_timing_v1",
+            "value_kind": "boolean",
+            "statistic": "exact",
+            "population": "cold",
+            "workload_id": "documented_window_slot_task_v1",
+            "start_boundary_id": "slot_task_presented_v1",
+            "end_boundary_id": "configured_desktop_launch_succeeded_v1",
+            "method_id": "task_completion_contract_v1",
+            "required_context": [
+              "slot_task_definition_v1",
+              "source_revision_v1",
+              "workspace_lock_digest_v1"
+            ],
+            "reuse_policy": "invalidation_mapped"
+          }
+        }
+      ]
+    }
+  ]
+}

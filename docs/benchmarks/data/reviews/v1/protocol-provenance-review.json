@@ -1,0 +1,19 @@
+{
+  "kind": "nara.first_playable_independent_review",
+  "format_version": 1,
+  "reviewer_id": "u22_review_provenance_v2",
+  "reviewer_class": "independent_pre_u4",
+  "scope_id": "protocol_provenance_v1",
+  "reviewed_at_utc": "2026-07-15T07:30:33Z",
+  "source_revision": "09695166d16d4c9411c53fe68a86ebed177bcda7",
+  "target_results_seen": false,
+  "verdict": "approve",
+  "reviewed_artifact": {
+    "path": "docs/benchmarks/data/sources/v1/first-playable-product-budgets.json",
+    "revision": "first_playable_product_budgets_v1",
+    "digest": {
+      "bytes": 39621,
+      "blake3": "fe7bf66ad90fef9838ede7acc7c7849849611c4f4b32b66793e2906b781ca0ce"
+    }
+  }
+}
