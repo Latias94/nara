@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-14
+**Last Revised**: 2026-07-15
 **Refines**: ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement
@@ -78,12 +78,22 @@ The plugin metadata contract is:
 - `App::add_plugins` preserves a Bevy-like single/group/tuple call through a sealed input trait, but
   all inputs lower through collection, resolution, optional private preparation, and closed commit.
   Plugin build/finish hooks cannot install hidden dependencies.
+- First-party and third-party runtime plugins use the same public `App` and domain Interfaces. A
+  closed commit restricts plugin-graph mutation, runner selection, automatic-main-loop insertion,
+  and Host-issued authority; it does not turn `Plugin::build` into a behavior whitelist. The runtime
+  extension contract must permit trusted plugin code to use its own ECS component types and add
+  typed resources, systems, system sets, custom schedules, typed queues, and runtime-local domain
+  registrations through public Interfaces.
+  Import, editor/tooling, render, cook, and Host-authority roles still use their owning contribution
+  contracts. A known runtime/domain contribution must not require a first-party ID allowlist or an
+  edit to Nara core merely because its crate is external.
 - Ordinary Rust callers edit groups by plugin type or by a typed definition helper, for example
   `.disable::<TilemapPlugin>()` and `.configure(window::plugin(settings))`. Stable slot IDs remain
   the durable authority for project data, tooling, and later admitted cross-plugin replacement,
   but common same-plugin configuration and disable flows must not require handwritten slot
   constants. Advanced slot-directed methods remain available outside the gameplay prelude.
-- The ordinary concept budget is `App`, `Plugin`, `PluginGroup`, tuple, and `add_plugins`.
+- The ordinary concept budget is `App`, `Plugin`, `PluginGroup`, tuple, `add_plugins`, and typed
+  domain configuration helpers.
   Declaration helpers should generate stable boilerplate; `PluginDefinition`, entry drafts,
   `PluginPlan`, commit batches, definition keys, and fingerprints stay in advanced or private
   modules. One `AddPluginsError` preserves internal phase guarantees while allowing one `?` at the
@@ -168,6 +178,7 @@ immediate-install semantics.
 | Diagnostics | Missing prerequisites/conflicts produce structured errors with plugin IDs before mutation | Unit tests |
 | Docs/tooling | Plugin groups can be listed for docs/editor/AI tooling | Snapshot/API test |
 | Author concept budget | Common code-first examples use only App, Plugin, PluginGroup, tuples, typed group edits, and one `?` | Clean-room compile fixtures |
+| Runtime extension freedom | A renamed-dependency external crate uses the same public Interfaces as first-party code to add its own ECS data, resources, systems, sets, typed custom schedule, and runtime-local known-domain registration with zero Nara source edits or first-party allowlist | Independent workspace compile/run and static source audit |
 | Product separation | Runtime 2D installs no runtime UI; runtime UI pulls no sprite/tilemap group | Group and dependency tests |
 | Deterministic plan | Identical inputs produce identical order and fingerprint | Repeated/property tests |
 | Closed dependencies | No build/finish hook installs a plugin/group | Static and ignored-error contract tests |
@@ -183,6 +194,7 @@ immediate-install semantics.
 | Convenience examples get more verbose | Low | Medium | Provide clear group presets instead of hidden installs. |
 | Group membership drifts from installation | High | Medium | Derive both resolved group snapshots and committed installation from one ordered entry collection. |
 | Stable infrastructure leaks into ordinary authoring | High | Medium | Keep definition keys, fingerprints, entry drafts, plans, and commit batches out of the gameplay prelude; provide typed helpers and group edits. |
+| Declarative metadata is mistaken for a behavior sandbox or exhaustive manifest | High | Medium | State that trusted `build` code remains free inside public App/domain Interfaces; declarations close composition facts and authority requests only. |
 
 ## Consequences
 

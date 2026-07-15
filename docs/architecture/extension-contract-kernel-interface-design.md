@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-14
+**Last Updated**: 2026-07-15
 
 **Owner**: extension contract leaf kernel, domain contract owners, root composition, and concrete Hosts
 
@@ -37,7 +37,10 @@ The type names and Rust sketches are illustrative. The durable subject is the ow
   domain-specific binding rules;
 - root composition selects the contracts compiled into one executable and directly owns their
   concrete typed results;
-- concrete Hosts own candidate construction, placement, activation, retirement, and active state.
+- domain owners and their concrete Adapters own domain candidate internals, native state, readiness,
+  and retirement;
+- concrete Hosts own attempt retention, scoped authority coordination, cross-domain readiness
+  barriers, publication, parent lifetime, and active slots without taking over domain internals.
 
 ## Decision Summary
 
@@ -66,7 +69,7 @@ root-selected bounded declarations
 This recommendation combines the strongest parts of three independent Interface derivations:
 
 - keep the leaf smaller than the domain contracts;
-- keep ordinary package registration close to Bevy's explicit Rust ergonomics;
+- keep one explicit `package()` definition close to Bevy's explicit Rust ergonomics;
 - keep pure plan data separate from Host-specific executable bindings;
 - keep Host Adapters and authority outside the leaf;
 - keep the contract set open in source, but statically closed per compiled Host executable.
@@ -606,16 +609,18 @@ The Interface distinguishes three edge owners:
 |---|---|
 | Contract-internal order, slot, and fallback edge | Domain contract owner |
 | Package presence, requirement, conflict, and cross-contract bridge | Root composition |
-| Candidate authority, startup, readiness, retirement, and active publication edge | Concrete Host |
+| Domain candidate construction, internal readiness, and retirement edge | Domain owner and concrete Adapter |
+| Attempt retention, scoped grants, cross-domain readiness, and active publication edge | Concrete Host |
 
 The contract plan may propose stable edge drafts. The leaf/root validates selected endpoints,
 generation/fingerprint matches, allowed bridge kinds, bounded cycles, engine-owned phase limits,
 and whether the static dependency topology has a valid reverse order. A third-party contract may
 define namespaced internal phases but cannot invent a process-wide lifecycle phase by string.
 
-The concrete Host derives its retirement DAG from the admitted dependency topology, executes reverse
-retirement, and proves the actual order through a Host-owned retirement receipt. The leaf
-cannot prove candidate owner behavior before a candidate exists.
+The concrete Host derives and coordinates the retirement DAG from the admitted dependency topology.
+Each domain owner retains and retires its own candidate internals in that reverse order, while the
+Host proves the overall traversal through a Host-owned retirement receipt. The leaf cannot prove
+candidate-owner behavior before a candidate exists.
 
 The receipt records admitted edge facts. It does not execute them.
 
@@ -855,7 +860,7 @@ The selected hybrid is:
 
 ```text
 ordinary package ergonomics
-    = untyped generated locator + typed domain helper + one package registration
+    = untyped generated locator + typed domain helper + one explicit package() definition
 
 leaf kernel
     = minimal support-owned typed join + structural validation + receipt
@@ -919,7 +924,7 @@ private erased capsules, sort buffers, or slice witnesses.
 | Receipt is mistaken for activation or security proof | Critical | Medium | Private constructors, explicit phase scope, and separate binding, Host placement, retirement, and activation receipts |
 | Pure resolver invokes implementation code | Critical | Medium | Give slices evidence only; retain callable bindings in opaque transfer until a visibility/typestate-restricted Host binder moves them without invocation |
 | Plan fingerprint omits behavior-affecting fields | High | Medium | Constrained canonical sink plus golden and semantic conformance tests per contract |
-| Generic Interface harms ordinary author ergonomics | High | Medium | Hide it behind domain helpers and one package registration; expose advanced kit only to contract authors |
+| Generic Interface harms ordinary author ergonomics | High | Medium | Hide it behind domain helpers and one explicit `package()` definition; expose advanced kit only to contract authors |
 | Static support set increases compile time or binary size | Medium | Medium | Measure contract count and monomorphization; retain static dispatch until evidence justifies a different execution technology |
 | Marker collision is presented as namespace security | High | Medium | Describe collision checks as drift/conflict protection only; do not claim malicious native isolation |
 | A universal Host Adapter trait becomes a lowest common denominator | High | Medium | Keep concrete Host binding above the leaf and require a second real Adapter before standardizing a reusable seam |

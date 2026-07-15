@@ -2,7 +2,7 @@
 
 **Status**: Design Draft
 **Created**: 2026-07-13
-**Last Updated**: 2026-07-14
+**Last Updated**: 2026-07-15
 **Owner**: Root product composition, `nara_app`, executable hosts, and the reference game
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Related Decisions**: [ADR 0010](adr/0010-plugin-lifecycle-dependencies-and-failure.md),
@@ -107,9 +107,11 @@ a deep execution Module.
 - Arbitrary behavioral equivalence between plugins that share metadata.
 - Rollback of arbitrary `Plugin::build`, native, thread, filesystem, or process-global effects.
 - A generic renderer, platform, task-runtime, or service backend trait.
-- Public exposure or module layout for `RuntimePlan`, `RuntimeRecipe`, `RuntimeStartAttempt`,
-  `RuntimeCandidate`, or `RuntimeInstance` while ADRs 0082 and 0084 remain Proposed. This design
-  uses the canonical architecture names without requiring all of them to become public Rust types.
+- Public exposure or module layout for outer product `RuntimePlan`/`RuntimeRecipe` topology before
+  ADR 0082 has implementation evidence, or for `RuntimeStartAttempt`/`RuntimeCandidate`/
+  `RuntimeInstance` lifecycle before ADR 0084 has its own evidence. The ADRs may be decided
+  independently; this design uses canonical architecture names without requiring any of them to
+  become public Rust types.
 - Scene materialization, runtime control, or service shutdown details already owned by other seams.
 
 ## Working Decisions
@@ -121,10 +123,12 @@ claim that Proposed ADRs already have implementation evidence.
 2. Pure admission failure creates no App, lease, thread, watcher, GPU object, or native session.
 3. Product startup always commits a fresh App, seals it, and transfers it into a fresh unpublished
    runtime candidate before registry/scene/startup work.
-4. A committed plugin hook failure poisons only that candidate and never becomes a rollback claim.
-5. A failed candidate is not published and remains owned until admitted shutdown reaches an
-   observable terminal result. The start attempt establishes its obligation ledger before the
-   first fallible preparation, hook, or acquisition.
+4. A committed plugin hook failure poisons only the current product-construction owner and never
+   becomes a rollback claim: the start attempt owns the partial App before candidate admission, and
+   retains the candidate afterward.
+5. A failed start attempt or candidate is not published and remains owned until admitted shutdown
+   reaches an observable terminal result. The start attempt establishes its obligation ledger
+   before the first fallible preparation, hook, or acquisition.
 6. After all fallible startup and publication-preflight work succeeds, one atomic, infallible
    publish-and-promote move transfers the candidate directly into the Host's visible runtime slot;
    there is no promoted-but-unpublished owner or later publication failure point.
@@ -226,9 +230,9 @@ budget is role-specific:
 
 | Caller | Concepts it should learn | Concepts hidden behind its seam |
 |---|---|---|
-| Game author | `App`, systems/sets, `Plugin`, `PluginGroup`, tuples, `add_plugins` | Stable slots, definitions, entries, plans, recipes, candidates, Host authority |
+| Game author | `App`, systems/sets, `Plugin`, `PluginGroup`, tuples, `add_plugins`, and domain configuration helpers | Stable slots, definition IDs/keys, canonical factory/config machinery, entries, plans, recipes, candidates, Host authority |
 | Small plugin author | Game-author concepts plus one generated/static plugin declaration | Definition keys, canonical config encoding, factory erasure, commit batches |
-| Reusable package author | `PackageDefinition`, Contributions, and domain-owned authoring helpers | Entry drafts, plans, receipts, Host binding, start attempts, candidates |
+| Reusable package author | `PackageDefinition`, Contributions, `PluginGroupBuilder` when supplying runtime plugins, and domain-owned authoring helpers | Definition IDs/keys, entry drafts, plans, receipts, Host binding, start attempts, candidates |
 | Concrete Host maintainer | Runtime Plan/Recipe and Start Attempt integration vocabulary | Private resolver maps, erased factory carriers, candidate internals |
 | Editor/tooling UI | Commands, views, observations, runtime generation/status, Apply Changes | Live Runtime Instance/Start Attempt ownership, process/native authority |
 
@@ -388,17 +392,18 @@ impl PluginGroupBuilder {
 }
 ```
 
-`PluginGroupBuilder` and `PluginDefinition` are group/package infrastructure, not ordinary game
-configuration concepts. Domain helpers return opaque definitions, and the edited-group facade
-locates the unique same-plugin slot by `Plugin::declaration().id`:
+`PluginGroupBuilder` is group/package infrastructure. A `PluginDefinition` is an opaque value that
+ordinary game code may pass only after obtaining it from a domain helper; callers do not construct
+its identity, canonical configuration, or factory machinery. The edited-group facade locates the
+unique same-plugin slot by `Plugin::declaration().id`:
 
 ```rust
 app.add_plugins(
     Runtime2dPlugins
         .edit()
         .disable::<TilemapPlugin>()
-        .configure(window::plugin(window_settings))
-        .insert_after::<GameplayPlugin>(my_game::plugin(settings)),
+        .configure(nara_image::plugin(image_settings))
+        .insert_after::<nara_sprite::SpritePlugin>(my_game::plugin(settings)),
 )?;
 ```
 
@@ -521,9 +526,10 @@ requirements or conflicts hidden behind `metadata(&self)`.
 structural snapshots proven necessary by current preflight consumers. It exposes no `World`, raw
 resource access, runner mutation, or native authority. A typed `Err` is retryable before the
 attempt's first commit only under this no-side-effect contract. A preflight unwind always poisons a
-caller-owned App or marks a product candidate failed/unpublishable; the candidate owner remains
-retained through terminal shutdown. Catch-unwind provides diagnostics/shutdown opportunity, not proof
-that trusted code left process state intact.
+caller-owned App or marks the current product-construction owner failed/unpublishable. Before App
+seal and candidate admission that owner is the start attempt; afterward it retains the candidate.
+The owner remains retained through terminal shutdown. Catch-unwind provides diagnostics/shutdown
+opportunity, not proof that trusted code left process state intact.
 
 A runtime recipe cannot retain a one-shot plugin instance. Group and package paths use an opaque
 repeatable definition created through typed helpers:
@@ -726,7 +732,8 @@ and Interface contract are clear:
 - the resolved plugin plan privately prepares all fresh instances and verifies their carriers
   under that existing ledger before reservation, candidate, or App creation;
 - only then does the attempt request one-shot inactive reservations through concrete Host/domain
-  Adapters, with every first-party close obligation explicitly registered into one ledger;
+  Adapters, with every declared first-party or third-party close obligation explicitly registered
+  into one ledger;
 - the attempt creates a fresh App, commits build/finish, seals it, and moves that App plus ledger into
   U5's unpublished `RuntimeCandidate` before registry freeze, service activation, scene
   materialization, or startup;
@@ -1016,6 +1023,43 @@ three classes:
 | Evidence-triggered defer | Cross-plugin slot replacement | Wait for a second implementation plus domain-owned conformance suite |
 | Evidence-triggered defer | Universal async plugin readiness, public `SubApp`, second render World, dynamic native ABI | Keep private/domain-specific or defer until multiple concrete consumers prove the common seam |
 
+### Plugin Freedom Contract
+
+Nara targets **reachable capability parity**, not identical ambient-authority or API-shape parity.
+For trusted in-process Rust and an already supported engine domain, an external package must be able
+to reach the same class of production result as first-party code without editing Nara's owning core
+or backend crates. Static declarations close identity, dependency, conflict, and authority facts;
+they do not enumerate or whitelist every component, resource, system, queue, codec, or algorithm a
+plugin may use through public Interfaces.
+
+The freedom split is:
+
+| Class | Third-party capability | Nara rule |
+|---|---|---|
+| Runtime Plugin freedom floor | Own ECS component types, resources, systems, system sets, typed queues, custom schedules, and runtime-local known-domain registrations | Same public App/domain Interfaces as first-party plugins; no crate-path or first-party-ID allowlist |
+| Moved composition authority | Conditional companions and transitive plugin dependencies | Declare them in a `PluginGroup`, tuple, or package contribution so one user-facing entry still selects the complete closure |
+| Moved process authority | Runner/event loop, automatic main-loop insertion, filesystem/platform grants, and waitable native sessions | Top-level code-first caller, concrete Host Adapter, or domain service Adapter owns these operations |
+| Specialized package roles | Importer, schema, Inspector/tool, render feature/pass, cook/export, and content | Use the owning typed contribution contract; a runtime plugin must not hide another role inside `build` |
+| Runtime-local service freedom | Physics, audio, networking, or another runtime-generation-local service session may begin as plugin-installed resources/systems plus a private session | First-party and third-party plugins use the same App/domain Interfaces and retain explicit shutdown ownership; introduce a public service Adapter only when a fake/second implementation proves the seam |
+| Host-authority service split | A service needs Host-issued authority, thread affinity, waitable startup, an independent process, or platform permission | Use a separately declared domain Adapter/contribution and register its typed close obligation; `Plugin::build` may declare the requirement but cannot acquire that authority |
+| Scoped rendering escape hatch | Custom extraction, packet data, material/queue policy, post-process, gizmo, overlay, and declared encoding work | ADR 0077 provider/packet/graph Interfaces must prove equivalent results without ordinary `Device`/`Queue` ownership or backend-core edits |
+| New contribution under a known contract | Another runtime plugin, importer, Inspector, render provider, or service Adapter under an existing contract | Add the package, compiled binding, and explicit composition entry; the stock root must not gain a package-specific match arm or `ProductCapability` |
+| New contract kind or Host authority | A genuinely new product role, execution affinity, protocol, or privileged operation | Requires a contract owner plus supporting Host registration and rebuild; the leaf kernel remains unchanged, and an old executable rejects it honestly |
+
+A plugin-defined gameplay domain made only from public ECS/runtime Interfaces is still Runtime
+Plugin freedom, even when Nara core has never heard that domain name. It does not create a new
+contribution contract and requires no root or Host registration. The new-contract row begins only
+when the product root must plan, bind, publish, or grant a genuinely new cross-Host role or
+authority.
+
+This contract does not currently claim full implementation parity. Arbitrary typed schedules,
+data-only group editing, the shared Import Host, third-party render providers, tooling UI Adapters,
+and Host-authority service lifecycle tracers remain evidence gates. Multi-instance plugins,
+universal async plugin readiness, and public `SubApp`/`RenderApp` are also not current guarantees. If first-party
+code can ship a supported-domain feature only through a private root/backend hook that an external
+package cannot replace with a public typed Interface, that is a blocker gap rather than an
+intentional product trade-off.
+
 Bevy evidence for this budget is concrete: `App::add_systems` accepts any `ScheduleLabel`
 (`repo-ref/bevy/crates/bevy_app/src/app.rs`), `PluginGroupBuilder` provides type-directed
 set/disable/order operations (`repo-ref/bevy/crates/bevy_app/src/plugin_group.rs`), functions can be
@@ -1055,6 +1099,7 @@ author: that surface remains `Plugin`, `PluginGroup`, tuple, and `App::add_plugi
 | Fresh retry | Failed-first/success-second attempts share no mutable runtime generation state | Generation-isolation test |
 | Public leverage | Reference game uses type-directed group edits, places its game plugin, and configures systems without stable infrastructure vocabulary or Nara source edits | Independent clean-room workspace test |
 | Schedule extension | A third-party domain owns a typed custom schedule without modifying built-in stage enums; it remains inert until explicitly driven | Public compile/run and negative order tests |
+| Extension outcome parity | External clean-room packages prove runtime/custom-schedule, importer, render-feature, and native-service/tooling paths through public Interfaces with zero edits to their owning Nara core/backend crates; explicit package/Host registration and rebuild remain allowed and audited | Renamed-dependency workspaces, source-diff gate, compile-fail authority tests, and domain conformance suites |
 | Tooling authority | Editor/tooling commands and views contain no live Runtime Instance, Start Attempt, native lease, or process handle | Static boundary tests |
 | Host parity | Headless, editor, and desktop consume the same runtime-plan/recipe contract | Cross-host semantic tests |
 | Frame overhead | Zero composition resolution, factory construction, or plan lookup in steady-state frames | Profiling and static review |

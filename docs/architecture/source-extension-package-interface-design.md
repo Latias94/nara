@@ -2,7 +2,7 @@
 
 **Status**: Design Draft
 **Created**: 2026-07-13
-**Last Updated**: 2026-07-14
+**Last Updated**: 2026-07-15
 **Owner**: Source extension packages, contribution catalogs, product/build hosts, and domain owners
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Related Question**: [OQ-031: Source Extension Package and Trust Topology](open-questions.md#oq-031-source-extension-package-and-trust-topology)
@@ -82,7 +82,7 @@ Each comparison names the closest mature concept and the deliberate Nara differe
 | Contribution contract | Rust trait plus schedule/registry expectations | Engine class contract such as `EditorImportPlugin` or `EditorInspectorPlugin` | Base type, interface, attribute, and assembly constraints | Module type plus engine interface such as `IAssetTools` or Interchange providers | A stable versioned contract ID has one owning domain Module and a typed Rust plan; unknown contracts never self-authorize |
 | Typed plan | `PluginGroupBuilder` holds ordered entries before `finish` mutates `App` | Plugin enablement and registries exist, but not as one pure typed package plan | Package/assembly resolution determines what compiles into Editor or Player | Descriptor and target rules determine which modules build and load | Nara makes pure, deterministic, zero-authority planning an explicit product contract before any Host mutation |
 | Adapter | Concrete `Plugin`, `AssetLoader`, runner, or backend implementation | Concrete `EditorPlugin`, importer, inspector, or GDExtension implementation | Concrete importer/editor/build class loaded by the relevant process | Concrete module or provider loaded by Editor, Game, Program, or commandlet | Adapter means the implementation at one real seam; it receives only domain-specific authority, never a universal `EngineContext` |
-| Host role | Primarily the application and runner selected by code | Editor, running project, export tooling, and GDExtension initialization levels | Editor, Player, import worker, and build pipeline | Editor, Game, Program, server, commandlet, and build tool | Role selection is inspectable package data; actual process and native authority remain owned by concrete Host Adapters |
+| Host role | Primarily the application and runner selected by code | Editor, running project, export tooling, and GDExtension initialization levels | Editor, Player, import worker, and build pipeline | Editor, Game, Program, server, commandlet, and build tool | Role selection is inspectable package data; process authority, attempt retention, and publication remain owned by concrete executable Hosts, which may use domain/platform Adapters |
 | Execution and subject target | Usually the Cargo target that runs the `App` | Editor/export tools run on the Host while exports target another platform | Editor/import/build code runs on the Host; Player assemblies target the product platform | UBT/commandlets run on the Host while modules/content target selected platforms | Nara records execution target and subject/product target independently; `target-independent` is explicit rather than inferred |
 | Compiled binding | Application code constructs and adds Rust plugins/loaders | Script/native entry points register classes and editor extensions | Managed assemblies are discovered through engine metadata/reflection | Module startup and UHT-generated registration bind code | Nara initially uses static Rust bindings checked against both the data declaration and verified executable/provider implementation fingerprints; it does not claim reflection discovery or a Rust dylib ABI |
 | Active generation | An `App` is built and run; dynamic linking is a development optimization | Editor can enable addons and may require restart for native levels | Assembly/domain reload and Player process boundaries | Module reload, Live Coding, editor restart, or new executable | Structural native changes build a fresh executable/Host/runtime generation; active state survives only through declared document/checkpoint contracts |
@@ -257,6 +257,7 @@ flowchart TD
     Bind[Domain-specific inactive binding]
     Runtime[Bound runtime contract]
     Editor[Bound Editor contract]
+    Render[Bound render contracts by Host binding kind]
     Import[Bound importer-catalog contract]
     Build[Bound cook / export contract]
     Content[Content / template transaction plan]
@@ -280,16 +281,22 @@ flowchart TD
     Pending --> Bind
     Bind --> Runtime
     Bind --> Editor
+    Bind --> Render
     Bind --> Import
     Bind --> Build
     Selection --> Content
     Runtime --> Composition
     Editor --> Composition
+    Render --> Composition
     Import --> Composition
     Build --> Composition
     Content --> Composition
-    Composition --> Host
-    Host --> Candidate --> Publish
+    Composition --> Host[Concrete executable Host]
+    Composition --> Owners[Selected domain owners and Adapters]
+    Host -->|scoped grants and attempt retention| Owners
+    Owners --> Candidate[Domain-owned candidates]
+    Candidate -->|readiness and retained retirement| Host
+    Host --> Publish[Axis-specific publication]
 ```
 
 | Module | Owns | Must not own |
@@ -301,7 +308,7 @@ flowchart TD
 | contract owner | Typed descriptor schema, domain closure/order, plan, diagnostics, conformance suite | Package acquisition, unrelated contracts, universal Host context |
 | domain binding Module | Exact plan-version/Adapter/target/affinity join and inactive bound plan | Factory invocation, placement, candidate readiness, or publication |
 | compiled binding catalog | Declared ID to static typed factory/provider binding, declaration fingerprint, verified executable generation, and provider implementation digest | Dynamic library compatibility claim, package declaration authority |
-| concrete Host Adapter | Process/platform authority, candidate construction, activation, drive, publication, finite shutdown evidence or a retained failed owner | Package resolution policy or another domain's lifecycle |
+| concrete executable Host | Process/platform parent authority, attempt retention, scoped grant coordination, cross-domain readiness barriers, drive, publication, and finite aggregate shutdown evidence | Package resolution policy, another domain's candidate internals, or domain-native handles and queues |
 | package UX Adapter | CLI/editor presentation, preview, explicit consent, generated source changes | Dependency solving, silent code execution, hidden permission widening |
 
 Both package definition and concrete root composition have real Depth. Deleting the first would
@@ -622,6 +629,7 @@ ProjectResolutionBundle (root-private, move-only, sole owner)
 |- project/package semantic facts
 |- runtime: PendingContractBinding<RuntimeContract, ...>
 |- schema: PendingContractBinding<SchemaContract, ...>
+|- render: concrete typed PendingContractBinding fields for each selected render Host binding kind
 |- editor/import/service/cook: concrete typed PendingContractBinding fields when selected
 `- content/template/docs: typed source transaction plan
 
@@ -647,6 +655,7 @@ ResolvedProjectSemanticsView<'a>
 |- package provenance, trust decisions, inactive entries, and semantic fingerprint
 |- runtime: &ResolvedContract<RuntimeContract, RuntimeContributionPlan>
 |- schema: &ResolvedContract<SchemaContract, SchemaPlan>
+|- render: borrowed typed ResolvedContract values for each selected render Host binding kind
 |- editor: borrowed typed ResolvedContract values for selected tooling contracts
 |- import: &ResolvedContract<ImportContract, ImportPlan>
 |- service: borrowed typed ResolvedContract values for selected Host-service contracts
@@ -663,8 +672,10 @@ Before that move, the root may derive a bounded owned
 `ExtensionInspectionSnapshot` containing canonical projections and fingerprints, never a duplicate
 `PlanData` or a continuation. Only after every bind succeeds does the root construct an
 `EditorExtensionComposition`, `ServerExtensionComposition`, or another concrete typed composition.
-Each domain plan remains owned and activated by its Module. Cross-process Hosts may exchange
-versioned stable plan projections or fingerprints, not Rust trait objects.
+Each selected binding kind is stored as its own complete `BoundContract<C, H, ...>` field; concrete
+compositions do not extract and retain only the inner `BoundPlan`. Each domain plan remains owned
+and activated by its Module. Cross-process Hosts may exchange versioned stable plan projections or
+fingerprints, not Rust trait objects.
 
 The plan fingerprint binds at least:
 
@@ -675,7 +686,8 @@ The plan fingerprint binds at least:
 - normalized Host-role, execution-target, subject-target, and product-capability facts;
 - contribution selection, requirements, conflicts, order, and fallback decisions;
 - trust disclosures and explicit authority decisions;
-- relevant schema/settings/import/tool/cook/export contract versions.
+- relevant schema/settings/render/import/tool/cook/export contract versions and selected render Host
+  binding kinds.
 
 Equal package IDs with different source, lock, manifest, semantic selection, execution target,
 subject target, or policy facts are not the same semantic plan generation. A different compiled
@@ -698,15 +710,56 @@ The comparison is behavioral prior art, not an inheritance hierarchy.
 | Schema/type provider | Bevy type data; Godot ClassDB; Unity serialization metadata; Unreal UHT | `nara_reflect` builds an immutable catalog candidate and runtime binding set | Stable schema IDs are independent from Rust paths; editor can inspect catalog without running gameplay |
 | Inspector/property provider | Godot `EditorInspectorPlugin`; Unity `CustomEditor`; Unreal details customization | `nara_tooling` inspector Module resolves stable schema predicates to UI-neutral models/commands | Standard schema inspector is default; custom provider emits validated commands/patches, never direct `World` mutation |
 | Editor tool model | Unity Editor assembly; Unreal Editor module; Godot editor tool | `nara_tooling` owns models, commands, selection, state, and retirement | No toolkit handle or mutable workspace escape hatch in the general contract |
-| Editor UI Adapter | Godot dock/control; Unity editor window; Unreal Slate/editor UI | Concrete egui/Nara-UI Adapter renders tooling models and submits commands | Toolkit dependency and compatibility are explicit; UI does not become document authority |
+| Editor UI Adapter | Godot dock/control; Unity editor window; Unreal Slate/editor UI | Concrete egui Adapter today; Dear ImGui or Nara UI may become separate concrete Adapters after their own tracer evidence | Toolkit dependency and compatibility are explicit; UI does not become document authority, and a general toolkit seam waits for a second implementation |
+| Render feature/pass provider | Bevy `RenderApp`/render graph nodes; Unity renderer features; Unreal view extensions | `nara_render` owns the typed provider plan/catalog and engine compiler; concrete Runtime/Editor render Hosts bind a selected provider generation | External providers contribute extraction/packet data, material/queue policy, declared passes, post-process, gizmo, or overlay work without editing `nara_render_wgpu`; direct `Device`/`Queue` ownership requires a trusted backend Adapter |
 | Asset importer/processor | Bevy `AssetLoader`; Godot `EditorImportPlugin`; Unity `ScriptedImporter`; Unreal Interchange | `nara_asset` resolves an immutable importer catalog; import Host runs bounded tracked jobs | Source extensions/options/artifact version/conflicts resolve before jobs; no runtime `App` registration path |
 | Project setting provider | Unity package/editor settings; Godot project setting integration | `nara_project` validates namespaced schema/default/profile lowering | `nara.toml` remains the only project settings authority and cannot enable uncompiled code |
-| Native service Adapter | Unreal provider/module split; Godot server/native extension level | Domain service owner plus executable Host reservations/sessions | Runtime plugin declares semantic requirement; Host Adapter owns handles, affinity, queues, and close |
+| Native service Adapter | Unreal provider/module split; Godot server/native extension level | Domain service owner plus concrete Adapter own handles, affinity, queues, sessions, and retirement mechanics; executable Host retains typed close obligations and coordinates reservations and parent lifetime | Runtime plugin declares semantic requirements; Host coordination does not make native state a global Host service locator |
 | Cook/export/artifact provider | Godot export plugin; Unity build callbacks; Unreal cook/commandlet modules | A compiled tool Host plus ADR 0088 resolves typed graph providers and staged outputs | Declared immutable inputs/outputs, implementation digest, cancellation, determinism, provenance; cannot affect the build that produced its own binding |
 | Content/template/sample/docs | Unity package Samples/Documentation; Unreal content plugin; Godot addon content | Project/content transaction owner | Data-only does not mean trusted; install/remove/migration follows bounded explicit transactions |
 
 A package may contribute to several rows. It does not receive one callback that can impersonate all
 of them.
+
+`ProductCapability` remains a coarse compiled product ceiling such as runtime 2D, tooling, or a
+platform/backend Adapter. It is not a registry of third-party package IDs or domain implementations.
+An additional contribution under an already compiled contract uses that contract's typed
+requirements plus the compiled binding catalog; it must not require a new root Cargo feature or
+package-specific `ProductCapability` merely because it is external.
+
+| Extension change | Required integration | What must stay unchanged |
+|---|---|---|
+| New contribution under a known contract | Add the dependency/package definition, compiled binding, and explicit composition entry; rebuild the executable | Package core, owning domain resolver, stock-root package-specific matches, and Nara core/backend source |
+| New contract kind | Compile its contract owner and supporting Host/Adapter registration, then rebuild | Leaf contract kernel and unrelated domain contracts |
+| New privileged Host authority or execution mode | Add explicit Host policy, lifecycle, trust, and conformance evidence | Runtime plugin `build` must not become a universal authority gateway |
+
+A package-defined gameplay domain expressed entirely through public Runtime Plugin/ECS Interfaces
+is not a new contribution contract. It requires no package-core variant or Host registration. A new
+contract begins only when root composition must resolve and bind a new product role, publication
+authority, execution placement, or privileged operation.
+
+Render providers follow the known-contract row. Resolution and binding are specific to the concrete
+render `H: HostBindingKind`. If one provider declaration is selected for both an Editor viewport
+and Play/runtime rendering, the root obtains two move-only pending bindings against their distinct
+Host facts, consumes them into two complete `BoundContract` values, and records two binding
+receipts. Whether one composite resolver or separate role-specific calls produce those values
+remains a root-private implementation choice. The static provider definition and semantic provider
+identity may be shared; owned plan data, Host binding evidence, and candidate ownership may not be
+forked or shared.
+
+The Editor render bound contract moves into a concrete Editor-side render attempt owner. The
+Play/runtime bound contract moves into the runtime composition and is later consumed by its
+`RuntimeStartAttempt`; successful ADR 0084 publication makes that ownership reachable through the
+new `RuntimeInstance`. That runtime cut does not replace ADR 0077's later pipeline-template,
+backend-realization, and pipeline-set generation publication rules.
+
+Whether the Editor render candidate becomes a required member of `EditorCatalogActivation` or uses
+a compatible independent publication axis remains a render/editor tracer decision. The tracer may
+also prove a typed lease through which Editor and runtime views consume compatible immutable
+template/backend-realization generations under the same device epoch. That deferred activation and
+sharing policy does not defer ownership of the two pre-activation bound contracts. Until an
+external package proves runtime post-process plus Editor gizmo/overlay paths, Nara must not claim
+that this parity is implemented.
 
 Compilation has a separate bootstrap rule:
 
@@ -752,8 +805,9 @@ authored package intent
     -> compiled contribution catalog / executable generation
     -> root-private semantic view and pending bindings
     -> concrete typed composition
-    -> ready required candidates for one activation cohort
-    -> active editor/import/runtime/tool generations
+    -> stage candidates for one explicit publication axis
+    -> Editor catalog record OR ADR 0084 runtime cut OR independent domain publication
+    -> active axis-specific generations
 ```
 
 These are distinct publication axes:
@@ -761,8 +815,8 @@ These are distinct publication axes:
 - editing `Cargo.toml` records author intent, not a successful active extension;
 - a new `Cargo.lock` records a resolved source graph, not a compiled or compatible Host;
 - successful compilation records a candidate executable/catalog, not runtime/editor publication;
-- each domain owns its generation lifecycle, but required compositions selected by one plan do not
-  publish independently before their activation cohort is ready;
+- each domain owns its generation lifecycle, but required siblings on one publication axis do not
+  publish independently before that axis's activation is ready;
 - failure may leave authoring source ahead of the last-good activation, and tooling must show that
   state instead of claiming global rollback.
 
@@ -778,10 +832,11 @@ An eventual package action should:
 6. perform final catalog admission, resolve every selected pure typed semantic plan, and bind each
    plan to verified inactive implementations before sealing a concrete composition;
 7. preview required project/schema/import migrations and destructive removal blockers;
-8. start and stage fresh Host/runtime/import/tool candidates from that bound composition as
-   required;
-9. publish one coherent activation cohort only after every required candidate is ready, while
-   retaining complete last-good activation evidence.
+8. start and stage fresh candidates for one explicit Editor-catalog, Play-runtime, or independent
+   domain publication axis as required;
+9. publish through that axis's sole authority only after every required candidate for the axis is
+   ready, while retaining complete last-good activation evidence. A package action does not imply
+   that Editor catalog and Play runtime publish together.
 
 Local paths, Git dependencies, and Cargo registries are sufficient initial transports. A future
 Nara discovery index may improve search, compatibility CI, docs, samples, and quality signals while
@@ -789,37 +844,53 @@ still delegating Rust source resolution to Cargo.
 
 ### 8. Activation Cohorts
 
-Domain generations remain independently owned, but one package-plan update may require several of
-them to agree. A runtime compiled against a new schema/importer-provider set must not observe a new
-provider catalog while still running the old package plan. Ordinary asset reimport and
+Domain generations remain independently owned, but candidates on one publication axis may need to
+agree. A runtime compiled against a new schema/importer-provider set must not continue through a
+structural catalog switch. The initial contract stops Play or defers catalog activation, publishes
+the new Editor catalog, and then starts a fresh runtime from leases to that catalog. It does not
+claim one atomic Editor-catalog-plus-Play-runtime replacement. Ordinary asset reimport and
 `ArtifactGroupGeneration` publication remain independent ADR 0087 transactions unless a runtime
 startup plan explicitly selects a required artifact-closure receipt.
 
-Every required domain composition selected by one concrete activation intent and concrete root
-fingerprint therefore belongs to one `ActivationCohortId`. The composition fingerprint binds the
-semantic receipts, binding receipts, executable generation, target, and selected cohort membership;
-it is distinct from the pre-binding semantic fingerprint exposed by
-`ResolvedProjectSemanticsView<'_>`. Package composition
-produces the immutable cohort membership/fingerprint; an outer executable/project Host owns a
-private activation coordinator that applies it:
+Every required domain composition selected by one concrete activation intent on one publication
+axis and concrete root fingerprint belongs to one `ActivationCohortId`. The composition fingerprint
+binds semantic receipts, binding receipts, executable generation, target, and selected cohort
+membership; it is distinct from the pre-binding semantic fingerprint exposed by
+`ResolvedProjectSemanticsView<'_>`. Package composition produces immutable membership and
+fingerprints; an outer executable/project Host owns a private coordinator that applies them:
 
-1. each domain constructs and validates a candidate against the same plan/cohort fingerprint;
-2. selected provider catalogs, editor models, service reservations, runtimes, and any explicitly
-   required startup artifact-closure receipt remain staged or ready-but-unpublished;
-3. only after every required candidate reports `ReadyToPublish` does the Host-owned coordinator
-   publish one immutable cohort activation record;
-4. the activation record remains Host-private; consumers receive generation-consistent typed
-   leases rather than a generic record lookup, so in-flight work cannot mix selected package
-   generations;
-5. a pre-publication sibling failure retires or quarantines every ready candidate in reverse
-   admitted dependency order;
-6. a domain may publish outside the cohort only when its contract explicitly proves
-   independent compatibility and records that relation in both plans;
+1. each domain constructs and validates a candidate against the same plan/cohort fingerprint for
+   that axis;
+2. selected schema, importer-provider, and tooling candidates remain staged until one
+   `EditorCatalogActivation` is ready; a Play start separately retains its runtime candidate and
+   compatible catalog/artifact receipts inside `RuntimeStartAttempt`;
+3. the Editor Host publishes one immutable catalog activation record only after all required catalog
+   candidates are ready; Play publication instead uses ADR 0084's sole atomic candidate-to-
+   `RuntimeInstance` cut and has no later cohort promotion;
+4. Host-private records expose generation-consistent typed leases rather than a generic lookup, so
+   in-flight work cannot mix selected package generations;
+5. a pre-publication sibling failure retires or quarantines every ready candidate on that axis in
+   reverse admitted dependency order;
+6. a domain may publish on an independent axis only when its contract proves compatibility and
+   records that relation in both plans;
 7. publication is still not arbitrary side-effect rollback. If a supposedly infallible activation
-   pointer swap fails, the cohort remains failed/owned and conflicting replacement is blocked;
-8. side-by-side activation requires coexistence and budget evidence. An exclusive stop-then-start
-   Host retains launchable last-good inputs but does not promise continuous availability or
-   in-memory rollback.
+   pointer swap fails, the affected axis remains failed/owned and conflicting replacement is blocked;
+8. side-by-side activation within one axis requires coexistence and budget evidence. An exclusive
+   stop-then-start Host retains launchable last-good inputs but does not promise continuous
+   availability or in-memory rollback.
+
+The initial axes are deliberately separate: `EditorCatalogActivation` publishes schema,
+importer-provider, and optional tooling topology; `PlayRuntimeActivation` publishes exactly one
+runtime through ADR 0084 while recording compatible catalog and required artifact receipts. No
+initial activation cohort spans both linearization points.
+
+An Editor viewport render bound contract is consumed by a concrete Editor-side render attempt
+owner, while a Play/runtime render bound contract is consumed by the corresponding runtime start
+attempt. The render/editor tracer must decide whether the Editor render candidate joins
+`EditorCatalogActivation` or publishes on a compatible independent axis. It cannot satisfy that
+decision by sharing one move-only pending/bound value, binding receipt, or candidate owner with
+Play; after activation, ADR 0077 may still permit both sides to consume compatible immutable
+template/backend-realization generations through a typed lease.
 
 The initial guarantee is scoped to logical Host roles inside one concrete executable Host.
 Cross-process prepare/commit/adopt requires its own protocol and conformance evidence; it is not
@@ -993,7 +1064,7 @@ pub fn package() -> Result<PackageDefinition, PackageAuthorReport> {
 }
 ```
 
-Default gameplay placement, required product capability, execution/subject-target support, and
+Default gameplay placement, required existing coarse product capability, execution/subject-target support, and
 factory semantics are visible in the resolved plan and generated docs. Advanced authors override a
 stable slot or requirement only when the default is wrong.
 
@@ -1062,8 +1133,8 @@ separate runtime or service contribution. The importer cannot secretly install i
 
 ### Progressive Disclosure Rules
 
-1. One package registration is reused across desktop, headless, server, editor, import, and build
-   Hosts; the author does not reproduce order per Host.
+1. One explicit `package()` definition is reused across desktop, headless, server, editor, import,
+   and build Hosts; the author does not reproduce order per Host.
 2. Typed helpers cover common contracts. Stable IDs, execution/subject-target predicates,
    conflicts, and authority are exposed only when defaults do not fit.
 3. Every omitted default remains visible in the resolved plan, generated docs, and diagnostics.
@@ -1101,7 +1172,7 @@ sequenceDiagram
     participant Kernel as Leaf Contract Kernel
     participant Contract as Domain Contract Owners
     participant Binder as Domain Binding Modules
-    participant Activation as Concrete Host Activation Coordinator
+    participant Activation as Concrete Host / Axis Coordinator
     participant Owner as Domain Candidate Owners
     participant Active as Active Generations
     participant Consumers as Typed Consumers
@@ -1125,14 +1196,25 @@ sequenceDiagram
     UX->>Activation: Stage approved composition and activation intent facts
     Activation-->>UX: Opaque activation attempt ID
     UX->>Activation: Start approved activation attempt by ID
-    Activation->>Owner: Start required fresh candidates
-    alt Every required Host candidate succeeds
-        Owner-->>Activation: ReadyToPublish for one cohort fingerprint
-        Activation->>Active: Publish immutable cohort activation record
-        Active-->>Consumers: Typed generation leases become visible at the record exchange
+    Activation->>Owner: Start candidates for the selected publication axis
+    alt EditorCatalogActivation candidates succeed
+        Owner-->>Activation: Schema/importer/tooling candidates ready for one catalog fingerprint
+        Activation->>Active: Publish immutable EditorCatalogActivation record
+        Active-->>Consumers: Typed catalog leases become visible
         Activation->>Owner: Retain predecessor retirement obligations
-        Activation-->>UX: Success and retirement obligations
-    else Candidate preparation, activation, or retirement fails
+        Activation-->>UX: Catalog success and retirement obligations
+    else PlayRuntimeActivation succeeds
+        Owner-->>Activation: Sealed RuntimeCandidate plus compatible catalog/artifact receipts
+        Activation->>Active: ADR 0084 atomic RuntimeInstance publication cut
+        Active-->>Consumers: Typed RuntimeLease becomes visible
+        Activation->>Owner: Retain predecessor retirement obligations
+        Activation-->>UX: Runtime success and retirement obligations
+    else Independent domain-axis publication succeeds
+        Owner-->>Activation: Domain candidate ready under its publication policy
+        Activation->>Active: Publish through the domain-owned axis authority
+        Active-->>Consumers: Domain-specific typed lease or generation becomes visible
+        Activation-->>UX: Domain success and retained last-good evidence
+    else Candidate preparation or activation fails
         Activation->>Owner: Retire or quarantine every ready sibling candidate
         Owner-->>Activation: Failure and retained retirement state
         Activation-->>UX: Failure, retained candidate owner, last-good status
@@ -1334,12 +1416,13 @@ worker timeout, process crash, and a referenced package removed from the current
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Simple Rust path | Runtime-only package needs one Cargo/package action and at most one explicit package registration; game-owned Plugin needs neither | Clean-room authoring task |
+| Simple Rust path | Runtime-only package needs one Cargo/package action and at most one explicit `package()` definition call; game-owned Plugin needs neither | Clean-room authoring task |
 | Provider path | An importer or Inspector author implements one narrow domain Interface and imports zero admission, receipt, binding, candidate, task-pool, filesystem-authority, or publication types | Independent provider fixtures and public API audit |
 | Public complexity firewall | Game, package, and provider examples compile without Host-integration types; broad preludes expose no internal phase evidence and primary diagnostics use author-domain language | Compile fixtures, rustdoc/API audit, and diagnostic goldens |
 | Staged trust evidence | Every trust fact carries `IndexClaimed`, `SourceObserved`, `CargoResolved`, `CompiledVerified`, or `RuntimeObserved`; unavailable behavior is explicit `Unknown` before execution | Preview snapshots, metadata fixtures, compiled catalog audit |
 | Plan determinism | 100 repeated resolutions of equal inputs produce identical package and typed-plan fingerprints/order | Property/regression test |
 | Contract locality | Adding a test contribution contract changes its domain/supporting Host registration but zero package-core matches or central variants | Diff/API review |
+| Known-contract extensibility | Adding an external runtime/import/render/tooling/service contribution under an already supported contract requires no package-specific root match, new `ProductCapability`, first-party allowlist, or owning core/backend edit | Stock-root clean-room matrix and source-diff gate |
 | Binding truth | Every executable contribution has exactly one verified declared binding; no hidden activation succeeds | Catalog fault matrix |
 | Shipping separation | Server/release fixtures contain zero forbidden editor/import/tooling contribution code or dependencies | `cargo tree`, binary/dependency audit |
 | Editor authority | 100% of inspector/editor package edits flow through tooling commands/patches, never private `World` or document mutation | Integration and static API audit |
@@ -1381,7 +1464,7 @@ The following boundaries are expensive to reverse and already have cross-engine 
 
 1. Package and runtime `Plugin` are different concepts with a one-to-many relationship.
 2. Package discovery/resolution is data-only and precedes executable Host mutation.
-3. Runtime, schema, editor, inspector, import, service, cook/export/tool, and content contracts have
+3. Runtime, schema, editor, inspector, render feature/pass, import, service, cook/export/tool, and content contracts have
    separate owners and typed plans.
 4. Cargo is the sole Rust graph/lock authority; Nara adds an inspectable contribution view.
 5. The initial native Rust path is source/static integration and fresh generation rebuild.

@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-07-15
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary
 
 ## Context
@@ -37,6 +38,14 @@ Rules:
 - Scene/prefab files store high-level nara physics components, not backend handles.
 - Backend plugins negotiate declared capabilities, synchronize ECS data to backend state, and emit
   collision/contact results at named schedule boundaries.
+- The first concrete backend uses plugin-installed resources and systems plus a private,
+  runtime-generation-scoped session. That session owns the solver world, native body/fixture
+  handles, callback state, runtime-entity mappings, queues, and domain close mechanics. The
+  enclosing runtime-generation owner retains its typed close obligation, polls the close
+  participant, and blocks conflicting replacement until retirement reaches a terminal result.
+- Do not publish a generic `PhysicsBackend2d` trait before a fake/test integration or a second real
+  solver proves which behavior actually varies. A first-party Box2D-style Adapter and a third-party
+  Adapter follow the same domain rules; first-party support does not move solver handles into core.
 - Scene schemas express nara-owned intent. Unsupported required capabilities reject composition;
   optional capabilities require explicit fallback policy.
 - Changing solver or adapter may change contacts, ordering, stability, determinism, tuning, and
@@ -77,7 +86,7 @@ scene data.
 |---|---:|---|
 | Backend neutrality | Scene physics data contains no backend handles | Schema review |
 | Fixed timestep | Physics steps from fixed update only | Future test |
-| Adapter isolation | A fake/test adapter can satisfy the domain boundary without backend handles in scene data | Future test |
+| Adapter isolation | A fake/test integration can satisfy the domain boundary without backend handles in scene data or a premature public backend trait | Future test |
 | Capability rejection | Missing required solver capabilities reject composition before runtime mutation | Future test |
 | Diagnostics | Invalid collider/body combos emit structured diagnostics | Future test |
 
@@ -88,10 +97,13 @@ scene data.
 | High-level components mismatch backend capability | High | Medium | Spike one concrete backend before freezing schemas |
 | Sync code gets complex | Medium | High | Use generation IDs and clear ownership |
 | Event ordering nondeterministic | Medium | Medium | Emit events at fixed schedule boundaries |
+| First backend freezes the wrong public trait | High | Medium | Keep the first session private; extract a physics-specific Interface only after a fake or second solver supplies counterevidence |
 
 ## Consequences
 
 - Nara can admit a second adapter without redesigning scene identity or leaking native handles.
+- Nara may ship a first-party physics package and concrete solver Adapter through the same plugin,
+  service-session, schema, and tooling seams available to external packages.
 - Backend selection is an explicit product/profile choice with capability diagnostics, not a claim
   that every physics scene behaves identically on every solver.
 - Transform authority, contact/query freshness, and write-back timing still require a concrete

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-14
+**Last Revised**: 2026-07-15
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
 
@@ -50,12 +50,16 @@ explicit shutdown remain available. Shutdown of a poisoned app returns to `Poiso
   contract is obeyed and the current top-level plan commit has not already committed an entry. If an
   earlier entry has built, the enclosing attempt is already partially committed and the App is
   poisoned even though the rejecting plugin never became a shutdown owner. A preflight unwind always
-  poisons a caller-owned App or marks a product candidate failed/unpublishable regardless of
-  position; the candidate owner remains retained through terminal shutdown.
+  poisons a caller-owned App or marks the retained product-construction owner failed/unpublishable
+  regardless of position. Before a sealed runtime candidate exists, that owner is still the start
+  attempt holding the partial App, prepared owners, and obligation ledger; it remains retained
+  through terminal shutdown.
 - `build(&mut App)` and `finish(&mut App)` are committed on entry. Their `Err` or unwind panic
-  poisons a caller-owned App or marks a product candidate failed/unpublishable, records the first
-  failure, and triggers shutdown after the outermost active hook returns. A product candidate remains
-  owned until shutdown reaches an observable terminal result.
+  poisons a caller-owned App or marks the retained product-construction owner failed/unpublishable,
+  records the first failure, and triggers shutdown after the outermost active hook returns. The
+  start attempt owns a partial App until a later layer successfully seals and admits it as a runtime
+  candidate; whichever owner exists remains retained until shutdown reaches an observable terminal
+  result.
 - The product path may use a private one-attempt prepared plugin transfer after all repeatable
   factories succeed. The transfer preserves each complete admitted definition key; typed factory
   erasure fixes the concrete plugin type but does not claim to prove that trusted code used every
@@ -63,9 +67,9 @@ explicit shutdown remain available. Shutdown of a poisoned app returns to `Poiso
   and is not permission to run mutable hooks. Arbitrary mutable preparation callbacks remain
   invalid.
 - Hook panics are isolated with `catch_unwind` and converted to stable `PluginError` values. Every
-  hook unwind poisons the caller-owned App or marks the retained product candidate failed. This
-  containment applies only to `panic = "unwind"`; aborting builds cannot run Rust shutdown code and
-  make no in-process recovery guarantee.
+  hook unwind poisons the caller-owned App or marks the retained product-construction owner failed.
+  This containment applies only to `panic = "unwind"`; aborting builds cannot run Rust shutdown
+  code and make no in-process recovery guarantee.
 
 The first poison-causing attempt/lifecycle failure is immutable. Later shutdown errors and shutdown
 panics are appended to `PluginFailureReport::shutdown_failures`; they never replace the primary

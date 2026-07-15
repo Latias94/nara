@@ -5,7 +5,7 @@ types remain proposed
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-14
+**Last Updated**: 2026-07-15
 
 **Audience**: Game authors, package authors, engine contributors, and future Host integrators who
 do not already know Nara's extension architecture vocabulary
@@ -201,6 +201,10 @@ Three actors also stay distinct:
 | Concrete Host | One executable or concrete lifecycle owner | Selects an activation intent, waits for every required domain candidate, and linearizes the cohort's visibility; one concrete Runtime or Import implementation may also perform its domain-owner role |
 | Composition root | One concrete executable | Coordinates selection and typed assembly; it does not own every domain's active state |
 
+One concrete Host may use several platform or domain Adapters, and one implementation may perform
+both a Host role and a domain-owner role. The roles still remain distinct: an Adapter fills one seam;
+it does not automatically own process publication, and not every Adapter is a Host.
+
 In formal generic types, a `HostBindingKind` or `H` is a type-level marker for the destination owner
 role. It is not proof that a live operating-system process or active Host already exists.
 
@@ -263,6 +267,23 @@ pub fn package() -> Result<PackageDefinition, PackageAuthorReport> {
     )
 }
 ```
+
+The canonical runtime definitions function must also remain ordinary package-author code. Its
+approximate shape is deliberately small:
+
+```rust
+mod definitions {
+    pub(super) fn runtime_plugins() -> PluginGroupBuilder {
+        PluginGroupBuilder::new()
+            .add(runtime::plugin(RuntimeSettings::default()))
+    }
+}
+```
+
+The domain helper returns an opaque `PluginDefinition`; the author does not construct a definition
+ID, fingerprint, erased factory, entry draft, or runtime plan. Exact helper spelling remains
+proposed and must be proven by the external clean-room package fixture. Until then, this function is
+an explicit authoring evidence gap rather than hidden framework magic.
 
 The names are illustrative; tuple versus sealed list versus builder is not frozen. The stable idea
 is that ordinary authors use domain helpers and one package operation.
@@ -413,8 +434,8 @@ seal a product-specific composition. An Editor executable might produce:
 ```rust
 struct EditorExtensionComposition {
     schemas: BoundSchemaContract,
-    runtime: BoundRuntimeContract,
-    import: BoundImportContract,
+    play_runtime: BoundRuntimeContract,
+    importers: BoundImportContract,
 }
 ```
 
@@ -431,6 +452,22 @@ The exact fields are illustrative. Each `Bound*Contract` name denotes the comple
 `BoundContract<C, H, PlanData, BoundPlan>` wrapper that owns the semantic plan, private
 domain-specific `BoundPlan` payload, and both receipts. It is not merely the inner `BoundPlan`.
 Unsupported domains are absent from the type and product closure.
+
+For the runtime branch, the proposed ADR 0082/0084 design gives Host maintainers one ownership chain
+to validate rather than another universal layer:
+
+```text
+BoundRuntimeContract / RuntimeContributionPlan
+    -> nara_app PluginPlan
+    -> profile RuntimePlan
+    -> immutable RuntimeRecipe
+    -> Host-owned RuntimeStartAttempt
+    -> sealed RuntimeCandidate
+    -> atomic RuntimeInstance publication
+```
+
+The start attempt owns partial preparation and the obligation ledger before App seal; the
+`RuntimeCandidate` exists only after the sealed App and complete ledger move into it.
 
 The root also checks product rules, for example:
 
@@ -450,7 +487,7 @@ required candidate set, and each publication axis retains its own authority.
 
 | Owner | What it prepares | Owner-only input or later authority | Visibility path |
 |---|---|---|---|
-| Runtime Host | A fresh isolated `App`/runtime candidate | `World`, schedules, runner and selected native services | A concrete Runtime/Editor Play Host publishes one `PlayRuntimeActivation`, or includes it in an explicitly linked structural replacement |
+| Runtime Host | A fresh isolated `App`/runtime candidate | `World`, schedules, runner and selected native services | Under proposed ADR 0084, a concrete Runtime/Editor Play Host publishes one `PlayRuntimeActivation` through the sole runtime cut |
 | Import Host | An importer-provider catalog candidate during package activation; later, attempt-owned artifact-group candidates for concrete sources | Provider definitions grant no import authority; only admitted attempts later receive tracked source snapshots, bounded tasks, staging, and scoped filesystem receipts | The provider catalog joins `EditorCatalogActivation`; ordinary compatible import publishes an independent `ArtifactGroupGeneration` and preserves last-good data on failure |
 | Schema Catalog Owner | A merged, validated, frozen schema catalog candidate | Registered native codec/provider definitions only | Supplies a ready candidate to `EditorCatalogActivation`; it does not independently replace the visible schema catalog |
 | Tooling Provider Catalog Owner | A selected Inspector, gizmo, preview, and tool provider topology candidate | Provider definitions and UI-neutral model factories only | Supplies a ready candidate to `EditorCatalogActivation`; it never implies workspace or document mutation |
@@ -470,10 +507,15 @@ Their differences remain explicit. Import publication is not runtime activation.
 not worker execution. For `EditorCatalogActivation`, the Schema Catalog Owner, Import Host's
 provider-catalog path, and optional Tooling Provider Catalog Owner prepare and retain their own
 candidates, but the concrete Editor Host waits for every required member and publishes one private
-`CohortActivationRecord`. None may swap an independently visible active pointer first. A tooling
+`EditorCatalogActivationRecord`. None may swap an independently visible active pointer first. A tooling
 package changes workspace or saved document state only through separately validated commands owned
 by the workspace/document Module. The Tooling Workspace Owner is therefore a downstream consumer
 of selected providers, not another package-activation target.
+
+The initial contract does not place `EditorCatalogActivation` and `PlayRuntimeActivation` in one
+cross-axis atomic record. A structural catalog change stops Play or defers catalog publication,
+publishes the new catalog, and then starts a fresh runtime from compatible leases. This avoids a
+second runtime promotion point while keeping each axis internally coherent.
 
 The four important publication axes are deliberately separate:
 
@@ -583,6 +625,40 @@ publication phases.
 Nara adds a data-only, inspectable package layer before `App` mutation. Bevy's process-local Rust
 types and live plugin values are not used as durable package identity.
 
+### What Bevy-Like Plugin Freedom Means In Nara
+
+The target answer is **yes for reachable engine capability, not yes for every permission inside one
+callback**. For a domain Nara already supports, a compiled external package must be able to achieve
+the same class of result as first-party code without editing the owning Nara core or backend crate.
+It uses the same public Interfaces and may contain arbitrary trusted Rust business logic. This is
+capability parity; it is not a claim that one `Plugin::build` owns the event loop, GPU device,
+filesystem, Editor workspace, and package graph.
+
+| Bevy-like need | Nara authoring path | Deliberate difference or current gate |
+|---|---|---|
+| Add gameplay behavior | Direct `Plugin` or systems may use package-owned ECS component types and add resources, systems, sets, typed queues, and custom schedules | Static declarations close composition facts, not the plugin's complete behavior; arbitrary typed schedules are still an implementation gate |
+| Ship conditional companions | One `PluginGroup`, tuple, or package runtime contribution selects the complete declared closure | `build`/`finish` cannot hide nested `add_plugins`; the user must still get one top-level entry |
+| Add an asset format | Typed Import contribution and Importer provider | Shared tracked Import Host and multi-product publication remain unimplemented evidence |
+| Add rendering or post-processing | Render feature/pass contribution using packet, provider, graph, and scoped encoding Interfaces | Ordinary providers do not retain `Device`/`Queue`; clean-room feature parity without backend-core edits is mandatory and not yet proven |
+| Add physics, audio, networking, or another native runtime | Runtime plugin first; add a domain service Adapter only when Host-issued authority, affinity, waitable startup, a process, or platform permission is required | Runtime-local resources, systems, and a private session remain valid; a proven public Adapter registers an explicit close obligation |
+| Add Inspector, gizmo, panel, or alternate toolkit | Schema/Tooling provider plus a concrete UI Adapter where needed | Tooling commands retain document truth; the Dear ImGui/second-toolkit path is not implemented yet |
+| Supply a different event loop or product runner | Concrete Host/platform Adapter selected at the top level | A normal runtime plugin cannot replace the runner as a hidden side effect |
+| Add another implementation of a known contract | Add the Cargo dependency, package definition/binding, and explicit composition entry | No package-specific root match arm, `ProductCapability`, or first-party allowlist is allowed |
+| Invent a new contract or privileged Host role | Compile its contract owner and supporting Host Adapter, register support, and rebuild | The leaf kernel remains unchanged, but an old stock executable rejects the unknown contract; this is not a dynamic native ABI |
+
+Most plugin authors never need the last row. A package may invent an AI, terrain, dialogue, camera,
+combat, or other gameplay domain from its own components, resources, systems, queues, and custom
+schedules even when Nara has no built-in concept for it. That is ordinary Runtime Plugin freedom,
+not a new contribution contract. A new contract is needed only when the product root or a Host must
+understand and control a new role, publication path, execution placement, or privileged authority.
+
+Therefore Spine, a Box2D-style backend, or Dear ImGui can expose a Bevy-like one-line package/group
+experience, but internally that package may aggregate Runtime, Import, Render, Service, Schema, and
+Tooling roles instead of giving one callback every authority. Today this remains a design target:
+custom schedule/group ergonomics, the shared Import Host, render-provider parity, native-service
+retirement, and second-toolkit integration still require clean-room implementation evidence. The
+detailed classification lives in [Runtime Composition Interface Design](runtime-composition-interface-design.md#bevy-trade-off-budget).
+
 ### What Nara Takes From Godot
 
 - Importer, Inspector, export, runtime, and native extension roles are genuinely different.
@@ -611,6 +687,23 @@ makes Host-finalized artifact candidates and exact publication evidence explicit
 
 Nara does not introduce Unreal-sized module/build machinery or a universal Interchange graph before
 two real implementations prove each seam.
+
+## Representative First-Party And Third-Party Packages
+
+First-party status changes support policy, defaults, and repository location, not the ownership
+model. Nara can ship engine-maintained packages through the same domain-specific roles that an
+external Cargo package uses:
+
+| Representative package | Role composition under the current design | Ownership rule | Current evidence gate |
+|---|---|---|---|
+| Spine-like skeletal animation | Schema for persistent animator/skeleton references; Import for skeleton, atlas, and animation products; Runtime playback; render-feature extraction/submission; optional preview tooling and native-runtime service Adapter | Scenes store semantic `AssetRef` values; ECS components own inspectable playback intent, time, and state. A native runtime owns only derived poses, constraints, caches, and FFI handles. The Import Host owns tracked reads/staging, `nara_asset` publishes typed products/artifacts, renderer caches own GPU resources, and tooling owns only preview session state and commands. | The sprite-animation tracer covers schema/runtime/import authoring. Multi-product import, render-provider submission, preview clocks, and optional native-runtime placement still need concrete evidence. |
+| Box2D-like 2D physics | `nara_physics2d` schema/runtime domain plus one concrete solver Adapter and optional debug-render/tooling package | ECS stores body/collider/joint intent. A private runtime-generation-scoped service session owns solver/native state, callbacks, mappings, and queues; the enclosing runtime owner retains its close obligation and replacement gate. Fixed stages perform sync-in, step, write-back, and contact publication. | Start with plugin-installed resources/systems and a private session. Extract a public physics-specific Interface only when a fake or second real solver proves the variation. A 3D solver belongs to parallel `nara_physics3d`, not one 2D/3D trait. |
+| Dear ImGui editor tooling | Concrete Editor UI Adapter, platform-input binding, and Nara render-feature provider over UI-neutral `nara_tooling` models/commands | A Host-retained Adapter owns the main-thread ImGui context and CPU font atlas. Input capture, focus, text/IME, cursor, and clipboard feedback are transient Host data; draw data becomes an owned frame packet; backend caches own the GPU font texture, buffers, and pipelines by device epoch. | First tracer is single-viewport and does not expose raw `wgpu` or embed a second renderer. The focus/capture/text/IME/cursor/clipboard bridge is not implemented. A general toolkit seam waits for egui plus a second real Adapter; runtime UI remains Nara-owned. |
+
+These mappings require no universal `ExtensionHost`, `PhysicsBackend`, toolkit trait, or service
+locator. They do require the already named domain seams to become real. A package based on the
+official Spine runtime also needs an independent license and redistribution review; the package
+contract cannot grant third-party rights.
 
 ## Public Complexity Firewall
 
@@ -736,6 +829,8 @@ fields, match arms, or domain-specific orchestration.
 | Typed composition | Editor/server compositions contain concrete domain fields and no public `Any`/string plan lookup | Type-level fixtures and public-surface audit |
 | Domain ownership | Domain owners retain candidate retirement; a required sibling failure exposes no partial cohort, while independent import/document axes preserve their own last-good state | Candidate, cohort, and fault-injection tests |
 | Product isolation | Runtime/server artifacts contain no unselected importer, editor toolkit, or process Adapter code | Separate Cargo closure and binary audits |
+| Representative package fit | Spine-like animation, one concrete physics solver, and one Dear ImGui tooling tracer use existing domain roles without adding a universal Host/backend/toolkit Interface | Independent tracer reviews and package fixtures |
+| Extension outcome parity | External runtime/custom-schedule, multi-product importer, render-feature, and native-service/tooling packages reach supported-domain results without editing owning Nara core/backend crates or receiving a first-party allowlist | Renamed-dependency clean-room fixtures, source-diff gates, and domain conformance suites |
 
 ## Risks And Mitigations
 
@@ -774,4 +869,9 @@ dependencies, conditional import roles, invalid locators, aggregate diagnostics,
 - [Unity package and assembly definitions](https://docs.unity3d.com/6000.0/Documentation/Manual/cus-layout.html)
 - [Unity `ScriptedImporter`](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/AssetImporters.ScriptedImporter.html)
 - [Unreal Engine plugins and modules](https://dev.epicgames.com/documentation/en-us/unreal-engine/plugins-in-unreal-engine)
+- [ADR 0015: Editor, Tooling, and Dogfooding Boundary](adr/0015-editor-tooling-and-dogfooding-boundary.md)
+- [ADR 0019: Physics Strategy](adr/0019-physics-strategy.md)
+- [ADR 0029: Animation Strategy](adr/0029-animation-strategy.md)
+- [ADR 0042: Runtime Service and Backend Boundary](adr/0042-runtime-service-and-backend-boundary.md)
+- [Dear ImGui Bevy-native backend](../../repo-ref/dear-imgui-rs/backends/dear-imgui-bevy/)
 - [Leaving Rust gamedev after 3 years](https://loglog.games/blog/leaving-rust-gamedev/)

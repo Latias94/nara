@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
+**Last Revised**: 2026-07-15
 **Refines**: [ADR 0017](0017-render-graph-policy.md),
 [ADR 0032](0032-render-backend-integration-boundary.md), and
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md)
@@ -20,7 +21,7 @@ The next architecture boundary must satisfy several product goals at once:
 - projects may select different pipeline policies per view, similar to choosing a renderer or
   pipeline asset;
 - trusted plugins may add portable render features without taking ownership of submission;
-- advanced integrations retain a narrow raw-wgpu escape hatch;
+- advanced integrations retain a narrow scoped encoding escape hatch;
 - browser WebGPU, native desktop, mobile, editor viewports, and future render workers use the same
   product-facing contract;
 - pipeline configuration, shader changes, and feature parameters can be validated, inspected, and
@@ -220,7 +221,7 @@ viewport targets use the same transaction vocabulary as surfaces.
 1. Recipe configuration is the default extension path and remains fully portable and inspectable.
 2. Declared feature/pass providers may contribute graph work but do not own target acquisition,
    graph compilation, global resource lifetime, queue submission, or presentation.
-3. An advanced wgpu escape hatch may receive a short-lived command context after declaring its
+3. An advanced scoped encoding escape hatch may receive a short-lived command context after declaring its
    resource scope and ordering contract. The standard escape hatch does not expose `Device`,
    `Queue`, target leases, engine caches, owned engine resource handles, or cloneable wgpu resource
    views. It exposes a non-cloneable callback-scoped encoding facade plus host-managed opaque keys
@@ -230,11 +231,11 @@ Opaque keys are bound to the captured plan generation and current host/device ep
 rejects undeclared, stale, cross-generation, cross-epoch, or out-of-callback use before encoding;
 provider code cannot resolve a key into an independently retained backend handle.
 
-Raw passes are marked in compiled observations. The compiler must conservatively disable or explain
+Scoped encoding passes are marked in compiled observations. The compiler must conservatively disable or explain
 optimizations it can no longer prove, including culling, aliasing, pass merging, or reordering. Raw
 wgpu access is not part of gameplay preludes or the portable plugin ABI. An integration requiring
 direct device/queue ownership or native interop is a trusted backend adapter with explicit epoch,
-teardown, and portability policy, not a normal raw pass.
+teardown, and portability policy, not a normal scoped encoding pass.
 
 ### Reload, failure, and observation
 
@@ -297,7 +298,7 @@ transitional implementation.
 **Cons**: Couples plugins and project policy to wgpu versions, prevents safe graph optimization,
 weakens WebGPU portability, and makes editor/headless inspection incomplete.
 
-**Decision**: Rejected as the default path. Retained only as a restricted advanced escape hatch.
+**Decision**: Rejected as the default path. Retained only as a restricted scoped encoding escape hatch.
 
 ### Option C: Copy Bevy's RenderApp, retained render world, and schedule as the public model
 
@@ -310,7 +311,7 @@ SubApp ownership also conflicts with nara-owned app lifecycle.
 
 **Decision**: Rejected for the public model and deferred as a possible internal optimization.
 
-### Option D: Engine-owned compiler with recipes, declared passes, and a raw escape hatch
+### Option D: Engine-owned compiler with recipes, declared passes, and a scoped encoding escape hatch
 
 **Pros**: Gives simple projects a complete default, preserves controlled customization, keeps
 project data stable, supports WebGPU and editor inspection, and leaves physical optimization in one
@@ -347,7 +348,7 @@ eventual real resource graph.
 | Recipe schema freezes before a real pipeline exists | High | Medium | Freeze ownership and semantics now; defer exact persistent and Rust shapes to the first implementation. |
 | `RenderPassPlan` grows into a second partial graph | High | High | Keep it transitional and replace it under the pre-1.0 policy when a graph-only slice arrives. |
 | Semantic capabilities merely rename every wgpu feature | Medium | Medium | Add semantic requirements only from concrete family/provider needs; retain exact values in the backend snapshot. |
-| Raw passes become the normal plugin path | High | Medium | Keep them out of normal preludes, require declared scope, and expose lost optimizations in diagnostics. |
+| Scoped encoding passes become the normal plugin path | High | Medium | Keep them out of normal preludes, require declared scope, and expose lost optimizations in diagnostics. |
 | Recipe flexibility makes defaults difficult to support | High | Medium | Ship explicit engine-owned portable family bundles and validate family/feature compatibility. |
 | Legal recipes amplify into excessive graph work | High | Medium | Enforce decoded feature/pass/resource/edge/variant/diagnostic budgets before realization. |
 | Graph compilation adds per-frame cost | Medium | Medium | Separate cached templates from bounded frame instantiation and key them by recipe, provider, schema, shader-interface, semantic-capability, and generation identity. |

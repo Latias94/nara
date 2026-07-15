@@ -83,18 +83,24 @@ The conceptual names `RuntimeCandidate` and `RuntimeInstance` may be used by imp
 plans, but this ADR freezes their unpublished/published ownership contract, not final public type
 names or module layout.
 
-The conceptual name `RuntimeStartAttempt` denotes the unique Host-owned operation that contains the
-private candidate until publication or terminal retirement. It is not a Cargo build handle, a
-cloneable reference, a tooling-view value, or a second active runtime. A concrete Host may keep the
-type private or advanced; ordinary game authors and `nara_tooling` models do not need it.
+The conceptual name `RuntimeStartAttempt` denotes the unique Host-owned operation that owns the
+ledger, prepared owners, reservations, and any partial App before candidate admission. Only after
+the App is successfully committed and sealed does the attempt contain a private
+`RuntimeCandidate`, which it retains until publication or terminal retirement. It is not a Cargo
+build handle, a cloneable reference, a tooling-view value, or a second active runtime. A concrete
+Host may keep the type private or advanced; ordinary game authors and `nara_tooling` models do not
+need it.
 
 ### Ownership
 
 - An unpublished `RuntimeCandidate` exclusively owns one sealed, unstarted `App` plus every
   explicitly registered runtime close obligation. Admission rejects an active hook, an
-  already-started App, a raw runner that can bypass runtime driving, or a first-party
-  obligation-bearing declaration whose owner was not registered. Arbitrary App/World resources are
-  caller-owned by default; the runtime cannot infer shutdown semantics from their Rust types.
+  already-started App, a raw runner that can bypass runtime driving, or any first-party or
+  third-party obligation-bearing declaration whose owner was not registered. Arbitrary App/World
+  resources are caller-owned by default; the runtime cannot infer shutdown semantics from their
+  Rust types. Immediate runtime-local cleanup may remain in the once-only plugin shutdown hook;
+  owners that require Host-issued authority, asynchronous progress, or waitable close must register
+  a typed close obligation before App sealing.
   After successful startup and every fallible publication precondition, one atomic, infallible
   publish-and-promote move makes the same owner the Host-visible executable runtime. No
   promoted-but-unpublished owner or fallible hook exists across that boundary. `App` remains the
@@ -154,10 +160,12 @@ may subdivide a stage, but it must preserve the ledger -> pure-validation/plugin
 inactive-reservation -> App commit/seal -> candidate/freeze -> service-activation -> scene -> startup/
 publication-preflight -> atomic publish-and-promote dependency edges.
 
-Failure before publication returns a typed startup and shutdown report. It publishes no runnable
-session. Activated sessions, inactive reservations, `App` work, and other candidate resources all
-retire through the same ledger in reverse admitted dependency order while the start attempt retains
-the `RuntimeCandidate`. The final boundary is one ownership and visibility cut: it consumes the
+Failure before publication returns a typed startup and shutdown report and publishes no runnable
+session. Before step 4 completes, the start attempt retires its partial App, prepared owners,
+inactive reservations, and other obligations directly through the ledger; no
+`RuntimeCandidate` exists. After step 4, the start attempt retains the candidate and retires its
+App, activated sessions, and remaining resources through the same ledger in reverse admitted
+dependency order. The final boundary is one ownership and visibility cut: it consumes the
 candidate directly into the Host's visible `RuntimeInstance` slot, keeps the complete ledger and
 `App` under that owner, and leaves the attempt with access to neither. There is no separately
 fallible promotion or final-publication phase. Publication atomicity does not claim that arbitrary
@@ -342,7 +350,7 @@ an equivalent private optimization later.
 | Metric | Target | Measurement |
 |---|---:|---|
 | Startup publication | Failure in plugin/freeze/startup/spawn/service/publication-preflight phases publishes no runtime session; the final publish-and-promote cut is infallible and compare-consumes one current attempt epoch | Start-attempt fault-injection, stale/duplicate/late-epoch, and binary publication-cut tests |
-| Ownership handoff | Every registered obligation is owned exactly once: retired with the candidate or moved by the atomic publication cut into the visible runtime | Candidate-admission, publication-cut, and close-order tests |
+| Ownership handoff | Every registered obligation is owned exactly once: retired by the start attempt before candidate admission, retired through the candidate afterward, or moved by the atomic publication cut into the visible runtime | Attempt/candidate-admission, publication-cut, and close-order tests |
 | App admission | Unsealed, already-started, raw-runner, or declared obligation-bearing Apps without registration reject before candidate admission; arbitrary resources remain caller-owned | Code-first admission tests |
 | Play execution | Editor Play runs startup and scheduled systems through `App`, with no bare-`World` session owner | Tooling integration and static API audit |
 | Driver parity | Editor, desktop, and headless use one frame/fixed transaction for the same command stream | Reference-game semantic snapshot tests |
@@ -362,7 +370,7 @@ an equivalent private optimization later.
 | Runtime wrapper becomes a second `App` | Critical | Medium | Prohibit schedule/plugin/time ownership; delegate exactly one `App`. |
 | Plugin and runtime states drift | High | Medium | Treat plugin lifecycle as a startup/close sub-state, not a second product state machine. |
 | Startup atomicity is mistaken for rollback | High | Medium | Promise unpublished candidate plus shutdown report, not reversal of external effects. |
-| Candidate admission or publication loses or double-owns a close obligation | Critical | Medium | Establish one ledger before fallible work, move it once with the sealed App into the candidate, and atomically publish-and-promote the same owner; the attempt retains no published copy or intermediate owner. |
+| Attempt, candidate admission, or publication loses or double-owns a close obligation | Critical | Medium | Establish one ledger before fallible work, retain partial state in the attempt, move it once with the sealed App into the candidate, and atomically publish-and-promote the same owner; the attempt retains no published copy or intermediate owner. |
 | Faulted system leaves a partially mutated World | High | Medium | Stop execution, preserve first fault, observe if safe, and discard the generation. |
 | Direct tooling access bypasses safe points | High | High | Replace unrestricted Play-world mutation with commands and bounded observations. |
 | Shutdown freezes editor or server | High | Medium | Use pollable close participants and deadlines; keep host pumping. |

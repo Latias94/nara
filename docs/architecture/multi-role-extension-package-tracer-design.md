@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-14
+**Last Updated**: 2026-07-15
 
 **Owner**: source package composition, runtime, schema, asset import, tooling, and concrete product Hosts
 
@@ -18,7 +18,7 @@
 
 **Research Context**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
 
-**Related ADRs**: [0003](adr/0003-own-app-plugin-and-schedule-lifecycle.md), [0007](adr/0007-asset-identity-and-import-pipeline.md), [0015](adr/0015-editor-tooling-and-dogfooding-boundary.md), [0016](adr/0016-extension-seams-for-backends-and-domain-modules.md), [0042](adr/0042-runtime-service-and-backend-boundary.md), [0045](adr/0045-component-schema-capability-metadata.md), [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md), [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md), [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md), [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md), [0070](adr/0070-capability-oriented-filesystem-substrate.md), [0080](adr/0080-domain-owned-task-update-integration-sets.md), [0081](adr/0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0082](adr/0082-process-host-authority-and-runtime-construction-topology.md), [0086](adr/0086-rust-project-build-and-executable-generation.md), [0087](adr/0087-asset-dependency-import-product-and-artifact-publication-graph.md), [0090](adr/0090-unavailable-schema-and-lossless-authoring.md), [0093](adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md)
+**Related ADRs**: [0003](adr/0003-own-app-plugin-and-schedule-lifecycle.md), [0007](adr/0007-asset-identity-and-import-pipeline.md), [0015](adr/0015-editor-tooling-and-dogfooding-boundary.md), [0016](adr/0016-extension-seams-for-backends-and-domain-modules.md), [0042](adr/0042-runtime-service-and-backend-boundary.md), [0045](adr/0045-component-schema-capability-metadata.md), [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md), [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md), [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md), [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md), [0070](adr/0070-capability-oriented-filesystem-substrate.md), [0080](adr/0080-domain-owned-task-update-integration-sets.md), [0081](adr/0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0082](adr/0082-process-host-authority-and-runtime-construction-topology.md), [0084](adr/0084-executable-runtime-ownership-and-isolation.md), [0086](adr/0086-rust-project-build-and-executable-generation.md), [0087](adr/0087-asset-dependency-import-product-and-artifact-publication-graph.md), [0090](adr/0090-unavailable-schema-and-lossless-authoring.md), [0093](adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md)
 
 ## Purpose
 
@@ -214,7 +214,7 @@ to fit a temporary codec limitation.
 ```mermaid
 flowchart LR
     Source[Bounded .nanim source] --> ImportPlan[Typed importer plan]
-    ImportPlan --> ImportHost[Import Host Adapter]
+    ImportPlan --> ImportHost[Import Host]
     ImportHost --> Staged[Staged artifact group]
     Image[Tracked image product] --> ImportHost
     Staged --> ActiveAssets[Active animation products]
@@ -395,20 +395,24 @@ flowchart TD
     PluginPlan --> RuntimePlan[Profile RuntimePlan<br/>plus service closure]
     RuntimePlan --> Recipe[Private RuntimeRecipe<br/>plus exact content snapshot]
     Recipe --> Start[Host-owned RuntimeStartAttempt]
-    Start --> Candidate[Private runtime candidate]
+    Start --> Candidate[Private sealed runtime candidate]
+    Candidate --> RuntimeCut[ADR 0084 atomic publish cut]
+    RuntimeCut --> RuntimeActive[RuntimeInstance and typed runtime lease]
     SchemaPlan --> Reflect[nara_reflect catalog Adapter]
-    ImportPlan --> Asset[nara_asset Import Host Adapter]
+    ImportPlan --> Asset[nara_asset Import Host]
     ToolPlan --> Tooling[nara_tooling model/command Adapter]
 
     Common --> Host[Concrete Editor or Project Host]
     Host --> Start
-    Candidate --> Host
+    Host --> RuntimeCut
     Reflect --> Host
     Asset --> Host
     Tooling --> Host
-    Host --> Active[Private CohortActivationRecord]
-    Active --> Leases[Generation-consistent typed leases]
-    Leases --> Consumers[Selected Editor or runtime consumers]
+    Host --> CatalogActive[Private EditorCatalogActivation record]
+    CatalogActive --> CatalogLeases[Generation-consistent catalog leases]
+    CatalogLeases -. compatible immutable receipts .-> Start
+    CatalogLeases --> Consumers[Selected Editor consumers]
+    RuntimeActive --> Consumers
     Asset --> Artifacts[Independent ArtifactGroupGeneration]
     Artifacts --> Consumers
 ```
@@ -487,7 +491,7 @@ importer, editor, or cook roles and does not promise package preview, multi-Host
 last-good publication, or fresh-runtime restart. Those are product-path guarantees, not hidden
 behavior of `App::add_plugins`.
 
-The reusable package path has one explicit registration:
+The reusable package path has one explicit `package()` definition:
 
 ```rust
 pub fn package() -> Result<PackageDefinition, PackageAuthorReport> {
@@ -524,7 +528,7 @@ This is illustrative. Its required properties are:
   target, trust, executable generation, and implementation evidence;
 - domain helpers construct bindings, so adding a contract does not add a package-core method;
 - a factory creates fresh definition state and receives no generic context;
-- package registration is explicit; no linker constructor or global inventory hides inclusion;
+- the root explicitly calls `package()`; no linker constructor or global inventory hides inclusion;
 - ordinary Rust remains complete and proc macros are optional.
 
 One facade `package()` entry therefore compiles in every selected Host artifact, but it aggregates
@@ -865,7 +869,8 @@ The plugin:
 - uses Nara game/virtual time and declared schedule sets;
 - writes backend-neutral sprite intent;
 - owns no importer, source path, editor registration, process driver, or backend handle;
-- installs only inside a fresh unpublished runtime candidate on the product path;
+- commits only into the start attempt's fresh App on the product path; that App becomes an
+  unpublished runtime candidate only after successful seal;
 - cannot add undeclared package contributions or hidden plugin dependencies after plan closure.
 
 Code-first `App` use retains current plugin failure semantics. Product use additionally gains pure
@@ -901,7 +906,11 @@ Activation intent is explicit:
 |---|---|---|
 | `EditorCatalogActivation` | schema catalog, importer provider catalog, optional tooling providers | Does not start Play runtime and does not republish ordinary asset contents |
 | `PlayRuntimeActivation` | genuinely prepared runtime from compatible package/schema and selected artifact receipts | A `RuntimeRecipe` alone is never a ready runtime member |
-| linked structural replacement | only the catalog/runtime members proven to require one coordinated structural switch | Not used for ordinary compatible reimport |
+
+The initial tracer has no cross-axis linked structural-replacement intent. If a structural catalog
+change invalidates a running Play generation, the Host stops Play (or defers catalog activation),
+publishes the new Editor catalog, and starts a fresh runtime from compatible leases. A future atomic
+cross-axis protocol requires evidence beyond these Interfaces.
 
 The concrete Host attempt starts only after composition and follows this internal order:
 
@@ -915,8 +924,10 @@ The concrete Host attempt starts only after composition and follows this interna
 6. capture a `RequiredStartupArtifactClosureReceipt` only when a runtime start actually depends on
    a specific complete artifact closure;
 7. wait until every selected required member is `ReadyToPublish`;
-8. preallocate and validate the complete Host-private activation record;
-9. publish with an expected-generation check or perform the admitted stop-then-start transition;
+8. preallocate and validate the complete Host-private activation record for the selected axis, or
+   the ADR 0084 runtime publication slot when this is a Play start;
+9. publish through that axis's single linearization point with an expected-generation check, or
+   perform the admitted stop-then-start transition;
 10. retain or retire predecessor owners according to captured leases and terminal retirement
     evidence.
 
@@ -928,7 +939,7 @@ Publication mode is part of Host admission:
 
 | Mode | Guarantee | Required evidence |
 |---|---|---|
-| `SideBySide` | Complete successor prepares while predecessor remains captured, then one private root exchange linearizes activation | Budget for both generations and proof that process, service, device, and lease authorities may coexist |
+| `SideBySide` | Within one publication axis, a complete successor prepares while its predecessor remains captured, then that axis's sole exchange linearizes activation | Budget for both generations and proof that process, service, device, and lease authorities may coexist |
 | `ExclusiveStopThenStart` | Predecessor stops before successor starts; a launchable last-good record is retained, but continuous availability and in-memory rollback are not promised | Finite predecessor retirement and reacquisition rules for exclusive authority |
 
 The first tracer may prove `SideBySide` only for headless/in-memory candidates. That result does not
@@ -958,33 +969,33 @@ Representative membership is therefore:
 |---|---|---|
 | First Editor open, then first Play start | Publish Editor catalog intent first; Play later captures compatible schema/provider leases plus required startup artifact receipts and prepares a runtime | Runtime plan names the catalog and artifact format/generation ranges it accepts |
 | Compatible importer-only content reimport | Only the affected `ArtifactGroupGeneration`; no package cohort | Stable asset handle and artifact compatibility permit normal generation replacement |
-| Structural schema/runtime provider update while Play is running | New Editor catalog intent plus a separately prepared linked Play replacement only when the structural plan requires both | Explicit package/schema/runtime compatibility receipt; otherwise stop Play or defer catalog activation |
+| Structural schema/runtime provider update while Play is running | Stop Play or defer the catalog update; publish the new Editor catalog; then start a fresh Play runtime from compatible leases | Explicit package/schema/runtime compatibility receipt; no cross-axis atomicity claim |
 
 Ordinary `.nanim` reimport changes only its artifact-group axis. It does not regenerate the package
-plan or Editor catalog cohort. A structural provider update may create a linked replacement
-transaction only when typed compatibility edges prove that catalog and runtime members must switch
-together.
+plan or Editor catalog cohort. Structural provider updates use the stop/defer, catalog-publication,
+fresh-Play sequence above.
 
-Required candidates inside one intent do not independently swap global active pointers and later
-claim atomic activation. Before publication, frozen schema catalogs, importer provider catalogs,
-tooling catalogs, and prepared runtimes remain undiscoverable. The linearization point for a
-`SideBySide` intent is one Host-private `CohortActivationRecord` exchange:
+Required candidates inside one intent on one axis do not independently swap global active pointers
+and later claim atomic activation. Before publication, frozen schema, importer-provider, and tooling
+catalogs remain undiscoverable. The linearization point for a side-by-side
+`EditorCatalogActivation` is one Host-private record exchange:
 
 ```text
-CohortActivationRecord
+EditorCatalogActivationRecord
 |- activation intent plus package/plan/executable/cohort fingerprints
 |- selected schema snapshot and native-binding receipt
 |- selected importer-provider and tooling catalog receipts
-|- attempt-owned private runtime-candidate readiness evidence, only for an intent that starts/replaces runtime
-`- RequiredStartupArtifactClosureReceipt, only when selected by the runtime plan
 ```
 
-A `RuntimeRecipe` is immutable reconstruction input, not a ready member and never substitutes for
-the `RuntimeStartAttempt`'s private candidate readiness evidence. That evidence is not a second
-runtime type. The record is not a global read-only service locator. It remains private to the
-concrete Host; consumers receive generation-consistent typed leases such as
-`SchemaCatalogLease`, `ImporterCatalogLease`, or `RuntimeLease`, each carrying the relevant cohort
-fingerprint but exposing no generic lookup.
+Play publication is separate. A `RuntimeRecipe` is immutable reconstruction input, not a ready
+member and never substitutes for `RuntimeStartAttempt`'s private candidate. ADR 0084's atomic
+candidate-to-`RuntimeInstance` cut is the only Play-runtime linearization point; the instance records
+the compatible catalog leases and any `RequiredStartupArtifactClosureReceipt`. There is no second
+generic cohort exchange after that cut.
+
+Neither private record is a global read-only service locator. Consumers receive
+generation-consistent typed leases such as `SchemaCatalogLease`, `ImporterCatalogLease`, or
+`RuntimeLease`, each carrying the relevant fingerprint but exposing no generic lookup.
 
 The first tracer proves several logical roles inside one concrete executable Host. Cross-process
 prepare/commit/adopt remains deferred. A future process Import Adapter may reuse semantic plans and
@@ -1078,17 +1089,17 @@ No universal `ExtensionError` should erase the responsible Module or mutation gu
 | Schema merge/freeze failure | `nara_reflect` candidate | Candidate-local memory only | None | Retire prepared siblings |
 | Importer slot/extension conflict | `nara_asset` plan | No job or source grant | None | Active state unchanged |
 | Ordinary import queue pressure, cancellation, decode, or budget failure | `nara_asset` Import Host | `nara_tasks` work and scoped staging may exist | No new artifact group; package cohort unaffected | Preserve artifact last-good; cancel and retire/quarantine staging |
-| Import failure in an explicitly linked startup transaction | concrete runtime Host plus `nara_asset` | Required startup closure is not ready | No linked runtime activation | Preserve independent artifact/package predecessors; retire selected candidates |
+| Import failure required by a runtime start attempt | concrete runtime Host plus `nara_asset` | Required startup closure is not ready | No `RuntimeInstance` publication | Preserve independent artifact/catalog predecessors; retire attempt-owned state |
 | Stale or superseded import result | `nara_asset` Import Host | Result cannot enter active artifact manifest | None | Reject by task/source/artifact generation |
 | Custom Inspector construction failure | `nara_tooling` candidate | Candidate-local model only | None when selected required | Retire prepared siblings; fallback only if preselected in plan |
-| Typed plugin preflight rejection before the attempt's first commit | runtime candidate or caller-owned `App` | No plugin or staged plan/provenance metadata committed | None | End the attempt and discard staged inspection metadata; no plugin shutdown owner exists, and a caller-owned `App` remains reusable |
-| Plugin preflight rejection after an earlier commit, or any preflight unwind | runtime candidate | Earlier admitted plugins may have mutated the unpublished candidate; unwind is poison-causing even before the first commit | None | Mark failed/unpublishable and retain the candidate owner through reverse once-only terminal plugin shutdown before release |
-| Plugin build/finish failure or panic | `nara_app` candidate | Poisoned candidate `App` | None | Retain the candidate owner; `nara_app` reports reverse once-only plugin shutdown, and external/native retirement remains owned until its terminal result |
+| Typed plugin preflight rejection before the attempt's first commit | runtime start attempt or caller-owned `App` | No plugin or staged plan/provenance metadata committed | None | End the attempt and discard staged inspection metadata; no plugin shutdown owner exists, and a caller-owned `App` remains reusable |
+| Plugin preflight rejection after an earlier commit, or any preflight unwind | runtime start attempt | Earlier admitted plugins may have mutated the partial unpublished App; unwind is poison-causing even before the first commit | None | Mark the attempt failed/unpublishable and retain its partial App through reverse once-only terminal plugin shutdown before release |
+| Plugin build/finish failure or panic | runtime start attempt plus `nara_app` partial App | Poisoned partial App; no sealed runtime candidate exists | None | Retain the attempt; `nara_app` reports reverse once-only plugin shutdown, and external/native retirement remains owned until its terminal result |
 | User cancel before publication | concrete Host | Cooperative request; work may still run | None | Gate ingress, reject late results, prove retirement |
 | UI controller is dropped or panics | concrete Host | Host registry still owns the attempt | None by itself | Continue retirement or retain owner; controller lifetime is irrelevant |
 | Expected active generation changed | concrete Host | No active exchange | None | Retire stale candidate |
 | Unexpected publication operation failure before linearization | concrete Host | Fully prepared record remains owned but inactive | None | Retain owner, block conflicting activation, preserve predecessor |
-| Complete `SideBySide` record exchange | concrete Host | New immutable generation becomes visible once | Exactly one for that intent | Retain predecessor until typed leases retire |
+| Complete `SideBySide` publication | concrete Host | New immutable generation becomes visible once through the Editor-catalog record exchange or ADR 0084 runtime cut | Exactly one for that axis and intent | Retain predecessor until typed leases retire |
 | `ExclusiveStopThenStart` successor fails | concrete Host | Predecessor is stopped; successor is not active | None | Retain launchable last-good evidence; continuous availability and rollback are not promised |
 | Predecessor retirement fails after successful publication | concrete Host | Successor remains active; predecessor owner/authority remains retained | Publication already occurred | Block conflicting future activation where resources cannot coexist; do not roll back successor |
 | Live runtime fault after publication | published runtime owner | Published state may be mutated | Already published | Sticky fault, stop/discard, and a new restart transaction |
@@ -1275,9 +1286,9 @@ serialization, cancellation, and containment cost before semantics are proven.
 | Metric | Target | Measurement |
 |---|---|---|
 | Ordinary game author cost | One plugin-group call and no package manifest for game-owned code | Public compile fixture |
-| Reusable package author cost | One explicit package registration; no per-Host registration list | External package fixture |
+| Reusable package author cost | One explicit `package()` definition; no per-Host registration list | External package fixture |
 | Domain provider author cost | One narrow typed domain Interface and zero imports from admission, binding, candidate, task-pool, native-authority, or publication internals | Independent Importer and Inspector compile fixtures |
-| Clean-room task surface | Game author edits one Rust call site plus normal data; package author edits one canonical declaration source plus one registration Module | Scripted task diary with concepts and files touched |
+| Clean-room task surface | Game author edits one Rust call site plus normal data; package author edits one canonical declaration source plus one package-definition Module | Scripted task diary with concepts and files touched |
 | Public complexity firewall | Game, package, and provider fixtures import no Host-integration types; broad preludes expose no internal phase evidence; primary diagnostics use author-domain language | Compile fixtures, rustdoc/API audit, and diagnostic goldens |
 | Dual-path equivalence | Direct and package lowerings have equal schema fingerprints, plugin declarations, schedule placement, and headless semantic snapshots | Cross-path conformance fixture |
 | Standard Inspector leverage | `SpriteAnimator` is inspectable/editable with zero custom Inspector code | Model, patch, and undo tests |
@@ -1285,7 +1296,7 @@ serialization, cancellation, and containment cost before semantics are proven.
 | Pre-authority rejection | Every preview, plan, and binding fault creates zero Nara-owned `App`, worker, capability grant, staged artifact, or active pointer change; ambient trusted-code breach is reported separately | Fault matrix instrumentation |
 | Contract locality | Adding a test contract changes its owner and one supporting Host, with zero leaf-kernel enum variants or matches | Diff review |
 | Type safety | Wrong contract key, output type, one-shot factory, and illegal Inspector result fail at compile time where representable | Compile-fail fixtures |
-| Cohort visibility | In admitted `SideBySide` tests, concurrent readers receive typed leases for complete old or complete new intent records, never a mixed generation | Stress/property test |
+| Axis visibility | In admitted `SideBySide` tests, concurrent readers receive complete old or new Editor-catalog leases, while Play publication occurs only through ADR 0084's runtime cut; neither path exposes a mixed generation | Stress/property and runtime publication tests |
 | Attempt ownership | Dropping the UI/controller handle never drops retirement ownership or parent authority | Host registry fault test |
 | Last-good import | Every required import failure publishes zero new artifact group and preserves the prior usable group | Import fault matrix |
 | Shipping isolation | Release/server Cargo closures contain zero unselected importer, tooling, egui, winit, or wgpu dependencies | `cargo tree` and boundary checks |
@@ -1399,8 +1410,8 @@ through their owning ADRs.
    structured animation assets without turning reflection into a universal object system?
 5. Which exact compatibility edge permits a new runtime candidate to reuse a last-good artifact
    produced by an older importer implementation?
-6. Which compatibility receipt links `EditorCatalogActivation` to `PlayRuntimeActivation`, and when
-   does a running Play replacement join an explicit linked structural transaction?
+6. Which compatibility receipt links `EditorCatalogActivation` to `PlayRuntimeActivation`, and
+   which structural changes require stop/defer, catalog publication, and fresh Play startup?
 7. What measured standard-Inspector limitation, if any, justifies the first custom Inspector
    provider Interface?
 8. Can a custom Inspector lower directly to an authorized target-scoped `ScenePatchDocument`, or is

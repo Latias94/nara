@@ -11,7 +11,7 @@ RGF-U17/RGF-U13 diffuse it into Editor and desktop Hosts, and RGF-U23 decides th
 before checking compatibility with the accepted executable-runtime decision
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
-**Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079
+**Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079, ADR 0084
 
 ## Context
 
@@ -122,12 +122,12 @@ sequenceDiagram
     Start->>Start: Prepare repeatable plugin instances under the ledger without Host authority
     loop Each required reservation
         Start->>Start: Open an attempt-owned acquisition guard
-        Start->>Service: Request one inactive reservation through a concrete Host Adapter
+        Start->>Service: Request one inactive reservation through a Host-selected domain Adapter
         Service-->>Start: Atomically fill that guard or return typed rejection
     end
     alt ADR 0084 reaches its final boundary
         Start-->>Consumer: Atomically publish-and-promote one executable runtime generation
-    else ADR 0084 candidate startup fails
+    else ADR 0084 start attempt fails
         Start-->>Host: Typed startup and shutdown report; publish nothing
     end
 ```
