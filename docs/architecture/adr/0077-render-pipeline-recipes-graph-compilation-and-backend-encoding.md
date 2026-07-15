@@ -31,11 +31,13 @@ The next architecture boundary must satisfy several product goals at once:
 - the engine can later add a real resource graph without changing gameplay components.
 
 Unity demonstrates that useful programmability is a permission gradient rather than one unlimited
-callback: pipeline assets configure a renderer, renderer features contribute declared passes,
-RenderGraph owns scheduling and resources, and unsafe passes trade optimization and observability
-for control. Current Bevy demonstrates that ECS schedules are useful for pass execution order, but
+callback: pipeline assets configure a renderer, URP Renderer Features and HDRP Custom Passes
+contribute Family-specific work, URP Render Graph schedules graph-declared work and manages declared
+resources, and unsafe passes trade optimization and dependency visibility for lower-level command
+access. Current Bevy demonstrates that ECS schedules are useful for pass execution order, but
 schedule topology alone does not define resource lifetimes or a data-driven pipeline asset. Godot
-similarly separates product-facing compositor effects from its lower-level rendering device graph.
+similarly separates its experimental product-facing compositor effects from its lower-level internal
+rendering device graph.
 
 This ADR fixes the ownership and vocabulary before nara fixes a public Rust graph API.
 
@@ -46,14 +48,19 @@ This ADR fixes the ownership and vocabulary before nara fixes a public Rust grap
 | Render backend | The concrete GPU implementation. nara uses wgpu rather than defining a second RHI. |
 | Pipeline family | A code-provided rendering policy with compatible material, lighting, feature, and frame-topology assumptions, such as the portable 2D family or a future high-fidelity family. |
 | Pipeline family contribution | A first-party or external code contribution that defines one stable family ID, default logical topology, material/lighting/view compatibility, semantic capability policy, and editor-facing output contract. The exact Rust trait shape remains deferred. |
-| Pipeline recipe/profile | Versioned, inspectable project data selecting a family, feature instances, parameters, quality policy, and capability fallbacks. |
+| Renderer profile | An author-facing package or product preset that offers one coherent renderer choice and lowers into selection or creation of a pipeline recipe. It is not the persistent project-data authority. |
+| Pipeline recipe | Versioned, inspectable project-owned data selecting a family, feature instances, parameters, quality policy, and capability fallbacks. |
 | Render feature | A stable-ID code provider that contributes parameters, pass declarations, queue inputs, and capability requirements to a family. |
 | Frame pass / graph pass | A declarative unit with stable identity, logical resource access, ordering constraints, side effects, and portability metadata. |
 | Render phase | A category of queued render items, such as opaque, transparent, UI, or gizmo. A phase is not a frame pass. |
-| Material technique | A future material/shader implementation for a family, phase, and feature set. It is not the pipeline recipe. |
+| Retained logical render scene | A complete backend-neutral render projection retained across frames and updated atomically through bounded scene-update candidates. It is not a public second ECS World or a physical GPU cache. |
+| Render scene update | An ordered create/update/remove or complete-resynchronization candidate with stable identity, generations, budgets, and publication semantics for the retained logical render scene. |
+| View family and history | Stable logical identities and invalidation policy for one primary view, related auxiliary or atomic views, targets, and cross-frame resources. They are not frame-local indices or runtime `Entity` values. |
+| Shader program artifact and interface | A validated shader-program candidate plus stable entry-point, parameter, resource, dependency, capability, diagnostic, and cache identity shared by code and future visual frontends. Exact storage and reflection remain deferred. |
+| Material technique | A material/shader implementation compatible with a family, phase, feature set, and shader interface. It is not the pipeline recipe. |
 | Backend render pass | A wgpu command-encoding concept owned by the selected wgpu Render Host; the stock owner is `nara_render_wgpu`. It is not persistent authoring data. |
 | Compiled pipeline template | A reusable backend-neutral result derived from recipe, providers, and semantic capabilities. Frame packets do not participate in its identity. |
-| Frame execution plan | A backend-neutral frame-local instantiation of a captured active pipeline-set snapshot against current views, targets, batches, and dynamic extents. |
+| Frame execution plan | A backend-neutral frame-local instantiation of captured logical-scene, pipeline-set, ViewFamily/target, history, packet, and dynamic-extent generations. |
 | Device-epoch backend realization | The wgpu shader, pipeline, layout, retained physical resource, and cache state paired with a logical template for exactly one live host/device epoch. |
 | Wgpu/native interop contribution | An explicitly selected trusted-native contribution invoked by the owning wgpu Host inside declared epoch and scheduling boundaries; it may use exact wgpu/native APIs and retained epoch resources without becoming a second target or queue authority. |
 | Render Host Adapter | The exclusively selected execution authority for one device domain, including Device/Queue ownership, target transactions, physical resources, submission, presentation, recovery, diagnostics, and finite teardown. |
@@ -62,16 +69,22 @@ This ADR fixes the ownership and vocabulary before nara fixes a public Rust grap
 ## Decision
 
 nara adopts an engine-owned pipeline compiler with data-driven recipes, declared feature/pass
-contributions, backend-neutral frame packets, and one selected wgpu execution authority per device
-domain.
+contributions, a retained backend-neutral scene plus owned frame packets, and one selected wgpu
+execution authority per device domain.
 
 ```mermaid
 flowchart TD
-    World[Gameplay World] --> Extract[Domain extraction and queueing]
-    Extract --> Packet[Owned RenderFramePacket]
+    World[Gameplay World] --> Persistent[Persistent render projection]
+    World --> Transient[Frame-transient extraction and queueing]
+    Persistent --> SceneUpdate[Bounded RenderSceneUpdate candidate]
+    SceneUpdate --> Scene[Retained logical render scene generation]
+    Transient --> Packet[Owned RenderFramePacket]
     Project[nara.toml project authority] --> Recipe[Resolved pipeline recipe slots]
+    ShaderSources[WGSL, code-first, or future Shader Graph frontend] --> ShaderArtifact[Shader program artifact and interface]
+    ShaderArtifact --> Techniques[Material techniques]
     Families[Pipeline family contribution catalog] --> Compiler
     Providers[Feature and pass contribution catalog] --> Compiler
+    Techniques --> Compiler
     Recipe --> Compiler[Engine-owned logical compiler]
     Caps[Semantic render capabilities] --> Compiler
     Compiler --> Candidate[CompiledPipelineTemplate candidates]
@@ -82,10 +95,11 @@ flowchart TD
     Candidate --> Realize[Device-epoch backend realizations]
     Realize --> Active[Active pipeline-set generation]
     Active --> Instantiate[Frame instantiation]
+    Scene --> Instantiate
     Packet --> Instantiate
+    Views[View families, targets, and history state] --> Instantiate
     Instantiate --> Plan[FrameExecutionPlan]
     Plan --> Host[Selected WgpuRenderHost role]
-    Packet --> Host
     Host --> Target[Acquire, encode, submit, present]
     Host --> Observation[Structured render observations]
     Observation --> Tooling[nara_tooling and headless diagnostics]
@@ -134,8 +148,9 @@ flowchart TD
 - The first product family is portable and WebGPU-baseline oriented. A high-fidelity family is
   introduced only when real material, lighting, and frame-topology differences justify it.
 - This ADR freezes family ownership and selection, not a `PipelineFamilyProvider` trait, object-safe
-  factory, material schema, or public render schedule. The first independent HDR-like family tracer
-  chooses the smallest Rust shape that satisfies this contract.
+  factory, material schema, or public render schedule. The first independent stylized/high-fidelity
+  Family tracer uses ADR 0092-compatible SDR output and chooses the smallest Rust shape that
+  satisfies this contract.
 
 ### Feature and pass provider catalog
 
@@ -157,7 +172,37 @@ flowchart TD
 - Rust provider code changes require recompilation or a future separately designed native-module
   boundary. Recipe parameters and shader/material data may use normal asset reload policy.
 
-### Owned frame packet
+### Shader program and material artifacts
+
+- WGSL, future WESL, code generation, third-party shader compilers, and a future Shader Graph are
+  compiler frontends. They lower into the same validated shader program artifact and inspectable
+  shader interface; Shader Graph is not the frame Render Graph.
+- Stable shader semantics include entry-point, parameter, and resource identities; interface and
+  dependency digests; compatible Family/material contracts; required capabilities; bounded source-
+  map and diagnostic provenance; variant inputs; cook/cache identity; generation; and last-good
+  publication.
+- A Material Technique binds a compatible artifact/interface to a Family, phase, and Feature set.
+  Family/technique compatibility is explicit and versioned; nara does not promise that every
+  material or Feature is portable across every Family.
+- Shader and material candidates contain no Device, Queue, target lease, command encoder, or backend
+  cache object. The selected Host realizes validated candidates for one device epoch.
+- Concrete artifact storage, reflection implementation, visual-node schema, graph IR, derive
+  helpers, and public Rust traits wait for reusable material assets plus independent frontend and
+  Family tracers.
+
+### Retained scene and owned frame packet
+
+- Persistent render-domain state lowers into bounded `RenderSceneUpdate` candidates and one retained
+  backend-neutral logical scene generation. The exact type name is not frozen.
+- Scene updates express ordered create, update, remove, or complete resynchronization operations
+  using stable logical identity and generation evidence. Missing sequences, stale updates, budget
+  rejection, or invalid data cannot partially mutate the active scene.
+- Removal remains observable until acknowledged or superseded by a complete resynchronization.
+  Backpressure is bounded and cannot silently discard a state-changing update. Candidate failure
+  preserves the previous complete scene generation.
+- Logical scene state contains no physical GPU object. Mesh buffers, acceleration structures,
+  bind groups, pipelines, and other backend resources are device-epoch realizations reconstructed
+  from logical scene, asset, or prepared-resource state.
 
 - Extraction and domain queueing produce an owned, backend-neutral `RenderFramePacket` boundary.
 - A packet may contain owned views, domain batches, upload payloads, semantic resource keys,
@@ -171,10 +216,12 @@ flowchart TD
   `Device`, `Queue`, command encoders, backend cache entries, or platform window objects.
 - Packet ownership preserves the option to execute on the browser's local GPU executor, a future
   native render worker, or an editor-owned render host without changing gameplay authoring.
-- The current main-world extraction model remains valid. A retained second render ECS world is an
-  internal optimization, not a public pipeline contract.
-- Packet producer, consumer, budget, rejection, and retirement rules must follow ADR 0036 before
-  packets cross an asynchronous or threaded boundary.
+- The current main-world extraction model remains valid. Logical scene storage may initially remain
+  in the same process and thread. A retained second render ECS World or render worker is an internal
+  optimization, not a public pipeline contract.
+- Scene-update and packet producer, consumer, budget, rejection, acknowledgement, resynchronization,
+  and retirement rules must follow ADR 0036 before either channel crosses an asynchronous or
+  threaded boundary.
 
 ### Template compilation and frame instantiation
 
@@ -189,16 +236,20 @@ generation. At the frame boundary, the execution coordinator captures an immutab
 recipe slots selected by that frame's views. Publication during execution affects only a later
 frame; one frame never mixes old and new generations of a slot.
 
-Each frame instantiates that pipeline-set snapshot against current packet views, targets, batches,
-dynamic extents, and enabled frame-local work to produce a backend-neutral `FrameExecutionPlan`.
-Exact type names and whether the plan owns or indexes packet sections remain implementation
-decisions; it may not borrow the gameplay `World` or contain GPU objects.
+Each frame captures coherent logical-scene, pipeline-set, ViewFamily/target, history, and packet
+generations. It instantiates that snapshot against current views, batches, dynamic extents, and
+enabled frame-local work to produce a backend-neutral `FrameExecutionPlan`. Publication during
+instantiation affects only a later frame. Exact type names and whether the plan owns or indexes
+scene/packet sections remain implementation decisions; it may not borrow the gameplay `World` or
+contain GPU objects.
 
 The compiler owns:
 
 - stable pass and logical-resource identity validation;
-- ordering, cycle detection, and target/view compatibility;
+- ordering, cycle detection, and target/ViewFamily compatibility;
 - declared read, write, attachment, copy, and side-effect validation;
+- stable View, ViewFamily, auxiliary-view, target, and history-slot identity plus declared history
+  invalidation;
 - required, optional, and fallback capability resolution;
 - logical lifetime and external-ownership declarations, with possible future forms including
   transient, retained/history, imported target, or persistent-cache resources;
@@ -254,6 +305,9 @@ viewport targets use the same transaction vocabulary as surfaces.
   disable the feature, substitute a named variant, or reject compilation.
 - Capability lowering is deterministic and inspectable. A pass is never silently omitted.
 - Raw `wgpu::Limits` and feature bitsets are not serialized into project files.
+- Experimental exact-wgpu capabilities require explicit code/product/Host opt-in in addition to
+  normal support checks. Project recipe or package metadata may request such a capability but cannot
+  grant it or silently enable all experimental features.
 - Capability tiers are added only from measured pipeline needs; nara does not invent a comprehensive
   hardware taxonomy in advance.
 - Activating a structurally different composition that needs capabilities absent from the live
@@ -336,6 +390,12 @@ handle outside the declared slot.
   realization is invalid: nara may retain the logical template, but affected rendering remains in
   recovering/skipped state until a complete realization for the new epoch succeeds. Optional lazy
   variants must use declared fallback behavior and cannot partially replace the active generation.
+- Scene-update candidates publish one complete retained logical scene generation at a frame-safe
+  boundary. A gap, stale generation, overflow, failed validation, or failed resynchronization keeps
+  the prior complete scene active and exposes bounded resync/backpressure observations.
+- Camera cuts, target extent/format/sample changes, Family or incompatible shader/material changes,
+  origin rebasing, and device-epoch changes invalidate affected history by declared policy. History
+  cannot silently survive an incompatible generation.
 - Template generation, backend-realization generation, device epoch, selected variants, fallback
   decisions, disabled features, pass/resource edges, lifetimes, cache pressure, and CPU/GPU timing
   eligibility are structured observations.
@@ -360,8 +420,8 @@ handle outside the declared slot.
 
 | Owner | Responsibility |
 |---|---|
-| `nara_render` | Recipe vocabulary, semantic capabilities/outputs, owned extensible frame packet, family/feature catalog contracts, plan/graph validation, compiled observations. |
-| Domain render crates and external render packages | Extract domain data, contribute typed packet sections, queue/sort/batch items, and declare family/feature/pass policy through public render contribution contracts. |
+| `nara_render` | Recipe vocabulary, semantic capabilities/outputs, retained logical scene/update and owned frame-packet contracts, ViewFamily/history identity, shader-interface semantics, family/feature catalog contracts, plan/graph validation, compiled observations. |
+| Domain render crates and external render packages | Project persistent domain changes and frame-transient data, contribute typed scene/packet sections, queue/sort/batch items, and declare family/feature/pass/material policy through public render contribution contracts. |
 | `nara_render_wgpu` | First-party default wgpu Render Host Adapter, exact capabilities, physical resource allocation, pipelines, encoding, submission, presentation, device-domain caches, and Host-managed wgpu/native interop sessions. |
 | External wgpu/native Adapter crates | Explicitly selected epoch-scoped interop contributions or replacement Render Host Adapters bound to Nara's exact supported wgpu/backend contract; never gameplay-facing or a second RHI. |
 | `nara_app` | Declared extraction/prepare/queue/render stages and runtime lifecycle; it does not own GPU policy. |
@@ -435,10 +495,13 @@ eventual real resource graph.
 | Template reuse | Unchanged recipe, provider, schema, shader-interface, and semantic-capability generations do not revalidate or recompile the static template each frame | Compile-count instrumentation test |
 | Expansion bounds | Encoded and decoded recipe expansion limits reject oversized candidates before backend allocation | Boundary and hostile-input matrix tests |
 | Packet openness | An external render domain contributes a bounded typed packet section without a core enum edit, public `Any`, or per-frame string lookup | Renamed-dependency packet tracer and source-diff gate |
+| Retained-scene integrity | Ordered update gaps, stale generations, budget rejection, removal acknowledgement, and resync never partially mutate the active logical scene | Scene-update fault and resynchronization suite |
+| View/history correctness | Temporal and auxiliary-view work uses stable ViewFamily/history identity and deterministic invalidation rather than frame-local indices | Temporal and multi-view fault matrix |
+| Shader frontend convergence | Handwritten/code-generated and future visual frontends produce the same validated artifact/interface semantics, dependency invalidation, and last-good behavior | Shader artifact and renamed-frontend fixtures |
 | Pre-device admission | Selected Host, family, feature, target, and interop requirements close before `request_device`; tests distinguish supported/requested/enabled/fallback states and never try to widen a live Device | Adapter capability matrix and reconstruction test |
 | Escape containment | The normal scoped-encoding-pass API exposes no device, queue, target lease, cloneable resource view, or owned engine handle; undeclared/stale keys and escaped facade borrows are rejected | API review, runtime scope checks, and compile-fail tests where practical |
 | Portable feature parity | Independent packages contribute extraction/packet data, material/queue policy, post-process passes, and editor-only gizmo/overlay work without editing `nara_render_wgpu` or requiring a public second render World | Clean-room external-package tracer and dependency/API audit |
-| Pipeline family parity | An independent HDR-like family owns different material/lighting assumptions and full frame topology, is selected by recipe, exposes final color plus a picking strategy, and needs no `nara_render` or stock-backend edit | Renamed-dependency family/editor tracer and source-diff gate |
+| Pipeline family parity | An independent stylized family owns different material/lighting assumptions and full frame topology, is offered through a Renderer Profile, selected through a persistent Pipeline Recipe, exposes ADR 0092-compatible SDR final color plus a picking strategy, and needs no `nara_render` or stock-backend edit | Renamed-dependency family/editor tracer and source-diff gate |
 | Wgpu/native interop parity | An independent contribution requests a non-baseline pre-device capability, creates retained epoch resources, performs declared compute or native work, and rebuilds or retires correctly across device loss without editing the stock Host | Interop conformance, loss/recovery, and portability tests |
 | Interop GPU order | Host-submit work joins global submission order; direct-submit work declares resource access and observes predecessor-flush -> interop-submit -> successor order | Instrumented command/queue ordering and hazard tests |
 | Host/interop compatibility | Every selected interop contribution matches a declared contract/backend/queue/resource-binding mode from the selected Host or follows its explicit fallback/rejection policy | Host/interop compatibility matrix |
@@ -456,8 +519,11 @@ eventual real resource graph.
 | Raw interop silently becomes a second queue authority | Critical | Medium | Require declared resource access, Host-submit or predecessor-flushing direct-submit mode, bind retained work to one epoch, and require whole-Host replacement for independent target/submission ownership. |
 | First-party renderer uses private family or Host hooks | Critical | Medium | Require one public contribution/selection path and independent renamed-dependency tracers for each promised permission level. |
 | Recipe flexibility makes defaults difficult to support | High | Medium | Ship explicit engine-owned portable family bundles and validate family/feature compatibility. |
+| Pipeline families fragment shaders, materials, or Features | Critical | High | Version compatibility explicitly, expose conversion/fallback/rejection, and keep one coherent supported stock renderer rather than promise arbitrary cross-Family portability. |
 | Legal recipes amplify into excessive graph work | High | Medium | Enforce decoded feature/pass/resource/edge/variant/diagnostic budgets before realization. |
 | Graph compilation adds per-frame cost | Medium | Medium | Separate cached templates from bounded frame instantiation and key them by recipe, provider, schema, shader-interface, semantic-capability, and generation identity. |
+| Retained scene loses updates or diverges from gameplay truth | Critical | Medium | Ordered generations, acknowledged removals, bounded backpressure, full resync, atomic publication, and stale/gap fault tests. |
+| Shader frontends produce incompatible hidden binding rules | High | Medium | One artifact/interface contract with stable parameter/resource identity, dependency tracking, capability declaration, and last-good publication. |
 | Editor requirements fork the runtime renderer | High | Medium | Require editor targets and overlays to consume the same captured template/backend-realization generations, backend-neutral `FrameExecutionPlan`, and target-transaction semantics. |
 | A custom family renders but cannot participate in the editor | High | Medium | Require final-color/overlay semantics and one declared picking strategy at Editor Host admission; keep optional capture outputs explicit. |
 
@@ -471,13 +537,14 @@ eventual real resource graph.
   prove equivalent reachable capability through Nara's typed seams. A feature-only tracer cannot
   establish renderer parity.
 - The first real graph implementation must be driven by at least two concrete target/resource
-  flows, such as the current SDR surface path plus HDR/offscreen editor composition.
+  flows, such as the current SDR surface path plus an intermediate/offscreen post-process path.
 - Project-facing pipeline data can evolve independently from wgpu versions and native backends.
 - Pipeline family selection, logical template compilation, device-epoch realization, frame
   instantiation, and execution become separate observable states rather than one backend draw
   function.
-- This ADR does not implement a full graph, shader DSL, material file format, high-fidelity family,
-  async compute, pass fusion, physical alias allocator, render worker, or second render world.
+- This ADR does not implement a full graph, shader DSL or visual graph, material file format,
+  high-fidelity family, async compute, pass fusion, physical alias allocator, render worker, or
+  second render World.
 - First-party support policy and defaults may differ, but first-party families, interop modules, and
   Host candidates do not receive private extension authority unavailable to an external package.
 
@@ -487,13 +554,22 @@ eventual real resource graph.
 - Concrete logical resource and graph node schema, lifetime enum, execution queues, aliasing,
   merging, and barrier algorithms, triggered by the first intermediate texture or cross-target
   dependency that static planning cannot express.
-- Color space, transfer function, HDR display, tone-mapping, and alpha contracts, triggered before
-  the first HDR output family or persistent color-bearing project format.
+- Exact retained-scene update carrier, storage, indexing, acknowledgement transport, and private ECS
+  or worker topology. Stable identity/generation, bounded update/resync, atomic publication, and
+  physical-realization separation are not deferred.
+- Exact ViewFamily, target, and history Rust carriers. Stable identity, related-view atomicity,
+  final-consumer ownership, and invalidation semantics are not deferred.
+- HDR/wide-gamut working space, HDR target and display policy, exposure, tone-mapping, color grading,
+  paper-white/UI composition, mastering metadata, and display profiles remain deferred to OQ-021.
+  SDR color-space, transfer, output encoding, and straight-alpha semantics already follow ADR 0092.
 - Shared editor/process render-host ownership, triggered by the first offscreen editor viewport that
   must outlive or be shared across isolated Play runtimes.
-- Native parallel encoding or retained render world, triggered only by profiling evidence.
-- Material-technique and shader-reflection contracts, triggered by reusable material assets and a
-  second real family/technique combination.
+- Native parallel encoding or a retained second render World, triggered only by profiling and
+  ownership evidence.
+- Exact shader artifact storage, reflection implementation, Material Technique Rust Interface,
+  Shader Graph IR/node/UI, and frontend registration shape, triggered by reusable material assets
+  plus independent code and visual/frontend tracers. Stable artifact/interface semantics are not
+  deferred.
 - Exact Rust shapes for family contributions, typed packet sections, interop sessions, and Render
   Host selection, chosen by their independent clean-room tracers. Their capability, cardinality,
   selection, and lifecycle guarantees are not deferred.
@@ -502,6 +578,7 @@ eventual real resource graph.
 
 - [ADR 0017: Render Graph Policy](0017-render-graph-policy.md)
 - [ADR 0040: Render Resource Lifetime and Submitter Ownership](0040-render-resource-lifetime-and-submitter-ownership.md)
+- [ADR 0092: SDR Color Space, Alpha, and Output Encoding](0092-sdr-color-space-alpha-and-output-encoding.md)
 - [Unity URP RenderGraph introduction](https://docs.unity3d.com/6000.0/Documentation/Manual/urp/render-graph-introduction.html)
 - [Unity URP unsafe passes](https://docs.unity3d.com/6000.0/Documentation/Manual/urp/render-graph-unsafe-pass.html)
 - [Unity `RenderPipelineAsset`](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Rendering.RenderPipelineAsset.html)
@@ -513,4 +590,5 @@ eventual real resource graph.
 - [Bevy per-view core schedules at `f6c6e6eebb94`](https://github.com/bevyengine/bevy/blob/f6c6e6eebb94/crates/bevy_core_pipeline/src/schedule.rs)
 - [Godot compositor effect contract at `c939bf3791`](https://github.com/godotengine/godot/blob/c939bf3791/doc/classes/CompositorEffect.xml)
 - [Godot rendering device graph at `c939bf3791`](https://github.com/godotengine/godot/blob/c939bf3791/servers/rendering/rendering_device_graph.h)
+- [Render Capability Demand and Pressure Matrix](../render-capability-pressure-matrix.md)
 - [Render Extension Capability Interface Design](../render-extension-capability-interface-design.md)
