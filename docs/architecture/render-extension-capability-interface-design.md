@@ -19,6 +19,12 @@ external renderer packages
 **Composition Designs**: [Runtime Composition Interface Design](runtime-composition-interface-design.md)
 and [Source Extension Package Interface Design](source-extension-package-interface-design.md)
 
+**Follow-Up Validation Plan**:
+[Render Extension Parity Tracers Plan](../plans/2026-07-15-001-feat-render-extension-parity-tracers-plan.md)
+
+The follow-up remains inactive until the reference-game plan releases its registration and an
+activation rebaseline reconciles the tracer file map and authority decisions with the landed code.
+
 ## Purpose
 
 This document tests whether Nara can provide Bevy-level reachable extension freedom, Unity
