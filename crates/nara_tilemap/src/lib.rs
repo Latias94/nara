@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use nara_app::{App, Plugin, PluginError};
+use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
 use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Assets, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::Component;
@@ -460,25 +460,38 @@ impl Default for Tilemap {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TilemapPlugin;
 
-impl Plugin for TilemapPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.tilemap"),
-            nara_app::PluginCategory::Runtime,
-        )
+pub const TILEMAP_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.tilemap");
+pub const TILEMAP_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
+    nara_app::PluginSchemaProviderId::new("nara.tilemap.components");
+pub const TILEMAP_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
+    nara_reflect::ComponentSchemaProviderDefinition::new(
+        TILEMAP_SCHEMA_PROVIDER_ID,
+        nara_reflect::ComponentSchemaProviderBindingId::new("nara.tilemap.components.native", 1),
+        register_tilemap_components,
+    );
+const TILEMAP_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("runtime-2d")];
+pub const TILEMAP_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(TILEMAP_PLUGIN_ID, nara_app::PluginCategory::Runtime)
         .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .requires_product_capabilities(TILEMAP_PRODUCT_REQUIREMENTS)
+        .provides_schema(&[TILEMAP_SCHEMA_PROVIDER_ID]);
+
+impl Plugin for TilemapPlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &TILEMAP_PLUGIN_DECLARATION
     }
 
-    fn preflight(&self, app: &App) -> Result<(), PluginError> {
-        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
-            return Ok(());
-        };
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
-        registry
-            .validate_component_registration::<Tilemap>(&component_id)
-            .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
-            })
+        let registry = nara_reflect::registry_for_plugin_preflight(
+            context,
+            TILEMAP_PLUGIN_ID,
+            component_id.as_str(),
+        )?;
+        validate_tilemap_components(registry).map_err(|error| {
+            PluginError::component_registration(TILEMAP_PLUGIN_ID, component_id.as_str(), error)
+        })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -486,7 +499,7 @@ impl Plugin for TilemapPlugin {
         let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
         register_tilemap_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+                PluginError::component_registration(TILEMAP_PLUGIN_ID, component_id.as_str(), error)
             })?;
         Ok(())
     }
@@ -495,6 +508,7 @@ impl Plugin for TilemapPlugin {
 pub fn register_tilemap_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
+    validate_tilemap_components(registry)?;
     let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
     let schema = ComponentSchema::new(component_id, "Tilemap", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -553,6 +567,11 @@ pub fn register_tilemap_components(
         },
     )?;
     Ok(())
+}
+
+fn validate_tilemap_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+    registry
+        .validate_component_registration::<Tilemap>(&ComponentTypeId::new("nara.tilemap.Tilemap"))
 }
 
 fn tilemap_fields() -> [ComponentFieldSchema; 6] {

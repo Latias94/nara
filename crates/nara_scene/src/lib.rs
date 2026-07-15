@@ -33,8 +33,9 @@ pub use format::{
     ScenePatchDocumentCandidate,
 };
 pub use hierarchy::{
-    Children, HierarchyPlugin, Name, Parent, Transform2d, Visibility, register_scene_components,
-    spawn_child, sync_children,
+    Children, HIERARCHY_PLUGIN_DECLARATION, HIERARCHY_PLUGIN_ID, HIERARCHY_SCHEMA_PROVIDER,
+    HIERARCHY_SCHEMA_PROVIDER_ID, HierarchyPlugin, Name, Parent, Transform2d, Visibility,
+    register_scene_components, spawn_child, sync_children,
 };
 pub use nara_identity::{SceneEntityId, SceneEntityIdError, SceneInstanceId, SpawnedSceneInstance};
 pub use patch::{ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport};

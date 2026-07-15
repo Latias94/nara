@@ -67,21 +67,18 @@ Observable test oracle:
 Depth / Locality / Seam verdict:
 ```
 
-## Problem
+## Original Problem
 
-The current composition path exposes several separate facts that can drift:
+Before RGF-U4, the composition path exposed several separate facts that could drift:
 
-- RGF-U3 now produces an immutable `ProjectSettingsCandidate` after manifest and compiled-ceiling
-  validation, but it does not yet resolve plugin slots, services, conflicts, or a publishable
-  runtime candidate (`src/project_host.rs`).
-- root plugin groups maintain static plugin-ID arrays separately from their imperative `build`
-  methods (`src/lib.rs`).
-- `PluginGroupBuilder` directly wraps `&mut App`, so group expansion and committed installation are
-  the same operation (`crates/nara_app/src/lib.rs`).
-- production plugin `build` methods install hidden prerequisite plugins after App mutation has
-  begun (`nara_asset_watch`, `nara_image`, `nara_ui`, `nara_winit`, and render adapters).
-- `WinitPlugin::build` selects the process runner from inside runtime plugin installation.
-- the reference game and examples repeat product setup knowledge through manual
+- RGF-U3 produced an immutable `ProjectSettingsCandidate` after manifest and compiled-ceiling
+  validation, but did not resolve plugin slots, services, conflicts, or schema providers.
+- root plugin groups maintained static plugin-ID arrays separately from imperative `build` methods.
+- `PluginGroupBuilder` wrapped `&mut App`, so group expansion and committed installation were the
+  same operation.
+- production plugin `build` methods installed hidden prerequisite plugins after App mutation began.
+- runner selection could be hidden inside runtime plugin installation.
+- the reference game and examples repeated product setup knowledge through manual
   `App::new -> group -> game plugin` sequences.
 
 This makes a successful example concise only after callers learn hidden ordering, feature, failure,
@@ -525,8 +522,8 @@ an additional explicit companion entry/group. A second definition ID for the sam
 requirements or conflicts hidden behind `metadata(&self)`.
 
 `PluginPreflightContext` is a narrow immutable view of the installed-plan prefix and the specific
-structural snapshots proven necessary by current preflight consumers. It exposes no `World`, raw
-resource access, runner mutation, or native authority. A typed `Err` is retryable before the
+structural resources whose owners explicitly implement `PluginPreflightResource`. It exposes no
+`World`, arbitrary resource access, runner mutation, or native authority. A typed `Err` is retryable before the
 attempt's first commit only under this no-side-effect contract. A preflight unwind always poisons a
 caller-owned App or marks the current product-construction owner failed/unpublishable. Before App
 seal and candidate admission that owner is the start attempt; afterward it retains the candidate.
@@ -547,15 +544,18 @@ core::plugin()
 window::plugin(window_settings)
 ```
 
-Exact config trait and derive names wait for U4 implementation evidence. The contract is fixed:
+RGF-U4 implements opaque canonical bytes plus typed domain helpers. A universal config trait or
+derive remains deferred; the contract is fixed:
 
 - one stable versioned `PluginDefinitionId` identifies one canonical construction policy; a domain
-  helper hides this advanced identity from normal game/package callers;
+  helper hides this advanced identity from normal game/package callers; `for_default` derives its
+  policy identity from the resolved stable `PluginId`, while non-default factories supply an
+  explicit domain-owned ID/version;
 - canonical configuration and the repeatable factory binding are `Send + Sync + 'static`, so an
   immutable definition/recipe can be shared across Host attempts;
 - configuration is explicit immutable data with a deterministic canonical fingerprint, never only
   a captured closure;
-- typed construction returns `Result<P, PluginCreateError>` for one concrete `P: Plugin`, so the
+- typed construction returns `Result<P, PluginPrepareFailure>` for one concrete `P: Plugin`, so the
   static declaration cannot be swapped after erasure; infallible domain helpers adapt `P` to
   `Ok(P)`;
 - construction is repeatable (`Fn` semantics), not one-shot (`FnOnce` semantics);
@@ -591,7 +591,12 @@ definition ID with a divergent declaration, config schema/version, or factory bi
 admission error, not behavioral equivalence. There is no first-wins, last-wins, or public
 `add_plugin_if_missing` rule.
 
-All plugin IDs are unique in U4. The current unused `non_unique` metadata option should be removed.
+Schema-provider callbacks follow the same rule separately: a stable versioned
+`ComponentSchemaProviderBindingId` names the native registration policy, while the function pointer
+is invocation-only and never semantic identity. Provider unwind is caught at composition and
+reported as `SchemaProviderPanicked` without publishing the scratch registry.
+
+All plugin IDs are unique in U4. The unused `non_unique` metadata option is removed.
 If a real multi-instance plugin lifecycle appears, it must introduce a stable `PluginEntryId` and
 define ordering, shutdown, inspection, and configuration identity explicitly.
 
@@ -628,8 +633,8 @@ fingerprint promise. A direct input that collides with an existing/planned `Plug
 an explicit duplicate error rather than an implicit equality merge. Tooling may inspect that an
 opaque one-shot entry was selected, but it cannot claim the entry is reconstructible.
 
-`add_plugins` is the primary public entry. The current singular `add_plugin` may be removed or kept
-only as a thin alias with identical semantics; `add_plugin_if_missing` is not retained as a public
+`add_plugins` is the primary public entry. The singular `add_plugin` remains only as a thin alias
+with identical semantics; `add_plugin_if_missing` is not retained as a public
 composition mechanism. Tuple collection happens before resolution rather than installing each
 element immediately.
 
@@ -792,8 +797,9 @@ Headless, editor, winit, and an external compiled runner are concrete Adapters o
 drive outcome. Root composition explicitly selects one per driver scope, and external candidates
 must not require a package-specific root match or first-party allowlist. A universal
 `RuntimeDriver` trait is not required until concrete implementations prove its smallest reusable
-shape. The current `WinitPlugin::build -> App::set_runner` route is transitional for the product
-path.
+shape. `WinitRunner::install` is a top-level code-first selection; RGF-U13 must still prove that the
+desktop product driver routes frames and lifecycle control through `RuntimeInstance` rather than a
+raw App.
 
 ## Interface Evaluation
 
@@ -802,7 +808,7 @@ The candidates are evaluated by Interface depth rather than implementation size.
 | Candidate | Depth | Locality | Authority Honesty | Common-Caller Cost | Decision |
 |---|---|---|---|---|---|
 | Removed legacy `apply_project_settings(&mut App)` | Low | Low: validation and mutation knowledge was spread across facade, groups, and plugins | Low: predictable rejection could follow mutation | Low on success, high on failure | Removed in RGF-U3 |
-| Current immutable settings/capability candidate | Medium | High for manifest admission, low for plugin closure and publication | High for the compiled/requested capability subset only | Low for manifest callers, incomplete for runtime hosts | Keep as input to RGF-U4 composition |
+| Immutable settings candidate plus U4 `RuntimePlan` | High for admission | High for manifest lineage, product/plugin closure, and schema-provider validation; publication remains separate | High through pure resolution; owns no App/native authority | Low through typed project/game helpers | Implemented as U12/U24 input |
 | Pure resolve plus public install into an existing App | Medium | High for composition, low for startup publication | Medium: admission is honest, committed failure still poisons caller state | Medium | Omit the public operation; use the private commit batch inside existing entry points |
 | Universal host/builder around project, services, runtime, and driver | Superficially high | Low over time: unrelated authorities converge in one Module | Low: scope and lifetime differences become hidden | Initially low, grows with every domain | Reject |
 | Pure Runtime Plan plus Host-owned start attempt and fresh unpublished candidate | High | High: admission, committed lifecycle, and host authority each have one owner | High: publication is atomic without claiming external rollback | Low on product path, explicit on embedding path | Recommend |
@@ -1063,8 +1069,8 @@ contribution contract and requires no root or Host registration. The new-contrac
 when the product root must plan, bind, publish, or grant a genuinely new cross-Host role or
 authority.
 
-This contract does not currently claim full implementation parity. Arbitrary typed schedules,
-data-only group editing, the shared Import Host, third-party render families/interop/Hosts, tooling
+This contract does not currently claim full implementation parity. The shared Import Host,
+third-party render families/interop/Hosts, tooling
 UI Adapters, and Host-authority service lifecycle tracers remain evidence gates. Multi-instance plugins,
 universal async plugin readiness, and public `SubApp`/`RenderApp` are also not current guarantees. If first-party
 code can ship a supported-domain feature only through a private root/backend hook that an external
@@ -1168,7 +1174,7 @@ This design follows the reference-game plan's revised dependency order and makes
 evidence expected from each slice explicit:
 
 1. U3 produces truthful compiled capabilities and a normalized project request.
-2. U4 introduces static plugin declarations, repeatable definitions, the data-only group/slot
+2. U4 has introduced static plugin declarations, repeatable definitions, the data-only group/slot
    builder, sealed plugin/group/tuple inputs, pure resolution, type-directed common edits, private
    fresh preparation, provider/schema input resolution, explicit obligation-bearing declarations,
    terminal `shutdown` naming, hook-time runner prohibition, and closed commit. It also keeps the
@@ -1189,18 +1195,16 @@ evidence expected from each slice explicit:
 8. Later desktop work proves the winit driver calls the runtime boundary and preserves target lifetime without changing composition
    policy.
 
-The data-only group step is a prerequisite for the package runtime role. Package helpers must not
-wrap the current `PluginGroupBuilder<'_>` as though it were a pure plan: that builder immediately
-mutates `App`, while root groups still duplicate membership in static plugin-ID arrays. U4 must
-derive membership and order from one immutable entry collection, validate it before committed
-App mutation, remove hook-time nested installation, and only then preserve direct
-`App::add_plugins` ergonomics as a lowering. Root static plugin-ID arrays,
-`PluginGroupBuilder::app`, public `add_plugin_if_missing`, and unused non-unique metadata are
-migration targets rather than compatibility constraints.
+The data-only group step is now the package runtime prerequisite. Package helpers compose the same
+`PluginDefinition` and group inputs; they do not wrap an App-mutating builder. U4 derives membership
+and order from one immutable entry collection, validates it before committed App mutation, rejects
+hook-time nested installation, and preserves direct `App::add_plugins` ergonomics as a lowering.
+Root static plugin-ID arrays, `PluginGroupBuilder::app`, public `add_plugin_if_missing`, and unused
+non-unique metadata are absent rather than compatibility constraints.
 
-## U4 Decisions And Remaining Questions
+## U4 Implemented Decisions And Remaining Questions
 
-U4 closes these high-cost choices:
+U4 implements these high-cost choices:
 
 - `Plugin::declaration()` is the single stable declaration authority.
 - `PluginDefinition` is an opaque advanced value that combines that declaration with explicit

@@ -74,12 +74,14 @@ pub struct ImagePrepareStats {
 #[derive(Debug, Default)]
 pub struct ImagePreparePlugin;
 
+pub const IMAGE_PREPARE_PLUGIN_ID: nara_app::PluginId =
+    nara_app::PluginId::new("nara.image.prepare");
+pub const IMAGE_PREPARE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(IMAGE_PREPARE_PLUGIN_ID, nara_app::PluginCategory::Render);
+
 impl Plugin for ImagePreparePlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.image.prepare"),
-            nara_app::PluginCategory::Render,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &IMAGE_PREPARE_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {

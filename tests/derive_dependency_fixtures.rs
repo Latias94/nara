@@ -53,7 +53,7 @@ fn reference_game_depends_only_on_the_public_root_package() {
     assert_eq!(dependency["uses_default_features"], false);
     assert_eq!(
         dependency["features"],
-        serde_json::json!(["runtime-core", "serde"])
+        serde_json::json!(["runtime-2d", "serde"])
     );
 
     let dependency_path = dependency["path"]

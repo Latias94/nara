@@ -45,8 +45,9 @@ explicit shutdown remain available. Shutdown of a poisoned app returns to `Poiso
   native authority acquisition. Their typed errors are plan or preparation failures, not plugin
   lifecycle failures, and do not poison an App.
 - `preflight(&PluginPreflightContext)` executes immediately before its plugin is committed. Its
-  narrow context exposes immutable installed-plan/structural snapshots, not `World`, arbitrary
-  resources, runner mutation, or native authority. A typed `Err` is retryable only when this pure
+  narrow context exposes immutable installed-plan data plus resources explicitly opted into the
+  `PluginPreflightResource` structural contract, not `World`, arbitrary resources, runner mutation,
+  or native authority. A typed `Err` is retryable only when this pure
   contract is obeyed and the current top-level plan commit has not already committed an entry. If an
   earlier entry has built, the enclosing attempt is already partially committed and the App is
   poisoned even though the rejecting plugin never became a shutdown owner. A preflight unwind always
@@ -100,6 +101,9 @@ error and never stop later shutdown hooks.
   prerequisites, capabilities, and conflicts are checked before custom preflight; a conflict
   declared by either the new or an installed plugin rejects the pair independent of installation
   order.
+- A stable slot may be contributed by overlapping groups only when it resolves to the same plugin
+  and complete definition identity. Two different plugins claiming the same slot are rejected as
+  `PluginPlanError::DuplicateSlot`; slot identity never becomes an implicit replacement policy.
 - `PluginGroup::build` produces a data-only `PluginGroupBuilder`. The builder records stable slots,
   repeatable definitions, nested groups, and order intent; it has no `App`, `finish(App)`, native
   authority, or public installation callback. Group membership and order derive from the resolved
@@ -124,6 +128,10 @@ error and never stop later shutdown hooks.
 - `Plugin::shutdown` is fallible and receives a narrow `PluginShutdownContext` rather than
   `&mut App`. Shutdown can access the world to release owned resources but cannot add plugins,
   schedules, or a runner.
+- A declaration that creates a first-party close obligation lists a stable
+  `PluginShutdownObligationId`. Its build hook must register that obligation explicitly; sealing
+  rejects a missing, duplicate, undeclared, or out-of-hook registration. Arbitrary resources are
+  not inferred as runtime-owned obligations from their Rust type.
 - Shutdown is reverse-order, best-effort, panic-isolated, and once-only. A hook is marked attempted
   before invocation, so a shutdown panic cannot cause a second call during `Drop`.
 - Lifecycle-control reentry and plugin/group installation from committed build or finish hooks are
@@ -132,6 +140,9 @@ error and never stop later shutdown hooks.
   code-first callers or concrete Host/driver Adapters own runner selection; product plugins do not.
 - `Drop` performs best-effort shutdown without unwinding, including when another panic is already
   unwinding. Callers that need shutdown evidence use `App::shutdown_plugins` or `App::run`.
+- `App::seal` consumes the configurable App and returns a `SealedApp` after finish hooks and
+  obligation validation succeed. The former public `finish_plugins` and `cleanup_plugins` aliases
+  are removed rather than retained as competing lifecycle entry points.
 
 `shutdown` is deliberately not named `cleanup`. In Bevy, `Plugin::cleanup` is a startup hook that
 runs after `finish` and before the first update; nara's hook is terminal reverse-order teardown.
@@ -181,10 +192,11 @@ Long-running services remain behind runners, task pools, and explicit backend st
 
 - Canonical types are `PluginLifecycleState`, `PluginHook`, `PluginFailure`,
   `PluginFailureReport`, `PluginShutdownContext`, `PluginGroupBuilder`, `PluginPlanError`,
-  `PluginPrepareError`, and the private `PluginCommitBatch` transfer.
+  `PluginPrepareError`, `PluginShutdownObligationId`, `SealedApp`, and the private
+  `PluginCommitBatch` transfer.
 - Static declaration and group-definition failures are plan/preparation failures, not lifecycle
-  hooks. They do not use `PluginHook::Metadata` or `PluginFailureSubject::Group`; those transitional
-  variants are removed when U4 replaces the imperative group path.
+  hooks. `PluginHook::Metadata`, `PluginFailureSubject::Group`, and the imperative group path are
+  absent from the canonical model.
 - Plugin declarations and resolved group provenance remain stable and inspectable after successful
   installation. Group definition/plan failure publishes no installed group. If lifecycle commit
   later fails, actual committed entries remain inspectable on the terminal App.
@@ -207,6 +219,7 @@ Long-running services remain behind runners, task pools, and explicit backend st
 | Early preflight staging | Retryable rejection leaves installed entry/group/provenance snapshots byte-for-byte unchanged | snapshot fault tests |
 | Metadata-only batch | Matching empty-suffix group/provenance changes publish atomically or leave inspection unchanged | direct App snapshot tests |
 | Driver authority | Plugin hooks cannot set/replace the runner | ignored-error and static boundary tests |
+| Explicit close ownership | Declared first-party obligations must register before sealing; arbitrary resources are not guessed | sealing and obligation tests |
 | Runner shutdown | Prior runner, runner teardown, and plugin shutdown failures remain separately observable | runner shutdown and teardown aggregation tests |
 | Built-in registration | Duplicate component registration is a contextual error, not panic | component plugin tests |
 

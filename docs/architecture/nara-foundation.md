@@ -105,7 +105,7 @@ flowchart TD
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
 | `nara` | Facade and layered preludes | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs |
-| `nara_app` | `App`, `Plugin`, terminal plugin lifecycle/failure reports, `StartupStage`, `CoreStage`, `FixedUpdateSet`, validated real/virtual/fixed/render time resources and frame outcomes | Preflight versus committed hook containment, reverse once-only cleanup, borrowing runner policy, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary |
+| `nara_app` | `App`, static `PluginDeclaration`, repeatable `PluginDefinition`, pure `PluginPlan`, `SealedApp`, terminal plugin lifecycle/failure reports, built-in and custom typed schedules, validated real/virtual/fixed/render time resources and frame outcomes | Data-only group/slot resolution, private preparation, closed hook commit, explicit shutdown obligations, reverse once-only shutdown, borrowing runner policy, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary |
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker pools with pending-only coalescing, panic isolation, first-terminal cancellation, finite drain/cancel/join, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
@@ -131,7 +131,7 @@ flowchart TD
 | `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized input state, frame-transient action outcome resolution, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
 | `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonically ordered fixed-tick admission with reserved local-action authority, pending/active/quarantine accounting, terminal fail-closed lifecycle state, and action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
-| `nara_winit` | `WinitPlugin`, `WinitRunner` | Desktop event-loop adapter that owns native windows, updates normalized input/window state, invokes scoped renderer retirement only for its targets, performs provider/native teardown after owner-drop acknowledgement, and preserves distinct primary-runner and native-teardown failures |
+| `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver that owns native windows, updates normalized input/window state, invokes scoped renderer retirement only for its targets, performs provider/native teardown after owner-drop acknowledgement, and preserves distinct primary-runner and native-teardown failures |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
 | `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldIdentitySnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, stable identity-only snapshots, open scene document slots, active document, selection sets, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
@@ -261,22 +261,32 @@ second real adapter or stronger isolation pressure.
 
 ## Implemented Authoring Foundations
 
-- `nara_app` owns an explicit terminal plugin lifecycle. Current read-only preflight rejection is
+- `nara_app` owns an explicit terminal plugin lifecycle. Read-only preflight rejection is
   retryable only before the current top-level attempt has committed a member; build/finish entry is
   committed, and later preflight failure or build/finish error/unwind panic poisons the app,
-  preserves the first error, aggregates reverse once-only cleanup failures, and prevents schedule
-  execution. Plugin groups receive a composition-only builder, cleanup receives a world-only
-  context, runners borrow
-  the app so shutdown remains observable, and mutable app entry points are fallible. Built-in
-  component registration conflicts are checked during preflight and return contextual
-  `PluginError` values rather than panic.
+  preserves the first error, aggregates reverse once-only shutdown failures, and prevents schedule
+  execution. Static declarations and repeatable typed definitions resolve through data-only groups,
+  stable slots, dependency/service/conflict/order closure, and private preparation before closed
+  App hooks. Shutdown receives a world-only context, explicit first-party obligations must register
+  before `App::seal`, runners borrow the app so shutdown remains observable, and mutable app entry
+  points are fallible. Hook-time plugin/group installation and runner selection are sticky
+  violations. Built-in component plugins read only explicitly opted-in `PluginPreflightResource`
+  structural state; component-registration conflicts reject before commit with contextual
+  `PluginError` values and leave an early App attempt retryable.
+- `nara_app` stores built-in and custom schedules in one typed `Schedules` registry. `add_systems`,
+  `configure_sets`, initialization, and inspection accept any `ScheduleLabel`; custom schedules are
+  inert until an owner calls `run_schedule`. That entry point rejects built-in labels and seals
+  before running a registered custom schedule, while the standard frame loop remains closed to the
+  engine-owned stage order.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
 - `nara_project` validates quantized durations, fixed debt policy, per-kind/aggregate worker and queue
   limits, shutdown timeouts, runtime presets, and coarse capability requests before lowering. It
   remains free of runtime side effects and accepts only bounded immutable bytes. The root product
   host reads an already authorized `FileCapability` and publishes `ProjectSettingsCandidate` only
-  after normalized requested capabilities fit the compiled ceiling. RGF-U4 still owns the separate
-  plugin service/conflict/slot closure, while RGF-U12 owns asset roots and startup-scene content.
+  after normalized requested capabilities fit the compiled ceiling. Lineage-bound
+  `ProjectRuntimePlugins` now resolves service/conflict/slot/product/schema-provider closure into an
+  immutable `RuntimePlan` without creating an App or acquiring native authority. RGF-U12 owns asset
+  roots and startup-scene content.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
 - `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
 - `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age
@@ -341,7 +351,7 @@ second real adapter or stronger isolation pressure.
   targets before provider and native-window ownership are released. Premature platform destruction
   is a sticky fault that disables acquisition. Direct first-party backend replacement uses the same
   surface-owner Drop fallback, and surface loss alone keeps the registered provider live for
-  recreation. Global plugin cleanup remains owned by `App::run`.
+  recreation. Global plugin shutdown remains owned by `App::run`.
 - `WgpuRenderBackend` is registered through the ECS resource derive rather than a hand-written
   marker, so the backend and its render resources are queryable before the first native frame.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
@@ -436,8 +446,9 @@ second real adapter or stronger isolation pressure.
   mutation. `default` is `runtime-core`, serde weak-forwards only into enabled domains, root engine
   dependencies are optional, and `nara_render_wgpu` gates its sprite/UI submitters independently.
   The gameplay prelude remains backend-free, advanced/tooling/backend surfaces are explicit, and
-  `nara_audio` has been retired because it had no production consumer. RGF-U4 still owns complete
-  pre-mutation plugin closure and configurable slots.
+  `nara_audio` has been retired because it had no production consumer. Pure product/plugin closure,
+  stable configurable slots, repeatable preparation, and frozen schema-provider input are
+  implemented; authorized startup content and Host-owned publication remain RGF-U12/RGF-U24 work.
   See ADR
   [0079](adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md).
 - `CoreStage::TaskUpdate` remains the app-owned main-thread integration point, while each business

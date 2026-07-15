@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-14
+**Last Revised**: 2026-07-15
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
 
@@ -52,7 +52,7 @@ flowchart LR
     Prepared -->|no| PrepareReject[PluginPrepareError; no App]
     Prepared -->|yes| Commit[Commit App plugin lifecycle]
     Commit --> CommitResult{Hooks succeed?}
-    CommitResult -->|no| CommitReject[PluginError; candidate failed, retained through cleanup]
+    CommitResult -->|no| CommitReject[PluginError; candidate failed, retained through shutdown]
     CommitResult -->|yes| Ready[Continue runtime startup]
 ```
 
@@ -69,8 +69,8 @@ plugin `provides`/`requires` vocabulary: a plugin plan may close over internal s
 that project data cannot request directly. Composition validates that service-capability closure
 separately, including requirements, conflicts, and group membership. A Cargo feature is the
 compile-time upper bound, not a request to install plugins. A project request is declarative data,
-not authority to compile code or mutate an app. Plugin metadata remains the runtime inspection and
-dependency contract.
+not authority to compile code or mutate an app. Static plugin declarations and resolved plan
+entries remain the runtime inspection and dependency contract.
 
 ### Root Cargo capabilities
 
@@ -127,6 +127,14 @@ Pure composition, plan, and typed preparation rejection leave the same direct `A
 later valid attempt. Diagnostics and task settings are not installed early as a workaround because
 that would already be mutation.
 
+File-backed composition binds `ProjectRuntimePlugins` to the opaque manifest/profile lineage of its
+`ProjectSettingsCandidate`. `resolve_runtime_plan` rejects a mismatched lineage before plugin
+resolution, validates required product capabilities independently from plugin closure, selects the
+resolved declarations' typed schema providers, freezes a scratch registry, and publishes an
+immutable `RuntimePlan`. The plan contains no App, World, file authority, service reservation,
+watcher, GPU owner, or live plugin object. U12 consumes this input when it builds authorized startup
+content; U24 owns the later product start transaction.
+
 ### Product plugin groups
 
 `MinimalPlugins`, `HeadlessRuntimePlugins`, and `ServerPlugins` remain runtime-policy groups under
@@ -137,6 +145,10 @@ runtime UI. A separate runtime-UI group owns runtime UI authoring and submission
 wgpu, and egui groups are additive adapter groups available only under their corresponding compiled
 capability. The fixed `DesktopWgpuPlugins` product bundle is removed; project capability
 normalization composes the same pieces without hiding their closure.
+
+When a minimal project requests 2D or runtime UI, that product group supplies the shared
+`MinimalPlugins` base; profile resolution does not add a second independently edited base. Overlap
+between 2D, UI, and wgpu groups converges only when slot/plugin/definition identities match.
 
 The base wgpu adapter owns clear/target/backend operation without permanently compiling every
 submitter. `nara_render_wgpu` uses internal optional `sprite-submitter` and `ui-submitter` features.

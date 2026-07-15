@@ -5,15 +5,15 @@ mod interaction;
 mod layout;
 mod style;
 
-use nara_app::{App, CoreStage, Plugin, PluginError};
+use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
 use nara_asset::Handle;
 use nara_core::Color;
 use nara_ecs::Component;
 use nara_ecs::schedule::IntoScheduleConfigs;
 use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_reflect::{ComponentRegistry, ComponentTypeId};
-use nara_render::{RenderPlugin, RenderTarget};
+use nara_reflect::ComponentRegistry;
+use nara_render::RenderTarget;
 
 pub use crate::codec::register_ui_components;
 pub use crate::interaction::{
@@ -213,59 +213,55 @@ impl Default for UiPanelMaterial {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UiPlugin;
 
+pub const UI_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.ui");
+pub const UI_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
+    nara_app::PluginSchemaProviderId::new("nara.ui.components");
+pub const UI_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
+    nara_reflect::ComponentSchemaProviderDefinition::new(
+        UI_SCHEMA_PROVIDER_ID,
+        nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 1),
+        register_ui_components,
+    );
+const UI_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
+    nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
+    nara_render::RENDER_PLUGIN_ID,
+    nara_input::INPUT_PLUGIN_ID,
+    nara_scene::HIERARCHY_PLUGIN_ID,
+];
+const UI_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("runtime-ui")];
+pub const UI_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(UI_PLUGIN_ID, nara_app::PluginCategory::Runtime)
+        .requires_plugins(UI_PLUGIN_REQUIREMENTS)
+        .requires_product_capabilities(UI_PRODUCT_REQUIREMENTS)
+        .provides_schema(&[UI_SCHEMA_PROVIDER_ID]);
+
 impl Plugin for UiPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.ui"),
-            nara_app::PluginCategory::Runtime,
-        )
-        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &UI_PLUGIN_DECLARATION
     }
 
-    fn preflight(&self, app: &App) -> Result<(), PluginError> {
-        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
-            return Ok(());
-        };
-
-        let root_id = ComponentTypeId::new("nara.ui.UiRoot");
-        registry
-            .validate_component_registration::<UiRoot>(&root_id)
-            .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), root_id.as_str(), error)
-            })?;
-
-        let node_id = ComponentTypeId::new("nara.ui.UiNode");
-        registry
-            .validate_component_registration::<UiNode>(&node_id)
-            .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), node_id.as_str(), error)
-            })?;
-
-        let panel_id = ComponentTypeId::new("nara.ui.UiPanel");
-        registry
-            .validate_component_registration::<UiPanel>(&panel_id)
-            .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), panel_id.as_str(), error)
-            })
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
+        let registry = nara_reflect::registry_for_plugin_preflight(
+            context,
+            UI_PLUGIN_ID,
+            UI_SCHEMA_PROVIDER_ID.as_str(),
+        )?;
+        crate::codec::validate_ui_components(registry).map_err(|error| {
+            PluginError::component_registration(UI_PLUGIN_ID, UI_SCHEMA_PROVIDER_ID.as_str(), error)
+        })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(RenderPlugin)?;
-        app.add_plugin_if_missing(nara_input::InputPlugin)?;
-        app.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
-        let registry = &mut app.world_mut()?.resource_mut::<ComponentRegistry>();
-        let root_id = ComponentTypeId::new("nara.ui.UiRoot");
-        codec::register_ui_root_component(registry).map_err(|error| {
-            PluginError::component_registration(self.plugin_id(), root_id.as_str(), error)
-        })?;
-        let node_id = ComponentTypeId::new("nara.ui.UiNode");
-        codec::register_ui_node_component(registry).map_err(|error| {
-            PluginError::component_registration(self.plugin_id(), node_id.as_str(), error)
-        })?;
-        let panel_id = ComponentTypeId::new("nara.ui.UiPanel");
-        codec::register_ui_panel_component(registry).map_err(|error| {
-            PluginError::component_registration(self.plugin_id(), panel_id.as_str(), error)
-        })?;
+        register_ui_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>()).map_err(
+            |error| {
+                PluginError::component_registration(
+                    UI_PLUGIN_ID,
+                    UI_SCHEMA_PROVIDER_ID.as_str(),
+                    error,
+                )
+            },
+        )?;
         app.init_resource::<ComputedUiLayouts>()?;
         app.init_resource::<UiInteractionState>()?;
         app.add_systems(

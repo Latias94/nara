@@ -3,7 +3,7 @@
 mod pass_plan;
 mod prepare;
 
-use nara_app::{App, CoreStage, Plugin, PluginError};
+use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
 use nara_asset::Handle;
 pub use nara_core::Color;
 use nara_core::Vec2;
@@ -406,32 +406,42 @@ impl RenderBackendStatus {
 #[derive(Debug, Default)]
 pub struct RenderPlugin;
 
-impl Plugin for RenderPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.render"),
-            nara_app::PluginCategory::Render,
-        )
+pub const RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render");
+pub const RENDER_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
+    nara_app::PluginSchemaProviderId::new("nara.render.components");
+pub const RENDER_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
+    nara_reflect::ComponentSchemaProviderDefinition::new(
+        RENDER_SCHEMA_PROVIDER_ID,
+        nara_reflect::ComponentSchemaProviderBindingId::new("nara.render.components.native", 1),
+        register_render_components,
+    );
+pub const RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
         .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .provides_schema(&[RENDER_SCHEMA_PROVIDER_ID]);
+
+impl Plugin for RenderPlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &RENDER_PLUGIN_DECLARATION
     }
 
-    fn preflight(&self, app: &App) -> Result<(), PluginError> {
-        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
-            return Ok(());
-        };
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.render.Camera2d");
-        registry
-            .validate_component_registration::<Camera2d>(&component_id)
-            .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
-            })
+        let registry = nara_reflect::registry_for_plugin_preflight(
+            context,
+            RENDER_PLUGIN_ID,
+            component_id.as_str(),
+        )?;
+        validate_render_components(registry).map_err(|error| {
+            PluginError::component_registration(RENDER_PLUGIN_ID, component_id.as_str(), error)
+        })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.render.Camera2d");
         register_render_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+                PluginError::component_registration(RENDER_PLUGIN_ID, component_id.as_str(), error)
             })?;
         app.init_resource::<ClearColor>()?;
         app.init_resource::<ExtractedViews>()?;
@@ -448,6 +458,7 @@ impl Plugin for RenderPlugin {
 pub fn register_render_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
+    validate_render_components(registry)?;
     let component_id = ComponentTypeId::new("nara.render.Camera2d");
     let schema = ComponentSchema::new(component_id, "Camera 2D", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -491,6 +502,11 @@ pub fn register_render_components(
         },
     )?;
     Ok(())
+}
+
+fn validate_render_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+    registry
+        .validate_component_registration::<Camera2d>(&ComponentTypeId::new("nara.render.Camera2d"))
 }
 
 fn camera_fields() -> [ComponentFieldSchema; 5] {

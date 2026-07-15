@@ -2464,6 +2464,51 @@ fn app_with_image_plugin(asset_root: &Path, record: AssetRecord) -> App {
     app_with_image_plugin_config(asset_root, [record], TaskPoolConfig::default())
 }
 
+#[test]
+fn image_plugin_definition_binds_canonical_limits_and_prepares_that_configuration() {
+    let limits =
+        ImageImportLimits::default().with_max_width(std::num::NonZeroU32::new(2_048).unwrap());
+    let first = crate::plugin(limits);
+    let repeated = crate::plugin(limits);
+    let changed = crate::plugin(ImageImportLimits::default());
+
+    assert_eq!(first.key(), repeated.key());
+    assert_ne!(first.key(), changed.key());
+
+    let plan = nara_app::PluginPlan::resolve((
+        nara_app::PluginDefinition::for_default::<nara_tasks::TaskPlugin>(),
+        nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
+        nara_app::PluginDefinition::for_default::<ImagePreparePlugin>(),
+        first,
+    ))
+    .unwrap();
+    let app = plan.instantiate().unwrap();
+
+    assert_eq!(app.world().resource::<ImageImporter>().limits(), limits);
+}
+
+#[test]
+fn invalid_image_plugin_limits_fail_during_preparation() {
+    let limits = ImageImportLimits::default().with_max_in_flight_bytes(ByteLimit::new(1).unwrap());
+    let plan = nara_app::PluginPlan::resolve((
+        nara_app::PluginDefinition::for_default::<nara_tasks::TaskPlugin>(),
+        nara_app::PluginDefinition::for_default::<nara_asset::AssetPlugin>(),
+        nara_app::PluginDefinition::for_default::<ImagePreparePlugin>(),
+        crate::plugin(limits),
+    ))
+    .unwrap();
+
+    assert!(matches!(
+        plan.instantiate(),
+        Err(nara_app::PluginInstantiationError::Prepare(
+            nara_app::PluginPrepareError::Failed {
+                plugin: IMAGE_PLUGIN_ID,
+                code: "nara.image.invalid-import-limits",
+            }
+        ))
+    ));
+}
+
 fn app_with_image_plugin_config(
     asset_root: &Path,
     records: impl IntoIterator<Item = AssetRecord>,
@@ -2492,11 +2537,15 @@ fn app_with_image_plugin_configuration(
 ) -> App {
     let mut app = App::new();
     app.insert_resource(task_pools).unwrap();
-    app.add_plugin(nara_reflect::ComponentRegistryPlugin)
-        .unwrap();
-    app.add_plugin(nara_render::RenderPlugin).unwrap();
-    app.add_plugin(plugin.with_source_directory(image_source_directory(asset_root)))
-        .unwrap();
+    app.add_plugins((
+        nara_reflect::ComponentRegistryPlugin,
+        nara_tasks::TaskPlugin::default(),
+        nara_asset::AssetPlugin,
+        nara_render::RenderPlugin,
+        ImagePreparePlugin,
+        plugin.with_source_directory(image_source_directory(asset_root)),
+    ))
+    .unwrap();
     {
         let mut database = app
             .world_mut()

@@ -1,17 +1,19 @@
 use nara::{backend_prelude::*, prelude::*};
 
-fn main() -> Result<(), AppRunError> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)?
-        .add_plugin(WindowPlugin {
+    app.add_plugins((
+        MinimalPlugins,
+        WindowPlugin {
             primary_window: Some(Window::new(
                 "nara windowed clear",
                 WindowResolution::new(1280, 720),
             )),
-        })?
-        .add_plugin(WinitPlugin::default())?
-        .add_plugin(WgpuRenderPlugin)?
-        .add_startup_systems(StartupStage::Scene, setup_scene)?;
+        },
+        WgpuBackendPlugins,
+    ))?;
+    app.add_systems(StartupStage::Scene, setup_scene)?;
+    WinitRunner::default().install(&mut app)?;
 
     app.run()?;
     Ok(())

@@ -338,7 +338,7 @@ RGF-U11 implements the first narrow native subset without claiming the complete 
   surface ownership and leaves a valid provider available for recreation.
 - The current native render system uses the ECS main-thread executor marker. `WgpuRenderPlugin`
   registers a backend-neutral `WindowSurfaceRetirementDriver`; Winit invokes it only for target IDs
-  that Winit registered. Global plugin cleanup remains the once-only `App::run` responsibility and
+  that Winit registered. Global plugin shutdown remains the once-only `App::run` responsibility and
   drops any remaining backend surfaces without inventing platform retirement intent. Unsolicited
   `Destroyed` records `ExternallyDestroyed`, disables acquisition, and cannot report a controlled-
   retirement success.

@@ -178,9 +178,16 @@ fn ui_rect_projection_uses_top_left_origin_and_flipped_uv() {
 
 fn ui_app() -> App {
     let mut app = App::new();
-    app.add_plugin(nara_reflect::ComponentRegistryPlugin)
-        .unwrap();
-    app.add_plugin(UiRenderPlugin).unwrap();
+    app.add_plugins((
+        nara_reflect::ComponentRegistryPlugin,
+        nara_scene::HierarchyPlugin,
+        nara_render::RenderPlugin,
+        nara_input::InputPlugin,
+        nara_image::ImagePreparePlugin,
+        nara_ui::UiPlugin,
+        UiRenderPlugin,
+    ))
+    .unwrap();
     app.world_mut()
         .expect("app should allow world mutation")
         .spawn(Camera2d {

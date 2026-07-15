@@ -1,9 +1,9 @@
 use nara::advanced_prelude::*;
 
-fn main() -> Result<(), AppRunError> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     app.add_plugins(Runtime2dPlugins)?
-        .add_startup_systems(StartupStage::Scene, setup_scene)?;
+        .add_systems(StartupStage::Scene, setup_scene)?;
 
     app.update()?;
 

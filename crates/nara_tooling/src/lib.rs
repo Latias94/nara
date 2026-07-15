@@ -28,12 +28,16 @@ pub use workspace::{
 #[derive(Debug, Default)]
 pub struct ToolingPlugin;
 
+pub const TOOLING_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.tooling");
+const TOOLING_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("tooling")];
+pub const TOOLING_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(TOOLING_PLUGIN_ID, nara_app::PluginCategory::Tooling)
+        .requires_product_capabilities(TOOLING_PRODUCT_REQUIREMENTS);
+
 impl Plugin for ToolingPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.tooling"),
-            nara_app::PluginCategory::Tooling,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &TOOLING_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {

@@ -451,12 +451,13 @@ impl ActionOutcomes {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct InputPlugin;
 
+pub const INPUT_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.input");
+pub const INPUT_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(INPUT_PLUGIN_ID, nara_app::PluginCategory::Input);
+
 impl Plugin for InputPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.input"),
-            nara_app::PluginCategory::Runtime,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &INPUT_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {

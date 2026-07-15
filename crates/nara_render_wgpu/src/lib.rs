@@ -19,7 +19,7 @@ use crate::quad::{
     WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers_for_phase,
 };
 use crate::surface::{SurfaceDropReason, WgpuSurfaceState};
-use nara_app::{App, CoreStage, Plugin, PluginCleanupContext, PluginError};
+use nara_app::{App, CoreStage, Plugin, PluginError, PluginShutdownContext};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_asset::Assets;
 use nara_ecs::{Query, Res, ResMut, schedule::IntoScheduleConfigs, system::NonSendMarker};
@@ -62,22 +62,29 @@ const WGPU_RENDER_BACKEND: &str = "wgpu";
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuRenderPlugin;
 
+pub const WGPU_RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render-wgpu");
+pub const WGPU_BACKEND_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
+    nara_app::PluginShutdownObligationId::new("nara.render-wgpu.backend");
+const WGPU_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("render-wgpu")];
+pub const WGPU_RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(WGPU_RENDER_PLUGIN_ID, nara_app::PluginCategory::Backend)
+        .requires_plugins(&[nara_render::RENDER_PLUGIN_ID])
+        .requires_product_capabilities(WGPU_RENDER_PRODUCT_REQUIREMENTS)
+        .shutdown_obligations(&[WGPU_BACKEND_SHUTDOWN_OBLIGATION]);
+
 impl Plugin for WgpuRenderPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.render-wgpu"),
-            nara_app::PluginCategory::Backend,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &WGPU_RENDER_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(nara_render::RenderPlugin)?;
         app.init_resource::<WgpuRenderBackend>()?;
         app.init_resource::<RenderBackendStatus>()?;
         let world = app.world_mut()?;
         if let Some(driver) = world.get_resource::<WindowSurfaceRetirementDriver>() {
             return Err(PluginError::SetupFailed {
-                plugin: self.metadata().id,
+                plugin: WGPU_RENDER_PLUGIN_ID,
                 message: format!(
                     "window surface retirement driver is already owned by {}",
                     driver.driver()
@@ -95,16 +102,17 @@ impl Plugin for WgpuRenderPlugin {
             CoreStage::Render,
             render_wgpu_surfaces.after(begin_render_frame),
         )?;
+        app.register_plugin_shutdown_obligation(WGPU_BACKEND_SHUTDOWN_OBLIGATION)?;
         Ok(())
     }
 
-    fn cleanup(&self, context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
+    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
         if let Some(mut backend) = context.world_mut().get_resource_mut::<WgpuRenderBackend>() {
             backend
                 .clear_gpu_resources(SurfaceDropReason::BackendCleanup)
                 .map_err(|_| PluginError::SetupFailed {
-                    plugin: self.metadata().id,
-                    message: "failed to retire a window surface during cleanup".to_owned(),
+                    plugin: WGPU_RENDER_PLUGIN_ID,
+                    message: "failed to retire a window surface during shutdown".to_owned(),
                 })?;
         }
         Ok(())
@@ -319,9 +327,12 @@ mod tests {
         assert!(world.contains_resource::<WgpuRenderBackend>());
 
         let mut app = App::new();
-        app.add_plugin(nara_reflect::ComponentRegistryPlugin)
-            .unwrap();
-        app.add_plugin(WgpuRenderPlugin).unwrap();
+        app.add_plugins((
+            nara_reflect::ComponentRegistryPlugin,
+            nara_render::RenderPlugin,
+            WgpuRenderPlugin,
+        ))
+        .unwrap();
 
         assert!(app.world().contains_resource::<WgpuRenderBackend>());
         assert!(app.world().contains_resource::<ExtractedViews>());

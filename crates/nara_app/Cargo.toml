@@ -7,5 +7,6 @@ license.workspace = true
 
 [dependencies]
 bevy_ecs.workspace = true
+blake3.workspace = true
 nara_ecs.workspace = true
 thiserror.workspace = true

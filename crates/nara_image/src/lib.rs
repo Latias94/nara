@@ -20,10 +20,14 @@ pub use limits::{
     ImageImportLimits, ImageImportLimitsError, ImageImportMemoryPlan,
 };
 pub use prepare::{
-    ImagePreparePlugin, ImagePrepareStats, PreparedImageResource, image_descriptor_hash,
-    image_resource_key, prepare_images,
+    IMAGE_PREPARE_PLUGIN_DECLARATION, IMAGE_PREPARE_PLUGIN_ID, ImagePreparePlugin,
+    ImagePrepareStats, PreparedImageResource, image_descriptor_hash, image_resource_key,
+    prepare_images,
 };
-pub use reload::{ImagePlugin, ImageReloadError, ImageReloadStats};
+pub use reload::{
+    IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImagePlugin, ImageReloadError, ImageReloadStats,
+    plugin,
+};
 
 #[cfg(test)]
 mod tests;

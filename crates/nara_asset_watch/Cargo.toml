@@ -12,5 +12,8 @@ nara_asset.workspace = true
 nara_ecs.workspace = true
 notify.workspace = true
 
+[dev-dependencies]
+nara_tasks.workspace = true
+
 [features]
 default = []

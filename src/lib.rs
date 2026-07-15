@@ -73,298 +73,7 @@ pub mod __macro_support {
 }
 
 #[cfg(feature = "runtime-core")]
-mod product {
-    use nara_app::{
-        App, Plugin, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId,
-        PluginGroupMetadata, PluginId,
-    };
-
-    const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.scene.hierarchy");
-    const COMPONENT_REGISTRY_PLUGIN_ID: PluginId = nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID;
-    const DIAGNOSTIC_PLUGIN_ID: PluginId = PluginId::new("nara.diagnostic");
-    const TASK_PLUGIN_ID: PluginId = PluginId::new("nara.tasks");
-    const ASSET_PLUGIN_ID: PluginId = PluginId::new("nara.asset");
-    const TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.transform");
-    const INPUT_PLUGIN_ID: PluginId = PluginId::new("nara.input");
-    const GAMEPLAY_COMMAND_PLUGIN_ID: PluginId = PluginId::new("nara.gameplay.commands");
-    const SERVER_TIME_POLICY_PLUGIN_ID: PluginId = PluginId::new("nara.server-time-policy");
-
-    const MINIMAL_PLUGIN_IDS: &[PluginId] = &[
-        COMPONENT_REGISTRY_PLUGIN_ID,
-        HIERARCHY_PLUGIN_ID,
-        DIAGNOSTIC_PLUGIN_ID,
-        TASK_PLUGIN_ID,
-        ASSET_PLUGIN_ID,
-        TRANSFORM_PLUGIN_ID,
-        INPUT_PLUGIN_ID,
-    ];
-
-    const HEADLESS_RUNTIME_PLUGIN_IDS: &[PluginId] = &[
-        COMPONENT_REGISTRY_PLUGIN_ID,
-        HIERARCHY_PLUGIN_ID,
-        DIAGNOSTIC_PLUGIN_ID,
-        TASK_PLUGIN_ID,
-        ASSET_PLUGIN_ID,
-        TRANSFORM_PLUGIN_ID,
-        INPUT_PLUGIN_ID,
-        GAMEPLAY_COMMAND_PLUGIN_ID,
-    ];
-
-    const SERVER_PLUGIN_IDS: &[PluginId] = &[
-        SERVER_TIME_POLICY_PLUGIN_ID,
-        COMPONENT_REGISTRY_PLUGIN_ID,
-        HIERARCHY_PLUGIN_ID,
-        DIAGNOSTIC_PLUGIN_ID,
-        TASK_PLUGIN_ID,
-        ASSET_PLUGIN_ID,
-        TRANSFORM_PLUGIN_ID,
-        GAMEPLAY_COMMAND_PLUGIN_ID,
-    ];
-
-    /// Minimal runtime defaults for headless examples and code-first games.
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct MinimalPlugins;
-
-    impl PluginGroup for MinimalPlugins {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(
-                PluginGroupId::new("nara.plugins.minimal"),
-                MINIMAL_PLUGIN_IDS,
-            )
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugin_if_missing(nara_reflect::ComponentRegistryPlugin)?;
-            group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
-            group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
-            group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
-            group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
-            group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
-            group.add_plugin_if_missing(nara_input::InputPlugin)?;
-            Ok(())
-        }
-    }
-
-    /// Local headless defaults with input observations and semantic gameplay commands.
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct HeadlessRuntimePlugins;
-
-    impl PluginGroup for HeadlessRuntimePlugins {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(
-                PluginGroupId::new("nara.plugins.headless-runtime"),
-                HEADLESS_RUNTIME_PLUGIN_IDS,
-            )
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugins(MinimalPlugins)?;
-            group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin::default())?;
-            Ok(())
-        }
-    }
-
-    /// Dedicated-server defaults without raw input, window, render, or tooling installation.
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct ServerPlugins;
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct ServerTimePolicyPlugin;
-
-    impl Plugin for ServerTimePolicyPlugin {
-        fn metadata(&self) -> nara_app::PluginMetadata {
-            nara_app::PluginMetadata::new(
-                SERVER_TIME_POLICY_PLUGIN_ID,
-                nara_app::PluginCategory::Core,
-            )
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            let Some(mut fixed_time) = app.world_mut()?.get_resource_mut::<nara_app::FixedTime>()
-            else {
-                return Err(PluginError::SetupFailed {
-                    plugin: SERVER_TIME_POLICY_PLUGIN_ID,
-                    message: "server time policy requires FixedTime".to_owned(),
-                });
-            };
-            fixed_time
-                .set_catch_up_policy(nara_app::FixedCatchUpPolicy::PreserveDebt)
-                .map_err(|error| PluginError::SetupFailed {
-                    plugin: SERVER_TIME_POLICY_PLUGIN_ID,
-                    message: error.to_string(),
-                })?;
-            Ok(())
-        }
-    }
-
-    impl PluginGroup for ServerPlugins {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(PluginGroupId::new("nara.plugins.server"), SERVER_PLUGIN_IDS)
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugin_if_missing(ServerTimePolicyPlugin)?;
-            group.add_plugin_if_missing(nara_reflect::ComponentRegistryPlugin)?;
-            group.add_plugin_if_missing(nara_scene::HierarchyPlugin)?;
-            group.add_plugin_if_missing(nara_diagnostic::DiagnosticsPlugin::default())?;
-            group.add_plugin_if_missing(nara_tasks::TaskPlugin::default())?;
-            group.add_plugin_if_missing(nara_asset::AssetPlugin)?;
-            group.add_plugin_if_missing(nara_transform::TransformPlugin)?;
-            group.add_plugin_if_missing(nara_gameplay::GameplayCommandPlugin::default())?;
-            Ok(())
-        }
-    }
-
-    #[cfg(feature = "runtime-2d")]
-    const RUNTIME_2D_PLUGIN_IDS: &[PluginId] = &[
-        COMPONENT_REGISTRY_PLUGIN_ID,
-        HIERARCHY_PLUGIN_ID,
-        DIAGNOSTIC_PLUGIN_ID,
-        TASK_PLUGIN_ID,
-        ASSET_PLUGIN_ID,
-        TRANSFORM_PLUGIN_ID,
-        INPUT_PLUGIN_ID,
-        PluginId::new("nara.sprite"),
-        PluginId::new("nara.tilemap"),
-        PluginId::new("nara.render"),
-        PluginId::new("nara.image"),
-        PluginId::new("nara.sprite-render"),
-    ];
-
-    #[cfg(feature = "runtime-2d")]
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct Runtime2dPlugins;
-
-    #[cfg(feature = "runtime-2d")]
-    impl PluginGroup for Runtime2dPlugins {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(
-                PluginGroupId::new("nara.plugins.runtime-2d"),
-                RUNTIME_2D_PLUGIN_IDS,
-            )
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugins(MinimalPlugins)?;
-            group.add_plugin_if_missing(nara_sprite::SpritePlugin)?;
-            group.add_plugin_if_missing(nara_tilemap::TilemapPlugin)?;
-            group.add_plugin_if_missing(nara_render::RenderPlugin)?;
-            group.add_plugin_if_missing(nara_image::ImagePlugin::default())?;
-            group.add_plugin_if_missing(nara_sprite_render::SpriteRenderPlugin)?;
-            Ok(())
-        }
-    }
-
-    #[cfg(feature = "runtime-ui")]
-    const RUNTIME_UI_PLUGIN_IDS: &[PluginId] = &[
-        COMPONENT_REGISTRY_PLUGIN_ID,
-        HIERARCHY_PLUGIN_ID,
-        DIAGNOSTIC_PLUGIN_ID,
-        TASK_PLUGIN_ID,
-        ASSET_PLUGIN_ID,
-        TRANSFORM_PLUGIN_ID,
-        INPUT_PLUGIN_ID,
-        PluginId::new("nara.render"),
-        PluginId::new("nara.image"),
-        PluginId::new("nara.ui"),
-        PluginId::new("nara.ui-render"),
-    ];
-
-    #[cfg(feature = "runtime-ui")]
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct RuntimeUiPlugins;
-
-    #[cfg(feature = "runtime-ui")]
-    impl PluginGroup for RuntimeUiPlugins {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(
-                PluginGroupId::new("nara.plugins.runtime-ui"),
-                RUNTIME_UI_PLUGIN_IDS,
-            )
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugins(MinimalPlugins)?;
-            group.add_plugin_if_missing(nara_render::RenderPlugin)?;
-            group.add_plugin_if_missing(nara_image::ImagePlugin::default())?;
-            group.add_plugin_if_missing(nara_ui::UiPlugin)?;
-            group.add_plugin_if_missing(nara_ui_render::UiRenderPlugin)?;
-            Ok(())
-        }
-    }
-
-    #[cfg(feature = "desktop-winit")]
-    const DESKTOP_WINIT_PLUGIN_IDS: &[PluginId] =
-        &[PluginId::new("nara.window"), PluginId::new("nara.winit")];
-
-    #[cfg(feature = "desktop-winit")]
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct DesktopWinitPlugins;
-
-    #[cfg(feature = "desktop-winit")]
-    impl PluginGroup for DesktopWinitPlugins {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(
-                PluginGroupId::new("nara.plugins.desktop-winit"),
-                DESKTOP_WINIT_PLUGIN_IDS,
-            )
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugin_if_missing(nara_window::WindowPlugin::default())?;
-            group.add_plugin_if_missing(nara_winit::WinitPlugin::default())?;
-            Ok(())
-        }
-    }
-
-    #[cfg(feature = "render-wgpu")]
-    const WGPU_BACKEND_PLUGIN_IDS: &[PluginId] = &[
-        PluginId::new("nara.render"),
-        PluginId::new("nara.render-wgpu"),
-    ];
-
-    #[cfg(feature = "render-wgpu")]
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct WgpuBackendPlugins;
-
-    #[cfg(feature = "render-wgpu")]
-    impl PluginGroup for WgpuBackendPlugins {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(
-                PluginGroupId::new("nara.plugins.render-wgpu"),
-                WGPU_BACKEND_PLUGIN_IDS,
-            )
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugin_if_missing(nara_render::RenderPlugin)?;
-            group.add_plugin_if_missing(nara_render_wgpu::WgpuRenderPlugin)?;
-            Ok(())
-        }
-    }
-
-    #[cfg(feature = "tooling")]
-    const TOOLING_PLUGIN_IDS: &[PluginId] = &[PluginId::new("nara.tooling")];
-
-    #[cfg(feature = "tooling")]
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct ToolingPlugins;
-
-    #[cfg(feature = "tooling")]
-    impl PluginGroup for ToolingPlugins {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(
-                PluginGroupId::new("nara.plugins.tooling"),
-                TOOLING_PLUGIN_IDS,
-            )
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugin_if_missing(nara_tooling::ToolingPlugin)?;
-            Ok(())
-        }
-    }
-}
+mod product;
 
 #[cfg(feature = "desktop-winit")]
 pub use product::DesktopWinitPlugins;
@@ -387,8 +96,9 @@ pub mod prelude {
     pub use crate::RuntimeUiPlugins;
     pub use crate::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
     pub use nara_app::{
-        App, AppExit, AppRunError, CoreStage, FixedCatchUpPolicy, FixedTime, FixedUpdateSet,
-        Plugin, PluginError, PluginGroup, RealTime, RuntimeTimeSettings, StartupStage, VirtualTime,
+        AddPluginsError, App, AppExit, AppRunError, CoreStage, FixedCatchUpPolicy, FixedTime,
+        FixedUpdateSet, Plugin, PluginError, PluginGroup, RealTime, RuntimeTimeSettings,
+        StartupStage, VirtualTime,
     };
     pub use nara_asset::{
         Asset, AssetId, AssetPath, AssetRef, AssetServer, Assets, Handle, StableAssetId,
@@ -447,10 +157,15 @@ pub mod prelude {
 pub mod advanced_prelude {
     pub use crate::prelude::*;
     pub use nara_app::{
-        AppExitRequests, AppFrameOutcome, FixedTimeError, PluginCapability, PluginCategory,
-        PluginCleanupContext, PluginCleanupError, PluginFailure, PluginFailureReport,
-        PluginFailureSubject, PluginGroupBuilder, PluginGroupId, PluginGroupMetadata, PluginHook,
-        PluginId, PluginLifecycleState, PluginMetadata, RenderTime, RuntimeFrameStatus,
+        AppExitRequests, AppFrameOutcome, AppScheduleRunError, EditedPluginGroup, FixedTimeError,
+        PluginCapability, PluginCategory, PluginConfigurationFingerprint, PluginDeclaration,
+        PluginDefinition, PluginDefinitionId, PluginDefinitionKey, PluginFailure,
+        PluginFailureReport, PluginGroupBuilder, PluginGroupId, PluginHook, PluginHookMutation,
+        PluginId, PluginInstantiationError, PluginLifecycleState, PluginPlan, PluginPlanEntry,
+        PluginPlanError, PluginPlanFingerprint, PluginPrepareError, PluginPrepareFailure,
+        PluginProductCapability, PluginSchemaProviderId, PluginServiceId, PluginShutdownContext,
+        PluginShutdownError, PluginShutdownObligationId, PluginSlot, PluginSlotId,
+        PluginSlotPresence, RenderTime, ResolvedPluginGroup, RuntimeFrameStatus, SealedApp,
         TaskUpdateSet, TimeFrameError, TimeFrameResource, TimeSettingsError,
     };
     pub use nara_asset::{
@@ -606,13 +321,13 @@ pub mod backend_prelude {
         WindowResolution, apply_window_event, push_window_event,
     };
     #[cfg(feature = "desktop-winit")]
-    pub use nara_winit::{WinitControlFlow, WinitPlugin, WinitRunner};
+    pub use nara_winit::{WinitControlFlow, WinitRunner};
 }
 
 #[cfg(all(test, feature = "runtime-core"))]
 mod tests {
     use super::*;
-    use nara_app::{App, FixedCatchUpPolicy, PluginGroupId};
+    use nara_app::{App, FixedCatchUpPolicy, PluginGroup, PluginGroupId};
     use nara_ecs::schedule::IntoScheduleConfigs;
 
     #[test]
@@ -698,7 +413,7 @@ mod tests {
         );
         assert!(
             app.installed_plugin_groups()
-                .any(|group| group.id == PluginGroupId::new("nara.plugins.server"))
+                .any(|group| group.id() == PluginGroupId::new("nara.plugins.server"))
         );
     }
 
@@ -899,9 +614,8 @@ mod tests {
         let mut app = App::new();
         let one = nara_core::ItemLimit::new(1).unwrap();
         let config = nara_tasks::TaskPoolConfig::threaded(one, one, one).unwrap();
-        app.add_plugin(nara_tasks::TaskPlugin::new(config)).unwrap();
-
-        app.add_plugins(ServerPlugins).unwrap();
+        app.add_plugins(ServerPlugins.edit().configure(nara_tasks::plugin(config)))
+            .unwrap();
 
         assert_eq!(
             *app.world().resource::<nara_tasks::TaskPools>().config(),
@@ -914,8 +628,8 @@ mod tests {
         let mut app = App::new();
         let one = nara_core::ItemLimit::new(1).unwrap();
         let config = nara_tasks::TaskPoolConfig::threaded(one, one, one).unwrap();
-        app.add_plugin(nara_tasks::TaskPlugin::new(config)).unwrap();
-        app.add_plugins(ServerPlugins).unwrap();
+        app.add_plugins(ServerPlugins.edit().configure(nara_tasks::plugin(config)))
+            .unwrap();
 
         let (started_sender, started_receiver) = std::sync::mpsc::sync_channel(0);
         let (release_sender, release_receiver) = std::sync::mpsc::sync_channel(1);
@@ -985,11 +699,11 @@ mod tests {
         );
         let metadata = app
             .installed_plugin_groups()
-            .find(|group| group.id == PluginGroupId::new("nara.plugins.runtime-2d"))
+            .find(|group| group.id() == PluginGroupId::new("nara.plugins.runtime-2d"))
             .unwrap();
         assert!(
             !metadata
-                .plugins
+                .plugins()
                 .contains(&nara_app::PluginId::new("nara.ui"))
         );
     }
@@ -1003,11 +717,11 @@ mod tests {
         assert!(app.world().contains_resource::<nara_ui_render::UiBatches>());
         let metadata = app
             .installed_plugin_groups()
-            .find(|group| group.id == PluginGroupId::new("nara.plugins.runtime-ui"))
+            .find(|group| group.id() == PluginGroupId::new("nara.plugins.runtime-ui"))
             .unwrap();
         assert!(
             !metadata
-                .plugins
+                .plugins()
                 .contains(&nara_app::PluginId::new("nara.sprite"))
         );
     }

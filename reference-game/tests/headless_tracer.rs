@@ -1,8 +1,8 @@
 use std::{process::Command, time::Duration};
 
 use nara::{
-    app::{PluginError, PluginLifecycleState},
-    prelude::{App, ComponentRegistry, FixedTime, MinimalPlugins},
+    app::{AddPluginsError, PluginLifecycleState, PluginPlanError},
+    prelude::{App, FixedTime, MinimalPlugins},
 };
 use nara_reference_game::{
     REFERENCE_GAME_PLUGIN_ID, ReferenceGameError, ReferenceGamePlugin, TracerSnapshot,
@@ -18,8 +18,8 @@ fn fixed_tick_tracer_is_deterministic_and_zero_time_does_not_advance() {
     assert_eq!(first, TracerSnapshot::after_three_ticks());
 
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins).unwrap();
-    app.add_plugin(ReferenceGamePlugin).unwrap();
+    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))
+        .unwrap();
 
     let startup = app.run_once(Duration::ZERO).unwrap();
     assert_eq!(startup.status.fixed_steps, 0);
@@ -62,41 +62,33 @@ fn headless_binary_runs_the_public_tracer() {
 }
 
 #[test]
-fn missing_component_registry_fails_preflight_without_poisoning_the_app() {
+fn missing_declared_registry_plugin_fails_pure_planning_and_is_retryable() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins).unwrap();
-    app.world_mut()
-        .unwrap()
-        .remove_resource::<ComponentRegistry>();
-
     let Err(error) = app.add_plugin(ReferenceGamePlugin) else {
-        panic!("reference-game plugin unexpectedly accepted a missing component registry");
+        panic!("reference-game plugin unexpectedly accepted a missing declared dependency");
     };
 
     assert!(matches!(
         error,
-        PluginError::ComponentRegistrationFailed {
+        AddPluginsError::Plan(PluginPlanError::MissingPlugin {
             plugin,
-            ref component,
-            ..
-        } if plugin == REFERENCE_GAME_PLUGIN_ID && component == "component-schema-catalog"
+            required: _,
+        }) if plugin == REFERENCE_GAME_PLUGIN_ID
     ));
     assert_eq!(
         app.plugin_lifecycle_state(),
         PluginLifecycleState::Configuring
     );
 
-    app.world_mut()
-        .unwrap()
-        .insert_resource(ComponentRegistry::new());
-    app.add_plugin(ReferenceGamePlugin).unwrap();
+    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))
+        .unwrap();
 }
 
 #[test]
 fn snapshot_capture_reports_a_missing_fixed_clock() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins).unwrap();
-    app.add_plugin(ReferenceGamePlugin).unwrap();
+    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))
+        .unwrap();
     app.run_once(Duration::ZERO).unwrap();
     app.world_mut().unwrap().remove_resource::<FixedTime>();
 

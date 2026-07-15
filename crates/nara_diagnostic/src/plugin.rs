@@ -20,6 +20,10 @@ pub struct DiagnosticsPlugin {
     pressure_settings: RuntimePressureSettings,
 }
 
+pub const DIAGNOSTICS_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.diagnostic");
+pub const DIAGNOSTICS_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(DIAGNOSTICS_PLUGIN_ID, nara_app::PluginCategory::Core);
+
 impl DiagnosticsPlugin {
     #[must_use]
     pub const fn new(
@@ -44,11 +48,8 @@ impl DiagnosticsPlugin {
 }
 
 impl Plugin for DiagnosticsPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.diagnostic"),
-            nara_app::PluginCategory::Core,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &DIAGNOSTICS_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {

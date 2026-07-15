@@ -793,13 +793,13 @@ fn shutdown_timeouts_are_bounded_per_phase_and_in_aggregate() {
 }
 
 #[test]
-fn plugin_cleanup_shuts_down_only_plugin_owned_pools() {
+fn plugin_shutdown_shuts_down_only_plugin_owned_pools() {
     let mut owned_app = App::new();
     owned_app
         .add_plugin(TaskPlugin::new(test_config(1)))
         .unwrap();
     assert!(owned_app.world().contains_resource::<TaskPools>());
-    owned_app.cleanup_plugins().unwrap();
+    owned_app.shutdown_plugins().unwrap();
     assert!(!owned_app.world().contains_resource::<TaskPools>());
     assert!(owned_app.world().contains_resource::<TaskShutdownReport>());
 
@@ -808,7 +808,7 @@ fn plugin_cleanup_shuts_down_only_plugin_owned_pools() {
     external_app
         .add_plugin(TaskPlugin::new(test_config(1)))
         .unwrap();
-    external_app.cleanup_plugins().unwrap();
+    external_app.shutdown_plugins().unwrap();
     assert!(external_app.world().contains_resource::<TaskPools>());
     assert!(
         !external_app
@@ -821,7 +821,7 @@ fn plugin_cleanup_shuts_down_only_plugin_owned_pools() {
         .add_plugin(TaskPlugin::new(test_config(1)))
         .unwrap();
     replaced_app.insert_resource(inline_pools(2)).unwrap();
-    replaced_app.cleanup_plugins().unwrap();
+    replaced_app.shutdown_plugins().unwrap();
     assert_eq!(
         replaced_app
             .world()
@@ -840,7 +840,7 @@ fn plugin_cleanup_shuts_down_only_plugin_owned_pools() {
 }
 
 #[test]
-fn plugin_cleanup_preserves_a_timed_out_shutdown_report() {
+fn plugin_shutdown_preserves_a_timed_out_shutdown_report() {
     let mut app = App::new();
     app.add_plugin(TaskPlugin::new(test_config(1))).unwrap();
     let (started_tx, started_rx) = mpsc::channel();
@@ -864,7 +864,7 @@ fn plugin_cleanup_preserves_a_timed_out_shutdown_report() {
         .shutdown();
     assert!(first_report.timed_out());
     assert_eq!(first_report.detached_workers(), 1);
-    assert!(app.cleanup_plugins().is_err());
+    assert!(app.shutdown_plugins().is_err());
     let report = app.world().resource::<TaskShutdownReport>();
     assert!(report.timed_out());
     assert_eq!(report.detached_workers(), 1);

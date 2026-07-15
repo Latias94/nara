@@ -9,8 +9,6 @@ mod tests;
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_ecs::schedule::IntoScheduleConfigs;
-use nara_render::RenderPlugin;
-use nara_ui::UiPlugin;
 
 pub use crate::extract::extract_ui;
 pub use crate::queue::{
@@ -26,18 +24,25 @@ pub use crate::types::{
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UiRenderPlugin;
 
+pub const UI_RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.ui-render");
+const UI_RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
+    nara_ui::UI_PLUGIN_ID,
+    nara_render::RENDER_PLUGIN_ID,
+    nara_image::IMAGE_PREPARE_PLUGIN_ID,
+];
+const UI_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("runtime-ui")];
+pub const UI_RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(UI_RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
+        .requires_plugins(UI_RENDER_PLUGIN_REQUIREMENTS)
+        .requires_product_capabilities(UI_RENDER_PRODUCT_REQUIREMENTS);
+
 impl Plugin for UiRenderPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.ui-render"),
-            nara_app::PluginCategory::Render,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &UI_RENDER_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(UiPlugin)?;
-        app.add_plugin_if_missing(RenderPlugin)?;
-        app.add_plugin_if_missing(nara_image::ImagePreparePlugin)?;
         app.init_resource::<ExtractedUiItems>()?;
         app.init_resource::<QueuedUiItems>()?;
         app.init_resource::<UiBatches>()?;

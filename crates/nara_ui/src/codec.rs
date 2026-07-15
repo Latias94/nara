@@ -15,13 +15,20 @@ use crate::{UiNode, UiPanel, UiPanelMaterial, UiRoot, UiStyle, UiVal};
 pub fn register_ui_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
+    validate_ui_components(registry)?;
+    register_ui_root_component(registry)?;
+    register_ui_node_component(registry)?;
+    register_ui_panel_component(registry)
+}
+
+pub(crate) fn validate_ui_components(
+    registry: &ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
     registry.validate_component_registration::<UiRoot>(&ComponentTypeId::new("nara.ui.UiRoot"))?;
     registry.validate_component_registration::<UiNode>(&ComponentTypeId::new("nara.ui.UiNode"))?;
     registry
         .validate_component_registration::<UiPanel>(&ComponentTypeId::new("nara.ui.UiPanel"))?;
-    register_ui_root_component(registry)?;
-    register_ui_node_component(registry)?;
-    register_ui_panel_component(registry)
+    Ok(())
 }
 
 pub(crate) fn register_ui_root_component(

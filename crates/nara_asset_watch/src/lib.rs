@@ -12,8 +12,8 @@ use std::{
 
 use nara_app::{App, CoreStage, Plugin, PluginError, TaskUpdateSet};
 use nara_asset::{
-    AssetPath, AssetPathError, AssetPlugin, AssetSourceChange, AssetSourceChangeKind,
-    AssetSourceChanges, AssetSourceRoot,
+    AssetPath, AssetPathError, AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges,
+    AssetSourceRoot,
 };
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use notify::{
@@ -442,6 +442,17 @@ pub struct AssetWatchPlugin {
     root: PathBuf,
 }
 
+pub const ASSET_WATCH_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.asset-watch");
+pub const ASSET_WATCH_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
+    nara_app::PluginShutdownObligationId::new("nara.asset-watch.watcher");
+const ASSET_WATCH_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("asset-watch")];
+pub const ASSET_WATCH_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(ASSET_WATCH_PLUGIN_ID, nara_app::PluginCategory::Asset)
+        .requires_plugins(&[nara_asset::ASSET_PLUGIN_ID])
+        .requires_product_capabilities(ASSET_WATCH_PRODUCT_REQUIREMENTS)
+        .shutdown_obligations(&[ASSET_WATCH_SHUTDOWN_OBLIGATION]);
+
 impl AssetWatchPlugin {
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -450,15 +461,11 @@ impl AssetWatchPlugin {
 }
 
 impl Plugin for AssetWatchPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.asset-watch"),
-            nara_app::PluginCategory::Asset,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &ASSET_WATCH_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(AssetPlugin)?;
         let watch_root = if app.world().contains_resource::<AssetSourceRoot>() {
             let existing_root = app
                 .world()
@@ -467,12 +474,12 @@ impl Plugin for AssetWatchPlugin {
                 .to_path_buf();
             if !same_lexical_path(&existing_root, &self.root).map_err(|error| {
                 PluginError::SetupFailed {
-                    plugin: self.plugin_id(),
+                    plugin: ASSET_WATCH_PLUGIN_ID,
                     message: error.to_string(),
                 }
             })? {
                 return Err(PluginError::SetupFailed {
-                    plugin: self.plugin_id(),
+                    plugin: ASSET_WATCH_PLUGIN_ID,
                     message: format!(
                         "asset watch root '{}' does not match AssetSourceRoot '{}'",
                         self.root.display(),
@@ -491,7 +498,7 @@ impl Plugin for AssetWatchPlugin {
         let watcher =
             AssetWatcher::watch_recursive(&watch_root, queue.clone()).map_err(|error| {
                 PluginError::SetupFailed {
-                    plugin: self.plugin_id(),
+                    plugin: ASSET_WATCH_PLUGIN_ID,
                     message: error.to_string(),
                 }
             })?;
@@ -501,6 +508,15 @@ impl Plugin for AssetWatchPlugin {
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
         )?;
+        app.register_plugin_shutdown_obligation(ASSET_WATCH_SHUTDOWN_OBLIGATION)?;
+        Ok(())
+    }
+
+    fn shutdown(
+        &self,
+        context: &mut nara_app::PluginShutdownContext<'_>,
+    ) -> Result<(), PluginError> {
+        context.world_mut().remove_resource::<AssetWatcher>();
         Ok(())
     }
 }
@@ -639,7 +655,7 @@ fn normalize_lexical(path: impl AsRef<Path>) -> PathBuf {
 mod tests {
     use super::*;
     use nara_asset::{
-        AssetRecord, AssetReloadRequestKind, AssetReloadRequests, AssetSourceKind,
+        AssetPlugin, AssetRecord, AssetReloadRequestKind, AssetReloadRequests, AssetSourceKind,
         ProjectAssetDatabase, StableAssetId,
     };
     use std::{
@@ -657,6 +673,11 @@ mod tests {
             std::process::id(),
             stamp
         ))
+    }
+
+    fn install_asset_prerequisites(app: &mut App) {
+        app.add_plugins((nara_tasks::TaskPlugin::default(), AssetPlugin))
+            .unwrap();
     }
 
     #[test]
@@ -901,7 +922,7 @@ mod tests {
         app.insert_resource(queue).unwrap();
         app.insert_resource(AssetWatchDiagnostics::default())
             .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_prerequisites(&mut app);
         app.world_mut()
             .unwrap()
             .resource_mut::<ProjectAssetDatabase>()
@@ -935,7 +956,7 @@ mod tests {
         app.insert_resource(queue).unwrap();
         app.insert_resource(AssetWatchDiagnostics::default())
             .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_prerequisites(&mut app);
         app.add_systems(
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
@@ -965,7 +986,7 @@ mod tests {
         app.insert_resource(queue).unwrap();
         app.insert_resource(AssetWatchDiagnostics::default())
             .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_prerequisites(&mut app);
         app.add_systems(
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
@@ -1005,7 +1026,7 @@ mod tests {
         app.insert_resource(queue).unwrap();
         app.insert_resource(AssetWatchDiagnostics::default())
             .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_prerequisites(&mut app);
         app.add_systems(
             CoreStage::TaskUpdate,
             drain_asset_watch_events.in_set(TaskUpdateSet::Poll),
@@ -1026,12 +1047,16 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(AssetSourceRoot::new(&configured_root))
             .unwrap();
+        install_asset_prerequisites(&mut app);
 
         let Err(error) = app.add_plugin(AssetWatchPlugin::new(&watch_root)) else {
             panic!("watch plugin should reject a root that differs from AssetSourceRoot");
         };
 
-        assert!(matches!(error, PluginError::SetupFailed { .. }));
+        assert!(matches!(
+            error,
+            nara_app::AddPluginsError::Plugin(PluginError::SetupFailed { .. })
+        ));
         remove_temp_root(&configured_root);
     }
 

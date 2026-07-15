@@ -33,7 +33,7 @@ use nara_ecs::{
 };
 use nara_input::{ActionOutcomes, InputSet};
 
-const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
+pub const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.gameplay.commands");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
@@ -74,11 +74,12 @@ impl GameplayCommandPlugin {
 }
 
 impl Plugin for GameplayCommandPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        const DECLARATION: nara_app::PluginDeclaration = nara_app::PluginDeclaration::new(
             GAMEPLAY_COMMAND_PLUGIN_ID,
             nara_app::PluginCategory::Runtime,
-        )
+        );
+        &DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {

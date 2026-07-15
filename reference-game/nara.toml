@@ -10,4 +10,4 @@ preset = "local-headless"
 fixed_timestep_seconds = 0.02
 
 [capabilities]
-requested = []
+requested = ["runtime-2d"]

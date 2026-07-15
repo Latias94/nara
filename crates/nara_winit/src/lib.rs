@@ -6,10 +6,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_app::{App, AppExit, AppRunError, Plugin, PluginError};
-use nara_input::{ButtonInput, InputPlugin, KeyCode, MouseButton, PointerState};
+use nara_app::{App, AppExit, AppRunError, PluginError};
+use nara_input::{ButtonInput, KeyCode, MouseButton, PointerState};
 use nara_window::{
-    Window, WindowEvent, WindowId, WindowPlugin, WindowResolution,
+    Window, WindowEvent, WindowId, WindowResolution,
     backend::{BackendWindowHandles, WindowHandleProvider, WindowSurfaceRetirementDriver},
     push_window_event,
 };
@@ -54,37 +54,6 @@ impl WinitShutdownState {
     }
 }
 
-/// Installs a winit-owned desktop runner.
-#[derive(Debug, Clone, Default)]
-pub struct WinitPlugin {
-    runner: WinitRunner,
-}
-
-impl WinitPlugin {
-    #[must_use]
-    pub fn new(runner: WinitRunner) -> Self {
-        Self { runner }
-    }
-}
-
-impl Plugin for WinitPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.winit"),
-            nara_app::PluginCategory::Platform,
-        )
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(WindowPlugin::default())?;
-        app.add_plugin_if_missing(InputPlugin)?;
-
-        let runner = self.runner;
-        app.set_runner(move |app| runner.run(app))?;
-        Ok(())
-    }
-}
-
 /// Native event-loop runner configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WinitRunner {
@@ -95,6 +64,11 @@ impl WinitRunner {
     #[must_use]
     pub fn new(control_flow: WinitControlFlow) -> Self {
         Self { control_flow }
+    }
+
+    /// Selects this platform runner from top-level code-first authority.
+    pub fn install(self, app: &mut App) -> Result<&mut App, PluginError> {
+        app.set_runner(move |app| self.run(app))
     }
 
     fn run(self, app: &mut App) -> Result<AppExit, AppRunError> {
@@ -650,9 +624,9 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use nara_app::PluginCleanupContext;
+    use nara_app::{Plugin, PluginCategory, PluginDeclaration, PluginId, PluginShutdownContext};
     use nara_window::{
-        WindowEvents,
+        WindowEvents, WindowPlugin,
         backend::{WindowSurfaceHandleSource, WindowSurfaceLease, WindowSurfaceRetirementError},
     };
     use raw_window_handle::{
@@ -706,24 +680,25 @@ mod tests {
     }
 
     #[derive(Debug, Clone, Copy)]
-    struct FailingCleanupPlugin;
+    struct FailingShutdownPlugin;
 
-    impl Plugin for FailingCleanupPlugin {
-        fn metadata(&self) -> nara_app::PluginMetadata {
-            nara_app::PluginMetadata::new(
-                nara_app::PluginId::new("test.cleanup-failure"),
-                nara_app::PluginCategory::Backend,
-            )
+    const FAILING_SHUTDOWN_PLUGIN_ID: PluginId = PluginId::new("test.shutdown-failure");
+    const FAILING_SHUTDOWN_PLUGIN_DECLARATION: PluginDeclaration =
+        PluginDeclaration::new(FAILING_SHUTDOWN_PLUGIN_ID, PluginCategory::Backend);
+
+    impl Plugin for FailingShutdownPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &FAILING_SHUTDOWN_PLUGIN_DECLARATION
         }
 
         fn build(&self, _app: &mut App) -> Result<(), PluginError> {
             Ok(())
         }
 
-        fn cleanup(&self, _context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
+        fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
             Err(PluginError::SetupFailed {
-                plugin: nara_app::PluginId::new("test.cleanup-failure"),
-                message: "injected cleanup failure".to_owned(),
+                plugin: FAILING_SHUTDOWN_PLUGIN_ID,
+                message: "injected shutdown failure".to_owned(),
             })
         }
     }
@@ -842,16 +817,15 @@ mod tests {
     }
 
     #[test]
-    fn plugin_installs_prerequisite_resources() {
+    fn runner_selection_does_not_install_runtime_prerequisites() {
         let mut app = App::new();
-        app.add_plugin(WinitPlugin::default()).unwrap();
-        app.finish_plugins().unwrap();
+        WinitRunner::default().install(&mut app).unwrap();
 
-        assert!(app.world().contains_resource::<WindowEvents>());
-        assert!(app.world().contains_resource::<BackendWindowHandles>());
-        assert!(app.world().contains_resource::<ButtonInput<KeyCode>>());
-        assert!(app.world().contains_resource::<ButtonInput<MouseButton>>());
-        assert!(app.world().contains_resource::<PointerState>());
+        assert!(!app.world().contains_resource::<WindowEvents>());
+        assert!(!app.world().contains_resource::<BackendWindowHandles>());
+        assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
+        assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
+        assert!(!app.world().contains_resource::<PointerState>());
     }
 
     #[test]
@@ -874,7 +848,7 @@ mod tests {
         let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
         retire_app_targets(&mut app, &handles, &owned_window_ids).unwrap();
         retire_app_targets(&mut app, &handles, &owned_window_ids).unwrap();
-        app.cleanup_plugins().unwrap();
+        app.shutdown_plugins().unwrap();
 
         assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
         assert_eq!(
@@ -937,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_failure_does_not_block_safe_target_retirement() {
+    fn shutdown_failure_does_not_block_safe_target_retirement() {
         let mut app = App::new();
         app.add_plugin(WindowPlugin::default()).unwrap();
         let handles = app.world().resource::<BackendWindowHandles>().clone();
@@ -952,13 +926,13 @@ mod tests {
             .unwrap();
         install_fake_surface_driver(&mut app);
         add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-        app.add_plugin(FailingCleanupPlugin).unwrap();
+        app.add_plugin(FailingShutdownPlugin).unwrap();
 
         let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
         retire_app_targets(&mut app, &handles, &owned_window_ids).unwrap();
 
         assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-        assert!(app.cleanup_plugins().is_err());
+        assert!(app.shutdown_plugins().is_err());
         assert_eq!(
             handles.snapshot(WindowId::PRIMARY).unwrap().phase,
             nara_window::backend::WindowTargetPhase::ProviderReleased

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-14
+**Last Revised**: 2026-07-15
 **Refined By**: ADR 0010: Plugin Lifecycle, Dependencies, and Failure Containment; ADR 0046:
 Plugin Metadata and Default Plugin Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness
 
@@ -71,13 +71,23 @@ Plugin shape:
 
 ```rust
 pub trait Plugin {
+    fn declaration() -> &'static PluginDeclaration
+    where
+        Self: Sized;
+
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError>;
     fn build(&self, app: &mut App) -> Result<(), PluginError>;
+    fn finish(&self, app: &mut App) -> Result<(), PluginError>;
+    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError>;
 }
 ```
 
 Plugin setup is fallible. Pure group/slot/duplicate/prerequisite closure returns structured
-`PluginPlanError` values before App mutation. App-level preflight/build/finish failures return
-structured `PluginError` values instead of panic-based helpers, as refined by ADRs 0010 and 0046.
+`PluginPlanError` values before App mutation, repeatable factory preparation returns
+`PluginPrepareError`, and App-level preflight/build/finish failures return structured `PluginError`
+values instead of panic-based helpers. `App::seal` closes configuration and returns a `SealedApp`;
+terminal teardown uses `shutdown`, not the frame/startup-overloaded `cleanup` vocabulary. ADRs 0010
+and 0046 define the detailed lifecycle and composition contracts.
 
 ## Alternatives Considered
 
@@ -112,7 +122,9 @@ schedule vocabulary.
 - `nara_app` is the owner of engine startup and frame semantics.
 - `nara_app` can use `bevy_ecs::Schedule` internally or through `nara_ecs`.
 - Built-in startup/frame schedules and arbitrary custom schedules share one type-directed authoring
-  Interface; only built-in schedules are automatically driven by default.
+  Interface. `run_schedule` is the explicit custom driver, seals before executing a registered
+  custom schedule, and rejects built-in schedule labels; built-in schedules remain exclusively
+  driven by the App lifecycle.
 - Window, renderer, audio, input, and tooling integrations should arrive as nara plugins.
 - Headless and test runners should be first-class enough that engine systems can run without a
   window.

@@ -3,18 +3,20 @@ use nara::{advanced_prelude::*, backend_prelude::*};
 
 const UI_TEXTURE_STABLE_ID: &str = "f7d2d9c7-2b13-49fe-8b89-83d0f98f0c3f";
 
-fn main() -> Result<(), AppRunError> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
-    app.add_plugins(RuntimeUiPlugins)?
-        .add_plugin(WindowPlugin {
+    app.add_plugins((
+        RuntimeUiPlugins,
+        WindowPlugin {
             primary_window: Some(Window::new(
                 "nara runtime ui",
                 WindowResolution::new(960, 540),
             )),
-        })?
-        .add_plugin(WinitPlugin::default())?
-        .add_plugin(WgpuRenderPlugin)?
-        .add_startup_systems(StartupStage::Scene, setup_scene)?;
+        },
+        WgpuBackendPlugins,
+    ))?;
+    app.add_systems(StartupStage::Scene, setup_scene)?;
+    WinitRunner::default().install(&mut app)?;
     app.world_mut()?.insert_resource(AssetServer::new());
 
     app.run()?;

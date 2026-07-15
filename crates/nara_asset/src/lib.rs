@@ -35,10 +35,10 @@ pub use import::{
     SourceExtension, TypedImporter,
 };
 pub use reload::{
-    AssetLoadGeneration, AssetLoadGenerations, AssetPlugin, AssetReloadDiagnostics,
-    AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequests,
-    AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges, AssetSourceRoot,
-    SourceChangeResolver, UnresolvedAssetSourceChange,
+    ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations,
+    AssetPlugin, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
+    AssetReloadRequestKind, AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind,
+    AssetSourceChanges, AssetSourceRoot, SourceChangeResolver, UnresolvedAssetSourceChange,
 };
 pub use server::{AssetError, AssetServer};
 pub use state::{

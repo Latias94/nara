@@ -22,7 +22,9 @@ pub use identity::{
     IdentityErrorReason, PressureMetricId, PressureSourceId, PublicDiagnosticIdentifier,
     SafeDisplayText, SafeSummary, SafeTextError, SafeTextErrorReason,
 };
-pub use plugin::{DiagnosticCleanupSet, DiagnosticsPlugin};
+pub use plugin::{
+    DIAGNOSTICS_PLUGIN_DECLARATION, DIAGNOSTICS_PLUGIN_ID, DiagnosticCleanupSet, DiagnosticsPlugin,
+};
 pub use pressure::{
     PressureDraftError, PressureMeasurement, PressureMetricKind, PressurePublishOutcome,
     PressurePublishRejection, PressureSettingsError, PressureStats, PressureUnit,

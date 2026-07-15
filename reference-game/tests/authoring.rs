@@ -109,7 +109,7 @@ fn four_game_components_register_and_round_trip_through_public_api() {
     let mut app = nara::prelude::App::new();
     app.add_plugins(nara::prelude::MinimalPlugins).unwrap();
     app.add_plugin(ReferenceGamePlugin).unwrap();
-    app.finish_plugins().unwrap();
+    let app = app.seal().unwrap();
 
     let registry = app.world().resource::<ComponentRegistry>();
     for id in [

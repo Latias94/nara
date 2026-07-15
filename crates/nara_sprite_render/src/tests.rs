@@ -38,9 +38,13 @@ fn instance() -> SpriteInstance {
 
 fn sprite_app() -> App {
     let mut app = App::new();
-    app.add_plugin(nara_reflect::ComponentRegistryPlugin)
-        .unwrap();
-    app.add_plugin(SpriteRenderPlugin).unwrap();
+    app.add_plugins((
+        nara_reflect::ComponentRegistryPlugin,
+        nara_render::RenderPlugin,
+        nara_image::ImagePreparePlugin,
+        SpriteRenderPlugin,
+    ))
+    .unwrap();
     app
 }
 

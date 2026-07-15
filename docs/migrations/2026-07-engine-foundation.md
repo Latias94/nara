@@ -39,6 +39,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U3-1 | RGF-U3 | `RGF-U3` | `cargo-feature/rust-api/persistent-shape` | Root product capabilities, plugin bundles/preludes, and `nara.toml` product selection | Select the new coarse features, import advanced/tooling/backend names explicitly, replace plugin-plan data with runtime preset plus requested capabilities, and open manifests through a host-issued file capability. |
 | RGF-U11-1 | RGF-U11 | `RGF-U11` | `rust-api/behavior` | Native window handle providers and surface/window shutdown | Replace raw-handle providers with an owning source, handle fallible registration/retirement, and let the platform runner complete renderer-acknowledged teardown. |
 | RGF-U10-1 | RGF-U10 | `RGF-U10` | `rust-api/behavior/safety/cache` | Image importer input, bounded file reads, PNG decode/publication, reload failure semantics, and image artifact identity | Supply owned bytes or an opened capability, use the audited bounded PNG importer, and publish only through the reservation-bearing candidate; rebuild image import caches. |
+| RGF-U4-1 | RGF-U4 | `RGF-U4` | `rust-api/behavior` | Plugin declarations, groups, slots, product planning, schema-provider input, App sealing/shutdown, and custom schedules | Replace imperative metadata/group installation and lifecycle aliases with static declarations, typed repeatable definitions, pure plans, `App::seal`, `App::shutdown_plugins`, and the unified typed schedule API. |
 
 ## Entry Contract
 
@@ -61,16 +62,18 @@ Each migration entry contains:
 
 - `App::try_update()` plus panic-based `App::update() -> AppFrameOutcome`.
 - Infallible mutable entry points such as `world_mut`, `insert_resource`, `init_resource`,
-  `add_startup_systems`, `add_systems`, `configure_sets`, and `set_runner`.
+  `add_systems`, `configure_sets`, custom schedule inspection, and `set_runner`.
 - `Plugin::cleanup(&mut App) -> ()` and unrestricted `PluginGroup::build(&mut App)`.
 - `RunnerFn = FnOnce(App)`, which hid cleanup failures inside runner-owned `Drop`.
 - The implicit `plugins_finished: bool` behavior that allowed committed failures to be retried.
 
 **Canonical replacement or deletion rationale**: `App` exposes one explicit terminal plugin state
 machine. Mutable entry points and `update` return `Result`; `Plugin::preflight` is the only
-pre-mutation retry boundary; cleanup uses `PluginCleanupContext` and `PluginCleanupError`; groups use
-`PluginGroupBuilder`; runners borrow `&mut App`; failure details use `PluginFailureReport`. The old
-paths are deleted because they could run a partially initialized app or lose cleanup ownership.
+pre-mutation retry boundary; terminal teardown uses `PluginShutdownContext` and
+`PluginShutdownError`; groups produce a data-only `PluginGroupBuilder`; runners borrow `&mut App`;
+failure details use `PluginFailureReport`. `App::seal` closes configuration, while `App::run` seals
+and then performs observable shutdown. The old paths are deleted because they could run a partially
+initialized app or lose shutdown ownership.
 
 **Before**:
 
@@ -91,9 +94,9 @@ app.insert_resource(GameState::default())?;
 app.add_systems(CoreStage::Update, update_game)?;
 app.update()?;
 
-fn cleanup(
+fn shutdown(
     &self,
-    context: &mut PluginCleanupContext<'_>,
+    context: &mut PluginShutdownContext<'_>,
 ) -> Result<(), PluginError> {
     context.world_mut().remove_resource::<Backend>();
     Ok(())
@@ -105,7 +108,8 @@ tests, window/wgpu examples, asset import examples, and headless/server examples
 fallible canonical API.
 
 **User action**: update downstream plugin/app code to propagate or explicitly handle every returned
-error; replace group access to `App` with `PluginGroupBuilder`; change runners to borrow `&mut App`.
+error; replace group access to `App` with a data-only `PluginGroupBuilder`; rename terminal hooks and
+error handling to `shutdown`; change runners to borrow `&mut App`.
 
 **Source action**: `none`.
 
@@ -1014,7 +1018,7 @@ handles.mark_native_destroyed(window_id)?;
 
 Platform adapters should normally let their runner drive this sequence instead of invoking the
 individual transitions. Renderer adapters register `WindowSurfaceRetirementDriver`; platform
-runners submit only their owned target IDs and must not use `App::cleanup_plugins` as a local
+runners submit only their owned target IDs and must not use `App::shutdown_plugins` as a local
 retirement operation. Callers handle `WindowTargetError` and may inspect `WindowTargetSnapshot` for
 tooling/tests.
 
@@ -1030,10 +1034,10 @@ failure reporting.
 **User action**: custom native platform adapters must replace raw-handle snapshots with an owning
 typed source and implement provider/native release through the lifecycle authority. Code that
 removed providers directly must request retirement and wait for `SurfaceRetired` first. Install a
-runner through `WinitPlugin::new(WinitRunner::new(...))` and invoke `App::run`; direct
-`WinitRunner::run` is removed so plugin cleanup cannot be bypassed. Custom runners with a fallible
+runner through `WinitRunner::new(...).install(&mut app)` and invoke `App::run`; direct
+`WinitRunner::run` is private so plugin shutdown cannot be bypassed. Custom runners with a fallible
 native teardown should return `AppRunError::runner_teardown(prior, teardown)` when both phases fail;
-plugin cleanup remains owned and aggregated by `App::run`. Exhaustive `AppRunError` matches must add
+plugin shutdown remains owned and aggregated by `App::run`. Exhaustive `AppRunError` matches must add
 the `RunnerTeardown` arm.
 
 **Source action**: `manual-rewrite`.
@@ -1188,6 +1192,126 @@ publication, importer-version cache identity, and last-good reload. The three af
 compile through the public path.
 Source gates reject `std::fs::read`, ambient path loading, `load_from_memory`, and `to_rgba8` in
 `nara_image`.
+
+## RGF-U4-1: Pure Plugin Composition, Sealed App, and Typed Schedules
+
+**Removed contract**:
+
+- Instance-owned `Plugin::metadata` / `plugin_id` and parallel `PluginGroupMetadata` member arrays.
+- Imperative group expansion through a builder borrowing `&mut App`, build-time dependency
+  installation, and public `add_plugin_if_missing` prerequisite policy.
+- Public `App::finish_plugins`, `App::cleanup_plugins`, `Plugin::cleanup`, cleanup error/context
+  names, and the separate `add_startup_systems` spelling.
+- Hook-time plugin/group installation or runner selection, including calls whose returned errors
+  were ignored.
+- Root product composition that inferred requirements from a plugin-ID switchboard or applied
+  settings before plugin/service/provider closure was known.
+
+**Canonical replacement or deletion rationale**: each plugin type owns one static
+`PluginDeclaration`. Repeatable configuration is represented by typed helpers returning
+`PluginDefinition`; data-only `PluginGroupBuilder` values lower stable slots and edits into a pure
+`PluginPlan`. Product composition keeps `CompositionError`, `PluginPlanError`,
+`PluginPrepareError`, and `PluginError` as distinct phases, binds the request to its opaque project
+lineage, and freezes selected schema providers before publishing `RuntimePlan`. A direct code-first
+App uses the same resolver, closes configuration with `App::seal`, and tears down through
+`App::shutdown_plugins` or `App::run`. Different plugins cannot claim one slot, and first-party
+close owners must register their declared `PluginShutdownObligationId` before sealing.
+
+All schedules now live in one typed registry. `add_systems`, `configure_sets`, `init_schedule`, and
+inspection accept any `ScheduleLabel`. `run_schedule` is the custom-schedule entry point: it rejects
+built-in startup/core stages, validates that the custom schedule exists without sealing on a
+missing label, seals the App, and then runs the schedule. Custom schedules remain inert unless an
+owner explicitly drives them; the built-in frame order is unchanged.
+
+**Before**:
+
+```rust
+impl Plugin for GamePlugin {
+    fn metadata(&self) -> PluginMetadata {
+        PluginMetadata::new(GAME_PLUGIN_ID, PluginCategory::Runtime)
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_plugin_if_missing(DependencyPlugin)?;
+        Ok(())
+    }
+
+    fn cleanup(&self, context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
+        context.world_mut().remove_resource::<GameOwner>();
+        Ok(())
+    }
+}
+
+app.add_plugin(GamePlugin)?;
+app.add_startup_systems(StartupStage::Core, initialize)?;
+app.finish_plugins()?;
+app.cleanup_plugins()?;
+```
+
+**After**:
+
+```rust
+const GAME_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(GAME_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(&[DEPENDENCY_PLUGIN_ID]);
+
+impl Plugin for GamePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &GAME_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(CoreStage::Update, update_game)?;
+        Ok(())
+    }
+
+    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        context.world_mut().remove_resource::<GameOwner>();
+        Ok(())
+    }
+}
+
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, DependencyPlugin, GamePlugin))?;
+app.add_systems(StartupStage::Core, initialize)?;
+app.init_schedule(GameMaintenance)?;
+app.add_systems(GameMaintenance, maintain_game)?;
+app.run_schedule(GameMaintenance)?;
+let sealed = app.seal()?;
+```
+
+The integrated project path should start from `project_runtime_plugins(&candidate)` or a typed
+game helper wrapping it, apply type-directed `disable` / `configure` / relative-order edits, and
+call `resolve_runtime_plan` with the compiled provider catalog. Do not construct definition IDs,
+configuration fingerprints, slot constants, erased factories, or live plugin instances merely to
+configure ordinary first-party groups.
+
+**Affected examples and fixtures**: all first-party plugin declarations and default groups, root
+examples, the independent reference game, task/window/render/UI adapters, public-prelude fixtures,
+plugin composition tests, and custom schedule tests use the canonical APIs.
+
+**User action**: move invariant metadata to `Plugin::declaration`; return `PluginDefinition` from
+typed configuration helpers; make `PluginGroup::build(self)` return a data-only builder; declare
+dependencies/services/conflicts/providers instead of installing them in hooks; replace startup
+registration with `add_systems`; replace manual finish/cleanup calls with `seal`, `run`, or explicit
+`shutdown_plugins` as ownership requires. Configurable project code should edit a lineage-bound
+request and resolve it before acquiring an App or native service.
+
+**Source action**: `none`.
+
+**Cache action**: `keep`; plugin-plan and schema fingerprints are runtime validation identities,
+not a compatibility promise for pre-U4 generated caches.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the complete RGF-U4 commit and its callers together. Do not restore metadata,
+finish/cleanup aliases, imperative group mutation, or hidden hook installation as compatibility
+wrappers.
+
+**Verification anchors**: `crates/nara_app/tests/plugin_composition.rs`,
+`crates/nara_app/tests/schedule_registry.rs`, `tests/plugin_composition.rs`,
+`tests/product_capabilities.rs`, `reference-game/tests/plugin_composition.rs`, and
+`reference-game/tests/authoring.rs`; stale-symbol searches reject the removed lifecycle/group API.
 
 ## Persistent Format Matrix
 

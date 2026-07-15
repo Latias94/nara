@@ -323,6 +323,61 @@ pub struct WindowPlugin {
     pub primary_window: Option<Window>,
 }
 
+pub const WINDOW_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.window");
+const WINDOW_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
+    nara_app::PluginDefinitionId::new("nara.window.configured", 1);
+const WINDOW_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("desktop-winit")];
+pub const WINDOW_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(WINDOW_PLUGIN_ID, nara_app::PluginCategory::Platform)
+        .requires_product_capabilities(WINDOW_PRODUCT_REQUIREMENTS);
+
+/// Creates a repeatable window plugin definition from primary-window data.
+#[must_use]
+pub fn plugin(primary_window: Option<Window>) -> nara_app::PluginDefinition {
+    let canonical_configuration = window_plugin_configuration(primary_window.as_ref());
+    nara_app::PluginDefinition::infallible::<WindowPlugin, _>(
+        WINDOW_PLUGIN_DEFINITION_ID,
+        canonical_configuration,
+        move || WindowPlugin {
+            primary_window: primary_window.clone(),
+        },
+    )
+}
+
+fn window_plugin_configuration(primary_window: Option<&Window>) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(
+        primary_window.map_or(32, |window| 96_usize.saturating_add(window.title.len())),
+    );
+    bytes.extend_from_slice(b"nara.window.plugin-config.v1\0");
+    let Some(window) = primary_window else {
+        bytes.push(0);
+        return bytes;
+    };
+    bytes.push(1);
+    bytes.extend_from_slice(&window.id.get().to_le_bytes());
+    bytes.extend_from_slice(&(window.title.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(window.title.as_bytes());
+    bytes.extend_from_slice(&window.resolution.physical_width.to_le_bytes());
+    bytes.extend_from_slice(&window.resolution.physical_height.to_le_bytes());
+    bytes.extend_from_slice(&window.resolution.scale_factor.to_bits().to_le_bytes());
+    bytes.push(match window.mode {
+        WindowMode::Windowed => 0,
+        WindowMode::BorderlessFullscreen => 1,
+        WindowMode::Fullscreen => 2,
+    });
+    bytes.push(match window.present_mode {
+        PresentMode::AutoVsync => 0,
+        PresentMode::AutoNoVsync => 1,
+        PresentMode::Fifo => 2,
+        PresentMode::Immediate => 3,
+        PresentMode::Mailbox => 4,
+    });
+    bytes.push(u8::from(window.resizable));
+    bytes.push(u8::from(window.focused));
+    bytes
+}
+
 impl Default for WindowPlugin {
     fn default() -> Self {
         Self {
@@ -332,11 +387,8 @@ impl Default for WindowPlugin {
 }
 
 impl Plugin for WindowPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.window"),
-            nara_app::PluginCategory::Platform,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &WINDOW_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -422,6 +474,30 @@ mod tests {
 
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].0.id, WindowId::PRIMARY);
+    }
+
+    #[test]
+    fn window_plugin_definition_binds_canonical_window_configuration() {
+        let window = Window::new("configured", WindowResolution::new(960, 540));
+        let first = plugin(Some(window.clone()));
+        let repeated = plugin(Some(window.clone()));
+        let changed = plugin(Some(Window::new(
+            "changed",
+            WindowResolution::new(960, 540),
+        )));
+
+        assert_eq!(first.key(), repeated.key());
+        assert_ne!(first.key(), changed.key());
+
+        let plan = nara_app::PluginPlan::resolve(first).unwrap();
+        let app = plan.instantiate().unwrap();
+        let mut query = app
+            .world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<Window>());
+
+        assert_eq!(query.next(), Some(&window));
+        assert_eq!(query.next(), None);
     }
 
     #[test]

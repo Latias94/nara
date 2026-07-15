@@ -1567,6 +1567,7 @@ name = "nara_app"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "blake3",
  "nara_ecs",
  "thiserror 2.0.18",
 ]
@@ -1594,6 +1595,7 @@ dependencies = [
  "nara_app",
  "nara_asset",
  "nara_ecs",
+ "nara_tasks",
  "notify",
 ]
 
@@ -1951,6 +1953,7 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_image",
+ "nara_input",
  "nara_material",
  "nara_reflect",
  "nara_render",

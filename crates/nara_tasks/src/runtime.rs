@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_app::{App, CoreStage, Plugin, PluginCleanupContext, PluginError, TaskUpdateSet};
+use nara_app::{App, CoreStage, Plugin, PluginError, PluginShutdownContext, TaskUpdateSet};
 use nara_core::{ItemLimit, TimeLimit};
 use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
 
@@ -2093,6 +2093,15 @@ pub struct TaskPlugin {
     config: TaskPoolConfig,
 }
 
+pub const TASK_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.tasks");
+const TASK_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
+    nara_app::PluginDefinitionId::new("nara.tasks.configured", 1);
+pub const TASK_POOLS_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
+    nara_app::PluginShutdownObligationId::new("nara.tasks.pools");
+pub const TASK_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(TASK_PLUGIN_ID, nara_app::PluginCategory::Service)
+        .shutdown_obligations(&[TASK_POOLS_SHUTDOWN_OBLIGATION]);
+
 impl TaskPlugin {
     #[must_use]
     pub const fn new(config: TaskPoolConfig) -> Self {
@@ -2100,12 +2109,40 @@ impl TaskPlugin {
     }
 }
 
+/// Creates a repeatable task plugin definition with canonical pool settings.
+#[must_use]
+pub fn plugin(config: TaskPoolConfig) -> nara_app::PluginDefinition {
+    let canonical_configuration = task_plugin_configuration(config);
+    nara_app::PluginDefinition::infallible::<TaskPlugin, _>(
+        TASK_PLUGIN_DEFINITION_ID,
+        canonical_configuration,
+        move || TaskPlugin::new(config),
+    )
+}
+
+fn task_plugin_configuration(config: TaskPoolConfig) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(96);
+    bytes.extend_from_slice(b"nara.tasks.plugin-config.v1\0");
+    for kind in TaskPoolKind::ALL {
+        let kind = config.kind(kind);
+        bytes.extend_from_slice(&(kind.workers().get() as u64).to_le_bytes());
+        bytes.extend_from_slice(&(kind.pending().get() as u64).to_le_bytes());
+    }
+    let shutdown = config.shutdown_policy();
+    for timeout in [
+        shutdown.drain_timeout().get(),
+        shutdown.cancel_timeout().get(),
+        shutdown.join_timeout().get(),
+    ] {
+        bytes.extend_from_slice(&timeout.as_secs().to_le_bytes());
+        bytes.extend_from_slice(&timeout.subsec_nanos().to_le_bytes());
+    }
+    bytes
+}
+
 impl Plugin for TaskPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.tasks"),
-            nara_app::PluginCategory::Core,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &TASK_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -2123,7 +2160,7 @@ impl Plugin for TaskPlugin {
         if !app.world().contains_resource::<TaskPools>() {
             let pools =
                 TaskPools::try_new(self.config).map_err(|error| PluginError::SetupFailed {
-                    plugin: self.plugin_id(),
+                    plugin: TASK_PLUGIN_ID,
                     message: error.to_string(),
                 })?;
             app.insert_resource(TaskPluginOwnedPools {
@@ -2131,10 +2168,11 @@ impl Plugin for TaskPlugin {
             })?;
             app.insert_resource(pools)?;
         }
+        app.register_plugin_shutdown_obligation(TASK_POOLS_SHUTDOWN_OBLIGATION)?;
         Ok(())
     }
 
-    fn cleanup(&self, context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
+    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
         let Some(ownership) = context
             .world_mut()
             .remove_resource::<TaskPluginOwnedPools>()
@@ -2154,7 +2192,7 @@ impl Plugin for TaskPlugin {
             context.world_mut().insert_resource(report);
             if timed_out || detached_workers > 0 {
                 return Err(PluginError::SetupFailed {
-                    plugin: self.plugin_id(),
+                    plugin: TASK_PLUGIN_ID,
                     message: format!(
                         "task pool shutdown timed out; detached {detached_workers} workers"
                     ),

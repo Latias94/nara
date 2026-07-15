@@ -1,7 +1,7 @@
 //! Application lifecycle and plugin orchestration for nara.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fmt::{self, Display, Formatter},
     num::NonZeroU32,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -11,10 +11,26 @@ use std::{
 
 use nara_ecs::{
     Resource, World,
-    schedule::{InternedSystemSet, IntoScheduleConfigs, Schedule, ScheduleLabel, SystemSet},
+    schedule::{
+        InternedSystemSet, IntoScheduleConfigs, Schedule, ScheduleLabel, Schedules, SystemSet,
+    },
     system::ScheduleSystem,
 };
 use thiserror::Error;
+
+mod plugin;
+
+pub use plugin::{
+    AddPluginsError, EditedPluginGroup, Plugin, PluginCapability, PluginCategory,
+    PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition, PluginDefinitionId,
+    PluginDefinitionKey, PluginError, PluginFailure, PluginFailureReport, PluginGroup,
+    PluginGroupBuilder, PluginGroupId, PluginHook, PluginHookMutation, PluginId,
+    PluginInstantiationError, PluginLifecycleState, PluginPlan, PluginPlanEntry, PluginPlanError,
+    PluginPlanFingerprint, PluginPreflightContext, PluginPreflightResource, PluginPrepareError,
+    PluginPrepareFailure, PluginProductCapability, PluginSchemaProviderId, PluginServiceId,
+    PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId, PluginSlot,
+    PluginSlotId, PluginSlotPresence, Plugins, ReplayablePlugins, ResolvedPluginGroup, SealedApp,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ScheduleLabel)]
 pub enum StartupStage {
@@ -86,397 +102,6 @@ pub enum FixedUpdateSet {
     Simulate,
     /// Publish tick-scoped outcomes after simulation commands are flushed.
     Finalize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PluginId(&'static str);
-
-impl PluginId {
-    #[must_use]
-    pub const fn new(id: &'static str) -> Self {
-        Self(id)
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        self.0
-    }
-}
-
-impl Display for PluginId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PluginCapability(&'static str);
-
-impl PluginCapability {
-    #[must_use]
-    pub const fn new(id: &'static str) -> Self {
-        Self(id)
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        self.0
-    }
-}
-
-impl Display for PluginCapability {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PluginGroupId(&'static str);
-
-impl PluginGroupId {
-    #[must_use]
-    pub const fn new(id: &'static str) -> Self {
-        Self(id)
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        self.0
-    }
-}
-
-impl Display for PluginGroupId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum PluginCategory {
-    Core,
-    Asset,
-    Runtime,
-    Render,
-    Platform,
-    Tooling,
-    Backend,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PluginMetadata {
-    pub id: PluginId,
-    pub category: PluginCategory,
-    pub provides: &'static [PluginCapability],
-    pub requires_plugins: &'static [PluginId],
-    pub requires_capabilities: &'static [PluginCapability],
-    pub conflicts: &'static [PluginId],
-    pub unique: bool,
-}
-
-impl PluginMetadata {
-    #[must_use]
-    pub const fn new(id: PluginId, category: PluginCategory) -> Self {
-        Self {
-            id,
-            category,
-            provides: &[],
-            requires_plugins: &[],
-            requires_capabilities: &[],
-            conflicts: &[],
-            unique: true,
-        }
-    }
-
-    #[must_use]
-    pub const fn provides(mut self, capabilities: &'static [PluginCapability]) -> Self {
-        self.provides = capabilities;
-        self
-    }
-
-    #[must_use]
-    pub const fn requires_plugins(mut self, plugins: &'static [PluginId]) -> Self {
-        self.requires_plugins = plugins;
-        self
-    }
-
-    #[must_use]
-    pub const fn requires_capabilities(
-        mut self,
-        capabilities: &'static [PluginCapability],
-    ) -> Self {
-        self.requires_capabilities = capabilities;
-        self
-    }
-
-    #[must_use]
-    pub const fn conflicts(mut self, plugins: &'static [PluginId]) -> Self {
-        self.conflicts = plugins;
-        self
-    }
-
-    #[must_use]
-    pub const fn non_unique(mut self) -> Self {
-        self.unique = false;
-        self
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PluginGroupMetadata {
-    pub id: PluginGroupId,
-    pub plugins: &'static [PluginId],
-}
-
-impl PluginGroupMetadata {
-    #[must_use]
-    pub const fn new(id: PluginGroupId, plugins: &'static [PluginId]) -> Self {
-        Self { id, plugins }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginLifecycleState {
-    Configuring,
-    Finishing,
-    Ready,
-    Poisoned,
-    Cleaning,
-    Cleaned,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginHook {
-    Metadata,
-    Preflight,
-    Build,
-    Finish,
-    Cleanup,
-}
-
-impl Display for PluginHook {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            Self::Metadata => "metadata",
-            Self::Preflight => "preflight",
-            Self::Build => "build",
-            Self::Finish => "finish",
-            Self::Cleanup => "cleanup",
-        };
-        formatter.write_str(name)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginFailureSubject {
-    Plugin(PluginId),
-    Group(PluginGroupId),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginFailure {
-    subject: PluginFailureSubject,
-    hook: PluginHook,
-    error: PluginError,
-}
-
-impl PluginFailure {
-    #[must_use]
-    pub const fn subject(&self) -> PluginFailureSubject {
-        self.subject
-    }
-
-    #[must_use]
-    pub const fn hook(&self) -> PluginHook {
-        self.hook
-    }
-
-    #[must_use]
-    pub const fn error(&self) -> &PluginError {
-        &self.error
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginFailureReport {
-    primary: Option<PluginFailure>,
-    cleanup_failures: Vec<PluginFailure>,
-    cleanup_complete: bool,
-}
-
-impl PluginFailureReport {
-    #[must_use]
-    pub const fn primary(&self) -> Option<&PluginFailure> {
-        self.primary.as_ref()
-    }
-
-    #[must_use]
-    pub fn cleanup_failures(&self) -> &[PluginFailure] {
-        &self.cleanup_failures
-    }
-
-    #[must_use]
-    pub const fn cleanup_complete(&self) -> bool {
-        self.cleanup_complete
-    }
-}
-
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum PluginCleanupError {
-    #[error("plugin cleanup cannot run while a committed plugin hook is active")]
-    HookActive,
-    #[error("plugin lifecycle or cleanup failed")]
-    Failure(Box<PluginFailureReport>),
-}
-
-pub struct PluginCleanupContext<'world> {
-    world: &'world mut World,
-}
-
-impl PluginCleanupContext<'_> {
-    #[must_use]
-    pub fn world(&self) -> &World {
-        self.world
-    }
-
-    #[must_use]
-    pub fn world_mut(&mut self) -> &mut World {
-        self.world
-    }
-}
-
-pub trait Plugin: Send + Sync + 'static {
-    fn metadata(&self) -> PluginMetadata;
-
-    fn preflight(&self, _app: &App) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError>;
-
-    fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    fn cleanup(&self, _context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    fn plugin_id(&self) -> PluginId {
-        self.metadata().id
-    }
-}
-
-pub trait PluginGroup: Send + Sync + 'static {
-    fn metadata(&self) -> PluginGroupMetadata;
-
-    fn preflight(&self, _app: &App) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError>;
-}
-
-pub struct PluginGroupBuilder<'app> {
-    app: &'app mut App,
-}
-
-impl PluginGroupBuilder<'_> {
-    #[must_use]
-    pub fn app(&self) -> &App {
-        self.app
-    }
-
-    pub fn add_plugin(&mut self, plugin: impl Plugin) -> Result<&mut Self, PluginError> {
-        self.app.add_plugin(plugin)?;
-        Ok(self)
-    }
-
-    pub fn add_plugin_if_missing(&mut self, plugin: impl Plugin) -> Result<&mut Self, PluginError> {
-        self.app.add_plugin_if_missing(plugin)?;
-        Ok(self)
-    }
-
-    pub fn add_plugins(&mut self, group: impl PluginGroup) -> Result<&mut Self, PluginError> {
-        self.app.add_plugins(group)?;
-        Ok(self)
-    }
-}
-
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum PluginError {
-    #[error("duplicate plugin: {plugin}")]
-    Duplicate { plugin: PluginId },
-    #[error("plugins cannot be added after plugin finishing has started: {plugin}")]
-    AddedAfterFinish { plugin: PluginId },
-    #[error("plugin groups cannot be added after plugin finishing has started: {group}")]
-    GroupAddedAfterFinish { group: PluginGroupId },
-    #[error("duplicate plugin group: {group}")]
-    DuplicateGroup { group: PluginGroupId },
-    #[error("plugin {plugin} requires missing prerequisite plugin {prerequisite}")]
-    MissingPluginPrerequisite {
-        plugin: PluginId,
-        prerequisite: PluginId,
-    },
-    #[error("plugin {plugin} requires missing capability {capability}")]
-    MissingCapabilityPrerequisite {
-        plugin: PluginId,
-        capability: PluginCapability,
-    },
-    #[error("plugin {plugin} conflicts with installed plugin {conflict}")]
-    ConflictingPlugin {
-        plugin: PluginId,
-        conflict: PluginId,
-    },
-    #[error("plugin dependency cycle while installing {plugin}: {chain:?}")]
-    DependencyCycle {
-        plugin: PluginId,
-        chain: Vec<PluginId>,
-    },
-    #[error("plugin group dependency cycle while installing {group}: {chain:?}")]
-    GroupDependencyCycle {
-        group: PluginGroupId,
-        chain: Vec<PluginGroupId>,
-    },
-    #[error("plugin {plugin} failed to initialize: {message}")]
-    SetupFailed { plugin: PluginId, message: String },
-    #[error("plugin {plugin} failed to register component {component}: {message}")]
-    ComponentRegistrationFailed {
-        plugin: PluginId,
-        component: String,
-        message: String,
-    },
-    #[error("plugin metadata hook panicked")]
-    MetadataPanicked,
-    #[error("plugin group metadata hook panicked")]
-    GroupMetadataPanicked,
-    #[error("plugin {plugin} panicked during {hook}")]
-    HookPanicked { plugin: PluginId, hook: PluginHook },
-    #[error("plugin group {group} panicked during {hook}")]
-    GroupHookPanicked {
-        group: PluginGroupId,
-        hook: PluginHook,
-    },
-    #[error("app lifecycle is already cleaned")]
-    LifecycleCleaned,
-    #[error("app plugin lifecycle is poisoned")]
-    LifecyclePoisoned,
-    #[error("plugin finishing cannot be re-entered")]
-    FinishReentered,
-}
-
-impl PluginError {
-    #[must_use]
-    pub fn component_registration(
-        plugin: PluginId,
-        component: impl Into<String>,
-        error: impl Display,
-    ) -> Self {
-        Self::ComponentRegistrationFailed {
-            plugin,
-            component: component.into(),
-            message: error.to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -572,6 +197,18 @@ impl From<FixedTimeError> for AppRunError {
     fn from(error: FixedTimeError) -> Self {
         Self::time(TimeFrameError::Fixed(error))
     }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum AppScheduleRunError {
+    #[error("app plugin lifecycle prevents schedule execution: {0}")]
+    Plugin(PluginError),
+    #[error("a custom schedule cannot run from inside a plugin hook")]
+    PluginHookActive,
+    #[error("built-in schedules cannot run through the custom schedule entry point")]
+    BuiltInSchedule,
+    #[error("the requested schedule is not registered")]
+    MissingSchedule,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -1325,25 +962,24 @@ impl AppExitRequests {
 
 struct InstalledPlugin {
     plugin: Arc<dyn Plugin>,
-    metadata: PluginMetadata,
-    cleanup_complete: bool,
+    plugin_id: PluginId,
+    shutdown_complete: bool,
 }
 
 pub struct App {
     world: World,
-    startup_schedules: BTreeMap<StartupStage, Schedule>,
-    schedules: BTreeMap<CoreStage, Schedule>,
+    schedules: Schedules,
     runner: Option<RunnerFn>,
     plugins: Vec<InstalledPlugin>,
-    plugin_install_counts: BTreeMap<PluginId, usize>,
-    plugin_metadata: BTreeMap<PluginId, PluginMetadata>,
-    provided_capabilities: BTreeSet<PluginCapability>,
-    plugin_groups: BTreeMap<PluginGroupId, PluginGroupMetadata>,
+    plugin_entries: Vec<PluginPlanEntry>,
+    plugin_definition_witnesses: Vec<plugin::PluginDefinitionWitness>,
+    plugin_groups: Vec<ResolvedPluginGroup>,
+    disabled_plugin_slots: BTreeSet<PluginSlotId>,
+    plugin_plan_fingerprint: PluginPlanFingerprint,
+    registered_shutdown_obligations: BTreeSet<(PluginId, PluginShutdownObligationId)>,
     plugin_lifecycle: PluginLifecycleState,
     plugin_failure_report: Option<PluginFailureReport>,
-    installing_plugins: Vec<PluginId>,
-    installing_plugin_groups: Vec<PluginGroupId>,
-    committed_hook_depth: usize,
+    active_plugin_hook: Option<(PluginId, PluginHook)>,
     started: bool,
 }
 
@@ -1355,7 +991,7 @@ impl Default for App {
 
 impl Drop for App {
     fn drop(&mut self) {
-        self.cleanup_plugins_internal();
+        self.shutdown_plugins_internal();
     }
 }
 
@@ -1371,16 +1007,15 @@ impl App {
         world.insert_resource(RuntimeFrameStatus::default());
         world.insert_resource(AppExitRequests::default());
 
-        let startup_schedules = StartupStage::ALL
-            .into_iter()
-            .map(|stage| (stage, Schedule::new(stage)))
-            .collect();
-        let mut schedules: BTreeMap<_, _> = CoreStage::ALL
-            .into_iter()
-            .map(|stage| (stage, Schedule::new(stage)))
-            .collect();
+        let mut schedules = Schedules::new();
+        for stage in StartupStage::ALL {
+            schedules.insert(Schedule::new(stage));
+        }
+        for stage in CoreStage::ALL {
+            schedules.insert(Schedule::new(stage));
+        }
         schedules
-            .get_mut(&CoreStage::FixedUpdate)
+            .get_mut(CoreStage::FixedUpdate)
             .expect("the fixed-update schedule is created above")
             .configure_sets(
                 (
@@ -1393,19 +1028,18 @@ impl App {
 
         Self {
             world,
-            startup_schedules,
             schedules,
-            runner: Some(Box::new(default_runner)),
+            runner: None,
             plugins: Vec::new(),
-            plugin_install_counts: BTreeMap::new(),
-            plugin_metadata: BTreeMap::new(),
-            provided_capabilities: BTreeSet::new(),
-            plugin_groups: BTreeMap::new(),
+            plugin_entries: Vec::new(),
+            plugin_definition_witnesses: Vec::new(),
+            plugin_groups: Vec::new(),
+            disabled_plugin_slots: BTreeSet::new(),
+            plugin_plan_fingerprint: plugin::empty_plan_fingerprint(),
+            registered_shutdown_obligations: BTreeSet::new(),
             plugin_lifecycle: PluginLifecycleState::Configuring,
             plugin_failure_report: None,
-            installing_plugins: Vec::new(),
-            installing_plugin_groups: Vec::new(),
-            committed_hook_depth: 0,
+            active_plugin_hook: None,
             started: false,
         }
     }
@@ -1445,201 +1079,196 @@ impl App {
         Ok(self)
     }
 
-    pub fn add_startup_systems<M>(
-        &mut self,
-        stage: StartupStage,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-    ) -> Result<&mut Self, PluginError> {
-        self.ensure_mutation_allowed()?;
-        self.startup_schedule_mut(stage).add_systems(systems);
-        Ok(self)
-    }
-
     pub fn add_systems<M>(
         &mut self,
-        stage: CoreStage,
+        schedule: impl ScheduleLabel,
         systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
     ) -> Result<&mut Self, PluginError> {
-        self.ensure_mutation_allowed()?;
-        self.schedule_mut(stage).add_systems(systems);
+        self.ensure_configuration_mutation_allowed()?;
+        self.schedules.add_systems(schedule, systems);
         Ok(self)
     }
 
     pub fn configure_sets<M>(
         &mut self,
-        stage: CoreStage,
+        schedule: impl ScheduleLabel,
         sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
     ) -> Result<&mut Self, PluginError> {
-        self.ensure_mutation_allowed()?;
-        self.schedule_mut(stage).configure_sets(sets);
+        self.ensure_configuration_mutation_allowed()?;
+        self.schedules.configure_sets(schedule, sets);
         Ok(self)
+    }
+
+    pub fn init_schedule(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> Result<&mut Self, PluginError> {
+        self.ensure_configuration_mutation_allowed()?;
+        self.schedules.entry(schedule);
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn get_schedule(&self, schedule: impl ScheduleLabel) -> Option<&Schedule> {
+        self.schedules.get(schedule)
+    }
+
+    pub fn get_schedule_mut(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> Result<Option<&mut Schedule>, PluginError> {
+        self.ensure_configuration_mutation_allowed()?;
+        Ok(self.schedules.get_mut(schedule))
+    }
+
+    pub fn run_schedule(
+        &mut self,
+        schedule: impl ScheduleLabel,
+    ) -> Result<(), AppScheduleRunError> {
+        self.ensure_mutation_allowed()
+            .map_err(AppScheduleRunError::Plugin)?;
+        if self.active_plugin_hook.is_some() {
+            return Err(AppScheduleRunError::PluginHookActive);
+        }
+        let schedule = schedule.intern();
+        if StartupStage::ALL
+            .into_iter()
+            .any(|stage| stage.intern() == schedule)
+            || CoreStage::ALL
+                .into_iter()
+                .any(|stage| stage.intern() == schedule)
+        {
+            return Err(AppScheduleRunError::BuiltInSchedule);
+        }
+        if self.schedules.get(schedule).is_none() {
+            return Err(AppScheduleRunError::MissingSchedule);
+        }
+        self.seal_internal().map_err(AppScheduleRunError::Plugin)?;
+        let Some(schedule) = self.schedules.get_mut(schedule) else {
+            return Err(AppScheduleRunError::MissingSchedule);
+        };
+        schedule.run(&mut self.world);
+        Ok(())
     }
 
     pub fn set_runner(
         &mut self,
         runner: impl FnOnce(&mut App) -> Result<AppExit, AppRunError> + 'static,
     ) -> Result<&mut Self, PluginError> {
-        self.ensure_mutation_allowed()?;
+        if let Some((plugin, hook)) = self.active_plugin_hook {
+            let error = PluginError::HookMutationForbidden {
+                plugin,
+                hook,
+                mutation: PluginHookMutation::RunnerSelection,
+            };
+            self.poison(plugin, hook, error.clone());
+            return Err(error);
+        }
+        self.ensure_configuration_mutation_allowed()?;
         self.runner = Some(Box::new(runner));
         Ok(self)
     }
 
-    pub fn add_plugin(&mut self, plugin: impl Plugin) -> Result<&mut Self, PluginError> {
-        self.add_plugin_internal(plugin, false)
-    }
-
-    pub fn add_plugin_if_missing(&mut self, plugin: impl Plugin) -> Result<&mut Self, PluginError> {
-        self.add_plugin_internal(plugin, true)
-    }
-
-    pub fn add_plugins(&mut self, group: impl PluginGroup) -> Result<&mut Self, PluginError> {
-        if self.plugin_lifecycle == PluginLifecycleState::Poisoned {
-            return Err(self.primary_plugin_error());
-        }
-        if self.plugin_lifecycle == PluginLifecycleState::Cleaned
-            || self.plugin_lifecycle == PluginLifecycleState::Cleaning
-        {
-            return Err(PluginError::LifecycleCleaned);
-        }
-
-        let metadata = catch_unwind(AssertUnwindSafe(|| group.metadata()))
-            .map_err(|_| PluginError::GroupMetadataPanicked)?;
-        if self.plugin_lifecycle != PluginLifecycleState::Configuring {
-            return Err(PluginError::GroupAddedAfterFinish { group: metadata.id });
-        }
-        if self.plugin_groups.contains_key(&metadata.id) {
-            return Err(PluginError::DuplicateGroup { group: metadata.id });
-        }
-        if let Some(cycle_start) = self
-            .installing_plugin_groups
-            .iter()
-            .position(|group_id| *group_id == metadata.id)
-        {
-            let mut chain = self.installing_plugin_groups[cycle_start..].to_vec();
-            chain.push(metadata.id);
-            return Err(PluginError::GroupDependencyCycle {
-                group: metadata.id,
-                chain,
-            });
-        }
-
-        catch_unwind(AssertUnwindSafe(|| group.preflight(self))).map_err(|_| {
-            PluginError::GroupHookPanicked {
-                group: metadata.id,
-                hook: PluginHook::Preflight,
-            }
-        })??;
-
-        self.installing_plugin_groups.push(metadata.id);
-        self.committed_hook_depth += 1;
-        let build_result = catch_unwind(AssertUnwindSafe(|| {
-            let mut builder = PluginGroupBuilder { app: self };
-            group.build(&mut builder)
-        }))
-        .map_err(|_| PluginError::GroupHookPanicked {
-            group: metadata.id,
-            hook: PluginHook::Build,
-        })
-        .and_then(|result| result);
-        self.committed_hook_depth -= 1;
-        self.installing_plugin_groups.pop();
-
-        if let Err(error) = build_result {
-            self.poison(
-                PluginFailureSubject::Group(metadata.id),
-                PluginHook::Build,
-                error,
-            );
-        }
-        self.cleanup_after_outermost_failure();
-        if self.plugin_lifecycle == PluginLifecycleState::Poisoned {
-            return Err(self.primary_plugin_error());
-        }
-
-        self.plugin_groups.insert(metadata.id, metadata);
+    pub fn add_plugins<M>(
+        &mut self,
+        plugins: impl Plugins<M>,
+    ) -> Result<&mut Self, AddPluginsError> {
+        plugin::install_plugins(self, plugins)?;
         Ok(self)
+    }
+
+    pub fn add_plugin<P: Plugin>(&mut self, plugin: P) -> Result<&mut Self, AddPluginsError> {
+        self.add_plugins(plugin)
     }
 
     #[must_use]
     pub fn has_plugin(&self, id: PluginId) -> bool {
-        self.plugin_install_counts.contains_key(&id)
+        self.plugin_entries
+            .iter()
+            .any(|entry| entry.plugin_id() == id)
     }
 
     #[must_use]
     pub fn has_capability(&self, capability: PluginCapability) -> bool {
-        self.provided_capabilities.contains(&capability)
+        self.plugin_entries
+            .iter()
+            .any(|entry| entry.declaration().provides.contains(&capability))
     }
 
-    pub fn installed_plugins(&self) -> impl Iterator<Item = PluginMetadata> + '_ {
-        self.plugin_metadata.values().copied()
+    pub fn installed_plugins(&self) -> impl Iterator<Item = PluginDeclaration> + '_ {
+        self.plugin_entries.iter().map(|entry| *entry.declaration())
     }
 
-    pub fn installed_plugin_groups(&self) -> impl Iterator<Item = PluginGroupMetadata> + '_ {
-        self.plugin_groups.values().copied()
+    pub fn installed_plugin_entries(&self) -> impl Iterator<Item = &PluginPlanEntry> {
+        self.plugin_entries.iter()
     }
 
-    pub fn require_plugin(
-        &self,
-        plugin: PluginId,
-        prerequisite: PluginId,
-    ) -> Result<(), PluginError> {
-        if self.has_plugin(prerequisite) {
-            Ok(())
-        } else {
-            Err(PluginError::MissingPluginPrerequisite {
-                plugin,
-                prerequisite,
-            })
-        }
+    pub fn installed_plugin_groups(&self) -> impl Iterator<Item = &ResolvedPluginGroup> {
+        self.plugin_groups.iter()
     }
 
-    pub fn require_capability(
-        &self,
-        plugin: PluginId,
-        capability: PluginCapability,
-    ) -> Result<(), PluginError> {
-        if self.has_capability(capability) {
-            Ok(())
-        } else {
-            Err(PluginError::MissingCapabilityPrerequisite { plugin, capability })
-        }
+    #[must_use]
+    pub const fn configuration_fingerprint(&self) -> PluginPlanFingerprint {
+        self.plugin_plan_fingerprint
     }
 
-    fn check_plugin_metadata(&self, metadata: PluginMetadata) -> Result<(), PluginError> {
-        for prerequisite in metadata.requires_plugins {
-            self.require_plugin(metadata.id, *prerequisite)?;
-        }
-        for capability in metadata.requires_capabilities {
-            self.require_capability(metadata.id, *capability)?;
-        }
-        for conflict in metadata.conflicts {
-            if self.has_plugin(*conflict) {
-                return Err(PluginError::ConflictingPlugin {
-                    plugin: metadata.id,
-                    conflict: *conflict,
-                });
-            }
-        }
-        for installed in self.plugin_metadata.values() {
-            if installed.conflicts.contains(&metadata.id) {
-                return Err(PluginError::ConflictingPlugin {
-                    plugin: metadata.id,
-                    conflict: installed.id,
-                });
-            }
-        }
-        Ok(())
+    #[must_use]
+    pub const fn has_raw_runner(&self) -> bool {
+        self.runner.is_some()
     }
 
-    pub fn finish_plugins(&mut self) -> Result<&mut Self, PluginError> {
-        if self.committed_hook_depth != 0 {
+    #[must_use]
+    pub const fn started(&self) -> bool {
+        self.started
+    }
+
+    pub fn register_plugin_shutdown_obligation(
+        &mut self,
+        obligation: PluginShutdownObligationId,
+    ) -> Result<&mut Self, PluginError> {
+        let Some((plugin, PluginHook::Build)) = self.active_plugin_hook else {
+            return Err(PluginError::ShutdownObligationOutsideBuild);
+        };
+        let declared = self
+            .plugin_entries
+            .iter()
+            .find(|entry| entry.plugin_id() == plugin)
+            .is_some_and(|entry| {
+                entry
+                    .declaration()
+                    .shutdown_obligations
+                    .contains(&obligation)
+            });
+        if !declared {
+            let error = PluginError::UndeclaredShutdownObligation { plugin, obligation };
+            self.poison(plugin, PluginHook::Build, error.clone());
+            return Err(error);
+        }
+        if !self
+            .registered_shutdown_obligations
+            .insert((plugin, obligation))
+        {
+            let error = PluginError::DuplicateShutdownObligation { plugin, obligation };
+            self.poison(plugin, PluginHook::Build, error.clone());
+            return Err(error);
+        }
+        Ok(self)
+    }
+
+    pub fn seal(mut self) -> Result<SealedApp, PluginError> {
+        self.seal_internal()?;
+        Ok(SealedApp { app: self })
+    }
+
+    pub(crate) fn seal_internal(&mut self) -> Result<(), PluginError> {
+        if self.active_plugin_hook.is_some() {
             return Err(PluginError::FinishReentered);
         }
         match self.plugin_lifecycle {
-            PluginLifecycleState::Ready => return Ok(self),
+            PluginLifecycleState::Ready => return Ok(()),
             PluginLifecycleState::Poisoned => return Err(self.primary_plugin_error()),
-            PluginLifecycleState::Cleaning | PluginLifecycleState::Cleaned => {
-                return Err(PluginError::LifecycleCleaned);
+            PluginLifecycleState::ShuttingDown | PluginLifecycleState::ShutdownComplete => {
+                return Err(PluginError::LifecycleShutdown);
             }
             PluginLifecycleState::Finishing => {
                 return Err(PluginError::FinishReentered);
@@ -1647,153 +1276,71 @@ impl App {
             PluginLifecycleState::Configuring => {}
         }
 
+        for entry in &self.plugin_entries {
+            for obligation in entry.declaration().shutdown_obligations {
+                if !self
+                    .registered_shutdown_obligations
+                    .contains(&(entry.plugin_id(), *obligation))
+                {
+                    let error = PluginError::MissingShutdownObligation {
+                        plugin: entry.plugin_id(),
+                        obligation: *obligation,
+                    };
+                    self.poison(entry.plugin_id(), PluginHook::Build, error.clone());
+                    self.shutdown_plugins_internal();
+                    return Err(error);
+                }
+            }
+        }
+
         self.plugin_lifecycle = PluginLifecycleState::Finishing;
         for index in 0..self.plugins.len() {
             let plugin = Arc::clone(&self.plugins[index].plugin);
-            let plugin_id = self.plugins[index].metadata.id;
-            self.committed_hook_depth += 1;
+            let plugin_id = self.plugins[index].plugin_id;
+            self.active_plugin_hook = Some((plugin_id, PluginHook::Finish));
             let result = catch_unwind(AssertUnwindSafe(|| plugin.finish(self)))
                 .map_err(|_| PluginError::HookPanicked {
                     plugin: plugin_id,
                     hook: PluginHook::Finish,
                 })
                 .and_then(|result| result);
-            self.committed_hook_depth -= 1;
+            self.active_plugin_hook = None;
             if let Err(error) = result {
-                self.poison(
-                    PluginFailureSubject::Plugin(plugin_id),
-                    PluginHook::Finish,
-                    error,
-                );
+                self.poison(plugin_id, PluginHook::Finish, error);
+                break;
+            }
+            if self.plugin_lifecycle == PluginLifecycleState::Poisoned {
                 break;
             }
         }
 
         if self.plugin_lifecycle == PluginLifecycleState::Finishing {
             self.plugin_lifecycle = PluginLifecycleState::Ready;
-            return Ok(self);
+            return Ok(());
         }
 
-        self.cleanup_plugins_internal();
+        self.shutdown_plugins_internal();
         Err(self.primary_plugin_error())
     }
 
-    pub fn cleanup_plugins(&mut self) -> Result<(), PluginCleanupError> {
-        if self.committed_hook_depth != 0 {
-            return Err(PluginCleanupError::HookActive);
+    pub fn shutdown_plugins(&mut self) -> Result<(), PluginShutdownError> {
+        if self.active_plugin_hook.is_some() {
+            return Err(PluginShutdownError::HookActive);
         }
-        self.cleanup_plugins_internal();
+        self.shutdown_plugins_internal();
         if let Some(report) = &self.plugin_failure_report
-            && (report.primary.is_some() || !report.cleanup_failures.is_empty())
+            && (report.primary.is_some() || !report.shutdown_failures.is_empty())
         {
-            return Err(PluginCleanupError::Failure(Box::new(report.clone())));
+            return Err(PluginShutdownError::Failure(Box::new(report.clone())));
         }
         Ok(())
-    }
-
-    fn add_plugin_internal<P>(
-        &mut self,
-        plugin: P,
-        skip_if_installed: bool,
-    ) -> Result<&mut Self, PluginError>
-    where
-        P: Plugin,
-    {
-        if self.plugin_lifecycle == PluginLifecycleState::Poisoned {
-            return Err(self.primary_plugin_error());
-        }
-        if self.plugin_lifecycle == PluginLifecycleState::Cleaned
-            || self.plugin_lifecycle == PluginLifecycleState::Cleaning
-        {
-            return Err(PluginError::LifecycleCleaned);
-        }
-
-        let metadata = catch_unwind(AssertUnwindSafe(|| plugin.metadata()))
-            .map_err(|_| PluginError::MetadataPanicked)?;
-        if self.plugin_lifecycle != PluginLifecycleState::Configuring {
-            return Err(PluginError::AddedAfterFinish {
-                plugin: metadata.id,
-            });
-        }
-        if let Some(cycle_start) = self
-            .installing_plugins
-            .iter()
-            .position(|plugin_id| *plugin_id == metadata.id)
-        {
-            let mut chain = self.installing_plugins[cycle_start..].to_vec();
-            chain.push(metadata.id);
-            return Err(PluginError::DependencyCycle {
-                plugin: metadata.id,
-                chain,
-            });
-        }
-        if metadata.unique && self.has_plugin(metadata.id) {
-            if skip_if_installed {
-                return Ok(self);
-            }
-            return Err(PluginError::Duplicate {
-                plugin: metadata.id,
-            });
-        }
-
-        self.check_plugin_metadata(metadata)?;
-        catch_unwind(AssertUnwindSafe(|| plugin.preflight(self))).map_err(|_| {
-            PluginError::HookPanicked {
-                plugin: metadata.id,
-                hook: PluginHook::Preflight,
-            }
-        })??;
-
-        let plugin: Arc<dyn Plugin> = Arc::new(plugin);
-        let committed_index = self.plugins.len();
-        self.plugins.push(InstalledPlugin {
-            plugin: Arc::clone(&plugin),
-            metadata,
-            cleanup_complete: false,
-        });
-        self.installing_plugins.push(metadata.id);
-        self.committed_hook_depth += 1;
-
-        let build_result = catch_unwind(AssertUnwindSafe(|| plugin.build(self)))
-            .map_err(|_| PluginError::HookPanicked {
-                plugin: metadata.id,
-                hook: PluginHook::Build,
-            })
-            .and_then(|result| result);
-
-        self.committed_hook_depth -= 1;
-        self.installing_plugins.pop();
-        let committed = self.plugins.remove(committed_index);
-        self.plugins.push(committed);
-
-        if let Err(error) = build_result {
-            self.poison(
-                PluginFailureSubject::Plugin(metadata.id),
-                PluginHook::Build,
-                error,
-            );
-        }
-
-        if self.plugin_lifecycle != PluginLifecycleState::Poisoned {
-            *self.plugin_install_counts.entry(metadata.id).or_default() += 1;
-            self.plugin_metadata.entry(metadata.id).or_insert(metadata);
-            for capability in metadata.provides {
-                self.provided_capabilities.insert(*capability);
-            }
-        }
-
-        self.cleanup_after_outermost_failure();
-        if self.plugin_lifecycle == PluginLifecycleState::Poisoned {
-            return Err(self.primary_plugin_error());
-        }
-        Ok(self)
     }
 
     fn ensure_mutation_allowed(&self) -> Result<(), PluginError> {
         match self.plugin_lifecycle {
             PluginLifecycleState::Poisoned => Err(self.primary_plugin_error()),
-            PluginLifecycleState::Cleaning | PluginLifecycleState::Cleaned => {
-                Err(PluginError::LifecycleCleaned)
+            PluginLifecycleState::ShuttingDown | PluginLifecycleState::ShutdownComplete => {
+                Err(PluginError::LifecycleShutdown)
             }
             PluginLifecycleState::Configuring
             | PluginLifecycleState::Finishing
@@ -1801,41 +1348,143 @@ impl App {
         }
     }
 
+    fn ensure_configuration_mutation_allowed(&self) -> Result<(), PluginError> {
+        self.ensure_mutation_allowed()?;
+        if self.plugin_lifecycle == PluginLifecycleState::Ready {
+            Err(PluginError::AppSealed)
+        } else {
+            Ok(())
+        }
+    }
+
     fn primary_plugin_error(&self) -> PluginError {
         self.plugin_failure_report
             .as_ref()
             .and_then(|report| report.primary.as_ref())
-            .map(|failure| failure.error.clone())
+            .map(|failure| failure.error().clone())
             .unwrap_or(PluginError::LifecyclePoisoned)
     }
 
-    fn poison(&mut self, subject: PluginFailureSubject, hook: PluginHook, error: PluginError) {
+    fn poison(&mut self, plugin: PluginId, hook: PluginHook, error: PluginError) {
         let report = self
             .plugin_failure_report
             .get_or_insert_with(|| PluginFailureReport {
                 primary: None,
-                cleanup_failures: Vec::new(),
-                cleanup_complete: false,
+                shutdown_failures: Vec::new(),
+                shutdown_complete: false,
             });
         if report.primary.is_none() {
-            report.primary = Some(PluginFailure {
-                subject,
-                hook,
-                error,
-            });
+            report.primary = Some(plugin::failure(plugin, hook, error));
         }
         self.plugin_lifecycle = PluginLifecycleState::Poisoned;
     }
 
-    fn cleanup_after_outermost_failure(&mut self) {
-        if self.committed_hook_depth == 0 && self.plugin_lifecycle == PluginLifecycleState::Poisoned
-        {
-            self.cleanup_plugins_internal();
+    pub(crate) fn reject_hook_composition_mutation(&mut self) -> Result<(), PluginError> {
+        if let Some((plugin, hook)) = self.active_plugin_hook {
+            let error = PluginError::HookMutationForbidden {
+                plugin,
+                hook,
+                mutation: PluginHookMutation::PluginMembership,
+            };
+            self.poison(plugin, hook, error.clone());
+            return Err(error);
         }
+        self.ensure_configuration_mutation_allowed()
     }
 
-    fn cleanup_plugins_internal(&mut self) {
-        if self.plugin_lifecycle == PluginLifecycleState::Cleaning {
+    pub(crate) fn composition_prefix(&self) -> plugin::CompositionPrefix {
+        plugin::prefix_from_parts(
+            self.plugin_entries.clone(),
+            self.plugin_definition_witnesses.clone(),
+            self.plugin_groups.clone(),
+            self.disabled_plugin_slots.clone(),
+        )
+    }
+
+    pub(crate) fn commit_plugin_batch(
+        &mut self,
+        batch: plugin::PluginCommitBatch,
+    ) -> Result<(), PluginError> {
+        self.reject_hook_composition_mutation()?;
+        if self.plugin_lifecycle != PluginLifecycleState::Configuring {
+            return Err(PluginError::AppSealed);
+        }
+        if batch.prefix_len != self.plugin_entries.len()
+            || batch.entries.len() != batch.witnesses.len()
+            || batch.entries.len().saturating_sub(batch.prefix_len) != batch.prepared.len()
+        {
+            return Err(PluginError::LifecyclePoisoned);
+        }
+
+        for (committed_in_batch, ((entry, witness), plugin)) in batch.entries[batch.prefix_len..]
+            .iter()
+            .zip(&batch.witnesses[batch.prefix_len..])
+            .zip(batch.prepared)
+            .enumerate()
+        {
+            let plugin_id = entry.plugin_id();
+            self.active_plugin_hook = Some((plugin_id, PluginHook::Preflight));
+            let context = plugin::preflight_context(&batch.entries, &self.world);
+            let preflight = catch_unwind(AssertUnwindSafe(|| plugin.preflight(&context)));
+            self.active_plugin_hook = None;
+            match preflight {
+                Err(_) => {
+                    let error = PluginError::HookPanicked {
+                        plugin: plugin_id,
+                        hook: PluginHook::Preflight,
+                    };
+                    self.poison(plugin_id, PluginHook::Preflight, error.clone());
+                    self.shutdown_plugins_internal();
+                    return Err(error);
+                }
+                Ok(Err(error)) if committed_in_batch == 0 => return Err(error),
+                Ok(Err(error)) => {
+                    let error = PluginError::CommittedPreflightRejected {
+                        plugin: plugin_id,
+                        source: Box::new(error),
+                    };
+                    self.poison(plugin_id, PluginHook::Preflight, error.clone());
+                    self.shutdown_plugins_internal();
+                    return Err(error);
+                }
+                Ok(Ok(())) => {}
+            }
+
+            self.plugin_entries.push(entry.clone());
+            self.plugin_definition_witnesses.push(witness.clone());
+            self.plugins.push(InstalledPlugin {
+                plugin: Arc::clone(&plugin),
+                plugin_id,
+                shutdown_complete: false,
+            });
+            self.active_plugin_hook = Some((plugin_id, PluginHook::Build));
+            let build = catch_unwind(AssertUnwindSafe(|| plugin.build(self)))
+                .map_err(|_| PluginError::HookPanicked {
+                    plugin: plugin_id,
+                    hook: PluginHook::Build,
+                })
+                .and_then(|result| result);
+            self.active_plugin_hook = None;
+            if let Err(error) = build {
+                self.poison(plugin_id, PluginHook::Build, error.clone());
+            }
+            if self.plugin_lifecycle == PluginLifecycleState::Poisoned {
+                let error = self.primary_plugin_error();
+                self.shutdown_plugins_internal();
+                return Err(error);
+            }
+        }
+
+        self.plugin_entries = batch.entries;
+        self.plugin_definition_witnesses = batch.witnesses;
+        self.plugin_groups = batch.groups;
+        self.disabled_plugin_slots = batch.disabled_slots;
+        self.plugin_plan_fingerprint = batch.fingerprint;
+        Ok(())
+    }
+
+    fn shutdown_plugins_internal(&mut self) {
+        if self.plugin_lifecycle == PluginLifecycleState::ShuttingDown {
             return;
         }
 
@@ -1844,24 +1493,22 @@ impl App {
                 .plugin_failure_report
                 .as_ref()
                 .is_some_and(|report| report.primary.is_some());
-        self.plugin_lifecycle = PluginLifecycleState::Cleaning;
+        self.plugin_lifecycle = PluginLifecycleState::ShuttingDown;
 
         for index in (0..self.plugins.len()).rev() {
-            if self.plugins[index].cleanup_complete {
+            if self.plugins[index].shutdown_complete {
                 continue;
             }
 
-            self.plugins[index].cleanup_complete = true;
+            self.plugins[index].shutdown_complete = true;
             let plugin = Arc::clone(&self.plugins[index].plugin);
-            let plugin_id = self.plugins[index].metadata.id;
+            let plugin_id = self.plugins[index].plugin_id;
             let result = {
-                let mut context = PluginCleanupContext {
-                    world: &mut self.world,
-                };
-                catch_unwind(AssertUnwindSafe(|| plugin.cleanup(&mut context)))
+                let mut context = plugin::shutdown_context(&mut self.world);
+                catch_unwind(AssertUnwindSafe(|| plugin.shutdown(&mut context)))
                     .map_err(|_| PluginError::HookPanicked {
                         plugin: plugin_id,
-                        hook: PluginHook::Cleanup,
+                        hook: PluginHook::Shutdown,
                     })
                     .and_then(|result| result)
             };
@@ -1870,29 +1517,29 @@ impl App {
                     self.plugin_failure_report
                         .get_or_insert_with(|| PluginFailureReport {
                             primary: None,
-                            cleanup_failures: Vec::new(),
-                            cleanup_complete: false,
+                            shutdown_failures: Vec::new(),
+                            shutdown_complete: false,
                         });
-                report.cleanup_failures.push(PluginFailure {
-                    subject: PluginFailureSubject::Plugin(plugin_id),
-                    hook: PluginHook::Cleanup,
+                report.shutdown_failures.push(plugin::failure(
+                    plugin_id,
+                    PluginHook::Shutdown,
                     error,
-                });
+                ));
             }
         }
 
         if let Some(report) = &mut self.plugin_failure_report {
-            report.cleanup_complete = true;
+            report.shutdown_complete = true;
         }
         self.plugin_lifecycle = if preserve_poisoned {
             PluginLifecycleState::Poisoned
         } else {
-            PluginLifecycleState::Cleaned
+            PluginLifecycleState::ShutdownComplete
         };
     }
 
     pub fn run(mut self) -> Result<AppExit, AppRunError> {
-        if let Err(error) = self.finish_plugins() {
+        if let Err(error) = self.seal_internal() {
             return Err(AppRunError::plugin(
                 error,
                 self.plugin_failure_report.clone(),
@@ -1903,13 +1550,13 @@ impl App {
             .take()
             .unwrap_or_else(|| Box::new(default_runner));
         let run_result = runner(&mut self);
-        match self.cleanup_plugins() {
+        match self.shutdown_plugins() {
             Ok(()) => run_result,
-            Err(PluginCleanupError::Failure(report)) => Err(AppRunError::Shutdown {
+            Err(PluginShutdownError::Failure(report)) => Err(AppRunError::Shutdown {
                 prior: run_result.err().map(Box::new),
                 report,
             }),
-            Err(PluginCleanupError::HookActive) => match run_result {
+            Err(PluginShutdownError::HookActive) => match run_result {
                 Err(error) => Err(error),
                 Ok(_) => Err(AppRunError::runner(
                     "runner returned while a plugin hook was still active",
@@ -1924,7 +1571,7 @@ impl App {
     /// resources left by startup; a planning failure does not roll startup back or run it again,
     /// but it commits no clock state, runs no core schedule, and does not clear frame trackers.
     pub fn run_once(&mut self, real_delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
-        if let Err(error) = self.finish_plugins() {
+        if let Err(error) = self.seal_internal() {
             return Err(AppRunError::plugin(
                 error,
                 self.plugin_failure_report.clone(),
@@ -1933,7 +1580,7 @@ impl App {
 
         if !self.started {
             for stage in StartupStage::ALL {
-                if let Some(schedule) = self.startup_schedules.get_mut(&stage) {
+                if let Some(schedule) = self.schedules.get_mut(stage) {
                     schedule.run(&mut self.world);
                 }
             }
@@ -1946,7 +1593,7 @@ impl App {
         let mut frame_status = None;
 
         for stage in CoreStage::ALL {
-            if let Some(schedule) = self.schedules.get_mut(&stage) {
+            if let Some(schedule) = self.schedules.get_mut(stage) {
                 if stage == CoreStage::FixedUpdate {
                     for _ in 0..time_frame_plan.fixed_steps_to_run {
                         fixed_time.advance_tick();
@@ -1989,18 +1636,6 @@ impl App {
     pub fn update(&mut self) -> Result<AppFrameOutcome, AppRunError> {
         self.run_once(Duration::ZERO)
     }
-
-    fn startup_schedule_mut(&mut self, stage: StartupStage) -> &mut Schedule {
-        self.startup_schedules
-            .entry(stage)
-            .or_insert_with(|| Schedule::new(stage))
-    }
-
-    fn schedule_mut(&mut self, stage: CoreStage) -> &mut Schedule {
-        self.schedules
-            .entry(stage)
-            .or_insert_with(|| Schedule::new(stage))
-    }
 }
 
 fn default_runner(app: &mut App) -> Result<AppExit, AppRunError> {
@@ -2013,10 +1648,6 @@ mod tests {
     use super::*;
     use nara_ecs::{
         Commands, Component, DetectChanges, Query, RemovedComponents, Res, ResMut, Resource,
-    };
-    use std::sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
     };
 
     #[derive(Debug, Default, Resource)]
@@ -2056,450 +1687,6 @@ mod tests {
 
     #[derive(Debug, Default, Resource)]
     struct Order(Vec<&'static str>);
-
-    #[derive(Debug, Default, Resource)]
-    struct PluginBuildCount(u32);
-
-    const COUNTING_PLUGIN_ID: PluginId = PluginId::new("nara.test.counting");
-    const FAILING_PLUGIN_ID: PluginId = PluginId::new("nara.test.failing");
-    const MISSING_PLUGIN_ID: PluginId = PluginId::new("nara.test.missing");
-    const COUNTING_CAPABILITY: PluginCapability = PluginCapability::new("nara.test.counting");
-    const CAPABILITY_PLUGIN_ID: PluginId = PluginId::new("nara.test.capability");
-    const COUNTING_GROUP_ID: PluginGroupId = PluginGroupId::new("nara.test.group");
-    const COMMITTED_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.committed_failure");
-    const FINISH_A_PLUGIN_ID: PluginId = PluginId::new("nara.test.finish_a");
-    const FINISH_B_PLUGIN_ID: PluginId = PluginId::new("nara.test.finish_b");
-    const FINISH_C_PLUGIN_ID: PluginId = PluginId::new("nara.test.finish_c");
-    const PREFLIGHT_PLUGIN_ID: PluginId = PluginId::new("nara.test.preflight");
-    const PROBE_A_PLUGIN_ID: PluginId = PluginId::new("nara.test.probe_a");
-    const PROBE_B_PLUGIN_ID: PluginId = PluginId::new("nara.test.probe_b");
-    const PROBE_C_PLUGIN_ID: PluginId = PluginId::new("nara.test.probe_c");
-    const CYCLE_A_PLUGIN_ID: PluginId = PluginId::new("nara.test.cycle_a");
-    const CYCLE_B_PLUGIN_ID: PluginId = PluginId::new("nara.test.cycle_b");
-    const NESTED_PLUGIN_ID: PluginId = PluginId::new("nara.test.nested");
-    const IGNORE_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.ignore_failure");
-    const PARTIAL_GROUP_ID: PluginGroupId = PluginGroupId::new("nara.test.partial_group");
-    const CYCLE_A_GROUP_ID: PluginGroupId = PluginGroupId::new("nara.test.cycle_a_group");
-    const CYCLE_B_GROUP_ID: PluginGroupId = PluginGroupId::new("nara.test.cycle_b_group");
-    const CONFLICT_A_PLUGIN_ID: PluginId = PluginId::new("nara.test.conflict_a");
-    const CONFLICT_B_PLUGIN_ID: PluginId = PluginId::new("nara.test.conflict_b");
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct CountingPlugin;
-
-    impl Plugin for CountingPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(COUNTING_PLUGIN_ID, PluginCategory::Core)
-                .provides(&[COUNTING_CAPABILITY])
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            if !app.world().contains_resource::<PluginBuildCount>() {
-                app.insert_resource(PluginBuildCount::default())?;
-            }
-            app.world_mut()?.resource_mut::<PluginBuildCount>().0 += 1;
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct FailingPlugin;
-
-    impl Plugin for FailingPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(FAILING_PLUGIN_ID, PluginCategory::Core)
-                .requires_plugins(&[MISSING_PLUGIN_ID])
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            app.require_plugin(self.plugin_id(), MISSING_PLUGIN_ID)
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct CapabilityPlugin;
-
-    impl Plugin for CapabilityPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(CAPABILITY_PLUGIN_ID, PluginCategory::Core)
-                .requires_capabilities(&[COUNTING_CAPABILITY])
-        }
-
-        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct ConflictAPlugin;
-
-    impl Plugin for ConflictAPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(CONFLICT_A_PLUGIN_ID, PluginCategory::Core)
-                .conflicts(&[CONFLICT_B_PLUGIN_ID])
-        }
-
-        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct ConflictBPlugin;
-
-    impl Plugin for ConflictBPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(CONFLICT_B_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct CountingGroup;
-
-    impl PluginGroup for CountingGroup {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(COUNTING_GROUP_ID, &[COUNTING_PLUGIN_ID])
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugin_if_missing(CountingPlugin)?;
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct CommittedFailurePlugin;
-
-    impl Plugin for CommittedFailurePlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(COMMITTED_FAILURE_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            app.insert_resource(PluginBuildCount(41))?;
-            Err(PluginError::SetupFailed {
-                plugin: COMMITTED_FAILURE_PLUGIN_ID,
-                message: "committed build failed".into(),
-            })
-        }
-    }
-
-    #[derive(Clone)]
-    struct FinishOrderPlugin {
-        id: PluginId,
-        cleanup_order: Arc<Mutex<Vec<PluginId>>>,
-        fail_finish: bool,
-    }
-
-    impl Plugin for FinishOrderPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(self.id, PluginCategory::Core)
-        }
-
-        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-            Ok(())
-        }
-
-        fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
-            if self.fail_finish {
-                Err(PluginError::SetupFailed {
-                    plugin: self.id,
-                    message: "finish failed".into(),
-                })
-            } else {
-                Ok(())
-            }
-        }
-
-        fn cleanup(&self, _context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
-            self.cleanup_order.lock().unwrap().push(self.id);
-            Ok(())
-        }
-    }
-
-    #[derive(Clone)]
-    struct RetryablePreflightPlugin {
-        allowed: Arc<AtomicBool>,
-    }
-
-    impl Plugin for RetryablePreflightPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(PREFLIGHT_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn preflight(&self, _app: &App) -> Result<(), PluginError> {
-            if self.allowed.load(Ordering::SeqCst) {
-                Ok(())
-            } else {
-                Err(PluginError::SetupFailed {
-                    plugin: PREFLIGHT_PLUGIN_ID,
-                    message: "preflight rejected".into(),
-                })
-            }
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            app.insert_resource(PluginBuildCount(7))?;
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct ProbeBehavior {
-        panic_preflight: bool,
-        panic_build: bool,
-        fail_finish: bool,
-        panic_finish: bool,
-        fail_cleanup: bool,
-        panic_cleanup: bool,
-    }
-
-    #[derive(Clone)]
-    struct LifecycleProbePlugin {
-        id: PluginId,
-        behavior: ProbeBehavior,
-        trace: Arc<Mutex<Vec<(PluginId, PluginHook)>>>,
-    }
-
-    impl Plugin for LifecycleProbePlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(self.id, PluginCategory::Core)
-        }
-
-        fn preflight(&self, _app: &App) -> Result<(), PluginError> {
-            assert!(!self.behavior.panic_preflight, "preflight panic");
-            Ok(())
-        }
-
-        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-            self.trace
-                .lock()
-                .unwrap()
-                .push((self.id, PluginHook::Build));
-            assert!(!self.behavior.panic_build, "build panic");
-            Ok(())
-        }
-
-        fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
-            self.trace
-                .lock()
-                .unwrap()
-                .push((self.id, PluginHook::Finish));
-            assert!(!self.behavior.panic_finish, "finish panic");
-            if self.behavior.fail_finish {
-                Err(PluginError::SetupFailed {
-                    plugin: self.id,
-                    message: "finish rejected".into(),
-                })
-            } else {
-                Ok(())
-            }
-        }
-
-        fn cleanup(&self, _context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
-            self.trace
-                .lock()
-                .unwrap()
-                .push((self.id, PluginHook::Cleanup));
-            assert!(!self.behavior.panic_cleanup, "cleanup panic");
-            if self.behavior.fail_cleanup {
-                Err(PluginError::SetupFailed {
-                    plugin: self.id,
-                    message: "cleanup rejected".into(),
-                })
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    #[derive(Clone)]
-    struct NestedProbePlugin {
-        trace: Arc<Mutex<Vec<(PluginId, PluginHook)>>>,
-    }
-
-    impl Plugin for NestedProbePlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(NESTED_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            app.add_plugin(LifecycleProbePlugin {
-                id: PROBE_B_PLUGIN_ID,
-                behavior: ProbeBehavior::default(),
-                trace: Arc::clone(&self.trace),
-            })?;
-            self.trace
-                .lock()
-                .unwrap()
-                .push((NESTED_PLUGIN_ID, PluginHook::Build));
-            Ok(())
-        }
-
-        fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
-            self.trace
-                .lock()
-                .unwrap()
-                .push((NESTED_PLUGIN_ID, PluginHook::Finish));
-            Ok(())
-        }
-
-        fn cleanup(&self, _context: &mut PluginCleanupContext<'_>) -> Result<(), PluginError> {
-            self.trace
-                .lock()
-                .unwrap()
-                .push((NESTED_PLUGIN_ID, PluginHook::Cleanup));
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct IgnoreNestedFailurePlugin;
-
-    impl Plugin for IgnoreNestedFailurePlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(IGNORE_FAILURE_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            assert!(app.add_plugin(CommittedFailurePlugin).is_err());
-            let Err(error) = app.insert_resource(Frames::default()) else {
-                panic!("nested failure must poison before outer build continues");
-            };
-            assert_eq!(
-                error,
-                PluginError::SetupFailed {
-                    plugin: COMMITTED_FAILURE_PLUGIN_ID,
-                    message: "committed build failed".into(),
-                }
-            );
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct LifecycleReentryPlugin;
-
-    impl Plugin for LifecycleReentryPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(PROBE_C_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            let Err(finish_error) = app.finish_plugins() else {
-                panic!("finish reentry should be rejected");
-            };
-            assert_eq!(finish_error, PluginError::FinishReentered);
-            assert_eq!(
-                app.cleanup_plugins().unwrap_err(),
-                PluginCleanupError::HookActive
-            );
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct FinishReentryPlugin;
-
-    impl Plugin for FinishReentryPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(PROBE_B_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-            Ok(())
-        }
-
-        fn finish(&self, app: &mut App) -> Result<(), PluginError> {
-            let Err(finish_error) = app.finish_plugins() else {
-                panic!("finish hook reentry should be rejected");
-            };
-            assert_eq!(finish_error, PluginError::FinishReentered);
-            assert_eq!(
-                app.cleanup_plugins().unwrap_err(),
-                PluginCleanupError::HookActive
-            );
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct CycleAPlugin;
-
-    impl Plugin for CycleAPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(CYCLE_A_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            app.add_plugin_if_missing(CycleBPlugin)?;
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct CycleBPlugin;
-
-    impl Plugin for CycleBPlugin {
-        fn metadata(&self) -> PluginMetadata {
-            PluginMetadata::new(CYCLE_B_PLUGIN_ID, PluginCategory::Core)
-        }
-
-        fn build(&self, app: &mut App) -> Result<(), PluginError> {
-            app.add_plugin_if_missing(CycleAPlugin)?;
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct PartialGroup;
-
-    impl PluginGroup for PartialGroup {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(
-                PARTIAL_GROUP_ID,
-                &[COUNTING_PLUGIN_ID, COMMITTED_FAILURE_PLUGIN_ID],
-            )
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugin(CountingPlugin)?;
-            group.add_plugin(CommittedFailurePlugin)?;
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct CycleAGroup;
-
-    impl PluginGroup for CycleAGroup {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(CYCLE_A_GROUP_ID, &[])
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugins(CycleBGroup)?;
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    struct CycleBGroup;
-
-    impl PluginGroup for CycleBGroup {
-        fn metadata(&self) -> PluginGroupMetadata {
-            PluginGroupMetadata::new(CYCLE_B_GROUP_ID, &[])
-        }
-
-        fn build(&self, group: &mut PluginGroupBuilder<'_>) -> Result<(), PluginError> {
-            group.add_plugins(CycleAGroup)?;
-            Ok(())
-        }
-    }
 
     fn spawn_entity(mut commands: Commands) {
         commands.spawn(Spawned);
@@ -2705,8 +1892,7 @@ mod tests {
     fn update_runs_startup_once_and_update_every_frame() {
         let mut app = App::new();
         app.insert_resource(Frames::default()).unwrap();
-        app.add_startup_systems(StartupStage::Core, spawn_entity)
-            .unwrap();
+        app.add_systems(StartupStage::Core, spawn_entity).unwrap();
         app.add_systems(CoreStage::Update, (spawn_entity, count_frame))
             .unwrap();
 
@@ -3048,7 +2234,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(StartupRuns::default()).unwrap();
         app.insert_resource(Frames::default()).unwrap();
-        app.add_startup_systems(StartupStage::Core, pause_on_startup)
+        app.add_systems(StartupStage::Core, pause_on_startup)
             .unwrap();
         app.add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
@@ -3067,7 +2253,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(StartupRuns::default()).unwrap();
         app.insert_resource(Frames::default()).unwrap();
-        app.add_startup_systems(StartupStage::Core, set_timestep_on_startup)
+        app.add_systems(StartupStage::Core, set_timestep_on_startup)
             .unwrap();
         app.add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
@@ -3088,7 +2274,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(StartupRuns::default()).unwrap();
         app.insert_resource(Frames::default()).unwrap();
-        app.add_startup_systems(StartupStage::Core, configure_preserve_debt_on_startup)
+        app.add_systems(StartupStage::Core, configure_preserve_debt_on_startup)
             .unwrap();
         app.add_systems(CoreStage::Update, count_frame).unwrap();
         let step = FixedTime::DEFAULT_TIMESTEP;
@@ -3134,7 +2320,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(StartupRuns::default()).unwrap();
         app.insert_resource(Frames::default()).unwrap();
-        app.add_startup_systems(StartupStage::Core, remove_fixed_time_on_startup)
+        app.add_systems(StartupStage::Core, remove_fixed_time_on_startup)
             .unwrap();
         app.add_systems(CoreStage::Update, count_frame).unwrap();
 
@@ -3481,831 +2667,6 @@ mod tests {
         assert_eq!(
             app.run().unwrap_err(),
             AppRunError::runner("window creation failed")
-        );
-    }
-
-    #[test]
-    fn run_preserves_runner_error_when_cleanup_also_fails() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-        app.add_plugin(LifecycleProbePlugin {
-            id: PROBE_A_PLUGIN_ID,
-            behavior: ProbeBehavior {
-                fail_cleanup: true,
-                ..ProbeBehavior::default()
-            },
-            trace: Arc::clone(&trace),
-        })
-        .unwrap();
-        app.set_runner(|_app| Err(AppRunError::runner("runner failed")))
-            .unwrap();
-
-        let error = app.run().unwrap_err();
-
-        let AppRunError::Shutdown { prior, report } = error else {
-            panic!("runner and cleanup failures should be returned together");
-        };
-        assert_eq!(
-            prior.as_deref(),
-            Some(&AppRunError::runner("runner failed"))
-        );
-        assert!(report.primary().is_none());
-        assert_eq!(report.cleanup_failures().len(), 1);
-        assert_eq!(
-            trace
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|(_, hook)| *hook == PluginHook::Cleanup)
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn run_preserves_runner_teardown_when_plugin_cleanup_also_fails() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-        app.add_plugin(LifecycleProbePlugin {
-            id: PROBE_A_PLUGIN_ID,
-            behavior: ProbeBehavior {
-                fail_cleanup: true,
-                ..ProbeBehavior::default()
-            },
-            trace: Arc::clone(&trace),
-        })
-        .unwrap();
-        let runner_error = AppRunError::runner_teardown(
-            AppRunError::runner("runner failed"),
-            AppRunError::runner("native teardown failed"),
-        );
-        let expected_runner_error = runner_error.clone();
-        app.set_runner(move |_app| Err(runner_error)).unwrap();
-
-        let error = app.run().unwrap_err();
-
-        let AppRunError::Shutdown { prior, report } = &error else {
-            panic!("runner, teardown, and cleanup failures should remain nested");
-        };
-        assert_eq!(prior.as_deref(), Some(&expected_runner_error));
-        assert!(report.primary().is_none());
-        assert_eq!(report.cleanup_failures().len(), 1);
-        assert_eq!(error.plugin_failure_report(), Some(report.as_ref()));
-        assert_eq!(
-            trace
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|(_, hook)| *hook == PluginHook::Cleanup)
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn runner_teardown_accessors_search_both_nested_errors() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut report_app = App::new();
-        report_app
-            .add_plugin(LifecycleProbePlugin {
-                id: PROBE_A_PLUGIN_ID,
-                behavior: ProbeBehavior {
-                    fail_cleanup: true,
-                    ..ProbeBehavior::default()
-                },
-                trace,
-            })
-            .unwrap();
-        let PluginCleanupError::Failure(report) = report_app.cleanup_plugins().unwrap_err() else {
-            panic!("test plugin should produce a cleanup report");
-        };
-        let report = *report;
-        let plugin_error = report.cleanup_failures()[0].error().clone();
-        let nested_plugin = AppRunError::plugin(plugin_error.clone(), Some(report.clone()));
-
-        for error in [
-            AppRunError::runner_teardown(
-                nested_plugin.clone(),
-                AppRunError::runner("teardown failed"),
-            ),
-            AppRunError::runner_teardown(
-                AppRunError::runner("runner failed"),
-                nested_plugin.clone(),
-            ),
-        ] {
-            assert_eq!(error.plugin_error(), Some(&plugin_error));
-            assert_eq!(error.plugin_failure_report(), Some(&report));
-        }
-    }
-
-    #[test]
-    fn failed_plugin_build_is_reported_without_registering_plugin() {
-        let mut app = App::new();
-
-        let Err(error) = app.add_plugin(FailingPlugin) else {
-            panic!("failing plugin should return an installation error");
-        };
-        assert_eq!(
-            error,
-            PluginError::MissingPluginPrerequisite {
-                plugin: FAILING_PLUGIN_ID,
-                prerequisite: MISSING_PLUGIN_ID
-            }
-        );
-        assert!(!app.has_plugin(FAILING_PLUGIN_ID));
-    }
-
-    #[test]
-    fn add_plugin_if_missing_skips_duplicate_without_rebuilding() {
-        let mut app = App::new();
-
-        app.add_plugin_if_missing(CountingPlugin).unwrap();
-        app.add_plugin_if_missing(CountingPlugin).unwrap();
-
-        assert!(app.has_plugin(COUNTING_PLUGIN_ID));
-        assert_eq!(app.world().resource::<PluginBuildCount>().0, 1);
-    }
-
-    #[test]
-    fn add_plugin_rejects_duplicate_stable_plugin_id() {
-        let mut app = App::new();
-
-        app.add_plugin(CountingPlugin).unwrap();
-        let Err(error) = app.add_plugin(CountingPlugin) else {
-            panic!("duplicate stable plugin id should be rejected");
-        };
-
-        assert_eq!(
-            error,
-            PluginError::Duplicate {
-                plugin: COUNTING_PLUGIN_ID
-            }
-        );
-        assert_eq!(app.world().resource::<PluginBuildCount>().0, 1);
-    }
-
-    #[test]
-    fn plugin_requirements_can_target_capabilities() {
-        let mut app = App::new();
-
-        let Err(error) = app.add_plugin(CapabilityPlugin) else {
-            panic!("capability plugin should require missing capability");
-        };
-        assert_eq!(
-            error,
-            PluginError::MissingCapabilityPrerequisite {
-                plugin: CAPABILITY_PLUGIN_ID,
-                capability: COUNTING_CAPABILITY,
-            }
-        );
-
-        app.add_plugin(CountingPlugin).unwrap();
-        app.add_plugin(CapabilityPlugin).unwrap();
-
-        assert!(app.has_capability(COUNTING_CAPABILITY));
-        assert!(app.has_plugin(CAPABILITY_PLUGIN_ID));
-    }
-
-    #[test]
-    fn plugin_conflicts_are_rejected_independent_of_install_order() {
-        let mut declared_first = App::new();
-        declared_first.add_plugin(ConflictAPlugin).unwrap();
-        let Err(reverse_error) = declared_first.add_plugin(ConflictBPlugin) else {
-            panic!("installed plugin conflict declaration must reject a later plugin");
-        };
-        assert_eq!(
-            reverse_error,
-            PluginError::ConflictingPlugin {
-                plugin: CONFLICT_B_PLUGIN_ID,
-                conflict: CONFLICT_A_PLUGIN_ID,
-            }
-        );
-        assert_eq!(
-            declared_first.plugin_lifecycle_state(),
-            PluginLifecycleState::Configuring
-        );
-
-        let mut declared_second = App::new();
-        declared_second.add_plugin(ConflictBPlugin).unwrap();
-        let Err(forward_error) = declared_second.add_plugin(ConflictAPlugin) else {
-            panic!("new plugin conflict declaration must reject an installed plugin");
-        };
-        assert_eq!(
-            forward_error,
-            PluginError::ConflictingPlugin {
-                plugin: CONFLICT_A_PLUGIN_ID,
-                conflict: CONFLICT_B_PLUGIN_ID,
-            }
-        );
-        assert_eq!(
-            declared_second.plugin_lifecycle_state(),
-            PluginLifecycleState::Configuring
-        );
-    }
-
-    #[test]
-    fn plugin_groups_are_recorded_with_stable_membership() {
-        let mut app = App::new();
-
-        app.add_plugins(CountingGroup).unwrap();
-
-        assert!(app.has_plugin(COUNTING_PLUGIN_ID));
-        let groups = app.installed_plugin_groups().collect::<Vec<_>>();
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].id, COUNTING_GROUP_ID);
-        assert_eq!(groups[0].plugins, &[COUNTING_PLUGIN_ID]);
-    }
-
-    #[test]
-    fn add_plugin_if_missing_rejects_install_after_finish() {
-        let mut app = App::new();
-        app.finish_plugins().unwrap();
-
-        let Err(error) = app.add_plugin_if_missing(CountingPlugin) else {
-            panic!("installing after finish should return an error");
-        };
-        assert_eq!(
-            error,
-            PluginError::AddedAfterFinish {
-                plugin: COUNTING_PLUGIN_ID
-            }
-        );
-    }
-
-    #[test]
-    fn committed_build_failure_prevents_later_frame_execution() {
-        let mut app = App::new();
-
-        let Err(expected) = app.add_plugin(CommittedFailurePlugin) else {
-            panic!("committed build failure should be reported");
-        };
-
-        assert_eq!(
-            expected,
-            PluginError::SetupFailed {
-                plugin: COMMITTED_FAILURE_PLUGIN_ID,
-                message: "committed build failed".into(),
-            }
-        );
-        let run_error = app.run_once(Duration::ZERO).unwrap_err();
-        assert_eq!(run_error.plugin_error(), Some(&expected));
-        assert!(run_error.plugin_failure_report().is_some());
-    }
-
-    #[test]
-    fn finish_failure_retains_reverse_once_only_cleanup() {
-        let cleanup_order = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-        app.insert_resource(Frames::default()).unwrap();
-        app.add_systems(CoreStage::Update, count_frame).unwrap();
-        for (id, fail_finish) in [
-            (FINISH_A_PLUGIN_ID, false),
-            (FINISH_B_PLUGIN_ID, true),
-            (FINISH_C_PLUGIN_ID, false),
-        ] {
-            app.add_plugin(FinishOrderPlugin {
-                id,
-                cleanup_order: Arc::clone(&cleanup_order),
-                fail_finish,
-            })
-            .unwrap();
-        }
-
-        let Err(expected) = app.finish_plugins() else {
-            panic!("finish failure should be reported");
-        };
-        assert_eq!(
-            expected,
-            PluginError::SetupFailed {
-                plugin: FINISH_B_PLUGIN_ID,
-                message: "finish failed".into(),
-            }
-        );
-        let Err(repeated) = app.finish_plugins() else {
-            panic!("poisoned app should retain the first failure");
-        };
-        assert_eq!(repeated, expected);
-        let run_error = app.run_once(Duration::ZERO).unwrap_err();
-        assert_eq!(run_error.plugin_error(), Some(&expected));
-        assert!(run_error.plugin_failure_report().is_some());
-        assert_eq!(app.world().resource::<Frames>().0, 0);
-        drop(app);
-
-        assert_eq!(
-            *cleanup_order.lock().unwrap(),
-            [FINISH_C_PLUGIN_ID, FINISH_B_PLUGIN_ID, FINISH_A_PLUGIN_ID]
-        );
-    }
-
-    #[test]
-    fn finish_panic_poisoning_cleans_all_plugins_in_reverse_order() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-        for (id, behavior) in [
-            (PROBE_A_PLUGIN_ID, ProbeBehavior::default()),
-            (
-                PROBE_B_PLUGIN_ID,
-                ProbeBehavior {
-                    panic_finish: true,
-                    ..ProbeBehavior::default()
-                },
-            ),
-            (PROBE_C_PLUGIN_ID, ProbeBehavior::default()),
-        ] {
-            app.add_plugin(LifecycleProbePlugin {
-                id,
-                behavior,
-                trace: Arc::clone(&trace),
-            })
-            .unwrap();
-        }
-
-        let Err(error) = app.finish_plugins() else {
-            panic!("finish panic should be isolated and poison the app");
-        };
-
-        assert_eq!(
-            error,
-            PluginError::HookPanicked {
-                plugin: PROBE_B_PLUGIN_ID,
-                hook: PluginHook::Finish,
-            }
-        );
-        let report = app.plugin_failure_report().unwrap();
-        assert_eq!(report.primary().unwrap().error(), &error);
-        assert!(report.cleanup_complete());
-        let cleanup_order = trace
-            .lock()
-            .unwrap()
-            .iter()
-            .filter_map(|(plugin, hook)| (*hook == PluginHook::Cleanup).then_some(*plugin))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            cleanup_order,
-            [PROBE_C_PLUGIN_ID, PROBE_B_PLUGIN_ID, PROBE_A_PLUGIN_ID]
-        );
-    }
-
-    #[test]
-    fn preflight_rejection_is_retryable_and_does_not_mutate() {
-        let allowed = Arc::new(AtomicBool::new(false));
-        let plugin = RetryablePreflightPlugin {
-            allowed: Arc::clone(&allowed),
-        };
-        let mut app = App::new();
-
-        let Err(error) = app.add_plugin(plugin.clone()) else {
-            panic!("preflight should reject the first attempt");
-        };
-        assert_eq!(
-            error,
-            PluginError::SetupFailed {
-                plugin: PREFLIGHT_PLUGIN_ID,
-                message: "preflight rejected".into(),
-            }
-        );
-        assert_eq!(
-            app.plugin_lifecycle_state(),
-            PluginLifecycleState::Configuring
-        );
-        assert!(app.plugin_failure_report().is_none());
-        assert!(!app.world().contains_resource::<PluginBuildCount>());
-
-        allowed.store(true, Ordering::SeqCst);
-        app.add_plugin(plugin).unwrap();
-
-        assert!(app.has_plugin(PREFLIGHT_PLUGIN_ID));
-        assert_eq!(app.world().resource::<PluginBuildCount>().0, 7);
-    }
-
-    #[test]
-    fn preflight_panic_is_retryable_and_does_not_commit_plugin() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-
-        let Err(error) = app.add_plugin(LifecycleProbePlugin {
-            id: PROBE_A_PLUGIN_ID,
-            behavior: ProbeBehavior {
-                panic_preflight: true,
-                ..ProbeBehavior::default()
-            },
-            trace: Arc::clone(&trace),
-        }) else {
-            panic!("preflight panic should be isolated");
-        };
-
-        assert_eq!(
-            error,
-            PluginError::HookPanicked {
-                plugin: PROBE_A_PLUGIN_ID,
-                hook: PluginHook::Preflight,
-            }
-        );
-        assert_eq!(
-            app.plugin_lifecycle_state(),
-            PluginLifecycleState::Configuring
-        );
-        assert!(app.plugin_failure_report().is_none());
-        assert!(trace.lock().unwrap().is_empty());
-
-        app.add_plugin(LifecycleProbePlugin {
-            id: PROBE_A_PLUGIN_ID,
-            behavior: ProbeBehavior::default(),
-            trace,
-        })
-        .unwrap();
-        assert!(app.has_plugin(PROBE_A_PLUGIN_ID));
-    }
-
-    #[test]
-    fn build_panic_poisoning_retains_error_and_cleans_current_plugin() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-        let plugin = LifecycleProbePlugin {
-            id: PROBE_A_PLUGIN_ID,
-            behavior: ProbeBehavior {
-                panic_build: true,
-                ..ProbeBehavior::default()
-            },
-            trace: Arc::clone(&trace),
-        };
-
-        let Err(expected) = app.add_plugin(plugin) else {
-            panic!("build panic should be isolated and reported");
-        };
-        assert_eq!(
-            expected,
-            PluginError::HookPanicked {
-                plugin: PROBE_A_PLUGIN_ID,
-                hook: PluginHook::Build,
-            }
-        );
-        assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Poisoned);
-        let report = app.plugin_failure_report().unwrap().clone();
-        assert_eq!(report.primary().unwrap().error(), &expected);
-        assert!(report.cleanup_complete());
-        assert_eq!(
-            *trace.lock().unwrap(),
-            [
-                (PROBE_A_PLUGIN_ID, PluginHook::Build),
-                (PROBE_A_PLUGIN_ID, PluginHook::Cleanup),
-            ]
-        );
-
-        let Err(world_error) = app.world_mut() else {
-            panic!("poisoned app must reject mutable world access");
-        };
-        assert_eq!(world_error, expected);
-        let Err(resource_error) = app.insert_resource(Frames::default()) else {
-            panic!("poisoned app must reject resource insertion");
-        };
-        assert_eq!(resource_error, expected);
-        let update_error = app.update().unwrap_err();
-        assert_eq!(update_error.plugin_error(), Some(&expected));
-        assert_eq!(update_error.plugin_failure_report(), Some(&report));
-        assert_eq!(
-            app.cleanup_plugins().unwrap_err(),
-            PluginCleanupError::Failure(Box::new(report))
-        );
-        assert_eq!(trace.lock().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn poisoned_app_rejects_every_public_mutation_and_consuming_run() {
-        macro_rules! assert_primary_error {
-            ($operation:expr, $expected:expr) => {
-                match $operation {
-                    Err(error) => assert_eq!(error, $expected),
-                    Ok(_) => panic!("poisoned app accepted a mutable lifecycle operation"),
-                }
-            };
-        }
-
-        let mut app = App::new();
-        let Err(expected) = app.add_plugin(CommittedFailurePlugin) else {
-            panic!("committed build failure should poison the app");
-        };
-
-        assert_primary_error!(app.world_mut(), expected);
-        assert_primary_error!(app.insert_resource(Frames::default()), expected);
-        assert_primary_error!(app.init_resource::<Frames>(), expected);
-        assert_primary_error!(
-            app.add_startup_systems(StartupStage::Core, spawn_entity),
-            expected
-        );
-        assert_primary_error!(app.add_systems(CoreStage::Update, count_frame), expected);
-        assert_primary_error!(
-            app.configure_sets(CoreStage::TaskUpdate, TaskUpdateSet::Poll),
-            expected
-        );
-        assert_primary_error!(app.set_runner(|_| Ok(AppExit::Success)), expected);
-        assert_primary_error!(app.add_plugin(CountingPlugin), expected);
-        assert_primary_error!(app.add_plugins(CountingGroup), expected);
-        assert_primary_error!(app.finish_plugins(), expected);
-        assert_eq!(
-            app.run_once(Duration::ZERO).unwrap_err().plugin_error(),
-            Some(&expected)
-        );
-        assert_eq!(app.update().unwrap_err().plugin_error(), Some(&expected));
-
-        let mut consuming_app = App::new();
-        let Err(consuming_expected) = consuming_app.add_plugin(CommittedFailurePlugin) else {
-            panic!("committed build failure should poison the consuming app");
-        };
-        let run_error = consuming_app.run().unwrap_err();
-        assert_eq!(run_error.plugin_error(), Some(&consuming_expected));
-        assert!(run_error.plugin_failure_report().is_some());
-    }
-
-    #[test]
-    fn dependency_cycle_poisoning_is_bounded_and_inspectable() {
-        let mut app = App::new();
-
-        let Err(error) = app.add_plugin(CycleAPlugin) else {
-            panic!("recursive plugin dependency should fail");
-        };
-
-        assert_eq!(
-            error,
-            PluginError::DependencyCycle {
-                plugin: CYCLE_A_PLUGIN_ID,
-                chain: vec![CYCLE_A_PLUGIN_ID, CYCLE_B_PLUGIN_ID, CYCLE_A_PLUGIN_ID],
-            }
-        );
-        assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Poisoned);
-        let report = app.plugin_failure_report().unwrap();
-        assert_eq!(
-            report.primary().unwrap().subject(),
-            PluginFailureSubject::Plugin(CYCLE_B_PLUGIN_ID)
-        );
-        assert_eq!(report.primary().unwrap().hook(), PluginHook::Build);
-        assert!(report.cleanup_complete());
-    }
-
-    #[test]
-    fn successful_nested_plugins_finish_dependencies_first_and_cleanup_dependents_first() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-        app.add_plugin(NestedProbePlugin {
-            trace: Arc::clone(&trace),
-        })
-        .unwrap();
-
-        app.finish_plugins().unwrap();
-        app.cleanup_plugins().unwrap();
-
-        assert_eq!(
-            *trace.lock().unwrap(),
-            [
-                (PROBE_B_PLUGIN_ID, PluginHook::Build),
-                (NESTED_PLUGIN_ID, PluginHook::Build),
-                (PROBE_B_PLUGIN_ID, PluginHook::Finish),
-                (NESTED_PLUGIN_ID, PluginHook::Finish),
-                (NESTED_PLUGIN_ID, PluginHook::Cleanup),
-                (PROBE_B_PLUGIN_ID, PluginHook::Cleanup),
-            ]
-        );
-    }
-
-    #[test]
-    fn ignored_nested_failure_still_preserves_first_error_and_poisoning() {
-        let mut app = App::new();
-
-        let Err(error) = app.add_plugin(IgnoreNestedFailurePlugin) else {
-            panic!("ignored nested failure must still fail outer installation");
-        };
-
-        assert_eq!(
-            error,
-            PluginError::SetupFailed {
-                plugin: COMMITTED_FAILURE_PLUGIN_ID,
-                message: "committed build failed".into(),
-            }
-        );
-        assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Poisoned);
-        assert!(!app.has_plugin(IGNORE_FAILURE_PLUGIN_ID));
-        let report = app.plugin_failure_report().unwrap();
-        assert_eq!(
-            report.primary().unwrap().subject(),
-            PluginFailureSubject::Plugin(COMMITTED_FAILURE_PLUGIN_ID)
-        );
-        assert!(report.cleanup_complete());
-    }
-
-    #[test]
-    fn plugin_group_dependency_cycle_is_bounded_and_poisoning() {
-        let mut app = App::new();
-
-        let Err(error) = app.add_plugins(CycleAGroup) else {
-            panic!("recursive plugin group dependency should fail");
-        };
-
-        assert_eq!(
-            error,
-            PluginError::GroupDependencyCycle {
-                group: CYCLE_A_GROUP_ID,
-                chain: vec![CYCLE_A_GROUP_ID, CYCLE_B_GROUP_ID, CYCLE_A_GROUP_ID],
-            }
-        );
-        assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Poisoned);
-        let report = app.plugin_failure_report().unwrap();
-        assert_eq!(
-            report.primary().unwrap().subject(),
-            PluginFailureSubject::Group(CYCLE_B_GROUP_ID)
-        );
-        assert_eq!(report.primary().unwrap().hook(), PluginHook::Build);
-    }
-
-    #[test]
-    fn lifecycle_control_reentry_is_rejected_without_poisoning() {
-        let mut app = App::new();
-
-        app.add_plugin(LifecycleReentryPlugin).unwrap();
-
-        assert_eq!(
-            app.plugin_lifecycle_state(),
-            PluginLifecycleState::Configuring
-        );
-        assert!(app.plugin_failure_report().is_none());
-        assert!(app.has_plugin(PROBE_C_PLUGIN_ID));
-    }
-
-    #[test]
-    fn lifecycle_control_reentry_from_finish_is_rejected() {
-        let mut app = App::new();
-        app.add_plugin(FinishReentryPlugin).unwrap();
-
-        app.finish_plugins().unwrap();
-
-        assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Ready);
-        assert!(app.plugin_failure_report().is_none());
-    }
-
-    #[test]
-    fn partial_plugin_group_failure_poisoning_does_not_publish_group() {
-        let mut app = App::new();
-
-        let Err(error) = app.add_plugins(PartialGroup) else {
-            panic!("partial plugin group should fail");
-        };
-
-        assert_eq!(
-            error,
-            PluginError::SetupFailed {
-                plugin: COMMITTED_FAILURE_PLUGIN_ID,
-                message: "committed build failed".into(),
-            }
-        );
-        assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Poisoned);
-        assert!(
-            app.installed_plugin_groups()
-                .all(|group| group.id != PARTIAL_GROUP_ID)
-        );
-        assert!(app.plugin_failure_report().unwrap().cleanup_complete());
-    }
-
-    #[test]
-    fn cleanup_failures_and_panics_are_aggregated_without_stopping_cleanup() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-        for (id, behavior) in [
-            (
-                PROBE_A_PLUGIN_ID,
-                ProbeBehavior {
-                    fail_cleanup: true,
-                    ..ProbeBehavior::default()
-                },
-            ),
-            (
-                PROBE_B_PLUGIN_ID,
-                ProbeBehavior {
-                    panic_cleanup: true,
-                    ..ProbeBehavior::default()
-                },
-            ),
-            (PROBE_C_PLUGIN_ID, ProbeBehavior::default()),
-        ] {
-            app.add_plugin(LifecycleProbePlugin {
-                id,
-                behavior,
-                trace: Arc::clone(&trace),
-            })
-            .unwrap();
-        }
-
-        let PluginCleanupError::Failure(report) = app.cleanup_plugins().unwrap_err() else {
-            panic!("completed cleanup failures should return their report");
-        };
-
-        assert!(report.primary().is_none());
-        assert!(report.cleanup_complete());
-        assert_eq!(report.cleanup_failures().len(), 2);
-        assert_eq!(
-            report.cleanup_failures()[0].subject(),
-            PluginFailureSubject::Plugin(PROBE_B_PLUGIN_ID)
-        );
-        assert_eq!(
-            report.cleanup_failures()[0].error(),
-            &PluginError::HookPanicked {
-                plugin: PROBE_B_PLUGIN_ID,
-                hook: PluginHook::Cleanup,
-            }
-        );
-        assert_eq!(
-            report.cleanup_failures()[1].subject(),
-            PluginFailureSubject::Plugin(PROBE_A_PLUGIN_ID)
-        );
-        assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Cleaned);
-
-        let cleanup_order = trace
-            .lock()
-            .unwrap()
-            .iter()
-            .filter_map(|(plugin, hook)| (*hook == PluginHook::Cleanup).then_some(*plugin))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            cleanup_order,
-            [PROBE_C_PLUGIN_ID, PROBE_B_PLUGIN_ID, PROBE_A_PLUGIN_ID]
-        );
-        assert_eq!(
-            app.cleanup_plugins().unwrap_err(),
-            PluginCleanupError::Failure(report)
-        );
-        assert_eq!(
-            trace
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|(_, hook)| *hook == PluginHook::Cleanup)
-                .count(),
-            3
-        );
-    }
-
-    #[test]
-    fn cleanup_failure_does_not_replace_finish_failure() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new();
-        app.add_plugin(LifecycleProbePlugin {
-            id: PROBE_A_PLUGIN_ID,
-            behavior: ProbeBehavior {
-                fail_finish: true,
-                fail_cleanup: true,
-                ..ProbeBehavior::default()
-            },
-            trace,
-        })
-        .unwrap();
-
-        let Err(expected) = app.finish_plugins() else {
-            panic!("finish failure should poison the app");
-        };
-        let report = app.plugin_failure_report().unwrap();
-
-        assert_eq!(
-            expected,
-            PluginError::SetupFailed {
-                plugin: PROBE_A_PLUGIN_ID,
-                message: "finish rejected".into(),
-            }
-        );
-        assert_eq!(report.primary().unwrap().error(), &expected);
-        assert_eq!(report.primary().unwrap().hook(), PluginHook::Finish);
-        assert_eq!(report.cleanup_failures().len(), 1);
-        assert_eq!(
-            report.cleanup_failures()[0].error(),
-            &PluginError::SetupFailed {
-                plugin: PROBE_A_PLUGIN_ID,
-                message: "cleanup rejected".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn drop_during_unwind_is_not_aborted_by_cleanup_panic() {
-        let trace = Arc::new(Mutex::new(Vec::new()));
-        let observed_trace = Arc::clone(&trace);
-
-        let unwind = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            let mut app = App::new();
-            app.add_plugin(LifecycleProbePlugin {
-                id: PROBE_A_PLUGIN_ID,
-                behavior: ProbeBehavior {
-                    panic_cleanup: true,
-                    ..ProbeBehavior::default()
-                },
-                trace,
-            })
-            .unwrap();
-            panic!("outer unwind");
-        }));
-
-        assert!(unwind.is_err());
-        assert!(
-            observed_trace
-                .lock()
-                .unwrap()
-                .contains(&(PROBE_A_PLUGIN_ID, PluginHook::Cleanup))
         );
     }
 }

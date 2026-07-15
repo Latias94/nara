@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use nara::{advanced_prelude::*, backend_prelude::*};
 
-fn main() -> Result<(), AppRunError> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let drop_backend_before_exit =
         std::env::args().any(|argument| argument == "--drop-backend-before-exit");
     let resize_observed = Arc::new(AtomicBool::new(false));
@@ -20,20 +20,21 @@ fn main() -> Result<(), AppRunError> {
         resize_observed: Arc::clone(&resize_observed),
         backend_removed: Arc::clone(&backend_removed),
         timed_out: Arc::clone(&timed_out),
-    })?
-    .add_plugins(MinimalPlugins)?
-    .add_plugin(WindowPlugin {
-        primary_window: Some(Window::new(
-            "nara surface retirement smoke",
-            WindowResolution::new(320, 180),
-        )),
-    })?
-    .add_plugin(WinitPlugin::default())?
-    .add_plugin(WgpuRenderPlugin)?
-    .add_startup_systems(StartupStage::Scene, setup_scene)?
-    .add_systems(CoreStage::Last, verify_resize_then_exit)?;
+    })?;
+    app.add_plugins((
+        MinimalPlugins,
+        WindowPlugin {
+            primary_window: Some(Window::new(
+                "nara surface retirement smoke",
+                WindowResolution::new(320, 180),
+            )),
+        },
+        WgpuBackendPlugins,
+    ))?;
+    app.add_systems(StartupStage::Scene, setup_scene)?
+        .add_systems(CoreStage::Last, verify_resize_then_exit)?;
+    WinitRunner::default().install(&mut app)?;
 
-    app.finish_plugins()?;
     assert!(app.world().contains_resource::<WgpuRenderBackend>());
     assert!(
         app.world()

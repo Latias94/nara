@@ -1,6 +1,6 @@
 //! Transform components and spatial primitives.
 
-use nara_app::{App, Plugin, PluginError};
+use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
 use nara_core::{Mat3, Vec2};
 use nara_ecs::Component;
 use nara_reflect::{
@@ -54,32 +54,46 @@ impl Default for GlobalTransform2d {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TransformPlugin;
 
-impl Plugin for TransformPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.transform"),
-            nara_app::PluginCategory::Core,
-        )
+pub const TRANSFORM_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.transform");
+pub const TRANSFORM_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
+    nara_app::PluginSchemaProviderId::new("nara.transform.components");
+pub const TRANSFORM_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
+    nara_reflect::ComponentSchemaProviderDefinition::new(
+        TRANSFORM_SCHEMA_PROVIDER_ID,
+        nara_reflect::ComponentSchemaProviderBindingId::new("nara.transform.components.native", 1),
+        register_transform_components,
+    );
+pub const TRANSFORM_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(TRANSFORM_PLUGIN_ID, nara_app::PluginCategory::Core)
         .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .provides_schema(&[TRANSFORM_SCHEMA_PROVIDER_ID]);
+
+impl Plugin for TransformPlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &TRANSFORM_PLUGIN_DECLARATION
     }
 
-    fn preflight(&self, app: &App) -> Result<(), PluginError> {
-        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
-            return Ok(());
-        };
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.transform.Transform2d");
-        registry
-            .validate_component_registration::<Transform2d>(&component_id)
-            .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
-            })
+        let registry = nara_reflect::registry_for_plugin_preflight(
+            context,
+            TRANSFORM_PLUGIN_ID,
+            component_id.as_str(),
+        )?;
+        validate_transform_components(registry).map_err(|error| {
+            PluginError::component_registration(TRANSFORM_PLUGIN_ID, component_id.as_str(), error)
+        })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.transform.Transform2d");
         register_transform_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+                PluginError::component_registration(
+                    TRANSFORM_PLUGIN_ID,
+                    component_id.as_str(),
+                    error,
+                )
             })?;
         Ok(())
     }
@@ -88,6 +102,7 @@ impl Plugin for TransformPlugin {
 pub fn register_transform_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
+    validate_transform_components(registry)?;
     let component_id = ComponentTypeId::new("nara.transform.Transform2d");
     let schema = ComponentSchema::new(component_id, "Transform 2D", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -113,6 +128,14 @@ pub fn register_transform_components(
         },
     )?;
     Ok(())
+}
+
+fn validate_transform_components(
+    registry: &ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    registry.validate_component_registration::<Transform2d>(&ComponentTypeId::new(
+        "nara.transform.Transform2d",
+    ))
 }
 
 fn transform_fields() -> [ComponentFieldSchema; 5] {
@@ -207,11 +230,11 @@ mod tests {
 
         assert!(matches!(
             error,
-            PluginError::ComponentRegistrationFailed {
+            nara_app::AddPluginsError::Plugin(PluginError::ComponentRegistrationFailed {
                 plugin,
                 component,
                 ..
-            } if plugin == PluginId::new("nara.transform")
+            }) if plugin == PluginId::new("nara.transform")
                 && component == "nara.transform.Transform2d"
         ));
         assert_eq!(
@@ -219,6 +242,9 @@ mod tests {
             PluginLifecycleState::Configuring
         );
         assert!(app.plugin_failure_report().is_none());
+        assert!(!app.has_plugin(TRANSFORM_PLUGIN_ID));
+        app.seal()
+            .expect("the corrected App should remain sealable");
     }
 
     #[test]

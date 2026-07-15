@@ -6,39 +6,62 @@ mod systems;
 use std::{error::Error, fmt, time::Duration};
 
 use nara::{
-    app::{AppRunError, PluginCategory, PluginError, PluginId, PluginMetadata},
+    app::{
+        AddPluginsError, AppRunError, PluginCategory, PluginDeclaration, PluginDefinition,
+        PluginError, PluginId, PluginPreflightContext, PluginSchemaProviderId,
+    },
     ecs::schedule::IntoScheduleConfigs,
     fs::FileCapability,
+    gameplay::GameplayCommandPlugin,
     prelude::{
         App, ComponentRegistry, CoreStage, FixedTime, FixedUpdateSet, MinimalPlugins,
         PersistentComponentProvider, Plugin, RuntimeTimeSettings, StartupStage, Vec2, World,
     },
-    project_host::{ProjectCandidateError, ingest_project_manifest},
-    reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT,
+    project_host::{
+        ProjectCandidateError, ProjectRuntimePlugins, ProjectSettingsCandidate,
+        ingest_project_manifest, project_runtime_plugins,
+    },
+    reflect::{
+        COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentRegistryError,
+        ComponentSchemaProviderDefinition,
+    },
 };
 
 pub use components::{Enemy, Player, Projectile, RuntimeOnlyTag, Weapon};
 
 pub const REFERENCE_GAME_PLUGIN_ID: PluginId = PluginId::new("reference-game.gameplay");
+pub const REFERENCE_GAME_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
+    PluginSchemaProviderId::new("reference-game.components");
+pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
+    ComponentSchemaProviderDefinition::new(
+        REFERENCE_GAME_SCHEMA_PROVIDER_ID,
+        nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 1),
+        register_reference_game_components,
+    );
+pub const REFERENCE_GAME_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(REFERENCE_GAME_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .provides_schema(&[REFERENCE_GAME_SCHEMA_PROVIDER_ID]);
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ReferenceGamePlugin;
 
 impl Plugin for ReferenceGamePlugin {
-    fn metadata(&self) -> PluginMetadata {
-        PluginMetadata::new(REFERENCE_GAME_PLUGIN_ID, PluginCategory::Runtime)
-            .requires_plugins(COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+    fn declaration() -> &'static PluginDeclaration {
+        &REFERENCE_GAME_PLUGIN_DECLARATION
     }
 
-    fn preflight(&self, app: &App) -> Result<(), PluginError> {
-        let registry = app
-            .world()
-            .get_resource::<ComponentRegistry>()
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
+        let registry = context
+            .get_structural_resource::<ComponentRegistry>()
             .ok_or_else(component_registry_unavailable)?;
-        validate_component::<Player>(registry)?;
-        validate_component::<Enemy>(registry)?;
-        validate_component::<Weapon>(registry)?;
-        validate_component::<Projectile>(registry)
+        validate_reference_game_components(registry).map_err(|error| {
+            PluginError::component_registration(
+                REFERENCE_GAME_PLUGIN_ID,
+                REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
+                error,
+            )
+        })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -47,13 +70,16 @@ impl Plugin for ReferenceGamePlugin {
             let mut registry = world
                 .get_resource_mut::<ComponentRegistry>()
                 .ok_or_else(component_registry_unavailable)?;
-            register_component::<Player>(&mut registry)?;
-            register_component::<Enemy>(&mut registry)?;
-            register_component::<Weapon>(&mut registry)?;
-            register_component::<Projectile>(&mut registry)?;
+            register_reference_game_components(&mut registry).map_err(|error| {
+                PluginError::component_registration(
+                    REFERENCE_GAME_PLUGIN_ID,
+                    REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
+                    error,
+                )
+            })?;
         }
 
-        app.add_startup_systems(StartupStage::Scene, systems::seed_tracer)?
+        app.add_systems(StartupStage::Scene, systems::seed_tracer)?
             .add_systems(
                 CoreStage::FixedUpdate,
                 (
@@ -70,6 +96,17 @@ impl Plugin for ReferenceGamePlugin {
     }
 }
 
+#[must_use]
+pub fn plugin() -> PluginDefinition {
+    PluginDefinition::for_default::<ReferenceGamePlugin>()
+}
+
+/// Adds the reference game after the semantic gameplay-command ingress in a project plan.
+#[must_use]
+pub fn runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectRuntimePlugins {
+    project_runtime_plugins(candidate).insert_after::<GameplayCommandPlugin>(plugin())
+}
+
 fn component_registry_unavailable() -> PluginError {
     PluginError::component_registration(
         REFERENCE_GAME_PLUGIN_ID,
@@ -78,37 +115,30 @@ fn component_registry_unavailable() -> PluginError {
     )
 }
 
-fn validate_component<T>(registry: &ComponentRegistry) -> Result<(), PluginError>
-where
-    T: PersistentComponentProvider,
-{
-    registry
-        .validate_persistent_component::<T>()
-        .map_err(|error| {
-            let schema = T::persistent_component_schema();
-            PluginError::component_registration(
-                REFERENCE_GAME_PLUGIN_ID,
-                schema.id().as_str(),
-                error,
-            )
-        })
+pub fn register_reference_game_components(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    validate_reference_game_components(registry)?;
+    register_component::<Player>(registry)?;
+    register_component::<Enemy>(registry)?;
+    register_component::<Weapon>(registry)?;
+    register_component::<Projectile>(registry)
 }
 
-fn register_component<T>(registry: &mut ComponentRegistry) -> Result<(), PluginError>
+fn validate_reference_game_components(
+    registry: &ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    registry.validate_persistent_component::<Player>()?;
+    registry.validate_persistent_component::<Enemy>()?;
+    registry.validate_persistent_component::<Weapon>()?;
+    registry.validate_persistent_component::<Projectile>()
+}
+
+fn register_component<T>(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError>
 where
     T: PersistentComponentProvider,
 {
-    registry
-        .register_persistent_component::<T>()
-        .map(|_| ())
-        .map_err(|error| {
-            let schema = T::persistent_component_schema();
-            PluginError::component_registration(
-                REFERENCE_GAME_PLUGIN_ID,
-                schema.id().as_str(),
-                error,
-            )
-        })
+    registry.register_persistent_component::<T>().map(|_| ())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,6 +211,7 @@ impl TracerSnapshot {
 
 #[derive(Debug)]
 pub enum ReferenceGameError {
+    Composition(AddPluginsError),
     Plugin(PluginError),
     Run(AppRunError),
     Project(ProjectCandidateError),
@@ -193,6 +224,9 @@ pub enum ReferenceGameError {
 impl fmt::Display for ReferenceGameError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Composition(error) => {
+                write!(formatter, "reference-game composition failed: {error}")
+            }
             Self::Plugin(error) => write!(formatter, "reference-game plugin setup failed: {error}"),
             Self::Run(error) => write!(formatter, "reference-game frame failed: {error}"),
             Self::Project(error) => write!(formatter, "reference-game project is invalid: {error}"),
@@ -222,6 +256,7 @@ impl fmt::Display for ReferenceGameError {
 impl Error for ReferenceGameError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Composition(error) => Some(error),
             Self::Plugin(error) => Some(error),
             Self::Run(error) => Some(error),
             Self::Project(error) => Some(error),
@@ -230,6 +265,12 @@ impl Error for ReferenceGameError {
             | Self::DuplicateComponent(_)
             | Self::UnexpectedFixedSteps { .. } => None,
         }
+    }
+}
+
+impl From<AddPluginsError> for ReferenceGameError {
+    fn from(error: AddPluginsError) -> Self {
+        Self::Composition(error)
     }
 }
 
@@ -273,8 +314,7 @@ fn run_headless_ticks_with_time(
     time: Option<(RuntimeTimeSettings, FixedTime)>,
 ) -> Result<TracerSnapshot, ReferenceGameError> {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)?;
-    app.add_plugin(ReferenceGamePlugin)?;
+    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))?;
     if let Some((runtime_time, fixed_time)) = time {
         app.insert_resource(runtime_time)?;
         app.insert_resource(fixed_time)?;

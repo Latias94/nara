@@ -66,8 +66,9 @@ The plugin metadata contract is:
   slot occurrence identity (or the same un-slotted unique `PluginId`) and complete admitted
   definition key match. Configuration
   equality compares private canonical representations after a digest match; hash equality alone is
-  insufficient. Divergent IDs/configurations/bindings are errors; public `add_plugin_if_missing`
-  and first/last-wins selection are not composition policy.
+  insufficient. Different plugins cannot claim the same stable slot. Divergent
+  IDs/configurations/bindings are errors; public `add_plugin_if_missing` and first/last-wins
+  selection are not composition policy.
 - Duplicate group IDs converge only when an intrinsic group-definition fingerprint over canonical
   expanded occurrences, definition keys, order intent, and nested group fingerprints matches. The
   fingerprint excludes outer edits and accumulated provenance, which merge only after equality.
@@ -75,6 +76,12 @@ The plugin metadata contract is:
   mutation. Pure plan failures use `PluginPlanError`; product capability failures use
   `CompositionError`; repeatable factory preparation uses `PluginPrepareError`; App-level plugin
   hook failures use `PluginError`. Panic-based prerequisite checks remain invalid.
+- Schema-contributing declarations name stable provider IDs. Root product resolution binds the
+  selected IDs to exact typed provider definitions with an explicit stable versioned native
+  binding ID, rejects divergent bindings or multiple plugin
+  owners, registers them into a scratch `ComponentRegistry`, and freezes that registry before
+  publishing `SchemaValidationInput`. A `RuntimePlan` retains the sorted provider IDs and catalog
+  fingerprint without retaining an App, World, native authority, or live plugin instance.
 - `App::add_plugins` preserves a Bevy-like single/group/tuple call through a sealed input trait, but
   all inputs lower through collection, resolution, optional private preparation, and closed commit.
   Plugin build/finish hooks cannot install hidden dependencies.
@@ -99,8 +106,8 @@ The plugin metadata contract is:
   the durable authority for project data, tooling, and later admitted cross-plugin replacement,
   but common same-plugin configuration and disable flows must not require handwritten slot
   constants. Advanced slot-directed methods remain available outside the gameplay prelude.
-- The ordinary concept budget is `App`, `Plugin`, `PluginGroup`, tuple, `add_plugins`, and typed
-  domain configuration helpers.
+- The ordinary concept budget is `App`, `Plugin`, `PluginGroup`, tuple, `add_plugins`, `seal`, typed
+  domain configuration helpers, and one surfaced `AddPluginsError` for `?` propagation.
   Declaration helpers should generate stable boilerplate; `PluginDefinition`, entry drafts,
   `PluginPlan`, commit batches, definition keys, and fingerprints stay in advanced or private
   modules. One `AddPluginsError` preserves internal phase guarantees while allowing one `?` at the
@@ -118,13 +125,12 @@ Initial group vocabulary:
 
 | Group | Purpose |
 |---|---|
-| `CorePlugins` | App scheduling, diagnostics, tasks, core runtime resources |
-| `AssetPlugins` | Asset server, import registry, reload scheduling, optional watch adapter by feature |
+| `MinimalPlugins` | Headless component registry, hierarchy, diagnostics, tasks, assets, transform, and normalized input foundations |
 | `Runtime2dPlugins` | Transform, render-domain basics, image/material, sprite, and tilemap; no runtime UI |
 | `RuntimeUiPlugins` | Runtime UI authoring, layout, interaction, and UI submission without sprite/tilemap ownership |
 | `HeadlessRuntimePlugins` | Core runtime plus asset/scene/gameplay-domain systems that can run without window, render, audio-device, editor, or UI toolkit adapters |
 | `ServerPlugins` | Dedicated-server-ready headless composition with deterministic-friendly gameplay stages, diagnostics/metrics, and no networking transport unless an optional networking crate is explicitly added |
-| `DesktopWinitPlugins` | `nara_window` plus desktop `nara_winit` adapter |
+| `DesktopWinitPlugins` | Backend-neutral window configuration for a desktop profile; top-level Host/code-first authority selects `WinitRunner` separately |
 | `WgpuBackendPlugins` | Transitional runtime integration for the already selected stock wgpu Host; it does not select or replace Render Host authority. Sprite and UI submitters are available only under their compiled domain/backend features and join a resolved plan only when requested. |
 | `ToolingPlugins` | UI-agnostic tooling models and optional adapter groups |
 
@@ -224,6 +230,9 @@ immediate-install semantics.
 - Closed plugin hooks limit hidden timing and ownership, not reachable engine capability. Advanced
   external packages escalate through explicit domain/Host contributions instead of private
   first-party callbacks.
+- `ProjectRuntimePlugins` exposes lineage-bound type-directed edits, while `RuntimePlan` combines
+  the immutable plugin plan with required product capabilities and frozen schema-validation input.
+  Neither type acquires services or mutates an App.
 
 ## Open Questions
 

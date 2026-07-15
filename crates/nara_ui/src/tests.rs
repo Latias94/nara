@@ -23,8 +23,14 @@ use crate::{
 
 fn ui_app() -> App {
     let mut app = App::new();
-    app.add_plugin(ComponentRegistryPlugin).unwrap();
-    app.add_plugin(UiPlugin).unwrap();
+    app.add_plugins((
+        ComponentRegistryPlugin,
+        nara_scene::HierarchyPlugin,
+        nara_render::RenderPlugin,
+        nara_input::InputPlugin,
+        UiPlugin,
+    ))
+    .unwrap();
     app
 }
 

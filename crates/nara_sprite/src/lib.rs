@@ -1,6 +1,6 @@
 //! Sprite authoring data for 2D scenes.
 
-use nara_app::{App, Plugin, PluginError};
+use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
 use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle};
 use nara_core::{Color, Vec2};
 use nara_ecs::Component;
@@ -215,32 +215,45 @@ impl Sprite {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SpritePlugin;
 
-impl Plugin for SpritePlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.sprite"),
-            nara_app::PluginCategory::Runtime,
-        )
+pub const SPRITE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.sprite");
+pub const SPRITE_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
+    nara_app::PluginSchemaProviderId::new("nara.sprite.components");
+pub const SPRITE_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
+    nara_reflect::ComponentSchemaProviderDefinition::new(
+        SPRITE_SCHEMA_PROVIDER_ID,
+        nara_reflect::ComponentSchemaProviderBindingId::new("nara.sprite.components.native", 1),
+        register_sprite_components,
+    );
+const SPRITE_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("runtime-2d")];
+pub const SPRITE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(SPRITE_PLUGIN_ID, nara_app::PluginCategory::Runtime)
         .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .requires_product_capabilities(SPRITE_PRODUCT_REQUIREMENTS)
+        .provides_schema(&[SPRITE_SCHEMA_PROVIDER_ID]);
+
+impl Plugin for SpritePlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &SPRITE_PLUGIN_DECLARATION
     }
 
-    fn preflight(&self, app: &App) -> Result<(), PluginError> {
-        let Some(registry) = app.world().get_resource::<ComponentRegistry>() else {
-            return Ok(());
-        };
+    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.sprite.Sprite");
-        registry
-            .validate_component_registration::<Sprite>(&component_id)
-            .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
-            })
+        let registry = nara_reflect::registry_for_plugin_preflight(
+            context,
+            SPRITE_PLUGIN_ID,
+            component_id.as_str(),
+        )?;
+        validate_sprite_components(registry).map_err(|error| {
+            PluginError::component_registration(SPRITE_PLUGIN_ID, component_id.as_str(), error)
+        })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.sprite.Sprite");
         register_sprite_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
-                PluginError::component_registration(self.plugin_id(), component_id.as_str(), error)
+                PluginError::component_registration(SPRITE_PLUGIN_ID, component_id.as_str(), error)
             })?;
         Ok(())
     }
@@ -249,6 +262,7 @@ impl Plugin for SpritePlugin {
 pub fn register_sprite_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
+    validate_sprite_components(registry)?;
     let component_id = ComponentTypeId::new("nara.sprite.Sprite");
     let schema = ComponentSchema::new(component_id, "Sprite", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -321,6 +335,10 @@ pub fn register_sprite_components(
         },
     )?;
     Ok(())
+}
+
+fn validate_sprite_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+    registry.validate_component_registration::<Sprite>(&ComponentTypeId::new("nara.sprite.Sprite"))
 }
 
 fn sprite_fields() -> [ComponentFieldSchema; 18] {

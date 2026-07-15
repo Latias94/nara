@@ -282,6 +282,11 @@ path = "tests/project_composition.rs"
 required-features = ["runtime-core"]
 
 [[test]]
+name = "plugin_composition"
+path = "tests/plugin_composition.rs"
+required-features = ["runtime-core"]
+
+[[test]]
 name = "measurement_policy"
 path = "tests/measurement_policy.rs"
 required-features = ["runtime-core", "serde"]

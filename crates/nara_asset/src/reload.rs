@@ -9,7 +9,6 @@ use nara_diagnostic::{
     PublicDiagnosticIdentifier, SafeSummary,
 };
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
-use nara_tasks::TaskPlugin;
 
 use crate::{
     AssetDatabaseError, AssetDependencyGraph, AssetError, AssetId, AssetPath, AssetRecord,
@@ -543,16 +542,17 @@ fn transitive_dependents(
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AssetPlugin;
 
+pub const ASSET_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.asset");
+pub const ASSET_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(ASSET_PLUGIN_ID, nara_app::PluginCategory::Asset)
+        .requires_plugins(&[nara_tasks::TASK_PLUGIN_ID]);
+
 impl Plugin for AssetPlugin {
-    fn metadata(&self) -> nara_app::PluginMetadata {
-        nara_app::PluginMetadata::new(
-            nara_app::PluginId::new("nara.asset"),
-            nara_app::PluginCategory::Asset,
-        )
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &ASSET_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.add_plugin_if_missing(TaskPlugin::default())?;
         app.init_resource::<AssetServer>()?;
         app.init_resource::<AssetStates>()?;
         app.init_resource::<crate::AssetEvents>()?;
@@ -705,6 +705,11 @@ mod tests {
         )
     }
 
+    fn install_asset_plugin(app: &mut App) {
+        app.add_plugins((nara_tasks::TaskPlugin::default(), AssetPlugin))
+            .unwrap();
+    }
+
     #[test]
     fn source_changes_coalesce_duplicate_frame_events() {
         let mut changes = AssetSourceChanges::new();
@@ -747,7 +752,7 @@ mod tests {
             nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
         )
         .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_plugin(&mut app);
         app.world_mut()
             .unwrap()
             .resource_mut::<ProjectAssetDatabase>()
@@ -783,7 +788,7 @@ mod tests {
             nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
         )
         .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_plugin(&mut app);
         app.world_mut()
             .unwrap()
             .resource_mut::<AssetSourceChanges>()
@@ -803,7 +808,7 @@ mod tests {
             nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
         )
         .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_plugin(&mut app);
         app.world_mut()
             .unwrap()
             .resource_mut::<ProjectAssetDatabase>()
@@ -873,7 +878,7 @@ mod tests {
             nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
         )
         .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_plugin(&mut app);
         {
             let mut database = app
                 .world_mut()
@@ -916,7 +921,7 @@ mod tests {
             nara_tasks::TaskPools::inline_for_tests(nara_tasks::TaskPoolConfig::default()).unwrap(),
         )
         .unwrap();
-        app.add_plugin(AssetPlugin).unwrap();
+        install_asset_plugin(&mut app);
         {
             let mut database = app
                 .world_mut()

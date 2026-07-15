@@ -11,6 +11,7 @@ mod format;
 mod migration;
 mod path;
 mod plugin;
+mod provider;
 mod registry;
 mod schema;
 mod value;
@@ -35,7 +36,9 @@ pub use nara_reflect_derive::PersistentComponent;
 pub use path::{ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment};
 pub use plugin::{
     COMPONENT_REGISTRY_PLUGIN_ID, COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentRegistryPlugin,
+    registry_for_plugin_preflight,
 };
+pub use provider::{ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition};
 pub use registry::{
     ComponentProjectionError, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
 };
