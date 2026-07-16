@@ -165,16 +165,18 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Status**: open
 - **Owner**: future replay domain and participating runtime services
 - **Trigger**: A concrete persistent replay workflow has stable identity/envelope evidence, an
-  admitted isolated runtime host, a named service-outcome coverage set, and representative
+  Accepted ADR 0084 executable runtime owner or explicit Accepted successor, a named
+  service-outcome coverage set, and representative
   size/latency measurements.
-- **Related ADRs**: 0024, 0042, 0049, 0051, 0057, 0076
+- **Related ADRs**: 0024, 0042, 0049, 0051, 0057, 0076, 0084
 - **Question**: What canonical artifact fields, checkpoint coverage registry, service outcome catalog, checksum algorithm, cadence, compression, compatibility fingerprint, and bounded retention defaults satisfy the first measured replay workflow?
 
 ## OQ-019: System-Level Stepping and Breakpoint Executor
 
 - **Status**: open
 - **Owner**: `nara_app`, `nara_ecs`, `nara_tooling`
-- **Trigger**: ADR 0076 exact fixed-tick stepping and an admitted ADR 0084 runtime host exist, and a
+- **Trigger**: ADR 0076 exact fixed-tick stepping and an Accepted ADR 0084 executable runtime owner
+  or explicit Accepted successor exists, and a
   real debugging workflow requires pausing inside a fixed tick rather than observing completed ticks.
 - **Related ADRs**: 0002, 0003, 0039, 0057, 0076, 0084
 - **Question**: Which stable system identity, topology generation, strict execution mode, open-tick transaction, conditional-breakpoint vocabulary, and failure/discard rules can support system stepping without splitting command acknowledgement or allowing parallel work across a claimed breakpoint?
