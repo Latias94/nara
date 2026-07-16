@@ -4,11 +4,13 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-16
 
 **Owner**: extension contract leaf kernel, domain contract owners, root composition, and concrete Hosts
 
 **Authority**: Non-normative Interface design. Accepted ADRs remain authoritative on conflict.
+
+**Document Role**: Candidate-interface appendix; no production consumer currently admits a public kernel.
 
 **Upstream Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 

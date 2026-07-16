@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-13
 **Owner**: `nara_core`, `nara_image`, material and render domains, render backends
-**Related**: ADR 0005, ADR 0033, ADR 0040, ADR 0051, ADR 0077
+**Related**: ADR 0005, ADR 0033, ADR 0040, ADR 0051, ADR 0094
 **Revisit Trigger**: A concrete HDR, wide-gamut, color-grading, display-profile, or
 premultiplied-alpha workflow cannot preserve this SDR contract as an explicit compatibility mode
 
@@ -94,8 +94,9 @@ flowchart LR
 - A future premultiplied-alpha, additive, masked, or custom blend mode must be explicit in stable
   material intent and must align import processing, shader output, pipeline state, batching keys,
   and tests. It may coexist with this contract but cannot reinterpret existing `Blend` assets.
-- Advanced raw-wgpu callbacks receive backend responsibility for any private intermediate format,
-  but their result must still satisfy the declared target encoding at the callback boundary.
+- Any future separately admitted backend-specific integration owns the correctness of its private
+  intermediate format, but its result must still satisfy the declared target encoding when it
+  rejoins a Nara-owned target path.
 
 ### SDR target and authoring semantics
 

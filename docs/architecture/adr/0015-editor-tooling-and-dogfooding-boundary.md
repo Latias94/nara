@@ -4,10 +4,16 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
 Capability Metadata; ADR 0047: Editor Workspace and Scene Document State
+**Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
+Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
 
 ## Context
 
-nara's editor is intentionally later than the core runtime, but editor boundaries must be clear early. The editor should validate the engine experience without coupling runtime logic to editor UI.
+nara's editor is intentionally later than the core runtime, but editor boundaries must be clear
+early. The editor should validate the engine experience without coupling runtime logic to editor UI.
+Runtime/game UI and editor/tool UI serve different products; whether they eventually share a
+retained implementation foundation must be decided by working game and editor workloads rather
+than assumed from either product's first implementation.
 
 The user wants nara to grow into a mature engine and asked whether the future editor UI should dogfood nara's own engine UI.
 
@@ -17,9 +23,19 @@ The editor is a **client of the runtime**, not the owner of runtime logic.
 
 Dogfooding policy:
 
+- Runtime/game UI and editor/tool UI are separate product layers. They may share narrow services or
+  a proven retained foundation later, but neither product requires a shared widget tree, authoring
+  model, or toolkit now.
 - The editor should dogfood nara runtime concepts: ECS world inspection, scene/prefab data model, asset handles, render views, diagnostics, and command/patch application.
 - The editor should dogfood nara rendering where practical, especially viewport rendering, gizmos, overlays, scene preview, and in-engine debug panels.
-- The editor UI toolkit can be phased. Early editor/debug UI may use egui or dear-imgui-rs for productivity. A future nara UI system can gradually take over when mature enough.
+- The editor UI toolkit can be phased. Early editor/debug UI may use egui or dear-imgui-rs for
+  productivity. A future nara UI system may gradually take over complete panels when mature enough.
+  Success with one panel proves adapter replaceability, not that the final editor must use the
+  runtime UI toolkit.
+- Docking, panel catalogs, workspace layout, and detached-window intent belong to the Editor Shell.
+  Event-loop, native-window, surface, and GPU submission authority remain with the selected
+  platform/window and render-execution authorities, never ordinary UI adapters or panel
+  contributions.
 - Runtime crates must not depend on editor crates.
 - Editor mutations should go through explicit commands/patches and validation, not direct private storage access.
 - UI adapters should render UI-agnostic tooling models and submit tooling commands. They should not
@@ -80,7 +96,8 @@ flowchart TD
 | Dependency direction | Runtime crates do not depend on editor crates | Dependency review |
 | Runtime dogfooding | Editor uses real scene/asset/diagnostic APIs | Code review |
 | Safe mutation | Editor changes flow through commands/patches with validation | `scene_inspector` and `scene_authoring_session` tests |
-| UI flexibility | egui/imgui can be replaced or supplemented later | Architecture review |
+| UI flexibility | A complete panel can use another adapter without changing its tooling model, commands, validation, or undo semantics | Cross-adapter fixtures and architecture review |
+| Host exclusivity | UI adapters and panel contributions do not own event loops, native windows, surfaces, or GPU submission | Dependency/API audit and Host integration tests |
 | Viewport fidelity | Editor view uses same render backend path as runtime where practical | Future integration test |
 
 ## Risks and Mitigations
@@ -89,4 +106,5 @@ flowchart TD
 |---|---|---:|---|
 | Editor becomes a separate engine | High | Medium | Force editor to use runtime APIs and diagnostics |
 | UI dogfooding slows core runtime | Medium | Medium | Phase UI dogfooding; start with egui/imgui if needed |
+| Premature toolkit convergence pollutes game UI or editor delivery | High | Medium | Migrate complete panels and require heterogeneous workload evidence before choosing a final topology |
 | Editor needs private access | High | Medium | Add explicit inspection/patch interfaces instead of breaking encapsulation |

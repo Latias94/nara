@@ -2,7 +2,9 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership
+**Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0077: Render
+Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded); ADR 0094: Minimal Render
+Execution Boundary and Evidence-Gated Extensions
 
 ## Context
 
@@ -90,15 +92,20 @@ This makes later graph migration a structural change, not a full conceptual rewr
 
 2D sprite/tilemap, debug gizmo, UI, and future 3D mesh items should enter named phases. A future graph may decide where those phases execute, but extraction/queueing should not be hardcoded to one monolithic draw loop.
 
-### Rule 4: Full graph waits for a real second use case
+### Rule 4: A graph decision waits for concrete resource pressure
 
-Do not build a full graph only for the initial sprite pass. Introduce it when at least one of these arrives:
+Do not build a full graph only for the initial sprite pass. Reopen OQ-001 when at least one of these
+arrives and `RenderPassPlan` cannot express its resource lifetime or dependency:
 
 - Post-processing.
 - Multiple viewports/render-to-texture.
 - Editor viewport composition.
 - 3D shadow/depth/prepass needs.
 - UI composition requiring explicit pass ordering.
+
+The triggered review compares static phases, a typed provider, a minimal execution kernel, and a
+logical graph under ADR 0094. The presence of post-processing or another item in this list does not
+automatically select a full graph.
 
 ## Alternatives Considered
 
@@ -147,16 +154,18 @@ Do not build a full graph only for the initial sprite pass. Introduce it when at
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Static passes become hidden hardcoding | High | Medium | Name pass resources and phases even before graph exists |
-| Premature graph abstractions creep in | Medium | Medium | Require a second concrete use case before full graph implementation |
+| Premature graph abstractions creep in | Medium | Medium | Require OQ-001 alternatives evidence and an Accepted decision; a feature label alone is not graph evidence |
 | Future graph conflicts with current phases | Medium | Medium | Treat phases as queue categories, not fixed pass ownership |
 
 ## Follow-Up Questions
 
-- What concrete second pass/resource use case should promote `RenderPassPlan` into a full
-  `RenderGraph`?
-- Does editor viewport composition require graph earlier than runtime post-processing?
-- Where should render resource lifetime tracking live once graph nodes produce and consume
-  intermediate textures, depth targets, or UI composition targets?
+- Which concrete resource or ordering workflow first proves that static `RenderPassPlan` is
+  insufficient?
+- Which smallest model wins for that workflow: extended static phases, independent target
+  transactions, a typed provider, a minimal execution kernel, or a logical graph?
+- Where should resource-lifetime ownership and inspection live in the admitted model?
+
+OQ-001 owns this trigger and alternatives review.
 
 ## Citations
 

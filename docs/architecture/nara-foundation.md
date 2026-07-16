@@ -19,14 +19,8 @@ contract is complete. ADR decision status and implementation status are separate
 decision catalogue and evidence rules live in `adr/README.md`, per-ADR implementation state lives
 in `adr/implementation-status.md`, and only unresolved trigger-based questions live in
 `open-questions.md`. Scenario-driven, non-normative Interface work may live in separate design
-drafts. The current drafts are
-[Runtime Composition Interface Design](runtime-composition-interface-design.md) and
-[Source Extension Package Interface Design](source-extension-package-interface-design.md). The
-[Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
-tests both workbenches against one runtime, schema, importer, and editor workflow. Its two focused
-Interfaces are the
-[Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md) and
-[Asset Import Host Interface Design](asset-import-host-interface-design.md).
+drafts. Their canonical, appendix, guide, and rebaseline roles are maintained in the
+[Architecture Document Map](README.md); this summary does not duplicate that status index.
 
 nara is unreleased. Incorrect prototype APIs and draft persistent shapes are removed rather than wrapped: the corrected Rust API takes the canonical unsuffixed name, the corrected persistent shape becomes canonical version 1 after in-repository sources are updated, and the deliberate break is recorded in `../migrations/2026-07-engine-foundation.md`.
 
@@ -63,15 +57,15 @@ dear-imgui-rs reinforces backend split. The workspace separates core context fro
 
 ## Proposed Architecture
 
+The crate/module edges below summarize current ownership. Proposed ADR 0082 Host scopes and ADR
+0084 managed-runtime topology remain intentionally absent until their independent RGF decision
+gates accept them; this map must not be used to infer a shared public Host trait.
+
 ```mermaid
 flowchart TD
     User[Game code / AI agent] --> Facade[nara facade crate]
     Facade --> App[nara_app: App + Plugin + stages]
     Facade --> Project[nara_project: nara.toml validation + settings lowering]
-    Product[CLI / Editor / product executable] --> Host
-    Host[Concrete desktop / editor / headless Host Adapter<br/>conceptual owner, not shared trait or crate] --> Runtime[nara_app: advanced runtime trial]
-    Host --> Project
-    Runtime --> App
     App --> ECS[nara_ecs: bevy_ecs substrate]
     App --> Tasks[nara_tasks: task pools + handles]
     Facade --> Core[nara_core: color + math primitives]
@@ -92,8 +86,7 @@ flowchart TD
     App --> SpriteRender[nara_sprite_render: 2D extract + queue + batch]
     App --> Window[nara_window: normalized window data]
     Window --> WinitAdapter[nara_winit adapter]
-    WinitAdapter --> Runtime
-    App --> Tooling[nara_tooling: snapshots + UI-agnostic inspector + Play Mode model]
+    App -->|models and observations| Tooling[nara_tooling: commands, views, inspector, and transitional Play model]
     Tooling --> EguiTooling[nara_tooling_egui: egui editor/debug adapter]
     Scene --> Identity
     Gameplay --> Identity
@@ -413,14 +406,14 @@ second real adapter or stronger isolation pressure.
   GPU textures, buffers, samplers, bind groups, pipelines, and intermediate targets; invalidation is
   generation/device/budget aware; submitters are owned by domain plugins or plugin groups. See ADR
   [0040](adr/0040-render-resource-lifetime-and-submitter-ownership.md).
-- Render pipelines use data-driven recipes and stable feature/pass providers above an engine-owned
-  plan/graph compiler. It produces reusable `CompiledPipelineTemplate` values and backend-neutral
-  frame-local `FrameExecutionPlan` values. wgpu remains the only RHI; exact wgpu limits and handles
-  stay in the backend, while project data expresses semantic requirements and explicit fallbacks.
-  One frame-wide coordinator orders encoding and submission across target transactions; each target
-  transaction owns acquire/import, final-consumer, and present/publish boundaries. See ADR
-  [0077](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md).
-- GPU execution is owned by one serialized render-host authority that consumes owned
+- The accepted render baseline keeps views, targets, phases, static `RenderPassPlan` ordering, and
+  owned frame transfer backend-neutral over one serialized wgpu execution authority. wgpu remains
+  the only RHI; exact limits, handles, allocation, encoding, and submission stay in the backend.
+  Pipeline families, recipes, a graph/compiler, retained scene, exact-GPU interop, and replacement
+  Host roles remain candidate mechanisms until focused tracers admit them. See ADR
+  [0094](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md) and the
+  non-normative [render capability harness](render-extension-capability-interface-design.md).
+- GPU execution is owned by one serialized render execution authority that consumes owned
   backend-neutral frame packets. Browser WebGPU is JavaScript-agent/local-executor affine and
   initializes asynchronously; native placement is adapter-declared. Surface and unexpected device
   loss are distinct, and Device/Queue-dependent physical state and results are scoped to a
@@ -516,44 +509,52 @@ second real adapter or stronger isolation pressure.
   golden fixtures are a policy contract that future CI must mirror. See ADR
   [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md).
 
-## Next Implementation Slices
+## Trigger-Gated Architecture Backlog
 
-1. Extend the implemented scene/prefab/patch/schema-catalog envelope boundary to asset metadata or
+This is an unordered pressure inventory, not an active implementation sequence. The reference-game
+plan is the sole current execution contract. An item enters a successor plan only when a named
+reference-game failure, security defect, or measured platform/product constraint triggers it.
+
+- Extend the implemented scene/prefab/patch/schema-catalog envelope boundary to asset metadata or
    import artifacts only when a concrete file-backed consumer admits that format. Keep project
    manifest ingest bounded and host-authorized without inventing a second project settings file.
-2. Add U31 composition bridges for stabilized task, asset, watcher, window, render, project, and
-   editor outcomes, plus their numeric pressure snapshots, without moving producer policy into the
-   diagnostics crate.
-3. Replace the ordinary-resource wgpu backend boundary with a serialized host authority and owned
+- Add producer bridges only when a named successor workflow admits the legacy U31 trigger backlog;
+  keep producer policy out of the diagnostics crate.
+- Replace the ordinary-resource wgpu backend boundary with a serialized host authority and owned
    frame packet, add browser-local asynchronous WebGPU initialization with adapter-declared native
    placement, and make native plus
    `wasm32-unknown-unknown` render checks part of the local feature matrix.
-4. Make surface/offscreen rendering use frame-wide coordination over target transactions: acquire
-   and present each target once, order cross-target encoding/submission, compose views with explicit
-   viewport/scissor/load semantics, and stop hard-coding each domain submitter in the backend system
-   signature.
-5. Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
+- Use the first real offscreen or cross-target workflow to reopen OQ-001. Compare independent target
+   transactions, a frame-wide coordinator, a typed provider, a minimal execution kernel, and a
+   logical graph; admit only the smallest model that owns acquire/finalization, ordering, resource
+   lifetime, and inspection truthfully. Until then, keep the accepted single-target transaction and
+   do not preselect global coordination.
+- Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
    buffers, buffer/pipeline stats, device epochs, and loss recovery for every GPU resource class.
-6. Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
-   widget state, keyboard/gamepad focus, action-map routing, and editor dogfooding once the runtime
-   model is stable.
-7. Introduce a full `RenderGraph` only when post-processing, render-to-texture, editor viewport
-   composition, 3D depth/prepass, or transient resource lifetime creates pressure beyond
-   `RenderPassPlan`; implement it behind the recipe/compiler ownership fixed by ADR 0077.
-8. Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
+- Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
+   widget state, keyboard/gamepad focus, action-map routing, and a scalable execution projection.
+   Once the runtime model is stable, use one complete editor panel to prove adapter parity; broader
+   editor-toolkit convergence remains an OQ-010 evidence question, not a runtime UI prerequisite.
+   See [UI Product Boundaries, Editor Dogfooding, and Porting
+   Strategy](ui-product-boundaries-editor-dogfood-and-porting-strategy.md).
+- Treat post-processing, render-to-texture, editor viewport composition, 3D depth/prepass, and
+   transient resource lifetime as OQ-001 evidence only when `RenderPassPlan` cannot express the
+   concrete workflow. None of those feature labels selects a full `RenderGraph`; the review still
+   compares static phases, typed providers, a minimal execution kernel, and a logical graph.
+- Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
-9. Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
+- Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab
    override write-back, and edit-while-playing merge semantics are designed.
-10. Design reusable material assets and custom shader specialization after inline
+- Design reusable material assets and custom shader specialization after inline
    `Material2dDescriptor` has enough runtime/UI pressure.
-11. Extend the implemented untrusted-input and asset-root containment evidence to every additional
+- Extend the implemented untrusted-input and asset-root containment evidence to every additional
     format before loading downloaded packages or widening file-backed editor workflows.
-12. Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
+- Add persistent file envelopes and golden fixtures before changing scene/prefab/patch/meta/artifact
     formats again.
-13. Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
+- Add task-pool backpressure before bulk import, hot-reload storm handling, or long-running editor
     jobs.
-14. Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
-15. Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
+- Add tilemap chunk visibility/cache before optimizing 2D large-scene rendering.
+- Add GPU upload budgets and buffer reuse before adding glyph atlas, tilemap chunk, or 3D upload
     pressure.
-16. Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
+- Encode the local feature matrix and boundary checks as an `xtask` or equivalent before adding
     GitHub Actions.

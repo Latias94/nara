@@ -2,10 +2,12 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-15
-**Refines**: [ADR 0032](0032-render-backend-integration-boundary.md),
+**Last Revised**: 2026-07-16
+**Refines**: [ADR 0012](0012-render-crate-boundaries.md),
+[ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
 [ADR 0042](0042-runtime-service-and-backend-boundary.md)
+**Refined By**: [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)
 
 ## Context
 
@@ -36,10 +38,9 @@ contract.
 
 nara uses one serialized GPU execution authority per live device domain, represented conceptually
 as `WgpuRenderHost`, to own all wgpu native state and consume owned backend-neutral frame packets.
-`nara_render_wgpu` is the first-party default Render Host Adapter, not the only implementation
-permitted by the architecture. Root composition explicitly selects exactly one first-party or
-external Host candidate for each device domain through the same public role and conformance
-obligations.
+`nara_render_wgpu` owns the accepted stock implementation. ADR 0094 preserves future replacement
+freedom but does not accept a public Render Host replacement role before a production tracer proves
+its trust, selection, target-transfer, recovery, and finite-close contract.
 
 Serialized authority means that one owner orders mutable host state, target operations,
 device-domain transitions, cache publication, submission, and presentation. It does not require
@@ -53,7 +54,7 @@ flowchart LR
     App[nara App stages] --> Packet[Owned RenderFramePacket]
     Packet --> Mailbox[Bounded local admission]
     Mailbox --> Host[Serialized WgpuRenderHost authority]
-    Requirements[Selected Host, family, feature,<br/>target, and interop requirements] --> DevicePlan[Pre-device request plan]
+    Requirements[Stock Host and target requirements] --> DevicePlan[Pre-device request plan]
     DevicePlan --> Init
     Init[Async adapter/device request] --> Host
     Handles[Platform target leases] --> Host
@@ -68,14 +69,9 @@ flowchart LR
 
 - Exactly one execution authority owns each live wgpu instance/device domain, surface set, physical
   cache set, queue-submission order, and device epoch.
-- Any number of Host-managed wgpu/native interop contributions may execute inside that authority's
-  declared slots, but they do not create another target, epoch, or unrestricted submission owner.
-  An integration requiring independent acquire/submit/present order supplies the one selected
-  replacement Render Host Adapter instead.
-- First-party status affects defaults and support policy only. An external Host candidate is
-  compiled, explicitly selected, version-bound, and tested against the same target-transaction,
-  affinity, recovery, observation, and finite-close contract; it is not admitted by crate path or
-  a first-party ID allowlist.
+- Ordinary plugins and render domains cannot acquire Device/Queue, target, submission,
+  presentation, recovery, or placement authority. Future exact-GPU and replacement-Host roles are
+  separate ADR 0094 admission questions rather than part of this contract.
 - The platform adapter declares and enforces the authority's call-site constraints. Browser WebGPU
   uses one JavaScript agent and local executor. Native backends may use the runner thread or a
   render worker when their adapter proves that placement and any quiescent migration are legal.
@@ -124,10 +120,9 @@ stateDiagram-v2
 
 - Browser adapter/device requests run on a local async executor such as `spawn_local`; the render
   stage never blocks the browser event loop with `pollster::block_on`.
-- Before initialization, root composition closes semantic requirements and any explicitly selected
-  backend-specific requirements from the selected Host policy, pipeline families, features,
-  targets, and wgpu/native interop contributions. That immutable input has its own fingerprint and
-  contains no live adapter/device.
+- Before initialization, the stock product path closes its target and backend requirements. That
+  immutable input has its own fingerprint and contains no live adapter/device. Future renderer or
+  exact-GPU providers may contribute requirements only after their own admission decision.
 - `PlanningDevice` evaluates the selected Adapter's exact support and lowers the closed input into
   one exact wgpu device-request plan before `request_device`. It records required, optional,
   fallback, rejected, requested, and later enabled facts separately; it never asks a live Device to
@@ -166,61 +161,33 @@ stateDiagram-v2
   the owning platform adapter establishes that deployment and never moves live GPU objects between
   agents.
 - Native wgpu backends remain selected by wgpu. Nara does not expose Vulkan, Metal, Direct3D, or
-  GLES objects through its portable product-facing render API. An explicitly selected native-only
-  interop contribution may bind exact wgpu/native APIs under a backend/version/capability contract;
-  unsupported targets reject or use a declared fallback rather than pretending portability.
-- Backend selection and adapter/device limits remain exact wgpu concerns; pipeline recipes consume
-  the semantic capability lowering defined by ADR 0077.
+  GLES objects through its portable product-facing render API. Any future exact wgpu/native
+  integration requires a separately admitted backend/version/capability, ordering, trust, epoch,
+  and teardown contract under ADR 0094.
+- Backend selection and adapter/device limits remain exact wgpu concerns. Future project-facing
+  capability data may expose stable semantic requirements only after a concrete renderer workflow
+  admits that vocabulary.
 
-### Host-managed wgpu and native interop
+### Future wgpu/native integration
 
-Each selected Host candidate declares the interop contract versions, backend modes, queue modes,
-and resource-binding rules it supports. Composition matches those facts before device admission and
-uses a declared fallback or rejects. A supporting Host exposes an advanced trusted-native role for
-integrations that need more than the portable graph/scoped-encoding Interface but do not need to
-replace target and submission ownership:
-
-- interop declarations close before device creation and contribute exact required/optional/fallback
-  features, limits, backend constraints, execution slots, queue mode, and portability facts;
-- the Host creates an extension-owned session only after the Device is ready and invokes it within
-  declared epoch and scheduling boundaries;
-- a session may create and retain its own wgpu/native resources for the current epoch. Those
-  resources are neither engine cache entries nor gameplay ECS state, and they cannot cross an
-  epoch, Host replacement, or unsupported target;
-- an interop declaration includes logical resource reads/writes plus one queue mode. In
-  Host-submit mode, the extension returns epoch/plan-stamped command work and the Host submits it in
-  the frame-wide order. In direct-submit mode, the Host first closes and submits every predecessor,
-  then enters the callback; only after the interop submission has established queue order may the
-  Host encode or submit successors. A native queue outside the selected wgpu Queue requires an
-  explicit synchronization protocol or replacement Host ownership;
-- callback-scoped Device/Queue/native access must not escape its declared lifetime. Direct queue
-  work is an opaque scheduling barrier; trusted native code is contractually responsible for not
-  cloning/retaining authority or submitting outside that slot.
-  Raw wgpu handles are cloneable, so this is a conformance obligation rather than a type-system or
-  sandbox guarantee; the Host can validate registered/returned work but cannot contain malicious
-  in-process native code;
-- async work, callbacks, imported/external objects, and returned command work carry Host/epoch and
-  plan-generation identity before integration;
-- device loss first closes admission and invalidates every affected interop session. Rebuild uses
-  extension-owned backend-neutral descriptions or another explicitly declared source; old native
-  handles are never treated as last-good data;
-- retirement is finite, observable, and registered in the Host obligation order. An extension that
-  needs arbitrary target acquisition, independent submission timing, presentation, or recovery
-  policy supplies the exclusively selected Render Host Adapter instead.
-
-This contract deliberately does not promise a stable C ABI, cross-wgpu-version compatibility, or
-one universal native-handle enum. Exact Rust interfaces are admitted by the first compute/native
-clean-room tracer, but external access and the lifecycle obligations above are not deferred.
+This ADR does not accept a public raw-wgpu callback, interop session, queue mode, native-handle
+carrier, or replacement Render Host contract. ADR 0094 keeps those as evidence-gated candidates.
+The first production compute, video, XR, vendor, or external-resource workflow must compare a
+stock-Host feature path, a scoped exact-GPU path, and whole-Host ownership as applicable. Any
+accepted successor must define pre-device requirements, trust, resource and submission ordering,
+host/device epoch rejection, target authority, diagnostics, cancellation, and finite teardown.
+Until then, exact wgpu access remains private backend implementation detail.
 
 ### Frame packet and target ownership
 
-- `RenderFramePacket` contains owned backend-neutral data only. It never contains `Surface`,
+- The owned frame transfer, currently expected to use the `RenderFramePacket` name, contains
+  backend-neutral data only. It never contains `Surface`,
   `SurfaceTexture`, `TextureView`, `Device`, `Queue`, an encoder, or a configured platform target.
 - Surface/offscreen acquisition, configuration, presentation, and discard remain inside the host's
-  target transactions. The frame-wide execution coordinator from ADR 0077 owns encoding and
-  submission order across every target transaction; an individual target lease cannot submit.
+  target transaction. The currently admitted path has one target transaction per target frame;
+  cross-target dependency and submission ordering remains an OQ-001 decision under ADR 0094.
 - A target is acquired at most once for one target frame and is presented or published only after
-  its final consumer declared by the captured `FrameExecutionPlan`.
+  its final consumer in the captured static plan.
 - The host must not reconfigure a surface while a prior acquired texture from that surface remains
   live. Every success, skip, error, cancellation, and shutdown path presents or discards acquired
   textures according to wgpu's contract.
@@ -245,12 +212,11 @@ host authority. An authority never reuses an epoch value; non-reused host identi
 prevents a replacement authority from colliding with the retired host's device domain.
 
 Every `Device`, `Queue`, object created by or validated for them, configured surface state, acquired
-or imported GPU target view, physical cache entry, interop-session resource, backend realization,
-and device-dependent asynchronous or encoded result belongs to exactly one host/epoch pair. Backend-neutral
-`CompiledPipelineTemplate`, logical specialization identity, `FrameExecutionPlan`, and
-`RenderFramePacket` do not acquire an epoch merely because a device is replaced. Device-realized
-pipeline/cache keys combine their logical identity with the host/epoch and exact backend capability
-or target-format identity they require.
+or imported GPU target view, physical cache entry, backend realization, and device-dependent
+asynchronous or encoded result belongs to exactly one host/epoch pair. Backend-neutral frame data
+and logical prepared-resource identity do not acquire an epoch merely because a device is replaced.
+Device-realized pipeline/cache keys combine their logical identity with the host/epoch and exact
+backend capability or target-format identity they require.
 
 The `Instance`, reusable `Surface` object, retained policy-compatible `Adapter`, and platform target
 leases are not device objects and do not become epoch-owned merely because they participate in
@@ -264,17 +230,15 @@ On unexpected device loss, the recovering host:
 2. records the first device failure and publishes a structured recovery transition;
 3. discards or retires every acquired target frame;
 4. invalidates configured surface state, pipelines, bind groups, samplers, textures, buffers,
-   upload arenas, transient pools, query sets, backend pipeline caches, and every registered interop
-   session/resource from the old epoch;
+   upload arenas, transient pools, query sets, and backend pipeline caches from the old epoch;
 5. rejects stale upload, mapping, device-realization, encoding, query, or submission results carrying
    the old epoch; initialization results remain guarded by their separate initialization generation;
 6. reuses the retained adapter to request a new device when that adapter is still valid and still
    satisfies target and selection policy;
 7. returns to `RequestingAdapter` only when capabilities or target policy require reselection, the
    adapter is invalid, or a retained-adapter device request fails;
-8. reuses backend-neutral logical templates when their semantic capability identity remains valid,
-   otherwise recompiles a complete logical candidate, then realizes and atomically activates the
-   new device-side generation under ADR 0077;
+8. reuses backend-neutral prepared render inputs when their logical identity remains valid, then
+   realizes and atomically activates a complete new device-side generation under ADR 0094;
 9. rebuilds backend objects from last-good backend-neutral prepared resources and compiled intent.
 
 Old-epoch objects are never submitted to a new device. Recovery does not mutate imported artifacts
@@ -300,12 +264,11 @@ entire device domain, even when the surface still exists.
 
 ### Shutdown and replacement
 
-- Shutdown first closes frame-packet admission and cancels or invalidates outstanding initialization
-  generations plus interop-session admission.
+- Shutdown first closes frame-transfer admission and cancels or invalidates outstanding
+  initialization generations.
 - The host finishes or abandons acquired target transactions, stops new submissions, and observes
   finite completion policy for in-flight work.
-- Host-managed interop sessions and device-domain caches retire before surfaces, target leases, and
-  platform windows. An incomplete interop retirement prevents false clean-shutdown evidence.
+- Device-domain caches retire before surfaces, target leases, and platform windows.
 - Host replacement creates a new authority with an independent initialization generation and
   allocates its own epoch only after device creation. The old authority reaches `ShuttingDown`
   rather than `Recovering`.
@@ -314,9 +277,10 @@ entire device domain, even when the surface still exists.
   placement or quiescent migration follows the platform adapter's declared authority rules.
 - Plugin cleanup remains fallible and finite under ADR 0010. Cleanup failure is reported without
   pretending that backend-native resources remain reusable.
-- Replacing the selected Host Adapter is stop-then-start at the authority boundary. Two candidates
-  may prepare independent non-conflicting inputs, but they cannot concurrently own the same Device,
-  target lease, surface, or publication slot.
+- Reconstructing the stock authority, or activating a future separately admitted replacement, is
+  stop-then-start at the authority boundary. Two candidates may prepare independent non-conflicting
+  inputs, but they cannot concurrently own the same Device, target lease, surface, or publication
+  slot.
 
 ### Current native baseline
 
@@ -428,18 +392,15 @@ and comprehensive target/device recovery tests.
 | Browser compilation | `nara_render_wgpu` compiles for `wasm32-unknown-unknown` without the fragile Send/Sync feature | Feature-matrix cargo check |
 | Native compilation | Existing native wgpu examples and crate checks remain green | Native feature-matrix checks |
 | Non-blocking browser init | Browser code contains no render-stage `pollster::block_on`; state progresses through owned async results | Source boundary check and browser smoke test |
-| Pre-device planning | Selected Host/family/feature/target/interop requirements lower against Adapter support before `request_device`, with distinct requested/enabled/fallback observations | PlanningDevice capability and fault matrix |
-| Authority enforcement | Host-owned browser wrong-agent access and native Host calls outside Adapter-declared placement are unrepresentable or fail before a platform call; scoped-encoding borrows cannot escape. Raw trusted interop remains an explicit conformance obligation, not a containment claim. | API review, Adapter tests, and trust-contract audit |
-| Target transaction | Each target is acquired and presented at most once per target frame, including multiple views | Instrumented multi-view test |
+| Pre-device planning | Stock Host and target requirements lower against Adapter support before `request_device`, with distinct requested/enabled observations | PlanningDevice capability and fault matrix |
+| Authority enforcement | Browser wrong-agent access and native Host calls outside Adapter-declared placement are unrepresentable or fail before a platform call | API review and Adapter tests |
+| Target transaction | Each admitted target is acquired and finalized at most once per target frame | Instrumented target test |
 | Epoch isolation | No old-epoch cache entry, upload result, pipeline, or command work reaches a replacement device | Device-loss/replacement tests |
 | Recovery completeness | Device loss clears every old-epoch device-domain resource class while preserving rebuildable prepared data | Fake/injected recovery integration test |
 | Expected destruction | A generation-invalidated `Destroyed` callback completes teardown without retry or a device-fault diagnostic; an uncorrelated one recovers | Shutdown/replacement race tests |
 | Adapter reuse | Recovery requests a device from a still-compatible adapter before bounded adapter reselection | Recovery transition tests |
 | Surface/device orthogonality | All seven surface-acquisition outcomes are tested independently from injected device-loss and out-of-memory signals | Combined surface/device state-machine tests |
 | Finite failure | Initialization, retry, recovery, and shutdown remain bounded and observable | Failure-injection tests |
-| Interop epoch safety | The Host rejects stale registered resources and returned work, and compliant interop sessions retire old-epoch state and use direct queue work only in declared barriers; malicious retention of cloneable raw handles is outside the in-process containment claim | Clean-room interop loss/recovery, scheduling, and trust-contract tests |
-| Interop GPU order | Host-submit work joins frame-wide order; direct-submit mode closes/submits all predecessors before the callback and admits no successor encoding/submission until interop queue order is established | Instrumented predecessor/interop/successor and resource-hazard tests |
-| External Host selection | A renamed-dependency external Render Host Adapter can be explicitly selected as the sole authority and passes the same target/recovery/close suite as the stock Host | Replacement-Host fixture, source-diff gate, and exclusive-slot tests |
 
 ## Risks and Mitigations
 
@@ -454,8 +415,7 @@ and comprehensive target/device recovery tests.
 | Native performance is limited by a simplistic single-thread implementation | Medium | Low initially | Keep packet preparation parallel and add epoch-stamped native encoding only after profiling. |
 | Process-level editor sharing is delayed | Medium | Medium | Preserve the owned packet seam so the host can move outside an App without changing gameplay data. |
 | Surface teardown races window destruction | Critical | Medium | Use target leases and enforce acquired texture -> surface -> lease/window teardown order. |
-| Raw interop retains or submits outside its Host slot | Critical | Medium | Keep it trusted/advanced, bind work to plan and epoch, model direct queue work as an opaque barrier, test teardown, and require replacement Host ownership for arbitrary ordering. |
-| External Host parity is promised but first-party construction stays private | Critical | Medium | Select stock and external candidates through one explicit root role and run the same conformance suite without crate-path allowlists. |
+| Future exact-GPU work bypasses admission because the stock backend already has handles | Critical | Medium | Keep exact access private until a separate ADR proves trust, ordering, epoch, target, and teardown behavior. |
 
 ## Consequences
 
@@ -464,15 +424,11 @@ and comprehensive target/device recovery tests.
   blocking call inside rendering.
 - Surface state and device state have separate failure/recovery paths.
 - Every Device/Queue-dependent object, configured surface state, acquired GPU target, physical cache
-  entry, interop resource, backend realization, and device-dependent asynchronous or encoded result requires
+  entry, backend realization, and device-dependent asynchronous or encoded result requires
   host/device-epoch identity.
-- `RenderFramePacket`, `CompiledPipelineTemplate`, and backend-neutral `FrameExecutionPlan` remain
-  free of acquired target and GPU object lifetimes.
+- Owned backend-neutral frame data remains free of acquired target and GPU object lifetimes.
 - The first implementation may remain single-threaded on native and browser. That is a deployment
   choice, not the permanent public contract.
-- External epoch-scoped wgpu/native contributions and replacement Render Host Adapters are supported
-  architecture roles. Their exact Rust API waits for clean-room tracers; their selection and
-  lifecycle are not first-party-only deferred capabilities.
 - WebGL2, persistent wgpu pipeline-cache blobs, multi-adapter rendering, browser Worker deployment,
   native parallel command encoding, and shared editor host placement remain deferred.
 
@@ -487,8 +443,8 @@ and comprehensive target/device recovery tests.
 - Process-level editor host sharing, triggered by multiple isolated edit/play runtimes requiring the
   same device and offscreen targets.
 - Multi-adapter and explicit multi-device deployment, each requiring a separate ADR. Backend-native
-  external image/semaphore protocols beyond the accepted epoch-scoped interop role require their
-  own concrete-use ADR.
+  interop, external image/semaphore protocols, and replacement Host authority each require their
+  own concrete-use tracer and ADR under ADR 0094.
 - Persistent backend pipeline-cache blobs, triggered by measured compile latency and a safe
   adapter/driver/version invalidation design.
 

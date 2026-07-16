@@ -2,9 +2,10 @@
 
 **Status**: Design Draft
 **Created**: 2026-07-13
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-16
 **Owner**: Source extension packages, contribution catalogs, product/build hosts, and domain owners
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
+**Document Role**: Canonical source-package harness; tracer-gated and not implementation authority.
 **Related Question**: [OQ-031: Source Extension Package and Trust Topology](open-questions.md#oq-031-source-extension-package-and-trust-topology)
 **Validation Harness**: [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 **Focused Interfaces**: [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md)
@@ -239,10 +240,12 @@ These are the recommended high-cost boundaries. They remain non-normative until 
     Host-private cohort record publishes and exposes generation-consistent typed leases.
 15. The direct `App::new().add_plugins(...)` path remains available with its narrower lifecycle
     guarantees and no package-manager ceremony.
-16. Known advanced roles are externally implementable, not first-party reservations. Render
-    Feature/Pass, Pipeline Family, wgpu/native interop, Render Host, domain service, and
-    Platform/Runner contributions each use their owning cardinality and conformance contract; a
-    package may aggregate them behind one ordinary user selection.
+16. An advanced role must be externally implementable rather than a first-party reservation once
+    its owning domain admits that role. Proven domain-service contributions use their owning
+    cardinality and conformance contract. Platform/Runner remains a candidate under Proposed ADRs
+    0082/0084; Render Feature/Pass, Pipeline Family, wgpu/native interop, and replacement Render Host
+    remain candidate pressure classes under ADR 0094. A package may aggregate any of them behind
+    one ordinary user selection only after focused tracers admit their Interfaces.
 17. "Trusted" means explicitly selected native code, not a first-party allowlist. A normal runtime
     plugin still cannot hide acquisition of an exclusive Host, Device/Queue, or event loop during
     `build`.
@@ -388,6 +391,10 @@ Scenario IDs are stable references for future Interface reviews and conformance 
 | PX-37 | Package is missing on one workstation or branch | Editor preserves bounded unavailable records under ADR 0090; runtime remains strict | Degraded open/save/recovery test |
 
 ### Advanced Renderer And Driver Authority
+
+PX-40 through PX-45 are pressure scenarios, not admitted contribution contracts. Each required
+result is the acceptance target if a focused tracer selects that role; ADR 0094 currently admits
+only the backend-neutral static-plan/owned-transfer baseline and one concrete wgpu authority.
 
 | ID | Caller And Goal | Required Result | Closest Mature Concepts | Primary Oracle |
 |---|---|---|---|---|
@@ -721,7 +728,9 @@ plan, Cargo version, declaration, and stable IDs did not change.
 ### 5. Domain-Owned Contribution Types
 
 The following table introduces each Nara contract next to the closest established engine concepts.
-The comparison is behavioral prior art, not an inheritance hierarchy.
+The comparison is behavioral prior art, not an inheritance hierarchy. Render rows marked Candidate
+remain hypotheses under ADR 0094 and do not assert a current catalog, compiler, provider, or Host
+Interface.
 
 | Nara contract | Closest established concepts | Typed plan and activation owner | Key Nara constraint |
 |---|---|---|---|
@@ -730,14 +739,14 @@ The comparison is behavioral prior art, not an inheritance hierarchy.
 | Inspector/property provider | Godot `EditorInspectorPlugin`; Unity `CustomEditor`; Unreal details customization | `nara_tooling` inspector Module resolves stable schema predicates to UI-neutral models/commands | Standard schema inspector is default; custom provider emits validated commands/patches, never direct `World` mutation |
 | Editor tool model | Unity Editor assembly; Unreal Editor module; Godot editor tool | `nara_tooling` owns models, commands, selection, state, and retirement | No toolkit handle or mutable workspace escape hatch in the general contract |
 | Editor UI Adapter | Godot dock/control; Unity editor window; Unreal Slate/editor UI | Concrete egui Adapter today; Dear ImGui or Nara UI may become separate concrete Adapters after their own tracer evidence | Toolkit dependency and compatibility are explicit; UI does not become document authority, and a general toolkit seam waits for a second implementation |
-| Render feature/pass provider | Bevy render systems/graph nodes; Unity Renderer Feature/HDRP Custom Pass; Godot `CompositorEffect` | `nara_render` owns the typed provider plan/catalog and engine compiler; concrete Runtime/Editor render consumers bind a selected provider generation | External providers contribute extraction, typed packet sections, material/queue policy, declared passes, post-process, gizmo, or overlay work without Device/Queue ownership or stock-backend edits |
-| Pipeline Family provider | Unity `RenderPipelineAsset` + `RenderPipeline`; Bevy custom camera render schedule | `nara_render` owns the family catalog/compiler contract; recipes/views select one family generation for a concrete render consumer | External families own logical topology, material/lighting/view compatibility, device semantics, and editor outputs through the same public path as first-party families |
-| Wgpu/native interop provider | Bevy `RenderDevice`/`RenderQueue`; Unity native graphics plug-in | Selected wgpu Render Host owns invocation slots and epoch; provider owns only its registered epoch resources and native integration state | Exact wgpu/native version and portability are explicit; Host-submit work joins global order, direct-submit mode flushes every predecessor before its opaque barrier, and arbitrary submission/target ownership upgrades to Render Host |
-| Render Host Adapter | Bevy `RenderCreation::Manual` injects resources only; full Bevy execution ownership also replaces/omits `RenderPlugin`. Godot `RendererCompositor` is the closer authority analogy. | Concrete root selects exactly one Host per device domain; the selected Host owns Device/Queue, target transactions, submission/present, recovery, diagnostics, and finite close | Stock and external Hosts use one public role/conformance suite; no first-party allowlist or package-specific root match |
+| Candidate render feature/pass provider | Bevy render systems/graph nodes; Unity Renderer Feature/HDRP Custom Pass; Godot `CompositorEffect` | A focused tracer compares the current static submitter path, typed provider, minimal execution kernel, and logical graph before selecting an owner | If admitted, external providers must add the selected lower-authority result without ambient Device/Queue ownership or stock-backend edits |
+| Candidate Pipeline Family provider | Unity `RenderPipelineAsset` + `RenderPipeline`; Bevy custom camera render schedule | A second renderer and ordinary author-selection tracer must first prove whether Family, recipe, and compiler vocabulary is necessary | If admitted, external and first-party families use the same selection and conformance Interface |
+| Candidate wgpu/native interop provider | Bevy `RenderDevice`/`RenderQueue`; Unity native graphics plug-in | A separate trust/pre-device/order/epoch/target/close contract must select any invocation owner and scoped capability | No public interop role exists today; arbitrary submission or target ownership would require a separately admitted Render Host role |
+| Candidate Render Host Adapter | Bevy `RenderCreation::Manual` injects resources only; full Bevy execution ownership also replaces/omits `RenderPlugin`. Godot `RendererCompositor` is the closer authority analogy. | A real workflow that cannot fit a lower-authority path plus a clean-room replacement must prove the selection and conformance seam | The stock wgpu Host is the only current implementation; first-party/private access cannot become the future admission rule |
 | Asset importer/processor | Bevy `AssetLoader`; Godot `EditorImportPlugin`; Unity `ScriptedImporter`; Unreal Interchange | `nara_asset` resolves an immutable importer catalog; import Host runs bounded tracked jobs | Source extensions/options/artifact version/conflicts resolve before jobs; no runtime `App` registration path |
 | Project setting provider | Unity package/editor settings; Godot project setting integration | `nara_project` validates namespaced schema/default/profile lowering | `nara.toml` remains the only project settings authority and cannot enable uncompiled code |
 | Native service Adapter | Unreal provider/module split; Godot server/native extension level | Domain service owner plus concrete Adapter own handles, affinity, queues, sessions, and retirement mechanics; executable Host retains typed close obligations and coordinates reservations and parent lifetime | Runtime plugin declares semantic requirements; Host coordination does not make native state a global Host service locator |
-| Platform/Runner Adapter | Bevy runner/Winit; Godot `MainLoop` and `DisplayServer` | Concrete root selects one driver per scope; it owns event-loop drive, platform events/time/wake/close, and declared platform-affine authorities | It drives `RuntimeInstance`, not raw App internals; exact display/platform versus runner trait split remains tracer-driven rather than one universal Host trait |
+| Candidate Platform/Runner Adapter | Bevy runner/Winit; Godot `MainLoop` and `DisplayServer` | Proposed ADRs 0082/0084 plus an alternate-runner tracer must prove root selection, event-loop authority, and conformance | If admitted, it drives `RuntimeInstance`, not raw App internals; exact display/platform versus runner trait split remains tracer-driven rather than one universal Host trait |
 | Cook/export/artifact provider | Godot export plugin; Unity build callbacks; Unreal cook/commandlet modules | A compiled tool Host plus ADR 0088 resolves typed graph providers and staged outputs | Declared immutable inputs/outputs, implementation digest, cancellation, determinism, provenance; cannot affect the build that produced its own binding |
 | Content/template/sample/docs | Unity package Samples/Documentation; Unreal content plugin; Godot addon content | Project/content transaction owner | Data-only does not mean trusted; install/remove/migration follows bounded explicit transactions |
 
@@ -761,11 +770,11 @@ Advanced contribution cardinality is domain-owned:
 | Role | Catalog cardinality | Active selection |
 |---|---:|---:|
 | Runtime Plugin | Many | Many in one closed Plugin plan |
-| Render Feature/Pass | Many | Many compatible contributions per family/recipe |
-| Pipeline Family | Many | Exactly one per selected recipe/view |
-| Wgpu/native interop | Many | Many Host-scheduled sessions per admitted device plan |
-| Render Host Adapter | Many candidates | Exactly one per live device domain |
-| Platform/Runner Adapter | Many candidates | Exactly one per driver scope |
+| Candidate Render Feature/Pass | Many if admitted | Domain-owned composition rule still open |
+| Candidate Pipeline Family | Many if admitted | At most one per selected recipe/view if that model is admitted |
+| Candidate wgpu/native interop | Many if admitted | Host scheduling and device-plan shape still open |
+| Candidate Render Host Adapter | Many candidates if admitted | Exactly one per live device domain |
+| Candidate Platform/Runner Adapter | Many candidates if admitted | Exactly one per driver scope |
 
 These are not ordinary `PluginGroup` replacement slots. Their exact conflict, version, and
 conformance rules belong to their contract owner and remain valid even while cross-plugin
@@ -776,28 +785,18 @@ is not a new contribution contract. It requires no package-core variant or Host 
 contract begins only when root composition must resolve and bind a new product role, publication
 authority, execution placement, or privileged operation.
 
-Render providers follow the known-contract row. Resolution and binding are specific to the concrete
-render consumer binding kind, such as Runtime or Editor. If one provider declaration is selected for both an Editor viewport
-and Play/runtime rendering, the root obtains two move-only pending bindings against their distinct
-Host facts, consumes them into two complete `BoundContract` values, and records two binding
-receipts. Whether one composite resolver or separate role-specific calls produce those values
-remains a root-private implementation choice. The static provider definition and semantic provider
-identity may be shared; owned plan data, Host binding evidence, and candidate ownership may not be
-forked or shared.
+If a future admitted render role serves both an Editor viewport and Play/runtime rendering, its
+tracer must decide whether those consumers require separate bindings, plans, candidates, or leases.
+The current design does not preselect two `BoundContract` values, shared template/backend
+realization generations, a provider catalog, or one publication cohort. It requires only that
+consumer-specific authority and candidate ownership cannot be duplicated by copying a receipt or
+handle.
 
-The Editor render bound contract moves into a concrete Editor-side render attempt owner. The
-Play/runtime bound contract moves into the runtime composition and is later consumed by its
-`RuntimeStartAttempt`; successful ADR 0084 publication makes that ownership reachable through the
-new `RuntimeInstance`. That runtime cut does not replace ADR 0077's later pipeline-template,
-backend-realization, and pipeline-set generation publication rules.
-
-Whether the Editor render candidate becomes a required member of `EditorCatalogActivation` or uses
-a compatible independent publication axis remains a render/editor tracer decision. The tracer may
-also prove a typed lease through which Editor and runtime views consume compatible immutable
-template/backend-realization generations under the same device epoch. That deferred activation and
-sharing policy does not defer ownership of the two pre-activation bound contracts. Until an
-external package proves runtime post-process plus Editor gizmo/overlay paths, Nara must not claim
-that this parity is implemented.
+The render/editor tracer must also decide whether compatible Editor and runtime results publish on
+one coordinated activation or independent axes, and whether any device-epoch sharing is necessary.
+ADR 0084 runtime publication does not answer those render questions. Until an external package
+proves both runtime post-process and Editor gizmo/overlay paths, this harness records the scenario
+without freezing its binding topology.
 
 Compilation has a separate bootstrap rule:
 
@@ -927,8 +926,8 @@ owner, while a Play/runtime render bound contract is consumed by the correspondi
 attempt. The render/editor tracer must decide whether the Editor render candidate joins
 `EditorCatalogActivation` or publishes on a compatible independent axis. It cannot satisfy that
 decision by sharing one move-only pending/bound value, binding receipt, or candidate owner with
-Play; after activation, ADR 0077 may still permit both sides to consume compatible immutable
-template/backend-realization generations through a typed lease.
+Play. Any future shared render generation or typed lease remains an OQ-022 and ADR 0094 admission
+question rather than an implied pipeline-template contract.
 
 The initial guarantee is scoped to logical Host roles inside one concrete executable Host.
 Cross-process prepare/commit/adopt requires its own protocol and conformance evidence; it is not
@@ -1169,28 +1168,33 @@ last-good behavior.
 If runtime decoding or a custom asset service is also required, the same package declares a
 separate runtime or service contribution. The importer cannot secretly install it.
 
-### Path E: Complete Renderer Package
+### Path E: Candidate Complete Renderer Package
+
+This path is an author-experience pressure test for the inactive render harness. It does not admit
+Pipeline Family, Feature/Pass, interop, or replacement Render Host Interfaces.
 
 The game author selects one coherent renderer bundle rather than its internal contribution graph:
 
 ```rust
+// Candidate authoring target; not implemented.
 nara::desktop()
     .renderer(aurora_hdr::renderer(HdrProfile::High))
     .add_plugins(MyGamePlugin)
     .run()
 ```
 
-The exact builder syntax is deferred. The package definition may internally aggregate a Pipeline
-Family, compatible Features/Passes, typed packet producers, optional wgpu/native interop, editor
-semantic-output support, and, only when required, a replacement Render Host. Root composition
-inspects and selects that closure as one user intent while preserving each role's separate
-cardinality, device-request, lifecycle, and conformance rules.
+The exact builder syntax is deferred. If the render tracers admit these roles, the package
+definition may internally aggregate a Pipeline Family, compatible Features/Passes, typed packet
+producers, optional wgpu/native interop, editor semantic-output support, and, only when required, a
+replacement Render Host. Root composition would inspect and select that closure as one user intent
+while preserving each admitted role's separate cardinality, device-request, lifecycle, and
+conformance rules.
 
-A normal HDRP/SRP-like renderer should stop at Family plus Features and optional interop. It does
-not need to own the Platform/Runner or replace the stock Render Host unless its device, target,
-submission, native SDK, XR, or recovery requirements truly require that authority. Package authors
-work with these advanced roles; ordinary game authors do not handle binding receipts, device plans,
-epochs, or Host candidates.
+Under that candidate model, a normal HDRP/SRP-like renderer should stop at Family plus Features and
+optional interop. It would not need to own the Platform/Runner or replace the stock Render Host
+unless its device, target, submission, native SDK, XR, or recovery requirements truly require that
+authority. Package authors would work with the admitted advanced roles; ordinary game authors do
+not handle binding receipts, device plans, epochs, or Host candidates.
 
 ### Progressive Disclosure Rules
 
@@ -1215,9 +1219,10 @@ epochs, or Host candidates.
 10. Provider authors implement one domain-owned trait/context and typed settings, errors, and
     outputs. Owner task scheduling, native capabilities, candidate preparation, and publication do
     not leak into that Interface unless the domain contract explicitly grants one scoped operation.
-11. A complete renderer/platform author imports only the advanced roles deliberately chosen. A
-    Family author does not need runner internals; an interop author does not construct Host
-    publication evidence; a replacement Host author does not receive package-kernel authority.
+11. A platform author, or a renderer author using future admitted advanced roles, imports only the
+    roles deliberately chosen. A candidate Family author does not need runner internals; an
+    interop author would not construct Host publication evidence; a replacement Host author would
+    not receive package-kernel authority.
 12. Broad preludes export no receipt, seal, transfer, bound-plan, candidate, cohort, or activation
     permit types. Advanced audit types remain in narrowly named modules.
 13. Primary diagnostics describe the author's package, role, target, settings, or output and give a
@@ -1486,9 +1491,9 @@ worker timeout, process crash, and a referenced package removed from the current
 | Staged trust evidence | Every trust fact carries `IndexClaimed`, `SourceObserved`, `CargoResolved`, `CompiledVerified`, or `RuntimeObserved`; unavailable behavior is explicit `Unknown` before execution | Preview snapshots, metadata fixtures, compiled catalog audit |
 | Plan determinism | 100 repeated resolutions of equal inputs produce identical package and typed-plan fingerprints/order | Property/regression test |
 | Contract locality | Adding a test contribution contract changes its domain/supporting Host registration but zero package-core matches or central variants | Diff/API review |
-| Known-contract extensibility | Adding an external runtime/import/render/tooling/service contribution under an already supported contract requires no package-specific root match, new `ProductCapability`, first-party allowlist, or owning core/backend edit | Stock-root clean-room matrix and source-diff gate |
-| Renderer package usability | A complete external renderer needs one package/product-preset action and one renderer/recipe selection; the game author does not manually register Family, Features, packet sections, interop sessions, or Host bindings | PX-40 through PX-45 clean-room author task and editor snapshot |
-| Advanced authority parity | External Pipeline Family, wgpu/native interop, Render Host, and Platform/Runner candidates are separately registerable and selectable through public domain roles with their declared cardinality and conformance suites | Renamed-dependency fixtures, exclusive-slot tests, source-diff gates, and loss/close fault matrices |
+| Known-contract extensibility | Adding an external runtime/import/tooling/service or admitted render contribution under an already supported contract requires no package-specific root match, new `ProductCapability`, first-party allowlist, or owning core/backend edit | Stock-root clean-room matrix and source-diff gate |
+| Future renderer package usability | If PX-40 through PX-45 admit a complete renderer model, one package/product action and one renderer selection hide its internal roles from the game author | Candidate clean-room author task and editor snapshot |
+| Future advanced authority parity | Each separately admitted Pipeline Family, wgpu/native interop, Render Host, or Platform/Runner role is registerable and selectable through its public domain Interface and conformance suite | Role-specific renamed-dependency fixtures, exclusive-slot tests, source-diff gates, and loss/close fault matrices |
 | Binding truth | Every executable contribution has exactly one verified declared binding; no hidden activation succeeds | Catalog fault matrix |
 | Shipping separation | Server/release fixtures contain zero forbidden editor/import/tooling contribution code or dependencies | `cargo tree`, binary/dependency audit |
 | Editor authority | 100% of inspector/editor package edits flow through tooling commands/patches, never private `World` or document mutation | Integration and static API audit |
@@ -1530,9 +1535,11 @@ The following boundaries are expensive to reverse and already have cross-engine 
 
 1. Package and runtime `Plugin` are different concepts with a one-to-many relationship.
 2. Package discovery/resolution is data-only and precedes executable Host mutation.
-3. Runtime, schema, editor, inspector, render Feature/Pass, Pipeline Family, wgpu/native interop,
-   Render Host, Platform/Runner, import, service, cook/export/tool, and content contracts have
-   separate owners and typed plans.
+3. Runtime, schema, editor, inspector, import, service, cook/export/tool, and content contracts have
+   separate owners and typed plans. Platform/Runner, Render Feature/Pass, Pipeline Family,
+   wgpu/native interop, and replacement Render Host remain separate pressure classes rather than
+   Accepted package contracts; any admitted successor must preserve domain-specific ownership
+   instead of merging them into a universal package callback.
 4. Cargo is the sole Rust graph/lock authority; Nara adds an inspectable contribution view.
 5. The initial native Rust path is source/static integration and fresh generation rebuild.
 6. Package, contribution, contract, plugin/slot, schema, executable, runtime, and content-package
@@ -1576,7 +1583,7 @@ premature registry, ABI, toolkit, or migration framework from becoming the archi
 | ADR 0016/0042 | Domain-owned extension seams, stable data, typed service Adapters | PX-15 through PX-18, PX-29, PX-36 |
 | ADR 0020/0086 | Cargo/lock/build-profile authority and executable generations | PX-02 through PX-08, PX-21, PX-22, PX-32, PX-34 |
 | ADR 0046/0079 | Stable plugin metadata, product capabilities, supported slots, closed composition | PX-10, PX-20 through PX-27 |
-| ADR 0077/0078 | Render contribution ladder, pre-device admission, epoch/Host authority, semantic editor outputs | PX-40 through PX-45 |
+| ADR 0078/0094 plus render Design Drafts | Minimal render authority/epoch baseline and candidate contribution/Editor-output pressure | PX-40 through PX-45 |
 | ADR 0081/0090 | Runtime-independent schema, binding freeze, unavailable-provider authoring | PX-11, PX-12, PX-06, PX-37 |
 | ADR 0087/0088 | Import products, cook providers, runtime content package separation | PX-15, PX-18, PX-19, PX-30, PX-33 |
 | ADR 0093 | Explicit reload/patch/rebuild/script paths and no universal ABI | PX-29 through PX-34 |

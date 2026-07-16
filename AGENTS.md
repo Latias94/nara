@@ -28,8 +28,18 @@ This file provides repo-local guidance for agents working on nara.
 - Runtime services such as physics, audio, text shaping, scripting, networking, file watching, and future specialized backends must use the shared service boundary: ECS data expresses stable intent, services/backends own native handles and queues, and results integrate through declared main-thread stages.
 - Keep backend crates behind adapters. Core gameplay-facing crates must not directly depend on `wgpu`, `winit`, egui, or dear-imgui.
 - `nara_winit` owns all `winit` imports and desktop event-loop integration.
-- `nara_render` owns backend-neutral render concepts, frame lifecycle, phases, `RenderPassPlan`, `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons. Full render graph work waits for a concrete second-pass/resource-lifetime use case.
-- `nara_render_wgpu` owns all `wgpu` imports and GPU surface/device lifecycle.
+- `nara_render` owns backend-neutral render concepts, frame lifecycle, views, targets, phases, `RenderPassPlan`, `RenderBackendStatus`, `RenderBackendState`, and skipped-frame reasons. `RenderPassPlan` is the current static phase-order contract, not a persistent recipe or partial graph; OQ-001 chooses a future execution/graph shape only after a concrete intermediate, history, or cross-target use case proves static planning insufficient.
+- wgpu is nara's only RHI. Exact wgpu limits, features, downlevel/surface capabilities, handles, encoders, and queues stay in `nara_render_wgpu`. Do not add a mirrored nara GPU API, speculative generic backend trait, or WebGL2 compatibility pipeline.
+- Pipeline families, renderer profiles/recipes, public feature/pass catalogs, retained render scenes, `CompiledPipelineTemplate`, `FrameExecutionPlan`, scoped raw-wgpu access, native interop, and replacement Render Host roles are candidate mechanisms under ADR 0094, not current implementation requirements. Each requires a production-shaped tracer, alternatives review, and separate admission before a public API is added.
+- Extraction must converge on an owned backend-neutral `RenderFramePacket` that does not borrow the gameplay `World` or carry surfaces/devices/encoders. A second render ECS world and native render worker remain optional internal optimizations.
+- `nara_render_wgpu` owns all `wgpu` imports and GPU surface/device lifecycle through one serialized execution authority. Browser WebGPU is JavaScript-agent/local-executor affine and uses local asynchronous initialization; native placement is declared by its platform adapter. Do not use `fragile-send-sync-non-atomic-wasm`, unsafe Send/Sync, or a blocking render-stage initializer to satisfy ECS resource bounds. Surface loss and unexpected device loss are separate; Device/Queue-dependent objects, physical caches, backend realizations, and device-dependent async/encoded results use a non-reused host/device epoch.
+- A native window target admits only one live surface binding. Its non-cloneable handle source owns
+  the native guard and acknowledges release from `Drop`; the paired `WindowSurfaceLease` may only
+  verify that release or request retirement. Platform runners invoke the registered surface-
+  retirement driver only for targets they registered; they must not use global plugin cleanup as a
+  local retirement pump. Device-loss detection and local invalidation do not prove epoch-
+  correlated recovery. An `Unavailable` backend must not re-enter device initialization every frame;
+  recovery requires a future explicit retry or reconstructed backend contract.
 - `nara_render_wgpu` reports backend initialization, skipped frames, and backend errors through `RenderBackendStatus`.
 - Backend GPU resource caches own textures, buffers, samplers, bind groups, pipelines, and intermediate targets. Cache invalidation must be generation/device/budget aware; do not make one-frame-unused pruning the product contract.
 - Render submitters are domain/plugin responsibilities. Convenience plugin groups may install sprite/UI/text submitters, but `WgpuRenderPlugin` should not permanently own every renderer feature by default.

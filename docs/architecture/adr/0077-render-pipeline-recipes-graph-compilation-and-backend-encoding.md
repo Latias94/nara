@@ -1,11 +1,16 @@
 # ADR 0077: Render Pipeline Recipes, Graph Compilation, and Backend Encoding
 
-**Status**: Accepted
+**Status**: Superseded
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-15
+**Last Revised**: 2026-07-16
+**Superseded By**: [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)
 **Refines**: [ADR 0017](0017-render-graph-policy.md),
 [ADR 0032](0032-render-backend-integration-boundary.md), and
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md)
+
+> Historical decision only. ADR 0094 retains the minimal backend-neutral execution boundary and
+> returns the unproven pipeline-family, recipe, compiler, retained-scene, interop, and replacement-
+> Host mechanisms below to evidence-gated design work.
 
 ## Context
 

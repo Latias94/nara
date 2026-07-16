@@ -12,6 +12,8 @@ future Host integrators who need Nara's internal extension architecture vocabula
 
 **Authority**: Explanatory only. Accepted ADRs remain authoritative on conflict.
 
+**Document Role**: Explanatory guide; it introduces no decisions or implementation order.
+
 **Canonical Vocabulary**: [Nara Engine Architecture Language](../../CONTEXT.md)
 
 **Detailed Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md), [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
@@ -239,6 +241,7 @@ Most Rust names in the walkthrough are proposed. Read each row independently:
 | Current importer traits and image import path | Implemented but transitional; not the shared Import Host design |
 | Atomic package authoring and leaf contract kernel | Proposed |
 | Shared Import Host and artifact-group publication | Proposed |
+| Render Feature/Pass provider, Pipeline Family, wgpu/native interop, and replacement Render Host roles | Candidate pressure classes only; ADR 0094 admits no public Interface for them yet |
 
 The guide explains the target ownership model. Code blocks marked as approximate or illustrative are
 not promises that those types already exist in the public crate surface.
@@ -652,29 +655,31 @@ filesystem, Editor workspace, and package graph.
 
 | Bevy-like need | Nara authoring path | Deliberate difference or current gate |
 |---|---|---|
-| Add gameplay behavior | Direct `Plugin` or systems may use package-owned ECS component types and add resources, systems, sets, typed queues, and custom schedules | Static declarations close composition facts, not the plugin's complete behavior; arbitrary typed schedules are still an implementation gate |
+| Add gameplay behavior | Direct `Plugin` or systems may use package-owned ECS component types and add resources, systems, sets, typed queues, and custom schedules | Static declarations close composition facts, not the plugin's complete behavior; arbitrary typed schedule registration has landed as a runtime trial, while independent package evidence remains open |
 | Ship conditional companions | One `PluginGroup`, tuple, or package runtime contribution selects the complete declared closure | `build`/`finish` cannot hide nested `add_plugins`; the user must still get one top-level entry |
 | Add an asset format | Typed Import contribution and Importer provider | Shared tracked Import Host and multi-product publication remain unimplemented evidence |
-| Add rendering or post-processing | Render Feature/Pass contribution using typed packet, provider, graph, and scoped-encoding Interfaces | Ordinary providers do not retain `Device`/`Queue`; portable feature parity without stock-backend edits is a separate clean-room gate |
-| Ship a complete SRP/HDRP-like renderer | Pipeline Family contribution plus compatible Features and optional wgpu/native interop | The family owns material/lighting/view assumptions and full logical topology; a recipe/view selects one family through the same first-party/external catalog path |
-| Use raw GPU APIs or a vendor SDK | Explicit Host-managed wgpu/native interop contribution | It declares pre-device requirements, logical resource access, portability, Host-submit or predecessor-flushing direct-submit mode, retained epoch resources, device-loss rebuild, and finite close |
-| Replace the entire renderer execution owner | Explicitly selected Render Host Adapter | Exactly one Host owns each device domain, including Device/Queue, target acquire, submit/present, recovery, and teardown |
+| Add rendering or post-processing | Current domain submitter/static-phase path, or a future admitted Render Feature/Pass role | ADR 0094 requires a concrete static-plan-breaking workflow before accepting provider, graph, or scoped-encoding Interfaces |
+| Ship a complete SRP/HDRP-like renderer | Candidate Pipeline Family plus compatible Features and optional wgpu/native interop | A second renderer and ordinary author-selection tracer must prove this vocabulary and Interface first |
+| Use raw GPU APIs or a vendor SDK | Candidate Host-managed wgpu/native interop role | Trust, pre-device requirements, ordering, epoch invalidation, target authority, and finite close need a separate admitted contract |
+| Replace the entire renderer execution owner | Candidate explicitly selected Render Host Adapter | ADR 0094 admits this only after a real workflow cannot fit a lower-authority path and a replacement passes conformance |
 | Add physics, audio, networking, or another native runtime | Runtime plugin first; add a domain service Adapter only when Host-issued authority, affinity, waitable startup, a process, or platform permission is required | Runtime-local resources, systems, and a private session remain valid; a proven public Adapter registers an explicit close obligation |
 | Add Inspector, gizmo, panel, or alternate toolkit | Schema/Tooling provider plus a concrete UI Adapter where needed | Tooling commands retain document truth; the Dear ImGui/second-toolkit path is not implemented yet |
-| Supply a different event loop or product runner | Concrete Host/platform Adapter selected at the top level | A normal runtime plugin cannot replace the runner as a hidden side effect |
+| Supply a different event loop or product runner | Candidate Host/platform role | Package/root selection and stable conformance still require ADR 0082/0084 plus an alternate-runner tracer; a normal Plugin cannot replace the runner as a hidden side effect |
 | Add another implementation of a known contract | Add the Cargo dependency, package definition/binding, and explicit composition entry | No package-specific root match arm, `ProductCapability`, or first-party allowlist is allowed |
 | Invent a new contract or privileged Host role | Compile its contract owner and supporting Host Adapter, register support, and rebuild | The leaf kernel remains unchanged, but an old stock executable rejects the unknown contract; this is not a dynamic native ABI |
 
-The render and process levels have established-engine counterparts and simple cardinality:
+The render and process pressure classes have established-engine counterparts and simple
+cardinality. Except for the ordinary Runtime Plugin and first-party Winit drive path, the advanced
+rows below are candidate architecture, not current public package Interfaces:
 
 | Nara capability level | Closest mature-engine concept | How many may exist? | Who selects/owns it? |
 |---|---|---:|---|
 | Runtime Plugin | Bevy `Plugin` | Many | One closed App/plugin plan |
-| Render Feature/Pass | Bevy render systems/graph nodes; Unity Renderer Feature or HDRP Custom Pass; Godot `CompositorEffect` | Many | Selected family/compiler composes them |
-| Pipeline Family | Unity `RenderPipelineAsset` plus `RenderPipeline`; Bevy custom camera render schedule | Many registered, one per recipe/view | Project/view recipe selects it |
-| Wgpu/native interop | Bevy `RenderDevice`/`RenderQueue`; Unity native graphics plug-in | Many | The one Render Host schedules epoch-scoped sessions |
-| Render Host Adapter | Bevy `RenderCreation::Manual` injects GPU resources but does not replace render execution; full Bevy ownership also requires replacing/omitting `RenderPlugin`. Godot `RendererCompositor` is the closer authority analogy. | One per device domain | Root product composition selects it |
-| Platform/Runner Adapter | Bevy runner/Winit; Godot `MainLoop`/`DisplayServer` | One per driver scope | Root product composition selects it |
+| Candidate Render Feature/Pass | Bevy render systems/graph nodes; Unity Renderer Feature or HDRP Custom Pass; Godot `CompositorEffect` | Many if admitted | A future selected family/compiler or lower-authority execution Module composes them |
+| Candidate Pipeline Family | Unity `RenderPipelineAsset` plus `RenderPipeline`; Bevy custom camera render schedule | Many registered, one per recipe/view if admitted | A future project/view recipe selects it |
+| Candidate wgpu/native interop | Bevy `RenderDevice`/`RenderQueue`; Unity native graphics plug-in | Many if admitted | The selected Render Host would schedule epoch-scoped sessions |
+| Candidate Render Host Adapter | Bevy `RenderCreation::Manual` injects GPU resources but does not replace render execution; full Bevy ownership also requires replacing/omitting `RenderPlugin`. Godot `RendererCompositor` is the closer authority analogy. | One per device domain if admitted | Root product composition would select it |
+| Candidate Platform/Runner Adapter | Bevy runner/Winit; Godot `MainLoop`/`DisplayServer` | One per driver scope if admitted | A future root selection/conformance Interface chooses it |
 
 Bevy needs fewer public nouns because a plugin can reach a broad mutable `App`, a separate
 `RenderApp`, and raw renderer resources; ordering and authority are often encoded by plugin order.
@@ -682,11 +687,12 @@ Nara names the internal ownership levels so package plans can be inspected befor
 and Play runtimes can restart independently, WebGPU affinity remains correct, and exclusive owners
 cannot be installed accidentally. Those levels are not supposed to appear in normal game code.
 
-A normal SRP/HDRP-like package usually needs Pipeline Family plus Features and perhaps interop. It
-does not need a custom runner or whole Render Host. The intended game-author experience remains one
-selection:
+If the render tracers admit this model, a normal SRP/HDRP-like package would usually need Pipeline
+Family plus Features and perhaps interop. It would not need a custom runner or whole Render Host.
+The intended game-author experience would remain one selection:
 
 ```rust
+// Candidate authoring target; not implemented.
 nara::desktop()
     .renderer(aurora_hdr::renderer(HdrProfile::High))
     .add_plugins(MyGamePlugin)
@@ -705,8 +711,9 @@ understand and control a new role, publication path, execution placement, or pri
 Therefore Spine, a Box2D-style backend, or Dear ImGui can expose a Bevy-like one-line package/group
 experience, but internally that package may aggregate Runtime, Import, Render, Service, Schema, and
 Tooling roles instead of giving one callback every authority. Today this remains a design target:
-custom schedule/group ergonomics, the shared Import Host, the separate render capability gates, native-service
-retirement, and second-toolkit integration still require clean-room implementation evidence. The
+custom schedule and type-directed group ergonomics have landed as trials but still need an
+independent package-author fixture; the shared Import Host, separate render capability gates,
+native-service retirement, and second-toolkit integration remain unimplemented evidence. The
 detailed classification lives in [Runtime Composition Interface Design](runtime-composition-interface-design.md#bevy-trade-off-budget).
 
 ### What Nara Takes From Godot
@@ -726,7 +733,8 @@ or claim that a Rust trait is a stable native extension ABI.
 - `RenderPipelineAsset` selects a code-provided `RenderPipeline`; Renderer Features and HDRP Custom
   Passes are a lower extension level rather than substitutes for a complete pipeline family.
 - Native graphics plug-ins are a separate explicitly non-portable level below SRP, which supports
-  Nara's split between Family, Host-managed interop, and whole Render Host ownership.
+  evaluating Family, Host-managed interop, and whole Render Host as distinct candidate pressure
+  classes rather than one permission level.
 - `ScriptedImporter` and `AssetImportContext` demonstrate a small importer Interface backed by an
   engine-owned import transaction.
 - Stable asset and sub-object identity matter to editor references.
@@ -750,9 +758,9 @@ First-party status changes support policy, defaults, and repository location, no
 model. Nara can ship engine-maintained packages through the same domain-specific roles that an
 external Cargo package uses:
 
-| Representative package | Role composition under the current design | Ownership rule | Current evidence gate |
+| Representative package | Current or candidate role composition | Ownership rule | Current evidence gate |
 |---|---|---|---|
-| HDR-like renderer | Pipeline Family; compatible Feature/Pass and typed packet contributions; optional wgpu/native interop; optional replacement Render Host only for independent target/submission/recovery needs | Recipe/view selects one family. Root composition closes selected Host/family/feature/target/interop device requirements before Device creation. The selected Host owns target/Queue order; interop owns only registered epoch resources; an editor-compatible family supplies final color/overlay and one picking strategy. | Independent feature, family, device-plan/interop, editor-semantic, and replacement-Host tracers; feature-only evidence cannot claim full renderer parity. |
+| HDR-like renderer | Candidate Pipeline Family, Feature/Pass, typed packet, interop, and optional replacement-Host roles | If admitted, one project selection hides the internal role graph while the selected Host retains target/Queue authority and editor compatibility stays explicit. | Independent feature, family, device-plan/interop, editor-semantic, and replacement-Host tracers; feature-only evidence cannot claim full renderer parity. |
 | Spine-like skeletal animation | Schema for persistent animator/skeleton references; Import for skeleton, atlas, and animation products; Runtime playback; render-feature extraction/submission; optional preview tooling and native-runtime service Adapter | Scenes store semantic `AssetRef` values; ECS components own inspectable playback intent, time, and state. A native runtime owns only derived poses, constraints, caches, and FFI handles. The Import Host owns tracked reads/staging, `nara_asset` publishes typed products/artifacts, renderer caches own GPU resources, and tooling owns only preview session state and commands. | The sprite-animation tracer covers schema/runtime/import authoring. Multi-product import, render-provider submission, preview clocks, and optional native-runtime placement still need concrete evidence. |
 | Box2D-like 2D physics | `nara_physics2d` schema/runtime domain plus one concrete solver Adapter and optional debug-render/tooling package | ECS stores body/collider/joint intent. A private runtime-generation-scoped service session owns solver/native state, callbacks, mappings, and queues; the enclosing runtime owner retains its close obligation and replacement gate. Fixed stages perform sync-in, step, write-back, and contact publication. | Start with plugin-installed resources/systems and a private session. Extract a public physics-specific Interface only when a fake or second real solver proves the variation. A 3D solver belongs to parallel `nara_physics3d`, not one 2D/3D trait. |
 | Dear ImGui editor tooling | Concrete Editor UI Adapter, platform-input binding, and Nara render-feature provider over UI-neutral `nara_tooling` models/commands | A Host-retained Adapter owns the main-thread ImGui context and CPU font atlas. Input capture, focus, text/IME, cursor, and clipboard feedback are transient Host data; draw data becomes an owned frame packet; backend caches own the GPU font texture, buffers, and pipelines by device epoch. | First tracer is single-viewport and does not expose raw `wgpu` or embed a second renderer. The focus/capture/text/IME/cursor/clipboard bridge is not implemented. A general toolkit seam waits for egui plus a second real Adapter; runtime UI remains Nara-owned. |
@@ -891,7 +899,7 @@ fields, match arms, or domain-specific orchestration.
 | Domain ownership | Domain owners retain candidate retirement; a required sibling failure exposes no partial cohort, while independent import/document axes preserve their own last-good state | Candidate, cohort, and fault-injection tests |
 | Product isolation | Runtime/server artifacts contain no unselected importer, editor toolkit, or process Adapter code | Separate Cargo closure and binary audits |
 | Representative package fit | Spine-like animation, one concrete physics solver, and one Dear ImGui tooling tracer use existing domain roles without adding a universal Host/backend/toolkit Interface | Independent tracer reviews and package fixtures |
-| Extension outcome parity | External runtime/custom-schedule, multi-product importer, portable render-feature, complete Pipeline Family, wgpu/native interop, replacement Render Host, alternate Platform/Runner, and native-service/tooling packages reach supported-domain results without editing owning Nara core/stock-backend crates or receiving a first-party allowlist | Separate renamed-dependency clean-room fixtures, source-diff gates, exclusive-authority tests, and domain conformance suites |
+| Future extension outcome parity | Each evidence-triggered external role, including candidate render roles, reaches its admitted result without editing the owning Nara core/stock-backend crate or receiving a first-party allowlist | Separate role-specific renamed-dependency fixtures, source-diff gates, exclusive-authority tests, and domain conformance suites |
 
 ## Risks And Mitigations
 

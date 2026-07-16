@@ -56,8 +56,16 @@ Rules:
   panels, editor gizmos, and viewport tools must not infer capture from hover alone.
 - Focus is explicit UI state. Keyboard/gamepad navigation targets focused widgets or focus scopes
   before falling back to gameplay contexts.
-- Accessibility is a runtime UI responsibility, not an editor overlay. UI nodes should eventually
-  expose semantic role, label, value, state, bounds, and actions through an accessibility tree.
+- The Platform/Editor Host owns raw native-window focus and IME sessions. Each input seat has at
+  most one keyboard/text target, each view has an explicit focus domain, and a gameplay viewport
+  receives gameplay input only after explicit activation. Pointer capture is bound to its source
+  window/view and emits an observable cancellation on focus loss, tear-off, close, or target
+  invalidation. Cross-window shortcuts are global only when declared as such.
+- Runtime/game UI and editor/tool UI each own the accessibility outcome of their product surface.
+  They may share semantic vocabulary or platform bridges, but neither may treat the other as an
+  overlay that supplies accessibility after the fact. Runtime UI nodes and editor adapters should
+  expose semantic role, label, value, state, bounds, and actions; both must preserve complete
+  keyboard navigation, recoverable focus, text/IME behavior, and platform accessibility output.
 - Input diagnostics and replay capture record normalized events, routing decisions, and semantic
   action outcomes at defined stages.
 
@@ -100,7 +108,7 @@ AI/editor tooling structured data to inspect.
 | UI consumption | Focused/captured UI can prevent gameplay actions in the same frame | Routing tests |
 | Text correctness | IME composition is represented separately from key presses | Text input tests |
 | Action maps | Actions can be rebound without changing gameplay systems | Unit tests |
-| Accessibility readiness | UI semantic nodes can be exported without depending on editor toolkit | API/design review |
+| Accessibility readiness | Runtime UI and editor adapters can export semantic state and complete keyboard/focus behavior without making either product depend on the other's toolkit | API/design review |
 
 ## Risks and Mitigations
 
@@ -109,7 +117,7 @@ AI/editor tooling structured data to inspect.
 | Input pipeline becomes too complex for simple games | Medium | Medium | Keep low-level button state available while documenting actions as the scalable path. |
 | UI and gameplay both consume shortcuts unexpectedly | High | Medium | Make context priority, global shortcut rules, and consumed-input diagnostics explicit. |
 | IME support is postponed too long | High | Medium | Keep text/IME as a first-class route even before full text widgets ship. |
-| Accessibility is treated as late-only work | Medium | Medium | Reserve semantic tree fields in UI model before editor dogfooding. |
+| Accessibility is treated as late-only work | High | Medium | Require runtime UI and editor adapters to prove their own semantic output, keyboard path, focus recovery, and IME behavior at their first complete workflow. |
 
 ## Consequences
 
@@ -118,6 +126,8 @@ AI/editor tooling structured data to inspect.
 - `nara_ui` focus and pointer capture should become engine-level state consumed by the input router.
 - Editor shortcuts and viewport tools should use the same routing/action model as runtime UI, not a
   private egui-only shortcut path.
+- Editor adapters remain responsible for accessibility even while the final editor toolkit and
+  any shared semantic bridge remain open design questions.
 - Replay, AI-driver, and future server-authoritative boundaries should consume semantic gameplay
   commands/action outcomes rather than raw device events.
 
@@ -126,4 +136,5 @@ AI/editor tooling structured data to inspect.
 - What is the smallest Phase 1 action-map schema that still supports rebinding and UI/gameplay
   context priority?
 - Which platform text/IME features must be represented before the first text widget?
-- How should multi-window and multi-viewport focus compose with pointer capture?
+- Which concrete per-seat/view focus and capture carriers should implement the accepted
+  multi-window invariants without coupling `nara_input` to one editor toolkit?

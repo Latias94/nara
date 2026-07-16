@@ -4,17 +4,19 @@
 
 **Created**: 2026-07-15
 
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-16
 
 **Owner**: `nara_render`, `nara_render_wgpu`, product composition, Editor render integration, and
 external renderer packages
 
 **Authority**: Non-normative Interface workbench. Accepted ADRs remain authoritative on conflict.
 
+**Document Role**: Future render canonical harness; inactive and needs activation rebaseline.
+
 **Normative Decisions**: [ADR 0032](adr/0032-render-backend-integration-boundary.md),
 [ADR 0042](adr/0042-runtime-service-and-backend-boundary.md),
-[ADR 0077](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md), and
-[ADR 0078](adr/0078-render-host-affinity-webgpu-initialization-and-device-recovery.md)
+[ADR 0078](adr/0078-render-host-affinity-webgpu-initialization-and-device-recovery.md), and
+[ADR 0094](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)
 
 **Composition Designs**: [Runtime Composition Interface Design](runtime-composition-interface-design.md)
 and [Source Extension Package Interface Design](source-extension-package-interface-design.md)
@@ -27,6 +29,10 @@ and [Source Extension Package Interface Design](source-extension-package-interfa
 
 The follow-up remains inactive until the reference-game plan releases its registration and an
 activation rebaseline reconciles the tracer file map and authority decisions with the landed code.
+
+Pipeline Family, Render Feature/pass catalogs, retained scenes, shader artifacts, interop, and
+replacement Host roles in this document are candidate Interfaces. ADR 0094 explicitly does not
+accept them before focused production-shaped tracers compare viable alternatives.
 
 ## Purpose
 
@@ -193,7 +199,7 @@ Scenario IDs are stable references for future APIs, conformance fixtures, and ar
 | RE-50 | Editor displays an external family | Family exposes ADR 0092-compatible SDR final-color meaning and an overlay-composition point; real HDR waits for [OQ-021](open-questions.md#oq-021-hdr-wide-gamut-and-tone-mapping-contract) | Editor viewport tracer |
 | RE-51 | Editor selects scene objects | Family declares one picking strategy: CPU query, GPU object ID, or custom provider | Picking conformance matrix |
 | RE-52 | Tool requests depth, normals, motion, or debug view | Support/fallback/rejection is inspectable; tooling receives no GPU handle | Semantic-output snapshot and capture budget tests |
-| RE-53 | Runtime and Editor render at once | Each consumer uses coherent immutable family/template/epoch generations and independent target transactions under the [OQ-022](open-questions.md#oq-022-editor-render-host-ownership)-selected Host ownership model | Edit/Play multi-view test |
+| RE-53 | Runtime and Editor render at once | Each consumer uses coherent immutable family/template/epoch generations and independent target transactions under the [OQ-022](open-questions.md#oq-022-editor-render-execution-ownership)-selected execution-ownership model | Edit/Play multi-view test |
 
 ## Ownership And Selection
 
@@ -650,7 +656,7 @@ binding, rebuild, and trust disclosure are allowed and audited; they are not cor
 | No ambient-authority regression | Plugin hooks cannot install providers, select runner/Host, or acquire Device/Queue | Negative static/runtime tests |
 | No frame registry tax | Frame execution performs no package/contract string resolution | Profiling and static audit |
 
-## Decisions To Preserve Now
+## Candidate Hypotheses To Preserve For Validation
 
 1. First-party and external packages have equal reachable roles for every supported render level.
 2. Feature/Pass and Pipeline Family are separate capabilities.
@@ -715,7 +721,8 @@ semantics.
 ## References
 
 - [Render Capability Demand and Pressure Matrix](render-capability-pressure-matrix.md)
-- [ADR 0077](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
+- [ADR 0077 historical decision](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
+- [ADR 0094 current render boundary](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)
 - [ADR 0092](adr/0092-sdr-color-space-alpha-and-output-encoding.md)
 - [Bevy `Plugin`](../../repo-ref/bevy/crates/bevy_app/src/plugin.rs)
 - [Bevy runner selection](../../repo-ref/bevy/crates/bevy_app/src/app.rs)

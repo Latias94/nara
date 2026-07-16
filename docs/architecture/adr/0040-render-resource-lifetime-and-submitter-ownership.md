@@ -5,8 +5,9 @@
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
 Culling, and Tilemap Render Cache; ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
-0077: Render Pipeline Recipes, Graph Compilation, and Backend Encoding; ADR 0078: Render Host
-Affinity, WebGPU Initialization, and Device Recovery
+0077: Render Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded); ADR 0078:
+Render Host Affinity, WebGPU Initialization, and Device Recovery; ADR 0094: Minimal Render
+Execution Boundary and Evidence-Gated Extensions
 
 ## Context
 
@@ -140,7 +141,5 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 
 - What exact cache eviction defaults should desktop Phase 1 use: grace frames, memory budget, or
   both?
-- Should render diagnostics live in `nara_render` as backend-neutral resources, in each backend with
-  a shared reporting adapter, or through the runtime diagnostics bus from ADR 0048?
 - Which feature first forces `RenderGraph`: editor viewports, post-processing, render-to-texture,
   3D depth/prepass, or text/UI composition targets?

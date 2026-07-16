@@ -2,11 +2,13 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-15
+**Last Revised**: 2026-07-16
+**Refines**: ADR 0012
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0044: Root Facade
 and Prelude Layering Policy; ADR 0053: Visibility, Culling, and Tilemap Render Cache; ADR 0077:
-Render Pipeline Recipes, Graph Compilation, and Backend Encoding; ADR 0078: Render Host Affinity,
-WebGPU Initialization, and Device Recovery
+Render Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded); ADR 0078: Render
+Host Affinity, WebGPU Initialization, and Device Recovery; ADR 0094: Minimal Render Execution
+Boundary and Evidence-Gated Extensions
 
 ## Context
 
@@ -42,14 +44,11 @@ Rules:
   readiness state, last error, and skipped-frame reason. This status resource is the current
   backend observation seam, not a speculative render backend trait.
 - Extracted render data is frame-local, rebuilt or cleared during `Extract`, not serialized, and not exported through the gameplay prelude initially.
-- Backend-neutral engine, gameplay, domain-render, packet, recipe, and tooling crates do not depend
+- Backend-neutral engine, gameplay, domain-render, frame-transfer, and tooling crates do not depend
   on `wgpu`. `nara_render_wgpu` is the first-party wgpu Host Adapter and the only stock crate that
-  owns exact wgpu device/queue/target execution. An explicitly selected external wgpu extension or
-  Render Host Adapter may bind Nara's exact supported wgpu API through the advanced backend contract
-  in ADRs 0077 and 0078; this is dependency isolation, not a first-party crate allowlist and not
-  permission to introduce another RHI or wgpu version. The first interop/Host tracer decides whether
-  that version lock is expressed by an advanced `nara_render_wgpu` re-export/gateway or an exact
-  direct Cargo dependency.
+  owns exact wgpu device/queue/target execution. A future exact-wgpu integration or replacement
+  authority requires its own admitted trust, version, ordering, epoch, target, and teardown
+  contract under ADR 0094; dependency isolation alone does not promise such a public API.
 - The stock `nara_render_wgpu` Adapter consumes `nara_window::backend` non-cloneable surface handle
   sources by value through wgpu's safe owning surface path, registers the scoped retirement driver,
   and writes wgpu skipped-frame/backend-error state into `RenderBackendStatus`. The actual handle

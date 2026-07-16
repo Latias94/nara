@@ -4,11 +4,13 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-16
 
 **Owner**: source package composition, runtime, schema, asset import, tooling, and concrete product Hosts
 
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
+
+**Document Role**: Scenario appendix to the source-package harness; owns only this tracer.
 
 **Upstream Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Runtime Composition Interface Design](runtime-composition-interface-design.md)
 

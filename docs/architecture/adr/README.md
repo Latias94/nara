@@ -110,20 +110,21 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md): Global Resource Budgets, Metrics, and Diagnostic Privacy
 - [ADR 0070](0070-capability-oriented-filesystem-substrate.md): Capability-Oriented Filesystem Substrate
 - [ADR 0076](0076-play-runtime-debug-control-and-observation.md): Play Runtime Debug Control and Observation
-- [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md): Render Pipeline Recipes, Graph Compilation, and Backend Encoding
+- [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md): Render Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded)
 - [ADR 0078](0078-render-host-affinity-webgpu-initialization-and-device-recovery.md): Render Host Affinity, WebGPU Initialization, and Device Recovery
 - [ADR 0079](0079-root-product-capabilities-and-placeholder-domain-retirement.md): Root Product Capabilities and Placeholder Domain Retirement
 - [ADR 0080](0080-domain-owned-task-update-integration-sets.md): Domain-Owned TaskUpdate Integration Sets
 - [ADR 0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md): Schema Source, Stable Identity, Catalog, and Runtime Binding
-- [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md): Process Host Authority and Runtime Construction Topology
-- [ADR 0083](0083-durable-project-asset-and-document-entity-identity.md): Durable Project Asset and Document Entity Identity
-- [ADR 0084](0084-executable-runtime-ownership-and-isolation.md): Executable Runtime Ownership and Isolation
-- [ADR 0085](0085-hierarchy-transform-and-visibility-semantics.md): Hierarchy, Transform, and Visibility Semantics
-- [ADR 0086](0086-rust-project-build-and-executable-generation.md): Rust Project Build and Executable Generation
-- [ADR 0087](0087-asset-dependency-import-product-and-artifact-publication-graph.md): Asset Dependency, Import Product, and Artifact Publication Graph
-- [ADR 0088](0088-target-build-cook-package-and-runtime-content-catalog.md): Target Build, Cook, Package, and Runtime Content Catalog
-- [ADR 0089](0089-runtime-scene-instance-loading-activation-unload-and-travel.md): Runtime Scene Instance Loading, Activation, Unload, and Travel
-- [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md): Unavailable Schema and Lossless Authoring
-- [ADR 0091](0091-editor-persistence-recovery-and-concurrent-writer-policy.md): Editor Persistence, Recovery, and Concurrent Writer Policy
+- [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md): Process Host Authority and Runtime Construction Topology (Proposed)
+- [ADR 0083](0083-durable-project-asset-and-document-entity-identity.md): Durable Project Asset and Document Entity Identity (Proposed)
+- [ADR 0084](0084-executable-runtime-ownership-and-isolation.md): Executable Runtime Ownership and Isolation (Proposed)
+- [ADR 0085](0085-hierarchy-transform-and-visibility-semantics.md): Hierarchy, Transform, and Visibility Semantics (Proposed)
+- [ADR 0086](0086-rust-project-build-and-executable-generation.md): Rust Project Build and Executable Generation (Proposed)
+- [ADR 0087](0087-asset-dependency-import-product-and-artifact-publication-graph.md): Asset Dependency, Import Product, and Artifact Publication Graph (Proposed)
+- [ADR 0088](0088-target-build-cook-package-and-runtime-content-catalog.md): Target Build, Cook, Package, and Runtime Content Catalog (Proposed)
+- [ADR 0089](0089-runtime-scene-instance-loading-activation-unload-and-travel.md): Runtime Scene Instance Loading, Activation, Unload, and Travel (Proposed)
+- [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md): Unavailable Schema and Lossless Authoring (Proposed)
+- [ADR 0091](0091-editor-persistence-recovery-and-concurrent-writer-policy.md): Editor Persistence, Recovery, and Concurrent Writer Policy (Proposed)
 - [ADR 0092](0092-sdr-color-space-alpha-and-output-encoding.md): SDR Color Space, Alpha, and Output Encoding
 - [ADR 0093](0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md): Rust Authoring, Hot Iteration, and Optional Scripting Adapters
+- [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md): Minimal Render Execution Boundary and Evidence-Gated Extensions

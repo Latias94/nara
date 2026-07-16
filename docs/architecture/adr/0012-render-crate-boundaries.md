@@ -2,10 +2,10 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-15
+**Last Revised**: 2026-07-16
 **Refined By**: ADR 0032: Render Backend Integration Boundary; ADR 0044: Root Facade and Prelude
-Layering Policy; ADR 0077: Render Pipeline Recipes, Graph Compilation, and Backend Encoding; ADR
-0078: Render Host Affinity, WebGPU Initialization, and Device Recovery
+Layering Policy; ADR 0078: Render Host Affinity, WebGPU Initialization, and Device Recovery; ADR
+0094: Minimal Render Execution Boundary and Evidence-Gated Extensions
 
 ## Context
 
@@ -85,8 +85,8 @@ additive without inventing a mirrored RHI or speculative universal backend trait
 - `nara_render` owns stable semantic render concepts and logical frame planning, not a generic
   backend API that mirrors wgpu.
 - Wgpu remains the only RHI. Backend-native capabilities and handles stay out of gameplay,
-  project-facing, backend-neutral, and ordinary render-provider Interfaces. Explicitly selected
-  wgpu/native interop contributions and replacement Render Host Adapters may bind the exact raw API
-  under ADRs 0032, 0077, and 0078 without creating another RHI.
+  project-facing, backend-neutral, and ordinary render-provider Interfaces. A future separately
+  admitted exact-GPU integration or replacement authority may bind the exact raw API under ADRs
+  0032, 0078, and 0094 without creating another RHI.
 - A future backend requires a concrete product need and a new decision; this ADR does not promise
   source-compatible or behaviorally equivalent backend replacement.

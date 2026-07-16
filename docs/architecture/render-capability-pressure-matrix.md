@@ -4,18 +4,20 @@
 
 **Created**: 2026-07-15
 
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-16
 
 **Owner**: `nara_render`, render-domain packages, `nara_render_wgpu`, product composition, and
 Editor render integration
 
 **Authority**: Non-normative design workbench. Accepted ADRs remain authoritative on conflict.
 
+**Document Role**: Render evidence/admission appendix; it evaluates pressure and is not a roadmap.
+
 **Normative Decisions**: [ADR 0005](adr/0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0032](adr/0032-render-backend-integration-boundary.md),
-[ADR 0077](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md),
 [ADR 0078](adr/0078-render-host-affinity-webgpu-initialization-and-device-recovery.md), and
-[ADR 0092](adr/0092-sdr-color-space-alpha-and-output-encoding.md)
+[ADR 0092](adr/0092-sdr-color-space-alpha-and-output-encoding.md), plus
+[ADR 0094](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)
 
 **Related Design**:
 [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
@@ -26,22 +28,26 @@ Editor render integration
 The validation plan remains inactive until its recorded reference-game release or exact handoff
 gate passes. This document does not authorize parallel renderer implementation.
 
+Everything below that exceeds ADR 0094's minimal render boundary is a candidate hypothesis. It is
+not an Accepted product guarantee, implementation requirement, or preapproved public API.
+
 ## Verdict
 
-Nara should preserve an SRP-level layered renderer extension model, but it should not clone Unity's
-SRP types, make complete renderer replacement the ordinary plugin path, or build a marketplace in
-advance of demand.
+Nara should investigate an SRP-level layered renderer extension model, but it should not clone
+Unity's SRP types, make complete renderer replacement the ordinary plugin path, or build a
+marketplace in advance of demand. Focused tracers may reject or simplify this taxonomy.
 
 The evidence supports four authority and admission classes, not measured usage-frequency tiers:
 
 1. Shader, material, renderable-domain, post-process, and Editor-visualization extensions recur
-   across the compared mature engines and should be normal supported workflows.
+   across the compared mature engines and are the highest-priority normal-workflow tracer targets.
 2. Complete renderer policy replacement is real but globally consequential. It should be an
-   advanced Pipeline Family capability proved by a production-shaped external tracer.
+   advanced Pipeline Family hypothesis proved by a production-shaped external tracer.
 3. Exact GPU/native integration serves specialized vendor, compute, video, and XR workflows. It
-   should require explicit authority and Host scheduling.
+   is a candidate that would require explicit authority and Host scheduling.
 4. Complete Device, target, submission, or presentation replacement is the highest-authority
-   class. It remains a conformance-tested Render Host escape hatch, not ordinary package authoring.
+   candidate. If a production workflow and focused ADR admit it, stock and external implementations
+   require the same conformance suite; no replacement Render Host escape hatch is accepted today.
 
 There is no verified usage telemetry proving that third-party complete renderer packages are
 frequent. Their architectural value is narrower: an admitted renderer workflow should not require a
@@ -441,7 +447,13 @@ The layered direction is revised rather than defended when any of these conditio
 | Semantic vocabulary mirrors one renderer's G-buffer | High | High | Require multiple Families and capability negotiation; keep optional outputs explicit |
 | Retained scene becomes a mandatory public second ECS | High | Medium | Freeze protocol semantics only; keep storage and worker topology private and evidence-driven |
 
-## Decisions To Preserve Now
+## Accepted Baseline
+
+ADR 0094 accepts backend-neutral authoring and domain batches, wgpu as the only RHI, an owned frame
+transfer, static `RenderPassPlan` ordering, one serialized device-domain authority, a single-target
+transaction, and device-epoch isolation. It does not accept the capability taxonomy below.
+
+## Candidate Hypotheses To Preserve For Validation
 
 1. Preserve the layered capability gradient and one coherent renderer-profile user experience.
 2. Treat complete Pipeline Family replacement as advanced, real, and falsifiable, without calling it
@@ -467,14 +479,15 @@ The layered direction is revised rather than defended when any of these conditio
 - Shader Graph IR, node schema, UI, custom-node ABI, and shader-reflection implementation.
 - Core ray-tracing pass, BLAS/TLAS, denoiser, or ray-pipeline types.
 - Real HDR/wide-gamut output until OQ-021 is resolved beyond ADR 0092's SDR mode.
-- Shared process-level Editor Render Host ownership until OQ-022 is accepted or superseded.
+- Shared process-level Editor render-execution ownership until OQ-022 is accepted or superseded.
 - Native binary plugin ABI, package marketplace, signing, billing, and ecosystem governance.
 
 ## References
 
 - [Repository direction](../../AGENTS.md)
 - [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
-- [ADR 0077](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
+- [ADR 0077 historical decision](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
+- [ADR 0094 current render boundary](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)
 - [ADR 0078](adr/0078-render-host-affinity-webgpu-initialization-and-device-recovery.md)
 - [Bevy `Material2d`](../../repo-ref/bevy/crates/bevy_sprite_render/src/mesh2d/material.rs)
 - [Bevy custom post-processing](../../repo-ref/bevy/examples/shader_advanced/custom_post_processing.rs)

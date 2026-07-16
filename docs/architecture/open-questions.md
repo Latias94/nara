@@ -1,17 +1,20 @@
 # nara Architecture Open Questions
 
 **Status**: Living Draft
-**Updated**: 2026-07-13
+**Updated**: 2026-07-16
 
 This document contains undecided architecture questions only. Accepted decisions belong in ADRs; implementation evidence belongs in `adr/implementation-status.md` and engineering memory. Each question remains open until its trigger creates enough concrete pressure for an ADR.
 
-## OQ-001: Full Render Graph Trigger
+## OQ-001: Render Execution Model Trigger
 
 - **Status**: open
 - **Owner**: `nara_render`
-- **Trigger**: A second pass requires explicit transient resource lifetime or cross-target dependency scheduling that `RenderPassPlan` cannot express.
-- **Related ADRs**: 0017, 0032, 0040
-- **Question**: What resource and scheduling model should replace phase ordering when the first concrete graph-only use case arrives?
+- **Trigger**: An intermediate logical resource, retained/history lifetime, or cross-target dependency requires scheduling that `RenderPassPlan` cannot express.
+- **Related ADRs**: 0017, 0032, 0040, 0094
+- **Question**: What is the smallest execution model that satisfies the first static-plan-breaking workflow:
+  extended static phases, typed pass providers, a minimal execution kernel, or a logical resource
+  graph? Which resource, lifetime, ordering, and inspection semantics does that workflow actually
+  require?
 
 ## OQ-002: Reusable Material and Shader Specialization
 
@@ -19,7 +22,7 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Owner**: `nara_material`, render domains
 - **Trigger**: A project needs a reusable material asset, a custom shader interface, or variants that
   must compile across more than one target capability profile.
-- **Related ADRs**: 0012, 0033, 0040, 0054, 0077
+- **Related ADRs**: 0012, 0033, 0040, 0054, 0094
 - **Question**: Which stable shader interface, parameter/binding schema, variant and fallback policy,
   and logical pipeline/cache key belong above backend-native shader modules and PSOs?
 
@@ -93,9 +96,14 @@ This document contains undecided architecture questions only. Accepted decisions
 
 - **Status**: open
 - **Owner**: `nara_ui`, editor adapters
-- **Trigger**: Runtime UI has text, keyboard navigation, focus, scroll, and the layout capabilities required by one existing egui panel.
+- **Trigger**: Runtime UI has text/IME, keyboard navigation, focus, scroll, accessibility semantics,
+  and the layout capabilities required by one complete existing egui panel.
 - **Related ADRs**: 0015, 0025, 0041
-- **Question**: Which real editor panel should migrate first, and what usability/performance evidence constitutes success?
+- **Question**: Which complete editor panel should migrate first, what command/undo/usability/
+  performance parity constitutes success, and which later heterogeneous workloads (a virtualized
+  hierarchy/table, viewport, timeline, or graph) are required before deciding whether nara UI
+  should become the primary editor toolkit? Success with the first panel proves adapter
+  replaceability, not final toolkit convergence.
 
 ## OQ-011: Platform Export, Signing, and Store Adapter
 
@@ -185,10 +193,21 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Owner**: `nara_image`, `nara_render`, material domains, render backends, authoring tooling
 - **Trigger**: The first HDR output, wide-gamut asset workflow, tone-mapping/color-grading pipeline,
   or display-profile-aware authoring workflow is scheduled beyond ADR 0092's SDR compatibility mode.
-- **Related ADRs**: 0005, 0033, 0040, 0077, 0092
+- **Related ADRs**: 0005, 0033, 0040, 0092, 0094
 - **Question**: Which scene-referred working space, asset primaries, HDR target formats, exposure,
   tone-mapping and color-grading ownership, paper-white/UI composition, mastering metadata, and
   display capability policy extend the SDR path without silently reinterpreting existing content?
+
+## OQ-022: Editor Render Execution Ownership
+
+- **Status**: open
+- **Owner**: render/platform adapters and `nara_tooling`
+- **Trigger**: The first offscreen editor viewport or multiple isolated edit/play runtimes need to share a device, caches, or render targets.
+- **Related ADRs**: 0015, 0034, 0042, 0078, 0094
+- **Question**: Should the editor own or lease a shared process-level render execution authority,
+  should each isolated App retain an independent authority, or is another model smaller? How do
+  bounded frame transfer, target leases, device epochs, cache budgets, and shutdown rules prevent
+  one runtime from invalidating another?
 
 ## OQ-023: Platform Application Lifecycle
 
@@ -234,7 +253,7 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Trigger**: A measured performance regression or production crash requires high-frequency CPU/GPU
   timing, schedule/task spans, call stacks, breadcrumbs, or an externally consumable crash artifact
   that the bounded diagnostics bus cannot represent.
-- **Related ADRs**: 0009, 0036, 0048, 0068, 0076, 0077, 0078, 0084
+- **Related ADRs**: 0009, 0036, 0048, 0068, 0076, 0078, 0084, 0094
 - **Question**: Which separate trace, profiler, crash-artifact, and opt-in telemetry contracts provide
   stable correlation, bounded capture, privacy/redaction, retention, and export without turning
   `RuntimeDiagnostics` into a high-volume event stream or process-global policy owner?
@@ -246,7 +265,7 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Trigger**: Profiling shows a fixed-tick, extraction, preparation, or encoding workload cannot
   meet its frame budget through ordinary ECS schedule parallelism or the current background task
   pools without unacceptable latency or synchronization.
-- **Related ADRs**: 0003, 0008, 0039, 0052, 0077, 0078, 0080, 0084
+- **Related ADRs**: 0003, 0008, 0039, 0052, 0078, 0080, 0084, 0094
 - **Question**: Does Nara need a distinct bounded frame-job graph, and if so which dependency,
   work-stealing, affinity, join barrier, panic/cancellation, deterministic-test, and shutdown rules
   separate it from ECS systems, long-running background tasks, and backend-affine workers?

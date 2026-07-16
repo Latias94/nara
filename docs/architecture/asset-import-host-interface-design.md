@@ -4,11 +4,13 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-14
+**Last Updated**: 2026-07-16
 
 **Owner**: `nara_asset`, importer-owning domains, concrete authoring Hosts, `nara_tasks`, and `nara_fs`
 
 **Authority**: Non-normative Interface design. Accepted ADRs remain authoritative on conflict.
+
+**Document Role**: Import specialization appendix; dormant until ADR 0087 or an Accepted successor is admitted.
 
 **Upstream Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md), [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md)
 

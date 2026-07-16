@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-15
+**Last Revised**: 2026-07-16
 **Owner**: Product composition and executable hosts
 **Admission Trigger**: RGF-U3, RGF-U4, and RGF-U12 prove bounded settings, pure profile planning,
 and immutable startup content; RGF-U26 freezes the task-equivalent manual counterfactual before
@@ -11,7 +11,7 @@ RGF-U17/RGF-U13 diffuse it into Editor and desktop Hosts, and RGF-U23 decides th
 before checking compatibility with the accepted executable-runtime decision
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
-**Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079, ADR 0084
+**Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079, ADR 0084, ADR 0094
 
 ## Context
 
@@ -99,19 +99,23 @@ These are scopes and roles, not required public structs, traits, crates, or fiel
 binary may collapse several scopes into one private owner. The ownership rules and lifetime order
 must remain observable even when the implementation is compact.
 
-Concrete root composition also closes exclusive authority roles before it starts a runtime:
+Concrete root composition also closes every authority role admitted by its owning decision before
+it starts a runtime:
 
-- one Platform/Runner Adapter drives each process/runtime-driver scope and supplies platform events,
-  elapsed time, wake/close behavior, and any process-affine target authority;
-- one Render Host Adapter owns each selected GPU device domain under ADR 0078;
+- one selected Platform/Runner Adapter drives each admitted process/runtime-driver scope and
+  supplies platform events, elapsed time, wake/close behavior, and process-affine target authority;
+- the stock render execution authority owns each selected GPU device domain under ADR 0078 and ADR
+  0094; this proposal does not admit a replacement Render Host role;
 - zero or more domain service Adapters own separately declared service authorities.
 
-Those cardinalities belong to their domain contracts, not ordinary plugin replacement slots. A
-first-party default and an external compiled candidate use the same explicit selection and
-conformance role; neither a crate path nor a first-party ID is admission policy. One package may
-aggregate a Platform/Runner, Render Host, service, and runtime-plugin closure so ordinary users make
-one product-level choice. The exact split between platform display/window ownership and runtime
-driving must be proven by concrete Adapters rather than frozen as one giant trait.
+Those cardinalities belong to their domain contracts, not ordinary plugin replacement slots. For
+each role separately admitted by its owning ADR, a first-party default and an external compiled
+candidate use the same explicit selection and conformance path; neither a crate path nor a
+first-party ID is admission policy. A future package may aggregate admitted Platform/Runner,
+service, runtime-plugin, and separately admitted render roles behind one product-level choice. ADR
+0094 keeps replacement Render Host authority candidate-only until its own production workflow and
+decision admit it. The exact split between platform display/window ownership and runtime driving
+must be proven by concrete Adapters rather than frozen as one giant trait.
 
 ### Host Admission and Runtime Delegation
 
@@ -155,10 +159,11 @@ sequenceDiagram
   `App` mutation or candidate lease acquisition. A resolved plugin plan stores static declarations,
   canonical configuration, and repeatable typed materializers, never an installed/live plugin
   object. Each start attempt privately materializes fresh plugin owners.
-- Root selection resolves external Platform/Runner, Render Host, and service candidates before
-  authority acquisition. A normal runtime plugin cannot change those choices from `build`, but an
-  external package can provide them through their typed contribution roles without modifying the
-  stock root or receiving a first-party allowlist.
+- Root selection resolves each admitted external Platform/Runner or service candidate before
+  authority acquisition. A replacement Render Host participates only after ADR 0094 or an explicit
+  successor separately admits that role. A normal runtime plugin cannot change these choices from
+  `build`; external packages use the typed contribution path of each role that actually exists,
+  without a stock-root package match or first-party allowlist.
 - The Host creates the `RuntimeStartAttempt`, its obligation ledger, and its exclusive logical
   publication reservation before any fallible plugin preparation or candidate reservation. The
   attempt completes authority-free plugin preparation under that ledger, then requests inactive
@@ -247,8 +252,10 @@ This proposal does not select:
 - a dynamic plugin ABI, script VM, physics API, or audio backend API.
 
 It also does not freeze one universal `PlatformRunnerAdapter` or `RenderHostAdapter` Rust trait.
-Their external availability, explicit selection, cardinality, and lifecycle/conformance outcomes
-are fixed; the first independent clean-room implementations choose the smallest concrete API.
+This proposal may admit Platform/Runner selection and conformance after its alternate-runner
+evidence. It does not fix external replacement Render Host availability, selection, or cardinality;
+ADR 0094 owns that separate admission. The first independent clean-room implementations of an
+admitted role choose its smallest concrete API.
 
 Those choices require concrete consumers. They may be implemented privately without changing the
 scope and lifetime rules in this ADR.
@@ -305,7 +312,7 @@ justified.
 | Cross-host parity | Editor, desktop, and headless hosts drive the same declared frame/fixed-tick contract | Reference-game semantic snapshot tests |
 | Least privilege | Server composition creates no window, render, audio-device, editor, or raw-input session | Feature/service boundary tests |
 | Embedded path | A code-first minimal `App` runs without a project file or public universal host object | Standalone compile/runtime test |
-| External authority parity | Clean-room external Platform/Runner and Render Host candidates can be explicitly selected without stock-root package matches or first-party allowlists; each is the sole owner of its declared authority | Renamed-dependency Host fixtures, source-diff gates, and domain conformance suites |
+| Admitted external authority parity | For every authority role separately admitted by its owning ADR, a clean-room external candidate can be selected without a stock-root package match or first-party allowlist and becomes the sole owner of its declared scope | Role-specific renamed-dependency fixtures, source-diff gates, and conformance suites; replacement Render Host remains outside this ADR |
 
 ## Risks and Mitigations
 
@@ -331,6 +338,8 @@ If accepted:
   declarations; ADR 0084 owns runtime-scoped activation and close.
 - ADR 0078 remains the render affinity/device authority; this ADR does not force a process-shared
   renderer.
+- ADR 0094 separately decides whether any replacement Render Host role exists; this ADR cannot
+  promote that candidate mechanism into product authority.
 - ADR 0079 remains the capability and plugin composition authority; its closure becomes a required
   input to runtime construction.
 - ADR 0084 exclusively owns candidate-internal construction order, atomic publish-and-promote,
@@ -343,12 +352,14 @@ If accepted:
 
 Acceptance requires all Host-authority success metrics owned by RGF-U3/U4/U12/U24, U26's pre-Host
 manual baseline, U25's early counterevidence verdict, and the Editor/desktop outer-host subsets of RGF-U17/RGF-U13. RGF-U23
-reviews this topology on its own metrics, then shows that Hosts delegate executable lifecycle to an
-Accepted ADR 0084 or an explicit Accepted successor and that no public universal Host/service
-Interface was admitted without a second concrete consumer. ADR 0084 may be accepted or rejected
-independently; a rejected or still-Proposed executable-runtime dependency blocks product use of this
-topology until an Accepted compatible successor exists, rather than forcing both ADRs to share one
-decision status.
+reviews this topology on its own metrics and records an independent merits verdict. A would-accept
+verdict remains conditional until the compatibility review shows that Hosts delegate executable
+lifecycle to an Accepted ADR 0084 or explicit Accepted successor and that no public universal
+Host/service Interface was admitted without a second concrete consumer. Only then may this ADR be
+promoted to Accepted for product use. ADR 0084 may be accepted or rejected independently; a
+rejected or still-Proposed executable-runtime dependency blocks product use of this topology until
+an Accepted compatible successor exists, rather than forcing both ADRs to share one decision
+status.
 
 ## Citations
 
