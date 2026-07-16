@@ -394,3 +394,22 @@ This document contains undecided architecture questions only. Accepted decisions
   design proves otherwise, catching a panic does not authorize continued gameplay in the same
   runtime generation; OQ-025 owns profiling, crash-artifact, and telemetry channels rather than
   containment semantics.
+
+## OQ-037: First-Party Product Preset and Project Creation Flow
+
+- **Status**: open
+- **Owner**: root product composition, project templates/CLI, and Editor project creation
+- **Trigger**: The first fresh-user or non-program-author trial must create and run a desktop 2D,
+  headless/server, or another supported product without understanding Cargo feature ceilings,
+  project capability closure, and internal plugin-group composition.
+- **Related ADRs**: 0020, 0035, 0046, 0079, 0082, 0084, 0086, 0088
+- **Question**: Should an official template, CLI, Editor flow, or combination own the single
+  author-facing product choice and generate matching Cargo features, `nara.toml` requests, and
+  first-party plugin composition while preserving the three-layer admission checks internally?
+- **Boundary**: This question owns product creation and preset UX, not executable-runtime or outer
+  Host topology. Run/Play actions still follow whichever ADR 0082/0084 decisions or explicit
+  successors are Accepted when the trigger fires.
+- **Admission evidence**: The RGF-U20 clean-room tracer starts outside an existing project, selects
+  one supported product preset, and verifies the generated product closure without editing Cargo.
+  That tracer may expose the need for a template, CLI, Editor flow, or combination; it does not
+  select or accept one by itself.
