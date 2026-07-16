@@ -91,16 +91,18 @@ The plugin metadata contract is:
   extension contract must permit trusted plugin code to use its own ECS component types and add
   typed resources, systems, system sets, custom schedules, typed queues, and runtime-local domain
   registrations through public Interfaces.
-  Import, editor/tooling, render, cook, and Host-authority roles still use their owning contribution
-  contracts. A known runtime/domain contribution must not require a first-party ID allowlist or an
-  edit to Nara core merely because its crate is external.
+  Import, editor/tooling, render, cook, and Host-authority roles use their owning contribution
+  contracts only after those roles are separately admitted. A known supported runtime/domain
+  contribution must not require a first-party ID allowlist or an edit to Nara core merely because
+  its crate is external.
 - Moving exclusive authority out of `Plugin::build` is not permission to reserve it for Nara.
-  `PluginGroup` may aggregate runtime-plugin companions only. A `PackageDefinition`, product preset,
-  or typed root helper may aggregate those runtime plugins with separately declared render-family,
-  raw-wgpu, Render Host, service, or platform/runner contributions so the user still selects one
-  coherent product entry. Root composition chooses every exclusive Host/runner slot explicitly,
-  and external candidates use the same public slot and conformance contract as the first-party
-  default.
+  `PluginGroup` may aggregate runtime-plugin companions only. A future `PackageDefinition`, product
+  preset, or typed root helper may aggregate those plugins with roles that already have their own
+  Accepted admission contract so the user still selects one coherent product entry. Render-family,
+  exact-GPU, replacement Render Host, service, or platform/runner examples do not become supported
+  roles merely by being named here. For each admitted exclusive role, root composition chooses its
+  owner explicitly and external candidates use the same supported slot/conformance contract as the
+  first-party default.
 - Ordinary Rust callers edit groups by plugin type or by a typed definition helper, for example
   `.disable::<TilemapPlugin>()` and `.configure(window::plugin(settings))`. Stable slot IDs remain
   the durable authority for project data, tooling, and later admitted cross-plugin replacement,

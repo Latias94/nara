@@ -44,20 +44,21 @@ document does not treat every plausible renderer feature as roadmap scope.
 
 The required outcome is simple:
 
-> First-party defaults and external Rust packages use the same public capability roles. Ordinary
-> game authors select one coherent renderer. Advanced authors can progressively request more
-> control up to the complete Render Host, with separate outer Platform Adapter and Runtime
-> Driver/Runner roles when those product boundaries are explicitly selected.
+> For each separately admitted capability, first-party defaults and external Rust packages use the
+> same supported path. Ordinary game authors select one coherent renderer. Advanced authors gain
+> only the progressively higher roles admitted by production evidence; reachability up to a complete
+> Render Host remains a validation goal, not a current product promise.
 
-This document freezes capability, ownership, cardinality, selection, and conformance expectations.
-It deliberately does not freeze speculative trait names, object-safe factories, a second render
-World, or one universal backend abstraction.
+This document records candidate capability, ownership, cardinality, selection, and conformance
+hypotheses for later tracers. It freezes neither those hypotheses nor speculative trait names,
+object-safe factories, a second render World, or one universal backend abstraction.
 
 ## The Short Answer
 
-Nara needs a five-step renderer-control gradient, but most users should see only `Plugin` and one
-Renderer Profile choice. Runtime Plugin, Platform Adapter, and Runtime Driver/Runner are orthogonal
-product roles rather than higher renderer permissions:
+This harness evaluates a five-step renderer-control gradient, while expecting most users to see only
+`Plugin` and one coherent renderer choice if such roles are admitted. Runtime Plugin, Platform
+Adapter, and Runtime Driver/Runner remain orthogonal product roles rather than higher renderer
+permissions:
 
 | Role | Kind | Closest mature-engine concept | Cardinality | Authority gained |
 |---|---|---|---:|---|
@@ -493,19 +494,20 @@ A complete external Host is necessary when an integration must own any of:
 - physical resource/caching policy outside the selected Host's extension rules;
 - device-loss recovery, target transfer, or executor placement incompatible with the stock Host.
 
-For one device domain, the selected Host must be the only authority for those operations. It must
-consume backend-neutral packets/plans or an explicitly versioned equivalent contract, expose
-semantic status/diagnostics, preserve target transaction rules, bind all native objects to an
-epoch, and provide finite shutdown evidence.
+If a replacement Render Host role is admitted, the selected Host must be the only authority for
+those operations in one device domain. It must consume backend-neutral packets/plans or an
+explicitly versioned equivalent contract, expose semantic status/diagnostics, preserve target
+transaction rules, bind all native objects to an epoch, and provide finite shutdown evidence.
 
-Every Host candidate also declares the interop contract versions, backend modes, queue modes, and
-resource-binding rules it supports. Composition matches the selected interop set before device
-admission and applies declared fallback or rejects.
+Every admitted Host candidate also declares the interop contract versions, backend modes, queue
+modes, and resource-binding rules it supports. Composition matches the selected interop set before
+device admission and applies declared fallback or rejects.
 
 The architecture does not yet require one generic object-safe `RenderHost` trait. A concrete root
 may bind a generic static implementation, an enum of compiled candidates, or another typed form.
-The external replacement tracer decides that shape. It may not reopen whether external selection is
-supported or give the first-party Host a private selection path.
+The external replacement tracer may reject the public Host role entirely or select its smallest
+sufficient shape. Only after that role is admitted must first-party and external candidates use the
+same supported selection path; the first-party Host must not retain a private equivalent.
 
 ## Editor Semantic Output Contract
 
@@ -696,8 +698,8 @@ binding, rebuild, and trust disclosure are allowed and audited; they are not cor
 | Native external image/semaphore protocol | Concrete XR/video/vendor integration with exact backend evidence |
 | Stable native dynamic ABI | Precompiled distribution/reload need justifies allocator/panic/thread/version contract |
 
-Deferral of Rust shape does not defer external availability, cardinality, selection, or lifecycle
-semantics.
+Deferral preserves external reachability as a validation goal. Availability, cardinality,
+selection, and lifecycle semantics remain unaccepted until the owning tracer and ADR admit them.
 
 ## Risks And Mitigations
 

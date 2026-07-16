@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-07-16
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
 Culling, and Tilemap Render Cache; ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
@@ -70,7 +71,9 @@ Rules:
 - `RenderPassPlan` remains the static pass-order contract. `RenderPassDependency` is an assertion
   that required earlier pass inputs exist in the static plan, not a general topological sorter. If
   nara needs computed ordering, transient graph resources, or pass-produced resource lifetimes, that
-  is the trigger to promote the model into a real `RenderGraph`.
+  reopens OQ-001 to compare extended static phases, independent target transactions, a typed
+  provider, a minimal execution kernel, and a logical graph. The pressure does not by itself select
+  `RenderGraph`.
 - `WgpuRenderPlugin` owns wgpu device/surface/backend resources. Sprite, tilemap, UI, text, gizmo,
   and future 3D submitters should be installed by their own domain plugins or explicit plugin
   groups. Backend examples may install convenient default groups, but unconditional long-term
@@ -117,7 +120,7 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 | Reload behavior | Asset reload invalidates prepared/gpu resources by generation | Reload tests |
 | Plugin decoupling | UI/sprite/text submitters can be enabled independently from device/surface setup | Plugin tests |
 | Surface retirement | Surface loss retains provider ownership; shutdown and backend replacement retire surface ownership before provider/native target ownership | Window/wgpu lifecycle and platform smoke tests |
-| Graph trigger clarity | Need for topological ordering or transient resource lifetimes points to `RenderGraph` work | Design review |
+| Execution-model trigger clarity | Need for computed ordering or transient resource lifetimes reopens OQ-001 without preselecting its answer | Design review |
 
 ## Risks and Mitigations
 
@@ -141,5 +144,7 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 
 - What exact cache eviction defaults should desktop Phase 1 use: grace frames, memory budget, or
   both?
-- Which feature first forces `RenderGraph`: editor viewports, post-processing, render-to-texture,
-  3D depth/prepass, or text/UI composition targets?
+- Which concrete workflow first proves the static plan insufficient: editor viewports,
+  post-processing, render-to-texture, 3D depth/prepass, or text/UI composition targets?
+- Which smallest model then satisfies its resource lifetime, ordering, inspection, and extension
+  needs without turning `RenderPassPlan` into a partial graph?

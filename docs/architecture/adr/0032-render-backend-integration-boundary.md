@@ -98,7 +98,7 @@ The backend should still model `Uninitialized`, `Initializing`, `Ready`, and `Un
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Backend isolation | Winit dependency/import authority remains isolated to the platform Adapter boundary and exact wgpu dependency/import authority remains isolated to the advanced backend boundary; neither enters backend-neutral/core/domain crates, while external runner/interop/Host fixtures still receive their promised capability | Dependency/import search plus selected-Adapter fixtures |
+| Backend isolation | Winit dependency/import authority remains isolated to the platform Adapter boundary and exact wgpu dependency/import authority remains isolated to the advanced backend boundary; neither enters backend-neutral/core/domain crates, and any separately admitted external runner/interop/Host capability stays inside its owning boundary | Dependency/import search plus role-specific fixtures when that capability is admitted |
 | Default facade cost | Root facade without default features does not include `winit` or `wgpu` | `cargo tree -p nara --no-default-features` |
 | Surface safety | Safe surface creation owns a tracked non-cloneable handle source; scoped retirement plus owner-Drop fallback prove surface -> provider -> native target ordering | Lifecycle, replacement, and platform smoke tests |
 | Extraction locality | Extracted render data is cleared or rebuilt each frame and stays out of gameplay prelude | Unit tests and API review |

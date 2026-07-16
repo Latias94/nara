@@ -64,15 +64,16 @@ would make engine upgrades, Editor integration, diagnostics, headless closure, a
 the responsibility of each game team.
 
 The current implementation does not yet provide this capability. It has an explicit but static
-`RenderPassPlan` and a stock wgpu quad path. The accepted Family, Feature, recipe, compiled-template,
-frame-plan, interop, and replacement-Host contracts remain mostly unimplemented. This document
-therefore evaluates whether the planned seam is worth proving; it does not describe current product
-support.
+`RenderPassPlan` and a stock wgpu quad path. Family, Feature, recipe, compiled-template, frame-plan,
+interop, and replacement-Host contracts are candidate mechanisms: they are neither admitted nor
+implemented product guarantees. This document evaluates whether any such seam is worth proving; it
+does not describe current product support.
 
 The project-specific case for the seam is conditional:
 
 - the stock portable renderer and an independent stylized renderer must exercise genuinely
-  different policies through the same compiler and Host;
+  different policies through the same admitted composition and execution boundaries wherever their
+  capabilities overlap;
 - lower-authority extensions must not be forced to become complete renderer families;
 - the reference game and first-party renderer remain the source of default-product requirements;
 - public Interface is retained only when a clean-room external package cannot be implemented
@@ -112,9 +113,11 @@ not create a public seam.
 | Wgpu/Native Interop | Vendor upscaler, external image, exact compute, native SDK | Declared exact capabilities and epoch-scoped resources in a Host slot | Independent queue/target ownership outside its declared mode |
 | Render Host Adapter | XR compositor, external submission model, complete GPU execution replacement | Device/Queue, targets, encoding/submission, present/publication, recovery, close | Platform event loop unless separately selected |
 
-The gradient is an authorization rule, not five runtime layers. An ordinary game selects one
-Renderer Profile and uses normal gameplay Plugins. A portable toon renderer normally uses Material
-Techniques, Features, and perhaps a Pipeline Family while retaining the stock wgpu Host.
+The candidate gradient is an authorization hypothesis, not five accepted runtime layers. If its
+roles are admitted, an ordinary game should select one coherent renderer choice and use normal
+gameplay Plugins. A portable toon renderer should use the lowest admitted Material, Feature, or
+Family authority sufficient for its workflow while retaining the stock wgpu execution authority
+when replacement is unnecessary.
 
 Runtime Plugin, Platform Adapter, and Runtime Driver/Runner are adjacent product-composition roles,
 not higher renderer permissions. A Platform Adapter may own display/window integration; a Runtime

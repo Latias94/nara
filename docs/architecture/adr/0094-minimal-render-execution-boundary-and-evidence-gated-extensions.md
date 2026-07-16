@@ -4,6 +4,7 @@
 **Date**: 2026-07-16
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
+[ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
 [ADR 0017](0017-render-graph-policy.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and

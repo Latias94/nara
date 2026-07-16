@@ -2,16 +2,19 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0042: Runtime Service and Backend Boundary
+**Last Revised**: 2026-07-16
+**Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0094: Minimal Render Execution
+Boundary and Evidence-Gated Extensions
 
 ## Context
 
-nara's core interfaces will become expensive to change once games, examples, tools, and AI-generated content depend on them. The engine must support replaceable or optional domain modules such as physics, rendering backends, serialization formats, audio backends, scripting runtimes, and editor UI adapters.
+nara's core interfaces will become expensive to change once games, examples, tools, and AI-generated content depend on them. The engine must support replaceable or optional domain modules such as physics, specialized rendering paths, serialization formats, audio backends, scripting runtimes, and editor UI adapters.
 
 Examples:
 
 - 2D physics may use Box2D, Rapier, Avian, or a custom deterministic backend.
-- Rendering may start with wgpu but could need alternate backends or specialized render paths.
+- Rendering uses wgpu as its only accepted RHI but may need specialized renderer policies, passes,
+  or exact-wgpu integration paths admitted independently under ADR 0094.
 - Serialization may support JSON, RON, binary cache formats, and future editor patch formats.
 - Plugins should install and replace capabilities without modifying core runtime code.
 
@@ -61,7 +64,9 @@ PreUpdate / FixedUpdate / PostUpdate
 Extract / Prepare / Queue / Render
 ```
 
-Use traits for backend seams only where behavior truly varies, such as physics backend stepping, render backend submission, or serialization format adapters.
+Use traits for backend seams only where behavior truly varies, such as physics backend stepping or
+serialization format adapters. Rendering follows ADR 0094's evidence ladder; this rule does not
+authorize a generic render-backend submission trait or a mirrored Nara RHI.
 
 ### Rule 3: Scene and prefab data must stay backend-neutral
 
@@ -121,11 +126,14 @@ This keeps tests and headless runs replaceable.
 ## Consequences
 
 - A future `nara_physics2d` crate can define stable components while `nara_physics2d_box2d` provides a concrete backend.
-- Render, audio, serialization, and scripting should follow the same domain/adapter split.
+- Render, audio, serialization, and scripting preserve stable intent outside native implementation,
+  but each domain admits its own smallest sufficient Adapter shape rather than sharing one trait
+  template. Rendering follows ADR 0094.
 - Core ECS data must avoid storing raw backend handles in serializable components.
 - Backend plugins need diagnostics for unsupported component combinations or invalid data.
 - Render backend observation currently uses plugin-installed resources and `RenderBackendStatus`;
-  a public backend trait should wait for a real second adapter or a concrete test backend need.
+  ADR 0094 accepts only the stock serialized wgpu execution boundary today. A public feature,
+  interop, replacement-Host, or other render-execution seam waits for its own tracer and decision.
 
 ## Success Metrics
 
