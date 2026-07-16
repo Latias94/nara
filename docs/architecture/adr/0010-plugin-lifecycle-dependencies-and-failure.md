@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-15
+**Last Revised**: 2026-07-16
+**Refines**: ADR 0003
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
 

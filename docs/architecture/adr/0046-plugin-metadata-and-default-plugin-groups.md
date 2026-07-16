@@ -2,8 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-15
-**Refines**: ADR 0010, ADR 0035, ADR 0040, ADR 0044
+**Last Revised**: 2026-07-16
+**Refines**: ADR 0003, ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement
 

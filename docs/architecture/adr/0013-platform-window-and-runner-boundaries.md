@@ -2,8 +2,11 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-07-16
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041:
 Input Routing, Actions, Text Input, UI Focus, and Accessibility
+**Proposed Refinement Under Evaluation**: ADR 0082 and ADR 0084 may place managed product/runtime
+ownership around this boundary; OQ-038 owns the reusable Platform Adapter and Runtime Driver shape.
 
 ## Context
 
@@ -17,7 +20,7 @@ Target crate taxonomy:
 
 ```text
 nara_app
-  App, Plugin, schedules, Runner trait
+  App, Plugin, schedules, top-level runner callback and managed runtime drive boundary
 
 nara_window
   Window, WindowId, WindowEvent, cursor, monitor, display mode data
@@ -35,6 +38,8 @@ Rules:
 - Headless runner is first-class.
 - Window events are normalized into nara event/data types before game systems consume them.
 - Fixed timestep belongs to app/runtime scheduling, not winit-specific code.
+- The accepted contract is a top-level driver authority and lifecycle boundary, not a public
+  `Runner` trait. Its reusable Rust shape waits for OQ-038 evidence from a second production Adapter.
 
 ## Alternatives Considered
 
@@ -46,7 +51,7 @@ Rules:
 
 **Decision**: Rejected.
 
-### Option B: No runner abstraction
+### Option B: No top-level runtime-driver boundary
 
 **Pros**: Simple library design.
 
@@ -54,7 +59,7 @@ Rules:
 
 **Decision**: Rejected.
 
-### Option C: App runner plus platform adapters (Chosen)
+### Option C: Concrete top-level driver plus platform adapters (Chosen)
 
 **Pros**: Mature engine shape, headless-friendly, portable.
 
@@ -75,6 +80,12 @@ Rules:
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| Runner abstraction too abstract | Medium | Medium | Start from headless + winit only |
+| Driver abstraction becomes speculative | Medium | Medium | Keep callback/concrete owners until two production Adapters justify a shared shape through OQ-038 |
 | Window model misses web/mobile needs | Medium | Medium | Keep window data minimal and adapter-owned |
 | Input latency from over-normalization | Medium | Low | Preserve raw event access behind advanced diagnostics if needed |
+
+## Follow-Up Questions
+
+- [OQ-038](../open-questions.md#oq-038-platform-adapter-and-runtime-driver-interface) owns the
+  eventual split and Rust shape for reusable Platform Adapter, event-loop, and Runtime Driver
+  integration. This ADR does not imply a universal Host or object-safe driver trait.

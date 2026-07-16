@@ -246,7 +246,8 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Boundary**: Platform adapters only produce normalized pressure drafts. Per-domain cache modes,
   lease/pin semantics, eviction/rehydration algorithms, and numeric defaults remain domain-owned;
   OQ-016 owns GPU cache defaults. Active scene/content candidate admission and atomic publication
-  remain with ADR 0088/0089 or a later residency-closure decision.
+  are outside OQ-024. If ADR 0088/0089 are Accepted they own that boundary; otherwise an explicit
+  Accepted successor or later residency-closure decision must own it.
 
 ## OQ-025: Profiling, Crash Artifacts, and Telemetry Channels
 
@@ -413,3 +414,24 @@ This document contains undecided architecture questions only. Accepted decisions
   one supported product preset, and verifies the generated product closure without editing Cargo.
   That tracer may expose the need for a template, CLI, Editor flow, or combination; it does not
   select or accept one by itself.
+
+## OQ-038: Platform Adapter and Runtime Driver Interface
+
+- **Status**: open
+- **Owner**: `nara_app`, platform adapters, and concrete product hosts
+- **Trigger**: A second production Platform Adapter or Runtime Driver must integrate with managed
+  runtimes; an external product host must duplicate the concrete project boot path or use private
+  imports; or the first-party platform path cannot enforce runtime-state and safe-point authority
+  without ambient `World` access.
+- **Related ADRs**: 0003, 0013, 0039, 0041, 0056, 0078, 0082, 0084, 0094
+- **Question**: What responsibility split between Platform/Display Adapter, event loop or Runtime
+  Driver, and concrete product Host is required, and which callback, static-generic, trait, opaque
+  lease, or other Rust shape provides only the normalized event, time, redraw, target, fault, and
+  close authority each participant needs?
+- **Boundary**: Top-level code-first `App::set_runner` remains a distinct embedding escape hatch;
+  ordinary Plugins do not select the process runner. OQ-017 owns advanced raw events and OQ-023
+  owns platform application lifecycle. This question does not admit a universal `EngineHost`, raw
+  `App`/`World` mutation, or a public object-safe driver trait by default.
+- **Admission evidence**: Compare at least two production Platform/Driver Adapters plus one
+  clean-room external integration while the ordinary Run/Play/Serve action remains free of driver
+  vocabulary. One first-party Winit path may supply pressure but cannot select the shared shape.
