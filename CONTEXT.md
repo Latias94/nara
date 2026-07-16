@@ -3,6 +3,10 @@
 **Status**: Vocabulary only; terms may describe proposed architecture and do not assert
 implementation or ADR acceptance.
 
+**Audience**: Engine, contract, product-root, and domain maintainers. This glossary is not the
+public authoring learning path; ordinary authors should follow the caller routes in the runtime and
+package guides.
+
 **Authority**: Accepted ADRs take precedence. Implementation evidence for the extension terms is
 summarized in [Extension Package Concept Guide](docs/architecture/extension-package-concept-guide.md#what-exists-today).
 
@@ -88,6 +92,9 @@ _Avoid_: Domain owner, universal plugin, package resolver
 
 ## Contract Resolution
 
+The terms in this section are maintainer vocabulary. Package and provider authors use one package
+definition plus domain-owned helpers or Interfaces; game authors do not perform these stages.
+
 **Final Catalog Admission**:
 The private Leaf operation that joins a root-selected canonical declaration, typed binding claim,
 and compiled contract/Adapter evidence into one sealed admission bundle without invoking a
@@ -145,6 +152,9 @@ _Avoid_: Plugin instances, installed-plugin registry, runtime plan
 The following runtime-construction names are provisional design vocabulary for the joint ADR 0082
 and ADR 0084 proposal and its RGF evidence units. They make the proposal discussable; they do not
 establish current product authority while either ADR remains Proposed.
+They are Host-integration vocabulary, not ordinary authoring steps. `RuntimeInstance` may remain an
+advanced Adapter Interface, while recipes, start attempts, and candidates may stay private to a
+concrete product Host.
 
 **Runtime Plan**:
 A concrete root's immutable result for one runtime profile after product-capability, plugin, and

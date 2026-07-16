@@ -5,10 +5,10 @@ types remain proposed
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-16
 
-**Audience**: Game authors, package authors, engine contributors, and future Host integrators who
-do not already know Nara's extension architecture vocabulary
+**Audience**: Engine contributors, contract/domain maintainers, product-root maintainers, and
+future Host integrators who need Nara's internal extension architecture vocabulary
 
 **Authority**: Explanatory only. Accepted ADRs remain authoritative on conflict.
 
@@ -19,20 +19,35 @@ do not already know Nara's extension architecture vocabulary
 ## Reader Route
 
 This guide contains the full internal ownership model because contract, product-root, and Host
-maintainers need shared terms. It is not a list of concepts every extension author must learn.
+maintainers need shared terms. It is not a learning path for ordinary project, game, plugin, or
+package authors; the first rows below tell those readers where to stop.
 
 | Audience | Normal Interface | Internal model required for normal work? |
 |---|---|---|
-| Game author | `App`, `Plugin`, ECS data/systems, assets, and scenes | No |
-| Reusable package author | One `package()` function plus engine-owned domain helpers | No |
+| Project user | `nara.toml`, package selections, Editor/CLI Run and Play, status, and diagnostics | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
+| Game code author | `Plugin`, ECS data/systems, assets, scenes, and optional code-first `App` | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
+| Small runtime plugin/group author | `Plugin`, `PluginGroup`, and domain helpers | No |
+| Reusable package author | Proposed target: one `package()` function returning an opaque definition plus engine-owned domain helpers | No |
 | Importer, Inspector, or other provider author | One narrow domain trait/context with typed settings, errors, and outputs | No |
-| Complete renderer or platform author | Only the selected Family, Feature, interop, Render Host, or Platform/Runner contract plus its conformance kit | No package-kernel or unrelated Host internals |
+| Advanced renderer or platform author | Only an admitted domain-specific role and its conformance kit; several render roles remain candidates under ADR 0094 | No package-kernel or unrelated Host internals |
 | Contract/domain maintainer | Versioned declarations, typed plans, resolvers, and conformance | Yes, only for the owned contract |
 | Product-root/Host maintainer | Product selection, typed compositions, candidate ownership, shutdown, and publication | Yes, only for the owned product/Host |
 
 Leaf-kernel, receipt, seal, inactive-transfer, candidate, and cohort vocabulary describes engine
 internals. It must not become a required workflow, broad-prelude surface, or primary diagnostic
-language for the first three audiences.
+language for the ordinary author rows above.
+
+### When A Plugin Is Enough
+
+Use a `Plugin` when one crate adds runtime behavior through components, resources, systems, sets,
+typed queues, custom schedules, or runtime-local registrations. Use a `PluginGroup` when several
+runtime plugins should be selected and configured together. Neither case requires a package
+definition or any contract-kernel vocabulary.
+
+Use a source extension package only when the distribution unit needs project-visible selection,
+version/provenance inspection, target scoping, or several roles such as runtime, schema, import,
+tooling, build, or a future admitted privileged domain role. A package aggregates those roles; it
+does not grant them additional authority. Each role still receives only its domain Interface.
 
 ## Why This Guide Exists
 
@@ -751,8 +766,9 @@ contract cannot grant third-party rights.
 
 The reader route above is a public Interface constraint, not only a documentation preference:
 
-1. Game-owned examples use `App`, `Plugin`, ECS, assets, and scenes without importing package,
-   contract, binding, or Host-integration modules.
+1. Project examples use Editor/CLI/product Run actions, while code-first examples use `App`,
+   `Plugin`, ECS, assets, and scenes. Neither imports contract, binding, candidate, or
+   Host-integration modules.
 2. Reusable package authors declare roles through one `package()` function and domain helpers.
    They cannot construct contribution keys, contract requests/slices, bound plans, receipts,
    generation seals, transfers, candidates, cohorts, or Host ordering.

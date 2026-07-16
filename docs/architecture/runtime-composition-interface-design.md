@@ -2,7 +2,7 @@
 
 **Status**: Design Draft
 **Created**: 2026-07-13
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-16
 **Owner**: Root product composition, `nara_app`, executable hosts, and the reference game
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Related Decisions**: [ADR 0010](adr/0010-plugin-lifecycle-dependencies-and-failure.md),
@@ -35,6 +35,45 @@ plugin plan; `Plugin` does not become the package abstraction.
 
 Every proposed Interface change should identify the scenarios it serves. A public type that serves
 no scenario in this document or an accepted extension should not be added speculatively.
+
+## Caller Journeys
+
+One person may wear several roles, but Nara must not charge every role the combined concept budget.
+The normal journeys are deliberately different:
+
+| Caller | Normal Interface | What stays behind the seam |
+|---|---|---|
+| Project user | `nara.toml`, package selections, Editor Play, or a CLI/product Run action | `App` construction, capability closure, plans, recipes, candidates, drivers, and retirement |
+| Game code author | Rust components, systems, assets/scenes, `Plugin`, and domain helpers | Package admission, Host authority, publication, and native lifecycle |
+| Code-first bootstrap or embedding author | `App`, `add_plugins`, ordinary configuration, and one explicit concrete runner/product action | Product-project reconstruction and any unused Host scopes |
+| Reusable package/provider author | One package definition and the narrow Interface for each contributed domain role | Root selection, unrelated contracts, candidate publication, and workspace authority |
+| Platform, Editor, or server Host maintainer | Inspectable plans plus the advanced runtime drive/control/close Interface | Private resolver maps, commit carriers, ready-candidate publication, and domain internals |
+
+The intended product journeys are therefore short even though the implementation is staged. Exact
+names remain evidence-gated, but the target shape is:
+
+```rust
+// Illustrative target; not implemented.
+// Code-first desktop embedding: App remains the authoring Interface.
+let mut app = App::new();
+app.add_plugins((Runtime2dPlugins, MyGamePlugin))?;
+nara::desktop::run(app)?;
+```
+
+A file-backed project user does not write a second builder. A CLI/Editor action receives an
+already authorized project root, selected profile/target, startup intent, and the game package or
+plugin definition. A generated executable binds the built/cooked project identity and target in its
+public root glue, then invokes the same concrete product action. The exact Rust carrier waits for
+U12/U24 evidence; the side-effecting action belongs to the root facade or concrete executable Host,
+never to the side-effect-free `nara_project` Module.
+
+Editor Play lowers a validated edit snapshot through that same product composition and publishes a
+fresh isolated runtime generation. Its UI sees commands, status, diagnostics, and observations; it
+does not own a live candidate or startup ledger.
+
+These snippets state the required Depth, not final spelling. RGF-U24/U25 must prove the concrete
+headless product action, RGF-U17 the Editor action, and RGF-U13 the desktop action before names or
+module placement freeze.
 
 ## How To Use This Design Harness
 
@@ -229,15 +268,34 @@ budget is role-specific:
 
 | Caller | Concepts it should learn | Concepts hidden behind its seam |
 |---|---|---|
-| Game author | `App`, systems/sets, `Plugin`, `PluginGroup`, tuples, `add_plugins`, and domain configuration helpers | Stable slots, definition IDs/keys, canonical factory/config machinery, entries, plans, recipes, candidates, Host authority |
-| Small plugin author | Game-author concepts plus one generated/static plugin declaration | Definition keys, canonical config encoding, factory erasure, commit batches |
-| Reusable package author | `PackageDefinition`, Contributions, `PluginGroupBuilder` when supplying runtime plugins, and domain-owned authoring helpers | Definition IDs/keys, entry drafts, plans, receipts, Host binding, start attempts, candidates |
-| Concrete Host maintainer | Runtime Plan/Recipe and Start Attempt integration vocabulary | Private resolver maps, erased factory carriers, candidate internals |
+| Project user | Project settings, package selections, Run/Play actions, status, and diagnostics | `App`, plans, recipes, candidates, drivers, and Host authority |
+| Game code author | Systems/sets, ECS and domain data, `Plugin`, passing plugin groups/tuples, and domain configuration helpers | Stable slots, definition IDs/keys, canonical factory/config machinery, entries, plans, recipes, candidates, Host authority |
+| Code-first bootstrap author | `App`, `add_plugins`, ordinary configuration, and one explicit concrete runner/product action | Package/root planning and unused Host scopes |
+| Small plugin author | Game-code author concepts plus one generated/static plugin declaration | Definition keys, canonical config encoding, factory erasure, commit batches |
+| Reusable package author | One proposed `package()` function returning an opaque `PackageDefinition`, domain-owned helpers, and `PluginGroup` only when authoring a reusable runtime bundle | Contribution locators/claims, definition IDs/keys, entry drafts, plans, receipts, Host binding, start attempts, candidates |
+| Concrete Host maintainer | Runtime Plan and Runtime Instance integration vocabulary; a Start Attempt only when its concrete Host exposes one | Private resolver maps, erased factory carriers, ready-candidate publication, and candidate internals |
 | Editor/tooling UI | Commands, views, observations, runtime generation/status, Apply Changes | Live Runtime Instance/Start Attempt ownership, process/native authority |
 
-Normal examples must not require authors to construct a `PluginDefinitionId`, config fingerprint,
-slot constant, entry draft, plan, recipe, candidate, or receipt. A concept can remain necessary
-inside the implementation without becoming public authoring vocabulary.
+Project, game-code, plugin, and package examples must not require authors to construct a
+`PluginDefinitionId`, config fingerprint, slot constant, entry draft, plan, recipe, candidate, or
+receipt. Advanced embedding and Host documentation may expose only the subset its caller actually
+owns. A concept can remain necessary inside the implementation without becoming public authoring
+vocabulary.
+
+## Interface Designs Compared
+
+The same requirements produce several superficially plausible Interfaces:
+
+| Design | Depth and Leverage | Locality and authority | Verdict |
+|---|---|---|---|
+| Make `App` the complete product control plane | Excellent Bevy-like code-first ergonomics, but every Editor/project caller must reproduce loading, reconstruction, publication, and close | Project, process, native, and runtime ownership collapse into mutable `App`; plugin order can become authority | Reject product-wide; retain only the direct code-first path |
+| Add a universal `Game`/`ProjectBuilder` and `EngineHost` trait | One apparent entry, but the builder mirrors `App` while accumulating manifest, build, Editor, renderer, server, and lifecycle methods | A shallow facade and giant context spread changes across every product and Adapter | Reject; a validated `Project` may be an immutable view, never the universal run builder |
+| Keep `App`, add concrete product actions, expose only advanced runtime driving | Ordinary Rust authoring stays small; each Run/Play/Serve action hides the complete product transaction | Product roots retain authority; `RuntimeInstance` is the shared advanced drive Interface without a universal Host trait | Recommend |
+| Hide the product path exclusively inside first-party CLI/Editor code | Very small ordinary Interface | Third-party products and studios cannot reproduce the complete production path through public Rust | Reject; generated/root glue must itself use public Interfaces |
+
+This is a layered Interface, not two competing engines. Direct `App` construction and integrated
+product startup share plugin resolution and App lifecycle semantics, while only the product path
+promises reconstructible inputs, atomic publication, and retained failure ownership.
 
 ## Contract Scenarios
 
@@ -299,6 +357,37 @@ future Interface proposals.
 | RC-43 | Game requests an in-runtime retry | Gameplay resets game-owned run state at a fixed safe point; it does not reconstruct the engine runtime | Same runtime generation, new game-run generation |
 
 ## Proposed Interface Shape
+
+### Recommended Entry Layering
+
+Do not add a mutable `Game` or universal `Project` builder that forwards most `App` methods. Deleting
+such a wrapper would remove little complexity, so it would be a shallow Module. Keep `App` as the
+gameplay/code-first authoring Interface and let concrete desktop, project, server, and Editor
+actions consume authoring inputs through the common private composition implementation.
+
+The product actions must hide this current Host-maintainer sequence:
+
+```text
+authorize and ingest project
+    -> resolve product, plugin, service, and schema closure
+    -> bind immutable content and startup intent
+    -> prepare fresh plugin owners and domain reservations
+    -> create, commit, and seal a fresh App
+    -> start an unpublished candidate
+    -> publish one runtime generation
+    -> drive and close it through the selected concrete Adapter
+```
+
+`RuntimeInstance` is the likely advanced shared Interface for concrete drivers. The current
+`RuntimeCandidate` may remain module-specific advanced support for code-first embedding, but it is
+not a gameplay-prelude or project-authoring concept. `ReadyRuntimeCandidate` and `promote()` are U5
+trial mechanics, not the managed product publication Interface: a concrete Host must keep ready
+ownership inside its start attempt and perform the sole compare-and-consume publication move.
+
+No public `EngineHost`, `ProductRoot`, `RuntimeFactory`, or `RuntimeDriver` trait is justified yet.
+Winit and a headless loop show that `RuntimeInstance` can be driven in different ways; they do not
+prove a common platform/event-loop trait. Each concrete product action remains an Adapter over the
+same implementation until a second production-quality substitutable caller proves a smaller seam.
 
 ### 1. Pure Plugin and Runtime Resolution
 
@@ -633,10 +722,10 @@ fingerprint promise. A direct input that collides with an existing/planned `Plug
 an explicit duplicate error rather than an implicit equality merge. Tooling may inspect that an
 opaque one-shot entry was selected, but it cannot claim the entry is reconstructible.
 
-`add_plugins` is the primary public entry. The singular `add_plugin` remains only as a thin alias
-with identical semantics; `add_plugin_if_missing` is not retained as a public
-composition mechanism. Tuple collection happens before resolution rather than installing each
-element immediately.
+`add_plugins` is the primary public composition entry on a caller-owned `App`. The singular
+`add_plugin` remains only as a thin alias with identical semantics; `add_plugin_if_missing` is not
+retained as a public composition mechanism. Tuple collection happens before resolution rather than
+installing each element immediately.
 
 Bevy also accepts `Fn(&mut App)` as a plugin. Nara must preserve the lightweight setup use case
 without pretending that an anonymous function has stable declaration or replayable identity. The
@@ -729,8 +818,10 @@ let mut start = headless.begin_start(recipe)?;
 let runtime = drive_until_ready(&mut start)?;
 ```
 
-The exact public visibility and module layout wait for U4, U12, U5, and U24 evidence. The architecture names
-and Interface contract are clear:
+U4 and U5 now establish a module-public advanced trial for code-first plan, sealed-App, candidate,
+and runtime behavior. They do not establish the ordinary project or Editor Interface. Exact
+project-content and product-Host visibility still waits for U12 and U24 evidence. The remaining
+architecture names and Interface contract are clear:
 
 - the `RuntimeRecipe` contains only immutable, reconstructible, versioned inputs;
 - a concrete Host creates and owns one `RuntimeStartAttempt`;
@@ -758,15 +849,28 @@ consumer proves why `App::add_plugins` and the concrete product Hosts are insuff
 
 ### 6. Code-First App Path
 
-The low-level embedded path remains intentionally direct:
+The ordinary code-first target keeps `App` as the authoring Interface while one concrete action
+hides managed startup mechanics:
 
 ```rust
+// Illustrative target; not implemented.
 let mut app = App::new();
 app.add_plugins((MinimalPlugins, MyPlugin))?;
+nara::headless::run(app)?;
 ```
 
-This Interface is not a second product composition system. It is an explicit escape hatch for
-embedded applications and focused tests:
+The product action name is illustrative and not implemented yet. The current U5 trial expands that
+last line into the advanced sequence below:
+
+```rust
+let candidate = RuntimeCandidate::admit(app.seal()?)?;
+let runtime = candidate.complete_startup()?.promote();
+```
+
+That sequence is Host-integration/embedding evidence, not a normal game tutorial and not a second
+product composition system. `RuntimeCandidate` may remain available from a module-specific advanced
+path, but it must stay out of `nara::prelude`, project templates, and Editor/tooling models. The
+direct path remains an explicit escape hatch for embedded applications and focused tests:
 
 - callers own ordering and selected plugins;
 - collection, resolution, and preparation rejection leave the App unchanged;
@@ -890,6 +994,11 @@ Do not force every phase into the current `PluginError` enum.
 | `PluginError` | App plugin hook / closed commit | A typed pure-preflight rejection before this attempt's first commit may be retryable; later rejection or any hook unwind poisons | Never retry an App after a committed/partial-attempt failure or hook unwind |
 | `RuntimeStartFailure` | runtime start attempt | No runtime publication; external effects require owned shutdown | Begin a fresh attempt only after retirement policy permits |
 | `RuntimeFault` | published executable runtime | Runtime may be partially mutated; first fault is sticky | Observe, stop, discard generation; never in-place rollback |
+
+A concrete Run/Play/Serve action may wrap these phases in one ergonomic sum error so its caller can
+use one `?`. The wrapper must retain the source phase, mutation guarantee, diagnostics, and close
+ownership; it must not flatten the table into an unclassified message or pretend incomplete close
+is success.
 
 ADR 0079 now reflects this split: product capability errors belong to root composition, plugin
 plan errors belong to `nara_app` plan mechanics, and App-level plugin hook failures remain owned by
@@ -1112,9 +1221,19 @@ evidence is recorded in
 | Unity package manifest and assembly definitions | Package/assembly selection, target scope, and dependencies are resolved before runtime/editor callbacks | Package resolution is not a typed Rust plugin plan, and initialization callbacks do not provide candidate publication | Package runtime role lowers into a closed typed plugin plan; package remains above `Plugin` |
 | Unreal plugin descriptor, module type/loading phase, and `StartupModule`/`ShutdownModule` | Descriptor-level module selection is distinct from module lifecycle callbacks | Loading phases and shutdown hooks do not imply rollback of arbitrary startup side effects | Stable slot/order resolution is distinct from committed plugin hooks and failure containment |
 
+At the product-entry level the mature engines are even more strongly layered:
+
+| Engine | Ordinary run experience | Advanced extension authority | Nara lesson |
+|---|---|---|---|
+| Bevy | `App::new().add_plugins(...).run()` | A plugin receives broad mutable `App`; Winit replaces the runner and render uses a `SubApp` | Preserve `App` ergonomics, but do not copy ambient runner/native authority into every Plugin |
+| Godot | Open a project and Run/Play a scene | `MainLoop`, `EditorPlugin`, GDExtension levels, servers, and renderer internals are separate | A project user should not construct lifecycle candidates; concrete Editor/process roots own them |
+| Unity | Open a Project, press Play, or Build Player | Package assemblies, PlayerLoop, Importer/Editor contracts, SRP, and native plugins are specialized | Package and privileged roles belong above ordinary runtime behavior, not in one callback |
+| Unreal | Open a project and use PIE/Standalone or package a target | Modules, Subsystems, EngineLoop, RHI, and plugin descriptors have distinct scopes | Source access and modules provide freedom; a universal public Host trait is not required |
+
 Nara's additional concepts are internal consequences of editor restart, server/desktop parity,
 package inspection, and last-good publication. They are not additional chores for the normal game
-author: that surface remains `Plugin`, `PluginGroup`, tuple, and `App::add_plugins`.
+author: game code remains `Plugin`, systems, ECS/domain data, and optional code-first `App`, while a
+project user invokes a concrete Run/Play action.
 
 ## Success Metrics
 
@@ -1130,6 +1249,8 @@ author: that surface remains `Plugin`, `PluginGroup`, tuple, and `App::add_plugi
 | Shutdown ownership | Every committed owner is attempted exactly once in reverse dependency order | Instrumented failure tests |
 | Fresh retry | Failed-first/success-second attempts share no mutable runtime generation state | Generation-isolation test |
 | Public leverage | Reference game uses type-directed group edits, places its game plugin, and configures systems without stable infrastructure vocabulary or Nara source edits | Independent clean-room workspace test |
+| Product entry depth | Project, desktop, server, and Editor Play callers do not manually perform manifest-to-plan-to-candidate-to-retirement choreography | Clean-room product actions and caller-concept inventory |
+| Advanced exposure | Gameplay prelude, project templates, package examples, and tooling models expose no Runtime Candidate, ready typestate, ledger, receipt, or Start Attempt owner | Compile fixtures, rustdoc/API audit, and primary-example search |
 | Schedule extension | A third-party domain owns a typed custom schedule without modifying built-in stage enums; it remains inert until explicitly driven | Public compile/run and negative order tests |
 | Extension outcome parity | External clean-room packages separately prove runtime/custom-schedule, importer, portable render-feature, complete Pipeline Family, epoch-scoped wgpu/native interop, replacement Render Host, alternate Platform/Runner, and native-service/tooling paths through public Interfaces with zero edits to owning Nara core/stock-backend crates; explicit package/root selection and rebuild remain allowed and audited | Renamed-dependency workspaces, source-diff gates, exclusive-authority tests, and domain conformance suites |
 | Tooling authority | Editor/tooling commands and views contain no live Runtime Instance, Start Attempt, native lease, or process handle | Static boundary tests |
@@ -1151,6 +1272,8 @@ author: that surface remains `Plugin`, `PluginGroup`, tuple, and `App::add_plugi
 | Composition Module becomes a universal host | High | Medium | Keep filesystem, event loop, services, runtime drive, and World outside pure resolver |
 | Existing nested plugin convenience is expensive to remove | Medium | High | Migrate first-party dependencies into groups/tuples in one breaking pre-1.0 slice; keep compile-time migration errors clear |
 | Runtime recipe captures mutable attempt state | High | Medium | Restrict to immutable versioned data and repeatable factories; assert generation isolation |
+| A second builder mirrors `App` and becomes the universal Host | High | Medium | Keep product roots as concrete actions; do not duplicate gameplay configuration methods |
+| U5 trial typestates become ordinary author vocabulary | High | High | Keep candidate/ready types advanced, remove them from primary examples, and let concrete product actions own publication/retirement |
 
 ## Requirements Traceability
 
@@ -1231,6 +1354,14 @@ The remaining questions belong to later candidate/tooling/driver slices or imple
    than same-plugin configuration replacement?
 5. Does the reference game need a direct-only `App::configure` helper, or do unified
    `add_systems` and ordinary App methods already provide the same leverage?
+6. Which concrete public product action gives desktop, project, server, and Editor callers the
+   shortest honest journey without creating a second mutable `App` builder? U24/U25 chooses the
+   headless shape before U17/U13 diffuse it.
+7. After U24 owns managed publication, which code-first consumer still requires public
+   `RuntimeCandidate` construction, and can `ReadyRuntimeCandidate` become private without losing a
+   supported advanced workflow?
+8. Which second production-quality Platform/Runner Adapter, if any, proves a public driver trait is
+   deeper than concrete Adapter methods over `RuntimeInstance`?
 
 These questions should be answered by the named scenarios, not by adding generality in advance.
 

@@ -67,9 +67,13 @@ dear-imgui-rs reinforces backend split. The workspace separates core context fro
 flowchart TD
     User[Game code / AI agent] --> Facade[nara facade crate]
     Facade --> App[nara_app: App + Plugin + stages]
+    Facade --> Project[nara_project: nara.toml validation + settings lowering]
+    Product[CLI / Editor / product executable] --> Host
+    Host[Concrete desktop / editor / headless Host Adapter<br/>conceptual owner, not shared trait or crate] --> Runtime[nara_app: advanced runtime trial]
+    Host --> Project
+    Runtime --> App
     App --> ECS[nara_ecs: bevy_ecs substrate]
     App --> Tasks[nara_tasks: task pools + handles]
-    App --> Project[nara_project: nara.toml validation + settings lowering]
     Facade --> Core[nara_core: color + math primitives]
     Facade --> FS[nara_fs: host-issued filesystem capabilities]
     Facade --> Transform[nara_transform: spatial components]
@@ -88,6 +92,7 @@ flowchart TD
     App --> SpriteRender[nara_sprite_render: 2D extract + queue + batch]
     App --> Window[nara_window: normalized window data]
     Window --> WinitAdapter[nara_winit adapter]
+    WinitAdapter --> Runtime
     App --> Tooling[nara_tooling: snapshots + UI-agnostic inspector + Play Mode model]
     Tooling --> EguiTooling[nara_tooling_egui: egui editor/debug adapter]
     Scene --> Identity
@@ -133,7 +138,7 @@ flowchart TD
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
 | `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver that owns native windows, updates normalized input/window state, invokes scoped renderer retirement only for its targets, performs provider/native teardown after owner-drop acknowledgement, and preserves distinct primary-runner and native-teardown failures |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
-| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldIdentitySnapshot`, `SceneInspectorState`, `SceneEditorState`, `SceneEditorMode`, `ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, stable identity-only snapshots, open scene document slots, active document, selection sets, isolated Play Mode lifecycle state, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents |
+| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldIdentitySnapshot`, `SceneInspectorState`, transitional `SceneEditorState`/`ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, stable identity-only snapshots, open scene document slots, active document, selection sets, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents; the current bare-World Play owner is replaced by the concrete Editor Host in RGF-U17 |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
 ## Accepted Runtime Debugging Direction
@@ -361,7 +366,12 @@ second real adapter or stronger isolation pressure.
   `WorldIdentitySnapshot`. Its local projection includes only component and field values eligible
   for `inspect`; it does not implement remote disclosure, logging, persistence, or host redaction.
   Authoring commands still apply through validated scene patches.
-- `nara_tooling::SceneEditorState` owns the first UI-agnostic Play Mode model. It starts plain, prefab-resolved, asset-aware, and combined Play sessions by spawning a fresh isolated runtime `World` through `SceneSpawner`, exposes Play/Paused/Edit mode state, and rejects persistent inspector edits while Play or Paused is active.
+- `nara_tooling::SceneEditorState` owns the transitional UI-agnostic, World-only Play Mode model. It
+  starts plain, prefab-resolved, asset-aware, and combined Play sessions by spawning a fresh
+  isolated runtime `World` through `SceneSpawner`, exposes Play/Paused/Edit mode state, and rejects
+  persistent inspector edits while Play or Paused is active. This is not the final runtime owner:
+  RGF-U17 moves Start Attempt and Runtime Instance ownership into the concrete Editor Host, while
+  tooling and egui retain only commands, status, observations, and Apply Changes models.
 - Stop Play drops the runtime `World` and discards runtime changes by default. Apply Changes now supports a narrow selected-entity / explicit-component subset: it encodes registered scene/edit-capable Play world components into `ScenePatchDocument` operations, applies them through `SceneAuthoringSession`, records undo, and rejects stale revisions, runtime-only components, prefab-expanded entities, and failed patch validation with diagnostics.
 - `nara_tooling::EditorWorkspace` is the UI-agnostic editor document authority. It owns open scene slots, active document, selection sets, dirty/saved revisions, external reload pending/conflict state, per-document undo/redo, and workspace command reports.
 - `nara_tooling_egui` is the first concrete debug/editor UI adapter. It renders `SceneEditorModel` and `SceneInspectorModel`, returns `EditorWorkspaceCommand` values, and keeps egui out of `nara_tooling` and runtime-facing crates.
