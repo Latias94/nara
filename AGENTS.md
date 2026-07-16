@@ -2,6 +2,57 @@
 
 This file provides repo-local guidance for agents working on nara.
 
+## Start Here
+
+Before changing code or architecture, establish the repository state and read authority in this
+order:
+
+1. Inspect `git status --short --branch` and preserve every concurrent user or agent change.
+2. Read `STRATEGY.md` when present for product scope and non-goals.
+3. Read [`docs/architecture/README.md`](docs/architecture/README.md) for document authority and
+   activation rules.
+4. Read the relevant Accepted ADRs for durable boundaries, then read
+   [`docs/architecture/adr/implementation-status.md`](docs/architecture/adr/implementation-status.md)
+   for what is actually implemented and what remains open.
+5. Execute only a plan whose frontmatter says `execution_state: active` and whose registration is
+   active in engineering memory. The current execution contract is
+   [`docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md`](docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md).
+6. Treat [`docs/architecture/open-questions.md`](docs/architecture/open-questions.md), Proposed ADRs,
+   design harnesses, appendices, and inactive plans as evidence or candidate input, never as
+   implementation authority.
+
+[`docs/knowledge/engineering/current-state.md`](docs/knowledge/engineering/current-state.md) is a
+derived navigation view, not an independent source of truth. Check its active registration,
+fingerprint, cited evidence, and repository revision before relying on it. Do not infer authority
+from the newest filename, the most detailed document, or the value
+`artifact_readiness: implementation-ready`. When sources disagree, stop the affected implementation
+path and reconcile the authority, ledger, active plan, and engineering-memory evidence first.
+
+## State Vocabulary
+
+- **Implemented** means repository evidence exists in the implementation ledger at the reviewed
+  revision.
+- **Accepted target** means an Accepted ADR constrains future implementation; it does not prove the
+  current code already has that shape.
+- **Proposed or candidate** means evaluation only. It cannot authorize a public API, crate, or
+  product claim.
+- **Active plan** owns execution order only. It may gather evidence for a Proposed ADR but cannot
+  silently make that ADR Accepted.
+
+The Project Direction rules below are durable constraints and accepted targets unless a sentence
+explicitly says that an implementation is transitional or a candidate. Use the implementation
+ledger, tests, and current source for implementation truth.
+
+## Task Router
+
+| Task | Required context before action |
+|---|---|
+| Implementation | Active plan unit, its entry trigger and gates, related ledger rows and Accepted ADRs, current code and tests |
+| Architecture decision | Product strategy, architecture map, relevant Accepted ADRs, implementation gaps, and the owning open question |
+| Research or design | Owning open question or active-plan evidence request; `repo-ref/` remains read-only and design drafts remain non-normative |
+| Code review | Fixed point plus dirty-worktree fingerprint, active unit/spec, relevant AGENTS rules and Accepted ADRs; report findings before summaries |
+| Handoff or integration | Active registration, exact source revision, dirty/staged ownership, verification evidence, remaining blockers, and next admitted unit |
+
 ## Project Direction
 
 - nara is a Rust-native, code-first, data-driven game engine.
