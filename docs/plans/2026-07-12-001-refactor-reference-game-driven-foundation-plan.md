@@ -636,7 +636,8 @@ Milestone rows are evidence joins, not implicit global barriers. The unit depend
 | U23 | Independent runtime/Host decision and compatibility review | ADR 0082/0084 evidence, authority docs, governance tests | U5, U13, U17, U19, U24, U25, U26 |
 | U8 | Domain-owned asset task integration | tasks/asset/watch/image integration | U6 |
 | U7 | Standalone release-candidate packaging | workflows, packaging, licenses, candidate smoke | U13, U14 Continue, U15 |
-| U20 | Pre-publication successor and exact-candidate evidence review | measurement helpers, raw lineage, benchmark review | U7, U8, U13, U14, U17, U19, U23 compatible accepted decisions |
+| U27 | First-party project-creation candidate | project creation tests, candidate review, one reversible product preset path | U3, U4, U13, U14 Continue, U17, U24 |
+| U20 | Pre-publication successor and exact-candidate evidence review | measurement helpers, raw lineage, benchmark review | U7, U8, U13, U14, U17, U19, U23 compatible accepted decisions, U27 |
 | U21 | Reviewed protected immutable GitHub pre-release | publisher workflow, post-release consumer | U20 |
 
 U9, U1, U2, U3, U10, and U11 are retained below as landed baseline evidence and verification contracts, not pending implementation. Their historical triggers explain why the work was admitted; execution derives completion from the cited commits and tests and begins the remaining critical path at U22.
@@ -1077,6 +1078,8 @@ pwsh -File reference-game/tools/package.ps1 -Configuration Release -OutputRoot t
 pwsh -File reference-game/tools/smoke-artifact.ps1 -ArtifactRoot target/reference-game-package -RandomizeEnvironment
 
 # RGF-U20
+cargo nextest run --locked -p nara --test project_creation --test project_composition --test-threads=1
+cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test project_creation --test-threads=1
 cargo nextest run --locked -p nara --test measurement_policy --test evidence_envelope --test-threads=1
 pwsh -File reference-game/tools/measure-headless-iteration.ps1 -VerifyProtocolOnly
 pwsh -File reference-game/tools/measure-desktop-product.ps1 -VerifyProtocolOnly
