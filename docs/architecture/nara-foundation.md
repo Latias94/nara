@@ -168,7 +168,14 @@ flowchart TD
   restoration. Optional script adapters own a separate reload contract. See ADR
   [0093](adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md).
 
-## Runtime Flow
+## Published Runtime Domain Flow
+
+This sequence begins after a code-first caller or concrete product action has produced the
+executable owner. It describes work inside a published frame; it is not the project-ingest,
+Host-start, candidate-publication, driver-selection, or close protocol. Those proposed ownership
+flows remain in ADRs 0082/0084 and the runtime-composition harness until their RGF evidence gates
+complete. Editor and platform integrations must not infer permission to drive a raw `App` from this
+abbreviated frame view.
 
 ```mermaid
 sequenceDiagram
@@ -185,8 +192,7 @@ sequenceDiagram
     participant UiRender as nara_ui_render
     participant Wgpu as nara_render_wgpu
 
-    Game->>App: add_plugins / add_systems
-    App->>ECS: run startup schedules once
+    Note over Game,App: Composition and startup completed before this published-frame view
     loop frame
         App->>Asset: TaskUpdate / AssetTaskUpdateSet::Poll
         Tasks-->>Image: expose terminal IDs in the poller's entry snapshot
@@ -209,11 +215,11 @@ sequenceDiagram
         Wgpu->>UiRender: read UiBatches
         Wgpu-->>App: FrameStats
     end
-    Game->>Asset: build ProjectAssetDatabase / reserve typed Handle<T>
-    Game->>Scene: validate SceneDocument with asset context
-    Scene->>Asset: preflight AssetRef path/stable_id through scratch AssetServer
-    Game->>Scene: spawn into World after successful preflight, export deterministic document
 ```
+
+Project database construction, scene validation/spawn, and candidate startup are separate
+authoring/product-start workflows. They are deliberately omitted here rather than appended to the
+steady-state frame loop.
 
 ## Alternatives Considered
 

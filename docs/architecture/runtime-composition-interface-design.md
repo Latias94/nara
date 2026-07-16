@@ -43,7 +43,7 @@ The normal journeys are deliberately different:
 
 | Caller | Normal Interface | What stays behind the seam |
 |---|---|---|
-| Project user | `nara.toml`, package selections, Editor Play, or a CLI/product Run action | `App` construction, capability closure, plans, recipes, candidates, drivers, and retirement |
+| Project user | `nara.toml`, a compiled product/profile choice, Editor Play, or a CLI/product Run action; source-package selection remains an OQ-031 target | `App` construction, capability closure, plans, recipes, candidates, drivers, and retirement |
 | Game code author | Rust components, systems, assets/scenes, `Plugin`, and domain helpers | Package admission, Host authority, publication, and native lifecycle |
 | Code-first bootstrap or embedding author | `App`, `add_plugins`, ordinary configuration, and one explicit concrete runner/product action | Product-project reconstruction and any unused Host scopes |
 | Reusable package/provider author | One package definition and the narrow Interface for each contributed domain role | Root selection, unrelated contracts, candidate publication, and workspace authority |
@@ -59,6 +59,13 @@ let mut app = App::new();
 app.add_plugins((Runtime2dPlugins, MyGamePlugin))?;
 nara::desktop::run(app)?;
 ```
+
+This illustration assumes that choosing the desktop action is itself an explicit, inspectable
+selection of Nara's stock desktop product capabilities. The action may lower that selection into
+window/render plugin composition before mutation; a runner must not secretly install Winit, wgpu,
+or another hidden plugin closure. If RGF-U13 instead proves a runner-only action, the caller must
+add the desktop product bundle explicitly. The authority invariant is fixed here; the exact helper
+and bundle spelling remain tracer-gated.
 
 A file-backed project user does not write a second builder. A CLI/Editor action receives an
 already authorized project root, selected profile/target, startup intent, and the game package or

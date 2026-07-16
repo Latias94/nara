@@ -24,7 +24,7 @@ package authors; the first rows below tell those readers where to stop.
 
 | Audience | Normal Interface | Internal model required for normal work? |
 |---|---|---|
-| Project user | `nara.toml`, package selections, Editor/CLI Run and Play, status, and diagnostics | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
+| Project user | `nara.toml`, compiled product/profile selection, Editor/CLI Run and Play, status, and diagnostics; source-package selection remains an OQ-031 target | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
 | Game code author | `Plugin`, ECS data/systems, assets, scenes, and optional code-first `App` | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
 | Small runtime plugin/group author | `Plugin`, `PluginGroup`, and domain helpers | No |
 | Reusable package author | Proposed target: one `package()` function returning an opaque definition plus engine-owned domain helpers | No |
