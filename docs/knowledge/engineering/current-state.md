@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "923b928b534ba4304155c8f62c79412b9802670a61e5c59be856d2bf3e434140"
+source_fingerprint: "910f7db7ac95052e2e21ab90d3cfbc5bd933561c3041b6054de002b0b1139bd4"
 ---
 
 # Current State
@@ -12,17 +12,18 @@ source_fingerprint: "923b928b534ba4304155c8f62c79412b9802670a61e5c59be856d2bf3e4
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `923b928b534ba4304155c8f62c79412b9802670a61e5c59be856d2bf3e434140`
-- Immutable records: 141
-- Active lane heads: 1
+- Source fingerprint: `910f7db7ac95052e2e21ab90d3cfbc5bd933561c3041b6054de002b0b1139bd4`
+- Immutable records: 144
+- Active lane heads: 0
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game-driven foundation refactor](registry/2026-07/2026-07-17T051401Z-engine-foundation-contract-completion-codex-root-e2ce7a290562461289b7283474fd2ed4.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game-driven foundation refactor: RGF-U28](registry/2026-07/2026-07-17T100742Z-engine-foundation-contract-completion-codex-root-3b0a5ef096ea4ef7b7809bfa621460bb.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGF-U28 public schedule compatibility verification](verification/2026-07/2026-07-17T100726Z-rgf-u28-public-schedule-compatibility-verification-55f3d96f00e544dba50a1802e35c3190.md) - Commit c24b38a closes the four public schedule anchors and seal-time deferred compatibility contract.
 - **Verification Evidence**: [RGF-U5 managed runtime correction verification](verification/2026-07/2026-07-17T051052Z-rgf-u5-managed-runtime-correction-verification-5a58cbaf030041fe8ead8cfdf4119c51.md) - Supersedes the first U5 verification after raw managed World access exposed a safe Bevy change-detection bypass; ff2e02a structurally seals the scope and re-verifies the six correction regressions.
 - **Verification Evidence**: [RGF-U5 managed runtime verification](verification/2026-07/2026-07-17T014655Z-rgf-u5-managed-runtime-verification-5b37e0cb30ca4d24bb1b30fc98dc7e47.md) - Verified sealed-App admission, sticky fault propagation, exact stepping, bounded close ownership, Winit retirement ordering, and independent reference-game consumption.
 - **Subagent Finding**: [RGF-U5 runtime ownership closure review](subagents/2026-07/2026-07-17-rgf-u5-runtime-closure-review.md) - Independent closure review of the corrected managed-runtime ownership, fault, driver, and finite-close contracts.
@@ -34,7 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGF-U10 bounded PNG ingest verification](verification/2026-07/2026-07-14T174858Z-rgf-u10-bounded-png-ingest-verification-cd08a4898f76409392fbaf093174ea5f.md) - Verified bounded PNG read, decode, publication, last-good reload, review disposition, and focused post-review gates.
 - **Session Handoff**: [RGF-U11 completion and U10 entry handoff](sessions/2026-07/2026-07-14T005902Z-rgf-u11-completion-and-u10-entry-handoff-43ed130b90a44e059f52ae2ccdd2ab4a.md) - Safe native surface retirement is committed and verified; RGF-U10 bounded PNG ingest is next.
 - **Verification Evidence**: [RGF U11 safe surface retirement verification](verification/2026-07/2026-07-13T215323Z-rgf-u11-safe-surface-retirement-verification-7873dc371c574fa3a0330be2b39ca589.md) - Safe owning wgpu surfaces, owner-scoped Winit retirement, device-loss invalidation, and truthful failure aggregation verified.
-- **Verification Evidence**: [RGF-U3 capability and manifest ingest verification](verification/2026-07/2026-07-13T181057Z-rgf-u3-capability-and-manifest-ingest-verification-2aa2885658504654bf7fb5f4c1f55201.md) - RGF-U3 closed its feature surface, manifest authority, CLI privacy, and Server regression evidence on the active refactor branch.
 
 # Integration Notes
 
