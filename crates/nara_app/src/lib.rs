@@ -13,7 +13,8 @@ use nara_ecs::{
     Resource, World,
     observer::IntoObserver,
     schedule::{
-        InternedSystemSet, IntoScheduleConfigs, Schedule, ScheduleLabel, Schedules, SystemSet,
+        InternedScheduleLabel, InternedSystemSet, IntoScheduleConfigs, Schedule,
+        ScheduleBuildSettings, ScheduleLabel, Schedules, SystemSet,
     },
     system::ScheduleSystem,
 };
@@ -59,6 +60,21 @@ pub enum CoreStage {
     First,
     TaskUpdate,
     PreUpdate,
+    /// Public schedule-label anchor for one authoritative fixed-tick transaction.
+    ///
+    /// External systems may register in this schedule. Before each entry, [`FixedTime`] exposes the
+    /// tick, delta, and elapsed time for the tick being simulated. A normal frame skips the schedule
+    /// when no fixed step is due, and may run it multiple times when catching up; an exact fixed step
+    /// runs it once.
+    ///
+    /// [`App::seal`] validates this schedule's graph, requires automatic deferred insertion, and
+    /// restores final deferred application. Consequently, ordinary deferred commands are visible at
+    /// declared set boundaries and all remaining deferred commands are applied before the schedule
+    /// completes. An explicit ignore-deferred relation opts out of that visibility contract.
+    ///
+    /// System and run-condition errors follow the App's configured error policy. Managed-runtime
+    /// escalation is a separate [`RuntimeInstance`] contract. World change trackers and frame
+    /// transients are retained until the enclosing frame or exact-step transaction completes.
     FixedUpdate,
     Update,
     PostUpdate,
@@ -89,6 +105,15 @@ impl CoreStage {
     ];
 }
 
+fn is_built_in_schedule(schedule: InternedScheduleLabel) -> bool {
+    StartupStage::ALL
+        .into_iter()
+        .any(|stage| stage.intern() == schedule)
+        || CoreStage::ALL
+            .into_iter()
+            .any(|stage| stage.intern() == schedule)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum TaskUpdateSet {
     Poll,
@@ -100,11 +125,34 @@ pub enum TaskUpdateSet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum FixedUpdateSet {
     /// Admit tick-scoped inputs and prepare simulation data.
+    ///
+    /// This engine-owned phase is not a first-playable public ordering anchor.
     Prepare,
-    /// Run authoritative fixed-step simulation.
+    /// Public joinable phase for authoritative fixed-step simulation.
+    ///
+    /// The phase begins after [`FixedUpdateSet::Prepare`] completes and its ordinary deferred
+    /// commands are applied. It inherits [`CoreStage::FixedUpdate`]'s run/skip and error behavior,
+    /// has no additional run condition, and retains frame transients. Ordinary deferred commands
+    /// produced by members are applied before [`FixedUpdateSet::Finalize`] begins.
+    ///
+    /// Membership does not order peers inside this phase. Extensions must declare any additional
+    /// semantic relation they require.
     Simulate,
     /// Publish tick-scoped outcomes after simulation commands are flushed.
+    ///
+    /// This engine-owned phase is not a first-playable public ordering anchor.
     Finalize,
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum ScheduleCompatibilityError {
+    #[error("public schedule {schedule:?} requires automatic deferred insertion")]
+    AutomaticDeferredInsertionDisabled { schedule: CoreStage },
+    #[error("public schedule {schedule:?} failed to build: {message}")]
+    BuildFailed {
+        schedule: CoreStage,
+        message: String,
+    },
 }
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -1203,16 +1251,56 @@ impl App {
         Ok(self)
     }
 
+    /// Replaces the build settings for a registered or newly initialized schedule.
+    ///
+    /// Built-in schedules remain subject to Nara's seal-time compatibility validation. This is the
+    /// controlled configuration path for build policy; raw mutable access is reserved for custom
+    /// schedules so callers cannot replace a built-in executor, graph, or build-pass inventory.
+    pub fn set_schedule_build_settings(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        settings: ScheduleBuildSettings,
+    ) -> Result<&mut Self, PluginError> {
+        self.ensure_configuration_mutation_allowed()?;
+        self.schedules.entry(schedule).set_build_settings(settings);
+        Ok(self)
+    }
+
+    /// Sets the final deferred-application policy before sealing.
+    ///
+    /// Seal reasserts final deferred application for public-anchor schedules.
+    pub fn set_schedule_apply_final_deferred(
+        &mut self,
+        schedule: impl ScheduleLabel,
+        apply_final_deferred: bool,
+    ) -> Result<&mut Self, PluginError> {
+        self.ensure_configuration_mutation_allowed()?;
+        self.schedules
+            .entry(schedule)
+            .set_apply_final_deferred(apply_final_deferred);
+        Ok(self)
+    }
+
     #[must_use]
     pub fn get_schedule(&self, schedule: impl ScheduleLabel) -> Option<&Schedule> {
         self.schedules.get(schedule)
     }
 
+    /// Returns raw mutable access to a custom schedule before App sealing.
+    ///
+    /// Engine-owned startup and frame schedules must be configured through [`App::add_systems`],
+    /// [`App::configure_sets`], and the controlled schedule policy methods. Exposing their complete
+    /// [`Schedule`] would allow replacing the executor, graph, and build passes after Nara installs
+    /// its semantic anchors.
     pub fn get_schedule_mut(
         &mut self,
         schedule: impl ScheduleLabel,
     ) -> Result<Option<&mut Schedule>, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
+        let schedule = schedule.intern();
+        if is_built_in_schedule(schedule) {
+            return Err(PluginError::RawBuiltInScheduleMutationForbidden);
+        }
         Ok(self.schedules.get_mut(schedule))
     }
 
@@ -1226,13 +1314,7 @@ impl App {
             return Err(AppScheduleRunError::PluginHookActive);
         }
         let schedule = schedule.intern();
-        if StartupStage::ALL
-            .into_iter()
-            .any(|stage| stage.intern() == schedule)
-            || CoreStage::ALL
-                .into_iter()
-                .any(|stage| stage.intern() == schedule)
-        {
+        if is_built_in_schedule(schedule) {
             return Err(AppScheduleRunError::BuiltInSchedule);
         }
         if self.schedules.get(schedule).is_none() {
@@ -1448,12 +1530,42 @@ impl App {
         }
 
         if self.plugin_lifecycle == PluginLifecycleState::Finishing {
+            if let Err(error) = self.validate_public_schedule_compatibility() {
+                self.shutdown_plugins_internal();
+                return Err(error);
+            }
             self.plugin_lifecycle = PluginLifecycleState::Ready;
             return Ok(());
         }
 
         self.shutdown_plugins_internal();
         Err(self.primary_plugin_error())
+    }
+
+    fn validate_public_schedule_compatibility(&mut self) -> Result<(), PluginError> {
+        let fixed_update = self
+            .schedules
+            .get_mut(CoreStage::FixedUpdate)
+            .expect("FixedUpdate remains registered for the App lifetime");
+        let build_settings = fixed_update.get_build_settings();
+        if !build_settings.auto_insert_apply_deferred {
+            return Err(
+                ScheduleCompatibilityError::AutomaticDeferredInsertionDisabled {
+                    schedule: CoreStage::FixedUpdate,
+                }
+                .into(),
+            );
+        }
+        fixed_update.set_build_settings(build_settings);
+        fixed_update.set_apply_final_deferred(true);
+        if let Err(error) = fixed_update.initialize(&mut self.world) {
+            return Err(ScheduleCompatibilityError::BuildFailed {
+                schedule: CoreStage::FixedUpdate,
+                message: error.to_string(fixed_update.graph(), &self.world),
+            }
+            .into());
+        }
+        Ok(())
     }
 
     pub fn shutdown_plugins(&mut self) -> Result<(), PluginShutdownError> {
@@ -3148,6 +3260,47 @@ mod tests {
                 "extract", "prepare", "queue", "sort", "render", "cleanup", "last"
             ]
         );
+    }
+
+    #[test]
+    fn seal_reasserts_the_automatic_deferred_build_pass() {
+        #[derive(Component)]
+        struct DeferredBeforeSimulate;
+
+        #[derive(Default, Resource)]
+        struct BoundaryObserved(bool);
+
+        fn emit_boundary(mut commands: Commands) {
+            commands.spawn(DeferredBeforeSimulate);
+        }
+
+        fn observe_boundary(
+            deferred: Query<&DeferredBeforeSimulate>,
+            mut observed: ResMut<BoundaryObserved>,
+        ) {
+            observed.0 = !deferred.is_empty();
+        }
+
+        let mut app = App::new();
+        app.init_resource::<BoundaryObserved>().unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            emit_boundary.before(FixedUpdateSet::Simulate),
+        )
+        .unwrap()
+        .add_systems(
+            CoreStage::FixedUpdate,
+            observe_boundary.in_set(FixedUpdateSet::Simulate),
+        )
+        .unwrap();
+        app.schedules
+            .get_mut(CoreStage::FixedUpdate)
+            .expect("FixedUpdate is an engine-owned schedule")
+            .remove_build_pass::<nara_ecs::schedule::passes::AutoInsertApplyDeferredPass>();
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        assert!(app.world().resource::<BoundaryObserved>().0);
     }
 
     #[test]

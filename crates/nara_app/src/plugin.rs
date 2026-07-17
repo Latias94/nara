@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use nara_ecs::{Resource, World};
 use thiserror::Error;
 
-use crate::{App, RuntimeCloseParticipantId};
+use crate::{App, RuntimeCloseParticipantId, ScheduleCompatibilityError};
 
 mod definition;
 mod fingerprint;
@@ -355,6 +355,10 @@ pub enum PluginError {
     },
     #[error("App configuration is sealed")]
     AppSealed,
+    #[error("raw mutable access to engine-owned schedules is forbidden")]
+    RawBuiltInScheduleMutationForbidden,
+    #[error("schedule compatibility validation failed: {0}")]
+    ScheduleCompatibility(#[from] ScheduleCompatibilityError),
     #[error("plugin {plugin} failed to initialize: {message}")]
     SetupFailed { plugin: PluginId, message: String },
     #[error("plugin {plugin} failed to register component {component}: {message}")]

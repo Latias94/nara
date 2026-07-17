@@ -531,8 +531,10 @@ name = "nara_ecs_derive"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs_macro_logic",
+ "bevy_macro_utils",
  "proc-macro-crate",
  "proc-macro2",
+ "quote",
  "syn",
 ]
 

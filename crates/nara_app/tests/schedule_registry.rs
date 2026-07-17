@@ -41,6 +41,7 @@ fn custom_typed_schedule_is_inspectable_inert_and_explicitly_driven() {
     .unwrap();
 
     assert!(app.get_schedule(DomainSchedule).is_some());
+    assert!(matches!(app.get_schedule_mut(DomainSchedule), Ok(Some(_))));
     app.run_once(Duration::ZERO).unwrap();
     assert!(app.world().resource::<DomainTrace>().0.is_empty());
 

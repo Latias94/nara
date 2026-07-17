@@ -101,6 +101,12 @@ schedules remain owner-defined and are not constrained by this validation unless
 publishes its own semantic anchors. This policy does not add another scheduler wrapper, a global
 stage DSL, or public access to every first-party system.
 
+Raw mutable `Schedule` access is available only for custom schedules. Engine-owned startup and
+frame schedules use `App::add_systems`, `App::configure_sets`, and explicit controlled policy
+methods; callers cannot replace their executor, graph, or build-pass inventory. This preserves
+advanced custom-schedule freedom without making a built-in semantic anchor replaceable behind
+seal validation.
+
 For the first-playable anchors in `CoreStage::FixedUpdate`, seal validation specifically requires
 automatic deferred insertion to remain enabled and reasserts the schedule's final deferred
 application before configuration closes. A relation that uses Bevy's `before_ignore_deferred`,
@@ -198,6 +204,8 @@ visibility.
   Interface. `run_schedule` is the explicit custom driver, seals before executing a registered
   custom schedule, and rejects built-in schedule labels; built-in schedules remain exclusively
   driven by the App lifecycle.
+- `get_schedule_mut` is a custom-schedule escape hatch. Built-in schedules expose immutable
+  inspection plus controlled App configuration, not raw executor/graph/build-pass mutation.
 - Third-party domains order against documented semantic anchors. Concrete first-party systems,
   private subsets, and registration order remain implementation details.
 - Window, renderer, audio, input, and tooling integrations should arrive as nara plugins.

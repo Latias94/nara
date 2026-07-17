@@ -42,14 +42,38 @@ pub const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum GameplayCommandSet {
     /// Lower local semantic action outcomes into commands for the next open tick.
+    ///
+    /// This is an engine-owned phase, not a public semantic ordering anchor.
     MapLocalActions,
     /// Close and admit the current authoritative tick.
+    ///
+    /// This is an engine-owned phase, not a public semantic ordering anchor.
     Admit,
-    /// Read the immutable current-tick batch during simulation.
+    /// Public joinable phase for reading the immutable current-tick command batch.
+    ///
+    /// The phase runs in `CoreStage::FixedUpdate` after command admission and only while the batch
+    /// belongs to the current fixed tick. Members see the admitted batch for the whole phase; an
+    /// admission/lifecycle failure reports a domain fault and makes the phase's run condition false.
+    /// Ordinary deferred commands from members are applied before [`GameplayCommandSet::Capture`]
+    /// begins.
+    ///
+    /// The batch remains retained and active after this phase. Member errors follow the App's
+    /// configured system-error policy; managed-runtime escalation is owned by `nara_app`.
     Consume,
-    /// Capture the immutable batch for replay or debugging after simulation.
+    /// Public joinable phase for replay/debug capture after command consumption.
+    ///
+    /// The phase runs in `CoreStage::FixedUpdate` only for a current batch and begins after all
+    /// [`GameplayCommandSet::Consume`] members and their ordinary deferred commands complete.
+    /// Members still see the same retained immutable batch. Their ordinary deferred commands are
+    /// applied before engine acknowledgement; after the complete fixed schedule returns, healthy
+    /// acknowledgement has retired the batch and released its retained command budget.
+    ///
+    /// Lifecycle faults make the phase's run condition false. Member errors follow the App's
+    /// configured system-error policy; managed-runtime escalation is owned by `nara_app`.
     Capture,
     /// Retire the batch and release its retained budget.
+    ///
+    /// This engine-owned phase is not a public semantic ordering anchor.
     Acknowledge,
 }
 
@@ -217,7 +241,9 @@ mod tests {
     use std::{num::NonZeroU64, time::Duration};
 
     use super::*;
-    use nara_app::{CoreStage, RuntimeFaultKind, RuntimeFaultReporter};
+    use nara_app::{
+        CoreStage, PluginError, RuntimeFaultKind, RuntimeFaultReporter, ScheduleCompatibilityError,
+    };
     use nara_core::{ByteLimit, ItemLimit};
     use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
     use nara_identity::{
@@ -1362,6 +1388,34 @@ mod tests {
             active_queue.last_lifecycle_error(),
             Some(&GameplayCommandLifecycleError::BatchAlreadyActive)
         );
+    }
+
+    #[test]
+    fn seal_rejects_moving_consume_across_ordered_fixed_phases() {
+        fn moved_consumer() {}
+
+        let mut app = App::new();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.configure_sets(
+            CoreStage::FixedUpdate,
+            GameplayCommandSet::Consume.in_set(FixedUpdateSet::Finalize),
+        )
+        .unwrap()
+        .add_systems(
+            CoreStage::FixedUpdate,
+            moved_consumer.in_set(GameplayCommandSet::Consume),
+        )
+        .unwrap();
+
+        let error = app.seal().unwrap_err();
+
+        assert!(matches!(
+            error,
+            PluginError::ScheduleCompatibility(ScheduleCompatibilityError::BuildFailed {
+                schedule: CoreStage::FixedUpdate,
+                ..
+            })
+        ));
     }
 
     #[test]

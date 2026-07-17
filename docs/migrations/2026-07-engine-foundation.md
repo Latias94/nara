@@ -1317,6 +1317,73 @@ wrappers.
 `tests/product_capabilities.rs`, `reference-game/tests/plugin_composition.rs`, and
 `reference-game/tests/authoring.rs`; stale-symbol searches reject the removed lifecycle/group API.
 
+## RGF-U28-1: Public Semantic Schedule Anchors and Seal Validation
+
+**Removed contract**:
+
+- Treating every public schedule/set variant, concrete first-party system, or registration order as
+  an extension compatibility promise.
+- Deferring invalid `CoreStage::FixedUpdate` graphs until the first runtime execution panic.
+- Allowing a fixed schedule with disabled automatic deferred insertion or disabled final deferred
+  application to publish as a compatible sealed App.
+- Exposing raw mutable built-in schedules that could replace the fixed graph, executor, or build
+  passes after Nara installed its semantic anchors.
+- Requiring a root-only or renamed-root extension to add a direct `bevy_ecs` dependency merely to
+  derive its own `Resource`, `ScheduleLabel`, or `SystemSet`.
+
+**Canonical replacement or deletion rationale**: the first-playable compatibility inventory is
+exactly `CoreStage::FixedUpdate` for typed registration plus joinable
+`FixedUpdateSet::Simulate`, `GameplayCommandSet::Consume`, and
+`GameplayCommandSet::Capture`. Their Rustdoc owns entry, completion, deferred, skip, error, and
+retention semantics. `App::seal` requires automatic deferred insertion, restores final deferred
+application, builds the fixed schedule, and returns a structured `ScheduleCompatibilityError`
+instead of publishing an invalid graph. `get_schedule_mut` now applies only to custom schedules;
+built-in schedules use `add_systems`, `configure_sets`, `set_schedule_build_settings`, and
+`set_schedule_apply_final_deferred`. Custom schedules remain owner-defined and inert.
+
+An explicit `before_ignore_deferred` / `after_ignore_deferred` relation is trusted advanced code:
+it may seal, but it opts out of the public deferred-visibility contract. Ordering against an absent
+set or a set populated only in another schedule remains ineffective rather than becoming a hidden
+cross-schedule edge. Unordered peers retain no relative-order promise.
+
+External packages that depend only on `nara`, including a renamed dependency, can derive the ECS
+types needed for extension sets through the facade-safe root exports:
+
+```rust
+use engine::ecs::{Resource, ScheduleLabel, SystemSet};
+use engine::ecs::schedule::IntoScheduleConfigs;
+```
+
+Do not import those derive macros from `engine::ecs::schedule`; that module remains the direct Bevy
+schedule surface. Do not add a direct `bevy_ecs` dependency solely to make a Nara root-package
+extension compile.
+
+**Affected examples and fixtures**: the renamed-root schedule-extension fixture exercises all four
+anchors, deferred visibility, skip, cleanup, ignore-deferred opt-out, registration permutation, and
+absent/cross-schedule negative cases. The reference game records that its current scheduling
+dependencies stop at `CoreStage::FixedUpdate` and `FixedUpdateSet::Simulate`.
+
+**User action**: order extensions only against the documented inventory. If another engine phase is
+needed as a compatibility dependency, extend ADR 0003, the external conformance fixture, and owner
+Rustdoc before consuming it. Handle `PluginError::ScheduleCompatibility` when accepting arbitrary
+schedule configuration before sealing. Replace raw built-in `get_schedule_mut` calls with the
+controlled App methods; raw custom-schedule mutation remains available before sealing.
+
+**Source action**: `none`; no persistent project format changes.
+
+**Cache action**: `keep`; rebuild Rust artifacts after the derive and seal-contract changes.
+
+**Compatibility window**: none (pre-1.0 public-contract correction).
+
+**Rollback**: revert the U28 seal validation, derive adapters, owner documentation, and external
+fixture together. Do not preserve a facade that compiles only through transitive Bevy visibility or
+restore runtime-panic graph validation as a compatibility layer.
+
+**Verification anchors**: `crates/nara_app/tests/schedule_compatibility.rs`,
+`crates/nara_gameplay/src/lib.rs#tests`, `tests/schedule_extension_contract.rs`,
+`tests/fixtures/schedule-extension/renamed-root/`, and
+`reference-game/tests/public_surface.rs`.
+
 ## RGF-U5-1: Thin Code-First Runtime and Truthful Close
 
 **Removed contract**:
