@@ -61,6 +61,7 @@ One broad "safe" flag is forbidden. Results report independent guarantees:
 | Resolution | `HandleBound`, `OpenedHandleOnly`, `CooperativeTrusted`, `Unsupported`, `Unproven` |
 | Identity | live-handle/session object identity, capability generation, link count, object kind, and proof availability |
 | Replacement parent authorization | `HandleBound`, `CooperativeTrusted`, `Unsupported`, `Unproven` |
+| Replacement source binding | `HandleBound`, `NameBound`, `Unsupported` |
 | Publication atomicity | `AtomicNameSwitch`, `NonAtomic`, `Unsupported`, `Unproven` |
 | Conflict protection | `StrongCompareAndSwap`, `CooperativeLocked`, `DetectOnly`, `None`, `Unsupported`, `Unproven` |
 | Durability progress | `DataSynced`, `FileMetadataSynced`, `NamePublished`, and `ParentDirectorySynced`, each achieved, unsupported, or unknown |
@@ -98,8 +99,9 @@ physical media has persisted data the operating system reported as synced.
 
 ### Platform evidence matrix
 
-- **Windows reference contract:** Windows 10 version 1809 or later on x86-64, using local NTFS or
-  ReFS volumes. Strict traversal uses `NtCreateFile` relative to a directory handle with
+- **Windows reference contract:** Windows 10 version 1809 or later, or the corresponding Windows
+  Server 2019 or later API baseline, on x86-64 using local NTFS or ReFS volumes. Strict traversal
+  uses `NtCreateFile` relative to a directory handle with
   `FILE_OPEN_REPARSE_POINT`; every reparse tag is rejected, including symbolic links and junctions.
   Live identity requires `FILE_ID_INFO`, `FILE_STANDARD_INFO`, attribute-tag inspection, absence of
   `FILE_REMOTE_DEVICE`, and an NTFS/ReFS filesystem name. Remote redirectors, local custom
@@ -118,8 +120,25 @@ physical media has persisted data the operating system reported as synced.
   `EINVAL`, or `EOPNOTSUPP` is `Unsupported`; a runtime policy that returns `EPERM` is `Unproven`.
   Strict live identity is currently limited to local ext, XFS, Btrfs, tmpfs, OverlayFS, and NTFS3
   filesystem types. Other, remote, or custom filesystem types fail closed. `st_dev` is only a
-  cross-check and never substitutes for `openat2` mount evidence. Unix replacement remains
-  `NameBound`, so strict replacement is rejected.
+  cross-check and never substitutes for `openat2` mount evidence. The currently implemented generic
+  Unix replacement remains `NameBound`, so strict replacement is rejected until RGF-U27 adds and
+  proves its narrower dedicated no-replace primitive; that primitive does not upgrade the generic
+  replacement tier.
+- **RGF-U27 project-creation publication contract:** The first publicly supported
+  same-capability directory no-replace implementation is narrower than the general reference
+  matrices above: x86-64 Windows on a probed local NTFS workspace and x86-64 Linux 5.6 or later on a
+  probed local ext4 workspace. Windows
+  uses the handle-bound `FileRenameInformationEx` no-replace form against the live parent handle;
+  Linux uses `renameat2` with `RENAME_NOREPLACE` against the same live parent directory descriptor.
+  Both bind the unpredictable sibling staging directory, validated absent child name, parent
+  capability generation/identity, and same-volume or same-mount proof into a typed publication
+  receipt. Collision, identity drift, unsupported filesystem behavior, or any native result that
+  cannot prove atomic no-replace publication returns `Unsupported` or `Unproven`; neither adapter
+  falls back to a destination precheck followed by ordinary rename. Hosted Windows and Linux jobs
+  must prove those two exact combinations before the project-creation candidate is documented as
+  available. ReFS, XFS, Btrfs, tmpfs, OverlayFS, NTFS3, macOS, and other combinations remain
+  `Unsupported` or `Unproven` for project creation until a dedicated live job supplies equivalent
+  evidence; injected platform-seam tests alone do not broaden public support.
 - **macOS and other Unix contract:** no current adapter proves absence of same-device mount
   traversal. Strict untrusted/recovery directory capabilities therefore return `Unproven`.
   Host-selected trusted mode may use no-follow `openat` and name-bound `renameat`, but receipts keep
@@ -145,13 +164,15 @@ foundation capability:
 | Reserved primitive | First owning unit | Completion rule |
 |---|---|---|
 | Handle-bound directory enumeration | A concrete asset/indexing host | Implement platform enumeration and return name plus scoped observation from `nara_fs`; `nara_asset` must not enumerate ambient paths. |
-| Same-capability non-overwrite rename | A concrete asset rename workflow | Add a typed source-binding/conflict receipt in `nara_fs`; asset rename reconciliation owns only the transaction. |
+| Same-capability non-overwrite rename | RGF-U27 first-party project creation | Add the Windows/Linux platform primitives and a typed source/parent/conflict publication receipt in `nara_fs`; project creation owns staging and validation policy, while later asset rename workflows reuse the primitive. |
 | Relative identity-guarded unlink and orphan reclamation | Proposed ADR 0091 persistence/recovery | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
 
 This deferral does not treat static `Unsupported` values as successful evidence. RGF-U3 is the
 first production consumer of bounded host-issued file authority for `nara.toml`. RGF-U12 reuses the
-same root/open/identity boundary for the startup content closure. Future indexing, rename, and ADR
-0091 persistence/recovery work must extend the shared primitives here; downstream domain crates are
+same root/open/identity boundary for the startup content closure. RGF-U27 owns the first bounded
+same-capability no-replace directory-publication consumer and must extend this shared primitive
+before accepting a generated project destination. Future indexing, asset rename, and ADR 0091
+persistence/recovery work reuse or extend the primitives here; downstream domain crates are
 prohibited from copying those platform algorithms.
 
 ## Alternatives Considered

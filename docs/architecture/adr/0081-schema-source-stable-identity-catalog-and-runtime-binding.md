@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-12
+**Last Revised**: 2026-07-16
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13
 **Refines**: ADR 0011, ADR 0045, ADR 0051
@@ -103,6 +104,46 @@ metadata on a native binding.
 The first RGF-U1 catalog contains only component-role declarations. Plain values, data assets,
 commands, and events may later reuse the same stable identity discipline when a real persistent
 format needs it; this ADR does not require one universal project type system.
+
+The version-1 catalog does not encode Bevy required-component closures, component lifecycle hooks,
+or observers. Its generation/fingerprint therefore cannot certify a persistent binding whose
+durable composition, defaults, or construction side effects depend on those mechanisms.
+
+Eligibility is therefore two-phase:
+
+1. provider validation/freeze registers the native component in an isolated scratch ECS registry
+   when necessary and rejects required-component or intrinsic `ComponentHooks` metadata that can
+   participate in persistent insertion/removal; and
+2. every actual persistent apply flushes deferred work, records the post-flush rejection baseline,
+   and takes one exclusive target `World` borrow. A fresh-target apply rechecks real `ComponentInfo`
+   values plus matching event-global/component-global lifecycle observers before allocation and
+   retains exclusivity through allocation and persistent insertion. An apply to an already existing
+   or reserved target additionally checks entity and entity+component scopes before its first
+   persistent mutation. Rejection leaves the applicable post-flush baseline unchanged.
+
+The second check rejects late required/hook registration and active `Add`/`Insert`/`Discard`/
+`Remove`/`Despawn` observers that insertion, replacement, removal, or despawn could trigger for the
+affected persistent apply. Across fresh- and existing-target paths it covers event-global,
+component-global, entity, and entity+component observer scopes rather than inspecting only
+component-targeted entries, and it inspects target-World
+`ComponentInfo` hooks so `World::register_component_hooks*` cannot bypass provider-freeze checks.
+In the current Bevy substrate, replacement is not a sixth lifecycle event: it triggers `Discard`
+for the old value followed by `Insert` for the new value, so both caches are part of the check.
+Post-publication World-local hooks and runtime observers are allowed. A later persistent apply
+rejects while a matching hook remains installed; for a matching observer it may instead wait for an
+explicit Host safe point that disables that observer. Runtime-only ECS components, unrelated
+custom-event observers, and post-spawn runtime projections remain free to use Bevy-local mechanisms
+outside document truth.
+
+A content snapshot may certify bounded document/schema decoding and the explicit persistent set; it
+does not certify a future target `World`'s observer or component-registration topology. Runtime
+construction and every direct persistent-spawn path own the second check.
+
+Any future catalog-derived persistent composition must add stable `ComponentTypeId` dependencies,
+bounded deterministic closure and cycle rules, default/override/removal semantics, migrations, and
+unavailable-provider behavior to a versioned fingerprint. It must agree across Scene, Prefab,
+Inspector, migration, and direct persistent-spawn paths. ADR 0006 defines the current explicit-set
+rule and OQ-043 owns the future carrier decision.
 
 File `format_version`, catalog generation/fingerprint, per-type schema version, and
 `engine_min_version` are distinct axes. None may be reused as another axis.
@@ -233,6 +274,7 @@ and reload requirements and exceeds RGF-U1's dependency evidence.
 | Frozen authority | Every schema, binding, codec, and migration mutation fails after freeze | Registry state-machine tests |
 | Whole-value safety | Mixed-capability whole values never reach encode/apply | Projection gate tests |
 | Runtime isolation | Structural catalog changes require a fresh runtime snapshot | Plugin/runtime lifecycle tests |
+| Composition truth | A catalog fingerprint cannot remain valid while an unmodeled Bevy requirement or hook changes persistent spawn semantics | Persistent-binding eligibility and scene composition tests |
 | Scope control | Dynamic ECS and universal scripting-host APIs are absent from RGF-U1 | API and dependency review |
 
 ## Risks and Mitigations
@@ -243,6 +285,7 @@ and reload requirements and exceeds RGF-U1's dependency evidence.
 | Field-ID registration becomes verbose | Medium | High | Allow explicit named presets/builders, but never infer identity or capability from Rust fields. |
 | Freeze order depends on plugin installation accidents | High | Medium | Require the registry-owner plugin through plugin metadata and reject registration outside build. |
 | Catalog and native bindings diverge | High | Medium | Freeze validates complete binding coverage for native component declarations. |
+| Required components or hooks change runtime meaning without changing the catalog | Critical | Medium | Reject hook/require-dependent persistent bindings until the behavior is stable-ID modeled and fingerprinted. |
 | Future dynamic representation pressures the v1 catalog | Medium | Medium | Keep runtime layout and `ComponentId` outside the persistent catalog. |
 | Tombstone policy grows without a source compiler | Medium | Low | RGF-U1 models and validates tombstones; the later compiler owns allocation and sidecar persistence. |
 

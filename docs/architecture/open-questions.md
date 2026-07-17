@@ -82,6 +82,9 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Question**: Which bounded projection/baking contract owns input snapshots, dependency tracking,
   stable source-to-output provenance, generated identity, failure atomicity, diagnostics, and runtime
   admission without freezing a universal baker from a single scene workflow?
+- **Boundary**: OQ-008 owns derived runtime projection and baking from already admitted authoring
+  truth. OQ-043 owns persistent document composition, authoring presets, and any stable-ID
+  requirement closure. Neither question may implicitly admit the other's carrier or semantics.
 
 ## OQ-009: Field-Level Apply Changes
 
@@ -138,10 +141,19 @@ This document contains undecided architecture questions only. Accepted decisions
 ## OQ-015: Text Shaping and Localization Stack
 
 - **Status**: open
-- **Owner**: future text/localization domains
-- **Trigger**: Runtime UI requires multilingual shaped text with font fallback and deterministic asset import.
-- **Related ADRs**: 0025, 0031, 0033
-- **Question**: Which shaping, bidi, font rasterization, and localization libraries fit nara's asset/render boundaries?
+- **Owner**: future text, localization, asset, runtime-UI, and tooling domains
+- **Trigger**: Runtime UI requires multilingual shaped text, deterministic font import, or a real
+  game needs localized content with runtime locale switching and authoring diagnostics.
+- **Related ADRs**: 0007, 0025, 0031, 0033, 0049, 0051, 0087
+- **Question**: Which shaping, bidi, fallback, rasterization, and glyph-cache boundary fits Nara's
+  asset/render model, and which separate localization contract owns stable message identity,
+  fallback chains, plural/select rules, typed argument formatting, runtime locale changes, package
+  contributions, locale-specific asset variants, pseudolocalization, and missing-translation
+  diagnostics?
+- **Boundary**: Font/shaping backend selection and localization content/runtime policy are separate
+  decisions. Neither a shaping library nor a string-key table may silently become the other
+  domain's authority; package precedence and user locale storage also wait for their owning
+  package/settings decisions.
 
 ## OQ-016: GPU Cache Eviction Defaults
 
@@ -322,13 +334,27 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Status**: open
 - **Owner**: package/build hosts, plugin/editor/importer owners, security adapters
 - **Trigger**: An independently versioned module must install a coherent combination of runtime
-  plugin, editor tool, importer, content/template, native extension, or user mod, or Cargo-only
-  transport creates a measured product-workflow gap.
+  plugin, editor tool, importer, content/template, native extension, or user mod; Cargo-only
+  transport creates a measured product-workflow gap; or Editor open/build/Play needs to execute
+  project Cargo build scripts, proc macros, native dependencies, importers, or game code whose
+  trust has not already been established by the Host.
 - **Related ADRs**: 0016, 0042, 0046, 0070, 0079, 0086, 0087, 0088, 0093
 - **Question**: Which source-package unit, resolution/lock/source metadata, declared contributions,
   provenance and trust tiers, capability grants, target restrictions, lifecycle/update policy, and
   optional isolation boundary provide one coherent installation experience without inventing a
   second Rust package manager or treating native code like validated data?
+- **Admission constraints**: Project data cannot grant native-code trust or store its own approval.
+  Any future approval must be Host-owned outside the project, bind the project-root capability plus
+  source/manifest/lock/features or equivalent executable identity, and invalidate on relevant drift.
+  In-process Rust, Cargo build scripts, proc macros, and native importers are fully trusted code;
+  only a separately proven process or sandbox Adapter may claim isolation.
+- **Removal boundary**: Cargo dependency removal, provider deactivation, derived-cache garbage
+  collection, mounted package content, copied templates/samples, and missing-schema preservation are
+  distinct owner-specific actions. A package directory, current manifest, or original filename
+  cannot prove deletion authority. Only recorded installation ownership plus matching content
+  identity/digest or lease evidence may authorize deletion; modified, adopted, or provenance-unknown
+  project files are preserved and reported by default. Editor contribution withdrawal is a catalog
+  generation operation, not an uninstall-script side effect.
 
 ## OQ-032: Incremental Authoring Projection
 
@@ -353,6 +379,12 @@ This document contains undecided architecture questions only. Accepted decisions
   external representations, references, migration, validation, editor capabilities, and reload
   semantics support reusable data assets without treating every value as an ECS component or
   expanding component reflection into a universal object system?
+- **Metadata boundary**: Keep four planes orthogonal: persistence/eligibility, semantic validation,
+  presentation preference, and custom interaction/provider binding. Units, finite ranges,
+  enum/flag domains, and asset kinds are cross-tool semantic constraints; slider preference,
+  grouping, and compact controls are presentation; coordinated bespoke editors are provider
+  behavior. The first real Inspector field that needs each plane must select a typed carrier. Do not
+  freeze an untyped metadata bag or a Godot-style stable `hint_string` protocol.
 
 ## OQ-034: Gameplay State Topology and Scoped Lifetime
 
@@ -435,3 +467,84 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Admission evidence**: Compare at least two production Platform/Driver Adapters plus one
   clean-room external integration while the ordinary Run/Play/Serve action remains free of driver
   vocabulary. One first-party Winit path may supply pressure but cannot select the shared shape.
+
+## OQ-039: Editor Play Placement and Local Transport
+
+- **Status**: open
+- **Owner**: concrete Editor Host, executable runtime owner, tooling command/observation domains
+- **Trigger**: A child-process Play mode, crash-isolated preview, remote target, or a second
+  production placement must preserve the current Editor Play semantics; or in-process placement
+  causes a measured safety, reload, or lifecycle failure.
+- **Related ADRs**: 0034, 0047, 0058, 0076, 0082, 0084, 0093
+- **Question**: Which in-process, child-process, or hybrid placement owns Play, and what smallest
+  versioned local connection preserves control, observation, content/schema lineage, fault,
+  retirement, and restart semantics across that placement?
+- **Boundary**: Tooling models communicate through bounded generation-stamped commands and
+  observations that can be projected onto a connection; they do not expose `World`, native handles,
+  or transport types. This question does not currently select IPC, wire encoding, process topology,
+  authentication, or a public universal runtime-session trait.
+
+## OQ-040: Editor-to-Play Live Edit
+
+- **Status**: open
+- **Owner**: document owners, concrete Editor Host, runtime edit adapters, provenance/tooling models
+- **Trigger**: A measured authoring workflow needs a committed document edit to affect an active
+  Play runtime without a fresh runtime, beyond the one-shot safe-point edit proven by the first
+  Play/Inspector slice.
+- **Related ADRs**: 0026, 0034, 0038, 0047, 0076, 0084, 0090, 0093
+- **Question**: Which component/field changes are safely projectable, at what safe point, and how do
+  document revision, runtime generation, scene instance, prefab provenance, validation, overwrite,
+  and fault outcomes remain explicit?
+- **Boundary**: The validated document commit is authoritative. Runtime projection is a subsequent
+  best-effort operation whose result distinguishes at least `Applied`, `Stale`, `Unsupported`,
+  `Overwritten`, and `Faulted`; projection failure never rolls back a successful document commit.
+  This question does not select a wire format, retained runtime override layer, arbitrary Rust-state
+  migration, or edit-while-playing merge algorithm.
+
+## OQ-041: Tooling Observation and Remote Command Session
+
+- **Status**: open
+- **Owner**: `nara_tooling`, runtime observability owners, concrete Editor/debug Hosts
+- **Trigger**: A timeline, profiler/debugger, remote target, child-process Play runtime, or AI tool
+  needs incremental observation or command results rather than bounded one-shot snapshots.
+- **Related ADRs**: 0048, 0058, 0068, 0076, 0082, 0084
+- **Question**: What session contract owns an initial baseline, monotonic sequence, subscription
+  lifetime, coalescing/drop policy, backpressure, resynchronization, command/result correlation,
+  stale-write rejection, disconnect, and reconnect across runtime generations?
+- **Boundary**: Stable IDs, schema eligibility, disclosure/redaction, bounded queues, and explicit
+  dropped-data evidence apply before transport selection. Temporal correlation remains distinct from
+  proven causality. Transport, authentication, process placement, and high-frequency tracing remain
+  deferred to the concrete consumer.
+
+## OQ-042: Runtime User Data, Preferences, and Save-Root Authority
+
+- **Status**: open
+- **Owner**: executable/product Hosts, future persistence/settings domains, platform adapters
+- **Trigger**: A shipped game needs per-user preferences, bindings, accessibility options, save
+  slots, cloud synchronization, profile selection, or a platform-specific writable root.
+- **Related ADRs**: 0027, 0035, 0041, 0050, 0051, 0070, 0091
+- **Question**: Which authority, root capability, envelope, migration owner, conflict policy,
+  privacy classification, quota, atomic-write guarantee, and package-removal behavior belongs to
+  project settings, runtime user preferences/save data, Editor workspace state, build/export
+  profiles, Host overrides, and secrets?
+- **Boundary**: These scopes remain distinct. Runtime preferences and saves do not write back to
+  `nara.toml`, Scene/Prefab documents, or Editor workspace files by default; project files cannot
+  self-authorize access to user data or secrets.
+
+## OQ-043: Persistent Component Composition and Hook Semantics
+
+- **Status**: open
+- **Owner**: `nara_reflect`, `nara_scene`, component-owning domains, authoring tooling
+- **Trigger**: A real editable component family needs ergonomic multi-component authoring beyond
+  ADR 0006's explicit persistent set, or the first Sprite/Camera/physics workflow demonstrates that
+  explicit composition creates unacceptable error or repetition.
+- **Related ADRs**: 0002, 0006, 0011, 0026, 0038, 0043, 0045, 0081, 0090
+- **Question**: Should Nara keep explicit document composition with an authoring preset that lowers
+  to one patch, or admit a catalog-derived stable-ID requirement closure? How do defaults,
+  transitive and diamond precedence, cycles/conflicts, explicit override/removal, prefab overrides,
+  undo, migrations, unavailable providers, and hook containment behave consistently?
+- **Boundary**: Bevy `#[require]`, component hooks, and observers are not persistent semantics by
+  inheritance. Any admitted derived closure must be bounded, deterministic, versioned, included in
+  the catalog fingerprint, and identical across Scene, Prefab, Inspector, migration, and direct
+  persistent spawn. Arbitrary hook effects on resources, foreign entities, native services, or
+  deferred queues cannot be described as transactionally rolled back without separate evidence.

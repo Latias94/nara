@@ -1,3 +1,13 @@
+---
+type: "Research Note"
+title: "Extension ecosystem research: packages, plugins, and editor contributions"
+description: "Cross-engine evidence for Nara's package and extension contribution boundaries."
+timestamp: 2026-07-13T09:51:55Z
+record_id: "1fa0f67fa5b34c89b73b5237e7db2f3f"
+producer_id: "codex-root"
+git_commit: "23fb5af23abc4458b1cba4379f3b4ed75e07ad0d"
+---
+
 # Extension Ecosystem Research: Packages, Plugins, and Editor Contributions
 
 **Status**: Research note, not an accepted architecture decision

@@ -103,9 +103,9 @@ flowchart TD
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
 | `nara` | Facade and layered preludes | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs |
-| `nara_app` | `App`, static `PluginDeclaration`, repeatable `PluginDefinition`, pure `PluginPlan`, `SealedApp`, terminal plugin lifecycle/failure reports, built-in and custom typed schedules, validated real/virtual/fixed/render time resources and frame outcomes | Data-only group/slot resolution, private preparation, closed hook commit, explicit shutdown obligations, reverse once-only shutdown, borrowing runner policy, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary |
+| `nara_app` | Gameplay authoring through `App`, Plugin declarations/definitions/plans, schedules, time, and frame outcomes; module-specific advanced U5 trial through `SealedApp`, `RuntimeCandidate`, `RuntimeInstance`, and typed control/fault/close values | Data-only group/slot resolution, private preparation, closed hook commit, explicit move-only shutdown obligations, reverse once-only shutdown, raw-runner versus managed-runtime exclusion, safe-point driving, exact fixed-tick execution, sticky fault authority, retryable finite close, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary; ADR 0084 still owns acceptance and final public placement |
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
-| `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker pools with pending-only coalescing, panic isolation, first-terminal cancellation, finite drain/cancel/join, and an explicitly test-only inline driver |
+| `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
 | `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, checked `limit + 1` bounded reads, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; unsupported platform primitives remain explicit |
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
@@ -129,7 +129,7 @@ flowchart TD
 | `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized input state, frame-transient action outcome resolution, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
 | `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonically ordered fixed-tick admission with reserved local-action authority, pending/active/quarantine accounting, terminal fail-closed lifecycle state, and action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
-| `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver that owns native windows, updates normalized input/window state, invokes scoped renderer retirement only for its targets, performs provider/native teardown after owner-drop acknowledgement, and preserves distinct primary-runner and native-teardown failures |
+| `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver over `RuntimeInstance` that owns native windows, updates normalized input/window state through short driver scopes, invokes scoped renderer retirement only for its targets, joins registered runtime close with provider/native teardown, and preserves distinct primary-runner and teardown failures |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
 | `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldIdentitySnapshot`, `SceneInspectorState`, transitional `SceneEditorState`/`ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, stable identity-only snapshots, open scene document slots, active document, selection sets, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents; the bare-World Play owner remains transitional while RGF-U17 tests a concrete Editor Host under the still-Proposed ADR 0082/0084 topology |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
@@ -139,6 +139,12 @@ flowchart TD
 - `nara_app` owns pause/resume/time-scale execution and the exact single-fixed-tick path. One paused
   step runs a complete fixed transaction and returns to paused; render-frame stepping and future
   system stepping are different capabilities.
+- The RGF-U5 code-first trial supplies generation-scoped controls, sticky typed faults, and
+  truthful `Stopping -> CloseIncomplete -> RetryClose -> Stopped` behavior around one App. A
+  once-only plugin shutdown failure may terminate ownership at `Stopped`, but it leaves
+  `RuntimeCloseEvidence`, a failed `CloseFailed` control result, and a Winit teardown error; an
+  unfinished registered owner remains `CloseIncomplete`. ADR 0084 remains Proposed until the later
+  Host, Editor, desktop, counterevidence, and independent-decision gates complete.
 - `nara_tooling` owns bounded, UI-agnostic observation, diff, timeline, and lifecycle models. It
   consumes the implemented legacy U8 stable identity and `nara_reflect` codecs; it does not serialize arbitrary worlds,
   store allocator-local `Entity` values, or use `RuntimeDiagnostics` as a high-frequency trace.
@@ -282,6 +288,33 @@ second real adapter or stronger isolation pressure.
   inert until an owner calls `run_schedule`. That entry point rejects built-in labels and seals
   before running a registered custom schedule, while the standard frame loop remains closed to the
   engine-owned stage order.
+- ADR 0003 now distinguishes documented public semantic schedule/set anchors from public Rust
+  implementation details. The first-playable inventory is exactly `CoreStage::FixedUpdate`
+  (schedule label) plus joinable `FixedUpdateSet::Simulate`, `GameplayCommandSet::Consume`, and
+  `GameplayCommandSet::Capture`; unlisted public variants are not ordering promises. Extensions may
+  register in the schedule label and join/order only against the three set anchors, not concrete
+  system functions, private sets, or registration order. RGF-U28 still needs to prove each anchor's
+  deferred, skip, App/domain fault, and cleanup
+  behavior from a renamed-dependency external fixture and make `App::seal` reject an invalid owning
+  schedule or set graph, require automatic deferred insertion, and reassert final deferred
+  application before configuration closes. Ignore-deferred relations remain a trusted advanced
+  opt-out and cannot claim anchor compatibility; no scheduler wrapper is added solely to police
+  them. This certifies no total order among otherwise unordered phase peers.
+- `nara_app::RuntimeCandidate` admits one sealed unstarted App with no raw runner and owns every
+  explicitly transferred close participant. Startup failure retains that owner for retirement;
+  successful startup consumes it infallibly into `RuntimeInstance`. The instance delegates all
+  schedule/time/tracker work to the App, exposes only short-lived driver mutation, scopes control
+  tickets and fault reporters to a non-reused generation, and never imports project/content,
+  tooling, or backend policy. Raw App Drop performs one best-effort participant pass; retryable
+  close requires the retained managed owner.
+  Abnormal Drop of an admission failure, startup failure, or published runtime begins one bounded
+  close pass and retains an unfinished `App`, `World`, and obligation ledger in an observable,
+  owner-thread-affine quarantine. The quarantine has per-thread and process ceilings, exposes
+  aggregate retained/reaped counts, and is explicitly driven from an owner-thread safe point; it is
+  never `Stopped` evidence.
+  This is module-specific advanced U5 trial evidence, not the ordinary project or Editor entry.
+  Concrete product actions must hide candidate/ready/retirement choreography, and ADR 0084 plus the
+  U24/U25/U17/U13 gates still decide final visibility and naming.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
 - `nara_project` validates quantized durations, fixed debt policy, per-kind/aggregate worker and queue
   limits, shutdown timeouts, runtime presets, and coarse capability requests before lowering. It
@@ -295,8 +328,12 @@ second real adapter or stronger isolation pressure.
 - `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
 - `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age
   stats, and finite shutdown reports; `inline_for_tests` drives the same queue state machine only in
-  tests. The current `nara_app::TaskUpdateSet` and `TaskPlugin`-configured asset phases are an
-  explicit U33 ownership gap pending migration to `nara_asset::AssetTaskUpdateSet`.
+  tests. Abnormal owner loss transfers pending destruction and unfinished workers to a process-owned
+  coordinator. A bounded internal lane set isolates a blocking destructor from other owners while
+  capacity remains, and an owner receipt completes only after its pending, in-flight destructor,
+  and worker state is empty. The current `nara_app::TaskUpdateSet` and `TaskPlugin`-configured asset phases are a
+  legacy U33 ownership gap now owned by RGF-U8's migration to
+  `nara_asset::AssetTaskUpdateSet`.
 - `nara_fs` accepts host-opened handles rather than ambient paths. Windows strict traversal is handle-bound; Linux uses `openat2`; unsupported mount, reparse, filesystem, replacement-source, directory enumeration, unlink, or rename guarantees fail closed and remain visible in the capability matrix.
 - The independent reference game opens its committed `nara.toml` through a directory capability and
   consumes its fixed timestep from a randomized current directory. This proves authorized manifest
@@ -355,7 +392,9 @@ second real adapter or stronger isolation pressure.
   targets before provider and native-window ownership are released. Premature platform destruction
   is a sticky fault that disables acquisition. Direct first-party backend replacement uses the same
   surface-owner Drop fallback, and surface loss alone keeps the registered provider live for
-  recreation. Global plugin shutdown remains owned by `App::run`.
+  recreation. Winit drives a managed runtime, retires its targets, and waits for both native and
+  registered runtime close before reporting success; raw `App::run` remains a separate embedding
+  path.
 - `WgpuRenderBackend` is registered through the ECS resource derive rather than a hand-written
   marker, so the backend and its render resources are queryable before the first native frame.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
@@ -437,6 +476,28 @@ second real adapter or stronger isolation pressure.
   migration chains exist only for ADR-retained compatibility windows. Runtime loading must not
   rewrite source files silently. See ADR
   [0043](adr/0043-scene-prefab-and-patch-document-migration-policy.md).
+- After prefab expansion, explicit stable-ID component records are the complete persistent
+  composition. Bevy required-component declarations, hooks, and observers remain runtime-local and
+  are absent from the canonical-v1 catalog fingerprint; persistent bindings may not depend on them
+  for durable composition, defaults, or construction side effects. RGF-U12 may independently certify
+  bounded document/schema truth, but never a future target `World` topology. In parallel, RGF-U29
+  must reject required-component/intrinsic-hook metadata at provider freeze and recheck actual
+  `ComponentInfo` metadata including World-registered hooks plus matching
+  `Add`/`Insert`/`Discard`/`Remove`/`Despawn` observers before every target-World apply. Each apply
+  first flushes deferred registration, captures a post-flush rejection baseline, then holds the
+  `World` exclusively. Fresh-target paths check event-global/component-global scopes before
+  allocation and retain exclusivity through persistent insertion; already-existing or reserved
+  targets additionally check entity and entity+component scopes before mutation. Rejection leaves
+  the applicable baseline unchanged. Any
+  version-coupled hook-presence probe remains a private `nara_ecs` implementation detail.
+  Post-publication World-local hooks/observers remain valid runtime behavior, but a later persistent
+  apply repeats the check. A matching hook rejects while it remains installed; a matching observer
+  either rejects or waits for an explicit Host safe point that disables it.
+  U12 and U29 converge before RGF-U26 first materializes the snapshot. OQ-043 owns any future
+  authoring preset or catalog-derived closure.
+- One-shot scene patch and inverse transactions are implemented. ADR 0026 also selects a future
+  toolkit-neutral `Begin -> bounded Preview -> Commit / Cancel` lifecycle for continuous controls,
+  but the first real slider/gizmo/curve/text consumer still owns its carrier and conformance proof.
 - The root facade uses layered preludes. `nara::prelude` is gameplay-first and backend-free;
   backend/tooling/debug/render internals move to advanced or module-specific preludes. See ADR
   [0044](adr/0044-root-facade-and-prelude-layering-policy.md).
@@ -445,7 +506,7 @@ second real adapter or stronger isolation pressure.
   replication, scripting, diagnostics, and runtime-only state do not reserve speculative wire
   values. Capabilities gate domain participation but do not replace domain policy. See ADR
   [0045](adr/0045-component-schema-capability-metadata.md).
-- The settled U4 plugin target uses one static declaration with stable ID, capabilities,
+- The settled RGF-U4 plugin target uses one static declaration with stable ID, capabilities,
   requirements, and conflicts; stable definition keys carry repeatable construction/config
   identity. Data-only groups derive inspectable membership/provenance through pure resolution, and
   hook commit is closed against nested installation/runner selection. Default groups remain

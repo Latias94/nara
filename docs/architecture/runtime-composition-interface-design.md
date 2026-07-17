@@ -905,13 +905,20 @@ runtime start attempt constructs what may be published
 host Adapter decides who drives it and when
 ```
 
-Headless, editor, winit, and an external compiled runner are concrete Adapters over the same runtime
-drive outcome. Root composition explicitly selects one per driver scope, and external candidates
-must not require a package-specific root match or first-party allowlist. A universal
-`RuntimeDriver` trait is not required until concrete implementations prove its smallest reusable
-shape. `WinitRunner::install` is a top-level code-first selection; RGF-U13 must still prove that the
-desktop product driver routes frames and lifecycle control through `RuntimeInstance` rather than a
-raw App.
+Winit and the U5 headless drive loop show that different concrete code can drive the same
+`RuntimeInstance` outcome. They do not yet prove an external package/root selection Interface.
+RGF-U13 must prove product-profile desktop parity, and a clean-room alternate runner plus the ADR
+0082/0084 decision gates must prove third-party selection and conformance. If that role is admitted,
+root composition selects exactly one per driver scope without a package-specific match or
+first-party allowlist. A universal `RuntimeDriver` trait is not required until those concrete
+implementations prove its smallest reusable shape.
+
+The current U5 `RuntimeDriverScope::world_mut()` is a trusted trial escape hatch, not the desired
+platform Interface. A Platform/Runner Adapter should normally submit typed normalized platform
+events, time, redraw/close intent, and target lifecycle operations, then call runtime drive/control.
+It should not receive unrestricted gameplay-World mutation merely because it owns the event loop.
+RGF-U13 and a later second production Adapter must prove the smallest capability before that part of
+the Interface freezes.
 
 ## Interface Evaluation
 
@@ -920,7 +927,7 @@ The candidates are evaluated by Interface depth rather than implementation size.
 | Candidate | Depth | Locality | Authority Honesty | Common-Caller Cost | Decision |
 |---|---|---|---|---|---|
 | Removed legacy `apply_project_settings(&mut App)` | Low | Low: validation and mutation knowledge was spread across facade, groups, and plugins | Low: predictable rejection could follow mutation | Low on success, high on failure | Removed in RGF-U3 |
-| Immutable settings candidate plus U4 `RuntimePlan` | High for admission | High for manifest lineage, product/plugin closure, and schema-provider validation; publication remains separate | High through pure resolution; owns no App/native authority | Low through typed project/game helpers | Implemented as U12/U24 input |
+| Immutable settings candidate plus U4 `RuntimePlan` | High for admission | High for manifest lineage, product/plugin closure, and schema-provider validation; publication remains separate | High through pure resolution; owns no App/native authority | Low through typed project/game helpers | U4 implemented; U12/U24 consumption pending |
 | Pure resolve plus public install into an existing App | Medium | High for composition, low for startup publication | Medium: admission is honest, committed failure still poisons caller state | Medium | Omit the public operation; use the private commit batch inside existing entry points |
 | Universal host/builder around project, services, runtime, and driver | Superficially high | Low over time: unrelated authorities converge in one Module | Low: scope and lifetime differences become hidden | Initially low, grows with every domain | Reject |
 | Pure Runtime Plan plus Host-owned start attempt and fresh unpublished candidate | High | High: admission, committed lifecycle, and host authority each have one owner | High: publication is atomic without claiming external rollback | Low on product path, explicit on embedding path | Recommend |
@@ -1313,9 +1320,10 @@ evidence expected from each slice explicit:
    schedule registry open without opening the automatic frame order.
 3. U12 consumes U4's provider/schema input and U3 lineage to produce the authorized immutable
    project/content snapshot; it does not own runtime policy or native bindings.
-4. In parallel with U12, U5 admits a sealed, unstarted App plus registered ledger into an
-   unpublished candidate and owns generic runtime driving, exact control, fault, and published close
-   without loading project content or reconstructing a product generation.
+4. U5 now admits a sealed, unstarted App plus registered ledger into an unpublished candidate and
+   owns generic runtime driving, exact control, fault, and published close without loading project
+   content or reconstructing a product generation. Its landed behavior remains Trial evidence for
+   Proposed ADR 0084.
 5. After U12 and before U24, U26 freezes an independently reviewed task-equivalent manual raw-App
    tracer plus its caller-glue, state, fault, owner, and shutdown inventory.
 6. U24 checks plan/content lineage and schema fingerprints, creates the registered ledger before

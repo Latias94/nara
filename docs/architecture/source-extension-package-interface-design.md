@@ -249,6 +249,18 @@ These are the recommended high-cost boundaries. They remain non-normative until 
 17. "Trusted" means explicitly selected native code, not a first-party allowlist. A normal runtime
     plugin still cannot hide acquisition of an exclusive Host, Device/Queue, or event loop during
     `build`.
+18. Remove is not one package callback. Cargo dependency removal, provider deactivation, derived
+    cache collection, mounted-content retirement, and project-file deletion remain separate
+    owner-specific transactions. A manifest cannot authorize deletion of files merely by naming
+    them; deletion requires recorded installation ownership plus matching content evidence, while
+    modified, adopted, or provenance-unknown files are preserved and reported. Direct installed
+    project paths have exactly one recorded package owner or installation rejects co-ownership;
+    shared content-addressed/cache objects carry an explicit owner-set lease and collect only after
+    every owner lease retires.
+19. One Editor catalog generation owns all importer, inspector, dock, shortcut, gizmo, and other
+    entries published from that generation. Update, disable, or replacement withdraws the complete
+    generation through the catalog authority; providers do not receive ambient uninstall authority
+    or need paired manual remove calls for every registration.
 
 ## Module And Seam Placement
 
@@ -343,7 +355,7 @@ Scenario IDs are stable references for future Interface reviews and conformance 
 | PX-03 | User inspects a package before building it | Identity, source, license, compatibility, contributions, execution/subject targets, claimed/observed native-build-proc-macro trust evidence, unknowns, and iteration effects are visible without executing package code | No-build inspection fixture |
 | PX-04 | Package offers default and optional contributions | Defaults are explicit in the plan; advanced selection appears only when requested | Golden plan and generated docs |
 | PX-05 | User updates a package | Preview reports Cargo diff, contract/schema changes, permission widening, rebuild/reimport/restart/migration effects | Candidate update fault matrix |
-| PX-06 | User removes a referenced package | Stable references/settings are reported; unsafe removal blocks or enters explicit degraded authoring/migration | ADR 0090 document fixtures |
+| PX-06 | User removes a referenced package | Preview separates Cargo removal, provider deactivation, cache collection, content retirement, and project-file deletion; stable references/settings are reported, and unsafe removal blocks or enters explicit degraded authoring/migration | ADR 0090 document fixtures and removal-ownership plan |
 | PX-07 | Code-first project never opens the editor | Package registration, headless tests, build, and release work through public Rust/CLI paths | Clean-room no-editor pipeline |
 | PX-08 | Third party publishes a package | One declaration authority generates inspectable metadata/docs and bindings pass public conformance suites | External package fixture |
 
@@ -360,7 +372,7 @@ Scenario IDs are stable references for future Interface reviews and conformance 
 | PX-16 | Package adds project settings | Namespaced schema/default/validation lowers through `nara_project`; package cannot create another persistent config authority | Unity package settings; Godot project/editor settings plugins | Manifest overlay/unknown-setting fixtures |
 | PX-17 | Package pairs runtime intent with native service authority | Separate service Adapter and runtime contribution join one validated requirement graph; plugin build cannot acquire Host authority | Unreal module/provider split; Godot server/native extension levels | Service admission/retirement test |
 | PX-18 | Package adds cook/export/artifact behavior | A previously compiled tool-Host provider consumes immutable declared inputs and publishes staged outputs; it cannot affect the build that produced itself | Godot export plugin; Unity build callback; Unreal cook/commandlet modules | Determinism, stale job, bootstrap, and output audit |
-| PX-19 | Package contains templates, samples, docs, or content only | Non-code contribution has provenance/license/install/remove policy and never needs an empty runtime plugin | Unity Samples/Documentation; Unreal content plugin; Godot addon content | Content-only install/remove fixture |
+| PX-19 | Package contains templates, samples, docs, or content only | Non-code contribution has provenance/license/install ownership and modification evidence; remove preserves copied/adopted/modified user files and never needs an empty runtime plugin | Unity Samples/Documentation; Unreal content plugin; Godot addon content | Content-only install/remove fixture |
 
 ### Host, Target, Compatibility, And Trust
 
@@ -389,6 +401,8 @@ Scenario IDs are stable references for future Interface reviews and conformance 
 | PX-35 | Editor extension crashes in process | Next launch can enter recovery mode from a journal; no claim that abort-time retirement ran | Crash/recovery integration test |
 | PX-36 | Isolated import/cook worker crashes or times out | Its candidate/job faults; late results and staged outputs quarantine, and replacement waits for proven terminate/reap/lease retirement while the Host remains responsive | Worker containment/crash/timeout fixture |
 | PX-37 | Package is missing on one workstation or branch | Editor preserves bounded unavailable records under ADR 0090; runtime remains strict | Degraded open/save/recovery test |
+| PX-38 | Package removal encounters mounted content, copied templates, generated cache, adopted files, user-modified files, or another package/version claiming the same path | Only package-owned immutable mounts, last-owner-released derived cache, or files with one recorded install owner plus matching content evidence are removed. Direct path co-ownership rejects at install; shared content-addressed/cache objects require every recorded owner lease to retire. Modified, adopted, or provenance-unknown files are preserved and reported | Removal ownership/digest/co-ownership fault matrix |
+| PX-39 | An Editor package generation is disabled, updated, or replaced | Its importer, inspector, dock, shortcut, gizmo, and provider entries become atomically invisible through catalog-generation withdrawal; stale intents reject and providers perform zero paired manual cleanup calls | Editor catalog withdrawal and stale-generation fixture |
 
 ### Advanced Renderer And Driver Authority
 
@@ -933,6 +947,27 @@ The initial guarantee is scoped to logical Host roles inside one concrete execut
 Cross-process prepare/commit/adopt requires its own protocol and conformance evidence; it is not
 implied by `ActivationCohortId`.
 
+#### Removal Ownership And Editor Withdrawal
+
+Removal planning keeps authorities separate; this draft deliberately does not define a receipt
+type or disk format yet.
+
+| Subject | Owner | Removal evidence | Default on drift or ambiguity |
+|---|---|---|---|
+| Cargo dependency/source entry | Cargo/project dependency editor | Expected manifest/lock edit and resolved graph preview | Reject or leave source intent ahead of last-good activation |
+| Compiled provider/contribution | Owning Host/catalog generation | Exact executable/catalog/contribution generation | Deactivate or retain last-good; do not delete project content |
+| Derived import/build cache | Domain cache owner | Recipe/product identity, generation, and no live lease | Quarantine or defer collection |
+| Package-owned immutable mounted content | Content mount/catalog owner | Exact mount/package generation and retired leases | Keep mounted or block conflicting replacement |
+| Installer-copied template/sample/docs | Project/content transaction owner | Recorded install ownership plus matching digest/content identity | Preserve and report as modified or provenance-unknown |
+| User-adopted or edited project file | Project/document owner | Explicit user deletion or a domain migration transaction | Preserve; never infer deletion from current manifest or filename |
+| Missing-schema document data | Document/schema owner under ADR 0090 | Admitted degraded-authoring or explicit migration/delete decision | Preserve bytes and report unavailable semantics |
+
+Editor contribution publication follows the same generation discipline as activation. The Editor
+catalog owns every registration derived from one candidate and can withdraw the complete generation
+without calling provider-specific `remove_*` methods. Domain owners retire any separately owned
+workers, native handles, or leases through their normal lifecycle; catalog withdrawal is not a
+claim that arbitrary provider side effects were rolled back.
+
 ### 9. Trust And Authority
 
 Mature engines generally execute editor/native package code with substantial process authority.
@@ -1297,6 +1332,11 @@ against one cohort fingerprint and expose only a complete cohort. Each authority
 remains visible, last-good activation remains captured, and partial mutation is never called a
 rollback.
 
+A catalog or cohort fingerprint proves only the immutable declarations and artifacts named by that
+catalog. It does not certify a live target `World`'s required-component, `ComponentHooks`, or
+lifecycle-observer topology. Any package-supplied persistent component and every later persistent
+apply must still satisfy ADR 0006/0081's provider-freeze and exclusive pre-mutation World checks.
+
 ## Error Model
 
 No universal `ExtensionError` should absorb domain facts or stringify arbitrary failures.
@@ -1412,6 +1452,18 @@ locator, makes automated testing depend on a complete editor, and spreads retire
 **Decision**: Rejected. Nara may offer convenience builders that group typed contributions, but
 the executable seams remain narrow.
 
+### Option G: Provider-Owned Install And Uninstall Scripts
+
+**Pros**: Packages can copy, register, migrate, and remove arbitrary state using one familiar
+lifecycle callback.
+
+**Cons**: Deletion authority becomes unauditable, user-modified files are easy to destroy, paired
+Editor registrations leak after partial failure, and reproducibility depends on hidden ambient side
+effects.
+
+**Decision**: Rejected. Domains own typed previewable transactions, and catalog generations own
+coherent Editor contribution withdrawal.
+
 ## Mature Engine Lessons
 
 The detailed evidence and source list live in the linked research note. This table records only the
@@ -1471,15 +1523,18 @@ Tests cross the same package and typed domain Interfaces as real callers.
 | Contract conformance suites | PX-10 through PX-19, PX-25 | Domain cardinality/order/fallback, typed plans, no hidden cross-domain registration |
 | Static binding fault matrix | PX-10, PX-23, PX-26, PX-32 | Missing/extra/wrong-kind/drifted factory rejection before authority |
 | Runtime composition | PX-10, PX-17, PX-31, PX-32, PX-34 | Existing RC scenarios plus package provenance and fresh generation identity |
-| Editor/tooling integration | PX-11 through PX-14, PX-35, PX-37 | Stable-schema selection, commands/undo, toolkit separation, crash recovery, degraded authoring |
+| Editor/tooling integration | PX-11 through PX-14, PX-35, PX-37, PX-39 | Stable-schema selection, commands/undo, toolkit separation, crash recovery, degraded authoring, atomic catalog withdrawal |
 | Import/tool/cook integration | PX-15, PX-18, PX-30, PX-33, PX-36 | Bounded tracked inputs, deterministic/stale-safe output, cancellation, worker containment/crash evidence |
-| Update/remove migration matrix | PX-05, PX-06, PX-27, PX-34, PX-37 | Previewed effects, no silent data loss, last-good active generation, explicit source state |
-| Artifact/static audits | PX-19, PX-21, PX-22, PX-28 | No editor/import/build code in forbidden products; no secrets/absolute paths; licenses/notices present |
+| Update/remove migration matrix | PX-05, PX-06, PX-27, PX-34, PX-37 through PX-39 | Previewed owner-specific effects, direct-path co-ownership rejection, last-owner cache collection, zero modified-file deletion, complete catalog withdrawal, last-good active generation, explicit source state |
+| Artifact/static audits | PX-19, PX-21, PX-22, PX-28, PX-38 | No editor/import/build code in forbidden products; no secrets/absolute paths; licenses/notices and deletion evidence present |
 
 Recommended hostile cases include oversized/deep manifests, duplicate IDs, dependency cycles,
 unknown required contracts, invalid optional fallback, package/source substitution, stale binding
 catalog, importer extension collisions, authority widening, migration failure, compiler failure,
-worker timeout, process crash, and a referenced package removed from the current source graph.
+worker timeout, process crash, a referenced package removed from the current source graph, a
+modified copied template, a forged install-ownership record, two packages or versions claiming one
+direct path, a shared content-addressed cache with one live owner lease, a live mount/cache lease,
+and stale Editor intents after catalog withdrawal.
 
 ## Success Metrics
 
@@ -1499,7 +1554,8 @@ worker timeout, process crash, and a referenced package removed from the current
 | Editor authority | 100% of inspector/editor package edits flow through tooling commands/patches, never private `World` or document mutation | Integration and static API audit |
 | Import/tool reproducibility | Equal immutable inputs plus provider implementation/tool digests produce equal logical plans and publish no stale result | Clean rebuild and stale-job fixtures |
 | Update safety | Every injected build/migration/admission/activation failure exposes zero members of the new required activation cohort and preserves a launchable last-good record | End-to-end fault matrix |
-| Removal safety | Referenced persistent data is blocked, migrated, explicitly deleted, or preserved degraded; never silently stripped | Document/settings fixtures |
+| Removal safety | Referenced persistent data is blocked, migrated, explicitly deleted, or preserved degraded; no modified, adopted, provenance-unknown, or co-owned project path is deleted, and shared cache collection waits for the final owner lease | Document/settings and removal ownership fault fixtures |
+| Editor withdrawal | Updating or disabling one Editor catalog generation leaves zero visible entries and rejects every stale intent with zero paired provider cleanup calls | Catalog withdrawal permutation/crash fixture |
 | Trust honesty | Every code-bearing package preview labels build script/proc macro/native/in-process/process/sandbox facts without calling native grants a sandbox | UX snapshot review |
 | Cross-package customization | Package B can add an inspector for package A's stable schema without a newtype, fork, or direct mutation route | External package fixture |
 | Authoring implementation choice | Package, Plugin, Inspector, and Importer have a tested ordinary-Rust path with no required proc macro | Compile fixture |
@@ -1525,6 +1581,8 @@ the product goal even if its type model is elegant.
 | Generic build hooks become non-reproducible arbitrary scripts | Critical | Medium | Typed providers over immutable declared inputs/outputs; Cargo build.rs remains separately disclosed trusted code |
 | Editor contract freezes before editor dogfooding | High | Medium | Freeze stable schema/command ownership now; defer panel/widget/toolkit Interfaces until real editor packages |
 | Missing package causes data loss | Critical | Medium | ADR 0090 degraded authoring, strict runtime, removal analysis, explicit migrations and undo |
+| Package removal deletes user work | Critical | Medium | Owner-specific removal plans, install ownership plus content evidence, modification detection, and preserve-by-default ambiguity handling |
+| Disabled Editor providers leave stale registrations | High | High | Catalog-generation-owned publication/withdrawal and stale-generation rejection; no provider-global paired cleanup contract |
 | Process isolation is mistaken for OS sandboxing or finite shutdown | High | High | Report address-space and OS enforcement separately; require process-tree containment, terminate/reap receipts, late-result rejection, output quarantine, platform evidence, and adversarial tests |
 | Package update leaves source ahead of active generation | Medium | High | Model source/lock/compiled/active axes explicitly; show last-good and retry/revert actions; do not claim global rollback |
 | Ecosystem quantity substitutes for production quality | High | High | Clean-room packages, reference games, examples, docs, compatibility CI, conformance and shipped-artifact evidence |
@@ -1552,6 +1610,10 @@ The following boundaries are expensive to reverse and already have cross-engine 
 10. Release/server exclusion is a compiled dependency-closure property, not only runtime policy.
 11. First-party defaults and external candidates use the same public role/selection boundary for a
     supported contract; trusted native status is not a first-party allowlist.
+12. Package removal is a set of owner-specific transactions; package declarations do not grant
+    project-file deletion authority, and ambiguous or modified user content is preserved.
+13. Editor contributions publish and withdraw as one catalog generation rather than through
+    provider-managed paired registrations.
 
 These are appropriate future ADR content once a reference package and implementation slice prove
 the Interface. This draft alone does not mark them Accepted.
