@@ -141,6 +141,15 @@ flowchart LR
   for a named storage or performance reason. Compare another gameplay-language candidate only when
   measured evidence shows that the C# product hypothesis cannot meet an accepted workflow or target
   constraint, not merely because the first implementation is difficult.
+- **Leading author-visible binding hypothesis**: Keep the default C# surface domain-oriented rather
+  than generating a one-to-one mirror of ECS components or Schema fields. Every dependency in an
+  ordinary Behavior must declare one source category: a callback-scoped Host value such as input or
+  time; a required same-object domain capability validated before `Start`; an Inspector-authored
+  stable reference to another Behavior, scene object, module, asset, or prefab; or an explicitly
+  nullable dynamic lookup. The Adapter creates managed instances from Behavior attachments and
+  resolves every required binding before lifecycle callbacks begin. Raw component/query access is
+  an explicit advanced-layer candidate, not the default gameplay vocabulary. Attribute names,
+  generated member shapes, typed-owner shortcuts, and spawn return semantics remain Trial choices.
 - **First-trial multiplicity**: One scene entity may attach at most one instance of each stable C#
   Behavior type; different Behavior types remain composable. Repeated configuration should first use
   schema-backed collections or child entities. Multiple same-type attachments require a real game
