@@ -92,15 +92,27 @@ This document contains undecided architecture questions only. Accepted decisions
   for a named storage or performance reason. Compare another gameplay-language candidate only when
   measured evidence shows that the C# product hypothesis cannot meet an accepted workflow or target
   constraint, not merely because the first implementation is difficult.
+- **First-trial multiplicity**: One scene entity may attach at most one instance of each stable C#
+  Behavior type; different Behavior types remain composable. Repeated configuration should first use
+  schema-backed collections or child entities. Multiple same-type attachments require a real game
+  workflow and a separate stable attachment identity, ordering, patch-address, prefab, and migration
+  decision; an array index, CLR object reference, or GC handle can never be that identity.
+- **Unavailable-module requirement**: The first product-shaped trial must exercise ADR 0090-style
+  degraded authoring when an assembly, Behavior type, migration, or runtime binding is unavailable.
+  The editor preserves and round-trips the complete bounded semantic record, permits proven
+  unrelated edits and explicit undoable whole-record deletion, and keeps unavailable fields
+  read-only. A new runtime candidate rejects before publication; an existing last-good runtime may
+  continue only with explicit generation/status disclosure.
 - **Decision surface**: The tracer must decide stable module/type/field/attachment identity; one or
   multiple same-type attachments; persistent, runtime-private, and reload-retained state; Schema
   projection/freeze/migration and missing-type authoring; bounded data access and schedule semantics;
   managed module generation, last-good activation, reload/restart and debugger behavior; project
   graphs, trust, target export, runtime-pack provenance, and supported platform/profile scope.
 - **Admission evidence**: One end-to-end game slice must prove schema-backed Inspector fields,
-  scene attachment, structured compile diagnostics, bounded gameplay data access, command/service
-  integration, Play/Stop/restart behavior, clean-machine desktop export, and measured edit latency,
-  bridge/GC frame cost, startup, and package size.
+  unique-per-type scene attachment and duplicate rejection, missing-module degraded round trips,
+  structured compile diagnostics, bounded gameplay data access, command/service integration,
+  Play/Stop/restart behavior, clean-machine desktop export, and measured edit latency, bridge/GC
+  frame cost, startup, and package size.
 - **Adoption impact**: Success may refine project layout/settings (ADRs 0020/0035), Adapter-owned
   Schema projection and lossless missing-type authoring (0045/0081/0090), optional product and CI
   capabilities (0055/0079), and managed target artifacts (0088). ADR 0086 remains the Rust/Cargo

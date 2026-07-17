@@ -3,21 +3,24 @@
 **Status**: Proposed
 **Date**: 2026-07-13
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
-**Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without native
-binding, missing migration, and future component schema open/save with semantic preservation in the
-editor while every runtime spawn rejects before `World` mutation
+**Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
+required native or Adapter-specific runtime binding, missing migration, and future component schema
+open/save with semantic preservation in the editor while every runtime spawn rejects before `World`
+mutation
 **Revisit Trigger**: A second persistent value grammar, schema-only editor adapter, or concrete need
 for lexical byte/comment preservation proves semantic record preservation insufficient
 **Related**: ADR 0006, ADR 0011, ADR 0026, ADR 0034, ADR 0038, ADR 0043, ADR 0045, ADR 0047,
-ADR 0049, ADR 0051, ADR 0068, ADR 0079, ADR 0081, ADR 0083, ADR 0084
+ADR 0049, ADR 0051, ADR 0068, ADR 0079, ADR 0081, ADR 0083, ADR 0084, ADR 0093
 
 ## Context
 
-Rust-first strong typing and a frozen native binding registry are runtime strengths, but editors
-must survive common authoring conditions:
+Rust-first strong typing and a frozen runtime-binding registry, currently implemented with native
+bindings only, are runtime strengths, but editors must survive common authoring conditions:
 
 - a project plugin is temporarily unavailable on one workstation or branch;
 - a schema catalog describes a component whose native provider is not compiled into this editor;
+- a gameplay-language assembly or declared type is missing or fails to compile while a scene still
+  contains its last-known stable schema identity and value;
 - a component record has a known older/future schema version without a complete migration;
 - the editor needs to rename/reparent or edit unrelated known data without destroying the record.
 
@@ -31,7 +34,8 @@ preserved safely because the current engine does not know how to delimit or migr
 
 If accepted, Nara authoring will preserve a complete bounded semantic component record when the
 file envelope, document shape, and generic `ComponentValue` grammar are understood but its schema,
-migration, or native binding is unavailable. Runtime admission remains strict and fail-closed.
+migration, or required native/Adapter runtime binding is unavailable. Runtime admission remains
+strict and fail-closed.
 
 ```mermaid
 flowchart TD
@@ -66,8 +70,8 @@ Document readiness is `Rejected | Degraded | Complete`. Record readiness is:
 
 | State | Meaning |
 |---|---|
-| `Available` | Compatible catalog schema, migration path, and native binding are present |
-| `KnownUnbound` | Catalog schema is known but the native codec/provider is unavailable |
+| `Available` | Compatible catalog schema, migration path, and all required runtime bindings are present |
+| `KnownUnbound` | Catalog schema is known but its required native or Adapter-specific runtime binding is unavailable |
 | `UnknownSchema` | Stable component ID/version has no current catalog declaration |
 | `Unmigratable` | Schema is known but no complete migration reaches the current version |
 | `FutureSchema` | Record schema version is newer than the current catalog declaration |
@@ -119,15 +123,19 @@ never a fallback.
 
 ### Runtime and Registry Authority
 
-- ADR 0081's Building-to-Frozen catalog/native binding validation remains strict. Unavailable
-  records never register dynamic placeholders or fake codecs into the runtime registry.
+- ADR 0081's Building-to-Frozen catalog/runtime-binding validation remains strict. Unavailable
+  records never register dynamic placeholders or fake native/Adapter bindings into the runtime
+  registry.
 - Runtime scene/prefab preflight requires every record to be `Available`. Any unavailable required
-  record rejects before identity claims, asset-server write-back, entity spawn, or native service
-  mutation.
-- Changing the compiled provider/native-code set produces a new ADR 0086 executable generation.
-  Enabling, disabling, or recomposing providers already inside the compiled ceiling produces a new
-  ADR 0082 recipe and fresh ADR 0084 runtime generation without requiring recompilation. Both paths
-  construct a new frozen registry; an active registry never unfreezes.
+  record rejects before identity claims, asset-server write-back, entity spawn, or runtime
+  service/Adapter mutation.
+- Changing the compiled native provider set produces a new ADR 0086 executable generation.
+  Enabling, disabling, or recomposing native providers already inside the compiled ceiling produces
+  a new ADR 0082 recipe and fresh ADR 0084 runtime generation without requiring recompilation. A
+  future Adapter-managed assembly or module recovers through its separately admitted module
+  generation/activation contract rather than masquerading as an ADR 0086 native executable
+  generation. Every recovery path constructs a new frozen registry and runtime candidate; an active
+  registry never unfreezes.
 - Reopening/reclassifying a document after provider recovery may migrate in memory, but source
   rewriting still requires explicit save/migration policy.
 - A scene file cannot authorize the host to download, compile, enable, or execute a provider.
@@ -184,7 +192,7 @@ prefab/reference handling.
 | Metric | Target | Measurement |
 |---|---:|---|
 | Semantic preservation | Degraded open/save/reload keeps unavailable record ID/version/value/reference equality | Golden fixtures |
-| Precise classification | Missing binding, unknown schema, missing migration, and future schema return distinct states | Classification tests |
+| Precise classification | Missing native/Adapter binding, unknown schema, missing migration, and future schema return distinct states | Classification tests |
 | Runtime atomicity | Every unavailable class changes zero World/identity/asset scratch state on spawn failure | Fault tests |
 | Unrelated edit safety | Editing a known field changes zero unavailable record semantic digests | Patch integration test |
 | Operation gating | Field edit/override/Apply Changes/unproven remap reject without revision or dirty-state change | Command tests |
@@ -211,12 +219,13 @@ If accepted:
 
 - ADR 0043 continues to reject unknown top-level/document/value grammar while permitting bounded
   current-grammar records to enter degraded authoring;
-- ADR 0081 retains strict frozen schema/native binding authority for runtime;
+- ADR 0081 retains strict frozen schema/runtime-binding authority for runtime;
 - ADR 0047 workspace state gains Complete/Degraded readiness and operation-gated commands;
 - ADR 0026 undo can preserve an unavailable whole-record deletion without turning scene patches
   into an untyped universal editor format;
-- plugin/provider recovery recomposes a fresh runtime and rebuilds the executable only when the
-  compiled provider/native-code set changes; active type bindings are never mutated.
+- provider/Adapter recovery recomposes a fresh runtime, rebuilds the native executable only when the
+  compiled native provider set changes, and otherwise follows the owning Adapter's admitted module
+  activation contract; active type bindings are never mutated.
 
 This proposal does not define dynamic ECS components, schema sidecar generation, automatic package
 installation, lexical CST preservation, best-effort future-file parsing, or runtime placeholder
