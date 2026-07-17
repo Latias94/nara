@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bevy_ecs::error::{BevyError, ErrorContext, FallbackErrorHandler};
+use bevy_ecs::error::{BevyError, ErrorContext, ErrorHandler, FallbackErrorHandler};
 
 use nara::{
     app::{
@@ -20,11 +20,14 @@ use nara::{
         RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeControlFailure,
         RuntimeControlRejection, RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFault,
         RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger,
-        RuntimeState, RuntimeTimeSettings, StartupStage, VirtualTime, drive_runtime_quarantine,
-        runtime_quarantine_status,
+        RuntimeState, RuntimeTimeSettings, RuntimeWorldAccessError, StartupStage, VirtualTime,
+        drive_runtime_quarantine, runtime_quarantine_status,
     },
     core::{ItemLimit, TimeLimit},
-    ecs::{Event, On, Res, ResMut, Resource, schedule::IntoScheduleConfigs},
+    ecs::{
+        Commands, Event, On, Res, ResMut, Resource, change_detection::DetectChangesMut,
+        schedule::IntoScheduleConfigs,
+    },
     gameplay::{
         GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
         GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandRejection, GameplayCommandSet,
@@ -490,8 +493,8 @@ fn exact_step_runs_one_complete_gameplay_command_transaction() {
     runtime
         .with_driver_scope(|scope| {
             scope
-                .world_mut()
                 .resource_mut::<GameplayCommandQueue>()
+                .unwrap()
                 .submit(GameplayCommandSubmission::new(
                     GameplayCommandTick::new(1).unwrap(),
                     GameplayCommandIngressSource::test("runtime-step").unwrap(),
@@ -628,14 +631,22 @@ impl RuntimeCloseParticipant for ReportingCloseParticipant {
 }
 
 #[derive(Debug)]
-struct ObserverCloseParticipant;
+struct ProtectedFaultBridgeCloseParticipant {
+    rejected: Arc<AtomicBool>,
+}
 
-impl RuntimeCloseParticipant for ObserverCloseParticipant {
+impl RuntimeCloseParticipant for ProtectedFaultBridgeCloseParticipant {
     fn begin_close(
         &mut self,
         context: &mut RuntimeCloseContext<'_>,
     ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-        context.world_mut().trigger(RuntimeScopeFaultEvent);
+        self.rejected.store(
+            matches!(
+                context.resource_mut::<FallbackErrorHandler>(),
+                Err(RuntimeWorldAccessError::ProtectedType { .. })
+            ),
+            Ordering::Release,
+        );
         Ok(RuntimeCloseProgress::Complete)
     }
 
@@ -1386,16 +1397,19 @@ fn close_time_fault_remains_visible_after_runtime_stops() {
 }
 
 #[test]
-fn close_participant_world_errors_use_the_runtime_fault_bridge() {
+fn close_scope_protects_the_runtime_error_handler() {
+    let rejected = Arc::new(AtomicBool::new(false));
     let mut obligations = RuntimeObligationLedger::new();
     obligations
         .register(
-            RuntimeCloseParticipantId::new("nara.test.observer-close"),
-            ObserverCloseParticipant,
+            RuntimeCloseParticipantId::new("nara.test.protected-handler-close"),
+            ProtectedFaultBridgeCloseParticipant {
+                rejected: rejected.clone(),
+            },
         )
         .unwrap();
     let mut runtime = RuntimeCandidate::admit_with(
-        app_with_runtime_scope_observer().seal().unwrap(),
+        configured_app(FixedTime::default()).seal().unwrap(),
         obligations,
         RuntimeClosePolicy::default(),
     )
@@ -1409,7 +1423,8 @@ fn close_participant_world_errors_use_the_runtime_fault_bridge() {
     runtime.drive(Duration::ZERO).unwrap();
 
     assert_eq!(runtime.state(), RuntimeState::Stopped);
-    assert_eq!(runtime.fault().unwrap().kind(), RuntimeFaultKind::Observer);
+    assert!(rejected.load(Ordering::Acquire));
+    assert_eq!(runtime.fault(), None);
 }
 
 #[test]
@@ -1809,21 +1824,13 @@ fn candidate_rejects_shared_world_reporter_authority_before_startup() {
 #[test]
 fn missing_or_replaced_candidate_fault_reporter_prevents_startup() {
     for replace in [false, true] {
-        let mut candidate =
-            RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
-        let scope_error = candidate
-            .scope_world_mut(|world| {
-                world.remove_resource::<RuntimeFaultReporter>();
-                if replace {
-                    world.insert_resource(RuntimeFaultReporter::new());
-                }
-            })
-            .unwrap_err();
-
-        assert_eq!(
-            scope_error.fault().unwrap().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
+        let mut app = configured_app(FixedTime::default());
+        let world = app.world_mut().unwrap();
+        world.remove_resource::<RuntimeFaultReporter>();
+        if replace {
+            world.insert_resource(RuntimeFaultReporter::new());
+        }
+        let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
 
         let mut failure = candidate.complete_startup().unwrap_err();
 
@@ -1839,64 +1846,37 @@ fn missing_or_replaced_candidate_fault_reporter_prevents_startup() {
 }
 
 #[test]
-fn missing_or_replaced_world_fault_reporter_faults_before_driving() {
-    for replace in [false, true] {
-        let mut runtime = start_runtime(configured_app(FixedTime::default()));
-        let frame_before = runtime.world().resource::<RealTime>().frame;
-        let scope_error = runtime
-            .with_driver_scope(|scope| {
-                scope.world_mut().remove_resource::<RuntimeFaultReporter>();
-                if replace {
-                    scope
-                        .world_mut()
-                        .insert_resource(RuntimeFaultReporter::new());
-                }
-            })
-            .unwrap_err();
-
-        assert_eq!(
-            scope_error.fault().unwrap().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
-        assert_eq!(runtime.state(), RuntimeState::Faulted);
-
-        let result = runtime.drive(Duration::ZERO);
-
-        assert!(result.is_err(), "invalid reporter authority drove a frame");
-        assert_eq!(
-            result.unwrap_err().fault().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
-        assert_eq!(runtime.state(), RuntimeState::Faulted);
-        assert_eq!(runtime.world().resource::<RealTime>().frame, frame_before);
-    }
+fn runtime_scope_protects_the_fault_reporter_from_mutation() {
+    let mut runtime = start_runtime(configured_app(FixedTime::default()));
+    runtime
+        .with_driver_scope(|scope| {
+            assert!(matches!(
+                scope.resource_mut::<RuntimeFaultReporter>(),
+                Err(RuntimeWorldAccessError::ProtectedType { .. })
+            ));
+        })
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Running);
+    assert_eq!(runtime.fault(), None);
 }
 
 #[test]
 fn missing_or_replaced_candidate_error_handler_prevents_startup() {
     for replace in [false, true] {
-        let mut candidate =
-            RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
-        let scope_error = candidate
-            .scope_world_mut(|world| {
-                world.remove_resource::<FallbackErrorHandler>();
-                if replace {
-                    world.insert_resource(FallbackErrorHandler(ignore_bevy_error));
-                }
-            })
-            .unwrap_err();
-
-        assert_eq!(
-            scope_error.fault().unwrap().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
+        let mut app = app_with_runtime_scope_observer();
+        let world = app.world_mut().unwrap();
+        world.remove_resource::<FallbackErrorHandler>();
+        if replace {
+            world.insert_resource(FallbackErrorHandler(ignore_bevy_error));
+        }
+        app.add_systems(StartupStage::Runtime, trigger_runtime_scope_error)
+            .unwrap();
+        let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
 
         let mut failure = candidate.complete_startup().unwrap_err();
 
-        assert_eq!(
-            failure.fault().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
+        assert_eq!(failure.fault().kind(), RuntimeFaultKind::Observer);
         assert_eq!(
             failure.drive_retirement(),
             RuntimeCandidateRetirementState::Retired
@@ -1905,37 +1885,19 @@ fn missing_or_replaced_candidate_error_handler_prevents_startup() {
 }
 
 #[test]
-fn missing_or_replaced_runtime_error_handler_faults_before_driving() {
-    for replace in [false, true] {
-        let mut runtime = start_runtime(configured_app(FixedTime::default()));
-        let frame_before = runtime.world().resource::<RealTime>().frame;
-        let scope_error = runtime
-            .with_driver_scope(|scope| {
-                scope.world_mut().remove_resource::<FallbackErrorHandler>();
-                if replace {
-                    scope
-                        .world_mut()
-                        .insert_resource(FallbackErrorHandler(ignore_bevy_error));
-                }
-            })
-            .unwrap_err();
-
-        assert_eq!(
-            scope_error.fault().unwrap().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
-        assert_eq!(runtime.state(), RuntimeState::Faulted);
-
-        let result = runtime.drive(Duration::ZERO);
-
-        assert!(result.is_err(), "invalid error handler drove a frame");
-        assert_eq!(
-            result.unwrap_err().fault().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
-        assert_eq!(runtime.state(), RuntimeState::Faulted);
-        assert_eq!(runtime.world().resource::<RealTime>().frame, frame_before);
-    }
+fn runtime_scope_protects_the_fallback_error_handler_from_mutation() {
+    let mut runtime = start_runtime(configured_app(FixedTime::default()));
+    runtime
+        .with_driver_scope(|scope| {
+            assert!(matches!(
+                scope.resource_mut::<FallbackErrorHandler>(),
+                Err(RuntimeWorldAccessError::ProtectedType { .. })
+            ));
+        })
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Running);
+    assert_eq!(runtime.fault(), None);
 }
 
 #[test]
@@ -1960,6 +1922,7 @@ fn runtime_generations_do_not_share_world_time_or_gameplay_queue_state() {
     first_app
         .add_plugin(GameplayCommandPlugin::default())
         .unwrap();
+    first_app.insert_resource(FirstRuntimeOnly).unwrap();
     let mut second_app = configured_app(FixedTime::default());
     second_app
         .add_plugin(GameplayCommandPlugin::default())
@@ -1969,10 +1932,9 @@ fn runtime_generations_do_not_share_world_time_or_gameplay_queue_state() {
 
     first
         .with_driver_scope(|scope| {
-            scope.world_mut().insert_resource(FirstRuntimeOnly);
             scope
-                .world_mut()
                 .resource_mut::<GameplayCommandQueue>()
+                .unwrap()
                 .submit(GameplayCommandSubmission::new(
                     GameplayCommandTick::new(1).unwrap(),
                     GameplayCommandIngressSource::test("first-runtime").unwrap(),
@@ -2058,6 +2020,83 @@ impl std::error::Error for TestSystemError {}
 
 fn ignore_bevy_error(_error: BevyError, _context: ErrorContext) {}
 
+fn temporarily_ignore_runtime_scope_error(world: &mut nara::ecs::World) {
+    let canonical = *world.resource::<FallbackErrorHandler>();
+    world.insert_resource(FallbackErrorHandler(ignore_bevy_error));
+    world.trigger(RuntimeScopeFaultEvent);
+    world.insert_resource(canonical);
+}
+
+fn temporarily_bypass_runtime_scope_error_handler(world: &mut nara::ecs::World) {
+    let canonical = world.resource::<FallbackErrorHandler>().0;
+    world
+        .resource_mut::<FallbackErrorHandler>()
+        .bypass_change_detection()
+        .0 = ignore_bevy_error;
+    world.trigger(RuntimeScopeFaultEvent);
+    world
+        .resource_mut::<FallbackErrorHandler>()
+        .bypass_change_detection()
+        .0 = canonical;
+}
+
+#[derive(Debug, Default, Resource)]
+struct CrossStageFaultRouteProbe {
+    canonical: Option<ErrorHandler>,
+    generation: Option<nara::app::RuntimeGeneration>,
+    update_runs: usize,
+    last_runs: usize,
+}
+
+fn hide_fallback_before_next_stage(world: &mut nara::ecs::World) {
+    let canonical = world.resource::<FallbackErrorHandler>().0;
+    let generation = world
+        .remove_resource::<nara::app::RuntimeGeneration>()
+        .expect("a managed runtime publishes its generation resource");
+    {
+        let mut probe = world.resource_mut::<CrossStageFaultRouteProbe>();
+        probe.canonical = Some(canonical);
+        probe.generation = Some(generation);
+    }
+    world
+        .resource_mut::<FallbackErrorHandler>()
+        .bypass_change_detection()
+        .0 = ignore_bevy_error;
+}
+
+fn fail_after_fallback_was_hidden(
+    mut probe: ResMut<CrossStageFaultRouteProbe>,
+) -> Result<(), BevyError> {
+    probe.update_runs += 1;
+    Err(BevyError::error(TestSystemError))
+}
+
+fn restore_fallback_after_failure(world: &mut nara::ecs::World) {
+    let (canonical, generation) = {
+        let mut probe = world.resource_mut::<CrossStageFaultRouteProbe>();
+        probe.last_runs += 1;
+        (
+            probe
+                .canonical
+                .take()
+                .expect("the first stage captured the canonical handler"),
+            probe
+                .generation
+                .take()
+                .expect("the first stage captured the runtime generation"),
+        )
+    };
+    world.insert_resource(generation);
+    let mut handler = world.resource_mut::<FallbackErrorHandler>();
+    handler.bypass_change_detection().0 = canonical;
+}
+
+fn queue_failing_default_command(mut commands: Commands) {
+    commands.queue(|_: &mut nara::ecs::World| -> Result<(), BevyError> {
+        Err(BevyError::error(TestSystemError))
+    });
+}
+
 fn fail_system() -> Result<(), BevyError> {
     Err(BevyError::error(TestSystemError))
 }
@@ -2070,11 +2109,13 @@ fn fail_runtime_scope_observer(_: On<RuntimeScopeFaultEvent>) -> Result<(), Bevy
     Err(BevyError::error(TestSystemError))
 }
 
+fn trigger_runtime_scope_error(world: &mut nara::ecs::World) {
+    world.trigger(RuntimeScopeFaultEvent);
+}
+
 fn app_with_runtime_scope_observer() -> App {
     let mut app = configured_app(FixedTime::default());
-    let world = app.world_mut().unwrap();
-    world.add_observer(fail_runtime_scope_observer);
-    world.flush();
+    app.add_observer(fail_runtime_scope_observer).unwrap();
     app
 }
 
@@ -2083,13 +2124,15 @@ fn panic_system() {
 }
 
 struct NestedRuntimeDrive {
-    runtime: RuntimeInstance,
+    runtime: Option<RuntimeInstance>,
     fault: Option<RuntimeFaultKind>,
 }
 
 fn drive_nested_runtime(mut nested: nara::ecs::NonSendMut<NestedRuntimeDrive>) {
     let fault = nested
         .runtime
+        .as_mut()
+        .expect("nested runtime remains present until the test reclaims it")
         .drive(Duration::ZERO)
         .unwrap_err()
         .fault()
@@ -2125,19 +2168,27 @@ fn fallible_system_and_startup_failures_are_typed_and_unpublished() {
 }
 
 #[test]
-fn candidate_world_scope_captures_fallible_observer_errors() {
-    let mut candidate =
-        RuntimeCandidate::admit(app_with_runtime_scope_observer().seal().unwrap()).unwrap();
+fn default_command_failures_enter_the_runtime_fault_channel() {
+    let mut app = configured_app(FixedTime::default());
+    app.add_systems(CoreStage::Update, queue_failing_default_command)
+        .unwrap();
+    let mut runtime = start_runtime(app);
 
-    let scope_error = candidate
-        .scope_world_mut(|world| world.trigger(RuntimeScopeFaultEvent))
-        .unwrap_err();
+    let failure = runtime.drive(Duration::ZERO).unwrap_err();
 
-    assert_eq!(
-        scope_error.fault().unwrap().kind(),
-        RuntimeFaultKind::Observer
-    );
+    assert_eq!(failure.fault().kind(), RuntimeFaultKind::Command);
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
+}
+
+#[test]
+fn startup_rejects_a_temporarily_replaced_error_handler() {
+    let mut app = app_with_runtime_scope_observer();
+    app.add_systems(StartupStage::Core, temporarily_ignore_runtime_scope_error)
+        .unwrap();
+    let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+
     let mut failure = candidate.complete_startup().unwrap_err();
+
     assert_eq!(failure.fault().kind(), RuntimeFaultKind::Observer);
     assert_eq!(
         failure.drive_retirement(),
@@ -2146,30 +2197,73 @@ fn candidate_world_scope_captures_fallible_observer_errors() {
 }
 
 #[test]
-fn driver_world_scope_captures_fallible_observer_errors() {
-    let mut runtime = start_runtime(app_with_runtime_scope_observer());
+fn frame_captures_observer_errors_when_fallback_changes_are_hidden() {
+    let mut app = app_with_runtime_scope_observer();
+    app.add_systems(
+        CoreStage::Update,
+        temporarily_bypass_runtime_scope_error_handler,
+    )
+    .unwrap();
+    let mut runtime = start_runtime(app);
 
-    let scope_error = runtime
-        .with_driver_scope(|scope| scope.world_mut().trigger(RuntimeScopeFaultEvent))
-        .unwrap_err();
+    let failure = runtime.drive(Duration::ZERO).unwrap_err();
+
+    assert_eq!(failure.fault().kind(), RuntimeFaultKind::Observer);
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
+}
+
+#[test]
+fn frame_rejects_a_fallback_replacement_before_the_next_schedule() {
+    let mut app = configured_app(FixedTime::default());
+    app.insert_resource(CrossStageFaultRouteProbe::default())
+        .unwrap()
+        .add_systems(CoreStage::First, hide_fallback_before_next_stage)
+        .unwrap()
+        .add_systems(CoreStage::Update, fail_after_fallback_was_hidden)
+        .unwrap()
+        .add_systems(CoreStage::Last, restore_fallback_after_failure)
+        .unwrap();
+    let mut runtime = start_runtime(app);
+
+    let failure = runtime.drive(Duration::ZERO).unwrap_err();
 
     assert_eq!(
-        scope_error.fault().unwrap().kind(),
-        RuntimeFaultKind::Observer
+        failure.fault().kind(),
+        RuntimeFaultKind::FaultReporterAuthority
     );
     assert_eq!(runtime.state(), RuntimeState::Faulted);
-    assert_eq!(
-        runtime.drive(Duration::ZERO).unwrap_err().fault().kind(),
-        RuntimeFaultKind::Observer
-    );
+    let probe = runtime.world().resource::<CrossStageFaultRouteProbe>();
+    assert_eq!(probe.update_runs, 0);
+    assert_eq!(probe.last_runs, 0);
+}
+
+#[test]
+fn exact_step_rejects_a_temporarily_replaced_error_handler() {
+    let mut app = app_with_runtime_scope_observer();
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        temporarily_ignore_runtime_scope_error.in_set(FixedUpdateSet::Simulate),
+    )
+    .unwrap();
+    let mut runtime = start_runtime(app);
+    accepted_ticket(runtime.request_control(RuntimeControl::Pause));
+    runtime.drive(Duration::ZERO).unwrap();
+    accepted_ticket(runtime.request_control(RuntimeControl::StepFixedTick));
+
+    let failure = runtime.drive(Duration::ZERO).unwrap_err();
+
+    assert_eq!(failure.fault().kind(), RuntimeFaultKind::Observer);
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
 }
 
 #[test]
 fn faulted_runtime_keeps_driver_scope_available_for_retirement_work() {
     #[derive(Resource)]
-    struct RetirementMarker;
+    struct RetirementMarker(bool);
 
-    let mut runtime = start_runtime(configured_app(FixedTime::default()));
+    let mut app = configured_app(FixedTime::default());
+    app.insert_resource(RetirementMarker(false)).unwrap();
+    let mut runtime = start_runtime(app);
     runtime.fault_reporter().report(RuntimeFault::engine(
         RuntimeFaultKind::RequiredService,
         "nara.test.retirement-scope-service",
@@ -2178,11 +2272,11 @@ fn faulted_runtime_keeps_driver_scope_available_for_retirement_work() {
 
     runtime
         .with_driver_scope(|scope| {
-            scope.world_mut().insert_resource(RetirementMarker);
+            scope.resource_mut::<RetirementMarker>().unwrap().0 = true;
         })
         .unwrap();
 
-    assert!(runtime.world().contains_resource::<RetirementMarker>());
+    assert!(runtime.world().resource::<RetirementMarker>().0);
     accepted_ticket(runtime.request_control(RuntimeControl::Stop));
     assert_eq!(
         runtime.drive(Duration::ZERO).unwrap().state(),
@@ -2289,7 +2383,7 @@ fn nested_runtime_drive_is_typed_instead_of_deadlocking() {
         .world_mut()
         .unwrap()
         .insert_non_send(NestedRuntimeDrive {
-            runtime: inner,
+            runtime: Some(inner),
             fault: None,
         });
     outer_app
@@ -2299,16 +2393,21 @@ fn nested_runtime_drive_is_typed_instead_of_deadlocking() {
 
     outer.drive(Duration::ZERO).unwrap();
 
-    let nested = outer
+    let (fault, mut inner) = outer
         .with_driver_scope(|scope| {
-            scope
-                .world_mut()
-                .remove_non_send::<NestedRuntimeDrive>()
+            let mut nested = scope
+                .get_non_send_resource_mut::<NestedRuntimeDrive>()
                 .unwrap()
+                .unwrap();
+            let fault = nested.fault;
+            let runtime = nested
+                .runtime
+                .take()
+                .expect("nested runtime is reclaimed exactly once");
+            (fault, runtime)
         })
         .unwrap();
-    assert_eq!(nested.fault, Some(RuntimeFaultKind::ScheduleAuthority));
-    let mut inner = nested.runtime;
+    assert_eq!(fault, Some(RuntimeFaultKind::ScheduleAuthority));
     assert_eq!(inner.state(), RuntimeState::Faulted);
     accepted_ticket(inner.request_control(RuntimeControl::Stop));
     inner.drive(Duration::ZERO).unwrap();
@@ -2355,7 +2454,7 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
     );
     runtime
         .with_driver_scope(|scope| {
-            let mut queue = scope.world_mut().resource_mut::<GameplayCommandQueue>();
+            let mut queue = scope.resource_mut::<GameplayCommandQueue>().unwrap();
             queue.submit(submission.clone()).unwrap();
             assert_eq!(
                 queue.submit(submission).unwrap_err(),
@@ -2367,8 +2466,8 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
     runtime
         .with_driver_scope(|scope| {
             let rejection = scope
-                .world_mut()
                 .resource_mut::<GameplayCommandQueue>()
+                .unwrap()
                 .submit(GameplayCommandSubmission::new(
                     GameplayCommandTick::new(1).unwrap(),
                     GameplayCommandIngressSource::test("late-rejection").unwrap(),
@@ -2390,16 +2489,14 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
 #[test]
 fn a_failed_control_records_a_terminal_result_before_faulting() {
     let mut runtime = start_runtime(configured_app(FixedTime::default()));
-    runtime
-        .with_driver_scope(|scope| {
-            scope.world_mut().remove_resource::<RuntimeTimeSettings>();
-        })
-        .unwrap();
-
     let pause = accepted_ticket(runtime.request_control(RuntimeControl::Pause));
+    runtime.fault_reporter().report(RuntimeFault::engine(
+        RuntimeFaultKind::RequiredService,
+        "nara.test.pending-control-service",
+    ));
     let error = runtime.drive(Duration::ZERO).unwrap_err();
 
-    assert_eq!(error.fault().kind(), RuntimeFaultKind::AppFrame);
+    assert_eq!(error.fault().kind(), RuntimeFaultKind::RequiredService);
     assert_eq!(runtime.state(), RuntimeState::Faulted);
     assert_eq!(
         runtime.control_status(pause),
@@ -2460,8 +2557,8 @@ fn paused_runtime_state_cannot_be_bypassed_by_mutating_time_settings() {
     runtime
         .with_driver_scope(|scope| {
             scope
-                .world_mut()
                 .resource_mut::<RuntimeTimeSettings>()
+                .unwrap()
                 .set_paused(false);
         })
         .unwrap();

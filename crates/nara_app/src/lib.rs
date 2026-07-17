@@ -11,6 +11,7 @@ use std::{
 
 use nara_ecs::{
     Resource, World,
+    observer::IntoObserver,
     schedule::{
         InternedSystemSet, IntoScheduleConfigs, Schedule, ScheduleLabel, Schedules, SystemSet,
     },
@@ -1035,6 +1036,7 @@ pub struct App {
     registered_shutdown_obligations: BTreeSet<(PluginId, PluginShutdownObligationId)>,
     runtime_obligations: RuntimeObligationLedger,
     runtime_fault_reporter: RuntimeFaultReporter,
+    managed_runtime_generation: Option<RuntimeGeneration>,
     plugin_lifecycle: PluginLifecycleState,
     plugin_failure_report: Option<PluginFailureReport>,
     active_plugin_hook: Option<(PluginId, PluginHook)>,
@@ -1069,7 +1071,7 @@ impl App {
         world.insert_resource(RuntimeFrameStatus::default());
         world.insert_resource(AppExitRequests::default());
         let runtime_fault_reporter = RuntimeFaultReporter::new();
-        world.insert_resource(runtime_fault_reporter.clone());
+        runtime::initialize_runtime_fault_bridge(&mut world, runtime_fault_reporter.clone());
 
         let mut schedules = Schedules::new();
         for stage in StartupStage::ALL {
@@ -1103,6 +1105,7 @@ impl App {
             registered_shutdown_obligations: BTreeSet::new(),
             runtime_obligations: RuntimeObligationLedger::new(),
             runtime_fault_reporter,
+            managed_runtime_generation: None,
             plugin_lifecycle: PluginLifecycleState::Configuring,
             plugin_failure_report: None,
             active_plugin_hook: None,
@@ -1145,6 +1148,12 @@ impl App {
         Ok(self)
     }
 
+    /// Registers systems with Nara's schedule set.
+    ///
+    /// Managed runtimes route unhandled schedule, run-condition, and default command failures into
+    /// the sticky runtime fault channel. Code that installs an explicit per-system or per-command
+    /// handler, or directly mutates Bevy's [`bevy_ecs::error::FallbackErrorHandler`], owns that
+    /// error policy instead.
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
@@ -1152,6 +1161,26 @@ impl App {
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
         self.schedules.add_systems(schedule, systems);
+        Ok(self)
+    }
+
+    /// Registers an observer whose unhandled failures enter the managed runtime fault channel.
+    ///
+    /// Nara installs its canonical error handler explicitly on the observer, so supported observer
+    /// failures do not depend on the mutable Bevy fallback handler stored in the [`World`]. Callers
+    /// that need a different error policy should build and drive that observer outside Nara's
+    /// managed fault contract.
+    pub fn add_observer<M>(
+        &mut self,
+        observer: impl IntoObserver<M>,
+    ) -> Result<&mut Self, PluginError> {
+        self.ensure_configuration_mutation_allowed()?;
+        self.world.spawn(
+            observer
+                .into_observer()
+                .with_error_handler(runtime::runtime_system_error_handler),
+        );
+        self.world.flush();
         Ok(self)
     }
 
@@ -1679,9 +1708,7 @@ impl App {
 
         if !self.started {
             for stage in StartupStage::ALL {
-                if let Some(schedule) = self.schedules.get_mut(stage) {
-                    schedule.run(&mut self.world);
-                }
+                self.run_managed_schedule(stage)?;
             }
             self.started = true;
         }
@@ -1700,6 +1727,28 @@ impl App {
             settings.set_paused(false);
         }
         TimeFramePlan::from_world(&self.world, Duration::ZERO, false)?;
+        Ok(())
+    }
+
+    fn run_managed_schedule(&mut self, schedule: impl ScheduleLabel) -> Result<(), AppRunError> {
+        let generation = self.managed_runtime_generation;
+        if let Some(generation) = generation {
+            runtime::validate_managed_fault_boundary(
+                &self.world,
+                &self.runtime_fault_reporter,
+                generation,
+            )?;
+        }
+        if let Some(schedule) = self.schedules.get_mut(schedule) {
+            schedule.run(&mut self.world);
+        }
+        if let Some(generation) = generation {
+            runtime::validate_managed_fault_boundary(
+                &self.world,
+                &self.runtime_fault_reporter,
+                generation,
+            )?;
+        }
         Ok(())
     }
 
@@ -1731,36 +1780,34 @@ impl App {
         let mut frame_status = None;
 
         for stage in CoreStage::ALL {
-            if let Some(schedule) = self.schedules.get_mut(stage) {
-                if stage == CoreStage::FixedUpdate {
-                    for _ in 0..time_frame_plan.fixed_steps_to_run {
-                        fixed_time.advance_tick();
-                        *self.world.resource_mut::<FixedTime>() = fixed_time;
-                        schedule.run(&mut self.world);
-                    }
-                    fixed_time.finish_frame();
+            if stage == CoreStage::FixedUpdate {
+                for _ in 0..time_frame_plan.fixed_steps_to_run {
+                    fixed_time.advance_tick();
                     *self.world.resource_mut::<FixedTime>() = fixed_time;
-                    self.world
-                        .resource_mut::<RenderTime>()
-                        .update_from_fixed(&fixed_time);
-                    let status = RuntimeFrameStatus {
-                        frame: self.world.resource::<RealTime>().frame,
-                        real_delta: time_frame_plan.real_delta,
-                        virtual_delta: time_frame_plan.virtual_delta,
-                        real_delta_clamped: time_frame_plan.real_delta_clamped,
-                        fixed_steps: fixed_time.steps_this_frame(),
-                        fixed_steps_capped: fixed_time.capped_this_frame(),
-                        fixed_tick: fixed_time.tick(),
-                        fixed_elapsed: fixed_time.elapsed(),
-                        fixed_remainder: fixed_time.remainder(),
-                        fixed_debt: fixed_time.debt(),
-                        fixed_discarded: fixed_time.discarded_this_frame(),
-                    };
-                    *self.world.resource_mut::<RuntimeFrameStatus>() = status;
-                    frame_status = Some(status);
-                } else if !paused_stages_only || stage_runs_while_paused(stage) {
-                    schedule.run(&mut self.world);
+                    self.run_managed_schedule(stage)?;
                 }
+                fixed_time.finish_frame();
+                *self.world.resource_mut::<FixedTime>() = fixed_time;
+                self.world
+                    .resource_mut::<RenderTime>()
+                    .update_from_fixed(&fixed_time);
+                let status = RuntimeFrameStatus {
+                    frame: self.world.resource::<RealTime>().frame,
+                    real_delta: time_frame_plan.real_delta,
+                    virtual_delta: time_frame_plan.virtual_delta,
+                    real_delta_clamped: time_frame_plan.real_delta_clamped,
+                    fixed_steps: fixed_time.steps_this_frame(),
+                    fixed_steps_capped: fixed_time.capped_this_frame(),
+                    fixed_tick: fixed_time.tick(),
+                    fixed_elapsed: fixed_time.elapsed(),
+                    fixed_remainder: fixed_time.remainder(),
+                    fixed_debt: fixed_time.debt(),
+                    fixed_discarded: fixed_time.discarded_this_frame(),
+                };
+                *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+                frame_status = Some(status);
+            } else if !paused_stages_only || stage_runs_while_paused(stage) {
+                self.run_managed_schedule(stage)?;
             }
         }
 
@@ -1804,9 +1851,7 @@ impl App {
         *self.world.resource_mut::<VirtualTime>() = virtual_time;
         *self.world.resource_mut::<FixedTime>() = fixed_time;
 
-        if let Some(schedule) = self.schedules.get_mut(CoreStage::FixedUpdate) {
-            schedule.run(&mut self.world);
-        }
+        self.run_managed_schedule(CoreStage::FixedUpdate)?;
 
         fixed_time.finish_exact_step();
         *self.world.resource_mut::<FixedTime>() = fixed_time;
@@ -2398,15 +2443,13 @@ mod tests {
         runtime.drive(Duration::ZERO).unwrap();
         assert_eq!(runtime.state(), RuntimeState::Paused);
 
-        let (changed_entity, removed_entity) = runtime
-            .with_driver_scope(|scope| {
-                let world = scope.world_mut();
-                let changed_entity = world.spawn(Tracked).id();
-                let removed_entity = world.spawn(Tracked).id();
-                world.entity_mut(removed_entity).remove::<Tracked>();
-                (changed_entity, removed_entity)
-            })
-            .unwrap();
+        let (changed_entity, removed_entity) = {
+            let world = runtime.world_mut_for_tests();
+            let changed_entity = world.spawn(Tracked).id();
+            let removed_entity = world.spawn(Tracked).id();
+            world.entity_mut(removed_entity).remove::<Tracked>();
+            (changed_entity, removed_entity)
+        };
         let step = match runtime.request_control(RuntimeControl::StepFixedTick) {
             RuntimeControlRequestResult::Accepted(ticket) => ticket,
             RuntimeControlRequestResult::Rejected(rejection) => {
@@ -2437,19 +2480,17 @@ mod tests {
         assert!(runtime.world().removed::<Tracked>().next().is_none());
         assert!(runtime.world().get_entity(removed_entity).is_ok());
 
-        let paused_removed_entity = runtime
-            .with_driver_scope(|scope| {
-                let world = scope.world_mut();
-                world
-                    .entity_mut(changed_entity)
-                    .get_mut::<Tracked>()
-                    .unwrap()
-                    .set_changed();
-                let removed_entity = world.spawn(Tracked).id();
-                world.entity_mut(removed_entity).remove::<Tracked>();
-                removed_entity
-            })
-            .unwrap();
+        let paused_removed_entity = {
+            let world = runtime.world_mut_for_tests();
+            world
+                .entity_mut(changed_entity)
+                .get_mut::<Tracked>()
+                .unwrap()
+                .set_changed();
+            let removed_entity = world.spawn(Tracked).id();
+            world.entity_mut(removed_entity).remove::<Tracked>();
+            removed_entity
+        };
         assert!(
             runtime
                 .world()

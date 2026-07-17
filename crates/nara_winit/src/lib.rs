@@ -8,13 +8,14 @@ use std::{
 
 use nara_app::{
     AppExit, AppRunError, RuntimeControl, RuntimeControlRequestResult, RuntimeDriveError,
-    RuntimeInstance, RuntimeState,
+    RuntimeDriverScope, RuntimeFault, RuntimeInstance, RuntimeScopeError, RuntimeState,
+    RuntimeWorldAccessError,
 };
 use nara_input::{ButtonInput, KeyCode, MouseButton, PointerState};
 use nara_window::{
     Window, WindowEvent, WindowId, WindowResolution,
     backend::{BackendWindowHandles, WindowHandleProvider, WindowSurfaceRetirementDriver},
-    push_window_event,
+    push_window_driver_event,
 };
 use winit::{
     application::ApplicationHandler,
@@ -161,11 +162,11 @@ impl<'runtime> WinitApp<'runtime> {
         })
     }
 
-    fn with_driver_world<R>(
+    fn with_driver_scope<R>(
         &mut self,
-        operation: impl FnOnce(&mut nara_ecs::World) -> R,
+        operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, RuntimeWorldAccessError>,
     ) -> Result<R, AppRunError> {
-        with_runtime_driver_world(self.runtime, operation)
+        with_runtime_driver_scope(self.runtime, operation)
     }
 
     fn create_primary_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), AppRunError> {
@@ -202,8 +203,8 @@ impl<'runtime> WinitApp<'runtime> {
             .insert(platform_window.id(), window_id);
         self.platform_windows
             .insert(window_id, platform_window.clone());
-        self.with_driver_world(|world| {
-            push_window_event(world, WindowEvent::Created { window_id });
+        self.with_driver_scope(|scope| {
+            push_window_driver_event(scope, WindowEvent::Created { window_id })
         })?;
 
         Ok(())
@@ -260,56 +261,54 @@ impl<'runtime> WinitApp<'runtime> {
 
         match event {
             WinitWindowEvent::CloseRequested => {
-                self.with_driver_world(|world| {
-                    push_window_event(world, WindowEvent::CloseRequested { window_id });
+                self.with_driver_scope(|scope| {
+                    push_window_driver_event(scope, WindowEvent::CloseRequested { window_id })
                 })?;
             }
             WinitWindowEvent::Resized(size) => {
                 let resolution = WindowResolution::new(size.width, size.height);
-                self.with_driver_world(|world| {
-                    push_window_event(
-                        world,
+                self.with_driver_scope(|scope| {
+                    push_window_driver_event(
+                        scope,
                         WindowEvent::Resized {
                             window_id,
                             resolution,
                         },
-                    );
+                    )
                 })?;
             }
             WinitWindowEvent::Focused(focused) => {
-                self.with_driver_world(|world| {
-                    push_window_event(world, WindowEvent::Focused { window_id, focused });
+                self.with_driver_scope(|scope| {
+                    push_window_driver_event(scope, WindowEvent::Focused { window_id, focused })
                 })?;
             }
             WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.with_driver_world(|world| {
-                    push_window_event(
-                        world,
+                self.with_driver_scope(|scope| {
+                    push_window_driver_event(
+                        scope,
                         WindowEvent::ScaleFactorChanged {
                             window_id,
                             scale_factor,
                         },
-                    );
+                    )
                 })?;
             }
             WinitWindowEvent::RedrawRequested => {
-                self.with_driver_world(|world| {
-                    push_window_event(world, WindowEvent::RedrawRequested { window_id });
+                self.with_driver_scope(|scope| {
+                    push_window_driver_event(scope, WindowEvent::RedrawRequested { window_id })
                 })?;
             }
             WinitWindowEvent::KeyboardInput { event, .. } => {
-                self.with_driver_world(|world| apply_keyboard_input(world, &event))?;
+                self.with_driver_scope(|scope| apply_keyboard_input(scope, &event))?;
             }
             WinitWindowEvent::MouseInput { state, button, .. } => {
-                self.with_driver_world(|world| apply_mouse_input(world, state, button))?;
+                self.with_driver_scope(|scope| apply_mouse_input(scope, state, button))?;
             }
             WinitWindowEvent::CursorMoved { position, .. } => {
-                self.with_driver_world(|world| {
-                    apply_cursor_moved(world, position.x, position.y);
-                })?;
+                self.with_driver_scope(|scope| apply_cursor_moved(scope, position.x, position.y))?;
             }
             WinitWindowEvent::CursorLeft { .. } => {
-                self.with_driver_world(apply_cursor_left)?;
+                self.with_driver_scope(apply_cursor_left)?;
             }
             _ => {}
         }
@@ -330,8 +329,8 @@ impl<'runtime> WinitApp<'runtime> {
             .mark_native_destroyed(window_id)
             .map_err(|_| AppRunError::runner("native window target is not registered"))?;
         if externally_destroyed {
-            self.with_driver_world(|world| {
-                push_window_event(world, WindowEvent::Closed { window_id });
+            self.with_driver_scope(|scope| {
+                push_window_driver_event(scope, WindowEvent::Closed { window_id })
             })?;
         }
         self.platform_windows.remove(&window_id);
@@ -637,10 +636,10 @@ fn retire_runtime_targets(
         .get_resource::<WindowSurfaceRetirementDriver>()
         .copied();
     if let Some(retirement_driver) = retirement_driver {
-        with_runtime_driver_world(runtime, |world| {
-            retirement_driver.retire_targets(world, &owned_window_ids)
-        })?
-        .map_err(|_| AppRunError::runner("renderer failed to retire owned window surfaces"))?;
+        runtime
+            .with_driver_scope(|scope| retirement_driver.retire_targets(scope, &owned_window_ids))
+            .map_err(runtime_scope_error)?
+            .map_err(|_| AppRunError::runner("renderer failed to retire owned window surfaces"))?;
     }
     backend_windows
         .release_retired_providers(owned_window_ids.iter().copied())
@@ -648,57 +647,82 @@ fn retire_runtime_targets(
 }
 
 fn configured_primary_window(runtime: &mut RuntimeInstance) -> Result<Window, AppRunError> {
-    with_runtime_driver_world(runtime, |world| {
-        let mut query = world.query::<&Window>();
-        query
-            .iter(world)
-            .next()
-            .cloned()
-            .unwrap_or_else(Window::default)
-    })
+    Ok(runtime
+        .world()
+        .iter_entities()
+        .find_map(|entity| entity.get::<Window>().cloned())
+        .unwrap_or_else(Window::default))
 }
 
-fn with_runtime_driver_world<R>(
+fn with_runtime_driver_scope<R>(
     runtime: &mut RuntimeInstance,
-    operation: impl FnOnce(&mut nara_ecs::World) -> R,
+    operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, RuntimeWorldAccessError>,
 ) -> Result<R, AppRunError> {
     runtime
-        .with_driver_scope(|scope| operation(scope.world_mut()))
-        .map_err(|_| AppRunError::runner("runtime driver world is unavailable"))
+        .with_driver_scope(operation)
+        .map_err(runtime_scope_error)?
+        .map_err(|_| AppRunError::runner("runtime driver operation failed"))
 }
 
 fn runtime_drive_error(error: RuntimeDriveError) -> AppRunError {
-    let fault = error.fault();
+    runtime_fault_error(error.fault())
+}
+
+fn runtime_scope_error(error: RuntimeScopeError) -> AppRunError {
+    match error {
+        RuntimeScopeError::Unavailable { .. } => {
+            AppRunError::runner("runtime driver scope is unavailable")
+        }
+        RuntimeScopeError::Faulted { fault } => runtime_fault_error(&fault),
+    }
+}
+
+fn runtime_fault_error(fault: &RuntimeFault) -> AppRunError {
     AppRunError::managed_runtime(fault.kind(), fault.source())
 }
 
-fn apply_keyboard_input(world: &mut nara_ecs::World, event: &KeyEvent) {
+fn apply_keyboard_input(
+    scope: &mut RuntimeDriverScope<'_>,
+    event: &KeyEvent,
+) -> Result<(), RuntimeWorldAccessError> {
     let Some(key_code) = convert_physical_key(event.physical_key) else {
-        return;
+        return Ok(());
     };
-    let mut input = world.resource_mut::<ButtonInput<KeyCode>>();
+    let mut input = scope.resource_mut::<ButtonInput<KeyCode>>()?;
     match event.state {
         ElementState::Pressed => input.press(key_code),
         ElementState::Released => input.release(key_code),
     }
+    Ok(())
 }
 
-fn apply_mouse_input(world: &mut nara_ecs::World, state: ElementState, button: WinitMouseButton) {
-    let mut input = world.resource_mut::<ButtonInput<MouseButton>>();
+fn apply_mouse_input(
+    scope: &mut RuntimeDriverScope<'_>,
+    state: ElementState,
+    button: WinitMouseButton,
+) -> Result<(), RuntimeWorldAccessError> {
+    let mut input = scope.resource_mut::<ButtonInput<MouseButton>>()?;
     let button = convert_mouse_button(button);
     match state {
         ElementState::Pressed => input.press(button),
         ElementState::Released => input.release(button),
     }
+    Ok(())
 }
 
-fn apply_cursor_moved(world: &mut nara_ecs::World, x: f64, y: f64) {
-    let mut pointer = world.resource_mut::<PointerState>();
+fn apply_cursor_moved(
+    scope: &mut RuntimeDriverScope<'_>,
+    x: f64,
+    y: f64,
+) -> Result<(), RuntimeWorldAccessError> {
+    let mut pointer = scope.resource_mut::<PointerState>()?;
     pointer.set_position(nara_core::Vec2::new(x as f32, y as f32));
+    Ok(())
 }
 
-fn apply_cursor_left(world: &mut nara_ecs::World) {
-    world.resource_mut::<PointerState>().clear_position();
+fn apply_cursor_left(scope: &mut RuntimeDriverScope<'_>) -> Result<(), RuntimeWorldAccessError> {
+    scope.resource_mut::<PointerState>()?.clear_position();
+    Ok(())
 }
 
 #[must_use]

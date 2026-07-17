@@ -1,4 +1,5 @@
 use std::{
+    any::{TypeId, type_name},
     cell::RefCell,
     collections::{BTreeSet, VecDeque},
     fmt::{self, Debug, Display, Formatter},
@@ -13,7 +14,10 @@ use std::{
 use bevy_ecs::error::{
     BevyError, ErrorContext, ErrorHandler, FallbackErrorHandler, Severity, match_severity,
 };
-use nara_ecs::{Resource, World};
+use nara_ecs::{
+    Mut, Resource, World, change_detection::Tick, component::Mutable, lifecycle::HookContext,
+    world::DeferredWorld,
+};
 use thiserror::Error;
 
 use crate::{
@@ -32,6 +36,95 @@ static TOTAL_QUARANTINED_RUNTIME_OWNERS: AtomicU64 = AtomicU64::new(0);
 static TOTAL_REAPED_RUNTIME_OWNERS: AtomicU64 = AtomicU64::new(0);
 static RUNTIME_SCHEDULE_AUTHORITY: Mutex<()> = Mutex::new(());
 static ACTIVE_RUNTIME_REPORTER: Mutex<Option<RuntimeFaultReporter>> = Mutex::new(None);
+
+#[derive(Debug, Default, Resource)]
+struct RuntimeFaultBridgeRevision(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RuntimeFaultBridgeEpoch {
+    revision: u64,
+    reporter_added: Tick,
+    reporter_changed: Tick,
+    handler_added: Tick,
+    handler_changed: Tick,
+}
+
+impl RuntimeFaultBridgeEpoch {
+    fn capture(world: &World) -> Option<Self> {
+        let revision = world.get_resource::<RuntimeFaultBridgeRevision>()?.0;
+        let reporter = world.get_resource_change_ticks::<RuntimeFaultReporter>()?;
+        let handler = world.get_resource_change_ticks::<FallbackErrorHandler>()?;
+        Some(Self {
+            revision,
+            reporter_added: reporter.added,
+            reporter_changed: reporter.changed,
+            handler_added: handler.added,
+            handler_changed: handler.changed,
+        })
+    }
+}
+
+fn record_fault_bridge_structure_change(mut world: DeferredWorld<'_>, _context: HookContext) {
+    let Some(mut revision) = world.get_resource_mut::<RuntimeFaultBridgeRevision>() else {
+        return;
+    };
+    revision.0 = revision
+        .0
+        .checked_add(1)
+        .unwrap_or_else(|| std::process::abort());
+}
+
+pub(crate) fn initialize_runtime_fault_bridge(world: &mut World, reporter: RuntimeFaultReporter) {
+    world
+        .register_component_hooks::<RuntimeFaultReporter>()
+        .on_insert(record_fault_bridge_structure_change)
+        .on_discard(record_fault_bridge_structure_change);
+    world
+        .register_component_hooks::<FallbackErrorHandler>()
+        .on_insert(record_fault_bridge_structure_change)
+        .on_discard(record_fault_bridge_structure_change);
+    world.insert_resource(RuntimeFaultBridgeRevision::default());
+    world.insert_resource(reporter);
+}
+
+pub(crate) fn validate_managed_fault_boundary(
+    world: &World,
+    reporter: &RuntimeFaultReporter,
+    generation: RuntimeGeneration,
+) -> Result<(), AppRunError> {
+    let fault = reporter
+        .fault()
+        .or_else(|| {
+            (world.get_resource::<RuntimeGeneration>() != Some(&generation))
+                .then(runtime_fault_bridge_authority_fault)
+        })
+        .or_else(|| validate_runtime_fault_bridge_authority(world, reporter).err());
+    let Some(fault) = fault else {
+        return Ok(());
+    };
+    let fault = reporter.record_canonical(fault);
+    Err(AppRunError::managed_runtime(fault.kind(), fault.source()))
+}
+
+fn validate_runtime_fault_bridge_authority(
+    world: &World,
+    reporter: &RuntimeFaultReporter,
+) -> Result<(), RuntimeFault> {
+    let reporter_valid = world
+        .get_resource::<RuntimeFaultReporter>()
+        .is_some_and(|world_reporter| world_reporter.has_authority(reporter));
+    let handler_valid = world
+        .get_resource::<FallbackErrorHandler>()
+        .is_some_and(|handler| {
+            std::ptr::fn_addr_eq(handler.0, runtime_system_error_handler as ErrorHandler)
+        });
+    let revision_valid = world.contains_resource::<RuntimeFaultBridgeRevision>();
+    if reporter_valid && handler_valid && revision_valid {
+        Ok(())
+    } else {
+        Err(runtime_fault_bridge_authority_fault())
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Resource)]
 pub struct RuntimeGeneration(u64);
@@ -374,25 +467,62 @@ pub struct RuntimeDriverScope<'world> {
     world: &'world mut World,
 }
 
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeWorldAccessError {
+    #[error("runtime-managed ECS type {type_name} is protected from scoped mutation")]
+    ProtectedType { type_name: &'static str },
+    #[error("runtime scoped resource {type_name} is missing")]
+    MissingResource { type_name: &'static str },
+}
+
+fn ensure_scoped_type_is_unprotected<T: 'static>() -> Result<(), RuntimeWorldAccessError> {
+    let type_id = TypeId::of::<T>();
+    if type_id == TypeId::of::<RuntimeFaultReporter>()
+        || type_id == TypeId::of::<FallbackErrorHandler>()
+        || type_id == TypeId::of::<RuntimeFaultBridgeRevision>()
+    {
+        Err(RuntimeWorldAccessError::ProtectedType {
+            type_name: type_name::<T>(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
 impl RuntimeDriverScope<'_> {
     #[must_use]
     pub fn world(&self) -> &World {
         self.world
     }
 
-    #[must_use]
-    pub fn world_mut(&mut self) -> &mut World {
-        self.world
+    pub fn get_resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Result<Option<Mut<'_, R>>, RuntimeWorldAccessError> {
+        ensure_scoped_type_is_unprotected::<R>()?;
+        Ok(self.world.get_resource_mut::<R>())
+    }
+
+    pub fn resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Result<Mut<'_, R>, RuntimeWorldAccessError> {
+        self.get_resource_mut::<R>()?
+            .ok_or(RuntimeWorldAccessError::MissingResource {
+                type_name: type_name::<R>(),
+            })
+    }
+
+    pub fn get_non_send_resource_mut<R: 'static>(
+        &mut self,
+    ) -> Result<Option<Mut<'_, R>>, RuntimeWorldAccessError> {
+        ensure_scoped_type_is_unprotected::<R>()?;
+        Ok(self.world.get_non_send_mut::<R>())
     }
 }
 
-/// Failure returned by a short-lived mutable runtime World scope.
+/// Failure returned by a short-lived managed runtime scope.
 ///
 /// Healthy scopes verify the canonical fault reporter and fallback error handler around the
-/// operation. An unhandled fallible system or observer that reaches that fallback records the
-/// runtime's first sticky fault and returns [`RuntimeScopeError::Faulted`]. A system- or
-/// observer-specific error handler is an explicit caller-owned handling boundary and does not
-/// also report through the canonical fallback.
+/// operation. Runtime-managed fault resources are unavailable through scoped mutable access.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum RuntimeScopeError {
     #[error("runtime world access is unavailable while runtime state is {state:?}")]
@@ -417,9 +547,34 @@ impl RuntimeCloseContext<'_> {
         self.world
     }
 
-    #[must_use]
-    pub fn world_mut(&mut self) -> &mut World {
-        self.world
+    pub fn get_resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Result<Option<Mut<'_, R>>, RuntimeWorldAccessError> {
+        ensure_scoped_type_is_unprotected::<R>()?;
+        Ok(self.world.get_resource_mut::<R>())
+    }
+
+    pub fn resource_mut<R: Resource<Mutability = Mutable>>(
+        &mut self,
+    ) -> Result<Mut<'_, R>, RuntimeWorldAccessError> {
+        self.get_resource_mut::<R>()?
+            .ok_or(RuntimeWorldAccessError::MissingResource {
+                type_name: type_name::<R>(),
+            })
+    }
+
+    pub fn insert_resource<R: Resource>(
+        &mut self,
+        resource: R,
+    ) -> Result<(), RuntimeWorldAccessError> {
+        ensure_scoped_type_is_unprotected::<R>()?;
+        self.world.insert_resource(resource);
+        Ok(())
+    }
+
+    pub fn remove_resource<R: Resource>(&mut self) -> Result<Option<R>, RuntimeWorldAccessError> {
+        ensure_scoped_type_is_unprotected::<R>()?;
+        Ok(self.world.remove_resource::<R>())
     }
 }
 
@@ -989,6 +1144,7 @@ impl RuntimeCandidate {
             .append(app.take_runtime_obligations())
             .expect("runtime obligation conflicts were preflighted");
         let reporter = app.runtime_fault_reporter.clone();
+        app.managed_runtime_generation = Some(generation);
         app.world.insert_resource(generation);
         app.world
             .insert_resource(FallbackErrorHandler(runtime_system_error_handler));
@@ -1009,25 +1165,6 @@ impl RuntimeCandidate {
         self.owner.app.world()
     }
 
-    /// Runs one short-lived mutable World operation on an unpublished candidate.
-    ///
-    /// Candidate access rejects an existing sticky fault. During the operation, the candidate
-    /// binds its canonical reporter so unhandled fallible systems and observers cannot silently
-    /// bypass runtime fault capture.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuntimeScopeError::Faulted`] when the candidate was already faulted, its fault
-    /// bridge authority was replaced, or the operation reports a new canonical runtime fault.
-    pub fn scope_world_mut<R>(
-        &mut self,
-        operation: impl FnOnce(&mut World) -> R,
-    ) -> Result<R, RuntimeScopeError> {
-        self.owner
-            .capture_world_scope(true, operation)
-            .map_err(|fault| RuntimeScopeError::Faulted { fault })
-    }
-
     #[must_use]
     pub fn fault_reporter(&self) -> RuntimeFaultReporter {
         self.owner.reporter().clone()
@@ -1040,12 +1177,17 @@ impl RuntimeCandidate {
 
     pub fn complete_startup(mut self) -> Result<ReadyRuntimeCandidate, RuntimeCandidateFailure> {
         let reporter = self.owner.reporter().clone();
-        if let Some(fault) = self
-            .owner
-            .validate_fault_bridge_authority()
-            .err()
-            .or_else(|| reporter.fault())
-        {
+        let bridge_epoch = match self.owner.begin_fault_bridge_epoch() {
+            Ok(epoch) => epoch,
+            Err(fault) => {
+                return Err(RuntimeCandidateFailure::new(
+                    self.owner,
+                    self.generation,
+                    fault,
+                ));
+            }
+        };
+        if let Some(fault) = reporter.fault() {
             return Err(RuntimeCandidateFailure::new(
                 self.owner,
                 self.generation,
@@ -1059,7 +1201,6 @@ impl RuntimeCandidate {
             Ok(Err(error)) => Some(RuntimeFault::app(error)),
             Err(fault) => Some(fault),
         }
-        .or_else(|| self.owner.validate_fault_bridge_authority().err())
         .or_else(|| reporter.fault())
         .or_else(|| {
             self.owner
@@ -1068,7 +1209,7 @@ impl RuntimeCandidate {
                 .err()
                 .map(RuntimeFault::app)
         })
-        .or_else(|| self.owner.validate_fault_bridge_authority().err());
+        .or_else(|| self.owner.validate_fault_bridge_epoch(bridge_epoch).err());
 
         if let Some(fault) = fault {
             return Err(RuntimeCandidateFailure::new(
@@ -1421,11 +1562,17 @@ impl RuntimeInstance {
         self.owner.app.world()
     }
 
-    /// Grants a platform or Host one short-lived mutable runtime World scope.
+    #[cfg(test)]
+    pub(crate) fn world_mut_for_tests(&mut self) -> &mut World {
+        &mut self.owner.app.world
+    }
+
+    /// Grants a platform or Host one short-lived managed runtime scope.
     ///
-    /// The scope binds the canonical reporter and verifies fault-bridge authority around healthy
-    /// execution. A previously faulted runtime still permits this scope so the driver can retire
-    /// surfaces and other owned services; the existing fault remains sticky and observable.
+    /// The scope exposes immutable World inspection plus guarded mutable resource access.
+    /// Runtime-managed fault resources cannot be selected through that mutable surface. A
+    /// previously faulted runtime still permits this scope so the driver can retire surfaces and
+    /// other owned services; the existing fault remains sticky and observable.
     ///
     /// # Errors
     ///
@@ -1441,7 +1588,7 @@ impl RuntimeInstance {
             return Err(RuntimeScopeError::Unavailable { state });
         }
         self.owner
-            .capture_world_scope(false, |world| {
+            .capture_driver_scope(|world| {
                 let mut scope = RuntimeDriverScope { world };
                 operation(&mut scope)
             })
@@ -1685,16 +1832,17 @@ impl RuntimeInstance {
         real_delta: Duration,
         mode: RuntimeFrameMode,
     ) -> Result<AppFrameOutcome, RuntimeDriveError> {
-        if let Err(fault) = self.owner.validate_fault_bridge_authority() {
-            return Err(self.enter_fault(fault));
-        }
+        let bridge_epoch = match self.owner.begin_fault_bridge_epoch() {
+            Ok(epoch) => epoch,
+            Err(fault) => return Err(self.enter_fault(fault)),
+        };
         let reporter = self.owner.reporter().clone();
         let result = with_runtime_system_fault_capture(&reporter, || match mode {
             RuntimeFrameMode::Running => self.owner.app.run_managed_frame(real_delta),
             RuntimeFrameMode::Paused => self.owner.app.run_paused_frame(real_delta),
         });
         match result {
-            Ok(result) => self.finish_app_drive(result),
+            Ok(result) => self.finish_app_drive(result, bridge_epoch),
             Err(fault) => Err(self.enter_fault(fault)),
         }
     }
@@ -1703,15 +1851,16 @@ impl RuntimeInstance {
         &mut self,
         real_delta: Duration,
     ) -> Result<AppFrameOutcome, RuntimeDriveError> {
-        if let Err(fault) = self.owner.validate_fault_bridge_authority() {
-            return Err(self.enter_fault(fault));
-        }
+        let bridge_epoch = match self.owner.begin_fault_bridge_epoch() {
+            Ok(epoch) => epoch,
+            Err(fault) => return Err(self.enter_fault(fault)),
+        };
         let reporter = self.owner.reporter().clone();
         let result = with_runtime_system_fault_capture(&reporter, || {
             self.owner.app.run_exact_fixed_tick(real_delta)
         });
         match result {
-            Ok(result) => self.finish_app_drive(result),
+            Ok(result) => self.finish_app_drive(result, bridge_epoch),
             Err(fault) => Err(self.enter_fault(fault)),
         }
     }
@@ -1737,11 +1886,12 @@ impl RuntimeInstance {
     fn finish_app_drive(
         &mut self,
         result: Result<AppFrameOutcome, AppRunError>,
+        bridge_epoch: RuntimeFaultBridgeEpoch,
     ) -> Result<AppFrameOutcome, RuntimeDriveError> {
         if let Err(error) = result {
             return Err(self.enter_fault(RuntimeFault::app(error)));
         }
-        if let Err(fault) = self.owner.validate_fault_bridge_authority() {
+        if let Err(fault) = self.owner.validate_fault_bridge_epoch(bridge_epoch) {
             return Err(self.enter_fault(fault));
         }
         if let Some(fault) = self.owner.reporter().fault() {
@@ -1920,6 +2070,13 @@ impl RuntimeOwnerState {
             return;
         };
 
+        let bridge_epoch = match self.begin_fault_bridge_epoch() {
+            Ok(epoch) => Some(epoch),
+            Err(fault) => {
+                self.reporter.record_canonical(fault);
+                None
+            }
+        };
         let reporter = self.reporter.clone();
         let close_pass = with_runtime_system_fault_capture(&reporter, || {
             if attempt.plugin_shutdown == PluginShutdownState::Pending {
@@ -1947,6 +2104,12 @@ impl RuntimeOwnerState {
             }
         };
 
+        if let Some(epoch) = bridge_epoch
+            && let Err(fault) = self.validate_fault_bridge_epoch(epoch)
+        {
+            self.reporter.record_canonical(fault);
+        }
+
         let all_complete = self.obligations.is_close_complete();
         if all_complete && attempt.plugin_shutdown == PluginShutdownState::Complete {
             self.reporter.mark_closed();
@@ -1968,44 +2131,53 @@ impl RuntimeOwnerState {
         &self.reporter
     }
 
-    fn validate_fault_bridge_authority(&self) -> Result<(), RuntimeFault> {
-        let reporter_valid = self
-            .app
-            .world
-            .get_resource::<RuntimeFaultReporter>()
-            .is_some_and(|reporter| reporter.has_authority(&self.reporter));
-        let handler_valid = self
-            .app
-            .world
-            .get_resource::<FallbackErrorHandler>()
-            .is_some_and(|handler| {
-                std::ptr::fn_addr_eq(handler.0, runtime_system_error_handler as ErrorHandler)
-            });
-        if reporter_valid && handler_valid {
+    fn begin_fault_bridge_epoch(&mut self) -> Result<RuntimeFaultBridgeEpoch, RuntimeFault> {
+        self.validate_fault_bridge_authority()?;
+        let revision = self.app.world.resource::<RuntimeFaultBridgeRevision>().0;
+        let reporter = self.reporter.clone();
+        let fault_before = reporter.fault();
+        with_runtime_system_fault_capture(&reporter, || {
+            self.app.world.increment_change_tick();
+            self.app.world.check_change_ticks();
+        })?;
+        self.validate_fault_bridge_authority()?;
+        if self.app.world.resource::<RuntimeFaultBridgeRevision>().0 != revision {
+            return Err(runtime_fault_bridge_authority_fault());
+        }
+        if fault_before.is_none()
+            && let Some(fault) = reporter.fault()
+        {
+            return Err(fault);
+        }
+        RuntimeFaultBridgeEpoch::capture(&self.app.world)
+            .ok_or_else(runtime_fault_bridge_authority_fault)
+    }
+
+    fn validate_fault_bridge_epoch(
+        &self,
+        expected: RuntimeFaultBridgeEpoch,
+    ) -> Result<(), RuntimeFault> {
+        self.validate_fault_bridge_authority()?;
+        if RuntimeFaultBridgeEpoch::capture(&self.app.world) == Some(expected) {
             Ok(())
         } else {
-            Err(RuntimeFault::engine(
-                RuntimeFaultKind::FaultReporterAuthority,
-                "nara.app.runtime-fault-reporter",
-            ))
+            Err(runtime_fault_bridge_authority_fault())
         }
     }
 
-    fn capture_world_scope<R>(
+    fn validate_fault_bridge_authority(&self) -> Result<(), RuntimeFault> {
+        validate_runtime_fault_bridge_authority(&self.app.world, &self.reporter)
+    }
+
+    fn capture_driver_scope<R>(
         &mut self,
-        reject_existing_fault: bool,
         operation: impl FnOnce(&mut World) -> R,
     ) -> Result<R, RuntimeFault> {
         let reporter = self.reporter.clone();
         let fault_before = reporter.fault();
-        if reject_existing_fault && let Some(fault) = fault_before.as_ref() {
-            return Err(fault.clone());
-        }
-        if fault_before.is_none()
-            && let Err(fault) = self.validate_fault_bridge_authority()
-        {
-            return Err(reporter.record_canonical(fault));
-        }
+        let bridge_epoch = self
+            .begin_fault_bridge_epoch()
+            .map_err(|fault| reporter.record_canonical(fault))?;
 
         let result =
             match with_runtime_system_fault_capture(&reporter, || operation(&mut self.app.world)) {
@@ -2013,10 +2185,10 @@ impl RuntimeOwnerState {
                 Err(fault) => return Err(reporter.record_canonical(fault)),
             };
 
+        if let Err(fault) = self.validate_fault_bridge_epoch(bridge_epoch) {
+            return Err(reporter.record_canonical(fault));
+        }
         if fault_before.is_none() {
-            if let Err(fault) = self.validate_fault_bridge_authority() {
-                return Err(reporter.record_canonical(fault));
-            }
             if let Some(fault) = reporter.fault() {
                 return Err(fault);
             }
@@ -2303,6 +2475,13 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn runtime_fault_bridge_authority_fault() -> RuntimeFault {
+    RuntimeFault::engine(
+        RuntimeFaultKind::FaultReporterAuthority,
+        "nara.app.runtime-fault-reporter",
+    )
+}
+
 struct ActiveRuntimeReporterGuard<'lock> {
     _schedule_authority: MutexGuard<'lock, ()>,
 }
@@ -2334,7 +2513,7 @@ fn with_runtime_system_fault_capture<R>(
     Ok(operation())
 }
 
-fn runtime_system_error_handler(error: BevyError, context: ErrorContext) {
+pub(crate) fn runtime_system_error_handler(error: BevyError, context: ErrorContext) {
     let severity = error.severity();
     if severity == Severity::Error {
         let kind = match &context {

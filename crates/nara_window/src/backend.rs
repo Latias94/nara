@@ -6,7 +6,8 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use nara_ecs::{Resource, World};
+use nara_app::RuntimeDriverScope;
+use nara_ecs::Resource;
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
@@ -193,14 +194,18 @@ pub enum WindowSurfaceRetirementError {
 #[derive(Clone, Copy, Resource)]
 pub struct WindowSurfaceRetirementDriver {
     driver: &'static str,
-    retire: fn(&mut World, &[WindowId]) -> Result<(), WindowSurfaceRetirementError>,
+    retire:
+        fn(&mut RuntimeDriverScope<'_>, &[WindowId]) -> Result<(), WindowSurfaceRetirementError>,
 }
 
 impl WindowSurfaceRetirementDriver {
     #[must_use]
     pub const fn new(
         driver: &'static str,
-        retire: fn(&mut World, &[WindowId]) -> Result<(), WindowSurfaceRetirementError>,
+        retire: fn(
+            &mut RuntimeDriverScope<'_>,
+            &[WindowId],
+        ) -> Result<(), WindowSurfaceRetirementError>,
     ) -> Self {
         Self { driver, retire }
     }
@@ -212,10 +217,10 @@ impl WindowSurfaceRetirementDriver {
 
     pub fn retire_targets(
         self,
-        world: &mut World,
+        scope: &mut RuntimeDriverScope<'_>,
         window_ids: &[WindowId],
     ) -> Result<(), WindowSurfaceRetirementError> {
-        (self.retire)(world, window_ids)
+        (self.retire)(scope, window_ids)
     }
 }
 

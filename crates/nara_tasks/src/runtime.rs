@@ -3181,9 +3181,13 @@ impl RuntimeCloseParticipant for TaskPoolsCloseParticipant {
                     .get_resource::<TaskPools>()
                     .is_some_and(|pools| pools.has_ownership_token(&self.instance_token));
                 if owns_world_facade {
-                    context.world_mut().remove_resource::<TaskPools>();
+                    context.remove_resource::<TaskPools>().map_err(|_| {
+                        RuntimeCloseParticipantError::terminal("nara.tasks.runtime-resource-access")
+                    })?;
                 }
-                context.world_mut().insert_resource(report);
+                context.insert_resource(report).map_err(|_| {
+                    RuntimeCloseParticipantError::terminal("nara.tasks.runtime-resource-access")
+                })?;
                 Ok(RuntimeCloseProgress::Complete)
             }
         }

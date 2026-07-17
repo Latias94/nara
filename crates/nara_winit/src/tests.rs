@@ -11,7 +11,8 @@ use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, PluginShutdownContext,
     RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
     RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
-    RuntimeClosePolicy, RuntimeCloseProgress, RuntimeObligationLedger,
+    RuntimeClosePolicy, RuntimeCloseProgress, RuntimeDriverScope, RuntimeFaultKind,
+    RuntimeObligationLedger,
 };
 use nara_window::{
     WindowEvents, WindowPlugin,
@@ -24,6 +25,30 @@ use raw_window_handle::{
 #[derive(Debug)]
 struct TestWindowSource {
     events: Arc<Mutex<Vec<&'static str>>>,
+}
+
+#[test]
+fn runtime_scope_fault_preserves_managed_runtime_identity() {
+    let error = runtime_scope_error(RuntimeScopeError::Faulted {
+        fault: RuntimeFault::engine(RuntimeFaultKind::RequiredService, "nara.test.winit-service"),
+    });
+
+    assert!(matches!(
+        error,
+        AppRunError::ManagedRuntime {
+            kind: RuntimeFaultKind::RequiredService,
+            fault_source: "nara.test.winit-service"
+        }
+    ));
+}
+
+#[test]
+fn unavailable_runtime_scope_remains_a_runner_error() {
+    let error = runtime_scope_error(RuntimeScopeError::Unavailable {
+        state: RuntimeState::Stopped,
+    });
+
+    assert!(matches!(error, AppRunError::Runner { .. }));
 }
 
 impl Drop for TestWindowSource {
@@ -206,10 +231,15 @@ fn add_fake_surface(
 }
 
 fn retire_fake_surfaces(
-    world: &mut nara_ecs::World,
+    scope: &mut RuntimeDriverScope<'_>,
     window_ids: &[WindowId],
 ) -> Result<(), WindowSurfaceRetirementError> {
-    let Some(mut backend) = world.get_non_send_mut::<FakeSurfaceBackend>() else {
+    let Some(mut backend) = scope
+        .get_non_send_resource_mut::<FakeSurfaceBackend>()
+        .map_err(|_| WindowSurfaceRetirementError::DriverFailed {
+            driver: "test.surface",
+        })?
+    else {
         return Ok(());
     };
     let mut first_error = None;

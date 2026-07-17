@@ -19,7 +19,7 @@ use crate::quad::{
     WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers_for_phase,
 };
 use crate::surface::{SurfaceDropReason, WgpuSurfaceState};
-use nara_app::{App, CoreStage, Plugin, PluginError, PluginShutdownContext};
+use nara_app::{App, CoreStage, Plugin, PluginError, PluginShutdownContext, RuntimeDriverScope};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_asset::Assets;
 use nara_ecs::{Query, Res, ResMut, schedule::IntoScheduleConfigs, system::NonSendMarker};
@@ -120,10 +120,15 @@ impl Plugin for WgpuRenderPlugin {
 }
 
 fn retire_wgpu_window_surfaces(
-    world: &mut nara_ecs::World,
+    scope: &mut RuntimeDriverScope<'_>,
     window_ids: &[WindowId],
 ) -> Result<(), WindowSurfaceRetirementError> {
-    let Some(mut backend) = world.get_resource_mut::<WgpuRenderBackend>() else {
+    let Some(mut backend) = scope.get_resource_mut::<WgpuRenderBackend>().map_err(|_| {
+        WindowSurfaceRetirementError::DriverFailed {
+            driver: WGPU_RENDER_BACKEND,
+        }
+    })?
+    else {
         return Ok(());
     };
     backend
