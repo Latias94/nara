@@ -79,6 +79,11 @@ This document contains undecided architecture questions only. Accepted decisions
   is an optional C# gameplay Adapter using CoreCLR hosting plus the Roslyn/MSBuild toolchain. The
   trial selects the then-current supported .NET LTS; this hypothesis does not select a public SDK,
   runtime version, or Accepted implementation.
+- **Current research evidence**: [The LogLog/C# gameplay research
+  note](../knowledge/engineering/subagents/2026-07/2026-07-17-loglog-rust-gamedev-csharp-gameplay-research.md)
+  maps the experienced Rust-gameplay critique to language relief, engine-owned product work, CLR
+  risks, alternative authoring shapes, and a disposable Behavior-plus-batch Trial experience. It is
+  non-normative and does not advance this question's admission ladder.
 - **Research admission ladder**:
   1. Read-only precedent research may continue at any time, but it may only refine this question or
      language-independent work already justified by Rust consumers. It cannot add a production
