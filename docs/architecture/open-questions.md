@@ -68,13 +68,57 @@ This document contains undecided architecture questions only. Accepted decisions
 
 - **Status**: open
 - **Owner**: a concrete gameplay-language Adapter package
-- **Trigger**: A real project deliberately chooses a separately reloadable scripting layer and can name workflows that the complete Rust path does not satisfy.
-- **Related ADRs**: 0020, 0035, 0042, 0045, 0055, 0079, 0081, 0086, 0088, 0090, 0093
+- **Trigger**: A real project or target author can name concrete gameplay-authoring,
+  collaboration, iteration, or delivery workflows that the complete Rust path does not satisfy well
+  enough. Separately reloadable code is one candidate workflow, not a prerequisite for opening this
+  question.
+- **Related ADRs**: 0003, 0010, 0020, 0034, 0035, 0039, 0042, 0045, 0055, 0076,
+  0079, 0081, 0082, 0084, 0086, 0088, 0090, 0093
 - **Question**: Which concrete adapter should be trialed first, which lifecycle/data/tooling contracts belong to that adapter, and which contracts have enough independent consumers to move into Nara-owned domain APIs without creating a universal Behavior Host?
 - **Current hypothesis**: The preferred product hypothesis and leading first-party trial candidate
   is an optional C# gameplay Adapter using CoreCLR hosting plus the Roslyn/MSBuild toolchain. The
   trial selects the then-current supported .NET LTS; this hypothesis does not select a public SDK,
   runtime version, or Accepted implementation.
+- **Research admission ladder**:
+  1. Read-only precedent research may continue at any time, but it may only refine this question or
+     language-independent work already justified by Rust consumers. It cannot add a production
+     Adapter crate, public C# API, root capability, manifest field, VM dependency, or managed
+     artifact layout.
+  2. Bounded CoreCLR/Roslyn feasibility research may begin only after this question's Trigger is
+     satisfied and the active reference-game plan, or its actively registered successor, has all of
+     the following evidence: stable runtime-independent Schema identities and Catalog/native-binding
+     separation; an `RGF-U14` Continue result for the Rust headless and desktop first playable;
+     `RGF-U17` Host-owned Editor Play/Stop/fresh-Restart; and `RGF-U7` checkout-free Rust candidate
+     packaging. Its outputs are design evidence, measurements, and a disposable tracer outside
+     production APIs; completing the foundations alone does not admit this research automatically.
+  3. A product-shaped C# vertical slice may begin only when `RGF-U20`, or the corresponding closure
+     unit of an actively registered successor plan, records a non-blocking next-slice decision that
+     admits a separate OQ-007 Trial plan. A missing feasibility tracer, an incomplete result, or a
+     triggered stop condition can only keep OQ-007 deferred. An admission record must pin the tracer
+     revision, result, and stop-condition verdict and name the target author, Rust workflow gap,
+     comparison task, supported desktop profile, maintenance/reversibility budget, and Trial stop
+     conditions. It does not change the current Rust release verdict.
+  4. Production adoption and Adapter-specific Accepted ADRs require the end-to-end Trial evidence
+     below. A technically functioning bridge is not sufficient by itself.
+
+```mermaid
+flowchart LR
+  F[Language-independent Rust foundations] --> R[Bounded C# feasibility research]
+  R --> G{Tracer passes its stop conditions?}
+  G -->|No| H[Keep OQ-007 deferred]
+  G -->|Yes| D{U20 admits a separate Trial?}
+  D -->|No| H[Keep OQ-007 deferred]
+  D -->|Yes| T[Product-shaped C# vertical slice]
+  T --> A{Adoption evidence passes?}
+  A -->|No| H
+  A -->|Yes| P[Adapter-specific ADRs and production work]
+```
+
+- **Research-timing alternatives**: Starting production Adapter work now is rejected because it
+  would make an unproven language shape the Rust foundation. Waiting until every engine subsystem
+  is complete is also rejected because Host, Schema, Play, and export constraints would become
+  expensive to challenge. The staged ladder above begins disposable research once the relevant
+  foundations and Rust baseline exist, while reserving production authority for a separate Trial.
 - **Product-shape alternatives**: The trial must distinguish Rust-only, mixed Rust Host/Plugin plus
   C# gameplay, and C#-only projects using a prebuilt Nara Host. An initial technical slice may use a
   project-built Rust Host, but first-party C# product adoption must prove Play and clean export
@@ -106,13 +150,18 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Decision surface**: The tracer must decide stable module/type/field/attachment identity; one or
   multiple same-type attachments; persistent, runtime-private, and reload-retained state; Schema
   projection/freeze/migration and missing-type authoring; bounded data access and schedule semantics;
-  managed module generation, last-good activation, reload/restart and debugger behavior; project
-  graphs, trust, target export, runtime-pack provenance, and supported platform/profile scope.
+  Host/SDK/generated-binding compatibility identities; managed module generation, last-good
+  activation, reload/restart and debugger behavior; exception, `Task`, thread, GC-root, and shutdown
+  obligations across runtime generations; deterministic/replay non-claims; project graphs, trust,
+  target export, runtime-pack provenance, and supported platform/profile scope.
 - **Admission evidence**: One end-to-end game slice must prove schema-backed Inspector fields,
   unique-per-type scene attachment and duplicate rejection, missing-module degraded round trips,
   structured compile diagnostics, bounded gameplay data access, command/service integration,
   Play/Stop/restart behavior, clean-machine desktop export, and measured edit latency, bridge/GC
-  frame cost, startup, and package size.
+  frame cost, startup, and package size. For one named target-author persona and the same gameplay
+  task, it must compare authoring outcome with the `RGF-U14`/`RGF-U20` Rust baseline, demonstrate a
+  material user benefit, remain within a precommitted maintenance/reversibility budget, and show no
+  unacceptable regression to the complete Rust path.
 - **Adoption impact**: Success may refine project layout/settings (ADRs 0020/0035), Adapter-owned
   Schema projection and lossless missing-type authoring (0045/0081/0090), optional product and CI
   capabilities (0055/0079), and managed target artifacts (0088). ADR 0086 remains the Rust/Cargo
@@ -120,8 +169,9 @@ This document contains undecided architecture questions only. Accepted decisions
   executable generation, and shared activation concepts move outward only after both paths prove
   the same contract.
 - **Foundation guardrail**: Before this question triggers, continue only language-independent
-  foundations already justified by the Rust/editor path. Do not add Adapter-specific production
-  APIs in anticipation of C#.
+  foundations already justified by the Rust/editor path. Before the bounded-research gate, only
+  read-only precedent work is admitted; before the separate Trial plan, do not add Adapter-specific
+  production APIs in anticipation of C#.
 - **Terminology**: Existing Nara documents use *managed runtime* for a runtime lifecycle managed by
   a Nara Host/`RuntimeInstance`, not for CLR-managed code. This question uses *.NET runtime* or
   *CoreCLR* when it means the managed-code runtime.
