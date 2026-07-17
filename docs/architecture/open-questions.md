@@ -64,21 +64,49 @@ This document contains undecided architecture questions only. Accepted decisions
   tombstone, migration, service reconstruction, and transactional restore rules form the first save
   format without serializing an ambient `World` or backend-native state?
 
-## OQ-007: Optional Scripting Adapter Contract
+## OQ-007: Optional Gameplay-Language Adapter Contract
 
 - **Status**: open
-- **Owner**: a concrete scripting adapter package
+- **Owner**: a concrete gameplay-language Adapter package
 - **Trigger**: A real project deliberately chooses a separately reloadable scripting layer and can name workflows that the complete Rust path does not satisfy.
-- **Related ADRs**: 0042, 0045, 0093
+- **Related ADRs**: 0020, 0035, 0042, 0045, 0055, 0079, 0081, 0086, 0088, 0090, 0093
 - **Question**: Which concrete adapter should be trialed first, which lifecycle/data/tooling contracts belong to that adapter, and which contracts have enough independent consumers to move into Nara-owned domain APIs without creating a universal Behavior Host?
-- **Current hypothesis**: The leading first-party trial candidate is an optional C# gameplay
-  Adapter using CoreCLR hosting plus the Roslyn/MSBuild toolchain. The trial selects the then-current
-  supported .NET LTS; this hypothesis does not select a public SDK, runtime version, or Accepted
-  implementation.
+- **Current hypothesis**: The preferred product hypothesis and leading first-party trial candidate
+  is an optional C# gameplay Adapter using CoreCLR hosting plus the Roslyn/MSBuild toolchain. The
+  trial selects the then-current supported .NET LTS; this hypothesis does not select a public SDK,
+  runtime version, or Accepted implementation.
+- **Product-shape alternatives**: The trial must distinguish Rust-only, mixed Rust Host/Plugin plus
+  C# gameplay, and C#-only projects using a prebuilt Nara Host. An initial technical slice may use a
+  project-built Rust Host, but first-party C# product adoption must prove Play and clean export
+  without requiring an otherwise empty Cargo application. Cargo remains the Rust graph authority;
+  MSBuild/NuGet remains the managed graph authority; Nara must not invent one combined resolver.
+- **Product-experience preference**: Aim first for the familiar Godot/Unity C# gameplay workflow:
+  create a C#-only project, attach typed gameplay behavior to scene entities, expose stable fields in
+  the Inspector, receive source-aware compile diagnostics, use standard .NET IDE/debugger tooling,
+  click Play/Stop/restart, and export without author-written Rust. This is a user-experience target,
+  not a commitment to copy Godot's `ScriptLanguage` or Unity's `MonoBehaviour` internals.
+- **Leading authoring hypothesis**: Evaluate a Unity/Godot-like Behavior facade over
+  Adapter-private managed instances first, backed by stable Nara Schema data, generation-stamped
+  handles, batched query views, commands, and services. A second managed ECS authority or dynamic
+  Bevy component storage remains a counterfactual, admitted only if the Behavior/hybrid tracer fails
+  for a named storage or performance reason. Compare another gameplay-language candidate only when
+  measured evidence shows that the C# product hypothesis cannot meet an accepted workflow or target
+  constraint, not merely because the first implementation is difficult.
+- **Decision surface**: The tracer must decide stable module/type/field/attachment identity; one or
+  multiple same-type attachments; persistent, runtime-private, and reload-retained state; Schema
+  projection/freeze/migration and missing-type authoring; bounded data access and schedule semantics;
+  managed module generation, last-good activation, reload/restart and debugger behavior; project
+  graphs, trust, target export, runtime-pack provenance, and supported platform/profile scope.
 - **Admission evidence**: One end-to-end game slice must prove schema-backed Inspector fields,
   scene attachment, structured compile diagnostics, bounded gameplay data access, command/service
   integration, Play/Stop/restart behavior, clean-machine desktop export, and measured edit latency,
   bridge/GC frame cost, startup, and package size.
+- **Adoption impact**: Success may refine project layout/settings (ADRs 0020/0035), Adapter-owned
+  Schema projection and lossless missing-type authoring (0045/0081/0090), optional product and CI
+  capabilities (0055/0079), and managed target artifacts (0088). ADR 0086 remains the Rust/Cargo
+  executable-generation contract; a managed module generation must not masquerade as a native
+  executable generation, and shared activation concepts move outward only after both paths prove
+  the same contract.
 - **Foundation guardrail**: Before this question triggers, continue only language-independent
   foundations already justified by the Rust/editor path. Do not add Adapter-specific production
   APIs in anticipation of C#.
