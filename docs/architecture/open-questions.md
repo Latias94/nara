@@ -71,6 +71,23 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Trigger**: A real project deliberately chooses a separately reloadable scripting layer and can name workflows that the complete Rust path does not satisfy.
 - **Related ADRs**: 0042, 0045, 0093
 - **Question**: Which concrete adapter should be trialed first, which lifecycle/data/tooling contracts belong to that adapter, and which contracts have enough independent consumers to move into Nara-owned domain APIs without creating a universal Behavior Host?
+- **Current hypothesis**: The leading first-party trial candidate is an optional C# gameplay
+  Adapter using CoreCLR hosting plus the Roslyn/MSBuild toolchain. The trial selects the then-current
+  supported .NET LTS; this hypothesis does not select a public SDK, runtime version, or Accepted
+  implementation.
+- **Admission evidence**: One end-to-end game slice must prove schema-backed Inspector fields,
+  scene attachment, structured compile diagnostics, bounded gameplay data access, command/service
+  integration, Play/Stop/restart behavior, clean-machine desktop export, and measured edit latency,
+  bridge/GC frame cost, startup, and package size.
+- **Foundation guardrail**: Before this question triggers, continue only language-independent
+  foundations already justified by the Rust/editor path. Do not add Adapter-specific production
+  APIs in anticipation of C#.
+- **Terminology**: Existing Nara documents use *managed runtime* for a runtime lifecycle managed by
+  a Nara Host/`RuntimeInstance`, not for CLR-managed code. This question uses *.NET runtime* or
+  *CoreCLR* when it means the managed-code runtime.
+- **Non-commitments**: This hypothesis does not admit a coequal official language, a default VM
+  dependency, a universal Behavior Host or scripting ABI, dynamic non-Rust ECS storage, a sandbox
+  claim, a fixed Editor/Player process topology, C# editor extension parity, or a platform matrix.
 
 ## OQ-008: Authoring-to-Runtime Projection and Baking
 
