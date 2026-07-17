@@ -109,24 +109,6 @@ mod tests {
         atomic::{AtomicBool, AtomicUsize, Ordering},
     };
 
-    struct PendingCloseParticipant;
-
-    impl RuntimeCloseParticipant for PendingCloseParticipant {
-        fn begin_close(
-            &mut self,
-            _context: &mut RuntimeCloseContext<'_>,
-        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            Ok(RuntimeCloseProgress::Pending)
-        }
-
-        fn poll_close(
-            &mut self,
-            _context: &mut RuntimeCloseContext<'_>,
-        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            Ok(RuntimeCloseProgress::Pending)
-        }
-    }
-
     struct ReleasedCloseParticipant {
         released: Arc<AtomicBool>,
         polls: Arc<AtomicUsize>,
@@ -199,23 +181,28 @@ mod tests {
 
     #[test]
     fn incomplete_retirement_error_retains_owner_and_structured_evidence() {
+        let released = Arc::new(AtomicBool::new(false));
+        let polls = Arc::new(AtomicUsize::new(0));
         let mut obligations = RuntimeObligationLedger::new();
         obligations
             .register(
                 RuntimeCloseParticipantId::new("nara.example.pending-close"),
-                PendingCloseParticipant,
+                ReleasedCloseParticipant {
+                    released: released.clone(),
+                    polls: polls.clone(),
+                },
             )
             .unwrap();
         let runtime = start_runtime(obligations, RuntimeClosePolicy::new(Duration::ZERO));
 
-        let error = finish_runtime_after_winit_with_timeout(
+        let mut error = finish_runtime_after_winit_with_timeout(
             Ok(nara::app::AppExit::Success),
             runtime,
             Duration::from_millis(10),
         )
         .unwrap_err();
         let failure = error
-            .downcast_ref::<RuntimeRetirementFailure>()
+            .downcast_mut::<RuntimeRetirementFailure>()
             .expect("incomplete retirement keeps the typed owner error");
 
         assert_eq!(
@@ -228,6 +215,13 @@ mod tests {
                 .causes()
                 .contains(&RuntimeCloseCause::DeadlineExceeded)
         );
+        let polls_before_release = polls.load(Ordering::SeqCst);
+        released.store(true, Ordering::SeqCst);
+        assert_eq!(
+            failure.retirement.drive_retirement(),
+            nara::app::RuntimeCandidateRetirementState::Retired
+        );
+        assert!(polls.load(Ordering::SeqCst) > polls_before_release);
     }
 
     #[test]
