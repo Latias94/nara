@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8d84ca1fe4de07ab5c22f8fca7afe2c098fbfba74140b40d08fd82ea81d186a7"
+source_fingerprint: "c4170a27ab4e2bda8cbcc9ee8bc0d98c46274751f8398c2658ac9e20129f804b"
 ---
 
 # Current State
@@ -12,17 +12,19 @@ source_fingerprint: "8d84ca1fe4de07ab5c22f8fca7afe2c098fbfba74140b40d08fd82ea81d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8d84ca1fe4de07ab5c22f8fca7afe2c098fbfba74140b40d08fd82ea81d186a7`
-- Immutable records: 135
+- Source fingerprint: `c4170a27ab4e2bda8cbcc9ee8bc0d98c46274751f8398c2658ac9e20129f804b`
+- Immutable records: 138
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game-driven foundation refactor](registry/2026-07/2026-07-16T163914Z-engine-foundation-contract-completion-codex-root-daa83b6521074f95b4a62fbd838a2425.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-architecture-review`)
+- [Reference-game-driven foundation refactor](registry/2026-07/2026-07-17T014904Z-engine-foundation-contract-completion-codex-root-a08a5a1abe424c2b94cdf130a2667d95.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGF-U5 managed runtime verification](verification/2026-07/2026-07-17T014655Z-rgf-u5-managed-runtime-verification-5b37e0cb30ca4d24bb1b30fc98dc7e47.md) - Verified sealed-App admission, sticky fault propagation, exact stepping, bounded close ownership, Winit retirement ordering, and independent reference-game consumption.
+- **Subagent Finding**: [RGF-U5 runtime ownership closure review](subagents/2026-07/2026-07-17-rgf-u5-runtime-closure-review.md) - Independent closure review of the corrected managed-runtime ownership, fault, driver, and finite-close contracts.
 - **Decision**: [Treat ignore-deferred scheduling as an explicit compatibility opt-out](decisions/2026-07/2026-07-17T003947Z-treat-ignore-deferred-scheduling-as-an-explicit-compatibility-opt-out-5cbaef069ee343789b4414771fa516e7.md) - Keep Bevy's typed scheduler surface while excluding explicit ignore-deferred relations from Nara's public semantic-anchor compatibility guarantee.
 - **Subagent Finding**: [Bevy lifecycle observer and deferred schedule verification](subagents/2026-07/2026-07-16T164357Z-bevy-lifecycle-observer-and-deferred-schedule-verification-027c48803a9442d8930a3d0f558bafd3.md) - Source-bound correction for lifecycle event names, observer scopes, dynamic hooks, public-anchor deferred policy, and package removal co-ownership.
 - **Research Note**: [Bevy and Godot evidence for Nara's remaining early architecture decisions](subagents/2026-07/2026-07-16-bevy-godot-early-architecture-research.md) - Incremental source review of high-migration-cost boundaries that Nara should decide, preserve, defer, or reject.
@@ -33,8 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGF U11 safe surface retirement verification](verification/2026-07/2026-07-13T215323Z-rgf-u11-safe-surface-retirement-verification-7873dc371c574fa3a0330be2b39ca589.md) - Safe owning wgpu surfaces, owner-scoped Winit retirement, device-loss invalidation, and truthful failure aggregation verified.
 - **Verification Evidence**: [RGF-U3 capability and manifest ingest verification](verification/2026-07/2026-07-13T181057Z-rgf-u3-capability-and-manifest-ingest-verification-2aa2885658504654bf7fb5f4c1f55201.md) - RGF-U3 closed its feature surface, manifest authority, CLI privacy, and Server regression evidence on the active refactor branch.
 - **Research Note**: [Extension ecosystem research: packages, plugins, and editor contributions](extension-ecosystem-engine-research.md) - Cross-engine evidence for Nara's package and extension contribution boundaries.
-- **Session Handoff**: [RGF-U9 governance migration and RGF-U1 entry handoff](sessions/2026-07/2026-07-12T065637Z-rgf-u9-governance-migration-and-rgf-u1-entry-handoff-61e62159c1ee4c74a7b5da57625260df.md) - The reference-game-driven foundation plan is the sole active execution contract; RGF-U1 is the first code unit.
-- **Subagent Finding**: [Dioxus hot reload and Subsecond Rust hot-patching boundaries](subagents/2026-07/2026-07-12-dioxus-subsecond-rust-hot-patching-research.md) - Primary-source review of Dioxus RSX and asset reload, Subsecond runtime patching, current limitations, failure behavior, and realistic use with a Rust-first bevy_ecs game runtime.
 
 # Integration Notes
 

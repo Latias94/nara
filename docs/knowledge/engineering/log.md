@@ -5,6 +5,9 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-17
+* **Work Registration**: [Reference-game-driven foundation refactor](registry/2026-07/2026-07-17T014904Z-engine-foundation-contract-completion-codex-root-a08a5a1abe424c2b94cdf130a2667d95.md) - Continue the active reference-game-driven foundation plan after independently closing RGF-U5.
+* **Verification Evidence**: [RGF-U5 managed runtime verification](verification/2026-07/2026-07-17T014655Z-rgf-u5-managed-runtime-verification-5b37e0cb30ca4d24bb1b30fc98dc7e47.md) - Verified sealed-App admission, sticky fault propagation, exact stepping, bounded close ownership, Winit retirement ordering, and independent reference-game consumption.
+* **Subagent Finding**: [RGF-U5 runtime ownership closure review](subagents/2026-07/2026-07-17-rgf-u5-runtime-closure-review.md) - Independent closure review of the corrected managed-runtime ownership, fault, driver, and finite-close contracts.
 * **Decision**: [Treat ignore-deferred scheduling as an explicit compatibility opt-out](decisions/2026-07/2026-07-17T003947Z-treat-ignore-deferred-scheduling-as-an-explicit-compatibility-opt-out-5cbaef069ee343789b4414771fa516e7.md) - Keep Bevy's typed scheduler surface while excluding explicit ignore-deferred relations from Nara's public semantic-anchor compatibility guarantee.
 
 ## 2026-07-16
@@ -140,6 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Plan Registration**: [2D sprite tilemap render foundation planned](logs/2026-07/2026-07-08T063946Z-2d-sprite-tilemap-render-plan.md) - Records the implementation-ready 002 plan and the research adjustment for tilemap chunk/dirty semantics.
 * **Implementation Slice**: [Platform window render backend foundation implemented](logs/2026-07/2026-07-08T060500Z-platform-window-render-backend-slice.md) - Records the U2-U7 implementation state for runner, window, winit, render-domain, and wgpu backend boundaries.
 * **Architecture Decision**: [ADR 0032 render backend integration boundary accepted](logs/2026-07/2026-07-08T050000Z-render-backend-integration-boundary.md) - Records the platform/window/render backend foundation boundary before implementation.
-* **Memory Event**: [Runtime foundation committed](logs/2026-07/2026-07-08T044748Z-commit-runtime-foundation.md) - Recorded the initial nara runtime foundation commit and verification state.
-* **Implementation Log**: [Runtime foundation switched to bevy_ecs substrate](logs/2026-07/2026-07-08T044133Z-runtime-foundation-bevy-ecs-substrate-implemented.md) - Initial nara runtime foundation implementation aligned with accepted ECS, App, reflection, diagnostics, and transform ADRs.
-* **Memory Event**: [Architecture Decision: Accepted ADRs 0027-0031: save game/runtime persistence, networking/replication s](logs/2026-07/2026-07-08T033727Z-architecture-decision-accepted-adrs-0027-0031-save-game-runtime-persistence-networking-replication-s.md) - Accepted ADRs 0027-0031: save game/runtime persistence, networking/replication scope, animation strategy, audio strategy, and text/font stra
