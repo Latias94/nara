@@ -81,9 +81,15 @@ This document contains undecided architecture questions only. Accepted decisions
   runtime version, or Accepted implementation.
 - **Current research evidence**: [The LogLog/C# gameplay research
   note](../knowledge/engineering/subagents/2026-07/2026-07-17-loglog-rust-gamedev-csharp-gameplay-research.md)
-  maps the experienced Rust-gameplay critique to language relief, engine-owned product work, CLR
-  risks, alternative authoring shapes, and a disposable Behavior-plus-batch Trial experience. It is
-  non-normative and does not advance this question's admission ladder.
+  maps the experienced Rust-gameplay critique to language relief, engine-owned product work, and a
+  disposable Behavior-plus-batch Trial. [The Godot C# integration
+  note](../knowledge/engineering/godot-csharp-integration-research.md) examines hosting, assembly and
+  runtime generations, source generation, Editor/build/debug workflows, and managed export.
+  [The C# authoring-surface
+  note](../knowledge/engineering/csharp-gameplay-authoring-surface-research.md) compares the Unity
+  and Godot object models and develops the parameterless Behaviour plus explicit binding
+  hypothesis. All three are non-normative research evidence and do not advance this question's
+  admission ladder.
 - **Research admission ladder**:
   1. Read-only precedent research may continue at any time, but it may only refine this question or
      language-independent work already justified by Rust consumers. It cannot add a production
@@ -150,6 +156,23 @@ flowchart LR
   resolves every required binding before lifecycle callbacks begin. Raw component/query access is
   an explicit advanced-layer candidate, not the default gameplay vocabulary. Attribute names,
   generated member shapes, typed-owner shortcuts, and spawn return semantics remain Trial choices.
+- **Operation-shape guardrail**: Shared binding work must not assume that every domain interaction
+  is a projected property or deferred command. Physics-style synchronous queries, typed callbacks,
+  asynchronous request/results, and retained logical handles have different freshness,
+  cancellation, ordering, budget, and generation semantics. These are pressure categories, not a
+  public universal enum or service trait; concrete public APIs remain domain-owned.
+- **Cross-domain promotion gate**: The movement-and-fire slice may validate a disposable or
+  Adapter-specific implementation, but it cannot by itself freeze a reusable Nara-owned binding or
+  dispatcher contract. Promotion requires focused harness evidence for a physics query plus contact
+  callback, an animation parameter/marker/root-motion handoff, a shared-material versus
+  per-instance render override, and one cancellable asynchronous service result with a logical
+  handle. The harnesses need not implement complete domains and do not admit their public APIs.
+- **Author-role separation**: The Trial must distinguish an ordinary C# game author, a managed-only
+  gameplay package author consuming existing domain APIs, a native Rust domain package author that
+  supplies a managed companion facade, and the engine/SDK author that owns Host and binding
+  infrastructure. Before ecosystem parity is claimed, at least one independent managed-only
+  package and one independent Rust-backed domain package must install, diagnose, run, stop, and
+  update without a core package allowlist.
 - **First-trial multiplicity**: One scene entity may attach at most one instance of each stable C#
   Behavior type; different Behavior types remain composable. Repeated configuration should first use
   schema-backed collections or child entities. Multiple same-type attachments require a real game

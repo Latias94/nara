@@ -413,6 +413,47 @@ mutate the admitted runtime. Optional runtime discovery must use a visibly nulla
 | Nested-call closure | `PlayerController -> WeaponBehaviour` direct calls prove transitive facade/access planning, transaction ownership, exception attribution, reentrancy rejection, and stale/despawn behavior |
 | Extension proof | A first-party movement facade and an independent inventory/weapon-style package both use the candidate binding mechanism without core allowlists |
 | Test parity | `BehaviourHarness` and the production Adapter run the same binding, missing-dependency, intent, exception, and stale-generation conformance cases |
+| Author workflow | One author creates and attaches a Behaviour, binds Inspector references, receives source-aware diagnostics, presses Play/Stop, changes code, and observes either the new generation or an explicit last-good result without author-written Rust |
+
+### Cross-domain promotion gate
+
+The movement-and-fire slice is sufficient to test whether an Adapter-private C# facade is feasible.
+It is not sufficient to promote that facade's binding or dispatcher machinery into a shared
+Nara-owned public contract. Movement and firing mostly exercise projected state, same-object
+capabilities, authored references, synchronous managed calls, and deferred commands. Mature engine
+domains also require the following distinct operation shapes:
+
+| Operation shape | Ordinary author example | Hidden contract that differs |
+|---|---|---|
+| Callback-entry projection | Read current transform, grounded state, input, or animation parameter | Snapshot phase, freshness, copy budget, and same-callback visibility |
+| Same-callback staged update | Set desired movement or an animation parameter and read it back | Overlay semantics, validation, conflict policy, and commit point |
+| Deferred intent | Spawn an object, play a one-shot sound, or request scene travel | Admission, queue budget, failure, execution stage, and result visibility |
+| Bounded synchronous query | Raycast or overlap against the current physics query snapshot | Query freshness, filter/budget, ordering, allocation, and callback-safe execution |
+| Typed callback event | Collision/contact, animation marker, UI action, or audio completion | Event payload identity, ordering, retention, reentrancy, and invalidation |
+| Asynchronous request/result | Navigation path, streamed content, or another long-running service request | Cancellation, late result, continuation re-entry, pause, generation, and diagnostics |
+| Retained logical handle | Stop or fade a voice, inspect a tween, or cancel a path request later | Stable logical identity and lifetime without exposing a backend/native handle |
+
+These rows are analysis categories, not a proposed public enum, universal service trait, or required
+method vocabulary. Unity exposes similar differences through APIs such as physics queries and
+collision callbacks, Animator state/events, and shared-versus-instance material access. Godot uses
+direct-space-state queries, signals, AnimationTree/AnimationPlayer, and Resource/instance override
+semantics. Bevy exposes the underlying distinctions through systems, queries, events, commands,
+assets, and schedules. Nara may hide that machinery from ordinary C# gameplay, but it cannot make
+the semantic differences disappear.
+
+Before a shared Nara binding/dispatcher contract freezes, focused harness tracers should cover:
+
+| Tracer | Minimum pressure case | What it is allowed to decide |
+|---|---|---|
+| Physics | One fixed-step ray/overlap query plus one ordered contact callback | Query freshness, typed event delivery, and callback transaction interaction |
+| Animation | One controller parameter, one marker event, and one root-motion handoff | Control intent, event timing, and cross-domain writer arbitration |
+| Rendering | One shared material asset plus one per-instance override observed in Play | Asset/reference identity, instance state, and presentation visibility; no GPU authority |
+| Async service | One cancellable navigation or audio-style request with a late result and logical handle | Continuation re-entry, cancellation, generation rejection, and retained identity |
+
+These may be disposable Adapter/harness implementations; they do not require complete physics,
+animation, rendering, navigation, or audio products. The first product-shaped C# Trial may still use
+an explicitly unstable Adapter-specific SDK. The promotion gate applies when common machinery is
+claimed as a reusable Nara contract rather than when feasibility research begins.
 
 ### Risks and mitigations
 
@@ -425,6 +466,8 @@ mutate the admitted runtime. Optional runtime discovery must use a visibly nulla
 | Ergonomic properties cause per-access FFI | High | Batch extract, execute against managed staging, dirty-track, and batch commit; measure calls and copied bytes |
 | Required capability silently mutates persistent composition | High | Use explicit undoable Scene patches and repeat preflight; never rely on hidden Bevy hooks |
 | A universal facade kernel is frozen from one package | Medium | Keep bindings Adapter-local until an independent package and test Adapter prove the shared seam |
+| Movement-and-fire overfits every operation to properties and deferred commands | High | Run the cross-domain harness tracers before promoting shared binding or dispatcher contracts |
+| Operation categories become another universal framework | Medium | Keep semantics and public APIs domain-owned; use the categories only to test that shared machinery leaves each path possible |
 
 This hypothesis selects neither the exact attributes nor whether facades are classes, value handles,
 generated partial properties, or another representation. Those implementation choices remain
