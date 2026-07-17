@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-07-16
 **Refines**: ADR 0008, ADR 0042, ADR 0048
 **Refined By**: ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
@@ -63,7 +64,8 @@ flowchart TD
 - Cancellation is cooperative for running work. The handle may already be cancelled while the
   closure exits, but physical `running` count and age remain until the worker actually releases it.
 - Stats expose admitted, rejected, coalesced, queued, running, started, completed, failed,
-  cancelled, taken, oldest queued/running age, shutdowns, shutdown timeouts, and detached workers.
+  cancelled, taken, oldest queued/running age, shutdowns, and shutdown timeouts. A detached-worker
+  count is not exposed because dropping an unfinished `JoinHandle` is not a valid shutdown result.
   U18/U31 decide retention and diagnostic bridging; this crate does not log policy decisions.
 
 ### Result integration
@@ -86,12 +88,29 @@ flowchart TD
 - Production and project settings create threaded pools. `TaskPools::inline_for_tests` and
   `run_pending_for_tests` are explicitly test-only drivers of the same bounded admission and terminal
   state machine; there is no production `Deterministic` execution mode.
-- Shutdown linearizes with admission, closes queues, attempts bounded drain, cancels remaining
-  pending/running handles, and waits only for configured cancel/join deadlines.
-- A worker that does not exit by the deadline is detached and reported. Dropping pools never retries
-  an unbounded join. Shutdown is idempotent.
-- `TaskPlugin` shuts down only pools it created. Externally inserted pools remain externally owned;
-  plugin-owned shutdown leaves a typed report in the world for inspection.
+- Plugin-created pools split the World-facing `TaskPools` facade from a move-only close owner that
+  retains every worker `JoinHandle`. `TaskPlugin` registers that owner as an explicit runtime close
+  participant; replacing or removing the World facade cannot make the original workers disappear
+  from close evidence.
+- Close linearizes with admission, closes queues, attempts deadline-bound drain, cancels remaining
+  pending/running handles in bounded batches, and joins only workers already known to have exited.
+  All three pool kinds begin closing together rather than serially consuming three complete timeout
+  budgets.
+- Reaching a drain, cancel, or join deadline records the historical timeout and yields an incomplete
+  close while retaining the same owner and `JoinHandle` values. `RetryClose` polls only unfinished
+  work; it does not repeat cancellation, increment shutdown counts, or invoke plugin shutdown
+  again. A managed runtime reaches `Stopped` only after all registered owners complete.
+- `TaskPools::shutdown_blocking` is the explicitly named standalone convenience driver over the same
+  close state machine. It may return an incomplete report at the configured deadline, and a later
+  call on the same pools continues the same owner.
+- Drop never waits without bound. It closes admission, requests cancellation, joins only finished
+  workers, and moves unfinished handles plus pending-job destruction into a process-owned retained
+  quarantine so owner loss does not silently detach work. A small bounded set of internal drop
+  lanes prevents one blocking user destructor from monopolizing the owner coordinator. An owner's
+  receipt completes only after its pending queue, in-flight destructors, and worker handles are all
+  complete. Lane saturation remains retained work rather than false `Stopped` evidence.
+- `TaskPlugin` closes only pools it created. Externally inserted pools remain caller-owned; a
+  completed plugin-owned close publishes the typed report in the world for inspection.
 
 ## Alternatives Considered
 
@@ -131,7 +150,7 @@ work.
 | Panic isolation | A panicking task fails its handle and the worker runs later work | Threaded tests |
 | Race safety | Exactly one terminal wins cancellation/completion races | Concurrency tests |
 | Ordering | Ordered-prefix streams apply reverse completions by key | Typed integration tests |
-| Finite shutdown | Uncooperative workers produce timeout/detach reports without blocking drop | Shutdown tests |
+| Truthful finite close | An uncooperative worker yields `CloseIncomplete`, retains its owner, and reaches `Stopped` only after retry joins the same handle; Drop remains nonblocking and one blocked destructor cannot monopolize another owner's receipt while a lane is available | Runtime/task shutdown tests |
 
 ## Risks and Mitigations
 
@@ -140,7 +159,8 @@ work.
 | Rejection leaves a domain permanently loading | High | Medium | Require every domain to lower rejection/failure into its own terminal state and test it. |
 | Ordered prefix causes head-of-line blocking | Medium | Medium | Partition streams narrowly and expose running age/cancellation; use snapshot policy only when semantically valid. |
 | Capacity defaults oversubscribe the host | High | Medium | Validate aggregate worker/pending limits and apply project settings before plugin creation. |
-| Detached work outlives app state | High | Low | Jobs own inputs only; terminal is first-wins and detached closures cannot mutate `World`. |
+| Retained uncooperative work outlives a runtime generation | High | Low | Jobs own inputs only, cancellation is cooperative, managed close remains `CloseIncomplete`, and abnormal Drop transfers the handle into process-owned quarantine rather than claiming completion. |
+| Every bounded destructor lane is occupied by blocking user code | High | Low | Keep lane count internal, retain affected owners and receipts truthfully, and never run pending destructors on the coordinator or runtime driver thread. |
 | Panic payload leaks secrets | Medium | Medium | Store a stable failure class only; U18 controls safe diagnostic fields. |
 | Host panic hook prints a caught payload | High | Medium | Keep hook authority in host composition, require redaction before untrusted work, and never claim `catch_unwind` suppresses stderr. |
 
@@ -151,7 +171,8 @@ work.
   admission/application order, not inline execution.
 - Asset/import/editor domains must handle every spawn and terminal outcome and declare whether they
   use ordered-prefix or ready-snapshot integration.
-- Shutdown timeout/detach is an observable runtime result and later bridges to the diagnostics bus.
+- Shutdown timeout is observable history, while completion remains a separate fact. Managed runtime
+  close retains the owner for retry instead of treating timeout or handle loss as success.
 - The runtime's safe panic classification does not imply process stderr redaction; host composition
   owns that global policy and U18/U31 own its structured observability bridge.
 

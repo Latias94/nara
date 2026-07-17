@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-07-17
 **Refines**: ADR 0003
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
@@ -135,6 +135,11 @@ error and never stop later shutdown hooks.
   not inferred as runtime-owned obligations from their Rust type.
 - Shutdown is reverse-order, best-effort, panic-isolated, and once-only. A hook is marked attempted
   before invocation, so a shutdown panic cannot cause a second call during `Drop`.
+- A managed runtime treats a completed shutdown pass with hook failures as terminal plugin evidence,
+  not as unfinished waitable ownership. It records the failure, never invokes the hook again, and
+  may reach the `Stopped` ownership state only after every separately registered close obligation
+  completes. The corresponding Stop control and Host/runner teardown result remain failed, so
+  `Stopped` does not erase or misreport the hook failure as clean shutdown.
 - Lifecycle-control reentry and plugin/group installation from committed build or finish hooks are
   rejected. No intentional committed-hook nesting remains.
 - `App::set_runner` is likewise rejected as a sticky violation from plugin hooks. Top-level

@@ -19,6 +19,7 @@ use nara_ecs::{
 use thiserror::Error;
 
 mod plugin;
+mod runtime;
 
 pub use plugin::{
     AddPluginsError, EditedPluginGroup, Plugin, PluginCapability, PluginCategory,
@@ -31,6 +32,7 @@ pub use plugin::{
     PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId, PluginSlot,
     PluginSlotId, PluginSlotPresence, Plugins, ReplayablePlugins, ResolvedPluginGroup, SealedApp,
 };
+pub use runtime::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ScheduleLabel)]
 pub enum StartupStage {
@@ -120,6 +122,11 @@ pub enum AppRunError {
     },
     #[error("time frame planning failed: {error}")]
     Time { error: TimeFrameError },
+    #[error("managed runtime faulted: kind={kind:?}, source={fault_source}")]
+    ManagedRuntime {
+        kind: RuntimeFaultKind,
+        fault_source: &'static str,
+    },
     #[error("app shutdown reported plugin cleanup failures")]
     Shutdown {
         prior: Option<Box<AppRunError>>,
@@ -157,6 +164,14 @@ impl AppRunError {
     }
 
     #[must_use]
+    pub const fn managed_runtime(kind: RuntimeFaultKind, source: &'static str) -> Self {
+        Self::ManagedRuntime {
+            kind,
+            fault_source: source,
+        }
+    }
+
+    #[must_use]
     pub const fn plugin_error(&self) -> Option<&PluginError> {
         match self {
             Self::Plugin { error, .. } => Some(error),
@@ -164,7 +179,10 @@ impl AppRunError {
                 Some(error) => Some(error),
                 None => teardown.plugin_error(),
             },
-            Self::Runner { .. } | Self::Time { .. } | Self::Shutdown { .. } => None,
+            Self::Runner { .. }
+            | Self::Time { .. }
+            | Self::ManagedRuntime { .. }
+            | Self::Shutdown { .. } => None,
         }
     }
 
@@ -176,7 +194,7 @@ impl AppRunError {
             Self::RunnerTeardown { prior, teardown } => prior
                 .plugin_failure_report()
                 .or_else(|| teardown.plugin_failure_report()),
-            Self::Runner { .. } | Self::Time { .. } => None,
+            Self::Runner { .. } | Self::Time { .. } | Self::ManagedRuntime { .. } => None,
         }
     }
 }
@@ -784,6 +802,33 @@ impl FixedTime {
         })
     }
 
+    fn begin_exact_step(&self) -> Result<Self, FixedTimeError> {
+        let tick = self
+            .tick
+            .checked_add(1)
+            .ok_or(FixedTimeError::TickOverflow {
+                tick: self.tick,
+                attempted_steps: 1,
+            })?;
+        let elapsed =
+            self.elapsed
+                .checked_add(self.timestep)
+                .ok_or(FixedTimeError::ElapsedOverflow {
+                    elapsed: self.elapsed,
+                    timestep: self.timestep,
+                    attempted_steps: 1,
+                })?;
+        let mut exact = *self;
+        exact.delta = self.timestep;
+        exact.elapsed = elapsed;
+        exact.tick = tick;
+        exact.steps_this_frame = 1;
+        exact.capped_this_frame = false;
+        exact.discarded_this_frame = Duration::ZERO;
+        exact.frame_active = true;
+        Ok(exact)
+    }
+
     fn begin_frame(&mut self, plan: FixedFramePlan) {
         self.pending = plan.pending;
         self.advance_enabled = plan.advance_enabled;
@@ -826,6 +871,10 @@ impl FixedTime {
         self.frame_active = false;
     }
 
+    fn finish_exact_step(&mut self) {
+        self.frame_active = false;
+    }
+
     fn update_pending_parts(&mut self) {
         self.remainder = duration_remainder(self.pending, self.timestep);
         self.debt = self.pending.saturating_sub(self.remainder);
@@ -851,11 +900,18 @@ struct TimeFramePlan {
 }
 
 impl TimeFramePlan {
-    fn from_world(world: &World, real_delta: Duration) -> Result<Self, TimeFrameError> {
-        let settings = *required_frame_resource::<RuntimeTimeSettings>(
+    fn from_world(
+        world: &World,
+        real_delta: Duration,
+        force_paused: bool,
+    ) -> Result<Self, TimeFrameError> {
+        let mut settings = *required_frame_resource::<RuntimeTimeSettings>(
             world,
             TimeFrameResource::RuntimeTimeSettings,
         )?;
+        if force_paused {
+            settings.set_paused(true);
+        }
         let real_time = required_frame_resource::<RealTime>(world, TimeFrameResource::RealTime)?
             .plan_advance(real_delta)?;
         let (virtual_delta, real_delta_clamped) = settings.plan_virtual_delta(real_delta)?;
@@ -977,6 +1033,8 @@ pub struct App {
     disabled_plugin_slots: BTreeSet<PluginSlotId>,
     plugin_plan_fingerprint: PluginPlanFingerprint,
     registered_shutdown_obligations: BTreeSet<(PluginId, PluginShutdownObligationId)>,
+    runtime_obligations: RuntimeObligationLedger,
+    runtime_fault_reporter: RuntimeFaultReporter,
     plugin_lifecycle: PluginLifecycleState,
     plugin_failure_report: Option<PluginFailureReport>,
     active_plugin_hook: Option<(PluginId, PluginHook)>,
@@ -992,6 +1050,10 @@ impl Default for App {
 impl Drop for App {
     fn drop(&mut self) {
         self.shutdown_plugins_internal();
+        // A raw App has no retained retry state, so release it through one best-effort close pass.
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            self.runtime_obligations.drive_close_once(&mut self.world);
+        }));
     }
 }
 
@@ -1006,6 +1068,8 @@ impl App {
         world.insert_resource(RenderTime::default());
         world.insert_resource(RuntimeFrameStatus::default());
         world.insert_resource(AppExitRequests::default());
+        let runtime_fault_reporter = RuntimeFaultReporter::new();
+        world.insert_resource(runtime_fault_reporter.clone());
 
         let mut schedules = Schedules::new();
         for stage in StartupStage::ALL {
@@ -1037,6 +1101,8 @@ impl App {
             disabled_plugin_slots: BTreeSet::new(),
             plugin_plan_fingerprint: plugin::empty_plan_fingerprint(),
             registered_shutdown_obligations: BTreeSet::new(),
+            runtime_obligations: RuntimeObligationLedger::new(),
+            runtime_fault_reporter,
             plugin_lifecycle: PluginLifecycleState::Configuring,
             plugin_failure_report: None,
             active_plugin_hook: None,
@@ -1253,6 +1319,44 @@ impl App {
             return Err(error);
         }
         Ok(self)
+    }
+
+    pub fn register_plugin_runtime_close_participant<P>(
+        &mut self,
+        obligation: PluginShutdownObligationId,
+        participant_id: RuntimeCloseParticipantId,
+        participant: P,
+    ) -> Result<&mut Self, PluginError>
+    where
+        P: RuntimeCloseParticipant,
+    {
+        let Some((plugin, PluginHook::Build)) = self.active_plugin_hook else {
+            return Err(PluginError::ShutdownObligationOutsideBuild);
+        };
+        self.register_plugin_shutdown_obligation(obligation)?;
+        if let Err(failure) = self
+            .runtime_obligations
+            .register(participant_id, participant)
+        {
+            let (ledger_error, participant) = failure.into_parts();
+            self.runtime_obligations
+                .retain_for_retirement(participant_id, participant);
+            let participant_id = match ledger_error {
+                RuntimeObligationLedgerError::Duplicate { id } => id,
+            };
+            let error = PluginError::DuplicateRuntimeCloseParticipant {
+                plugin,
+                obligation,
+                participant_id,
+            };
+            self.poison(plugin, PluginHook::Build, error.clone());
+            return Err(error);
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn take_runtime_obligations(&mut self) -> RuntimeObligationLedger {
+        std::mem::take(&mut self.runtime_obligations)
     }
 
     pub fn seal(mut self) -> Result<SealedApp, PluginError> {
@@ -1565,12 +1669,7 @@ impl App {
         }
     }
 
-    /// Runs one frame using real elapsed time supplied by the runner.
-    ///
-    /// Startup is a committed one-time lifecycle phase. The frame clock plan is built from the
-    /// resources left by startup; a planning failure does not roll startup back or run it again,
-    /// but it commits no clock state, runs no core schedule, and does not clear frame trackers.
-    pub fn run_once(&mut self, real_delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
+    pub(crate) fn complete_startup_once(&mut self) -> Result<(), AppRunError> {
         if let Err(error) = self.seal_internal() {
             return Err(AppRunError::plugin(
                 error,
@@ -1587,7 +1686,46 @@ impl App {
             self.started = true;
         }
 
-        let time_frame_plan = TimeFramePlan::from_world(&self.world, real_delta)?;
+        Ok(())
+    }
+
+    pub(crate) fn prepare_managed_runtime(&mut self) -> Result<(), AppRunError> {
+        {
+            let Some(mut settings) = self.world.get_resource_mut::<RuntimeTimeSettings>() else {
+                return Err(TimeFrameError::MissingResource {
+                    resource: TimeFrameResource::RuntimeTimeSettings,
+                }
+                .into());
+            };
+            settings.set_paused(false);
+        }
+        TimeFramePlan::from_world(&self.world, Duration::ZERO, false)?;
+        Ok(())
+    }
+
+    pub(crate) fn run_managed_frame(
+        &mut self,
+        real_delta: Duration,
+    ) -> Result<AppFrameOutcome, AppRunError> {
+        self.run_frame_transaction(real_delta, false)
+    }
+
+    pub(crate) fn run_paused_frame(
+        &mut self,
+        real_delta: Duration,
+    ) -> Result<AppFrameOutcome, AppRunError> {
+        self.run_frame_transaction(real_delta, true)
+    }
+
+    fn run_frame_transaction(
+        &mut self,
+        real_delta: Duration,
+        paused_stages_only: bool,
+    ) -> Result<AppFrameOutcome, AppRunError> {
+        debug_assert!(self.started, "managed frames require completed startup");
+
+        let time_frame_plan =
+            TimeFramePlan::from_world(&self.world, real_delta, paused_stages_only)?;
         time_frame_plan.commit(&mut self.world);
         let mut fixed_time = time_frame_plan.fixed_time;
         let mut frame_status = None;
@@ -1620,7 +1758,7 @@ impl App {
                     };
                     *self.world.resource_mut::<RuntimeFrameStatus>() = status;
                     frame_status = Some(status);
-                } else {
+                } else if !paused_stages_only || stage_runs_while_paused(stage) {
                     schedule.run(&mut self.world);
                 }
             }
@@ -1633,9 +1771,92 @@ impl App {
         Ok(AppFrameOutcome { exit, status })
     }
 
+    pub(crate) fn run_exact_fixed_tick(
+        &mut self,
+        real_delta: Duration,
+    ) -> Result<AppFrameOutcome, AppRunError> {
+        debug_assert!(self.started, "exact stepping requires completed startup");
+        required_frame_resource::<RuntimeTimeSettings>(
+            &self.world,
+            TimeFrameResource::RuntimeTimeSettings,
+        )?;
+        let real_time =
+            required_frame_resource::<RealTime>(&self.world, TimeFrameResource::RealTime)?
+                .plan_advance(real_delta)?;
+        let current_fixed_time =
+            *required_frame_resource::<FixedTime>(&self.world, TimeFrameResource::FixedTime)?;
+        let virtual_delta = current_fixed_time.timestep();
+        let virtual_time =
+            required_frame_resource::<VirtualTime>(&self.world, TimeFrameResource::VirtualTime)?
+                .plan_advance(virtual_delta)?;
+        required_frame_resource::<RenderTime>(&self.world, TimeFrameResource::RenderTime)?;
+        required_frame_resource::<RuntimeFrameStatus>(
+            &self.world,
+            TimeFrameResource::RuntimeFrameStatus,
+        )?;
+        required_frame_resource::<AppExitRequests>(
+            &self.world,
+            TimeFrameResource::AppExitRequests,
+        )?;
+        let mut fixed_time = current_fixed_time.begin_exact_step()?;
+
+        *self.world.resource_mut::<RealTime>() = real_time;
+        *self.world.resource_mut::<VirtualTime>() = virtual_time;
+        *self.world.resource_mut::<FixedTime>() = fixed_time;
+
+        if let Some(schedule) = self.schedules.get_mut(CoreStage::FixedUpdate) {
+            schedule.run(&mut self.world);
+        }
+
+        fixed_time.finish_exact_step();
+        *self.world.resource_mut::<FixedTime>() = fixed_time;
+        let status = RuntimeFrameStatus {
+            frame: real_time.frame,
+            real_delta,
+            virtual_delta,
+            real_delta_clamped: false,
+            fixed_steps: 1,
+            fixed_steps_capped: false,
+            fixed_tick: fixed_time.tick(),
+            fixed_elapsed: fixed_time.elapsed(),
+            fixed_remainder: fixed_time.remainder(),
+            fixed_debt: fixed_time.debt(),
+            fixed_discarded: Duration::ZERO,
+        };
+        *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+        let exit = self.world.resource_mut::<AppExitRequests>().take();
+        self.world.clear_trackers();
+        Ok(AppFrameOutcome { exit, status })
+    }
+
+    /// Runs one frame using real elapsed time supplied by the runner.
+    ///
+    /// Startup is a committed one-time lifecycle phase. The frame clock plan is built from the
+    /// resources left by startup; a planning failure does not roll startup back or run it again,
+    /// but it commits no clock state, runs no core schedule, and does not clear frame trackers.
+    pub fn run_once(&mut self, real_delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
+        self.complete_startup_once()?;
+        self.run_frame_transaction(real_delta, false)
+    }
+
     pub fn update(&mut self) -> Result<AppFrameOutcome, AppRunError> {
         self.run_once(Duration::ZERO)
     }
+}
+
+fn stage_runs_while_paused(stage: CoreStage) -> bool {
+    matches!(
+        stage,
+        CoreStage::First
+            | CoreStage::TaskUpdate
+            | CoreStage::Extract
+            | CoreStage::Prepare
+            | CoreStage::Queue
+            | CoreStage::Sort
+            | CoreStage::Render
+            | CoreStage::Cleanup
+            | CoreStage::Last
+    )
 }
 
 fn default_runner(app: &mut App) -> Result<AppExit, AppRunError> {
@@ -1647,7 +1868,12 @@ fn default_runner(app: &mut App) -> Result<AppExit, AppRunError> {
 mod tests {
     use super::*;
     use nara_ecs::{
-        Commands, Component, DetectChanges, Query, RemovedComponents, Res, ResMut, Resource,
+        Commands, Component, DetectChanges, DetectChangesMut, Query, Ref, RemovedComponents, Res,
+        ResMut, Resource,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
     #[derive(Debug, Default, Resource)]
@@ -1664,6 +1890,13 @@ mod tests {
 
     #[derive(Debug, Default, Resource)]
     struct RemovalCount(u32);
+
+    #[derive(Debug, Default, Resource)]
+    struct ExactStepTrackerObservations {
+        changed: usize,
+        removed: usize,
+        fixed_runs: usize,
+    }
 
     #[derive(Debug, Component)]
     struct Spawned;
@@ -1687,6 +1920,125 @@ mod tests {
 
     #[derive(Debug, Default, Resource)]
     struct Order(Vec<&'static str>);
+
+    const RAW_APP_CLOSE_PLUGIN_ID: PluginId = PluginId::new("nara.test.raw-app-close");
+    const RAW_APP_CLOSE_OBLIGATION: PluginShutdownObligationId =
+        PluginShutdownObligationId::new("nara.test.raw-app-close");
+    const RAW_APP_CLOSE_PARTICIPANT_ID: RuntimeCloseParticipantId =
+        RuntimeCloseParticipantId::new("nara.test.raw-app-close");
+    const RAW_APP_CLOSE_PLUGIN_DECLARATION: PluginDeclaration =
+        PluginDeclaration::new(RAW_APP_CLOSE_PLUGIN_ID, PluginCategory::Runtime)
+            .shutdown_obligations(&[RAW_APP_CLOSE_OBLIGATION]);
+
+    const FIRST_COLLIDING_CLOSE_PLUGIN_ID: PluginId =
+        PluginId::new("nara.test.first-colliding-close");
+    const SECOND_COLLIDING_CLOSE_PLUGIN_ID: PluginId =
+        PluginId::new("nara.test.second-colliding-close");
+    const FIRST_COLLIDING_CLOSE_OBLIGATION: PluginShutdownObligationId =
+        PluginShutdownObligationId::new("nara.test.first-colliding-close");
+    const SECOND_COLLIDING_CLOSE_OBLIGATION: PluginShutdownObligationId =
+        PluginShutdownObligationId::new("nara.test.second-colliding-close");
+    const COLLIDING_CLOSE_PARTICIPANT_ID: RuntimeCloseParticipantId =
+        RuntimeCloseParticipantId::new("nara.test.colliding-close-participant");
+    const FIRST_COLLIDING_CLOSE_PLUGIN_DECLARATION: PluginDeclaration =
+        PluginDeclaration::new(FIRST_COLLIDING_CLOSE_PLUGIN_ID, PluginCategory::Runtime)
+            .shutdown_obligations(&[FIRST_COLLIDING_CLOSE_OBLIGATION]);
+    const SECOND_COLLIDING_CLOSE_PLUGIN_DECLARATION: PluginDeclaration =
+        PluginDeclaration::new(SECOND_COLLIDING_CLOSE_PLUGIN_ID, PluginCategory::Runtime)
+            .shutdown_obligations(&[SECOND_COLLIDING_CLOSE_OBLIGATION]);
+
+    #[derive(Debug)]
+    struct RawAppClosePlugin {
+        begins: Arc<AtomicUsize>,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl Plugin for RawAppClosePlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &RAW_APP_CLOSE_PLUGIN_DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.register_plugin_runtime_close_participant(
+                RAW_APP_CLOSE_OBLIGATION,
+                RAW_APP_CLOSE_PARTICIPANT_ID,
+                RawAppCloseParticipant {
+                    begins: Arc::clone(&self.begins),
+                    polls: Arc::clone(&self.polls),
+                },
+            )?;
+            Ok(())
+        }
+    }
+
+    struct RawAppCloseParticipant {
+        begins: Arc<AtomicUsize>,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl RuntimeCloseParticipant for RawAppCloseParticipant {
+        fn begin_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.begins.fetch_add(1, Ordering::SeqCst);
+            Ok(RuntimeCloseProgress::Pending)
+        }
+
+        fn poll_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.polls.fetch_add(1, Ordering::SeqCst);
+            Ok(RuntimeCloseProgress::Pending)
+        }
+    }
+
+    struct FirstCollidingClosePlugin {
+        begins: Arc<AtomicUsize>,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl Plugin for FirstCollidingClosePlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &FIRST_COLLIDING_CLOSE_PLUGIN_DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.register_plugin_runtime_close_participant(
+                FIRST_COLLIDING_CLOSE_OBLIGATION,
+                COLLIDING_CLOSE_PARTICIPANT_ID,
+                RawAppCloseParticipant {
+                    begins: Arc::clone(&self.begins),
+                    polls: Arc::clone(&self.polls),
+                },
+            )?;
+            Ok(())
+        }
+    }
+
+    struct SecondCollidingClosePlugin {
+        begins: Arc<AtomicUsize>,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl Plugin for SecondCollidingClosePlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &SECOND_COLLIDING_CLOSE_PLUGIN_DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.register_plugin_runtime_close_participant(
+                SECOND_COLLIDING_CLOSE_OBLIGATION,
+                COLLIDING_CLOSE_PARTICIPANT_ID,
+                RawAppCloseParticipant {
+                    begins: Arc::clone(&self.begins),
+                    polls: Arc::clone(&self.polls),
+                },
+            )?;
+            Ok(())
+        }
+    }
 
     fn spawn_entity(mut commands: Commands) {
         commands.spawn(Spawned);
@@ -1777,6 +2129,16 @@ mod tests {
         mut removal_count: ResMut<RemovalCount>,
     ) {
         removal_count.0 += u32::try_from(removed.read().count()).unwrap();
+    }
+
+    fn observe_exact_step_trackers(
+        tracked: Query<Ref<Tracked>>,
+        mut removed: RemovedComponents<Tracked>,
+        mut observations: ResMut<ExactStepTrackerObservations>,
+    ) {
+        observations.changed = tracked.iter().filter(DetectChanges::is_changed).count();
+        observations.removed = removed.read().count();
+        observations.fixed_runs += 1;
     }
 
     fn time_state(app: &App) -> TimeStateSnapshot {
@@ -2018,6 +2380,107 @@ mod tests {
         );
         assert!(app.world().removed::<Tracked>().next().is_none());
         assert!(app.world().get_entity(removed_entity).is_ok());
+    }
+
+    #[test]
+    fn exact_step_rotates_trackers_and_the_next_paused_drive_keeps_rotating_them() {
+        let mut app = App::new();
+        app.insert_resource(ExactStepTrackerObservations::default())
+            .unwrap();
+        app.add_systems(CoreStage::FixedUpdate, observe_exact_step_trackers)
+            .unwrap();
+        let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Pause),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(runtime.state(), RuntimeState::Paused);
+
+        let (changed_entity, removed_entity) = runtime
+            .with_driver_scope(|scope| {
+                let world = scope.world_mut();
+                let changed_entity = world.spawn(Tracked).id();
+                let removed_entity = world.spawn(Tracked).id();
+                world.entity_mut(removed_entity).remove::<Tracked>();
+                (changed_entity, removed_entity)
+            })
+            .unwrap();
+        let step = match runtime.request_control(RuntimeControl::StepFixedTick) {
+            RuntimeControlRequestResult::Accepted(ticket) => ticket,
+            RuntimeControlRequestResult::Rejected(rejection) => {
+                panic!("paused runtime rejected exact step: {rejection:?}")
+            }
+        };
+
+        let outcome = runtime.drive(Duration::ZERO).unwrap();
+
+        assert_eq!(outcome.state(), RuntimeState::Paused);
+        assert_eq!(outcome.frame().unwrap().status.fixed_steps, 1);
+        assert_eq!(
+            runtime.control_status(step),
+            Some(RuntimeControlStatus::Applied)
+        );
+        let observations = runtime.world().resource::<ExactStepTrackerObservations>();
+        assert_eq!(observations.changed, 1);
+        assert_eq!(observations.removed, 1);
+        assert_eq!(observations.fixed_runs, 1);
+        assert!(
+            !runtime
+                .world()
+                .entity(changed_entity)
+                .get_ref::<Tracked>()
+                .unwrap()
+                .is_changed()
+        );
+        assert!(runtime.world().removed::<Tracked>().next().is_none());
+        assert!(runtime.world().get_entity(removed_entity).is_ok());
+
+        let paused_removed_entity = runtime
+            .with_driver_scope(|scope| {
+                let world = scope.world_mut();
+                world
+                    .entity_mut(changed_entity)
+                    .get_mut::<Tracked>()
+                    .unwrap()
+                    .set_changed();
+                let removed_entity = world.spawn(Tracked).id();
+                world.entity_mut(removed_entity).remove::<Tracked>();
+                removed_entity
+            })
+            .unwrap();
+        assert!(
+            runtime
+                .world()
+                .entity(changed_entity)
+                .get_ref::<Tracked>()
+                .unwrap()
+                .is_changed()
+        );
+        assert_eq!(runtime.world().removed::<Tracked>().count(), 1);
+
+        let paused_outcome = runtime.drive(Duration::ZERO).unwrap();
+
+        assert_eq!(paused_outcome.state(), RuntimeState::Paused);
+        assert_eq!(paused_outcome.frame().unwrap().status.fixed_steps, 0);
+        assert_eq!(
+            runtime
+                .world()
+                .resource::<ExactStepTrackerObservations>()
+                .fixed_runs,
+            1
+        );
+        assert!(
+            !runtime
+                .world()
+                .entity(changed_entity)
+                .get_ref::<Tracked>()
+                .unwrap()
+                .is_changed()
+        );
+        assert!(runtime.world().removed::<Tracked>().next().is_none());
+        assert!(runtime.world().get_entity(paused_removed_entity).is_ok());
     }
 
     #[test]
@@ -2668,5 +3131,79 @@ mod tests {
             app.run().unwrap_err(),
             AppRunError::runner("window creation failed")
         );
+    }
+
+    #[test]
+    fn dropping_raw_app_begins_and_polls_registered_runtime_close_once() {
+        let begins = Arc::new(AtomicUsize::new(0));
+        let polls = Arc::new(AtomicUsize::new(0));
+        let mut app = App::new();
+        app.add_plugin(RawAppClosePlugin {
+            begins: Arc::clone(&begins),
+            polls: Arc::clone(&polls),
+        })
+        .unwrap();
+
+        drop(app);
+
+        assert_eq!(begins.load(Ordering::SeqCst), 1);
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn running_raw_app_begins_and_polls_registered_runtime_close_once() {
+        let begins = Arc::new(AtomicUsize::new(0));
+        let polls = Arc::new(AtomicUsize::new(0));
+        let mut app = App::new();
+        app.add_plugin(RawAppClosePlugin {
+            begins: Arc::clone(&begins),
+            polls: Arc::clone(&polls),
+        })
+        .unwrap();
+        app.set_runner(|_| Ok(AppExit::Success)).unwrap();
+
+        assert_eq!(app.run().unwrap(), AppExit::Success);
+        assert_eq!(begins.load(Ordering::SeqCst), 1);
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn runtime_close_participant_collision_reports_exact_error_and_retires_both_owners() {
+        let first_begins = Arc::new(AtomicUsize::new(0));
+        let first_polls = Arc::new(AtomicUsize::new(0));
+        let second_begins = Arc::new(AtomicUsize::new(0));
+        let second_polls = Arc::new(AtomicUsize::new(0));
+        let mut app = App::new();
+        app.add_plugin(FirstCollidingClosePlugin {
+            begins: Arc::clone(&first_begins),
+            polls: Arc::clone(&first_polls),
+        })
+        .unwrap();
+
+        let error = match app.add_plugin(SecondCollidingClosePlugin {
+            begins: Arc::clone(&second_begins),
+            polls: Arc::clone(&second_polls),
+        }) {
+            Ok(_) => panic!("colliding runtime close participant must reject the second plugin"),
+            Err(error) => error,
+        };
+
+        assert_eq!(
+            error,
+            AddPluginsError::Plugin(PluginError::DuplicateRuntimeCloseParticipant {
+                plugin: SECOND_COLLIDING_CLOSE_PLUGIN_ID,
+                obligation: SECOND_COLLIDING_CLOSE_OBLIGATION,
+                participant_id: COLLIDING_CLOSE_PARTICIPANT_ID,
+            })
+        );
+        assert_eq!(first_begins.load(Ordering::SeqCst), 0);
+        assert_eq!(second_begins.load(Ordering::SeqCst), 0);
+
+        drop(app);
+
+        assert_eq!(first_begins.load(Ordering::SeqCst), 1);
+        assert_eq!(first_polls.load(Ordering::SeqCst), 1);
+        assert_eq!(second_begins.load(Ordering::SeqCst), 1);
+        assert_eq!(second_polls.load(Ordering::SeqCst), 1);
     }
 }

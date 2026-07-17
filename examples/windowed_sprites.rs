@@ -1,9 +1,15 @@
+use std::error::Error;
+
 use image::ImageEncoder;
 use nara::{advanced_prelude::*, backend_prelude::*};
 
+#[path = "support/runtime_retirement.rs"]
+mod runtime_retirement;
+use runtime_retirement::finish_runtime_after_winit;
+
 const WINDOW_TEXTURE_STABLE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins((
         Runtime2dPlugins,
@@ -16,11 +22,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         WgpuBackendPlugins,
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
-    WinitRunner::default().install(&mut app)?;
     app.world_mut()?.insert_resource(AssetServer::new());
-
-    app.run()?;
-    Ok(())
+    let candidate = nara::app::RuntimeCandidate::admit(app.seal()?)?;
+    let mut runtime = candidate.complete_startup()?.promote();
+    let run_result = WinitRunner::default().run(&mut runtime);
+    finish_runtime_after_winit(run_result, runtime)
 }
 
 fn setup_scene(

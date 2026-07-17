@@ -9,10 +9,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_app::App;
-use nara_core::{ItemLimit, TimeLimit};
+use crate::runtime::default_worker_allocation;
 
-use super::runtime::default_worker_allocation;
 use super::*;
 
 struct PanicOnDrop;
@@ -23,29 +21,6 @@ impl Drop for PanicOnDrop {
     }
 }
 
-fn items(value: usize) -> ItemLimit {
-    ItemLimit::new(value).expect("test limits are non-zero")
-}
-
-fn time(value: Duration) -> TimeLimit {
-    TimeLimit::new(value).expect("test limits are non-zero")
-}
-
-fn test_config(pending: usize) -> TaskPoolConfig {
-    let kind = TaskKindConfig::new(ItemLimit::ONE, items(pending));
-    TaskPoolConfig::new(
-        kind,
-        kind,
-        kind,
-        TaskShutdownPolicy::new(
-            time(Duration::from_millis(250)),
-            time(Duration::from_millis(250)),
-            time(Duration::from_millis(250)),
-        ),
-    )
-    .expect("test task configuration is valid")
-}
-
 fn config_with_compute_workers(pending: usize, workers: usize) -> TaskPoolConfig {
     test_config(pending)
         .with_kind(
@@ -53,24 +28,6 @@ fn config_with_compute_workers(pending: usize, workers: usize) -> TaskPoolConfig
             TaskKindConfig::new(items(workers), items(pending)),
         )
         .expect("test task configuration is valid")
-}
-
-fn request(domain: u64) -> TaskSpawnRequest {
-    TaskSpawnRequest::new(17, TaskDomainKey::new(domain))
-}
-
-fn inline_pools(pending: usize) -> TaskPools {
-    TaskPools::inline_for_tests(test_config(pending)).unwrap()
-}
-
-fn accepted<T>(outcome: TaskSpawnOutcome<T>) -> TaskHandle<T> {
-    match outcome {
-        TaskSpawnOutcome::Accepted(handle) => handle,
-        TaskSpawnOutcome::Coalesced { handle, .. } => handle,
-        TaskSpawnOutcome::Rejected(rejection) => {
-            panic!("expected accepted task, got {rejection:?}")
-        }
-    }
 }
 
 fn wait_finished<T>(handle: &TaskHandle<T>) {
@@ -271,7 +228,7 @@ fn a_running_task_with_the_same_key_is_never_coalesced() {
         pools.stats().for_kind(TaskPoolKind::AsyncCompute).coalesced,
         0
     );
-    let _ = pools.shutdown();
+    let _ = pools.shutdown_blocking().unwrap();
 }
 
 #[test]
@@ -290,7 +247,7 @@ fn task_panics_fail_only_the_handle_and_the_worker_survives() {
     ));
     assert!(matches!(next.try_take(), Some(TaskTerminal::Completed(9))));
     assert_eq!(pools.stats().for_kind(TaskPoolKind::Compute).failed, 1);
-    let _ = pools.shutdown();
+    let _ = pools.shutdown_blocking().unwrap();
 }
 
 #[test]
@@ -343,7 +300,7 @@ fn cancelled_result_drop_panics_do_not_kill_the_worker() {
         }))
     ));
     assert!(matches!(next.try_take(), Some(TaskTerminal::Completed(4))));
-    let _ = pools.shutdown();
+    let _ = pools.shutdown_blocking().unwrap();
 }
 
 #[test]
@@ -420,7 +377,7 @@ fn concurrent_completion_and_cancellation_publish_exactly_one_terminal() {
     assert_eq!(stats.cancelled, cancelled);
     assert_eq!(stats.failed, 0);
     assert_eq!(stats.taken, ATTEMPTS);
-    let _ = pools.shutdown();
+    let _ = pools.shutdown_blocking().unwrap();
 }
 
 #[test]
@@ -452,95 +409,7 @@ fn running_stats_track_physical_work_after_terminal_cancellation() {
         }))
     ));
     drop(release_tx);
-    let _ = pools.shutdown();
-}
-
-#[test]
-fn shutdown_is_finite_and_detaches_an_uncooperative_worker() {
-    let mut pools = TaskPools::try_new(test_config(1)).unwrap();
-    let (started_tx, started_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel::<()>();
-    let (exited_tx, exited_rx) = mpsc::channel();
-    let mut handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
-        started_tx.send(()).unwrap();
-        let _ = release_rx.recv();
-        exited_tx.send(()).unwrap();
-        1_u32
-    }));
-    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-
-    let started = Instant::now();
-    let report = pools.shutdown();
-    assert!(started.elapsed() < Duration::from_secs(3));
-    let io = report.for_kind(TaskPoolKind::Io);
-    assert!(io.drain_timed_out);
-    assert!(io.cancel_timed_out);
-    assert!(io.join_timed_out);
-    assert_eq!(io.detached_workers, 1);
-    assert!(matches!(
-        handle.try_take(),
-        Some(TaskTerminal::Cancelled(TaskCancellation {
-            reason: TaskCancellationReason::PoolShutdown,
-            before_start: false,
-        }))
-    ));
-    assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).detached_workers, 1);
-    let repeated = pools.shutdown().for_kind(TaskPoolKind::Io);
-    assert!(repeated.already_shutdown);
-    assert!(repeated.drain_timed_out);
-    assert!(repeated.cancel_timed_out);
-    assert!(repeated.join_timed_out);
-    assert_eq!(repeated.detached_workers, 1);
-    assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).shutdowns, 1);
-    let drop_started = Instant::now();
-    drop(pools);
-    assert!(drop_started.elapsed() < Duration::from_millis(50));
-    drop(release_tx);
-    exited_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    thread::sleep(Duration::from_millis(20));
-}
-
-#[test]
-fn a_closed_pool_rejects_and_never_falls_back_to_inline_execution() {
-    let mut pools = inline_pools(1);
-    let _ = pools.shutdown();
-    let calls = Arc::new(AtomicUsize::new(0));
-    let task_calls = calls.clone();
-
-    let outcome = pools.spawn(TaskPoolKind::Io, request(1), move |_| {
-        task_calls.fetch_add(1, Ordering::SeqCst);
-    });
-
-    assert!(matches!(
-        outcome,
-        TaskSpawnOutcome::Rejected(TaskRejection {
-            reason: TaskRejectReason::PoolClosed,
-            ..
-        })
-    ));
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert_eq!(pools.run_pending_for_tests().executed, 0);
-}
-
-#[test]
-fn executor_repeated_shutdown_preserves_the_first_report() {
-    let mut pools = inline_pools(1);
-    let mut handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), |_| 1_u32));
-
-    let first = pools.shutdown_executor_for_tests(TaskPoolKind::Io);
-    let repeated = pools.shutdown_executor_for_tests(TaskPoolKind::Io);
-
-    assert!(!first.already_shutdown);
-    assert_eq!(first.cancelled_pending, 1);
-    assert!(repeated.already_shutdown);
-    assert_eq!(repeated.cancelled_pending, 1);
-    assert!(matches!(
-        handle.try_take(),
-        Some(TaskTerminal::Cancelled(TaskCancellation {
-            reason: TaskCancellationReason::PoolShutdown,
-            before_start: true,
-        }))
-    ));
+    let _ = pools.shutdown_blocking().unwrap();
 }
 
 #[test]
@@ -616,7 +485,7 @@ fn ordered_results_hold_later_completions_until_the_prefix_is_ready() {
     assert_eq!(ready.len(), 2);
     assert!(matches!(ready[0].terminal, TaskTerminal::Completed(1)));
     assert!(matches!(ready[1].terminal, TaskTerminal::Completed(2)));
-    let _ = pools.shutdown();
+    let _ = pools.shutdown_blocking().unwrap();
 }
 
 #[test]
@@ -790,87 +659,4 @@ fn shutdown_timeouts_are_bounded_per_phase_and_in_aggregate() {
         ),
         Err(TaskConfigError::ShutdownTotalTooLong { .. })
     ));
-}
-
-#[test]
-fn plugin_shutdown_shuts_down_only_plugin_owned_pools() {
-    let mut owned_app = App::new();
-    owned_app
-        .add_plugin(TaskPlugin::new(test_config(1)))
-        .unwrap();
-    assert!(owned_app.world().contains_resource::<TaskPools>());
-    owned_app.shutdown_plugins().unwrap();
-    assert!(!owned_app.world().contains_resource::<TaskPools>());
-    assert!(owned_app.world().contains_resource::<TaskShutdownReport>());
-
-    let mut external_app = App::new();
-    external_app.insert_resource(inline_pools(1)).unwrap();
-    external_app
-        .add_plugin(TaskPlugin::new(test_config(1)))
-        .unwrap();
-    external_app.shutdown_plugins().unwrap();
-    assert!(external_app.world().contains_resource::<TaskPools>());
-    assert!(
-        !external_app
-            .world()
-            .contains_resource::<TaskShutdownReport>()
-    );
-
-    let mut replaced_app = App::new();
-    replaced_app
-        .add_plugin(TaskPlugin::new(test_config(1)))
-        .unwrap();
-    replaced_app.insert_resource(inline_pools(2)).unwrap();
-    replaced_app.shutdown_plugins().unwrap();
-    assert_eq!(
-        replaced_app
-            .world()
-            .resource::<TaskPools>()
-            .config()
-            .kind(TaskPoolKind::Io)
-            .pending()
-            .get(),
-        2
-    );
-    assert!(
-        !replaced_app
-            .world()
-            .contains_resource::<TaskShutdownReport>()
-    );
-}
-
-#[test]
-fn plugin_shutdown_preserves_a_timed_out_shutdown_report() {
-    let mut app = App::new();
-    app.add_plugin(TaskPlugin::new(test_config(1))).unwrap();
-    let (started_tx, started_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel::<()>();
-    let (exited_tx, exited_rx) = mpsc::channel();
-    let _handle = accepted(app.world().resource::<TaskPools>().spawn(
-        TaskPoolKind::Io,
-        request(1),
-        move |_| {
-            started_tx.send(()).unwrap();
-            let _ = release_rx.recv();
-            exited_tx.send(()).unwrap();
-        },
-    ));
-    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-
-    let first_report = app
-        .world_mut()
-        .unwrap()
-        .resource_mut::<TaskPools>()
-        .shutdown();
-    assert!(first_report.timed_out());
-    assert_eq!(first_report.detached_workers(), 1);
-    assert!(app.shutdown_plugins().is_err());
-    let report = app.world().resource::<TaskShutdownReport>();
-    assert!(report.timed_out());
-    assert_eq!(report.detached_workers(), 1);
-    assert!(report.for_kind(TaskPoolKind::Io).already_shutdown);
-    assert!(!app.world().contains_resource::<TaskPools>());
-    drop(release_tx);
-    exited_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    thread::sleep(Duration::from_millis(20));
 }

@@ -377,7 +377,7 @@ fn pending_and_running_cancellation_release_admission_charge_exactly_once() {
         Some(TaskTerminal::Cancelled(cancellation)) if cancellation.before_start
     ));
     assert_budget_fully_released(importer.budget_snapshot());
-    let _ = inline.shutdown();
+    let _ = inline.shutdown_blocking();
 
     let running = admit_file(&importer, &source, record).unwrap();
     let mut threaded = TaskPools::try_new(TaskPoolConfig::default()).unwrap();
@@ -400,7 +400,7 @@ fn pending_and_running_cancellation_release_admission_charge_exactly_once() {
         Some(TaskTerminal::Cancelled(cancellation)) if !cancellation.before_start
     ));
     wait_for_budget_release(&importer);
-    let _ = threaded.shutdown();
+    let _ = threaded.shutdown_blocking();
     assert_budget_fully_released(importer.budget_snapshot());
 }
 
@@ -425,11 +425,11 @@ fn panic_and_pool_rejection_drop_unpublished_admission_charge() {
     assert_eq!(inline.run_pending_for_tests().executed, 1);
     assert!(matches!(handle.try_take(), Some(TaskTerminal::Failed(_))));
     assert_budget_fully_released(importer.budget_snapshot());
-    let _ = inline.shutdown();
+    let _ = inline.shutdown_blocking();
 
     let rejected = admit_file(&importer, &source, record).unwrap();
     let mut closed = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
-    let _ = closed.shutdown();
+    let _ = closed.shutdown_blocking();
     let outcome = closed.spawn(
         TaskPoolKind::Io,
         TaskSpawnRequest::new(2, TaskDomainKey::new(2)),

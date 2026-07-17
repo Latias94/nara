@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use nara_ecs::{Resource, World};
 use thiserror::Error;
 
-use crate::App;
+use crate::{App, RuntimeCloseParticipantId};
 
 mod definition;
 mod fingerprint;
@@ -384,6 +384,14 @@ pub enum PluginError {
     DuplicateShutdownObligation {
         plugin: PluginId,
         obligation: PluginShutdownObligationId,
+    },
+    #[error(
+        "runtime close participant {participant_id} for plugin {plugin} obligation {obligation} was registered more than once"
+    )]
+    DuplicateRuntimeCloseParticipant {
+        plugin: PluginId,
+        obligation: PluginShutdownObligationId,
+        participant_id: RuntimeCloseParticipantId,
     },
     #[error("shutdown obligations may only be registered by the active plugin build hook")]
     ShutdownObligationOutsideBuild,

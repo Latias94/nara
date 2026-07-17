@@ -3,12 +3,19 @@
 mod components;
 mod systems;
 
-use std::{error::Error, fmt, time::Duration};
+use std::{
+    error::Error,
+    fmt,
+    time::{Duration, Instant},
+};
 
 use nara::{
     app::{
-        AddPluginsError, AppRunError, PluginCategory, PluginDeclaration, PluginDefinition,
-        PluginError, PluginId, PluginPreflightContext, PluginSchemaProviderId,
+        AddPluginsError, PluginCategory, PluginDeclaration, PluginDefinition, PluginError,
+        PluginId, PluginPreflightContext, PluginSchemaProviderId, RuntimeAdmissionRetirement,
+        RuntimeCandidate, RuntimeCandidateFailure, RuntimeCandidateRetirementState,
+        RuntimeCloseEvidence, RuntimeControl, RuntimeControlRejection, RuntimeControlRequestResult,
+        RuntimeDriveError, RuntimeRetirement, RuntimeState,
     },
     ecs::schedule::IntoScheduleConfigs,
     fs::FileCapability,
@@ -209,16 +216,145 @@ impl TracerSnapshot {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReferenceGameRuntimeRetirementCause {
+    StopRejected { rejection: RuntimeControlRejection },
+    DriveFailed { error: RuntimeDriveError },
+    DeadlineExceeded,
+    CloseIncomplete,
+    InvalidState,
+}
+
+#[must_use = "runtime retirement errors retain close authority until explicitly retired"]
+pub struct ReferenceGameRuntimeRetirementError {
+    cause: ReferenceGameRuntimeRetirementCause,
+    observed_state: RuntimeState,
+    retirement: RuntimeRetirement,
+}
+
+impl fmt::Debug for ReferenceGameRuntimeRetirementError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReferenceGameRuntimeRetirementError")
+            .field("cause", &self.cause)
+            .field("observed_state", &self.observed_state)
+            .field("retirement", &self.retirement)
+            .finish()
+    }
+}
+
+impl ReferenceGameRuntimeRetirementError {
+    fn new(
+        cause: ReferenceGameRuntimeRetirementCause,
+        runtime: nara::app::RuntimeInstance,
+    ) -> Self {
+        let observed_state = runtime.state();
+        Self {
+            cause,
+            observed_state,
+            retirement: runtime.begin_retirement(),
+        }
+    }
+
+    #[must_use]
+    pub const fn cause(&self) -> &ReferenceGameRuntimeRetirementCause {
+        &self.cause
+    }
+
+    #[must_use]
+    pub const fn observed_state(&self) -> RuntimeState {
+        self.observed_state
+    }
+
+    #[must_use]
+    pub fn retirement_state(&self) -> RuntimeCandidateRetirementState {
+        self.retirement.retirement_state()
+    }
+
+    #[must_use]
+    pub fn close_evidence(&self) -> &RuntimeCloseEvidence {
+        self.retirement.close_evidence()
+    }
+
+    #[must_use]
+    pub const fn retirement(&self) -> &RuntimeRetirement {
+        &self.retirement
+    }
+
+    pub const fn retirement_mut(&mut self) -> &mut RuntimeRetirement {
+        &mut self.retirement
+    }
+
+    #[must_use]
+    pub fn into_retirement(self) -> RuntimeRetirement {
+        self.retirement
+    }
+}
+
+impl fmt::Display for ReferenceGameRuntimeRetirementError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.cause {
+            ReferenceGameRuntimeRetirementCause::StopRejected { rejection } => write!(
+                formatter,
+                "runtime stop was rejected in state {:?}: {rejection:?}",
+                self.observed_state
+            ),
+            ReferenceGameRuntimeRetirementCause::DriveFailed { error } => write!(
+                formatter,
+                "runtime retirement drive failed in state {:?}: {error}",
+                self.observed_state
+            ),
+            ReferenceGameRuntimeRetirementCause::DeadlineExceeded => write!(
+                formatter,
+                "runtime retirement deadline expired in state {:?}",
+                self.observed_state
+            ),
+            ReferenceGameRuntimeRetirementCause::CloseIncomplete => write!(
+                formatter,
+                "runtime retirement is incomplete in state {:?}",
+                self.observed_state
+            ),
+            ReferenceGameRuntimeRetirementCause::InvalidState => write!(
+                formatter,
+                "runtime cannot begin retirement from state {:?}",
+                self.observed_state
+            ),
+        }
+    }
+}
+
+impl Error for ReferenceGameRuntimeRetirementError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match &self.cause {
+            ReferenceGameRuntimeRetirementCause::DriveFailed { error } => Some(error),
+            ReferenceGameRuntimeRetirementCause::StopRejected { .. }
+            | ReferenceGameRuntimeRetirementCause::DeadlineExceeded
+            | ReferenceGameRuntimeRetirementCause::CloseIncomplete
+            | ReferenceGameRuntimeRetirementCause::InvalidState => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ReferenceGameError {
     Composition(AddPluginsError),
     Plugin(PluginError),
-    Run(AppRunError),
+    RuntimeAdmission(RuntimeAdmissionRetirement),
+    RuntimeStartup(RuntimeCandidateFailure),
+    RuntimeDrive(RuntimeDriveError),
+    RuntimeRetirement(ReferenceGameRuntimeRetirementError),
+    RuntimeTeardown {
+        prior: Box<ReferenceGameError>,
+        teardown: ReferenceGameRuntimeRetirementError,
+    },
     Project(ProjectCandidateError),
     MissingResource(&'static str),
     MissingComponent(&'static str),
     DuplicateComponent(&'static str),
-    UnexpectedFixedSteps { expected: u32, actual: u32 },
+    UnexpectedFixedSteps {
+        expected: u32,
+        actual: u32,
+    },
 }
 
 impl fmt::Display for ReferenceGameError {
@@ -228,7 +364,28 @@ impl fmt::Display for ReferenceGameError {
                 write!(formatter, "reference-game composition failed: {error}")
             }
             Self::Plugin(error) => write!(formatter, "reference-game plugin setup failed: {error}"),
-            Self::Run(error) => write!(formatter, "reference-game frame failed: {error}"),
+            Self::RuntimeAdmission(error) => {
+                write!(
+                    formatter,
+                    "reference-game runtime admission failed: {error}"
+                )
+            }
+            Self::RuntimeStartup(error) => {
+                write!(formatter, "reference-game runtime startup failed: {error}")
+            }
+            Self::RuntimeDrive(error) => {
+                write!(formatter, "reference-game runtime drive failed: {error}")
+            }
+            Self::RuntimeRetirement(error) => {
+                write!(
+                    formatter,
+                    "reference-game runtime retirement failed: {error}"
+                )
+            }
+            Self::RuntimeTeardown { prior, teardown } => write!(
+                formatter,
+                "{prior}; runtime teardown also failed: {teardown}"
+            ),
             Self::Project(error) => write!(formatter, "reference-game project is invalid: {error}"),
             Self::MissingResource(resource) => {
                 write!(
@@ -258,7 +415,11 @@ impl Error for ReferenceGameError {
         match self {
             Self::Composition(error) => Some(error),
             Self::Plugin(error) => Some(error),
-            Self::Run(error) => Some(error),
+            Self::RuntimeAdmission(error) => Some(error),
+            Self::RuntimeStartup(error) => Some(error),
+            Self::RuntimeDrive(error) => Some(error),
+            Self::RuntimeRetirement(error) => Some(error),
+            Self::RuntimeTeardown { prior, .. } => Some(prior),
             Self::Project(error) => Some(error),
             Self::MissingResource(_)
             | Self::MissingComponent(_)
@@ -280,9 +441,21 @@ impl From<PluginError> for ReferenceGameError {
     }
 }
 
-impl From<AppRunError> for ReferenceGameError {
-    fn from(error: AppRunError) -> Self {
-        Self::Run(error)
+impl From<RuntimeCandidateFailure> for ReferenceGameError {
+    fn from(error: RuntimeCandidateFailure) -> Self {
+        Self::RuntimeStartup(error)
+    }
+}
+
+impl From<RuntimeDriveError> for ReferenceGameError {
+    fn from(error: RuntimeDriveError) -> Self {
+        Self::RuntimeDrive(error)
+    }
+}
+
+impl From<ReferenceGameRuntimeRetirementError> for ReferenceGameError {
+    fn from(error: ReferenceGameRuntimeRetirementError) -> Self {
+        Self::RuntimeRetirement(error)
     }
 }
 
@@ -320,26 +493,131 @@ fn run_headless_ticks_with_time(
         app.insert_resource(fixed_time)?;
     }
 
-    let startup = app.run_once(Duration::ZERO)?;
-    if startup.status.fixed_steps != 0 {
-        return Err(ReferenceGameError::UnexpectedFixedSteps {
-            expected: 0,
-            actual: startup.status.fixed_steps,
-        });
+    let candidate = match RuntimeCandidate::admit(app.seal()?) {
+        Ok(candidate) => candidate,
+        Err(failure) => return Err(retire_admission_failure(failure)),
+    };
+    let ready = match candidate.complete_startup() {
+        Ok(ready) => ready,
+        Err(mut failure) => {
+            while failure.retirement_state() == RuntimeCandidateRetirementState::Retiring {
+                failure.drive_retirement();
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+            return Err(ReferenceGameError::RuntimeStartup(failure));
+        }
+    };
+    let mut runtime = ready.promote();
+    let fixed_timestep = runtime.world().resource::<FixedTime>().timestep();
+    let primary = (|| {
+        for _ in 0..ticks {
+            let outcome = runtime.drive(fixed_timestep)?;
+            let actual = outcome.frame().map_or(0, |frame| frame.status.fixed_steps);
+            if actual != 1 {
+                return Err(ReferenceGameError::UnexpectedFixedSteps {
+                    expected: 1,
+                    actual,
+                });
+            }
+        }
+        TracerSnapshot::capture(runtime.world())
+    })();
+    finish_headless_run(primary, runtime)
+}
+
+fn finish_headless_run(
+    primary: Result<TracerSnapshot, ReferenceGameError>,
+    runtime: nara::app::RuntimeInstance,
+) -> Result<TracerSnapshot, ReferenceGameError> {
+    let teardown = close_runtime(runtime);
+    match (primary, teardown) {
+        (Ok(snapshot), Ok(())) => Ok(snapshot),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(ReferenceGameError::RuntimeRetirement(error)),
+        (Err(prior), Err(teardown)) => Err(ReferenceGameError::RuntimeTeardown {
+            prior: Box::new(prior),
+            teardown,
+        }),
+    }
+}
+
+fn retire_admission_failure(failure: nara::app::RuntimeAdmissionFailure) -> ReferenceGameError {
+    let mut retirement = failure.begin_retirement();
+    while retirement.retirement_state() == RuntimeCandidateRetirementState::Retiring {
+        retirement.drive_retirement();
+        std::thread::park_timeout(Duration::from_millis(1));
+    }
+    ReferenceGameError::RuntimeAdmission(retirement)
+}
+
+fn close_runtime(
+    mut runtime: nara::app::RuntimeInstance,
+) -> Result<(), ReferenceGameRuntimeRetirementError> {
+    match runtime.state() {
+        RuntimeState::Running | RuntimeState::Paused | RuntimeState::Faulted => {
+            if let RuntimeControlRequestResult::Rejected(rejection) =
+                runtime.request_control(RuntimeControl::Stop)
+            {
+                return Err(ReferenceGameRuntimeRetirementError::new(
+                    ReferenceGameRuntimeRetirementCause::StopRejected { rejection },
+                    runtime,
+                ));
+            }
+        }
+        RuntimeState::Stopping => {}
+        RuntimeState::CloseIncomplete => {
+            return Err(ReferenceGameRuntimeRetirementError::new(
+                ReferenceGameRuntimeRetirementCause::CloseIncomplete,
+                runtime,
+            ));
+        }
+        RuntimeState::Stepping => {
+            return Err(ReferenceGameRuntimeRetirementError::new(
+                ReferenceGameRuntimeRetirementCause::InvalidState,
+                runtime,
+            ));
+        }
+        RuntimeState::Stopped => return Ok(()),
     }
 
-    let fixed_timestep = app.world().resource::<FixedTime>().timestep();
-    for _ in 0..ticks {
-        let outcome = app.run_once(fixed_timestep)?;
-        if outcome.status.fixed_steps != 1 {
-            return Err(ReferenceGameError::UnexpectedFixedSteps {
-                expected: 1,
-                actual: outcome.status.fixed_steps,
-            });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match runtime.state() {
+            RuntimeState::Stopped => return Ok(()),
+            RuntimeState::CloseIncomplete => {
+                return Err(ReferenceGameRuntimeRetirementError::new(
+                    ReferenceGameRuntimeRetirementCause::CloseIncomplete,
+                    runtime,
+                ));
+            }
+            RuntimeState::Stepping => {
+                return Err(ReferenceGameRuntimeRetirementError::new(
+                    ReferenceGameRuntimeRetirementCause::InvalidState,
+                    runtime,
+                ));
+            }
+            RuntimeState::Running
+            | RuntimeState::Paused
+            | RuntimeState::Faulted
+            | RuntimeState::Stopping => {}
+        }
+
+        if Instant::now() >= deadline {
+            return Err(ReferenceGameRuntimeRetirementError::new(
+                ReferenceGameRuntimeRetirementCause::DeadlineExceeded,
+                runtime,
+            ));
+        }
+        if let Err(error) = runtime.drive(Duration::ZERO) {
+            return Err(ReferenceGameRuntimeRetirementError::new(
+                ReferenceGameRuntimeRetirementCause::DriveFailed { error },
+                runtime,
+            ));
+        }
+        if runtime.state() != RuntimeState::Stopped {
+            std::thread::park_timeout(Duration::from_millis(1));
         }
     }
-
-    TracerSnapshot::capture(app.world())
 }
 
 fn single_component<'world, T>(
@@ -357,4 +635,136 @@ where
         return Err(ReferenceGameError::DuplicateComponent(label));
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use nara::app::{
+        RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseParticipant,
+        RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
+        RuntimeCloseProgress, RuntimeObligationLedger,
+    };
+
+    use super::*;
+
+    struct ReleasedCloseParticipant {
+        released: Arc<AtomicBool>,
+    }
+
+    impl RuntimeCloseParticipant for ReleasedCloseParticipant {
+        fn begin_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            Ok(RuntimeCloseProgress::Pending)
+        }
+
+        fn poll_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            Ok(if self.released.load(Ordering::Acquire) {
+                RuntimeCloseProgress::Complete
+            } else {
+                RuntimeCloseProgress::Pending
+            })
+        }
+    }
+
+    fn runtime_with_pending_close(released: Arc<AtomicBool>) -> nara::app::RuntimeInstance {
+        let mut obligations = RuntimeObligationLedger::new();
+        obligations
+            .register(
+                RuntimeCloseParticipantId::new("reference-game.test.pending-close"),
+                ReleasedCloseParticipant { released },
+            )
+            .unwrap();
+        let candidate = RuntimeCandidate::admit_with(
+            App::new().seal().unwrap(),
+            obligations,
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap();
+        candidate.complete_startup().unwrap().promote()
+    }
+
+    #[test]
+    fn failed_close_returns_retryable_retirement_owner() {
+        let released = Arc::new(AtomicBool::new(false));
+        let runtime = runtime_with_pending_close(Arc::clone(&released));
+
+        let mut failure = close_runtime(runtime).unwrap_err();
+
+        assert!(matches!(
+            failure.cause(),
+            ReferenceGameRuntimeRetirementCause::CloseIncomplete
+        ));
+        assert_eq!(failure.observed_state(), RuntimeState::CloseIncomplete);
+        assert_eq!(
+            failure.retirement_state(),
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        assert!(
+            failure
+                .close_evidence()
+                .causes()
+                .contains(&RuntimeCloseCause::DeadlineExceeded)
+        );
+
+        released.store(true, Ordering::Release);
+        assert_eq!(
+            failure.retirement_mut().drive_retirement(),
+            RuntimeCandidateRetirementState::Retired
+        );
+        let retirement = failure.into_retirement();
+        assert_eq!(
+            retirement.retirement_state(),
+            RuntimeCandidateRetirementState::Retired
+        );
+    }
+
+    #[test]
+    fn primary_and_teardown_failure_preserve_both_and_retirement_authority() {
+        let released = Arc::new(AtomicBool::new(false));
+        let runtime = runtime_with_pending_close(Arc::clone(&released));
+        let primary = ReferenceGameError::UnexpectedFixedSteps {
+            expected: 1,
+            actual: 0,
+        };
+
+        let failure = finish_headless_run(Err(primary), runtime).unwrap_err();
+
+        let ReferenceGameError::RuntimeTeardown {
+            prior,
+            mut teardown,
+        } = failure
+        else {
+            panic!("primary plus close failure must retain both errors");
+        };
+        assert!(matches!(
+            *prior,
+            ReferenceGameError::UnexpectedFixedSteps {
+                expected: 1,
+                actual: 0
+            }
+        ));
+        assert_eq!(teardown.observed_state(), RuntimeState::CloseIncomplete);
+        assert!(
+            teardown
+                .close_evidence()
+                .causes()
+                .contains(&RuntimeCloseCause::DeadlineExceeded)
+        );
+
+        released.store(true, Ordering::Release);
+        assert_eq!(
+            teardown.retirement_mut().drive_retirement(),
+            RuntimeCandidateRetirementState::Retired
+        );
+    }
 }

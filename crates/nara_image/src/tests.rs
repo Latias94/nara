@@ -1795,7 +1795,7 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
             .all(PendingImageImportStream::is_empty)
     );
 
-    let _ = pools.shutdown();
+    let _ = pools.shutdown_blocking();
 }
 
 #[test]

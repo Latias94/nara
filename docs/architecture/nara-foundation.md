@@ -307,6 +307,12 @@ second real adapter or stronger isolation pressure.
   tickets and fault reporters to a non-reused generation, and never imports project/content,
   tooling, or backend policy. Raw App Drop performs one best-effort participant pass; retryable
   close requires the retained managed owner.
+  Candidate and driver mutation scopes bind the canonical fallback reporter and verify both its
+  reporter and handler authority around healthy operations. An unhandled fallible system or
+  observer that reaches that fallback records the first sticky fault and makes the scope return
+  `RuntimeScopeError::Faulted`; an explicit per-system or per-observer error handler is instead the
+  caller's handling boundary. Candidate mutation rejects an existing fault, while a published
+  faulted runtime keeps its driver scope available for retirement work until it reaches `Stopped`.
   Abnormal Drop of an admission failure, startup failure, or published runtime begins one bounded
   close pass and retains an unfinished `App`, `World`, and obligation ledger in an observable,
   owner-thread-affine quarantine. The quarantine has per-thread and process ceilings, exposes

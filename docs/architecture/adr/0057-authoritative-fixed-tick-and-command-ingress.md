@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
+**Last Revised**: 2026-07-16
 **Refines**: ADR 0023: Event, Message, and Command Model; ADR 0024: Determinism,
 Fixed Update, and Replay Policy; ADR 0036: Event, Message, and Resource Queue Lifetime;
 ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0056: Headless Runtime
@@ -128,6 +129,12 @@ not execute after admission failure or against a stale batch. Pending and quaran
 retained and budgeted; there is no in-place recovery or acknowledgement path. The owning runtime
 must be discarded and rebuilt from a known-good boundary.
 
+`GameplayCommandPlugin` bridges engine-owned action-mapping loss and Admit/Acknowledge lifecycle
+failure into the current App-owned `RuntimeFaultReporter` before a managed frame or exact step can
+report success. The first such fault is sticky for that runtime generation. Malformed, late,
+duplicate, over-budget, future-horizon, or other policy-rejected external submissions remain typed
+producer rejections and do not fault an otherwise healthy runtime.
+
 ### Bounds, validation, and overload
 
 `nara_gameplay` owns immutable queue limits using the unit-safe scalar types from `nara_core`.
@@ -243,6 +250,8 @@ transport requirement that justifies the complexity.
 - U8 may replace the temporary scene/persistent target vocabulary with the world identity domain;
   U4 establishes no lookup dependency that would obstruct that change.
 - U31 consumes typed rejection/stat snapshots but does not move diagnostic policy into gameplay.
+- Managed exact stepping uses the same `Admit -> Consume -> Capture -> Acknowledge` sets and fault
+  bridge as an ordinary fixed tick; it does not provide a second command lifecycle.
 
 ## Success Metrics
 
@@ -254,6 +263,7 @@ transport requirement that justifies the complexity.
 | Bounded retention | Healthy pending plus active, or poisoned pending plus quarantine, never exceed configured limits; exact boundary accepts and boundary + 1 rejects | Queue limit and poison-quarantine tests |
 | Invalid ingress | Zero tick/sequence, invalid IDs/targets, NaN/Inf, late, future, and duplicate submissions are rejected without partial retention | Constructor, serde, and queue tests |
 | Lifecycle ownership | Capture observes a current healthy batch before Ack; a fault is sticky, quarantines active work, and gates consumers; no command cleanup system exists in `CoreStage::Last` | Schedule, poison, and stale-contract checks |
+| Runtime fault bridge | Engine-owned mapping/Admit/Acknowledge failure faults the current generation before success, while producer-visible validation/policy rejection does not | Managed runtime integration tests |
 
 ## Risks and Mitigations
 

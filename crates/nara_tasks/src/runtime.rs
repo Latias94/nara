@@ -2,21 +2,26 @@ use std::{
     collections::{BTreeMap, VecDeque},
     error::Error,
     fmt::{self, Debug, Display, Formatter},
+    io,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc, Condvar, Mutex, MutexGuard,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError, TrySendError},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
-use nara_app::{App, CoreStage, Plugin, PluginError, PluginShutdownContext, TaskUpdateSet};
+use nara_app::{
+    App, CoreStage, Plugin, PluginError, RuntimeCloseContext, RuntimeCloseParticipant,
+    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress, TaskUpdateSet,
+};
 use nara_core::{ItemLimit, TimeLimit};
 use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
 
 #[cfg(test)]
-use std::{cell::RefCell, sync::atomic::AtomicUsize};
+use std::cell::RefCell;
 
 pub const MAX_TASK_POOL_THREADS_PER_KIND: usize = 256;
 pub const MAX_TASK_POOL_THREADS_TOTAL: usize = 512;
@@ -24,6 +29,17 @@ pub const MAX_TASK_POOL_PENDING_PER_KIND: usize = 1_048_576;
 pub const MAX_TASK_POOL_PENDING_TOTAL: usize = 2_097_152;
 pub const MAX_TASK_SHUTDOWN_PHASE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_TASK_SHUTDOWN_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+const TASK_CLOSE_CANCEL_BATCH: usize = 256;
+const TASK_REAPER_INTAKE_BATCH: usize = 64;
+const TASK_REAPER_OWNER_POLL_BATCH: usize = 64;
+const TASK_REAPER_DROP_LANES: usize = 2;
+const TASK_REAPER_ROUND_WAIT: Duration = Duration::from_millis(1);
+
+// Drop cannot run user destructors or wait for uncooperative workers. A process-owned reaper keeps
+// every transferred task owner observable until pending work is retired and worker handles join.
+static TASK_OWNER_REAPER_SUPERVISOR: Mutex<TaskOwnerReaperSupervisor> =
+    Mutex::new(TaskOwnerReaperSupervisor::new());
+static ABANDONED_TASK_OWNER_COUNT: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn default_worker_allocation(available_parallelism: usize) -> [usize; 3] {
     let io = 2.min(MAX_TASK_POOL_THREADS_PER_KIND);
@@ -684,7 +700,6 @@ struct TaskCounters {
     taken: u64,
     shutdowns: u64,
     shutdown_timeouts: u64,
-    detached_workers: u64,
 }
 
 type SharedTaskCounters = Arc<Mutex<TaskCounters>>;
@@ -1012,7 +1027,6 @@ pub struct TaskPoolStats {
     pub oldest_running_age: Option<Duration>,
     pub shutdowns: u64,
     pub shutdown_timeouts: u64,
-    pub detached_workers: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1051,15 +1065,18 @@ pub struct TaskPools {
     io: TaskPoolExecutor,
     compute: TaskPoolExecutor,
     async_compute: TaskPoolExecutor,
-    shutdown_report: Option<TaskShutdownReport>,
+    close_owner: Option<TaskPoolsCloseOwner>,
 }
 
 impl TaskPools {
     pub fn try_new(config: TaskPoolConfig) -> Result<Self, TaskPoolError> {
         config.validate().map_err(TaskPoolError::InvalidConfig)?;
-        let io = TaskPoolExecutor::threaded(TaskPoolKind::Io, config)?;
-        let compute = TaskPoolExecutor::threaded(TaskPoolKind::Compute, config)?;
-        let async_compute = TaskPoolExecutor::threaded(TaskPoolKind::AsyncCompute, config)?;
+        prewarm_task_owner_reaper();
+        let (io, io_close_owner) = TaskPoolExecutor::threaded(TaskPoolKind::Io, config)?;
+        let (compute, compute_close_owner) =
+            TaskPoolExecutor::threaded(TaskPoolKind::Compute, config)?;
+        let (async_compute, async_compute_close_owner) =
+            TaskPoolExecutor::threaded(TaskPoolKind::AsyncCompute, config)?;
         Ok(Self {
             config,
             next_id: AtomicU64::new(1),
@@ -1067,20 +1084,34 @@ impl TaskPools {
             io,
             compute,
             async_compute,
-            shutdown_report: None,
+            close_owner: Some(TaskPoolsCloseOwner::new(
+                io_close_owner,
+                compute_close_owner,
+                async_compute_close_owner,
+            )),
         })
     }
 
     pub fn inline_for_tests(config: TaskPoolConfig) -> Result<Self, TaskPoolError> {
         config.validate().map_err(TaskPoolError::InvalidConfig)?;
+        prewarm_task_owner_reaper();
+        let (io, io_close_owner) = TaskPoolExecutor::inline(TaskPoolKind::Io, config);
+        let (compute, compute_close_owner) =
+            TaskPoolExecutor::inline(TaskPoolKind::Compute, config);
+        let (async_compute, async_compute_close_owner) =
+            TaskPoolExecutor::inline(TaskPoolKind::AsyncCompute, config);
         Ok(Self {
             config,
             next_id: AtomicU64::new(1),
             instance_token: Arc::new(TaskPoolInstanceToken),
-            io: TaskPoolExecutor::inline(TaskPoolKind::Io, config),
-            compute: TaskPoolExecutor::inline(TaskPoolKind::Compute, config),
-            async_compute: TaskPoolExecutor::inline(TaskPoolKind::AsyncCompute, config),
-            shutdown_report: None,
+            io,
+            compute,
+            async_compute,
+            close_owner: Some(TaskPoolsCloseOwner::new(
+                io_close_owner,
+                compute_close_owner,
+                async_compute_close_owner,
+            )),
         })
     }
 
@@ -1211,18 +1242,39 @@ impl TaskPools {
         }
     }
 
-    pub fn shutdown(&mut self) -> TaskShutdownReport {
-        if let Some(report) = &self.shutdown_report {
-            return report.repeated();
+    pub fn shutdown_blocking(&mut self) -> Result<TaskShutdownReport, TaskShutdownError> {
+        let Some(owner) = self.close_owner.as_ref() else {
+            return Err(TaskShutdownError::CloseOwnerTransferred);
+        };
+        if owner.is_complete() {
+            return Ok(owner.report());
         }
-        let mut report = TaskShutdownReport::default();
-        for kind in TaskPoolKind::ALL {
-            report
-                .per_kind
-                .insert(kind, self.executor_mut(kind).shutdown());
+        self.begin_close();
+        loop {
+            match self.poll_close() {
+                TaskPoolsCloseProgress::Complete | TaskPoolsCloseProgress::Incomplete => {
+                    return Ok(self
+                        .close_owner
+                        .as_ref()
+                        .expect("standalone task pools retain their close owner")
+                        .report());
+                }
+                TaskPoolsCloseProgress::Pending => thread::sleep(Duration::from_millis(1)),
+            }
         }
-        self.shutdown_report = Some(report.clone());
-        report
+    }
+
+    fn begin_close(&mut self) {
+        if let Some(owner) = self.close_owner.as_mut() {
+            owner.begin_close();
+        }
+    }
+
+    fn poll_close(&mut self) -> TaskPoolsCloseProgress {
+        self.close_owner
+            .as_mut()
+            .expect("only standalone task pools drive their close owner")
+            .poll_close()
     }
 
     fn allocate_task_id(&self) -> Option<TaskId> {
@@ -1263,7 +1315,11 @@ impl TaskPools {
         &mut self,
         kind: TaskPoolKind,
     ) -> TaskPoolShutdownReport {
-        self.executor_mut(kind).shutdown()
+        self.close_owner
+            .as_mut()
+            .expect("standalone test pools retain their close owner")
+            .executor_mut(kind)
+            .shutdown()
     }
 
     fn executor(&self, kind: TaskPoolKind) -> &TaskPoolExecutor {
@@ -1274,12 +1330,8 @@ impl TaskPools {
         }
     }
 
-    fn executor_mut(&mut self, kind: TaskPoolKind) -> &mut TaskPoolExecutor {
-        match kind {
-            TaskPoolKind::Io => &mut self.io,
-            TaskPoolKind::Compute => &mut self.compute,
-            TaskPoolKind::AsyncCompute => &mut self.async_compute,
-        }
+    fn take_close_owner(&mut self) -> Option<TaskPoolsCloseOwner> {
+        self.close_owner.take()
     }
 }
 
@@ -1293,25 +1345,40 @@ impl Debug for TaskPools {
     }
 }
 
-impl Drop for TaskPools {
-    fn drop(&mut self) {
-        let _ = self.shutdown();
-    }
-}
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TaskInlineRunReport {
     pub executed: usize,
     pub cancelled_before_start: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskPoolsCloseProgress {
+    Pending,
+    Incomplete,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskShutdownError {
+    CloseOwnerTransferred,
+}
+
+impl Display for TaskShutdownError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CloseOwnerTransferred => formatter
+                .write_str("task pool close ownership was transferred to the managed runtime"),
+        }
+    }
+}
+
+impl Error for TaskShutdownError {}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TaskPoolShutdownReport {
-    pub already_shutdown: bool,
     pub cancelled_pending: usize,
     pub cancellation_requests: usize,
     pub joined_workers: usize,
-    pub detached_workers: usize,
     pub panicked_workers: usize,
     pub drain_timed_out: bool,
     pub cancel_timed_out: bool,
@@ -1351,22 +1418,6 @@ impl TaskShutdownReport {
         TaskPoolKind::ALL
             .into_iter()
             .any(|kind| self.for_kind(kind).timed_out())
-    }
-
-    #[must_use]
-    pub fn detached_workers(&self) -> usize {
-        TaskPoolKind::ALL
-            .into_iter()
-            .map(|kind| self.for_kind(kind).detached_workers)
-            .sum()
-    }
-
-    fn repeated(&self) -> Self {
-        let mut report = self.clone();
-        for pool in report.per_kind.values_mut() {
-            pool.already_shutdown = true;
-        }
-        report
     }
 }
 
@@ -1502,13 +1553,15 @@ impl ExecutorShared {
             oldest_running_age,
             shutdowns: counters.shutdowns,
             shutdown_timeouts: counters.shutdown_timeouts,
-            detached_workers: counters.detached_workers,
         }
     }
 
     fn take_next(&self, wait: bool) -> NextJob {
         let mut queue = lock_unpoisoned(&self.queue);
         loop {
+            if queue.lifecycle == QueueLifecycle::Closed {
+                return NextJob::Exit;
+            }
             if let Some(pending) = queue.pending.pop_front() {
                 if pending.control.state.mark_running() {
                     queue.running.insert(
@@ -1567,14 +1620,48 @@ enum InlineStep {
 
 struct TaskPoolExecutor {
     shared: Arc<ExecutorShared>,
+    inline: bool,
+}
+
+struct TaskPoolCloseOwner {
+    shared: Arc<ExecutorShared>,
     workers: Vec<JoinHandle<()>>,
+    pending_reaps: Vec<TaskOwnerReapReceipt>,
     shutdown_policy: TaskShutdownPolicy,
     inline: bool,
-    shutdown_report: Option<TaskPoolShutdownReport>,
+    close_phase: TaskPoolClosePhase,
+    shutdown_report: TaskPoolShutdownReport,
+    shutdown_recorded: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskPoolClosePhase {
+    Open,
+    Draining { deadline: Instant },
+    Cancelling { deadline: Instant },
+    Joining { deadline: Instant },
+    WaitingForRetry { resume: TaskPoolRetryPhase },
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskPoolRetryPhase {
+    Cancelling,
+    Joining,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskPoolCloseProgress {
+    Pending,
+    Incomplete,
+    Complete,
 }
 
 impl TaskPoolExecutor {
-    fn threaded(kind: TaskPoolKind, config: TaskPoolConfig) -> Result<Self, TaskPoolError> {
+    fn threaded(
+        kind: TaskPoolKind,
+        config: TaskPoolConfig,
+    ) -> Result<(Self, TaskPoolCloseOwner), TaskPoolError> {
         let kind_config = config.kind(kind);
         let thread_count = kind_config.workers().get();
         let shared = Arc::new(ExecutorShared::new(
@@ -1597,11 +1684,7 @@ impl TaskPoolExecutor {
                         &workers,
                         config.shutdown_policy().join_timeout().get(),
                     );
-                    for worker in workers {
-                        if worker.is_finished() {
-                            let _ = worker.join();
-                        }
-                    }
+                    retain_abandoned_workers(workers);
                     return Err(TaskPoolError::WorkerSpawnFailed {
                         kind,
                         message: error.to_string(),
@@ -1610,23 +1693,24 @@ impl TaskPoolExecutor {
             };
             workers.push(worker);
         }
-        Ok(Self {
-            shared,
-            workers,
-            shutdown_policy: config.shutdown_policy(),
-            inline: false,
-            shutdown_report: None,
-        })
+        Ok((
+            Self {
+                shared: shared.clone(),
+                inline: false,
+            },
+            TaskPoolCloseOwner::new(shared, workers, config.shutdown_policy(), false),
+        ))
     }
 
-    fn inline(kind: TaskPoolKind, config: TaskPoolConfig) -> Self {
-        Self {
-            shared: Arc::new(ExecutorShared::new(config.kind(kind).pending().get(), 0)),
-            workers: Vec::new(),
-            shutdown_policy: config.shutdown_policy(),
-            inline: true,
-            shutdown_report: None,
-        }
+    fn inline(kind: TaskPoolKind, config: TaskPoolConfig) -> (Self, TaskPoolCloseOwner) {
+        let shared = Arc::new(ExecutorShared::new(config.kind(kind).pending().get(), 0));
+        (
+            Self {
+                shared: shared.clone(),
+                inline: true,
+            },
+            TaskPoolCloseOwner::new(shared, Vec::new(), config.shutdown_policy(), true),
+        )
     }
 
     fn admit(&self, pending: PendingJob) -> AdmissionDecision {
@@ -1752,138 +1836,342 @@ impl TaskPoolExecutor {
             NextJob::Empty | NextJob::Exit => InlineStep::Empty,
         }
     }
+}
 
-    fn shutdown(&mut self) -> TaskPoolShutdownReport {
-        if let Some(mut report) = self.shutdown_report {
-            report.already_shutdown = true;
-            return report;
+impl TaskPoolCloseOwner {
+    fn new(
+        shared: Arc<ExecutorShared>,
+        workers: Vec<JoinHandle<()>>,
+        shutdown_policy: TaskShutdownPolicy,
+        inline: bool,
+    ) -> Self {
+        Self {
+            shared,
+            workers,
+            pending_reaps: Vec::new(),
+            shutdown_policy,
+            inline,
+            close_phase: TaskPoolClosePhase::Open,
+            shutdown_report: TaskPoolShutdownReport::default(),
+            shutdown_recorded: false,
         }
-        let mut report = TaskPoolShutdownReport::default();
+    }
 
-        if self.inline {
-            let pending = {
-                let mut queue = lock_unpoisoned(&self.shared.queue);
-                queue.lifecycle = QueueLifecycle::Closed;
-                self.shared.changed.notify_all();
-                queue.pending.drain(..).collect::<Vec<_>>()
-            };
-            for job in pending {
-                if job
-                    .control
-                    .state
-                    .cancel(TaskCancellationReason::PoolShutdown)
-                {
-                    report.cancelled_pending = report.cancelled_pending.saturating_add(1);
-                }
-                safe_drop_pending(job);
+    fn begin_close(&mut self) {
+        if self.close_phase != TaskPoolClosePhase::Open {
+            return;
+        }
+        let mut queue = lock_unpoisoned(&self.shared.queue);
+        queue.lifecycle = if self.inline {
+            QueueLifecycle::Closed
+        } else {
+            QueueLifecycle::Draining
+        };
+        self.shared.changed.notify_all();
+        drop(queue);
+        self.close_phase = if self.inline {
+            TaskPoolClosePhase::Cancelling {
+                deadline: deadline_after(self.shutdown_policy.cancel_timeout().get()),
             }
-            self.record_shutdown(report);
-            self.shutdown_report = Some(report);
-            return report;
+        } else {
+            TaskPoolClosePhase::Draining {
+                deadline: deadline_after(self.shutdown_policy.drain_timeout().get()),
+            }
+        };
+    }
+
+    fn poll_close(&mut self) -> TaskPoolCloseProgress {
+        if self.close_phase == TaskPoolClosePhase::Open {
+            self.begin_close();
         }
 
-        {
-            let mut queue = lock_unpoisoned(&self.shared.queue);
-            queue.lifecycle = QueueLifecycle::Draining;
-            self.shared.changed.notify_all();
+        loop {
+            match self.close_phase {
+                TaskPoolClosePhase::Open => unreachable!("close begins before polling"),
+                TaskPoolClosePhase::Complete => return TaskPoolCloseProgress::Complete,
+                TaskPoolClosePhase::WaitingForRetry { resume } => {
+                    self.close_phase = match resume {
+                        TaskPoolRetryPhase::Cancelling => TaskPoolClosePhase::Cancelling {
+                            deadline: deadline_after(self.shutdown_policy.cancel_timeout().get()),
+                        },
+                        TaskPoolRetryPhase::Joining => TaskPoolClosePhase::Joining {
+                            deadline: deadline_after(self.shutdown_policy.join_timeout().get()),
+                        },
+                    };
+                }
+                TaskPoolClosePhase::Draining { deadline } => {
+                    let drained = {
+                        let queue = lock_unpoisoned(&self.shared.queue);
+                        queue.pending.is_empty() && queue.running.is_empty()
+                    };
+                    if drained {
+                        self.close_queue_and_cancel_running();
+                        self.close_phase = TaskPoolClosePhase::Joining {
+                            deadline: deadline_after(self.shutdown_policy.join_timeout().get()),
+                        };
+                        continue;
+                    }
+                    if Instant::now() < deadline {
+                        return TaskPoolCloseProgress::Pending;
+                    }
+                    self.shutdown_report.drain_timed_out = true;
+                    self.close_queue_and_cancel_running();
+                    self.close_phase = TaskPoolClosePhase::Cancelling {
+                        deadline: deadline_after(self.shutdown_policy.cancel_timeout().get()),
+                    };
+                }
+                TaskPoolClosePhase::Cancelling { deadline } => {
+                    let pending_remain = self.cancel_pending_batch();
+                    if pending_remain {
+                        if Instant::now() >= deadline {
+                            self.shutdown_report.cancel_timed_out = true;
+                            self.close_phase = TaskPoolClosePhase::WaitingForRetry {
+                                resume: TaskPoolRetryPhase::Cancelling,
+                            };
+                            self.record_shutdown();
+                            return TaskPoolCloseProgress::Incomplete;
+                        }
+                        return TaskPoolCloseProgress::Pending;
+                    }
+                    let running_remain = !lock_unpoisoned(&self.shared.queue).running.is_empty();
+                    if !running_remain {
+                        self.close_phase = TaskPoolClosePhase::Joining {
+                            deadline: deadline_after(self.shutdown_policy.join_timeout().get()),
+                        };
+                        continue;
+                    }
+                    if Instant::now() < deadline {
+                        return TaskPoolCloseProgress::Pending;
+                    }
+                    self.shutdown_report.cancel_timed_out = true;
+                    self.close_phase = TaskPoolClosePhase::Joining {
+                        deadline: deadline_after(self.shutdown_policy.join_timeout().get()),
+                    };
+                }
+                TaskPoolClosePhase::Joining { deadline } => {
+                    self.join_finished_workers();
+                    if self.workers.is_empty() {
+                        self.close_phase = TaskPoolClosePhase::Complete;
+                        self.record_shutdown();
+                        return TaskPoolCloseProgress::Complete;
+                    }
+                    if Instant::now() >= deadline {
+                        self.shutdown_report.join_timed_out = true;
+                        self.close_phase = TaskPoolClosePhase::WaitingForRetry {
+                            resume: TaskPoolRetryPhase::Joining,
+                        };
+                        self.record_shutdown();
+                        return TaskPoolCloseProgress::Incomplete;
+                    }
+                    return TaskPoolCloseProgress::Pending;
+                }
+            }
         }
-        let drained = self.wait_until(self.shutdown_policy.drain_timeout().get(), |queue| {
-            queue.pending.is_empty() && queue.running.is_empty()
-        });
-        if drained {
+    }
+
+    #[cfg(test)]
+    fn shutdown(&mut self) -> TaskPoolShutdownReport {
+        if self.close_phase == TaskPoolClosePhase::Complete {
+            return self.shutdown_report;
+        }
+        self.begin_close();
+        loop {
+            match self.poll_close() {
+                TaskPoolCloseProgress::Complete | TaskPoolCloseProgress::Incomplete => {
+                    return self.shutdown_report;
+                }
+                TaskPoolCloseProgress::Pending => thread::sleep(Duration::from_millis(1)),
+            }
+        }
+    }
+
+    fn close_queue_and_cancel_running(&mut self) {
+        let running = {
             let mut queue = lock_unpoisoned(&self.shared.queue);
             queue.lifecycle = QueueLifecycle::Closed;
+            let running = queue
+                .running
+                .values()
+                .map(|running| running.control.clone())
+                .collect::<Vec<_>>();
             self.shared.changed.notify_all();
-        } else {
-            report.drain_timed_out = true;
-            let (pending, running) = {
-                let mut queue = lock_unpoisoned(&self.shared.queue);
-                queue.lifecycle = QueueLifecycle::Closed;
-                let pending = queue.pending.drain(..).collect::<Vec<_>>();
-                let running = queue
-                    .running
-                    .values()
-                    .map(|running| running.control.clone())
-                    .collect::<Vec<_>>();
-                self.shared.changed.notify_all();
-                (pending, running)
-            };
-            for job in pending {
-                if job
-                    .control
-                    .state
-                    .cancel(TaskCancellationReason::PoolShutdown)
-                {
-                    report.cancelled_pending = report.cancelled_pending.saturating_add(1);
-                }
-                safe_drop_pending(job);
-            }
-            for running in running {
-                report.cancellation_requests = report.cancellation_requests.saturating_add(1);
-                running.state.cancel(TaskCancellationReason::PoolShutdown);
-            }
-            if !self.wait_until(self.shutdown_policy.cancel_timeout().get(), |queue| {
-                queue.running.is_empty()
-            }) {
-                report.cancel_timed_out = true;
-            }
+            running
+        };
+        for running in running {
+            self.shutdown_report.cancellation_requests =
+                self.shutdown_report.cancellation_requests.saturating_add(1);
+            running.state.cancel(TaskCancellationReason::PoolShutdown);
+        }
+    }
+
+    fn cancel_pending_batch(&mut self) -> bool {
+        self.pending_reaps.retain(|receipt| !receipt.is_complete());
+        if !self.pending_reaps.is_empty() {
+            retry_task_owner_reaper();
         }
 
-        wait_for_workers_finished(&self.workers, self.shutdown_policy.join_timeout().get());
-        for worker in self.workers.drain(..) {
-            if worker.is_finished() {
-                if worker.join().is_ok() {
-                    report.joined_workers = report.joined_workers.saturating_add(1);
-                } else {
-                    report.panicked_workers = report.panicked_workers.saturating_add(1);
-                }
+        let (pending, pending_remain) = {
+            let mut queue = lock_unpoisoned(&self.shared.queue);
+            let take = queue.pending.len().min(TASK_CLOSE_CANCEL_BATCH);
+            let pending = queue.pending.drain(..take).collect::<VecDeque<_>>();
+            (pending, !queue.pending.is_empty())
+        };
+        for job in &pending {
+            if job
+                .control
+                .state
+                .cancel(TaskCancellationReason::PoolShutdown)
+            {
+                self.shutdown_report.cancelled_pending =
+                    self.shutdown_report.cancelled_pending.saturating_add(1);
+            }
+        }
+        if !pending.is_empty() {
+            self.pending_reaps
+                .push(retain_abandoned_task_owner(AbandonedTaskPoolOwner {
+                    pending,
+                    workers: Vec::new(),
+                }));
+        }
+        pending_remain || !self.pending_reaps.is_empty()
+    }
+
+    fn join_finished_workers(&mut self) {
+        let mut index = 0;
+        while index < self.workers.len() {
+            if !self.workers[index].is_finished() {
+                index += 1;
+                continue;
+            }
+            let worker = self.workers.swap_remove(index);
+            if worker.join().is_ok() {
+                self.shutdown_report.joined_workers =
+                    self.shutdown_report.joined_workers.saturating_add(1);
             } else {
-                report.detached_workers = report.detached_workers.saturating_add(1);
+                self.shutdown_report.panicked_workers =
+                    self.shutdown_report.panicked_workers.saturating_add(1);
             }
         }
-        report.join_timed_out = report.detached_workers > 0;
-        self.record_shutdown(report);
-        self.shutdown_report = Some(report);
-        report
     }
 
-    fn wait_until(&self, timeout: Duration, predicate: impl Fn(&QueueState) -> bool) -> bool {
-        let deadline = deadline_after(timeout);
-        let mut queue = lock_unpoisoned(&self.shared.queue);
-        while !predicate(&queue) {
-            let now = Instant::now();
-            if now >= deadline {
-                return false;
-            }
-            let (next, timed_out) = wait_timeout_unpoisoned(
-                &self.shared.changed,
-                queue,
-                deadline.saturating_duration_since(now),
-            );
-            queue = next;
-            if timed_out && !predicate(&queue) {
-                return false;
-            }
+    fn record_shutdown(&mut self) {
+        if self.shutdown_recorded {
+            return;
         }
-        true
-    }
-
-    fn record_shutdown(&self, report: TaskPoolShutdownReport) {
+        self.shutdown_recorded = true;
+        let report = self.shutdown_report;
         update_counters(&self.shared.counters, |counters| {
             counters.shutdowns = counters.shutdowns.saturating_add(1);
             if report.timed_out() {
                 counters.shutdown_timeouts = counters.shutdown_timeouts.saturating_add(1);
             }
-            counters.detached_workers = counters
-                .detached_workers
-                .saturating_add(report.detached_workers as u64);
+        });
+    }
+
+    fn abandon(&mut self) {
+        let (pending, running) = {
+            let mut queue = lock_unpoisoned(&self.shared.queue);
+            queue.lifecycle = QueueLifecycle::Closed;
+            let pending = std::mem::take(&mut queue.pending);
+            let running = queue
+                .running
+                .values()
+                .map(|running| running.control.clone())
+                .collect::<Vec<_>>();
+            self.shared.changed.notify_all();
+            (pending, running)
+        };
+        for running in running {
+            running.state.cancel(TaskCancellationReason::PoolShutdown);
+        }
+        self.join_finished_workers();
+        retain_abandoned_task_owner(AbandonedTaskPoolOwner {
+            pending,
+            workers: std::mem::take(&mut self.workers),
         });
     }
 }
 
-impl Drop for TaskPoolExecutor {
+impl Drop for TaskPoolCloseOwner {
     fn drop(&mut self) {
-        let _ = self.shutdown();
+        if self.close_phase != TaskPoolClosePhase::Complete {
+            self.abandon();
+        }
+    }
+}
+
+struct TaskPoolsCloseOwner {
+    io: TaskPoolCloseOwner,
+    compute: TaskPoolCloseOwner,
+    async_compute: TaskPoolCloseOwner,
+}
+
+impl TaskPoolsCloseOwner {
+    fn new(
+        io: TaskPoolCloseOwner,
+        compute: TaskPoolCloseOwner,
+        async_compute: TaskPoolCloseOwner,
+    ) -> Self {
+        Self {
+            io,
+            compute,
+            async_compute,
+        }
+    }
+
+    fn begin_close(&mut self) {
+        for kind in TaskPoolKind::ALL {
+            self.executor_mut(kind).begin_close();
+        }
+    }
+
+    fn poll_close(&mut self) -> TaskPoolsCloseProgress {
+        self.begin_close();
+        let mut aggregate = TaskPoolsCloseProgress::Complete;
+        for kind in TaskPoolKind::ALL {
+            let progress = self.executor_mut(kind).poll_close();
+            aggregate = match (aggregate, progress) {
+                (TaskPoolsCloseProgress::Incomplete, _)
+                | (_, TaskPoolCloseProgress::Incomplete) => TaskPoolsCloseProgress::Incomplete,
+                (TaskPoolsCloseProgress::Pending, _) | (_, TaskPoolCloseProgress::Pending) => {
+                    TaskPoolsCloseProgress::Pending
+                }
+                _ => TaskPoolsCloseProgress::Complete,
+            };
+        }
+        aggregate
+    }
+
+    fn executor_mut(&mut self, kind: TaskPoolKind) -> &mut TaskPoolCloseOwner {
+        match kind {
+            TaskPoolKind::Io => &mut self.io,
+            TaskPoolKind::Compute => &mut self.compute,
+            TaskPoolKind::AsyncCompute => &mut self.async_compute,
+        }
+    }
+
+    fn executor(&self, kind: TaskPoolKind) -> &TaskPoolCloseOwner {
+        match kind {
+            TaskPoolKind::Io => &self.io,
+            TaskPoolKind::Compute => &self.compute,
+            TaskPoolKind::AsyncCompute => &self.async_compute,
+        }
+    }
+
+    fn report(&self) -> TaskShutdownReport {
+        let mut report = TaskShutdownReport::default();
+        for kind in TaskPoolKind::ALL {
+            report
+                .per_kind
+                .insert(kind, self.executor(kind).shutdown_report);
+        }
+        report
+    }
+
+    fn is_complete(&self) -> bool {
+        TaskPoolKind::ALL
+            .into_iter()
+            .all(|kind| self.executor(kind).close_phase == TaskPoolClosePhase::Complete)
     }
 }
 
@@ -2024,7 +2312,9 @@ fn execute_pending(shared: &ExecutorShared, mut pending: PendingJob) {
 }
 
 fn safe_drop_pending(pending: PendingJob) {
-    let _ = catch_unwind(AssertUnwindSafe(|| drop(pending)));
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(|| drop(pending))) {
+        let _ = catch_unwind(AssertUnwindSafe(|| drop(payload)));
+    }
 }
 
 fn update_counters(counters: &SharedTaskCounters, update: impl FnOnce(&mut TaskCounters)) {
@@ -2066,26 +2356,698 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+struct AbandonedTaskPoolOwner {
+    pending: VecDeque<PendingJob>,
+    workers: Vec<JoinHandle<()>>,
+}
+
+impl AbandonedTaskPoolOwner {
+    fn take_pending_for_reap(&mut self) -> Option<PendingJob> {
+        self.pending.pop_front().inspect(|pending| {
+            pending
+                .control
+                .state
+                .cancel(TaskCancellationReason::PoolShutdown);
+        })
+    }
+
+    fn poll_finished_workers(&mut self) {
+        reap_abandoned_workers(&mut self.workers);
+    }
+
+    fn is_reaped(&self, pending_in_flight: &AtomicUsize) -> bool {
+        self.pending.is_empty()
+            && pending_in_flight.load(Ordering::Acquire) == 0
+            && self.workers.is_empty()
+    }
+}
+
+struct PendingDropWork {
+    pending: PendingJob,
+    in_flight: PendingDropInFlight,
+}
+
+impl PendingDropWork {
+    fn new(pending: PendingJob, owner_in_flight: Arc<AtomicUsize>) -> Self {
+        Self {
+            pending,
+            in_flight: PendingDropInFlight::new(owner_in_flight),
+        }
+    }
+
+    fn drop_pending(self) {
+        let Self { pending, in_flight } = self;
+        safe_drop_pending(pending);
+        drop(in_flight);
+    }
+
+    fn into_pending(self) -> PendingJob {
+        let Self { pending, in_flight } = self;
+        drop(in_flight);
+        pending
+    }
+}
+
+struct PendingDropInFlight {
+    owner_in_flight: Arc<AtomicUsize>,
+}
+
+impl PendingDropInFlight {
+    fn new(owner_in_flight: Arc<AtomicUsize>) -> Self {
+        owner_in_flight.fetch_add(1, Ordering::AcqRel);
+        Self { owner_in_flight }
+    }
+}
+
+impl Drop for PendingDropInFlight {
+    fn drop(&mut self) {
+        let previous = self.owner_in_flight.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "pending-drop in-flight count underflowed");
+    }
+}
+
+struct PendingDropLane {
+    sender: Option<SyncSender<PendingDropWork>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+struct PendingDropLaneSet {
+    lanes: Vec<PendingDropLane>,
+    next_lane: usize,
+}
+
+impl PendingDropLaneSet {
+    fn new() -> Self {
+        Self {
+            lanes: Vec::with_capacity(TASK_REAPER_DROP_LANES),
+            next_lane: 0,
+        }
+    }
+
+    fn push(&mut self, lane: PendingDropLane) {
+        self.lanes.push(lane);
+    }
+
+    fn try_dispatch(
+        &mut self,
+        pending: PendingJob,
+        owner_in_flight: Arc<AtomicUsize>,
+    ) -> Result<(), PendingJob> {
+        if self.lanes.is_empty() {
+            return Err(pending);
+        }
+
+        let lane_count = self.lanes.len();
+        let mut work = PendingDropWork::new(pending, owner_in_flight);
+        for offset in 0..lane_count {
+            let lane_index = (self.next_lane + offset) % lane_count;
+            let Some(sender) = self.lanes[lane_index].sender.as_ref() else {
+                continue;
+            };
+            match sender.try_send(work) {
+                Ok(()) => {
+                    self.next_lane = (lane_index + 1) % lane_count;
+                    return Ok(());
+                }
+                Err(TrySendError::Full(returned)) => work = returned,
+                Err(TrySendError::Disconnected(returned)) => {
+                    work = returned;
+                    self.lanes[lane_index].sender = None;
+                }
+            }
+        }
+        Err(work.into_pending())
+    }
+}
+
+impl Drop for PendingDropLaneSet {
+    fn drop(&mut self) {
+        for lane in &mut self.lanes {
+            lane.sender = None;
+        }
+        for lane in &mut self.lanes {
+            if let Some(worker) = lane.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+}
+
+#[cfg(not(test))]
+fn spawn_pending_drop_lane(index: usize) -> io::Result<PendingDropLane> {
+    let (sender, receiver) = mpsc::sync_channel(0);
+    let worker = thread::Builder::new()
+        .name(format!("nara-task-owner-drop-{index}"))
+        .spawn(move || pending_drop_lane_main(receiver))?;
+    Ok(PendingDropLane {
+        sender: Some(sender),
+        worker: Some(worker),
+    })
+}
+
+#[cfg(test)]
+fn spawn_pending_drop_lane(
+    index: usize,
+    probe: Option<PendingDropLaneProbe>,
+) -> io::Result<PendingDropLane> {
+    let (sender, receiver) = mpsc::sync_channel(0);
+    let worker = thread::Builder::new()
+        .name(format!("nara-task-owner-drop-{index}"))
+        .spawn(move || pending_drop_lane_main(receiver, probe))?;
+    Ok(PendingDropLane {
+        sender: Some(sender),
+        worker: Some(worker),
+    })
+}
+
+#[cfg(not(test))]
+fn pending_drop_lane_main(receiver: Receiver<PendingDropWork>) {
+    while let Ok(work) = receiver.recv() {
+        work.drop_pending();
+    }
+}
+
+#[cfg(test)]
+fn pending_drop_lane_main(
+    receiver: Receiver<PendingDropWork>,
+    probe: Option<PendingDropLaneProbe>,
+) {
+    let _lifetime = probe.map(PendingDropLaneLifetime::started);
+    while let Ok(work) = receiver.recv() {
+        work.drop_pending();
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct PendingDropLaneProbe {
+    live: Arc<AtomicUsize>,
+}
+
+#[cfg(test)]
+impl PendingDropLaneProbe {
+    pub(crate) fn live(&self) -> usize {
+        self.live.load(Ordering::Acquire)
+    }
+}
+
+#[cfg(test)]
+struct PendingDropLaneLifetime(PendingDropLaneProbe);
+
+#[cfg(test)]
+impl PendingDropLaneLifetime {
+    fn started(probe: PendingDropLaneProbe) -> Self {
+        probe.live.fetch_add(1, Ordering::AcqRel);
+        Self(probe)
+    }
+}
+
+#[cfg(test)]
+impl Drop for PendingDropLaneLifetime {
+    fn drop(&mut self) {
+        self.0.live.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TaskOwnerReapReceipt {
+    complete: Arc<AtomicBool>,
+}
+
+impl TaskOwnerReapReceipt {
+    fn pending() -> Self {
+        Self {
+            complete: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn completed() -> Self {
+        Self {
+            complete: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        self.complete.load(Ordering::Acquire)
+    }
+
+    fn mark_complete(&self) {
+        self.complete.store(true, Ordering::Release);
+    }
+}
+
+struct TaskOwnerReapRequest {
+    owner: AbandonedTaskPoolOwner,
+    receipt: TaskOwnerReapReceipt,
+    pending_in_flight: Arc<AtomicUsize>,
+    counted: bool,
+}
+
+impl TaskOwnerReapRequest {
+    fn new(owner: AbandonedTaskPoolOwner, receipt: TaskOwnerReapReceipt, counted: bool) -> Self {
+        Self {
+            owner,
+            receipt,
+            pending_in_flight: Arc::new(AtomicUsize::new(0)),
+            counted,
+        }
+    }
+
+    fn poll_reap(&mut self, drop_lanes: &mut PendingDropLaneSet) -> bool {
+        self.owner.poll_finished_workers();
+        if self.pending_in_flight.load(Ordering::Acquire) == 0
+            && let Some(pending) = self.owner.take_pending_for_reap()
+            && let Err(pending) =
+                drop_lanes.try_dispatch(pending, Arc::clone(&self.pending_in_flight))
+        {
+            self.owner.pending.push_front(pending);
+        }
+
+        if !self.owner.is_reaped(&self.pending_in_flight) {
+            return false;
+        }
+        self.receipt.mark_complete();
+        if self.counted {
+            ABANDONED_TASK_OWNER_COUNT.fetch_sub(1, Ordering::AcqRel);
+        }
+        true
+    }
+}
+
+enum TaskOwnerReaperMessage {
+    Retain(TaskOwnerReapRequest),
+    RetainBatch(VecDeque<TaskOwnerReapRequest>),
+    #[cfg(test)]
+    Shutdown,
+}
+
+struct TaskOwnerReaperSupervisor {
+    sender: Option<Sender<TaskOwnerReaperMessage>>,
+    worker: Option<JoinHandle<()>>,
+    fallback: VecDeque<TaskOwnerReapRequest>,
+    #[cfg(test)]
+    spawn_failures: usize,
+    #[cfg(test)]
+    lane_spawn_failure_at: Option<usize>,
+    #[cfg(test)]
+    lane_probe: Option<PendingDropLaneProbe>,
+}
+
+impl TaskOwnerReaperSupervisor {
+    const fn new() -> Self {
+        Self {
+            sender: None,
+            worker: None,
+            fallback: VecDeque::new(),
+            #[cfg(test)]
+            spawn_failures: 0,
+            #[cfg(test)]
+            lane_spawn_failure_at: None,
+            #[cfg(test)]
+            lane_probe: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_spawn_failures(spawn_failures: usize) -> Self {
+        Self {
+            spawn_failures,
+            ..Self::new()
+        }
+    }
+
+    #[cfg(test)]
+    fn with_lane_spawn_failure(lane_index: usize) -> Self {
+        let mut supervisor = Self::new();
+        supervisor.lane_spawn_failure_at = Some(lane_index);
+        supervisor.lane_probe = Some(PendingDropLaneProbe::default());
+        supervisor
+    }
+
+    fn retain(&mut self, request: TaskOwnerReapRequest) {
+        self.recover_finished_worker();
+        if self.sender.is_none() && !self.try_start() {
+            self.fallback.push_back(request);
+            return;
+        }
+
+        let sender = self
+            .sender
+            .as_ref()
+            .expect("a started task owner reaper retains its sender");
+        if let Err(error) = sender.send(TaskOwnerReaperMessage::Retain(request)) {
+            let TaskOwnerReaperMessage::Retain(request) = error.0 else {
+                unreachable!("retain sends exactly one task owner")
+            };
+            self.fallback.push_back(request);
+            self.sender = None;
+            self.recover_finished_worker();
+        }
+    }
+
+    fn retry(&mut self) {
+        self.recover_finished_worker();
+        if self.sender.is_none() {
+            let _ = self.try_start();
+        }
+    }
+
+    fn try_start(&mut self) -> bool {
+        if self.sender.is_some() {
+            return true;
+        }
+        if self.worker.is_some() {
+            return false;
+        }
+
+        let Ok((sender, worker)) = self.spawn_worker() else {
+            return false;
+        };
+        self.sender = Some(sender);
+        self.worker = Some(worker);
+
+        if self.fallback.is_empty() {
+            return true;
+        }
+        let fallback = std::mem::take(&mut self.fallback);
+        let sender = self
+            .sender
+            .as_ref()
+            .expect("a started task owner reaper retains its sender");
+        if let Err(error) = sender.send(TaskOwnerReaperMessage::RetainBatch(fallback)) {
+            let TaskOwnerReaperMessage::RetainBatch(mut fallback) = error.0 else {
+                unreachable!("fallback transfer sends exactly one retained batch")
+            };
+            self.fallback.append(&mut fallback);
+            self.sender = None;
+            self.recover_finished_worker();
+            return false;
+        }
+        true
+    }
+
+    fn spawn_worker(&mut self) -> io::Result<(Sender<TaskOwnerReaperMessage>, JoinHandle<()>)> {
+        #[cfg(test)]
+        if self.spawn_failures > 0 {
+            self.spawn_failures -= 1;
+            return Err(io::Error::other("injected task owner reaper spawn failure"));
+        }
+
+        let mut drop_lanes = PendingDropLaneSet::new();
+        for lane_index in 0..TASK_REAPER_DROP_LANES {
+            #[cfg(test)]
+            if self.lane_spawn_failure_at == Some(lane_index) {
+                self.lane_spawn_failure_at = None;
+                return Err(io::Error::other(
+                    "injected task owner reaper drop-lane spawn failure",
+                ));
+            }
+            #[cfg(test)]
+            let lane = spawn_pending_drop_lane(lane_index, self.lane_probe.clone())?;
+            #[cfg(not(test))]
+            let lane = spawn_pending_drop_lane(lane_index)?;
+            drop_lanes.push(lane);
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        let worker = thread::Builder::new()
+            .name("nara-task-owner-reaper".to_owned())
+            .spawn(move || reap_abandoned_task_owners(receiver, drop_lanes))?;
+        Ok((sender, worker))
+    }
+
+    fn recover_finished_worker(&mut self) {
+        if !self.worker.as_ref().is_some_and(JoinHandle::is_finished) {
+            return;
+        }
+        self.sender = None;
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+
+    #[cfg(test)]
+    fn shutdown(&mut self) {
+        self.retry();
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(TaskOwnerReaperMessage::Shutdown);
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn retain_abandoned_workers(workers: Vec<JoinHandle<()>>) {
+    let _ = retain_abandoned_task_owner(AbandonedTaskPoolOwner {
+        pending: VecDeque::new(),
+        workers,
+    });
+}
+
+fn retain_abandoned_task_owner(owner: AbandonedTaskPoolOwner) -> TaskOwnerReapReceipt {
+    if owner.pending.is_empty() && owner.workers.is_empty() {
+        return TaskOwnerReapReceipt::completed();
+    }
+    let receipt = TaskOwnerReapReceipt::pending();
+    ABANDONED_TASK_OWNER_COUNT.fetch_add(1, Ordering::AcqRel);
+    lock_unpoisoned(&TASK_OWNER_REAPER_SUPERVISOR).retain(TaskOwnerReapRequest::new(
+        owner,
+        receipt.clone(),
+        true,
+    ));
+    receipt
+}
+
+fn prewarm_task_owner_reaper() {
+    lock_unpoisoned(&TASK_OWNER_REAPER_SUPERVISOR).retry();
+}
+
+fn retry_task_owner_reaper() {
+    lock_unpoisoned(&TASK_OWNER_REAPER_SUPERVISOR).retry();
+}
+
+fn reap_abandoned_task_owners(
+    receiver: Receiver<TaskOwnerReaperMessage>,
+    mut drop_lanes: PendingDropLaneSet,
+) {
+    let mut retained = VecDeque::new();
+    let mut disconnected = false;
+    let mut shutdown_requested = false;
+    loop {
+        for _ in 0..TASK_REAPER_INTAKE_BATCH {
+            match receiver.try_recv() {
+                Ok(message) => {
+                    retain_reaper_message(message, &mut retained, &mut shutdown_requested)
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
+
+        let owners_to_poll = retained.len().min(TASK_REAPER_OWNER_POLL_BATCH);
+        for _ in 0..owners_to_poll {
+            let mut request = retained
+                .pop_front()
+                .expect("the reaper poll budget is bounded by retained owners");
+            if !request.poll_reap(&mut drop_lanes) {
+                retained.push_back(request);
+            }
+        }
+
+        let stopping = shutdown_requested || disconnected;
+        if stopping && retained.is_empty() {
+            return;
+        }
+        if retained.is_empty() {
+            match receiver.recv() {
+                Ok(message) => {
+                    retain_reaper_message(message, &mut retained, &mut shutdown_requested)
+                }
+                Err(_) => disconnected = true,
+            }
+        } else {
+            match receiver.recv_timeout(TASK_REAPER_ROUND_WAIT) {
+                Ok(message) => {
+                    retain_reaper_message(message, &mut retained, &mut shutdown_requested)
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => disconnected = true,
+            }
+        }
+    }
+}
+
+fn retain_reaper_message(
+    message: TaskOwnerReaperMessage,
+    retained: &mut VecDeque<TaskOwnerReapRequest>,
+    _shutdown_requested: &mut bool,
+) {
+    match message {
+        TaskOwnerReaperMessage::Retain(request) => retained.push_back(request),
+        TaskOwnerReaperMessage::RetainBatch(mut batch) => retained.append(&mut batch),
+        #[cfg(test)]
+        TaskOwnerReaperMessage::Shutdown => *_shutdown_requested = true,
+    }
+}
+
+fn reap_abandoned_workers(retained: &mut Vec<JoinHandle<()>>) {
+    let mut index = 0;
+    while index < retained.len() {
+        if !retained[index].is_finished() {
+            index += 1;
+            continue;
+        }
+        let worker = retained.swap_remove(index);
+        let _ = worker.join();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn retained_abandoned_worker_count_for_tests() -> usize {
+    ABANDONED_TASK_OWNER_COUNT.load(Ordering::Acquire) as usize
+}
+
+#[cfg(test)]
+pub(crate) fn reap_abandoned_workers_for_tests() {
+    thread::yield_now();
+}
+
+#[cfg(test)]
+pub(crate) struct TaskOwnerReaperHarness {
+    supervisor: TaskOwnerReaperSupervisor,
+}
+
+#[cfg(test)]
+struct ReaperTestDropJob {
+    on_drop: Option<Box<dyn FnOnce() + Send>>,
+}
+
+#[cfg(test)]
+impl ReaperTestDropJob {
+    fn invoke(&mut self) {
+        if let Some(on_drop) = self.on_drop.take() {
+            on_drop();
+        }
+    }
+}
+
+#[cfg(test)]
+impl ErasedJob for ReaperTestDropJob {
+    fn run(&mut self) {
+        self.invoke();
+    }
+}
+
+#[cfg(test)]
+impl Drop for ReaperTestDropJob {
+    fn drop(&mut self) {
+        self.invoke();
+    }
+}
+
+#[cfg(test)]
+impl TaskOwnerReaperHarness {
+    pub(crate) fn new() -> Self {
+        Self {
+            supervisor: TaskOwnerReaperSupervisor::new(),
+        }
+    }
+
+    pub(crate) fn with_spawn_failures(spawn_failures: usize) -> Self {
+        Self {
+            supervisor: TaskOwnerReaperSupervisor::with_spawn_failures(spawn_failures),
+        }
+    }
+
+    pub(crate) fn with_lane_spawn_failure(lane_index: usize) -> Self {
+        Self {
+            supervisor: TaskOwnerReaperSupervisor::with_lane_spawn_failure(lane_index),
+        }
+    }
+
+    pub(crate) fn lane_probe(&self) -> PendingDropLaneProbe {
+        self.supervisor
+            .lane_probe
+            .clone()
+            .expect("lane-spawn failure harness installs a lifetime probe")
+    }
+
+    pub(crate) fn retain_finished_worker(&mut self) -> TaskOwnerReapReceipt {
+        let receipt = TaskOwnerReapReceipt::pending();
+        self.supervisor.retain(TaskOwnerReapRequest::new(
+            AbandonedTaskPoolOwner {
+                pending: VecDeque::new(),
+                workers: vec![thread::spawn(|| {})],
+            },
+            receipt.clone(),
+            false,
+        ));
+        receipt
+    }
+
+    pub(crate) fn retain_pending_drops(
+        &mut self,
+        on_drop: Vec<Box<dyn FnOnce() + Send>>,
+    ) -> TaskOwnerReapReceipt {
+        let counters = Arc::new(Mutex::new(TaskCounters::default()));
+        let pending = on_drop
+            .into_iter()
+            .enumerate()
+            .map(|(index, on_drop)| {
+                let id = TaskId((index as u64).saturating_add(1));
+                let descriptor = TaskDescriptor {
+                    id,
+                    kind: TaskPoolKind::Io,
+                    order_key: TaskOrderKey::new(0, TaskDomainKey::new(0), id),
+                };
+                let state = Arc::new(TaskState::<()>::new(Arc::clone(&counters)));
+                PendingJob {
+                    descriptor,
+                    coalesce_key: None,
+                    admitted_at: Instant::now(),
+                    control: TaskControl { state },
+                    job: Box::new(ReaperTestDropJob {
+                        on_drop: Some(on_drop),
+                    }),
+                }
+            })
+            .collect();
+        let receipt = TaskOwnerReapReceipt::pending();
+        self.supervisor.retain(TaskOwnerReapRequest::new(
+            AbandonedTaskPoolOwner {
+                pending,
+                workers: Vec::new(),
+            },
+            receipt.clone(),
+            false,
+        ));
+        receipt
+    }
+
+    pub(crate) fn retry(&mut self) {
+        self.supervisor.retry();
+    }
+
+    pub(crate) fn fallback_len(&self) -> usize {
+        self.supervisor.fallback.len()
+    }
+}
+
+#[cfg(test)]
+impl Drop for TaskOwnerReaperHarness {
+    fn drop(&mut self) {
+        self.supervisor.shutdown();
+    }
+}
+
 fn wait_unpoisoned<'a, T>(condvar: &Condvar, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T> {
     condvar
         .wait(guard)
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn wait_timeout_unpoisoned<'a, T>(
-    condvar: &Condvar,
-    guard: MutexGuard<'a, T>,
-    timeout: Duration,
-) -> (MutexGuard<'a, T>, bool) {
-    let (guard, result) = condvar
-        .wait_timeout(guard, timeout)
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    (guard, result.timed_out())
-}
-
-#[derive(Resource)]
-struct TaskPluginOwnedPools {
-    instance_token: Arc<TaskPoolInstanceToken>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -2098,6 +3060,8 @@ const TASK_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
     nara_app::PluginDefinitionId::new("nara.tasks.configured", 1);
 pub const TASK_POOLS_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId =
     nara_app::PluginShutdownObligationId::new("nara.tasks.pools");
+const TASK_POOLS_CLOSE_PARTICIPANT: RuntimeCloseParticipantId =
+    RuntimeCloseParticipantId::new("nara.tasks.pools");
 pub const TASK_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(TASK_PLUGIN_ID, nara_app::PluginCategory::Service)
         .shutdown_obligations(&[TASK_POOLS_SHUTDOWN_OBLIGATION]);
@@ -2157,48 +3121,71 @@ impl Plugin for TaskPlugin {
                 .chain(),
         )?;
 
+        let mut owned_pools = None;
         if !app.world().contains_resource::<TaskPools>() {
-            let pools =
+            let mut pools =
                 TaskPools::try_new(self.config).map_err(|error| PluginError::SetupFailed {
                     plugin: TASK_PLUGIN_ID,
                     message: error.to_string(),
                 })?;
-            app.insert_resource(TaskPluginOwnedPools {
-                instance_token: pools.ownership_token(),
-            })?;
+            let instance_token = pools.ownership_token();
+            let close_owner = pools
+                .take_close_owner()
+                .expect("new task pools retain their close owner");
             app.insert_resource(pools)?;
+            owned_pools = Some((instance_token, close_owner));
         }
-        app.register_plugin_shutdown_obligation(TASK_POOLS_SHUTDOWN_OBLIGATION)?;
+        if let Some((instance_token, close_owner)) = owned_pools {
+            app.register_plugin_runtime_close_participant(
+                TASK_POOLS_SHUTDOWN_OBLIGATION,
+                TASK_POOLS_CLOSE_PARTICIPANT,
+                TaskPoolsCloseParticipant {
+                    instance_token,
+                    close_owner,
+                },
+            )?;
+        } else {
+            app.register_plugin_shutdown_obligation(TASK_POOLS_SHUTDOWN_OBLIGATION)?;
+        }
         Ok(())
     }
+}
 
-    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
-        let Some(ownership) = context
-            .world_mut()
-            .remove_resource::<TaskPluginOwnedPools>()
-        else {
-            return Ok(());
-        };
-        let owns_current_pools = context
-            .world()
-            .get_resource::<TaskPools>()
-            .is_some_and(|pools| pools.has_ownership_token(&ownership.instance_token));
-        if owns_current_pools
-            && let Some(mut pools) = context.world_mut().remove_resource::<TaskPools>()
-        {
-            let report = pools.shutdown();
-            let timed_out = report.timed_out();
-            let detached_workers = report.detached_workers();
-            context.world_mut().insert_resource(report);
-            if timed_out || detached_workers > 0 {
-                return Err(PluginError::SetupFailed {
-                    plugin: TASK_PLUGIN_ID,
-                    message: format!(
-                        "task pool shutdown timed out; detached {detached_workers} workers"
-                    ),
-                });
+struct TaskPoolsCloseParticipant {
+    instance_token: Arc<TaskPoolInstanceToken>,
+    close_owner: TaskPoolsCloseOwner,
+}
+
+impl RuntimeCloseParticipant for TaskPoolsCloseParticipant {
+    fn begin_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.close_owner.begin_close();
+        Ok(RuntimeCloseProgress::Pending)
+    }
+
+    fn poll_close(
+        &mut self,
+        context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        match self.close_owner.poll_close() {
+            TaskPoolsCloseProgress::Pending => Ok(RuntimeCloseProgress::Pending),
+            TaskPoolsCloseProgress::Incomplete => Err(RuntimeCloseParticipantError::new(
+                "nara.tasks.close-deadline",
+            )),
+            TaskPoolsCloseProgress::Complete => {
+                let report = self.close_owner.report();
+                let owns_world_facade = context
+                    .world()
+                    .get_resource::<TaskPools>()
+                    .is_some_and(|pools| pools.has_ownership_token(&self.instance_token));
+                if owns_world_facade {
+                    context.world_mut().remove_resource::<TaskPools>();
+                }
+                context.world_mut().insert_resource(report);
+                Ok(RuntimeCloseProgress::Complete)
             }
         }
-        Ok(())
     }
 }

@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-15
+**Last Revised**: 2026-07-17
 **Owner**: `nara_app` and concrete executable hosts
 **Admission Trigger**: RGF-U5 proves the code-first runtime core; RGF-U26 freezes the task-equivalent
 manual counterfactual before RGF-U24 proves unpublished candidate construction and headless Host
@@ -35,6 +35,20 @@ also needs:
 ADR 0076 contains runtime control as one part of a much larger observation/debug/replay direction.
 This proposal isolates the executable lifecycle contract without selecting system stepping,
 checkpoint formats, replay persistence, or native code hot patching.
+
+## Trial Evidence
+
+RGF-U5 now implements the code-first subset in `nara_app`: sealed-App admission, an unpublished
+candidate, startup-before-promotion, non-reused generations, safe-point controls, exact fixed-tick
+stepping, sticky typed faults, explicit move-only close obligations, and retryable finite close.
+`nara_winit` drives that runtime instead of raw `App`, and the independent reference game exercises
+the manifest-free path. The runtime remains a thin owner around one App and imports no project,
+content, tooling, window, or renderer policy.
+
+This evidence is intentionally incomplete. It does not provide the U26 manual counterfactual,
+U24 product Host/start-attempt publication, U25 reversal verdict, U17 Editor ownership, U13 desktop
+product parity, or U23 independent decision. The ADR therefore remains Proposed; landed type names
+and tests are a reversible trial, not authority for the unproven outer topology.
 
 ## Decision
 
@@ -221,8 +235,8 @@ stateDiagram-v2
     Running --> Stopping: stop, exit, or host close
     Paused --> Stopping: stop, exit, or host close
     Faulted --> Stopping: dispose requested
-    Stopping --> Stopped: every close participant succeeds
-    Stopping --> CloseIncomplete: shutdown error or deadline
+    Stopping --> Stopped: plugin shutdown attempted and every close participant completes
+    Stopping --> CloseIncomplete: unfinished participant, participant error, or deadline
     CloseIncomplete --> Stopping: drive remaining close
     Stopped --> [*]
 ```
@@ -234,6 +248,12 @@ attempt with a new generation.
 Driving incomplete retirement or close polls only unfinished participants. It never invokes a
 once-only plugin shutdown hook or already-attempted owner a second time; an unrecoverable failure
 may remain incomplete until process authority is torn down.
+
+A once-only plugin shutdown hook failure is terminal teardown evidence rather than an unfinished
+close participant. If every separately registered close obligation completes, the runtime reaches
+the `Stopped` ownership state, while the active Stop/RetryClose ticket records
+`Failed(CloseFailed)` and a platform Host returns a distinct teardown error. `Stopped` therefore
+proves ownership terminality, not that every teardown hook succeeded.
 
 Control has two observable layers:
 
@@ -285,9 +305,11 @@ operation result: Pending | Applied | Failed
   hide an unbounded wait from the host.
 - Waiting services expose pollable, deadline-bound close participants. The host can continue
   pumping allowed real-time/platform work while close progresses.
-- Only successful retirement of every participant permits `Stopped`. A timeout, detached worker,
-  live native lease, or shutdown error remains `CloseIncomplete` and prevents a conflicting
-  replacement.
+- Only completion of every registered close participant permits `Stopped`. A timeout, unfinished
+  worker owner, live native lease, or participant failure remains `CloseIncomplete` and prevents a
+  conflicting replacement. A terminal plugin hook failure remains separately observable after
+  ownership reaches `Stopped`. Abnormal Drop may transfer an unfinished owner to process-owned
+  quarantine, but that fallback is never clean-stop evidence.
 - `Drop` is best effort and cannot be used as product evidence that a runtime stopped cleanly.
 - Editor Close Scene, external reload, Restart, a second Start Play, and editor exit all obey
   stop-first. Failure retains the faulted or incomplete owner and diagnostics instead of silently
@@ -413,8 +435,8 @@ must add reciprocal refinement metadata and update implementation evidence.
 
 ## Admission Evidence
 
-RGF-U5 may implement the code-first candidate/runtime trial and RGF-U24 may implement the concrete
-headless Host/candidate trial. Acceptance also requires U26's pre-Host baseline, U25's early counterevidence verdict,
+RGF-U5 has implemented the code-first candidate/runtime trial; RGF-U24 may implement the concrete
+headless Host/candidate trial. Acceptance still requires U26's pre-Host baseline, U25's early counterevidence verdict,
 RGF-U17's Editor command/view ownership, RGF-U13's desktop Adapter evidence, and every success metric
 above through the independent RGF-U23 review; the existence of a wrapper does not make the ADR
 authoritative. A wrapper type, state enum, or bare-world adapter without scheduled execution, fault

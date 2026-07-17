@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -6,7 +7,11 @@ use std::time::{Duration, Instant};
 
 use nara::{advanced_prelude::*, backend_prelude::*};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[path = "support/runtime_retirement.rs"]
+mod runtime_retirement;
+use runtime_retirement::finish_runtime_after_winit;
+
+fn main() -> Result<(), Box<dyn Error>> {
     let drop_backend_before_exit =
         std::env::args().any(|argument| argument == "--drop-backend-before-exit");
     let resize_observed = Arc::new(AtomicBool::new(false));
@@ -33,24 +38,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?
         .add_systems(CoreStage::Last, verify_resize_then_exit)?;
-    WinitRunner::default().install(&mut app)?;
+    let candidate = nara::app::RuntimeCandidate::admit(app.seal()?)?;
+    let mut runtime = candidate.complete_startup()?.promote();
 
-    assert!(app.world().contains_resource::<WgpuRenderBackend>());
+    assert!(runtime.world().contains_resource::<WgpuRenderBackend>());
     assert!(
-        app.world()
+        runtime
+            .world()
             .contains_resource::<nara::window::backend::BackendWindowHandles>()
     );
-    assert!(app.world().contains_resource::<ExtractedViews>());
-    assert!(app.world().contains_resource::<RenderFrame>());
-    assert!(app.world().contains_resource::<FrameStats>());
-    assert!(app.world().contains_resource::<RenderBackendStatus>());
-    assert!(app.world().contains_resource::<AppExitRequests>());
+    assert!(runtime.world().contains_resource::<ExtractedViews>());
+    assert!(runtime.world().contains_resource::<RenderFrame>());
+    assert!(runtime.world().contains_resource::<FrameStats>());
+    assert!(runtime.world().contains_resource::<RenderBackendStatus>());
+    assert!(runtime.world().contains_resource::<AppExitRequests>());
 
-    let target_authority = app
+    let target_authority = runtime
         .world()
         .resource::<nara::window::backend::BackendWindowHandles>()
         .clone();
-    app.run()?;
+    let run_result = WinitRunner::default().run(&mut runtime);
+    finish_runtime_after_winit(run_result, runtime)?;
     assert!(
         !timed_out.load(Ordering::SeqCst),
         "surface retirement smoke exceeded its deadline"

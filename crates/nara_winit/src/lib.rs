@@ -6,7 +6,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara_app::{App, AppExit, AppRunError, PluginError};
+use nara_app::{
+    AppExit, AppRunError, RuntimeControl, RuntimeControlRequestResult, RuntimeDriveError,
+    RuntimeInstance, RuntimeState,
+};
 use nara_input::{ButtonInput, KeyCode, MouseButton, PointerState};
 use nara_window::{
     Window, WindowEvent, WindowId, WindowResolution,
@@ -25,6 +28,7 @@ use winit::{
 };
 
 const NATIVE_DESTROY_TIMEOUT: Duration = Duration::from_secs(5);
+const RUNTIME_CLOSE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NativeShutdownAction {
@@ -66,18 +70,14 @@ impl WinitRunner {
         Self { control_flow }
     }
 
-    /// Selects this platform runner from top-level code-first authority.
-    pub fn install(self, app: &mut App) -> Result<&mut App, PluginError> {
-        app.set_runner(move |app| self.run(app))
-    }
-
-    fn run(self, app: &mut App) -> Result<AppExit, AppRunError> {
+    /// Drives one managed runtime from the native event loop.
+    pub fn run(self, runtime: &mut RuntimeInstance) -> Result<AppExit, AppRunError> {
         let event_loop = EventLoop::new().map_err(|error| {
             AppRunError::runner(format!("failed to create winit event loop: {error}"))
         })?;
         event_loop.set_control_flow(self.control_flow.into_winit());
 
-        let mut state = WinitApp::new(app)?;
+        let mut state = WinitApp::new(runtime)?;
         let run_result = event_loop.run_app(&mut state);
         if let Err(error) = run_result {
             state.record_primary_failure(AppRunError::runner(format!(
@@ -88,6 +88,11 @@ impl WinitRunner {
 
         if let Some(error) = state.take_failure() {
             return Err(error);
+        }
+        if state.runtime.state() != RuntimeState::Stopped {
+            return Err(AppRunError::runner(
+                "winit event loop ended before managed runtime shutdown completed",
+            ));
         }
 
         Ok(state.exit)
@@ -118,38 +123,49 @@ impl WinitControlFlow {
     }
 }
 
-struct WinitApp<'app> {
-    app: &'app mut App,
+struct WinitApp<'runtime> {
+    runtime: &'runtime mut RuntimeInstance,
     nara_windows_by_winit: HashMap<WinitWindowId, WindowId>,
     platform_windows: HashMap<WindowId, Arc<WinitWindow>>,
     owned_window_ids: BTreeSet<WindowId>,
     last_frame: Instant,
     exit: AppExit,
     primary_failure: Option<AppRunError>,
-    teardown_failure: Option<AppRunError>,
+    runtime_close_failure: Option<AppRunError>,
+    native_retirement_failure: Option<AppRunError>,
     backend_windows: BackendWindowHandles,
     shutdown: WinitShutdownState,
+    runtime_close_incomplete_observed: bool,
 }
 
-impl<'app> WinitApp<'app> {
-    fn new(app: &'app mut App) -> Result<Self, AppRunError> {
-        let backend_windows = app
+impl<'runtime> WinitApp<'runtime> {
+    fn new(runtime: &'runtime mut RuntimeInstance) -> Result<Self, AppRunError> {
+        let backend_windows = runtime
             .world()
             .get_resource::<BackendWindowHandles>()
             .cloned()
             .ok_or_else(|| AppRunError::runner("backend window authority is missing"))?;
         Ok(Self {
-            app,
+            runtime,
             nara_windows_by_winit: HashMap::new(),
             platform_windows: HashMap::new(),
             owned_window_ids: BTreeSet::new(),
             last_frame: Instant::now(),
             exit: AppExit::Success,
             primary_failure: None,
-            teardown_failure: None,
+            runtime_close_failure: None,
+            native_retirement_failure: None,
             backend_windows,
             shutdown: WinitShutdownState::Running,
+            runtime_close_incomplete_observed: false,
         })
+    }
+
+    fn with_driver_world<R>(
+        &mut self,
+        operation: impl FnOnce(&mut nara_ecs::World) -> R,
+    ) -> Result<R, AppRunError> {
+        with_runtime_driver_world(self.runtime, operation)
     }
 
     fn create_primary_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), AppRunError> {
@@ -157,7 +173,7 @@ impl<'app> WinitApp<'app> {
             return Ok(());
         }
 
-        let window = configured_primary_window(self.app)?;
+        let window = configured_primary_window(self.runtime)?;
         let window_id = window.id;
         if self.backend_windows.is_registered(window_id) {
             return Err(AppRunError::runner(
@@ -186,22 +202,35 @@ impl<'app> WinitApp<'app> {
             .insert(platform_window.id(), window_id);
         self.platform_windows
             .insert(window_id, platform_window.clone());
-        push_window_event(self.app.world_mut()?, WindowEvent::Created { window_id });
+        self.with_driver_world(|world| {
+            push_window_event(world, WindowEvent::Created { window_id });
+        })?;
 
         Ok(())
     }
 
     fn run_frame(&mut self, delta: Duration, event_loop: &ActiveEventLoop) {
-        let outcome = match self.app.run_once(delta) {
+        let outcome = match self.runtime.drive(delta) {
             Ok(outcome) => outcome,
             Err(error) => {
-                self.fail(event_loop, error);
+                self.fail(event_loop, runtime_drive_error(error));
                 return;
             }
         };
 
-        if let Some(exit) = outcome.exit {
+        if let Some(exit) = outcome.frame().and_then(|frame| frame.exit) {
             self.exit = exit;
+            self.begin_shutdown(event_loop);
+            return;
+        }
+
+        if matches!(
+            outcome.state(),
+            RuntimeState::Stopping | RuntimeState::CloseIncomplete | RuntimeState::Stopped
+        ) {
+            if outcome.state() == RuntimeState::CloseIncomplete {
+                self.record_runtime_close_incomplete();
+            }
             self.begin_shutdown(event_loop);
             return;
         }
@@ -231,53 +260,56 @@ impl<'app> WinitApp<'app> {
 
         match event {
             WinitWindowEvent::CloseRequested => {
-                push_window_event(
-                    self.app.world_mut()?,
-                    WindowEvent::CloseRequested { window_id },
-                );
+                self.with_driver_world(|world| {
+                    push_window_event(world, WindowEvent::CloseRequested { window_id });
+                })?;
             }
             WinitWindowEvent::Resized(size) => {
                 let resolution = WindowResolution::new(size.width, size.height);
-                push_window_event(
-                    self.app.world_mut()?,
-                    WindowEvent::Resized {
-                        window_id,
-                        resolution,
-                    },
-                );
+                self.with_driver_world(|world| {
+                    push_window_event(
+                        world,
+                        WindowEvent::Resized {
+                            window_id,
+                            resolution,
+                        },
+                    );
+                })?;
             }
             WinitWindowEvent::Focused(focused) => {
-                push_window_event(
-                    self.app.world_mut()?,
-                    WindowEvent::Focused { window_id, focused },
-                );
+                self.with_driver_world(|world| {
+                    push_window_event(world, WindowEvent::Focused { window_id, focused });
+                })?;
             }
             WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                push_window_event(
-                    self.app.world_mut()?,
-                    WindowEvent::ScaleFactorChanged {
-                        window_id,
-                        scale_factor,
-                    },
-                );
+                self.with_driver_world(|world| {
+                    push_window_event(
+                        world,
+                        WindowEvent::ScaleFactorChanged {
+                            window_id,
+                            scale_factor,
+                        },
+                    );
+                })?;
             }
             WinitWindowEvent::RedrawRequested => {
-                push_window_event(
-                    self.app.world_mut()?,
-                    WindowEvent::RedrawRequested { window_id },
-                );
+                self.with_driver_world(|world| {
+                    push_window_event(world, WindowEvent::RedrawRequested { window_id });
+                })?;
             }
             WinitWindowEvent::KeyboardInput { event, .. } => {
-                apply_keyboard_input(self.app.world_mut()?, &event);
+                self.with_driver_world(|world| apply_keyboard_input(world, &event))?;
             }
             WinitWindowEvent::MouseInput { state, button, .. } => {
-                apply_mouse_input(self.app.world_mut()?, state, button);
+                self.with_driver_world(|world| apply_mouse_input(world, state, button))?;
             }
             WinitWindowEvent::CursorMoved { position, .. } => {
-                apply_cursor_moved(self.app.world_mut()?, position.x, position.y);
+                self.with_driver_world(|world| {
+                    apply_cursor_moved(world, position.x, position.y);
+                })?;
             }
             WinitWindowEvent::CursorLeft { .. } => {
-                apply_cursor_left(self.app.world_mut()?);
+                self.with_driver_world(apply_cursor_left)?;
             }
             _ => {}
         }
@@ -298,7 +330,9 @@ impl<'app> WinitApp<'app> {
             .mark_native_destroyed(window_id)
             .map_err(|_| AppRunError::runner("native window target is not registered"))?;
         if externally_destroyed {
-            push_window_event(self.app.world_mut()?, WindowEvent::Closed { window_id });
+            self.with_driver_world(|world| {
+                push_window_event(world, WindowEvent::Closed { window_id });
+            })?;
         }
         self.platform_windows.remove(&window_id);
         self.nara_windows_by_winit.remove(&winit_window_id);
@@ -322,16 +356,23 @@ impl<'app> WinitApp<'app> {
         self.primary_failure.get_or_insert(error);
     }
 
-    fn record_teardown_failure(&mut self, error: AppRunError) {
-        self.teardown_failure.get_or_insert(error);
+    fn record_runtime_close_failure(&mut self, error: AppRunError) {
+        self.runtime_close_failure.get_or_insert(error);
+    }
+
+    fn record_native_retirement_failure(&mut self, error: AppRunError) {
+        self.native_retirement_failure.get_or_insert(error);
     }
 
     fn take_failure(&mut self) -> Option<AppRunError> {
-        match (self.primary_failure.take(), self.teardown_failure.take()) {
-            (Some(prior), Some(teardown)) => Some(AppRunError::runner_teardown(prior, teardown)),
-            (Some(error), None) | (None, Some(error)) => Some(error),
-            (None, None) => None,
-        }
+        [
+            self.primary_failure.take(),
+            self.runtime_close_failure.take(),
+            self.native_retirement_failure.take(),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(AppRunError::runner_teardown)
     }
 
     fn begin_shutdown(&mut self, event_loop: &ActiveEventLoop) {
@@ -346,15 +387,20 @@ impl<'app> WinitApp<'app> {
             }
             WinitShutdownState::WaitingForNative { .. } => {}
             WinitShutdownState::Running => {
-                if let Err(error) =
-                    retire_app_targets(self.app, &self.backend_windows, &self.owned_window_ids)
-                {
-                    self.record_teardown_failure(error);
+                if let Err(error) = retire_runtime_targets(
+                    self.runtime,
+                    &self.backend_windows,
+                    &self.owned_window_ids,
+                ) {
+                    self.record_native_retirement_failure(error);
                     self.shutdown = WinitShutdownState::Aborted;
                     return EventLoopDirective::Exit;
                 }
 
                 self.platform_windows.clear();
+                if let Err(error) = self.begin_runtime_close() {
+                    self.record_runtime_close_failure(error);
+                }
                 self.shutdown = WinitShutdownState::WaitingForNative {
                     deadline: now + NATIVE_DESTROY_TIMEOUT,
                 };
@@ -364,6 +410,9 @@ impl<'app> WinitApp<'app> {
     }
 
     fn poll_native_shutdown(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
+        if let Err(error) = self.poll_runtime_close() {
+            self.record_runtime_close_failure(error);
+        }
         let directive = self.poll_native_shutdown_transition(now);
         apply_event_loop_directive(event_loop, directive);
     }
@@ -378,21 +427,44 @@ impl<'app> WinitApp<'app> {
         };
         match native_shutdown_action(&self.backend_windows, &self.owned_window_ids, now, deadline) {
             Ok(NativeShutdownAction::WaitUntil(deadline)) => {
-                EventLoopDirective::WaitUntil(deadline)
+                let runtime_poll = now
+                    .checked_add(RUNTIME_CLOSE_POLL_INTERVAL)
+                    .unwrap_or(deadline);
+                EventLoopDirective::WaitUntil(deadline.min(runtime_poll))
             }
-            Ok(NativeShutdownAction::Complete) => {
-                self.shutdown = WinitShutdownState::Complete;
-                EventLoopDirective::Exit
-            }
+            Ok(NativeShutdownAction::Complete) => match self.runtime.state() {
+                RuntimeState::Stopped => {
+                    if let Err(error) = self.runtime_close_result() {
+                        self.record_runtime_close_failure(error);
+                    }
+                    self.shutdown = WinitShutdownState::Complete;
+                    EventLoopDirective::Exit
+                }
+                RuntimeState::Stopping => EventLoopDirective::WaitUntil(
+                    now.checked_add(RUNTIME_CLOSE_POLL_INTERVAL).unwrap_or(now),
+                ),
+                RuntimeState::CloseIncomplete => {
+                    self.record_runtime_close_incomplete();
+                    self.shutdown = WinitShutdownState::Aborted;
+                    EventLoopDirective::Exit
+                }
+                state => {
+                    self.record_runtime_close_failure(AppRunError::runner(format!(
+                        "managed runtime remained in {state:?} during platform shutdown"
+                    )));
+                    self.shutdown = WinitShutdownState::Aborted;
+                    EventLoopDirective::Exit
+                }
+            },
             Ok(NativeShutdownAction::TimedOut) => {
-                self.record_teardown_failure(AppRunError::runner(
+                self.record_native_retirement_failure(AppRunError::runner(
                     "timed out waiting for native window destruction",
                 ));
                 self.shutdown = WinitShutdownState::Aborted;
                 EventLoopDirective::Exit
             }
             Err(_) => {
-                self.record_teardown_failure(AppRunError::runner(
+                self.record_native_retirement_failure(AppRunError::runner(
                     "native window target disappeared during shutdown",
                 ));
                 self.shutdown = WinitShutdownState::Aborted;
@@ -402,21 +474,90 @@ impl<'app> WinitApp<'app> {
     }
 
     fn finish_after_event_loop(&mut self) {
-        if self.shutdown == WinitShutdownState::Complete || self.owned_window_ids.is_empty() {
+        if self.shutdown == WinitShutdownState::Complete {
             return;
         }
 
         let retirement_result =
-            retire_app_targets(self.app, &self.backend_windows, &self.owned_window_ids);
+            retire_runtime_targets(self.runtime, &self.backend_windows, &self.owned_window_ids);
         self.platform_windows.clear();
         self.nara_windows_by_winit.clear();
         self.shutdown = WinitShutdownState::Aborted;
+        if let Err(error) = self.begin_runtime_close() {
+            self.record_runtime_close_failure(error);
+        }
         match retirement_result {
-            Ok(()) => self.record_teardown_failure(AppRunError::runner(
+            Ok(()) => self.record_native_retirement_failure(AppRunError::runner(
                 "winit event loop ended before controlled window retirement",
             )),
-            Err(error) => self.record_teardown_failure(error),
+            Err(error) => self.record_native_retirement_failure(error),
         }
+    }
+
+    fn begin_runtime_close(&mut self) -> Result<(), AppRunError> {
+        if self.runtime.state() == RuntimeState::CloseIncomplete {
+            self.record_runtime_close_incomplete();
+            return Ok(());
+        }
+        match self.runtime.request_control(RuntimeControl::Stop) {
+            RuntimeControlRequestResult::Accepted(_) => self.poll_runtime_close(),
+            RuntimeControlRequestResult::Rejected(_)
+                if self.runtime.state() == RuntimeState::Stopped =>
+            {
+                self.runtime_close_result()
+            }
+            RuntimeControlRequestResult::Rejected(_) => Err(AppRunError::runner(
+                "managed runtime rejected platform shutdown",
+            )),
+        }
+    }
+
+    fn poll_runtime_close(&mut self) -> Result<(), AppRunError> {
+        if self.runtime_close_incomplete_observed {
+            return Ok(());
+        }
+        if matches!(
+            self.runtime.state(),
+            RuntimeState::Stopping
+                | RuntimeState::Running
+                | RuntimeState::Paused
+                | RuntimeState::Faulted
+        ) {
+            self.runtime
+                .drive(Duration::ZERO)
+                .map_err(runtime_drive_error)?;
+        }
+        if self.runtime.state() == RuntimeState::CloseIncomplete {
+            self.record_runtime_close_incomplete();
+            return Ok(());
+        }
+        match self.runtime.state() {
+            RuntimeState::Stopped => self.runtime_close_result(),
+            RuntimeState::Stopping => Ok(()),
+            _ => Err(AppRunError::runner(
+                "managed runtime did not enter platform shutdown",
+            )),
+        }
+    }
+
+    fn runtime_close_result(&self) -> Result<(), AppRunError> {
+        if self.runtime.close_evidence().plugin_shutdown_failed() {
+            Err(AppRunError::runner(
+                "managed runtime plugin shutdown failed",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn record_runtime_close_incomplete(&mut self) {
+        if self.runtime_close_incomplete_observed {
+            return;
+        }
+        self.runtime_close_incomplete_observed = true;
+        self.record_runtime_close_failure(AppRunError::runner(
+            "managed runtime close is incomplete",
+        ));
     }
 }
 
@@ -482,8 +623,8 @@ fn should_process_window_event_during_shutdown(
     !shutdown.is_started() || matches!(event, WinitWindowEvent::Destroyed)
 }
 
-fn retire_app_targets(
-    app: &mut App,
+fn retire_runtime_targets(
+    runtime: &mut RuntimeInstance,
     backend_windows: &BackendWindowHandles,
     owned_window_ids: &BTreeSet<WindowId>,
 ) -> Result<(), AppRunError> {
@@ -491,28 +632,44 @@ fn retire_app_targets(
     backend_windows
         .request_retirements(&owned_window_ids)
         .map_err(|_| AppRunError::runner("owned native window target is not registered"))?;
-    let retirement_driver = app
+    let retirement_driver = runtime
         .world()
         .get_resource::<WindowSurfaceRetirementDriver>()
         .copied();
     if let Some(retirement_driver) = retirement_driver {
-        retirement_driver
-            .retire_targets(app.world_mut()?, &owned_window_ids)
-            .map_err(|_| AppRunError::runner("renderer failed to retire owned window surfaces"))?;
+        with_runtime_driver_world(runtime, |world| {
+            retirement_driver.retire_targets(world, &owned_window_ids)
+        })?
+        .map_err(|_| AppRunError::runner("renderer failed to retire owned window surfaces"))?;
     }
     backend_windows
         .release_retired_providers(owned_window_ids.iter().copied())
         .map_err(|_| AppRunError::runner("renderer did not retire every surface before shutdown"))
 }
 
-fn configured_primary_window(app: &mut App) -> Result<Window, AppRunError> {
-    let world = app.world_mut()?;
-    let mut query = world.query::<&Window>();
-    Ok(query
-        .iter(world)
-        .next()
-        .cloned()
-        .unwrap_or_else(Window::default))
+fn configured_primary_window(runtime: &mut RuntimeInstance) -> Result<Window, AppRunError> {
+    with_runtime_driver_world(runtime, |world| {
+        let mut query = world.query::<&Window>();
+        query
+            .iter(world)
+            .next()
+            .cloned()
+            .unwrap_or_else(Window::default)
+    })
+}
+
+fn with_runtime_driver_world<R>(
+    runtime: &mut RuntimeInstance,
+    operation: impl FnOnce(&mut nara_ecs::World) -> R,
+) -> Result<R, AppRunError> {
+    runtime
+        .with_driver_scope(|scope| operation(scope.world_mut()))
+        .map_err(|_| AppRunError::runner("runtime driver world is unavailable"))
+}
+
+fn runtime_drive_error(error: RuntimeDriveError) -> AppRunError {
+    let fault = error.fault();
+    AppRunError::managed_runtime(fault.kind(), fault.source())
 }
 
 fn apply_keyboard_input(world: &mut nara_ecs::World, event: &KeyEvent) {
@@ -617,530 +774,4 @@ pub fn convert_mouse_button(button: WinitMouseButton) -> MouseButton {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{
-        collections::BTreeMap,
-        sync::{Arc, Mutex},
-    };
-
-    use nara_app::{Plugin, PluginCategory, PluginDeclaration, PluginId, PluginShutdownContext};
-    use nara_window::{
-        WindowEvents, WindowPlugin,
-        backend::{WindowSurfaceHandleSource, WindowSurfaceLease, WindowSurfaceRetirementError},
-    };
-    use raw_window_handle::{
-        DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
-    };
-
-    #[derive(Debug)]
-    struct TestWindowSource {
-        events: Arc<Mutex<Vec<&'static str>>>,
-    }
-
-    impl Drop for TestWindowSource {
-        fn drop(&mut self) {
-            self.events.lock().unwrap().push("provider");
-        }
-    }
-
-    impl HasWindowHandle for TestWindowSource {
-        fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
-            Err(HandleError::NotSupported)
-        }
-    }
-
-    impl HasDisplayHandle for TestWindowSource {
-        fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
-            Err(HandleError::NotSupported)
-        }
-    }
-
-    #[derive(Debug)]
-    struct FakeSurfaceOwner {
-        _handle_source: WindowSurfaceHandleSource,
-        events: Arc<Mutex<Vec<&'static str>>>,
-    }
-
-    impl Drop for FakeSurfaceOwner {
-        fn drop(&mut self) {
-            self.events.lock().unwrap().push("surface");
-        }
-    }
-
-    #[derive(Debug)]
-    struct FakeSurfaceState {
-        owner: FakeSurfaceOwner,
-        lease: WindowSurfaceLease,
-    }
-
-    #[derive(Debug, Default)]
-    struct FakeSurfaceBackend {
-        surfaces: BTreeMap<WindowId, FakeSurfaceState>,
-    }
-
-    #[derive(Debug, Clone, Copy)]
-    struct FailingShutdownPlugin;
-
-    const FAILING_SHUTDOWN_PLUGIN_ID: PluginId = PluginId::new("test.shutdown-failure");
-    const FAILING_SHUTDOWN_PLUGIN_DECLARATION: PluginDeclaration =
-        PluginDeclaration::new(FAILING_SHUTDOWN_PLUGIN_ID, PluginCategory::Backend);
-
-    impl Plugin for FailingShutdownPlugin {
-        fn declaration() -> &'static PluginDeclaration {
-            &FAILING_SHUTDOWN_PLUGIN_DECLARATION
-        }
-
-        fn build(&self, _app: &mut App) -> Result<(), PluginError> {
-            Ok(())
-        }
-
-        fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
-            Err(PluginError::SetupFailed {
-                plugin: FAILING_SHUTDOWN_PLUGIN_ID,
-                message: "injected shutdown failure".to_owned(),
-            })
-        }
-    }
-
-    fn install_fake_surface_driver(app: &mut App) {
-        let world = app.world_mut().unwrap();
-        world.insert_non_send(FakeSurfaceBackend::default());
-        world.insert_resource(WindowSurfaceRetirementDriver::new(
-            "test.surface",
-            retire_fake_surfaces,
-        ));
-    }
-
-    fn add_fake_surface(
-        app: &mut App,
-        handles: &BackendWindowHandles,
-        window_id: WindowId,
-        events: Arc<Mutex<Vec<&'static str>>>,
-    ) {
-        let (handle_source, lease) = handles.acquire_surface(window_id).unwrap().into_parts();
-        app.world_mut()
-            .unwrap()
-            .non_send_mut::<FakeSurfaceBackend>()
-            .surfaces
-            .insert(
-                window_id,
-                FakeSurfaceState {
-                    owner: FakeSurfaceOwner {
-                        _handle_source: handle_source,
-                        events,
-                    },
-                    lease,
-                },
-            );
-    }
-
-    fn retire_fake_surfaces(
-        world: &mut nara_ecs::World,
-        window_ids: &[WindowId],
-    ) -> Result<(), WindowSurfaceRetirementError> {
-        let Some(mut backend) = world.get_non_send_mut::<FakeSurfaceBackend>() else {
-            return Ok(());
-        };
-        let mut first_error = None;
-        for window_id in window_ids {
-            let Some(FakeSurfaceState { owner, lease }) = backend.surfaces.remove(window_id) else {
-                continue;
-            };
-            drop(owner);
-            if lease.confirm_owner_dropped().is_err() {
-                first_error.get_or_insert(WindowSurfaceRetirementError::DriverFailed {
-                    driver: "test.surface",
-                });
-            }
-        }
-        first_error.map_or(Ok(()), Err)
-    }
-
-    #[test]
-    fn converts_common_keyboard_codes() {
-        assert_eq!(
-            convert_key_code(WinitKeyCode::Escape),
-            Some(KeyCode::Escape)
-        );
-        assert_eq!(convert_key_code(WinitKeyCode::Enter), Some(KeyCode::Enter));
-        assert_eq!(convert_key_code(WinitKeyCode::Space), Some(KeyCode::Space));
-        assert_eq!(
-            convert_key_code(WinitKeyCode::ArrowLeft),
-            Some(KeyCode::ArrowLeft)
-        );
-        assert_eq!(
-            convert_key_code(WinitKeyCode::KeyA),
-            Some(KeyCode::Character('a'))
-        );
-        assert_eq!(
-            convert_key_code(WinitKeyCode::Digit1),
-            Some(KeyCode::Character('1'))
-        );
-    }
-
-    #[test]
-    fn ignores_unmapped_keyboard_codes() {
-        assert_eq!(convert_key_code(WinitKeyCode::F1), None);
-    }
-
-    #[test]
-    fn converts_physical_keys() {
-        assert_eq!(
-            convert_physical_key(PhysicalKey::Code(WinitKeyCode::KeyW)),
-            Some(KeyCode::Character('w'))
-        );
-    }
-
-    #[test]
-    fn converts_mouse_buttons() {
-        assert_eq!(
-            convert_mouse_button(WinitMouseButton::Left),
-            MouseButton::Left
-        );
-        assert_eq!(
-            convert_mouse_button(WinitMouseButton::Right),
-            MouseButton::Right
-        );
-        assert_eq!(
-            convert_mouse_button(WinitMouseButton::Middle),
-            MouseButton::Middle
-        );
-        assert_eq!(
-            convert_mouse_button(WinitMouseButton::Back),
-            MouseButton::Other(4)
-        );
-        assert_eq!(
-            convert_mouse_button(WinitMouseButton::Other(9)),
-            MouseButton::Other(9)
-        );
-    }
-
-    #[test]
-    fn runner_selection_does_not_install_runtime_prerequisites() {
-        let mut app = App::new();
-        WinitRunner::default().install(&mut app).unwrap();
-
-        assert!(!app.world().contains_resource::<WindowEvents>());
-        assert!(!app.world().contains_resource::<BackendWindowHandles>());
-        assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
-        assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
-        assert!(!app.world().contains_resource::<PointerState>());
-    }
-
-    #[test]
-    fn runner_shutdown_retires_surface_before_releasing_provider() {
-        let mut app = App::new();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        let handles = app.world().resource::<BackendWindowHandles>().clone();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        handles
-            .insert(
-                WindowId::PRIMARY,
-                WindowHandleProvider::new(Arc::new(TestWindowSource {
-                    events: Arc::clone(&events),
-                })),
-            )
-            .unwrap();
-        install_fake_surface_driver(&mut app);
-        add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-
-        let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
-        retire_app_targets(&mut app, &handles, &owned_window_ids).unwrap();
-        retire_app_targets(&mut app, &handles, &owned_window_ids).unwrap();
-        app.shutdown_plugins().unwrap();
-
-        assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-        assert_eq!(
-            handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-            nara_window::backend::WindowTargetPhase::ProviderReleased
-        );
-    }
-
-    #[test]
-    fn runner_shutdown_does_not_retire_targets_owned_by_another_adapter() {
-        let mut app = App::new();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        let handles = app.world().resource::<BackendWindowHandles>().clone();
-        let owned_events = Arc::new(Mutex::new(Vec::new()));
-        let foreign_events = Arc::new(Mutex::new(Vec::new()));
-        handles
-            .insert(
-                WindowId::PRIMARY,
-                WindowHandleProvider::new(Arc::new(TestWindowSource {
-                    events: Arc::clone(&owned_events),
-                })),
-            )
-            .unwrap();
-        handles
-            .insert(
-                WindowId::new(2),
-                WindowHandleProvider::new(Arc::new(TestWindowSource {
-                    events: Arc::clone(&foreign_events),
-                })),
-            )
-            .unwrap();
-        install_fake_surface_driver(&mut app);
-        add_fake_surface(
-            &mut app,
-            &handles,
-            WindowId::PRIMARY,
-            Arc::clone(&owned_events),
-        );
-        add_fake_surface(
-            &mut app,
-            &handles,
-            WindowId::new(2),
-            Arc::clone(&foreign_events),
-        );
-
-        let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
-        retire_app_targets(&mut app, &handles, &owned_window_ids).unwrap();
-
-        assert_eq!(
-            handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-            nara_window::backend::WindowTargetPhase::ProviderReleased
-        );
-        assert_eq!(
-            handles.snapshot(WindowId::new(2)).unwrap().phase,
-            nara_window::backend::WindowTargetPhase::Active
-        );
-        assert!(handles.snapshot(WindowId::new(2)).unwrap().surface_active);
-        assert_eq!(*owned_events.lock().unwrap(), vec!["surface", "provider"]);
-        assert!(foreign_events.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn shutdown_failure_does_not_block_safe_target_retirement() {
-        let mut app = App::new();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        let handles = app.world().resource::<BackendWindowHandles>().clone();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        handles
-            .insert(
-                WindowId::PRIMARY,
-                WindowHandleProvider::new(Arc::new(TestWindowSource {
-                    events: Arc::clone(&events),
-                })),
-            )
-            .unwrap();
-        install_fake_surface_driver(&mut app);
-        add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-        app.add_plugin(FailingShutdownPlugin).unwrap();
-
-        let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
-        retire_app_targets(&mut app, &handles, &owned_window_ids).unwrap();
-
-        assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-        assert!(app.shutdown_plugins().is_err());
-        assert_eq!(
-            handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-            nara_window::backend::WindowTargetPhase::ProviderReleased
-        );
-    }
-
-    #[test]
-    fn event_loop_finish_does_not_replace_the_primary_failure() {
-        let mut app = App::new();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        let handles = app.world().resource::<BackendWindowHandles>().clone();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        handles
-            .insert(
-                WindowId::PRIMARY,
-                WindowHandleProvider::new(Arc::new(TestWindowSource {
-                    events: Arc::clone(&events),
-                })),
-            )
-            .unwrap();
-        install_fake_surface_driver(&mut app);
-        add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-        let mut state = WinitApp::new(&mut app).unwrap();
-        state.owned_window_ids.insert(WindowId::PRIMARY);
-        let primary = AppRunError::runner("primary runner failure");
-        state.record_primary_failure(primary.clone());
-
-        state.finish_after_event_loop();
-
-        assert_eq!(
-            state.take_failure(),
-            Some(AppRunError::runner_teardown(
-                primary,
-                AppRunError::runner("winit event loop ended before controlled window retirement")
-            ))
-        );
-        assert_eq!(state.shutdown, WinitShutdownState::Aborted);
-        assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-        assert_eq!(
-            handles.snapshot(WindowId::PRIMARY).unwrap().phase,
-            nara_window::backend::WindowTargetPhase::ProviderReleased
-        );
-        assert!(
-            !handles
-                .snapshot(WindowId::PRIMARY)
-                .unwrap()
-                .provider_present
-        );
-    }
-
-    #[test]
-    fn runner_failure_and_native_teardown_failure_remain_distinct() {
-        let mut app = App::new();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        let mut state = WinitApp::new(&mut app).unwrap();
-        let primary = AppRunError::runner("winit event loop failed: os failure");
-        let teardown = AppRunError::runner("timed out waiting for native window destruction");
-
-        state.record_teardown_failure(teardown.clone());
-        state.record_primary_failure(primary.clone());
-
-        assert_eq!(
-            state.take_failure(),
-            Some(AppRunError::runner_teardown(primary, teardown))
-        );
-    }
-
-    #[test]
-    fn external_destroyed_event_faults_and_retires_the_owned_target_once() {
-        let mut app = App::new();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        let handles = app.world().resource::<BackendWindowHandles>().clone();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        handles
-            .insert(
-                WindowId::PRIMARY,
-                WindowHandleProvider::new(Arc::new(TestWindowSource {
-                    events: Arc::clone(&events),
-                })),
-            )
-            .unwrap();
-        install_fake_surface_driver(&mut app);
-        add_fake_surface(&mut app, &handles, WindowId::PRIMARY, Arc::clone(&events));
-        let mut state = WinitApp::new(&mut app).unwrap();
-        let winit_window_id = WinitWindowId::dummy();
-        state
-            .nara_windows_by_winit
-            .insert(winit_window_id, WindowId::PRIMARY);
-        state.owned_window_ids.insert(WindowId::PRIMARY);
-
-        assert_eq!(
-            state
-                .handle_destroyed_window(winit_window_id, Instant::now())
-                .unwrap(),
-            EventLoopDirective::Exit
-        );
-
-        assert_eq!(state.shutdown, WinitShutdownState::Complete);
-        assert_eq!(
-            state.primary_failure,
-            Some(AppRunError::runner(
-                "native window was destroyed before controlled retirement"
-            ))
-        );
-        assert_eq!(state.teardown_failure, None);
-        assert!(!state.nara_windows_by_winit.contains_key(&winit_window_id));
-        assert_eq!(
-            state.app.world().resource::<WindowEvents>().as_slice(),
-            &[WindowEvent::Closed {
-                window_id: WindowId::PRIMARY,
-            }]
-        );
-        assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-        let snapshot = handles.snapshot(WindowId::PRIMARY).unwrap();
-        assert_eq!(
-            snapshot.phase,
-            nara_window::backend::WindowTargetPhase::NativeDestroyed
-        );
-        assert_eq!(
-            snapshot.fault,
-            Some(nara_window::backend::WindowTargetFault::ExternallyDestroyed)
-        );
-        assert!(!snapshot.provider_present);
-
-        assert_eq!(
-            state
-                .handle_destroyed_window(winit_window_id, Instant::now())
-                .unwrap(),
-            EventLoopDirective::None
-        );
-        assert_eq!(
-            state
-                .app
-                .world()
-                .resource::<WindowEvents>()
-                .as_slice()
-                .len(),
-            1
-        );
-        assert_eq!(*events.lock().unwrap(), vec!["surface", "provider"]);
-    }
-
-    #[test]
-    fn shutdown_ignores_repeated_close_but_accepts_destroyed() {
-        let deadline = Instant::now() + Duration::from_secs(1);
-        assert!(should_process_window_event_during_shutdown(
-            WinitShutdownState::Running,
-            &WinitWindowEvent::CloseRequested
-        ));
-        assert!(!should_process_window_event_during_shutdown(
-            WinitShutdownState::WaitingForNative { deadline },
-            &WinitWindowEvent::CloseRequested
-        ));
-        assert!(!should_process_window_event_during_shutdown(
-            WinitShutdownState::Aborted,
-            &WinitWindowEvent::CloseRequested
-        ));
-        assert!(should_process_window_event_during_shutdown(
-            WinitShutdownState::WaitingForNative { deadline },
-            &WinitWindowEvent::Destroyed
-        ));
-        assert!(should_process_window_event_during_shutdown(
-            WinitShutdownState::Aborted,
-            &WinitWindowEvent::Destroyed
-        ));
-    }
-
-    #[test]
-    fn native_shutdown_waits_for_destroyed_and_has_a_finite_timeout() {
-        let handles = BackendWindowHandles::default();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        handles
-            .insert(
-                WindowId::PRIMARY,
-                WindowHandleProvider::new(Arc::new(TestWindowSource {
-                    events: Arc::clone(&events),
-                })),
-            )
-            .unwrap();
-        handles.request_retirement(WindowId::PRIMARY).unwrap();
-        handles.release_provider(WindowId::PRIMARY).unwrap();
-
-        let now = Instant::now();
-        let deadline = now + Duration::from_secs(1);
-        let owned_window_ids = BTreeSet::from([WindowId::PRIMARY]);
-        assert_eq!(
-            native_shutdown_action(&handles, &owned_window_ids, now, deadline),
-            Ok(NativeShutdownAction::WaitUntil(deadline))
-        );
-
-        handles.mark_native_destroyed(WindowId::PRIMARY).unwrap();
-        assert_eq!(
-            native_shutdown_action(&handles, &owned_window_ids, now, deadline),
-            Ok(NativeShutdownAction::Complete)
-        );
-
-        let pending = BackendWindowHandles::default();
-        pending
-            .insert(
-                WindowId::PRIMARY,
-                WindowHandleProvider::new(Arc::new(TestWindowSource { events })),
-            )
-            .unwrap();
-        pending.request_retirement(WindowId::PRIMARY).unwrap();
-        pending.release_provider(WindowId::PRIMARY).unwrap();
-        assert_eq!(
-            native_shutdown_action(&pending, &owned_window_ids, deadline, deadline),
-            Ok(NativeShutdownAction::TimedOut)
-        );
-    }
-}
+mod tests;

@@ -40,6 +40,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U11-1 | RGF-U11 | `RGF-U11` | `rust-api/behavior` | Native window handle providers and surface/window shutdown | Replace raw-handle providers with an owning source, handle fallible registration/retirement, and let the platform runner complete renderer-acknowledged teardown. |
 | RGF-U10-1 | RGF-U10 | `RGF-U10` | `rust-api/behavior/safety/cache` | Image importer input, bounded file reads, PNG decode/publication, reload failure semantics, and image artifact identity | Supply owned bytes or an opened capability, use the audited bounded PNG importer, and publish only through the reservation-bearing candidate; rebuild image import caches. |
 | RGF-U4-1 | RGF-U4 | `RGF-U4` | `rust-api/behavior` | Plugin declarations, groups, slots, product planning, schema-provider input, App sealing/shutdown, and custom schedules | Replace imperative metadata/group installation and lifecycle aliases with static declarations, typed repeatable definitions, pure plans, `App::seal`, `App::shutdown_plugins`, and the unified typed schedule API. |
+| RGF-U5-1 | RGF-U5 | `RGF-U5` | `rust-api/behavior` | Code-first runtime ownership, exact stepping, typed faults, task close ownership, and Winit driving | Admit a sealed App through `RuntimeCandidate`, drive `RuntimeInstance`, use observable controls and retryable close, call `WinitRunner::run(&mut runtime)`, and rename standalone task shutdown to `shutdown_blocking`. |
 
 ## Entry Contract
 
@@ -971,7 +972,8 @@ imports, authorized bounded ingest, product request rejection, and actual settin
 - Winit exit paths that could destroy a native window before a live wgpu surface was retired.
 - Public lifecycle mutations that could mark a surface active or dropped without owning the unique
   surface binding.
-- Direct public `WinitRunner::run` calls that bypassed `App::run` plugin finalization and cleanup.
+- Direct public `WinitRunner::run(&mut App)` calls that bypassed managed runtime control, fault, and
+  close state.
 - The hand-written `WgpuRenderBackend: Resource` marker that omitted Bevy ECS resource-cache hooks
   and left the backend unavailable to render systems at runtime.
 
@@ -1018,7 +1020,7 @@ handles.mark_native_destroyed(window_id)?;
 
 Platform adapters should normally let their runner drive this sequence instead of invoking the
 individual transitions. Renderer adapters register `WindowSurfaceRetirementDriver`; platform
-runners submit only their owned target IDs and must not use `App::shutdown_plugins` as a local
+runners submit only their owned target IDs and must not use global plugin cleanup as a local
 retirement operation. Callers handle `WindowTargetError` and may inspect `WindowTargetSnapshot` for
 tooling/tests.
 
@@ -1033,12 +1035,14 @@ failure reporting.
 
 **User action**: custom native platform adapters must replace raw-handle snapshots with an owning
 typed source and implement provider/native release through the lifecycle authority. Code that
-removed providers directly must request retirement and wait for `SurfaceRetired` first. Install a
-runner through `WinitRunner::new(...).install(&mut app)` and invoke `App::run`; direct
-`WinitRunner::run` is private so plugin shutdown cannot be bypassed. Custom runners with a fallible
-native teardown should return `AppRunError::runner_teardown(prior, teardown)` when both phases fail;
-plugin shutdown remains owned and aggregated by `App::run`. Exhaustive `AppRunError` matches must add
-the `RunnerTeardown` arm.
+removed providers directly must request retirement and wait for `SurfaceRetired` first. For the
+first-party desktop path, seal an unstarted App, admit and start a `RuntimeCandidate`, promote it to
+`RuntimeInstance`, then call `WinitRunner::new(...).run(&mut runtime)`. Winit retires only its own
+targets and joins native destruction with registered runtime close. Raw `App::set_runner` /
+`App::run` remains a separate embedding path and cannot be admitted into a managed runtime. Custom
+runners with a fallible native teardown should return
+`AppRunError::runner_teardown(prior, teardown)` when both phases fail. Exhaustive `AppRunError`
+matches must include the `RunnerTeardown` arm.
 
 **Source action**: `manual-rewrite`.
 
@@ -1049,7 +1053,7 @@ the `RunnerTeardown` arm.
 **Rollback**: revert the complete RGF-U11 change. Do not restore unsafe raw-handle construction or
 provider removal that bypasses a live surface lease.
 
-**Verification anchors**: `tests/window_surface_retirement.rs`, `crates/nara_winit/src/lib.rs#tests`,
+**Verification anchors**: `tests/window_surface_retirement.rs`, `crates/nara_winit/src/tests.rs`,
 and `crates/nara_render_wgpu/src/backend.rs#tests` prove owning-source retention, exact controlled order,
 sticky external destruction, surface-loss provider retention, runner-scoped cleanup ordering,
 device-loss/partial-init invalidation, resize reconfiguration, backend Drop fallback, and native
@@ -1312,6 +1316,133 @@ wrappers.
 `crates/nara_app/tests/schedule_registry.rs`, `tests/plugin_composition.rs`,
 `tests/product_capabilities.rs`, `reference-game/tests/plugin_composition.rs`, and
 `reference-game/tests/authoring.rs`; stale-symbol searches reject the removed lifecycle/group API.
+
+## RGF-U5-1: Thin Code-First Runtime and Truthful Close
+
+**Removed contract**:
+
+- `WinitRunner::install(&mut App)` and the first-party platform path that retained raw App authority
+  or called `App::run_once` directly.
+- Treating plugin shutdown completion as proof that waitable task/service owners had also closed.
+- Treating a once-only plugin shutdown hook error as retryable unfinished ownership, or treating a
+  `Stopped` ownership state as proof that teardown succeeded.
+- Leaking an unfinished `App`, `World`, and close ledger with `mem::forget` after abnormal Drop.
+- Task shutdown that discarded unfinished worker `JoinHandle` values at a deadline and reported the
+  resulting detached work as a terminal outcome.
+- The ambiguous standalone `TaskPools::shutdown` name; it synchronously drives configured close
+  deadlines and is not the managed runtime's nonblocking close path.
+- Silent loss of engine-owned local gameplay intent and ignored Admit/Acknowledge lifecycle errors.
+
+**Canonical replacement or deletion rationale**: `RuntimeCandidate` admits one sealed, unstarted
+App with no raw runner and moves every explicitly registered close obligation into one unpublished
+owner. Successful startup produces `ReadyRuntimeCandidate`; its consuming `promote` operation is
+infallible and yields a generation-scoped `RuntimeInstance`. The App remains the only World,
+schedule, plugin, time, and tracker authority. Runtime controls apply at App safe points, exact step
+runs one complete fixed/gameplay transaction, the first typed fault is sticky, and `Stopped` means
+only that every registered runtime-owned close participant completed. `CloseIncomplete` retains the
+same owner for `RetryClose`; arbitrary resources remain caller-owned unless explicitly transferred.
+`RuntimeCandidate::scope_world_mut` and `RuntimeInstance::with_driver_scope` now return
+`Result<_, RuntimeScopeError>`. Both bind the canonical runtime reporter while the short-lived World
+scope runs and verify reporter/handler authority around healthy execution. An unhandled fallible
+system or observer that reaches the canonical fallback records a sticky fault and returns
+`RuntimeScopeError::Faulted`; an explicit system- or observer-specific error handler remains a
+caller-owned handling boundary. Candidate access rejects an existing fault, while driver access
+remains available on a faulted runtime for retirement work until `Stopped`.
+An attempted plugin shutdown hook may fail after all waitable owners complete: the runtime then
+reaches `Stopped` as an ownership state, while `RuntimeCloseEvidence::plugin_shutdown_failed`, the
+`Failed(CloseFailed)` control result, and the Winit teardown error preserve the failed outcome.
+
+Abnormal Drop of an admission failure, startup failure, or published runtime first performs one
+bounded close pass. If work remains, the complete `App`, `World`, and obligation ledger move into a
+bounded owner-thread-affine quarantine instead of becoming unreachable. Hosts can inspect
+`runtime_quarantine_status` and call `drive_runtime_quarantine` from that owner thread; exhausting a
+per-thread/process ceiling or exiting the owner thread with retained state fails closed rather than
+silently detaching ownership.
+
+`TaskPlugin` now registers the move-only worker owner separately from the World-facing `TaskPools`
+facade. A deadline records timeout history without dropping a worker handle. Standalone callers may
+use the explicitly named `shutdown_blocking` and retry it on the same pools. Abnormal owner Drop is
+nonblocking and moves unfinished handles plus pending destruction into process-owned retained
+quarantine. A bounded internal lane set keeps one blocking destructor from monopolizing the owner
+coordinator; each receipt remains pending until that owner's pending queue, in-flight destruction,
+and worker handles are empty. This fallback never counts as managed `Stopped` evidence.
+
+**Before**:
+
+```rust
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, WindowPlugin::default(), WgpuBackendPlugins))?;
+WinitRunner::default().install(&mut app)?;
+app.run()?;
+
+let report = pools.shutdown();
+```
+
+**After**:
+
+```rust
+let mut app = App::new();
+app.add_plugins((MinimalPlugins, WindowPlugin::default(), WgpuBackendPlugins))?;
+let candidate = RuntimeCandidate::admit(app.seal()?)?;
+let mut runtime = candidate.complete_startup()?.promote();
+WinitRunner::default().run(&mut runtime)?;
+
+let report = pools.shutdown_blocking();
+```
+
+Manifest-free and headless code may drive the same runtime explicitly:
+
+```rust
+let pause = runtime.request_control(RuntimeControl::Pause);
+runtime.drive(Duration::ZERO)?;
+let step = runtime.request_control(RuntimeControl::StepFixedTick);
+runtime.drive(Duration::ZERO)?;
+let stop = runtime.request_control(RuntimeControl::Stop);
+while !matches!(runtime.state(), RuntimeState::Stopped | RuntimeState::CloseIncomplete) {
+    runtime.drive(Duration::ZERO)?;
+}
+```
+
+Control requests return Accepted/Rejected immediately and their generation-scoped tickets expose
+Pending/Applied/Failed results separately. A `CloseIncomplete` runtime accepts `RetryClose`, not a
+second `Stop`; `CloseFailed` distinguishes terminal teardown failure from incomplete ownership. Raw
+`App::set_runner` / `App::run` remains supported for low-level embedding, but a
+sealed App carrying that runner intentionally fails managed candidate admission.
+
+**Affected examples and fixtures**: `windowed_clear`, `windowed_sprites`, `runtime_ui_panel`, and
+`window_surface_retirement_smoke` now start and pass `RuntimeInstance` to Winit. The independent
+reference game exposes a manifest-free managed runtime helper and drives every early-return path
+through bounded Stop. Image tests use the renamed standalone task shutdown API.
+
+**User action**: first-party-style platform integrations must drive `RuntimeInstance`, use only a
+short-lived `with_driver_scope` to project normalized events, and join their native teardown with
+runtime close. Handle `RuntimeScopeError` instead of assuming World projection is infallible. Code
+that needs retryable close must retain the runtime and handle
+`CloseIncomplete`; code that observes `Stopped` must still inspect its control/runner result for
+terminal teardown failure. Do not rely on destructor completion. Keep arbitrary external resources outside
+`Stopped` claims unless their owner is explicitly registered. Rename direct task-pool shutdown calls
+to `shutdown_blocking` and retain the same `TaskPools` value when retrying an incomplete report.
+
+**Source action**: `none`; no persistent project file changes.
+
+**Cache action**: `keep`; rebuild Rust artifacts after the API change.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the complete RGF-U5 commit and all managed-runner callers together. Do not
+restore a raw first-party Winit path, false `Stopped`, or detached-worker success reporting as a
+compatibility layer.
+
+**Verification anchors**: `tests/runtime_instance.rs`, `tests/runtime_driver_boundary.rs`,
+`reference-game/tests/runtime_core.rs`, `crates/nara_app/src/lib.rs#tests`,
+`crates/nara_tasks/src/tests/close.rs`, `crates/nara_tasks/src/tests/execution.rs`, and
+`crates/nara_winit/src/tests.rs` prove admission,
+generation isolation, exact step, qualified fault propagation, caller-owned resources, once-only
+shutdown, retryable close, retained worker ownership, and runtime/native teardown joining.
+The same matrix covers abnormal admission/start/runtime Drop quarantine, fault-resource replacement,
+candidate/driver/close observer fallback capture, ready-to-publish fault races, pending-Stop surface
+retirement, initial incomplete helper retry, normal panic unwind, and required/optional task and
+service integration.
 
 ## Persistent Format Matrix
 

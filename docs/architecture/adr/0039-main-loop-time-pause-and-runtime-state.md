@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-07-17
 **Refines**: ADR 0013, ADR 0018, ADR 0024, ADR 0035, ADR 0036
 **Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0057:
 Authoritative Fixed-Tick and Command Ingress; ADR 0076: Play Runtime Debug Control and Observation
@@ -63,6 +64,9 @@ The product contract is:
 - **Render interpolation** uses fixed overstep/interpolation data and must not mutate simulation
   state.
 - `run_once(delta)` receives real elapsed time. It must not silently mean virtual or fixed delta.
+- The managed path calls the same App-owned frame transactions through `RuntimeInstance::drive`.
+  Platform adapters do not reconstruct clocks or invoke `App::run_once` behind runtime lifecycle
+  state.
 - `time_scale`, pause state, maximum frame delta, fixed step duration, maximum fixed steps per
   frame, and background policy come from effective runtime settings. File-backed projects lower
   these from `nara.toml`; embedded apps may configure equivalent resources directly.
@@ -76,6 +80,14 @@ The product contract is:
   remaining whole ticks, and retains only the interpolation remainder. `PreserveDebt` retains whole
   ticks up to `max_debt_steps`; exceeding that bound rejects the frame before any clock or Core
   schedule mutation. Paused or zero-scale frames neither add virtual time nor consume existing debt.
+- A managed paused frame forces paused execution from `RuntimeState::Paused`; mutating the public
+  `RuntimeTimeSettings` resource cannot resume fixed or variable simulation behind the runtime
+  control state.
+- One accepted exact fixed-tick step is a dedicated App transaction, not a temporary resume or an
+  ordinary elapsed-time frame. It advances real time by the supplied real delta, virtual and fixed
+  time by exactly one fixed timestep, preserves pre-existing pending time, debt, remainder, render
+  interpolation, time scale, and paused settings, runs the complete fixed transaction once, clears
+  trackers once, and returns to paused only after success.
 - Startup is a separate once-only committed lifecycle phase. On the first run it completes before
   frame planning, may configure time resources, and is not rolled back if the subsequent frame is
   rejected. A retry does not rerun Startup; it plans from the committed Startup state.
@@ -101,6 +113,11 @@ is explicit runtime settings:
   depending on runtime settings.
 - redraw requests should be driven by configured frame policy, dirty render state, visible windows,
   and backend readiness rather than hardcoded inside an opaque draw loop.
+- The first-party Winit adapter drives `RuntimeInstance`, joins native target retirement with
+  registered runtime close, and reports success only after both ownership domains reach their
+  truthful terminal state. A terminal plugin-shutdown error may coexist with the runtime's
+  `Stopped` ownership state after every registered waitable owner completes; Winit still returns a
+  distinct teardown failure rather than treating that state as clean success.
 
 `WindowEvents` and similar frame-transient resources follow ADR 0036: they are produced by the
 platform adapter, consumed by same-frame systems, and cleared in a defined cleanup stage.
@@ -144,6 +161,7 @@ remains compatible with headless tests and platform adapters.
 | ECS frame boundary | Removed/change trackers rotate once after every successful frame | Unit tests |
 | State transitions | `OnEnter` / `OnExit`-style schedules can be driven without scene-tree lifecycle hooks | Schedule tests |
 | Runner portability | Headless and winit runners both call the same app runtime tick contract | Runner tests |
+| Exact paused step | One request advances one complete fixed/gameplay transaction without consuming retained debt or remainder | Runtime integration tests |
 
 ## Risks and Mitigations
 
@@ -164,6 +182,8 @@ remains compatible with headless tests and platform adapters.
   clearing.
 - Project manifest runtime settings in ADR 0035 lower into validated time resources before the
   selected product plugin bundle is installed.
+- `RuntimeInstance` contributes lifecycle/control state but does not duplicate any time resource or
+  frame schedule owned by `App`.
 
 ## Open Questions
 

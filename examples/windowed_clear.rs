@@ -1,6 +1,12 @@
+use std::error::Error;
+
 use nara::{backend_prelude::*, prelude::*};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[path = "support/runtime_retirement.rs"]
+mod runtime_retirement;
+use runtime_retirement::finish_runtime_after_winit;
+
+fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -13,10 +19,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         WgpuBackendPlugins,
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
-    WinitRunner::default().install(&mut app)?;
-
-    app.run()?;
-    Ok(())
+    let candidate = nara::app::RuntimeCandidate::admit(app.seal()?)?;
+    let mut runtime = candidate.complete_startup()?.promote();
+    let run_result = WinitRunner::default().run(&mut runtime);
+    finish_runtime_after_winit(run_result, runtime)
 }
 
 fn setup_scene(mut commands: Commands) {

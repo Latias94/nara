@@ -26,7 +26,10 @@ pub use queue::{
     MAX_GAMEPLAY_COMMAND_RETAINED_COMMANDS,
 };
 
-use nara_app::{App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError};
+use nara_app::{
+    App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError, RuntimeFault, RuntimeFaultKind,
+    RuntimeFaultReporter,
+};
 use nara_ecs::{
     Res, ResMut,
     schedule::{IntoScheduleConfigs, SystemSet},
@@ -92,7 +95,6 @@ impl Plugin for GameplayCommandPlugin {
         if !app.world().contains_resource::<GameplayCommandBatch>() {
             app.insert_resource(GameplayCommandBatch::new())?;
         }
-
         app.configure_sets(
             CoreStage::FixedUpdate,
             (
@@ -129,6 +131,7 @@ fn map_action_outcomes_to_commands(
     command_map: Res<ActionCommandMap>,
     outcomes: Option<Res<ActionOutcomes>>,
     mut queue: ResMut<GameplayCommandQueue>,
+    faults: Res<RuntimeFaultReporter>,
 ) {
     let Some(outcomes) = outcomes else {
         return;
@@ -138,7 +141,15 @@ fn map_action_outcomes_to_commands(
         for binding in
             command_map.matching_bindings(&outcome.action, &outcome.context, outcome.phase)
         {
-            let _ = queue.submit_local_for_next_tick(binding.command().clone());
+            if queue
+                .submit_local_for_next_tick(binding.command().clone())
+                .is_err()
+            {
+                faults.report(RuntimeFault::engine(
+                    RuntimeFaultKind::LocalIntentLoss,
+                    "nara.gameplay.local-action",
+                ));
+            }
         }
     }
 }
@@ -147,8 +158,17 @@ fn admit_gameplay_commands(
     fixed_time: Res<FixedTime>,
     mut queue: ResMut<GameplayCommandQueue>,
     mut batch: ResMut<GameplayCommandBatch>,
+    faults: Res<RuntimeFaultReporter>,
 ) {
-    let _ = queue.admit_fixed_tick(fixed_time.tick(), &mut batch);
+    if queue
+        .admit_fixed_tick(fixed_time.tick(), &mut batch)
+        .is_err()
+    {
+        faults.report(RuntimeFault::engine(
+            RuntimeFaultKind::GameplayLifecycle,
+            "nara.gameplay.fixed-admit",
+        ));
+    }
 }
 
 fn gameplay_command_batch_is_current(
@@ -164,8 +184,17 @@ fn acknowledge_gameplay_commands(
     fixed_time: Res<FixedTime>,
     mut queue: ResMut<GameplayCommandQueue>,
     mut batch: ResMut<GameplayCommandBatch>,
+    faults: Res<RuntimeFaultReporter>,
 ) {
-    let _ = queue.acknowledge_fixed_tick(fixed_time.tick(), &mut batch);
+    if queue
+        .acknowledge_fixed_tick(fixed_time.tick(), &mut batch)
+        .is_err()
+    {
+        faults.report(RuntimeFault::engine(
+            RuntimeFaultKind::GameplayLifecycle,
+            "nara.gameplay.fixed-acknowledge",
+        ));
+    }
 }
 
 pub mod prelude {
@@ -188,7 +217,7 @@ mod tests {
     use std::{num::NonZeroU64, time::Duration};
 
     use super::*;
-    use nara_app::CoreStage;
+    use nara_app::{CoreStage, RuntimeFaultKind, RuntimeFaultReporter};
     use nara_core::{ByteLimit, ItemLimit};
     use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
     use nara_identity::{
@@ -1201,6 +1230,46 @@ mod tests {
     }
 
     #[test]
+    fn engine_owned_local_intent_loss_reaches_the_runtime_fault_reporter() {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+
+        let action = ActionId::new("interact").unwrap();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionMap>()
+            .bind(ActionBinding::key(action.clone(), KeyCode::Enter));
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionCommandMap>()
+            .bind(ActionCommandBinding::new(
+                action,
+                ActionPhase::Started,
+                GameplayCommandTypeId::new("interact.started").unwrap(),
+            ))
+            .unwrap();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<GameplayCommandQueue>()
+            .set_local_sequence_for_test(u64::MAX);
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let fault = app
+            .world()
+            .resource::<RuntimeFaultReporter>()
+            .fault()
+            .expect("local intent loss should report a runtime fault");
+        assert_eq!(fault.kind(), RuntimeFaultKind::LocalIntentLoss);
+        assert_eq!(fault.source(), "nara.gameplay.local-action");
+    }
+
+    #[test]
     fn lifecycle_faults_fail_closed_and_hide_an_ambiguous_batch() {
         let mut queue = GameplayCommandQueue::default();
         queue
@@ -1364,6 +1433,13 @@ mod tests {
                 .last_lifecycle_error(),
             Some(&GameplayCommandLifecycleError::BatchAlreadyActive)
         );
+        let fault = app
+            .world()
+            .resource::<RuntimeFaultReporter>()
+            .fault()
+            .expect("a lifecycle invariant should report a runtime fault");
+        assert_eq!(fault.kind(), RuntimeFaultKind::GameplayLifecycle);
+        assert_eq!(fault.source(), "nara.gameplay.fixed-admit");
     }
 
     #[test]
