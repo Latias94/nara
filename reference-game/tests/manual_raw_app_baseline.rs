@@ -23,11 +23,26 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
     assert_eq!(report.command_stats.retained_commands, 0);
     assert!(report.command_queue_idle);
 
-    assert_eq!(report.plugin_plan_fingerprint.len(), 64);
-    assert_eq!(report.schema_fingerprint.len(), 64);
-    assert_eq!(report.content_revision.len(), 64);
-    assert_eq!(report.content_digest.len(), 64);
-    assert_eq!(report.command_digest.len(), 64);
+    assert_eq!(
+        report.plugin_plan_fingerprint,
+        "957780ddaae1597b3a3925cabac17330ca1c99d357246b9a60091f14cd08d701"
+    );
+    assert_eq!(
+        report.schema_fingerprint,
+        "bbdd60c2f559a1807d2c3429caed5b151ae5436fe1b6be037013ebd6b4bbb17b"
+    );
+    assert_eq!(
+        report.content_revision,
+        "4fe474f07f3a0c1fbf081b2da76da2c39bc9a30b80ca0e8a3165fddafdfac47e"
+    );
+    assert_eq!(
+        report.content_digest,
+        "0aab556515aca592942b6955aabddbf6d76bf5deda5ba3bd387fcfc371f62c47"
+    );
+    assert_eq!(
+        report.command_digest,
+        "42d5de0e3c23bd3d731f1d2a116f767adb43fa4df7f2722692058f480a888c2b"
+    );
     assert!(!report.task_shutdown.timed_out());
     assert!(report.joined_task_workers > 0);
 }
