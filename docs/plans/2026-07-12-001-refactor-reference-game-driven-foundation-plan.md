@@ -1301,7 +1301,7 @@ cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test manu
 
 # RGF-U24
 cargo nextest run --locked -p nara_app -p nara_project -p nara_asset -p nara_scene -p nara_gameplay -p nara_tasks --test-threads=1
-cargo nextest run --locked -p nara --test project_composition --test runtime_start_attempt --test project_runtime_boot --test project_host_boundary --test-threads=1
+cargo nextest run --locked -p nara --features runtime-2d,serde --lib --test project_composition --test runtime_instance --test project_runtime_boot --test project_host_boundary --test-threads=1
 cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test manual_raw_app_baseline --test project_manifest_ingest --test runtime_drive --test-threads=1
 
 # RGF-U6

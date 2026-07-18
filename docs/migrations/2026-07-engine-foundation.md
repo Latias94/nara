@@ -1670,6 +1670,85 @@ metadata.
 lifecycle event and observer scope, late required metadata, binding authority, asset-access
 classification, exact persistent composition, and external construction denial.
 
+## RGF-U24-1: Concrete Headless Product Action and Atomic Runtime Publication
+
+**Removed contract**:
+
+- Ordinary file-backed callers manually joining manifest ingest, product/plugin/schema planning,
+  startup-content loading, App construction, candidate admission, publication, exact stepping, and
+  retirement.
+- Treating `ReadyRuntimeCandidate::promote` as the product publication boundary even though a
+  separate Host-visible slot could still reject or race with a sticky fault.
+- Letting partial threaded task-pool construction synchronously wait or transfer earlier owners to
+  process fallback before a product runtime ledger could retain them.
+
+**Canonical replacement or deletion rationale**: use the root `HeadlessRunIntent<O>` and
+`HeadlessRun<O>` action for file-backed headless products. The action owns one authorized project
+root, one run intent, semantic command submissions, and one output resource type. It returns
+`HeadlessRunOutcome<O>` plus structured diagnostics. Calling `execute_bounded` after
+`CleanupIncomplete` drives only the retained cleanup owner; it never reopens source, reconstructs
+the runtime, or resubmits commands.
+
+The private root Host owns plan/content lineage checks, App/ledger construction, candidate
+admission, U29 guarded scene materialization, startup, and retirement. Advanced Host integrations
+that already own a ready candidate publish through the single-use `RuntimePublicationSlot`; the
+reporter lock linearizes the final fault check and ownership/visibility transition. Direct
+code-first `App` and `ReadyRuntimeCandidate::promote` remain advanced paths without the file-backed
+product action's Host publication guarantee.
+
+**Before**:
+
+```rust
+let candidate = ingest_project_manifest(&manifest, profile)?;
+let plan = resolve_runtime_plan(&candidate, plugins, providers)?;
+let snapshot = ProjectContentLoader::new(project_root)?.load(&candidate, &plan)?;
+
+// Caller then prepared/committed App, admitted and started a RuntimeCandidate,
+// materialized the scene, promoted the runtime, drove ticks, and joined retirement.
+```
+
+**After**:
+
+```rust
+let intent = HeadlessRunIntent::<GameSnapshot>::new(fixed_ticks)
+    .insert_after::<TransformPlugin>(game_plugin_definition());
+let mut run = HeadlessRun::new(project_root, intent, commands);
+
+match run.execute_bounded().outcome() {
+    HeadlessRunOutcome::Completed(snapshot) => use_snapshot(snapshot),
+    HeadlessRunOutcome::CleanupIncomplete => retry_later(),
+    HeadlessRunOutcome::Failed => report_failure(),
+}
+```
+
+**Affected examples and fixtures**: the independent reference-game headless binary and
+`runtime_drive` tests now use the concrete product action. The U26 manual raw-App fixture remains
+only as the frozen ownership counterfactual and is not a recommended application template.
+
+**User action**: file-backed headless callers should move manifest/content/runtime lifecycle code
+behind `HeadlessRun`. Keep game configuration in Rust plugin definitions and schema providers,
+submit semantic gameplay commands, retain the action while cleanup is incomplete, and emit only
+the returned structured diagnostics. Code-first embedding may continue to use `App`; platform or
+Editor Host maintainers may use the advanced runtime module but must not expose its choreography to
+ordinary game code.
+
+**Source action**: `none`; this migration changes Rust ownership/API usage, not project files.
+
+**Cache action**: `keep`; rebuild Rust artifacts after the API change.
+
+**Compatibility window**: none (pre-1.0 fearless replacement for the product path). The advanced
+code-first runtime path remains intentionally supported rather than shimmed through `HeadlessRun`.
+
+**Rollback**: revert the complete U24 product action and its callers together. Do not restore a
+second public lifecycle builder, publish an already-started raw `App`, flatten structured failure
+phases, or drop an incomplete retirement owner to simulate success.
+
+**Verification anchors**: `tests/project_runtime_boot.rs`, `tests/project_host_boundary.rs`,
+`tests/runtime_instance.rs`, `crates/nara_app/tests/plugin_composition.rs`,
+`crates/nara_tasks/src/tests/{execution,close}.rs`, `reference-game/tests/runtime_drive.rs`, and
+`reference-game/tests/manual_raw_app_baseline.rs` prove the caller boundary, lineage/schema
+binding, failure phases, publication linearization, owner retention, and U26 outcome parity.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

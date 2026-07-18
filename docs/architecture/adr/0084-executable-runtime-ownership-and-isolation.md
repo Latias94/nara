@@ -2,13 +2,13 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-17
+**Last Revised**: 2026-07-18
 **Owner**: `nara_app` and concrete executable hosts
 **Admission Trigger**: RGF-U5 proves the code-first runtime core; RGF-U26 freezes the task-equivalent
-manual counterfactual before RGF-U24 proves unpublished candidate construction and headless Host
-publication; RGF-U25 challenges the ownership model before RGF-U17 replaces the bare Play `World`
+manual counterfactual and RGF-U24 proves unpublished candidate construction, headless Host
+publication, and the reversal matrix before RGF-U17 replaces the bare Play `World`
 and RGF-U13 proves desktop drive/close parity; RGF-U23 then decides this ADR independently before
-checking compatibility with the accepted outer-Host decision
+checking compatibility with the outer-Host decision
 **Revisit Trigger**: A concrete embedded or multi-runtime workflow proves that a thin lifecycle owner
 cannot preserve `App` as the sole schedule/world authority
 **Related**: ADR 0003, ADR 0008, ADR 0034, ADR 0039, ADR 0042, ADR 0052, ADR 0057, ADR 0058,
@@ -38,17 +38,24 @@ checkpoint formats, replay persistence, or native code hot patching.
 
 ## Trial Evidence
 
-RGF-U5 now implements the code-first subset in `nara_app`: sealed-App admission, an unpublished
+RGF-U5 implements the code-first subset in `nara_app`: sealed-App admission, an unpublished
 candidate, startup-before-promotion, non-reused generations, safe-point controls, exact fixed-tick
 stepping, sticky typed faults, explicit move-only close obligations, and retryable finite close.
-`nara_winit` drives that runtime instead of raw `App`, and the independent reference game exercises
-the manifest-free path. The runtime remains a thin owner around one App and imports no project,
-content, tooling, window, or renderer policy.
+`nara_winit` drives that runtime instead of raw `App`; the runtime remains a thin owner around one
+App and imports no project, content, tooling, window, or renderer policy.
 
-This evidence is intentionally incomplete. It does not provide the U26 manual counterfactual,
-U24 product Host/start-attempt publication, U25 reversal verdict, U17 Editor ownership, U13 desktop
-product parity, or U23 independent decision. The ADR therefore remains Proposed; landed type names
-and tests are a reversible trial, not authority for the unproven outer topology.
+RGF-U26 freezes the equivalent manual reference-game task and failure cuts. RGF-U24 then adds one
+private product start attempt and obligation ledger, completes guarded scene/startup work while the
+candidate is unpublished, and linearizes final fault observation plus owner/visibility transfer
+through a single-use `RuntimePublicationSlot`. `HeadlessRun` hides that choreography, preserves
+fresh generations, and retains incomplete cleanup for later bounded drives. Product and manual
+paths prove the same plan, command, authoritative first tick, pre-owner rejection, late-hook
+rejection, and incomplete-retirement custody semantics.
+
+This evidence is intentionally incomplete. It does not provide U17
+Editor ownership, U13 desktop product parity, or U23 independent decision. The ADR therefore
+remains Proposed; landed type names and tests are Trial evidence, not authority for an unproven
+universal topology or final public API.
 
 ## Decision
 
@@ -393,7 +400,7 @@ an equivalent private optimization later.
 | Finite close | Never-completing shutdown does not block the host and never reports `Stopped` | Deadline/shutdown fixture |
 | Stop-first workspace | Close/reload/restart/second Play/editor exit cannot silently drop or replace a live/failed owner | Workspace state-machine tests |
 | API authority | Runtime wrapper exposes no system/plugin registration or independent schedule/time API | Public API and dependency review |
-| Early ownership value | The minimal candidate/runtime path closes named fault/ownership gaps without exceeding precommitted public-concept, caller-glue, or lifecycle-state limits against the independently frozen manual counterfactual | RGF-U26 baseline plus RGF-U25 counterevidence review |
+| Early ownership value | The minimal candidate/runtime path closes named fault/ownership gaps without exceeding the public-concept, caller-glue, or lifecycle-state limits against the independently frozen manual counterfactual | RGF-U26 baseline plus RGF-U24 reversal matrix and independent review |
 
 ## Risks and Mitigations
 
@@ -409,7 +416,7 @@ an equivalent private optimization later.
 | Recipe captures one-shot/runtime data | High | Medium | Restrict it to validated immutable inputs and reconstructible factories. |
 | Platform event-loop constraints leak into runtime | Medium | Medium | Keep the event loop in the host/driver and pass normalized input/time/control. |
 | Embedded shared resources invalidate isolation claims | High | Medium | Treat arbitrary resources as caller-owned, require explicit transfer for runtime close obligations, and scope isolation/Stopped evidence to registered runtime-owned state. |
-| The wrapper adds more concepts than the failures justify | High | Medium | Freeze U26's task-equivalent manual raw-App path before Host implementation, then run U25 on the same current source, content, plan, toolchain, and environment class before Editor/desktop diffusion; reject or simplify on a failed precommitted complexity gate. |
+| The wrapper adds more concepts than the failures justify | High | Medium | Freeze U26's task-equivalent manual raw-App path before Host implementation, then make U24 compare the same content, plan, command, fixed-tick task, and failure cuts before Editor/desktop diffusion; reject or simplify if the ordinary concept or ownership comparison fails. |
 
 ## Consequences
 
@@ -435,8 +442,8 @@ must add reciprocal refinement metadata and update implementation evidence.
 
 ## Admission Evidence
 
-RGF-U5 has implemented the code-first candidate/runtime trial; RGF-U24 may implement the concrete
-headless Host/candidate trial. Acceptance still requires U26's pre-Host baseline, U25's early counterevidence verdict,
+RGF-U5 has implemented the code-first candidate/runtime trial; RGF-U24 implements the concrete
+headless Host/candidate trial and its U26 reversal matrix. Acceptance still requires
 RGF-U17's Editor command/view ownership, RGF-U13's desktop Adapter evidence, and every success metric
 above through the independent RGF-U23 review; the existence of a wrapper does not make the ADR
 authoritative. A wrapper type, state enum, or bare-world adapter without scheduled execution, fault

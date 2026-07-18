@@ -2,7 +2,7 @@
 
 **Status**: Design Draft
 **Created**: 2026-07-13
-**Last Updated**: 2026-07-16
+**Last Updated**: 2026-07-18
 **Owner**: Root product composition, `nara_app`, executable hosts, and the reference game
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Document Role**: Canonical runtime-composition harness; rebaseline after RGF closure.
@@ -71,17 +71,18 @@ and bundle spelling remain tracer-gated.
 A file-backed project user does not write a second builder. A CLI/Editor action receives an
 already authorized project root, selected profile/target, startup intent, and the game package or
 plugin definition. A generated executable binds the built/cooked project identity and target in its
-public root glue, then invokes the same concrete product action. The exact Rust carrier waits for
-U12/U24 evidence; the side-effecting action belongs to the root facade or concrete executable Host,
-never to the side-effect-free `nara_project` Module.
+public root glue, then invokes the same concrete product action. RGF-U24 now supplies
+`HeadlessRunIntent`/`HeadlessRun` as the first concrete carrier; Editor and desktop carriers remain
+their own evidence-gated actions. The side-effecting action belongs to the root facade or concrete
+executable Host, never to the side-effect-free `nara_project` Module.
 
 Editor Play lowers a validated edit snapshot through that same product composition and publishes a
 fresh isolated runtime generation. Its UI sees commands, status, diagnostics, and observations; it
 does not own a live candidate or startup ledger.
 
-These snippets state the required Depth, not final spelling. RGF-U24/U25 must prove the concrete
-headless product action, RGF-U17 the Editor action, and RGF-U13 the desktop action before names or
-module placement freeze.
+These snippets state the required Depth, not final spelling. RGF-U24 proved the concrete headless
+product action and its U26 reversal matrix before U17 proves the Editor action and U13 the desktop
+action. Those later gates and U23 decide which names or module placements freeze.
 
 ## How To Use This Design Harness
 
@@ -203,6 +204,35 @@ claim that Proposed ADRs already have implementation evidence.
 18. `App::set_runner` is top-level code-first authority. Plugin hooks cannot select or replace the
     process driver. A raw-runner App uses direct `App::run`; a managed runtime admits only an App
     without a raw runner and is driven by the root-selected Platform/Runner Adapter.
+
+## RGF-U24 Implementation Rebaseline
+
+Commit `5ddbf18` implements the first concrete headless Trial of this design without changing the
+decision status of ADR 0082 or ADR 0084.
+
+- Ordinary callers use `HeadlessRunIntent<O>`, `HeadlessRun<O>`, semantic command submissions,
+  `HeadlessRunOutcome<O>`, and `DiagnosticReport`. The project capability, run intent, control
+  input, outcome, and diagnostics remain the only five caller concept categories.
+- `src/project_host/runtime/action.rs` owns that public action. The sibling private Host module owns
+  `ProjectHost`, `RuntimeStartAttempt`, epochs, publication reservation, and cleanup custody; none
+  enter the gameplay prelude or reference-game caller surface.
+- `RuntimePlan` and `ProjectContentSnapshot` bind only when their opaque lineage and schema
+  fingerprints match. The Host creates the ledger before fallible runtime work, then uses the same
+  `PluginPlan` preparation/commit path as code-first App construction.
+- Registry validation, U29 guarded Scene/Prefab apply, command submission, and startup finish in
+  the unpublished candidate. `ReadyRuntimeCandidate::publish_into` then checks the sticky reporter
+  and transfers the owner into a single-use `RuntimePublicationSlot` under one reporter lock.
+- A failed or incomplete path retains a typed retirement owner. Repeated bounded action drives
+  finish cleanup only; they cannot reopen source, rebuild, resubmit commands, or publish another
+  generation.
+- The committed reference game and U26 manual counterfactual use the same resolved plugin plan,
+  project fixture, semantic command, and authoritative first-tick outcome. The product path also
+  preserves the pre-owner, late-hook, and incomplete-retirement failure distinctions.
+
+This evidence supports the recommended concrete-action layering. It does not yet prove a universal
+process scope graph, Editor/desktop parity, a public recipe/factory abstraction, or final placement
+of advanced runtime types. U17/U13 remain the diffusion challenge, and U23 remains the only
+authority that may accept or reject the two Proposed ADRs.
 
 ## Module And Seam Placement
 
@@ -389,8 +419,9 @@ authorize and ingest project
 `RuntimeInstance` is the likely advanced shared Interface for concrete drivers. The current
 `RuntimeCandidate` may remain module-specific advanced support for code-first embedding, but it is
 not a gameplay-prelude or project-authoring concept. `ReadyRuntimeCandidate` and `promote()` are U5
-trial mechanics, not the managed product publication Interface: a concrete Host must keep ready
-ownership inside its start attempt and perform the sole compare-and-consume publication move.
+trial vocabulary, not the managed product publication Interface: U24 keeps ready ownership inside
+its private start transaction and calls the single-use `publish_into` move against a Host-reserved
+`RuntimePublicationSlot`. Ordinary callers cannot name either type.
 
 No public `EngineHost`, `ProductRoot`, `RuntimeFactory`, or `RuntimeDriver` trait is justified yet.
 Winit and a headless loop show that `RuntimeInstance` can be driven in different ways; they do not
@@ -1330,8 +1361,8 @@ evidence expected from each slice explicit:
    fallible work, moves it with the sealed App into U5's candidate before startup, and atomically
    publishes-and-promotes that same owner only after complete startup and publication preflight,
    without semantically rewriting U26.
-7. U25 challenges the minimal Host/candidate path against U26 on the same current source, content,
-   plan, toolchain, and environment class before diffusion.
+7. U24's completed reversal matrix challenges the minimal Host/candidate path against U26 on the
+   same committed content, plugin plan, command, fixed-tick task, and failure cuts before diffusion.
 8. Later desktop work proves the winit driver calls the runtime boundary and preserves target lifetime without changing composition
    policy.
 
@@ -1372,8 +1403,8 @@ The remaining questions belong to later candidate/tooling/driver slices or imple
 5. Does the reference game need a direct-only `App::configure` helper, or do unified
    `add_systems` and ordinary App methods already provide the same leverage?
 6. Which concrete public product action gives desktop, project, server, and Editor callers the
-   shortest honest journey without creating a second mutable `App` builder? U24/U25 chooses the
-   headless shape before U17/U13 diffuse it.
+   shortest honest journey without creating a second mutable `App` builder? U24 chooses and tests
+   the headless shape before U17/U13 diffuse it.
 7. After U24 owns managed publication, which code-first consumer still requires public
    `RuntimeCandidate` construction, and can `ReadyRuntimeCandidate` become private without losing a
    supported advanced workflow?

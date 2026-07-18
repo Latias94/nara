@@ -102,7 +102,7 @@ flowchart TD
 
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
-| `nara` | Facade, layered preludes, authorized project ingest/composition, and immutable startup-content publication | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs; root-owned `ProjectContentLoader` over opaque filesystem authority |
+| `nara` | Facade, layered preludes, authorized project ingest/composition, immutable startup-content publication, and the concrete `HeadlessRun` product action | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs; root-owned content loading plus a private `ProjectHost` start/publication/retirement state machine over opaque filesystem authority |
 | `nara_app` | Gameplay authoring through `App`, Plugin declarations/definitions/plans, schedules, time, and frame outcomes; module-specific advanced U5 trial through `SealedApp`, `RuntimeCandidate`, `RuntimeInstance`, and typed control/fault/close values | Data-only group/slot resolution, private preparation, closed hook commit, explicit move-only shutdown obligations, reverse once-only shutdown, raw-runner versus managed-runtime exclusion, safe-point driving, exact fixed-tick execution, sticky fault authority, retryable finite close, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary; ADR 0084 still owns acceptance and final public placement |
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
@@ -321,8 +321,9 @@ second real adapter or stronger isolation pressure.
   aggregate retained/reaped counts, and is explicitly driven from an owner-thread safe point; it is
   never `Stopped` evidence.
   This is module-specific advanced U5 trial evidence, not the ordinary project or Editor entry.
-  Concrete product actions must hide candidate/ready/retirement choreography, and ADR 0084 plus the
-  U24/U25/U17/U13 gates still decide final visibility and naming.
+  RGF-U24 now hides candidate/ready/retirement choreography behind the concrete headless product
+  action. ADR 0084 remains Proposed; U17/U13 and the independent U23 decision still determine
+  whether the ownership model diffuses further and which advanced names remain public.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
 - `nara_project` validates quantized durations, fixed debt policy, per-kind/aggregate worker and queue
   limits, shutdown timeouts, runtime presets, and coarse capability requests before lowering. It
@@ -335,6 +336,18 @@ second real adapter or stronger isolation pressure.
   path-addressed startup scene/prefab/image closure, and publishes a leased immutable
   `ProjectContentSnapshot` carrying the frozen schema fingerprint without creating an App or
   target World.
+- The root `HeadlessRun` action is the first ordinary file-backed runtime entry. It accepts one
+  host-issued project-root capability, a typed run intent, semantic commands, and an outcome
+  resource type; it returns only `HeadlessRunOutcome` plus a structured diagnostic report. Its
+  private `ProjectHost` reuses the immutable plan/content values only when lineage and schema
+  fingerprints match, creates one fresh App and obligation ledger, commits and seals the resolved
+  plugin plan, transfers ownership into an unpublished `RuntimeCandidate`, repeats registry and
+  U29 target-World eligibility checks, materializes startup content, and completes startup before
+  one reporter-lock-linearized `RuntimePublicationSlot` move makes the `RuntimeInstance` visible.
+  Failed preparation, admission, startup, publication, runtime drive, or close retains the same
+  owner through bounded retirement; incomplete cleanup blocks replacement and is retried by later
+  calls without reopening project source or resubmitting commands. This is the implemented U24
+  headless Trial slice, not acceptance of ADR 0082/0084 or a universal Host/factory Interface.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
 - `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
 - `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age
@@ -349,7 +362,10 @@ second real adapter or stronger isolation pressure.
 - The independent reference game opens its committed `nara.toml` through a directory capability
   from randomized current/home directories, consumes its fixed timestep, and follows the committed
   startup scene, enemy prefab, canonical image metadata, and PNG source into one immutable content
-  snapshot. It still does not claim runtime materialization or target-World topology.
+  snapshot. Its ordinary product path now materializes that snapshot through U29's guarded apply,
+  publishes one fresh managed runtime, executes the same first fixed tick as the frozen U26 manual
+  counterfactual, captures the authoritative outcome, and retains incomplete retirement for retry.
+  The complete movement/combat/wave and final CLI contracts remain RGF-U6 work.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_identity` implements the world-scoped identity core, structured references, atomic
   fork/restore remaps, tombstone policy, root facade wiring, and scene/gameplay/reflect/tooling
@@ -392,8 +408,9 @@ second real adapter or stronger isolation pressure.
   fault, lifecycle, and reviewer digests; generic aggregation and decision paths reject it. Its
   lifecycle graph starts at `candidate`, makes `stopped` terminal, and requires total start and
   termination reachability.
-  Future PowerShell collectors emit typed records only; U14/U20/U25/U26 Rust policy gates reuse the
-  collector-neutral test oracle for validation, aggregation, and decisions. This test-only policy is
+  Future PowerShell collectors emit typed records only; U14/U20 policy gates reuse the
+  collector-neutral test oracle for validation, aggregation, and decisions, while U24/U26 use
+  their direct focused behavior oracles. This test-only policy is
   not a runtime diagnostics bridge, pressure histogram, production evidence facade, CLI, or
   benchmark runner.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and `RenderPassPlan`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource and consumes the explicit pass plan for clear/world/UI/gizmo order.
@@ -536,8 +553,9 @@ second real adapter or stronger isolation pressure.
   The gameplay prelude remains backend-free, advanced/tooling/backend surfaces are explicit, and
   `nara_audio` has been retired because it had no production consumer. Pure product/plugin closure,
   stable configurable slots, repeatable preparation, and frozen schema-provider input are
-  implemented. Authorized immutable startup content is also implemented; Host-owned runtime
-  construction/publication remains RGF-U24 work.
+  implemented. Authorized immutable startup content and the concrete headless Host-owned runtime
+  construction/publication action are also implemented. RGF-U6 now owns the complete authoritative
+  game/CLI closure; Editor and desktop Host evidence remain separate later units.
   See ADR
   [0079](adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md).
 - `CoreStage::TaskUpdate` remains the app-owned main-thread integration point, while each business

@@ -2,13 +2,13 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-07-18
 **Owner**: Product composition and executable hosts
 **Admission Trigger**: RGF-U3, RGF-U4, and RGF-U12 prove bounded settings, pure profile planning,
-and immutable startup content; RGF-U26 freezes the task-equivalent manual counterfactual before
-RGF-U24 proves concrete headless Host construction; RGF-U25 challenges that topology before
-RGF-U17/RGF-U13 diffuse it into Editor and desktop Hosts, and RGF-U23 decides this ADR independently
-before checking compatibility with the accepted executable-runtime decision
+and immutable startup content; RGF-U26 freezes the task-equivalent manual counterfactual and
+RGF-U24 supplies concrete headless Host and U26 reversal evidence before RGF-U17/RGF-U13 diffuse it
+into Editor and desktop Hosts, and RGF-U23 decides this ADR independently
+before checking compatibility with the executable-runtime decision
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
 **Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079, ADR 0084, ADR 0094
@@ -37,6 +37,20 @@ Leaving these answers implicit would make the editor, desktop runner, headless r
 export tooling grow separate construction and shutdown semantics. Conversely, selecting a public
 universal `EngineHost` or process-global service hub before there are multiple consumers would
 freeze speculative APIs.
+
+## Trial Evidence
+
+RGF-U24 implements one bounded private headless `ProjectHost` behind the public `HeadlessRun`
+action. It binds one authorized project root, immutable plan/content lineage, a fresh start epoch,
+one obligation ledger, an unpublished candidate, atomic runtime publication, exact fixed-tick
+driving, and retryable cleanup. The same committed task and three failure cuts match the U26 manual
+counterfactual without exposing a universal Host/factory Interface or moving project authority into
+`nara_app`.
+
+This evidence proves only the headless construction/lifetime slice. It does not establish a shared
+process service scope, Editor or desktop parent/child ownership, multi-runtime sharing, package or
+build Host topology, or the final public placement of advanced types. RGF-U17/U13 and the
+independent U23 decision remain required, so this ADR stays Proposed.
 
 ## Decision
 
@@ -306,7 +320,7 @@ justified.
 | Pre-mutation project rejection | Every invalid manifest/content/composition candidate fails before `App` or service-session creation | RGF-U3/U4/U12/U24 project-start tests |
 | Recipe coherence | Separately cached content and composition values with different project lineage or schema fingerprints reject before candidate construction | RGF-U12/U24 mismatch tests |
 | Fresh plugin preparation | Two starts from one plan retain definition/configuration identity but share no plugin-instance state | RGF-U4/U24 preparation tests |
-| Early topology value | The minimal Host path closes named authority/fault gaps without exceeding precommitted author-concept, caller-glue, or state limits versus RGF-U26's independently frozen task-equivalent manual raw-App path on the same current source, content, plan, toolchain, and environment class | RGF-U26 baseline plus RGF-U25 counterevidence review |
+| Early topology value | The minimal Host path closes named authority/fault gaps without exceeding the author-concept, caller-glue, or state limits versus RGF-U26's independently frozen task-equivalent manual raw-App path | RGF-U26 baseline plus RGF-U24 reversal matrix and independent review |
 | Runtime delegation | Every Host begins one owned ADR 0084 start attempt from a complete recipe/admission-requirement set; the attempt owns every later reservation and no Host publishes a raw `App` | Host integration and static API audit |
 | Parent lifetime | Project and process/service authorities remain alive until every child runtime is `Stopped` and every issued lease retires; failed retirement retains its parent | Instrumented host lifetime test |
 | Cross-host parity | Editor, desktop, and headless hosts drive the same declared frame/fixed-tick contract | Reference-game semantic snapshot tests |
@@ -351,7 +365,8 @@ If accepted:
 ## Admission Evidence
 
 Acceptance requires all Host-authority success metrics owned by RGF-U3/U4/U12/U24, U26's pre-Host
-manual baseline, U25's early counterevidence verdict, and the Editor/desktop outer-host subsets of RGF-U17/RGF-U13. RGF-U23
+manual baseline and U24 reversal verdict, plus the Editor/desktop outer-host subsets of
+RGF-U17/RGF-U13. RGF-U23
 reviews this topology on its own metrics and records an independent merits verdict. A would-accept
 verdict remains conditional until the compatibility review shows that Hosts delegate executable
 lifecycle to an Accepted ADR 0084 or explicit Accepted successor and that no public universal
