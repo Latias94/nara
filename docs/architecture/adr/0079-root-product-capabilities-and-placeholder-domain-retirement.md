@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-15
+**Last Revised**: 2026-07-18
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
 
@@ -132,8 +132,9 @@ File-backed composition binds `ProjectRuntimePlugins` to the opaque manifest/pro
 resolution, validates required product capabilities independently from plugin closure, selects the
 resolved declarations' typed schema providers, freezes a scratch registry, and publishes an
 immutable `RuntimePlan`. The plan contains no App, World, file authority, service reservation,
-watcher, GPU owner, or live plugin object. U12 consumes this input when it builds authorized startup
-content; U24 owns the later product start transaction.
+watcher, GPU owner, or live plugin object. U12 now consumes this input to publish authorized
+immutable startup content with the same lineage and schema fingerprint; U24 owns the later product
+start transaction and remains the first owner that may combine the plan and content into a runtime.
 
 ### Product plugin groups
 

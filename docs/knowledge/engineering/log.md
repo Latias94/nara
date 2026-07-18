@@ -4,7 +4,16 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-18
+* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U29](registry/2026-07/2026-07-18T041242Z-engine-foundation-contract-completion-codex-root-00dcd517bec7414ba2f9046879534c53.md) - Activate RGF-U29 to enforce explicit persistent component composition and target-World hook/observer eligibility.
+* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U12](registry/2026-07/2026-07-18T040020Z-engine-foundation-contract-completion-codex-root-89deb6d9d8b74d699b9dcdb9f1c5542a.md) - Close RGF-U12 after bounded startup-content implementation, adversarial review fixes, and full repository verification.
+* **Verification Evidence**: [RGF-U12 authorized startup content verification](verification/2026-07/2026-07-18T035846Z-rgf-u12-authorized-startup-content-verification-ac05708ff3764164865e4cae207bf5a3.md) - Commit f341255 closes bounded authorized scene, prefab, and image startup-content publication as an immutable budget-leased snapshot.
+
 ## 2026-07-17
+* **Engineering Research**: [C# Gameplay Authoring Surface: Parameterless Behaviour over an ECS Kernel](csharp-gameplay-authoring-surface-research.md) - Primary-source comparison of Unity, Godot, C#, and Nara constraints for hiding frame and data-access mechanics while keeping gameplay object and dependency sources explicit.
+* **Engineering Research**: [Godot C# Integration Implications for Nara](godot-csharp-integration-research.md) - Primary-source review of Godot's .NET product stack and the boundaries it suggests for a future, optional Nara C# gameplay Adapter.
+* **Subagent Finding**: [LogLog Rust gamedev critique against an optional C# gameplay Adapter](subagents/2026-07/2026-07-17-loglog-rust-gamedev-csharp-gameplay-research.md) - Primary-source review of which Leaving Rust gamedev pain points an optional first-party C#/CoreCLR gameplay path could relieve, which remain engine-product problems, and which CLR/interop risks it introduces.
+* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U12](registry/2026-07/2026-07-17T103612Z-engine-foundation-contract-completion-codex-root-111c6b60a2a9401b83fb22da7f27b1f1.md) - Activate RGF-U12 to build the authorized immutable startup-content snapshot.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U28](registry/2026-07/2026-07-17T100742Z-engine-foundation-contract-completion-codex-root-3b0a5ef096ea4ef7b7809bfa621460bb.md) - Close RGF-U28 after implementation, independent review fixes, and full repository verification.
 * **Verification Evidence**: [RGF-U28 public schedule compatibility verification](verification/2026-07/2026-07-17T100726Z-rgf-u28-public-schedule-compatibility-verification-55f3d96f00e544dba50a1802e35c3190.md) - Commit c24b38a closes the four public schedule anchors and seal-time deferred compatibility contract.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U28](registry/2026-07/2026-07-17T052731Z-engine-foundation-contract-completion-codex-root-19efa83ee3d0418d84d4110c36bf0916.md) - Activate RGF-U28 to prove the four public semantic schedule anchors and seal-time deferred-policy contract.
@@ -136,10 +145,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Memory Event**: [Planning: Asset render resource seam plan created and reviewed for ADR 0033 implementation](logs/2026-07/2026-07-08T100714Z-planning-asset-render-resource-seam-plan-created-and-reviewed-for-adr-0033-implementation.md) - Asset render resource seam plan created and reviewed for ADR 0033 implementation; next action is goal-mode ce-work execution from U1.
 * **Decision**: [Next Priority Is Asset Import And Render Resource Preparation Seam](decisions/2026-07-08T093608Z-next-priority-asset-import-render-resource-seam.md)
 * **Verification**: [Scene Prefab Serialization Foundation Final Verification](verification/2026-07-08T091921Z-scene-prefab-serialization-foundation-final.md)
-* **Subagent Finding**: [Scene Serialization Read-only Review Findings](subagents/2026-07-08T091500Z-scene-serialization-readonly-review.md)
-* **Verification**: [Scene Prefab Serialization Foundation Verification](verification/2026-07-08T085412Z-scene-prefab-serialization-foundation.md)
-* **Work Progress**: [Scene Prefab Serialization Foundation Implemented](progress/2026-07-08T084957Z-scene-prefab-serialization-foundation.md)
-* **Verification Record**: [Render module split verification](verification/2026-07-08T082500Z-render-module-split-verification.md) - Verification gates after splitting sprite render and wgpu backend modules.
-* **Implementation Log**: [Render module split tail](logs/2026-07/2026-07-08T082000Z-render-module-split.md) - Records the post-implementation modularization of sprite render and wgpu backend code.
-* **Verification Record**: [2D render foundation verification](verification/2026-07-08T073000Z-2d-render-foundation-verification.md) - Final verification gates for the sprite/tilemap render foundation slice.
-* **Implementation Log**: [2D sprite tilemap render foundation implemented](logs/2026-07/2026-07-08T071500Z-2d-sprite-tilemap-render-foundation-implemented.md) - Records the implemented sprite/tilemap authoring split, backend-neutral batching, and wgpu colored quad path.

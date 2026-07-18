@@ -894,7 +894,8 @@ ceiling: `runtime-core`, `runtime-2d`, `runtime-ui`, `tooling`, `asset-watch`, `
 `[runtime].preset` plus `[capabilities].requested`. The root host reads an already opened
 `FileCapability`, applies the 256 KiB sentinel read and bounded TOML shape preflight, then publishes
 an immutable `ProjectSettingsCandidate` only when the request fits the compiled ceiling. Plugin
-service/conflict/slot closure remains RGF-U4, and assets/startup scene remain RGF-U12.
+service/conflict/slot closure is recorded by RGF-U4; RGF-U12-1 below records the later authorized
+asset/startup-scene closure.
 
 **Before**:
 
@@ -1511,6 +1512,85 @@ candidate/driver/close observer fallback capture, ready-to-publish fault races, 
 retirement, initial incomplete helper retry, normal panic unwind, and required/optional task and
 service integration.
 
+## RGF-U12-1: Authorized Immutable Startup Content
+
+**Removed contract**:
+
+- Treating `nara.toml` ingest as a complete file-backed boot path while startup scene, prefab, and
+  image content were still manually imported or seeded by Rust startup systems.
+- Reopening project content through ambient `std::fs`/`Path` authority, canonicalize-and-reopen, or
+  an implicit whole-root scan after the manifest handle was authorized.
+- Unbounded scene/prefab decode, ad hoc `.meta` JSON, and public `ImageAsset: Clone` payload escape
+  outside a retained content budget.
+- Publishing partial asset/document state while a dependency, schema, importer, or aggregate budget
+  failure was still possible.
+
+**Canonical replacement or deletion rationale**: `ProjectContentLoader` owns one host-issued
+project `DirectoryCapability` and requires a `ProjectSettingsCandidate` plus `RuntimePlan` with the
+same opaque lineage, root identity, and frozen schema input. It follows only the startup scene's
+path-addressed prefab and reflected image references. Scene, prefab, canonical `asset_meta`, and PNG
+boundaries retain their own strict decoders beneath one aggregate budget host. Successful loading
+publishes one immutable `ProjectContentSnapshot`; failures publish nothing.
+
+The snapshot carries lineage, schema fingerprint/generation, original and expanded scene
+documents, prefab/image values, content revision/digest, and one retained residency lease. Cloning
+the snapshot shares documents and pixel payloads rather than duplicating them. `ImageAsset` itself
+is no longer `Clone`, so a public value clone cannot outlive the snapshot charge. The snapshot
+contains no source capability, runtime plan, App, service, native binding, backend value, runtime
+handle, or target World.
+
+**Before**:
+
+```rust
+let scene_bytes = std::fs::read("scenes/startup.scene.json")?;
+let scene = SceneFileCandidate::decode_json_bytes(&scene_bytes)?;
+// Prefabs and images were opened and imported separately by caller-specific code.
+```
+
+**After**:
+
+```rust
+let loader = ProjectContentLoader::new(project_root)?;
+let snapshot = loader.load(&settings_candidate, &runtime_plan)?;
+
+let scene = snapshot.expanded_startup_scene();
+let images = snapshot.images();
+```
+
+**Affected examples and fixtures**: the independent reference game now commits
+`scenes/startup.scene.json`, `prefabs/enemy.prefab.json`,
+`assets/textures/player.png.meta`, and the PNG source. Root and reference-game boot tests randomize
+current/home directories and consume only public project APIs. Boundary tests prohibit ambient
+filesystem access, hidden module/include/macro bypasses, whole-root indexing, authority-bearing
+snapshot fields, and payload cloning.
+
+**User action**: use `AssetRef::Path` for the first file-backed startup closure, commit canonical
+version-1 asset metadata, and pass the same authorized settings candidate and resolved runtime plan
+to `ProjectContentLoader`. Keep the returned snapshot alive for every consumer of its documents or
+imported values. Stable-ID-only lookup requires a future admitted index and currently rejects.
+Parented transforms and inherited visibility also reject until the hierarchy contract is
+implemented.
+
+**Source action**: `manual-rewrite` for experimental `.meta` files that do not use the canonical
+`asset_meta` envelope. Existing canonical scene/prefab files remain unchanged.
+
+**Cache action**: `delete` or regenerate prototype metadata-derived/imported artifacts after the
+source metadata rewrite; keep canonical source content.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the complete RGF-U12 implementation and its reference-game content together.
+Do not restore ambient project opens, whole-root scans, cloneable leased payloads, or partial
+publication as compatibility paths.
+
+**Verification anchors**: `tests/project_content_boot.rs`,
+`tests/project_content_boundary.rs`, `tests/project_content_limits.rs`,
+`crates/nara_asset/tests/meta_format.rs`, `crates/nara_scene/tests/format_contract.rs`,
+`crates/nara_fs/tests/path_contract.rs`, `reference-game/tests/project_content_boot.rs`, and
+`reference-game/tests/prefab_startup.rs` prove authorized randomized-directory boot, strict
+formats/references, aggregate `limit + 1`, high-water/release accounting, immutable shared
+residency, source stability, and the World-independent boundary.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do
@@ -1522,3 +1602,4 @@ not remain as pseudo-legacy rows.
 | `prefab` | 1 | 1 | none | `0.1.0` | `manual-rewrite` | `keep` after rewrite |
 | `scene_patch` | 1 | 1 | none | `0.1.0` | `manual-rewrite` | `keep` after rewrite |
 | `component_schema_catalog` | 1 | 1 | direct predecessor validation only | `0.1.0` | regenerate or `manual-rewrite` | `delete`/regenerate derived copies |
+| `asset_meta` | 1 | 1 | none | `0.1.0` | `manual-rewrite` | `delete`/regenerate derived copies |

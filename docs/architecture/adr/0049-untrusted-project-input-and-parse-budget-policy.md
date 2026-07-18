@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-07-18
 **Refines**: ADR 0006, ADR 0007, ADR 0009, ADR 0011, ADR 0043
 **Refined By**: ADR 0050: Asset Root, Symlink, Junction, and Package Trust Policy; ADR 0068: Global
 Resource Budgets, Metrics, and Diagnostic Privacy; ADR 0070: Capability-Oriented Filesystem
@@ -93,13 +94,36 @@ stale completion, and publication failure.
 This evidence is PNG-specific. `png::Limits` is defense in depth for decoder-tracked allocations,
 not an allocator-capacity, fragmentation, heap, or OS/RSS hard limit; the Nara formula accounts for
 requested logical payloads with explicit conservative decoder slack and rejects unbounded decoder
-metadata before decode. Other codecs, U4 plugin-slot configuration, U12 startup content
-closure/residency, and ADR 0048 runtime-pressure publication remain unproved. Built-in importer
+metadata before decode. Other codecs and ADR 0048 runtime-pressure publication remain unproved by
+this slice; RGF-U12 composes this importer into a separately budgeted startup closure. Built-in importer
 version 2 invalidates version-1 image artifacts; the migration guide requires cache rebuild.
 Direct `ImageAsset::new`, serde construction, and raw `Assets<ImageAsset>` mutation are advanced
 in-memory paths rather than file-ingest APIs; their callers own any prior allocation budget. Every
 state write and value-slot mutation still advances an opaque revision, so those paths invalidate an
 in-flight official import candidate instead of silently reusing its publication admission.
+
+### Implemented RGF-U12 Startup Content Slice
+
+The root `ProjectContentLoader` consumes one host-issued project `DirectoryCapability`, one
+authorized `ProjectSettingsCandidate`, and one matching `RuntimePlan`. It follows only the declared
+startup scene's path-addressed prefab and reflected `AssetRef::Path` image closure. It never scans
+the whole asset root, reconstructs authority from logical paths, or accepts `AssetRef::StableId`
+without an independently admitted index.
+
+One `ProjectContentBudgetHost` coordinates directory depth/entries, path bytes, open handles,
+discovered files, queued and in-flight jobs, dependency edges, encoded bytes, migration/expansion
+work, imported artifacts, retained snapshot bytes, and aggregate byte pressure. Every reservation
+is RAII-owned, exposes active/high-water evidence, rejects `limit + 1` before publication, and
+releases on all failure paths. Snapshot-retained document and image payload charges live until the
+last cloned snapshot owner drops; overlapping revisions receive separate charges.
+
+Scene/prefab decoding, canonical asset metadata, structured asset-reference traversal, and the
+audited PNG importer all retain their format-specific preflight limits beneath the aggregate host.
+Failures return bounded privacy-safe diagnostics and no partial snapshot or asset publication.
+Flat explicit post-prefab content succeeds; content requiring unimplemented parent transform or
+inherited-visibility semantics rejects. This slice certifies only World-independent document,
+schema, digest, and residency truth. RGF-U29 still owns target-World hook/observer eligibility, and
+U24 owns runtime materialization without source reopen.
 
 ### Implemented RGF-U22 Evidence Transfer Slice
 

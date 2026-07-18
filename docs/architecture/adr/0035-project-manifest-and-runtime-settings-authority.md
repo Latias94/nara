@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-14
+**Last Revised**: 2026-07-18
 **Refines**: ADR 0020: Project Source Layout
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
@@ -76,6 +76,11 @@ that request and closes plugin service requirements/conflicts and group membersh
 mutation. App-level plugin hooks return `PluginError`. Only a valid resolved plan may create a
 private prepared transfer and enter closed plugin commit. `nara_project` itself remains
 side-effect-free.
+
+RGF-U12 consumes the candidate's path/startup settings and the matching resolved plan's frozen
+schema-validation input through the same project-root identity. It publishes a bounded immutable
+`ProjectContentSnapshot` carrying that lineage and schema fingerprint without creating an `App`,
+opening ambient paths, or storing source authority in the snapshot.
 
 ```mermaid
 flowchart TD

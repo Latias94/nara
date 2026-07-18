@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
+**Last Revised**: 2026-07-18
 **Refines**: [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
 [ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md),
 [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md)
@@ -168,8 +169,9 @@ foundation capability:
 | Relative identity-guarded unlink and orphan reclamation | Proposed ADR 0091 persistence/recovery | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
 
 This deferral does not treat static `Unsupported` values as successful evidence. RGF-U3 is the
-first production consumer of bounded host-issued file authority for `nara.toml`. RGF-U12 reuses the
-same root/open/identity boundary for the startup content closure. RGF-U27 owns the first bounded
+first production consumer of bounded host-issued file authority for `nara.toml`. RGF-U12 now reuses
+the same root/open/identity boundary for the path-addressed startup content closure without ambient
+path reopen or directory enumeration. RGF-U27 owns the first bounded
 same-capability no-replace directory-publication consumer and must extend this shared primitive
 before accepting a generated project destination. Future indexing, asset rename, and ADR 0091
 persistence/recovery work reuse or extend the primitives here; downstream domain crates are

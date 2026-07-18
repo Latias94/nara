@@ -2,17 +2,18 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Amended**: 2026-07-10 for the unreleased canonical-version reset policy
-**Implemented Slice**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes
+**Amended**: 2026-07-18 for the RGF-U12 asset-metadata envelope
+**Implemented Slices**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes; RGF-U12
+asset-metadata envelope
 **Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0037, ADR 0043, ADR 0045
 **Refined By**: ADR 0055: Feature Matrix, Boundary Checks, and Compatibility Fixtures;
 ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 ## Context
 
-Scene, prefab, standalone patch, and component-schema-catalog files now share the first canonical
-envelope implementation. Asset metadata, import artifact records, and project manifests do not yet
-share that file boundary.
+Scene, prefab, standalone patch, component-schema-catalog, and asset-metadata files now share the
+canonical envelope implementation. Import artifact records and project manifests do not yet share
+that file boundary.
 
 Without a shared envelope and fixture strategy, every file format will invent version names,
 generator metadata, unknown-field behavior, and compatibility tests separately. Patch migration is
@@ -44,9 +45,9 @@ Rules:
 - Persistent files include at least `kind`, `format_version`, `engine_min_version`, and `generator`.
 - The corrected unreleased shape for each kind is canonical `format_version = 1`. Superseded draft
   readers, structs, and fixtures are removed, and corrected Rust APIs use unsuffixed names.
-- Scene, prefab, scene patch, and component schema catalog currently have distinct canonical kinds.
-  Asset metadata, import artifact records, and a future file-backed project-manifest envelope remain
-  long-term participants, not implemented RGF-U1 facts.
+- Scene, prefab, scene patch, component schema catalog, and asset metadata currently have distinct
+  canonical kinds. Import artifact records and a future file-backed project-manifest envelope
+  remain long-term participants.
 - Unknown future versions fail with structured diagnostics.
 - Prototype versions/shapes fail with structured diagnostics rather than using a hidden fallback.
 - A non-v1 version is readable only when the format's compatibility matrix links an ADR that names
@@ -67,12 +68,20 @@ Rules:
 | `prefab` | 1 | 1 | none |
 | `scene_patch` | 1 | 1 | none |
 | `component_schema_catalog` | 1 | 1 | none; a successor is checked against its direct predecessor |
+| `asset_meta` | 1 | 1 | none |
 
 The eight RGF-U1 JSON/RON golden files intentionally contain empty payload containers. They lock
 the common envelope, field names, omission rules, line endings, and empty canonical shape. They do
 not prove representative nested payload stability. Non-empty component values, field-ID patches,
 embedded prefab overrides, catalog entries, and rejection behavior are covered by construction-based
 round-trip and negative tests until a real project fixture is admitted.
+
+RGF-U12 adds strict `asset_meta` JSON decode and canonical serialization around `AssetMeta`.
+Unknown fields, wrong kind/version/engine compatibility, malformed stable IDs, over-budget input,
+and writer output that would fail the same decoder reject before publication. The committed
+reference-game image metadata and `nara_asset` format tests provide the first production-shaped
+fixture and round-trip evidence. Import artifact records remain runtime/cache records rather than a
+new persistent file kind.
 
 ## Alternatives Considered
 

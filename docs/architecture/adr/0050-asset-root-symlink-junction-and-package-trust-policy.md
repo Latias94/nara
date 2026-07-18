@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-07-18
 **Refines**: ADR 0007, ADR 0037, ADR 0049
 **Refined By**: [ADR 0070: Capability-Oriented Filesystem Substrate](0070-capability-oriented-filesystem-substrate.md)
 
@@ -110,8 +111,9 @@ closed when a platform cannot prove the requested policy.
 ## Consequences
 
 - `AssetSourceRoot::source_path` cannot remain the authorization boundary.
-- RGF-U3 already routes file-backed project-manifest ingest through `nara_fs`; RGF-U12 extends the
-  same authority to the startup content closure. Asset-wide enumeration and watch/cache migration
+- RGF-U3 routes file-backed project-manifest ingest through `nara_fs`; RGF-U12 now extends the same
+  project-root identity and handle-bound authority through the path-addressed startup scene,
+  prefab, asset metadata, and image closure. Asset-wide enumeration and watch/cache migration
   remain trigger-driven, while editor persistence/recovery belongs to proposed ADR 0091.
 - Existing path-based containment checks may remain only for logical validation or safe diagnostics,
   not as evidence that a file access is authorized.

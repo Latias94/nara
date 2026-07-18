@@ -2,9 +2,10 @@
 
 **Status**: Accepted
 **Date**: 2026-07-12
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-07-18
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
-native Rust derive authoring and public headless consumer on 2026-07-13
+native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
+content/fingerprint handoff on 2026-07-18
 **Refines**: ADR 0011, ADR 0045, ADR 0051
 **Related**: ADR 0034, ADR 0058, ADR 0076
 
@@ -215,6 +216,21 @@ Locked renamed-dependency fixtures verify root and ECS derive path resolution.
 
 This slice does not admit dynamic non-Rust component storage, a universal schema compiler, generated
 schema sidecars, a scripting ABI, or adapter-owned catalog projection.
+
+### Implemented RGF-U12 Content Fingerprint Slice
+
+`ProjectContentLoader` consumes the frozen `SchemaValidationInput` carried by the matching
+`RuntimePlan`. Scene and prefab component values decode and validate against that registry, while
+`collect_declared_asset_references` traverses only fields whose frozen schema declares
+`asset_ref`. Unknown fields, undeclared reference shapes, incompatible providers, and a changed
+catalog reject before snapshot publication.
+
+The immutable `ProjectContentSnapshot` carries the same opaque project lineage, catalog
+fingerprint, and schema generation together with the explicit expanded stable-ID document set,
+content revision, and content digest. It stores no native type/codec binding and does not certify a
+future target `World`'s required-component, hook, or observer topology. RGF-U29 remains the owner of
+provider-freeze and per-apply target-World eligibility; U24 later compares the fresh runtime
+registry before materialization.
 
 ### Persistent File Boundary
 

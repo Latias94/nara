@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "910f7db7ac95052e2e21ab90d3cfbc5bd933561c3041b6054de002b0b1139bd4"
+source_fingerprint: "47ac5f5975eac15fdcf91b96ffe8cd4edf0a5305aa0d8ca15ea8cccde61ccfea"
 ---
 
 # Current State
@@ -12,17 +12,21 @@ source_fingerprint: "910f7db7ac95052e2e21ab90d3cfbc5bd933561c3041b6054de002b0b11
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `910f7db7ac95052e2e21ab90d3cfbc5bd933561c3041b6054de002b0b1139bd4`
-- Immutable records: 144
-- Active lane heads: 0
+- Source fingerprint: `47ac5f5975eac15fdcf91b96ffe8cd4edf0a5305aa0d8ca15ea8cccde61ccfea`
+- Immutable records: 151
+- Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game-driven foundation refactor: RGF-U28](registry/2026-07/2026-07-17T100742Z-engine-foundation-contract-completion-codex-root-3b0a5ef096ea4ef7b7809bfa621460bb.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game-driven foundation refactor: RGF-U29](registry/2026-07/2026-07-18T041242Z-engine-foundation-contract-completion-codex-root-00dcd517bec7414ba2f9046879534c53.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGF-U12 authorized startup content verification](verification/2026-07/2026-07-18T035846Z-rgf-u12-authorized-startup-content-verification-ac05708ff3764164865e4cae207bf5a3.md) - Commit f341255 closes bounded authorized scene, prefab, and image startup-content publication as an immutable budget-leased snapshot.
+- **Engineering Research**: [C# Gameplay Authoring Surface: Parameterless Behaviour over an ECS Kernel](csharp-gameplay-authoring-surface-research.md) - Primary-source comparison of Unity, Godot, C#, and Nara constraints for hiding frame and data-access mechanics while keeping gameplay object and dependency sources explicit.
+- **Engineering Research**: [Godot C# Integration Implications for Nara](godot-csharp-integration-research.md) - Primary-source review of Godot's .NET product stack and the boundaries it suggests for a future, optional Nara C# gameplay Adapter.
+- **Subagent Finding**: [LogLog Rust gamedev critique against an optional C# gameplay Adapter](subagents/2026-07/2026-07-17-loglog-rust-gamedev-csharp-gameplay-research.md) - Primary-source review of which Leaving Rust gamedev pain points an optional first-party C#/CoreCLR gameplay path could relieve, which remain engine-product problems, and which CLR/interop risks it introduces.
 - **Verification Evidence**: [RGF-U28 public schedule compatibility verification](verification/2026-07/2026-07-17T100726Z-rgf-u28-public-schedule-compatibility-verification-55f3d96f00e544dba50a1802e35c3190.md) - Commit c24b38a closes the four public schedule anchors and seal-time deferred compatibility contract.
 - **Verification Evidence**: [RGF-U5 managed runtime correction verification](verification/2026-07/2026-07-17T051052Z-rgf-u5-managed-runtime-correction-verification-5a58cbaf030041fe8ead8cfdf4119c51.md) - Supersedes the first U5 verification after raw managed World access exposed a safe Bevy change-detection bypass; ff2e02a structurally seals the scope and re-verifies the six correction regressions.
 - **Verification Evidence**: [RGF-U5 managed runtime verification](verification/2026-07/2026-07-17T014655Z-rgf-u5-managed-runtime-verification-5b37e0cb30ca4d24bb1b30fc98dc7e47.md) - Verified sealed-App admission, sticky fault propagation, exact stepping, bounded close ownership, Winit retirement ordering, and independent reference-game consumption.
@@ -31,10 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Subagent Finding**: [Bevy lifecycle observer and deferred schedule verification](subagents/2026-07/2026-07-16T164357Z-bevy-lifecycle-observer-and-deferred-schedule-verification-027c48803a9442d8930a3d0f558bafd3.md) - Source-bound correction for lifecycle event names, observer scopes, dynamic hooks, public-anchor deferred policy, and package removal co-ownership.
 - **Research Note**: [Bevy and Godot evidence for Nara's remaining early architecture decisions](subagents/2026-07/2026-07-16-bevy-godot-early-architecture-research.md) - Incremental source review of high-migration-cost boundaries that Nara should decide, preserve, defer, or reject.
 - **Verification Evidence**: [RGF-U4 pure plugin composition verification](verification/2026-07/2026-07-15T162857Z-rgf-u4-pure-plugin-composition-verification-1796d384bcee48fcbf2c6cb27ed08cdd.md) - Verified pure profile/plugin resolution, stable construction identity, schema-provider closure, sealed App commit, and independent reference-game consumption.
-- **Verification Evidence**: [RGF-U22 first-playable evidence protocol verification](verification/2026-07/2026-07-15T081419Z-rgf-u22-first-playable-evidence-protocol-verification-6ae07ce306d14b3bab489129f2758a32.md) - Verified the pre-target decision protocol, independent source attestations, trusted evidence envelope, Git revision admission, and ownership cohort gate.
-- **Verification Evidence**: [RGF-U10 bounded PNG ingest verification](verification/2026-07/2026-07-14T174858Z-rgf-u10-bounded-png-ingest-verification-cd08a4898f76409392fbaf093174ea5f.md) - Verified bounded PNG read, decode, publication, last-good reload, review disposition, and focused post-review gates.
-- **Session Handoff**: [RGF-U11 completion and U10 entry handoff](sessions/2026-07/2026-07-14T005902Z-rgf-u11-completion-and-u10-entry-handoff-43ed130b90a44e059f52ae2ccdd2ab4a.md) - Safe native surface retirement is committed and verified; RGF-U10 bounded PNG ingest is next.
-- **Verification Evidence**: [RGF U11 safe surface retirement verification](verification/2026-07/2026-07-13T215323Z-rgf-u11-safe-surface-retirement-verification-7873dc371c574fa3a0330be2b39ca589.md) - Safe owning wgpu surfaces, owner-scoped Winit retirement, device-loss invalidation, and truthful failure aggregation verified.
 
 # Integration Notes
 
