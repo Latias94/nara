@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{fs::File, path::Path};
+use std::{error::Error, fmt, fs::File, io, path::Path};
 
 #[cfg(windows)]
 use std::fs::OpenOptions;
@@ -32,30 +32,78 @@ pub struct LoadedProjectContent {
     pub snapshot: ProjectContentSnapshot,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectContentFixtureError {
+    OpenProjectRoot,
+    AuthorizeProjectRoot,
+    ParseManifestPath,
+    OpenManifest,
+    IngestManifest,
+    ResolveRuntimePlan,
+    CreateContentLoader,
+    LoadContentSnapshot,
+}
+
+impl fmt::Display for ProjectContentFixtureError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::OpenProjectRoot => "project root directory could not be opened",
+            Self::AuthorizeProjectRoot => "project root capability could not be authorized",
+            Self::ParseManifestPath => "project manifest path is invalid",
+            Self::OpenManifest => "project manifest could not be opened",
+            Self::IngestManifest => "project manifest could not be ingested",
+            Self::ResolveRuntimePlan => "project runtime plan could not be resolved",
+            Self::CreateContentLoader => "project content loader could not be created",
+            Self::LoadContentSnapshot => "project content snapshot could not be loaded",
+        })
+    }
+}
+
+impl Error for ProjectContentFixtureError {}
+
 pub fn load_project_content() -> LoadedProjectContent {
-    let (candidate, plan, root) = candidate_plan_and_root(ImageImportLimits::default(), false);
-    let loader = ProjectContentLoader::new(root).unwrap();
-    let snapshot = loader.load(&candidate, &plan).unwrap();
-    LoadedProjectContent {
+    try_load_project_content().expect("reference project content should load")
+}
+
+pub fn try_load_project_content() -> Result<LoadedProjectContent, ProjectContentFixtureError> {
+    let (candidate, plan, root) = try_candidate_plan_and_root(ImageImportLimits::default(), false)?;
+    let loader = ProjectContentLoader::new(root)
+        .map_err(|_| ProjectContentFixtureError::CreateContentLoader)?;
+    let snapshot = loader
+        .load(&candidate, &plan)
+        .map_err(|_| ProjectContentFixtureError::LoadContentSnapshot)?;
+    Ok(LoadedProjectContent {
         candidate,
         plan,
         loader,
         snapshot,
-    }
+    })
 }
 
 pub fn candidate_plan_and_root(
     image_limits: ImageImportLimits,
     include_tilemap: bool,
 ) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
-    let root = project_root_capability();
+    try_candidate_plan_and_root(image_limits, include_tilemap)
+        .expect("reference project plan should resolve")
+}
+
+pub fn try_candidate_plan_and_root(
+    image_limits: ImageImportLimits,
+    include_tilemap: bool,
+) -> Result<(ProjectSettingsCandidate, RuntimePlan, DirectoryCapability), ProjectContentFixtureError>
+{
+    let root = try_project_root_capability()?;
+    let manifest_path = RelativePath::new("nara.toml")
+        .map_err(|_| ProjectContentFixtureError::ParseManifestPath)?;
     let manifest = root
-        .open_file(&RelativePath::new("nara.toml").unwrap())
-        .unwrap();
-    let candidate = ingest_project_manifest(&manifest, None).unwrap();
-    let plan = resolve_reference_plan(&candidate, image_limits, include_tilemap);
+        .open_file(&manifest_path)
+        .map_err(|_| ProjectContentFixtureError::OpenManifest)?;
+    let candidate = ingest_project_manifest(&manifest, None)
+        .map_err(|_| ProjectContentFixtureError::IngestManifest)?;
+    let plan = try_resolve_reference_plan(&candidate, image_limits, include_tilemap)?;
     drop(manifest);
-    (candidate, plan, root)
+    Ok((candidate, plan, root))
 }
 
 pub fn resolve_reference_plan(
@@ -63,10 +111,20 @@ pub fn resolve_reference_plan(
     image_limits: ImageImportLimits,
     include_tilemap: bool,
 ) -> RuntimePlan {
+    try_resolve_reference_plan(candidate, image_limits, include_tilemap)
+        .expect("reference runtime plan should resolve")
+}
+
+pub fn try_resolve_reference_plan(
+    candidate: &ProjectSettingsCandidate,
+    image_limits: ImageImportLimits,
+    include_tilemap: bool,
+) -> Result<RuntimePlan, ProjectContentFixtureError> {
     let request = reference_runtime_plugins(candidate, image_limits, include_tilemap);
     let mut providers = built_in_schema_providers();
     providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
-    resolve_runtime_plan(candidate, request, providers).unwrap()
+    resolve_runtime_plan(candidate, request, providers)
+        .map_err(|_| ProjectContentFixtureError::ResolveRuntimePlan)
 }
 
 pub fn reference_runtime_plugins(
@@ -184,12 +242,14 @@ fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
     }
 }
 
-fn project_root_capability() -> DirectoryCapability {
+fn try_project_root_capability() -> Result<DirectoryCapability, ProjectContentFixtureError> {
+    let root = host_directory(Path::new(env!("CARGO_MANIFEST_DIR")))
+        .map_err(|_| ProjectContentFixtureError::OpenProjectRoot)?;
     DirectoryCapability::from_host_handle(
-        host_directory(Path::new(env!("CARGO_MANIFEST_DIR"))),
+        root,
         HostCapabilityOptions::new(CapabilityRights::ReadOnly, portable_trust()),
     )
-    .unwrap()
+    .map_err(|_| ProjectContentFixtureError::AuthorizeProjectRoot)
 }
 
 fn portable_trust() -> TrustMode {
@@ -200,7 +260,7 @@ fn portable_trust() -> TrustMode {
     }
 }
 
-fn host_directory(path: &Path) -> File {
+fn host_directory(path: &Path) -> io::Result<File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
@@ -214,12 +274,11 @@ fn host_directory(path: &Path) -> File {
             .share_mode(FILE_SHARE_READ_WRITE_DELETE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)
-            .unwrap()
     }
 
     #[cfg(unix)]
     {
-        File::open(path).unwrap()
+        File::open(path)
     }
 }
 

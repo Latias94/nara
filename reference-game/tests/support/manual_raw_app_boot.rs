@@ -22,13 +22,15 @@ use nara::{
 use nara_reference_game::{Enemy, Player, Weapon};
 
 use crate::project_content_fixture::{
-    LoadedProjectContent, load_project_content, reference_runtime_plugins, scene_id,
+    LoadedProjectContent, ProjectContentFixtureError, reference_runtime_plugins, scene_id,
+    try_load_project_content,
 };
 
 const COMMAND_INPUT: &[u8] = include_bytes!("../data/manual-first-tick.command");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManualRawAppBootError {
+    ProjectContent(ProjectContentFixtureError),
     TaskPools,
     PluginCommit,
     PluginPlanDrift,
@@ -48,7 +50,10 @@ pub enum ManualRawAppBootError {
 
 impl fmt::Display for ManualRawAppBootError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
+        let message = match self {
+            Self::ProjectContent(error) => {
+                return write!(formatter, "manual raw-App project content failed: {error}");
+            }
             Self::TaskPools => "manual raw-App task pools could not be created",
             Self::PluginCommit => "manual raw-App plugin commit failed",
             Self::PluginPlanDrift => "manual raw-App plugin plan drifted from the resolved plan",
@@ -64,7 +69,8 @@ impl fmt::Display for ManualRawAppBootError {
             Self::TaskShutdown => "manual raw-App task shutdown failed",
             Self::PluginShutdown => "manual raw-App plugin shutdown failed",
             Self::MissingDiagnostic => "manual raw-App rejection had no diagnostic code",
-        })
+        };
+        formatter.write_str(message)
     }
 }
 
@@ -286,7 +292,9 @@ pub fn run_manual_raw_app_fault(
 }
 
 fn prepare_manual_raw_app() -> Result<(App, LoadedProjectContent), ManualRawAppFailure> {
-    let loaded = load_project_content();
+    let loaded = try_load_project_content().map_err(|error| {
+        ManualRawAppFailure::before_owner(ManualRawAppBootError::ProjectContent(error))
+    })?;
     let mut app = App::new();
     let pools = TaskPools::try_new(loaded.plan.settings().tasks.pool_config)
         .map_err(|_| ManualRawAppFailure::before_owner(ManualRawAppBootError::TaskPools))?;
