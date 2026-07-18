@@ -63,15 +63,24 @@ pub fn resolve_reference_plan(
     image_limits: ImageImportLimits,
     include_tilemap: bool,
 ) -> RuntimePlan {
+    let request = reference_runtime_plugins(candidate, image_limits, include_tilemap);
+    let mut providers = built_in_schema_providers();
+    providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
+    resolve_runtime_plan(candidate, request, providers).unwrap()
+}
+
+pub fn reference_runtime_plugins(
+    candidate: &ProjectSettingsCandidate,
+    image_limits: ImageImportLimits,
+    include_tilemap: bool,
+) -> nara::project_host::ProjectRuntimePlugins {
     let request = runtime_plugins(candidate).configure(nara::image::plugin(image_limits));
     let request = if include_tilemap {
         request
     } else {
         request.disable::<TilemapPlugin>()
     };
-    let mut providers = built_in_schema_providers();
-    providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
-    resolve_runtime_plan(candidate, request, providers).unwrap()
+    request
 }
 
 pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {

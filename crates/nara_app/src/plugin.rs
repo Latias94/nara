@@ -16,8 +16,8 @@ pub use definition::{
 };
 pub use fingerprint::PluginPlanFingerprint;
 pub use group::{
-    EditedPluginGroup, PluginGroup, PluginGroupBuilder, PluginSlot, PluginSlotPresence, Plugins,
-    ReplayablePlugins,
+    EditedPluginGroup, EditedPluginGroupMarker, PluginGroup, PluginGroupBuilder, PluginSlot,
+    PluginSlotPresence, Plugins, ReplayablePlugins,
 };
 pub use resolve::{
     AddPluginsError, PluginInstantiationError, PluginPlan, PluginPlanEntry, PluginPlanError,

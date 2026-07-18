@@ -24,10 +24,10 @@ mod plugin;
 mod runtime;
 
 pub use plugin::{
-    AddPluginsError, EditedPluginGroup, Plugin, PluginCapability, PluginCategory,
-    PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-    PluginDefinitionKey, PluginError, PluginFailure, PluginFailureReport, PluginGroup,
-    PluginGroupBuilder, PluginGroupId, PluginHook, PluginHookMutation, PluginId,
+    AddPluginsError, EditedPluginGroup, EditedPluginGroupMarker, Plugin, PluginCapability,
+    PluginCategory, PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition,
+    PluginDefinitionId, PluginDefinitionKey, PluginError, PluginFailure, PluginFailureReport,
+    PluginGroup, PluginGroupBuilder, PluginGroupId, PluginHook, PluginHookMutation, PluginId,
     PluginInstantiationError, PluginLifecycleState, PluginPlan, PluginPlanEntry, PluginPlanError,
     PluginPlanFingerprint, PluginPreflightContext, PluginPreflightResource, PluginPrepareError,
     PluginPrepareFailure, PluginProductCapability, PluginSchemaProviderId, PluginServiceId,

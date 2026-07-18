@@ -1,6 +1,7 @@
 # Canonical schema catalogs are byte-for-byte protocol evidence.
 tests/fixtures/schema-catalog/*.json text eol=lf
 reference-game/schema/*.json text eol=lf
+reference-game/tests/data/*.command text eol=lf
 
 # Canonical U22 evidence is hashed byte-for-byte.
 docs/benchmarks/data/**/*.json text eol=lf

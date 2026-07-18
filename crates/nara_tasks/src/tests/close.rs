@@ -9,11 +9,32 @@ use std::{
 };
 
 use nara_app::{
-    App, RuntimeCandidate, RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult,
-    RuntimeInstance, RuntimeState,
+    AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
+    PluginLifecycleState, RuntimeCandidate, RuntimeClosePolicy, RuntimeControl,
+    RuntimeControlRequestResult, RuntimeInstance, RuntimeState,
 };
 
 use super::*;
+
+const FAILING_TASK_OWNER_PLUGIN_ID: PluginId =
+    PluginId::new("nara.tasks.test.failing-caller-owner");
+const FAILING_TASK_OWNER_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(FAILING_TASK_OWNER_PLUGIN_ID, PluginCategory::Runtime);
+
+struct FailingTaskOwnerPlugin;
+
+impl Plugin for FailingTaskOwnerPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &FAILING_TASK_OWNER_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        Err(PluginError::SetupFailed {
+            plugin: FAILING_TASK_OWNER_PLUGIN_ID,
+            message: "injected build failure".to_owned(),
+        })
+    }
+}
 
 struct SlowPendingDrop(Duration);
 
@@ -77,8 +98,39 @@ fn wait_finished<T>(handle: &TaskHandle<T>) {
 }
 
 #[test]
+fn caller_owned_pools_remain_explicitly_shutdown_capable_after_app_poison() {
+    let pools = TaskPools::try_new(test_config(1)).unwrap();
+    let mut app = App::new();
+    app.insert_resource(pools).unwrap();
+
+    let Err(error) = app.add_plugins(FailingTaskOwnerPlugin) else {
+        panic!("the injected plugin build must fail");
+    };
+
+    assert!(matches!(
+        error,
+        AddPluginsError::Plugin(PluginError::SetupFailed {
+            plugin: FAILING_TASK_OWNER_PLUGIN_ID,
+            ..
+        })
+    ));
+    assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Poisoned);
+    let report = app
+        .world()
+        .resource::<TaskPools>()
+        .shutdown_blocking()
+        .unwrap();
+    assert!(!report.timed_out());
+    assert!(
+        TaskPoolKind::ALL
+            .into_iter()
+            .all(|kind| report.for_kind(kind).joined_workers > 0)
+    );
+}
+
+#[test]
 fn shutdown_retains_an_uncooperative_worker_and_completes_on_retry() {
-    let mut pools = TaskPools::try_new(test_config(1)).unwrap();
+    let pools = TaskPools::try_new(test_config(1)).unwrap();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let (exited_tx, exited_rx) = mpsc::channel();
@@ -217,7 +269,7 @@ fn dropping_pending_task_owners_transfers_slow_destructors_without_blocking() {
 
 #[test]
 fn a_closed_pool_rejects_and_never_falls_back_to_inline_execution() {
-    let mut pools = inline_pools(1);
+    let pools = inline_pools(1);
     let _ = pools.shutdown_blocking().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let task_calls = calls.clone();

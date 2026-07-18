@@ -6,8 +6,8 @@ use std::{
 };
 
 use nara_app::{
-    EditedPluginGroup, Plugin, PluginDefinition, PluginGroup, PluginId, PluginPlan,
-    PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
+    EditedPluginGroup, EditedPluginGroupMarker, Plugin, PluginDefinition, PluginGroup, PluginId,
+    PluginPlan, PluginPlanError, PluginProductCapability, PluginSchemaProviderId, Plugins,
 };
 use nara_fs::FileIdentity;
 use nara_project::{EffectiveProjectSettings, ProductCapability, ProductCapabilitySet};
@@ -193,6 +193,16 @@ impl ProjectRuntimePlugins {
             lineage: self.lineage,
             plugins: self.plugins.insert_before::<P>(definition),
         }
+    }
+
+    /// Returns this pure project request as ordinary `App::add_plugins` input.
+    ///
+    /// This lower-level embedding path does not perform project capability, schema-provider, or
+    /// lineage admission. Callers that also resolve a [`RuntimePlan`] must compare the committed
+    /// App fingerprint with that plan before running it.
+    #[must_use]
+    pub fn into_app_plugins(self) -> impl Plugins<EditedPluginGroupMarker> {
+        self.plugins
     }
 }
 

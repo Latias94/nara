@@ -192,7 +192,7 @@ fn coalescing_key_is_scoped_by_domain() {
 
 #[test]
 fn a_running_task_with_the_same_key_is_never_coalesced() {
-    let mut pools = TaskPools::try_new(test_config(1)).unwrap();
+    let pools = TaskPools::try_new(test_config(1)).unwrap();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let policy = TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(4));
@@ -233,7 +233,7 @@ fn a_running_task_with_the_same_key_is_never_coalesced() {
 
 #[test]
 fn task_panics_fail_only_the_handle_and_the_worker_survives() {
-    let mut pools = TaskPools::try_new(test_config(2)).unwrap();
+    let pools = TaskPools::try_new(test_config(2)).unwrap();
     let mut panicked = accepted(pools.spawn(TaskPoolKind::Compute, request(1), |_| -> u32 {
         panic!("must not escape the worker")
     }));
@@ -278,7 +278,7 @@ fn rejected_closure_drop_panics_are_contained() {
 
 #[test]
 fn cancelled_result_drop_panics_do_not_kill_the_worker() {
-    let mut pools = TaskPools::try_new(test_config(2)).unwrap();
+    let pools = TaskPools::try_new(test_config(2)).unwrap();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let mut cancelled = accepted(pools.spawn(TaskPoolKind::Compute, request(1), move |_| {
@@ -339,7 +339,7 @@ fn first_terminal_state_wins_cancellation_result_races() {
 fn concurrent_completion_and_cancellation_publish_exactly_one_terminal() {
     const ATTEMPTS: u64 = 128;
 
-    let mut pools = TaskPools::try_new(test_config(1)).unwrap();
+    let pools = TaskPools::try_new(test_config(1)).unwrap();
     let mut completed = 0_u64;
     let mut cancelled = 0_u64;
 
@@ -382,7 +382,7 @@ fn concurrent_completion_and_cancellation_publish_exactly_one_terminal() {
 
 #[test]
 fn running_stats_track_physical_work_after_terminal_cancellation() {
-    let mut pools = TaskPools::try_new(test_config(1)).unwrap();
+    let pools = TaskPools::try_new(test_config(1)).unwrap();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let mut handle = accepted(pools.spawn(TaskPoolKind::Io, request(1), move |_| {
@@ -454,7 +454,7 @@ fn task_id_exhaustion_rejects_without_running_the_closure() {
 
 #[test]
 fn ordered_results_hold_later_completions_until_the_prefix_is_ready() {
-    let mut pools = TaskPools::try_new(config_with_compute_workers(2, 2)).unwrap();
+    let pools = TaskPools::try_new(config_with_compute_workers(2, 2)).unwrap();
     let (first_release_tx, first_release_rx) = mpsc::channel();
     let (second_done_tx, second_done_rx) = mpsc::channel();
     let first = accepted(pools.spawn(TaskPoolKind::Compute, request(1), move |_| {

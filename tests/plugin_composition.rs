@@ -1,18 +1,21 @@
 use std::{
     fs::{self, File},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use nara::{
     app::{
-        Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError, PluginId,
-        PluginProductCapability, PluginSchemaProviderId,
+        AddPluginsError, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError,
+        PluginHook, PluginHookMutation, PluginId, PluginProductCapability, PluginSchemaProviderId,
     },
     fs::{FileCapability, TrustMode},
     project::ProductCapability,
     project_host::{
-        CompositionError, RuntimePlanError, built_in_schema_providers, ingest_project_manifest,
-        project_runtime_plugins, resolve_runtime_plan,
+        CompositionError, ProjectRuntimePlugins, RuntimePlanError, built_in_schema_providers,
+        ingest_project_manifest, project_runtime_plugins, resolve_runtime_plan,
     },
     reflect::{
         ComponentRegistry, ComponentRegistryError, ComponentSchema,
@@ -82,6 +85,8 @@ const TEST_AFTER_ORDERING_PLUGIN_DECLARATION: PluginDeclaration =
 
 const TEST_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.schema-provider");
 const TEST_SECOND_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.second-schema-provider");
+const TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID: PluginId =
+    PluginId::new("test.reentrant-project-request");
 const TEST_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
     PluginSchemaProviderId::new("test.schema-provider.components");
 const TEST_SCHEMA_PROVIDER_BINDING_ID: ComponentSchemaProviderBindingId =
@@ -94,6 +99,10 @@ const TEST_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
 const TEST_SECOND_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(TEST_SECOND_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
         .provides_schema(&[TEST_SCHEMA_PROVIDER_ID]);
+const TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_DECLARATION: PluginDeclaration = PluginDeclaration::new(
+    TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID,
+    PluginCategory::Runtime,
+);
 
 #[derive(Default)]
 struct ProductCapabilityPlugin;
@@ -201,6 +210,35 @@ impl Plugin for SecondSchemaProviderPlugin {
     }
 }
 
+struct ReentrantProjectRequestPlugin(Mutex<Option<ProjectRuntimePlugins>>);
+
+impl Plugin for ReentrantProjectRequestPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
+        let request = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .expect("the project request is consumed once");
+        let Err(error) = app.add_plugins(request.into_app_plugins()) else {
+            panic!("hook-time project composition must reject");
+        };
+        assert!(matches!(
+            error,
+            AddPluginsError::Plugin(PluginError::HookMutationForbidden {
+                plugin: TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID,
+                hook: PluginHook::Build,
+                mutation: PluginHookMutation::PluginMembership,
+            })
+        ));
+        Ok(())
+    }
+}
+
 #[test]
 fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
@@ -251,6 +289,37 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
         .unwrap()
         .fingerprint();
     assert_eq!(runtime_fingerprint, first.schema_validation().fingerprint());
+
+    let mut raw_app = nara::app::App::new();
+    raw_app
+        .add_plugins(project_runtime_plugins(&candidate).into_app_plugins())
+        .unwrap();
+    assert_eq!(
+        raw_app.configuration_fingerprint(),
+        first.plugin_plan().fingerprint()
+    );
+}
+
+#[test]
+fn project_request_app_input_preserves_hook_time_sticky_poison() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let mut app = nara::app::App::new();
+
+    let Err(error) = app.add_plugins(ReentrantProjectRequestPlugin(Mutex::new(Some(
+        project_runtime_plugins(&candidate),
+    )))) else {
+        panic!("the hook-time request must poison the App");
+    };
+
+    assert!(matches!(
+        error,
+        AddPluginsError::Plugin(PluginError::HookMutationForbidden {
+            plugin: TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID,
+            hook: PluginHook::Build,
+            mutation: PluginHookMutation::PluginMembership,
+        })
+    ));
 }
 
 #[test]

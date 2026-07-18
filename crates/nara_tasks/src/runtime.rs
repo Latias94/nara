@@ -1065,7 +1065,7 @@ pub struct TaskPools {
     io: TaskPoolExecutor,
     compute: TaskPoolExecutor,
     async_compute: TaskPoolExecutor,
-    close_owner: Option<TaskPoolsCloseOwner>,
+    close_owner: Mutex<Option<TaskPoolsCloseOwner>>,
 }
 
 impl TaskPools {
@@ -1084,11 +1084,11 @@ impl TaskPools {
             io,
             compute,
             async_compute,
-            close_owner: Some(TaskPoolsCloseOwner::new(
+            close_owner: Mutex::new(Some(TaskPoolsCloseOwner::new(
                 io_close_owner,
                 compute_close_owner,
                 async_compute_close_owner,
-            )),
+            ))),
         })
     }
 
@@ -1107,11 +1107,11 @@ impl TaskPools {
             io,
             compute,
             async_compute,
-            close_owner: Some(TaskPoolsCloseOwner::new(
+            close_owner: Mutex::new(Some(TaskPoolsCloseOwner::new(
                 io_close_owner,
                 compute_close_owner,
                 async_compute_close_owner,
-            )),
+            ))),
         })
     }
 
@@ -1242,39 +1242,26 @@ impl TaskPools {
         }
     }
 
-    pub fn shutdown_blocking(&mut self) -> Result<TaskShutdownReport, TaskShutdownError> {
-        let Some(owner) = self.close_owner.as_ref() else {
+    pub fn shutdown_blocking(&self) -> Result<TaskShutdownReport, TaskShutdownError> {
+        let mut close_owner = self
+            .close_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(owner) = close_owner.as_mut() else {
             return Err(TaskShutdownError::CloseOwnerTransferred);
         };
         if owner.is_complete() {
             return Ok(owner.report());
         }
-        self.begin_close();
+        owner.begin_close();
         loop {
-            match self.poll_close() {
+            match owner.poll_close() {
                 TaskPoolsCloseProgress::Complete | TaskPoolsCloseProgress::Incomplete => {
-                    return Ok(self
-                        .close_owner
-                        .as_ref()
-                        .expect("standalone task pools retain their close owner")
-                        .report());
+                    return Ok(owner.report());
                 }
                 TaskPoolsCloseProgress::Pending => thread::sleep(Duration::from_millis(1)),
             }
         }
-    }
-
-    fn begin_close(&mut self) {
-        if let Some(owner) = self.close_owner.as_mut() {
-            owner.begin_close();
-        }
-    }
-
-    fn poll_close(&mut self) -> TaskPoolsCloseProgress {
-        self.close_owner
-            .as_mut()
-            .expect("only standalone task pools drive their close owner")
-            .poll_close()
     }
 
     fn allocate_task_id(&self) -> Option<TaskId> {
@@ -1316,6 +1303,8 @@ impl TaskPools {
         kind: TaskPoolKind,
     ) -> TaskPoolShutdownReport {
         self.close_owner
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .as_mut()
             .expect("standalone test pools retain their close owner")
             .executor_mut(kind)
@@ -1331,7 +1320,10 @@ impl TaskPools {
     }
 
     fn take_close_owner(&mut self) -> Option<TaskPoolsCloseOwner> {
-        self.close_owner.take()
+        self.close_owner
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
     }
 }
 
