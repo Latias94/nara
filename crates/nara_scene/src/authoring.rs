@@ -11,8 +11,13 @@ use crate::{
     SceneSpawner,
     diagnostics::{
         error as diagnostic_error, info as diagnostic_info, warning as diagnostic_warning,
+        with_codec_error,
     },
     hierarchy::sync_children,
+    spawn::{
+        resolved_scene_targets, validate_existing_scene_persistent_apply,
+        validate_scene_identity_support,
+    },
 };
 
 static NEXT_AUTHORING_SOURCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -403,6 +408,41 @@ impl SceneAuthoringSession {
                     "Scene identity retirement failed",
                 ),
                 &nara_identity::IdentityDomainError::WorldDomainUnavailable,
+            ));
+            return SceneAuthoringClearReport {
+                cleared: false,
+                removed_entities: 0,
+                live_instance: Some(current),
+                diagnostics,
+            };
+        }
+
+        let current_targets = resolved_scene_targets(world, &current);
+        if let Err(error) = validate_scene_identity_support(world, &current_targets) {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(crate::diagnostics::with_identity_support_error(
+                diagnostic_error(
+                    "scene.identity-support-ineligible",
+                    "Scene identity support is ineligible for target-World apply",
+                ),
+                &error,
+            ));
+            return SceneAuthoringClearReport {
+                cleared: false,
+                removed_entities: 0,
+                live_instance: Some(current),
+                diagnostics,
+            };
+        }
+
+        if let Err(error) = validate_existing_scene_persistent_apply(world, &current_targets) {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(with_codec_error(
+                diagnostic_error(
+                    "scene.persistent-apply-ineligible",
+                    "Persistent scene components are ineligible for target-World apply",
+                ),
+                &error,
             ));
             return SceneAuthoringClearReport {
                 cleared: false,

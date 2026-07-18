@@ -228,7 +228,7 @@ pub mod advanced_prelude {
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFloat,
         ComponentMigrationError, ComponentRegistryError, ComponentValueError, ComponentValueKind,
-        MigratedComponentValue, PreparedComponent,
+        MigratedComponentValue, PreparedComponent, PreparedComponentCandidate,
     };
     pub use nara_tasks::{
         OrderedTaskResults, OrderedTaskTerminal, TaskCancellation, TaskCancellationReason,

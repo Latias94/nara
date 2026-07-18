@@ -166,6 +166,21 @@ fn building_registry_does_not_expose_runtime_query_surface() {
 }
 
 #[test]
+fn building_registry_cannot_prepare_an_applicable_component() {
+    let mut registry = ComponentRegistry::new();
+    let schema = position_schema("x", "Position X");
+    let id = schema.id().clone();
+    registry.register_component_schema(schema).unwrap();
+    register_position_binding(&mut registry, &id).unwrap();
+    let value = ComponentValue::map([("x", ComponentValue::f64(1.0).unwrap())]);
+
+    assert!(registry.preflight_component(&id, &value).is_none());
+
+    registry.freeze().unwrap();
+    assert!(registry.preflight_component(&id, &value).is_some());
+}
+
+#[test]
 fn catalog_generation_exhaustion_is_explicit() {
     let predecessor = ComponentSchemaCatalog {
         generation: u64::MAX,

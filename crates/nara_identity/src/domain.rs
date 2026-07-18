@@ -5,7 +5,14 @@ use std::{
 };
 
 use nara_core::ItemLimit;
-use nara_ecs::{Component, Entity, Resource, World, world::WorldId};
+use nara_ecs::{
+    __private::{
+        validate_registered_persistent_component_apply, validate_resource_insertion,
+        validate_resource_scope,
+    },
+    Component, Entity, Resource, World,
+    world::WorldId,
+};
 use thiserror::Error;
 
 use crate::{
@@ -146,6 +153,86 @@ pub struct WorldEntityToken {
 #[derive(Debug, Component)]
 struct IdentityEntityMarker {
     domain: WorldIdentityDomainId,
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum IdentitySupportTopologyError {
+    #[error("identity support lifecycle topology is incompatible with scene publication")]
+    LifecycleConflict,
+    #[error("identity support target no longer exists")]
+    TargetMissing,
+}
+
+#[doc(hidden)]
+pub fn validate_identity_support_topology(
+    world: &mut World,
+    targets: impl IntoIterator<Item = Entity>,
+) -> Result<(), IdentitySupportTopologyError> {
+    let targets = targets.into_iter().collect::<BTreeSet<_>>();
+    world.register_component::<IdentityEntityMarker>();
+    world.register_component::<WorldIdentityDomain>();
+    world.flush();
+    validate_registered_persistent_component_apply::<IdentityEntityMarker>(world, None)
+        .and_then(|()| {
+            if world.contains_resource::<WorldIdentityDomain>() {
+                validate_resource_scope::<WorldIdentityDomain>(world)
+            } else {
+                validate_resource_insertion::<WorldIdentityDomain>(world)
+            }
+        })
+        .map_err(|_| IdentitySupportTopologyError::LifecycleConflict)?;
+    for target in targets {
+        let entity = world
+            .get_entity(target)
+            .map_err(|_| IdentitySupportTopologyError::TargetMissing)?;
+        if entity.contains::<IdentityEntityMarker>() {
+            validate_registered_persistent_component_apply::<IdentityEntityMarker>(
+                world,
+                Some(target),
+            )
+            .map_err(|_| IdentitySupportTopologyError::LifecycleConflict)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod identity_support_topology_tests {
+    use nara_ecs::{
+        Resource,
+        lifecycle::Despawn,
+        observer::{Observer, On},
+        system::ResMut,
+    };
+
+    use super::*;
+
+    #[derive(Resource, Default)]
+    struct SupportCanary(u32);
+
+    #[test]
+    fn target_validation_rejects_identity_marker_observer_before_retirement() {
+        let mut world = World::new();
+        world.init_resource::<SupportCanary>();
+        let domain = WorldIdentityDomain::new(&world, WorldIdentityDomainSettings::default())
+            .expect("identity domain must initialize");
+        let domain_id = domain.id();
+        world.insert_resource(domain);
+        let target = world.spawn(IdentityEntityMarker { domain: domain_id }).id();
+        let marker = world.component_id::<IdentityEntityMarker>().unwrap();
+        world.spawn(
+            Observer::new(|_: On<Despawn>, mut canary: ResMut<SupportCanary>| canary.0 += 1)
+                .with_entity(target)
+                .with_component(marker),
+        );
+        world.flush();
+
+        let error = validate_identity_support_topology(&mut world, [target]).unwrap_err();
+
+        assert_eq!(error, IdentitySupportTopologyError::LifecycleConflict);
+        assert!(world.get_entity(target).is_ok());
+        assert_eq!(world.resource::<SupportCanary>().0, 0);
+    }
 }
 
 impl WorldEntityToken {

@@ -14,7 +14,7 @@ use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
     ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentValue, ComponentValueKind, PreparedComponentCandidate,
 };
 
 pub const DEFAULT_TILE_SIZE: Vec2 = Vec2::new(16.0, 16.0);
@@ -523,19 +523,21 @@ pub fn register_tilemap_components(
             let tileset = prepare_optional_tileset(context, tileset_ref)?;
             let cells = read_cells(value.get("cells"))?;
 
-            Ok(PreparedComponent::new(move |context| {
-                let tileset = resolve_prepared_tileset(context, tileset)?;
-                let mut tilemap = Tilemap::new(tile_size)
-                    .with_layer(layer)
-                    .with_sort_key(sort_key);
-                if let Some(tileset) = tileset {
-                    tilemap = tilemap.with_tileset(tileset);
-                }
-                for (coord, cell) in cells {
-                    tilemap.set_cell(coord, cell);
-                }
-                Ok(tilemap)
-            }))
+            if prepared_tileset_requires_asset_server(&tileset) {
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        let tileset = resolve_prepared_tileset(context, tileset)?;
+                        Ok(build_prepared_tilemap(
+                            tile_size, layer, sort_key, tileset, cells,
+                        ))
+                    },
+                ))
+            } else {
+                let tileset = resolve_prepared_tileset_without_asset_server(tileset)?;
+                Ok(PreparedComponentCandidate::insert(build_prepared_tilemap(
+                    tile_size, layer, sort_key, tileset, cells,
+                )))
+            }
         },
         |world, entity, context| {
             let Some(tilemap) = world.get::<Tilemap>(entity) else {
@@ -629,6 +631,41 @@ fn tilemap_fields() -> [ComponentFieldSchema; 6] {
 enum PreparedTileset {
     Resolved(Handle<TileSet>),
     Deferred(AssetRef),
+}
+
+fn prepared_tileset_requires_asset_server(tileset: &Option<PreparedTileset>) -> bool {
+    matches!(tileset, Some(PreparedTileset::Deferred(_)))
+}
+
+fn resolve_prepared_tileset_without_asset_server(
+    tileset: Option<PreparedTileset>,
+) -> Result<Option<Handle<TileSet>>, ComponentCodecError> {
+    match tileset {
+        None => Ok(None),
+        Some(PreparedTileset::Resolved(handle)) => Ok(Some(handle)),
+        Some(PreparedTileset::Deferred(_)) => Err(ComponentCodecError::Message(
+            "prepared tilemap unexpectedly requires AssetServer".to_string(),
+        )),
+    }
+}
+
+fn build_prepared_tilemap(
+    tile_size: Vec2,
+    layer: i32,
+    sort_key: i32,
+    tileset: Option<Handle<TileSet>>,
+    cells: Vec<(TileCoord, TileCell)>,
+) -> Tilemap {
+    let mut tilemap = Tilemap::new(tile_size)
+        .with_layer(layer)
+        .with_sort_key(sort_key);
+    if let Some(tileset) = tileset {
+        tilemap = tilemap.with_tileset(tileset);
+    }
+    for (coord, cell) in cells {
+        tilemap.set_cell(coord, cell);
+    }
+    tilemap
 }
 
 fn prepare_optional_tileset(

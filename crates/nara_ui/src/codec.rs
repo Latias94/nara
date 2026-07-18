@@ -6,7 +6,7 @@ use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
     ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentValue, ComponentValueKind, PreparedComponentCandidate,
 };
 use nara_render::RenderTarget;
 
@@ -98,10 +98,21 @@ pub(crate) fn register_ui_panel_component(
         schema,
         |value, context| {
             let material = read_panel_material(value.field("material")?, context)?;
-            Ok(PreparedComponent::new(move |context| {
-                let material = resolve_prepared_material(context, material)?;
-                Ok(UiPanel { material })
-            }))
+            if material.requires_asset_server() {
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        let material = resolve_prepared_material(context, material)?;
+                        Ok(UiPanel { material })
+                    },
+                ))
+            } else {
+                let material = material.into_resolved().ok_or_else(|| {
+                    ComponentCodecError::Message(
+                        "prepared UI panel material unexpectedly requires AssetServer".to_string(),
+                    )
+                })?;
+                Ok(PreparedComponentCandidate::insert(UiPanel { material }))
+            }
         },
         |world, entity, context| {
             let Some(panel) = world.get::<UiPanel>(entity) else {
@@ -458,6 +469,26 @@ struct PreparedPanelMaterial {
     sampler: SamplerDescriptor,
     alpha_mode: AlphaMode2d,
     tint: Color,
+}
+
+impl PreparedPanelMaterial {
+    fn requires_asset_server(&self) -> bool {
+        matches!(self.image, Some(PreparedImage::Deferred(_)))
+    }
+
+    fn into_resolved(self) -> Option<UiPanelMaterial> {
+        let image = match self.image {
+            None => None,
+            Some(PreparedImage::Resolved(handle)) => Some(handle),
+            Some(PreparedImage::Deferred(_)) => return None,
+        };
+        Some(UiPanelMaterial {
+            image,
+            sampler: self.sampler,
+            alpha_mode: self.alpha_mode,
+            tint: self.tint,
+        })
+    }
 }
 
 fn read_panel_material(

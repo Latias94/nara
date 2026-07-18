@@ -8,7 +8,7 @@ use nara_ecs::{Entity, World};
 use nara_identity::{EntityLookup, IdentityDomainError, SpawnedSceneInstance};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEncodeContext, ComponentMigrationError,
-    ComponentRegistry, ComponentTypeId,
+    ComponentRegistry, ComponentTypeId, PersistentApplyRejection,
 };
 use nara_scene::{
     PrefabSourceResolver, SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord,
@@ -1178,9 +1178,99 @@ fn with_codec_error(entry: Diagnostic, error: &ComponentCodecError) -> Diagnosti
         ComponentCodecError::AssetServerChanged => {
             diagnostic::with_public_identifier(entry, "codec_reason", "asset_server_changed")
         }
+        ComponentCodecError::PreparedComponentTypeMismatch { .. } => diagnostic::with_secret(
+            diagnostic::with_public_identifier(
+                entry,
+                "codec_reason",
+                "prepared_component_type_mismatch",
+            ),
+            "codec_detail",
+        ),
+        ComponentCodecError::PersistentApplyReceiptMissing => diagnostic::with_public_identifier(
+            entry,
+            "codec_reason",
+            "persistent_apply_receipt_missing",
+        ),
+        ComponentCodecError::PersistentApplyTargetNotEmpty => diagnostic::with_public_identifier(
+            entry,
+            "codec_reason",
+            "persistent_apply_target_not_empty",
+        ),
+        ComponentCodecError::PersistentApplyBindingConflict { component_id } => {
+            diagnostic::with_public_identifier(
+                diagnostic::with_public_identifier(
+                    entry,
+                    "codec_reason",
+                    "persistent_apply_binding_conflict",
+                ),
+                "persistent_component",
+                component_id.as_str(),
+            )
+        }
+        ComponentCodecError::PersistentApplySupportRejected { reason } => {
+            with_persistent_apply_rejection(
+                diagnostic::with_public_identifier(
+                    entry,
+                    "codec_reason",
+                    "persistent_apply_support_rejected",
+                ),
+                reason,
+            )
+        }
+        ComponentCodecError::PersistentApplyRejected {
+            component_id,
+            reason,
+        } => {
+            let entry = diagnostic::with_public_identifier(
+                diagnostic::with_public_identifier(
+                    entry,
+                    "codec_reason",
+                    "persistent_apply_rejected",
+                ),
+                "persistent_component",
+                component_id.as_str(),
+            );
+            with_persistent_apply_rejection(entry, reason)
+        }
         ComponentCodecError::Message(_) => diagnostic::with_secret(
             diagnostic::with_public_identifier(entry, "codec_reason", "message"),
             "message",
+        ),
+    }
+}
+
+fn with_persistent_apply_rejection(
+    entry: Diagnostic,
+    reason: &PersistentApplyRejection,
+) -> Diagnostic {
+    match reason {
+        PersistentApplyRejection::ComponentMetadataMissing => diagnostic::with_public_identifier(
+            entry,
+            "persistent_apply_reason",
+            "component_metadata_missing",
+        ),
+        PersistentApplyRejection::RequiredComponents => diagnostic::with_public_identifier(
+            entry,
+            "persistent_apply_reason",
+            "required_components",
+        ),
+        PersistentApplyRejection::LifecycleHook { event } => diagnostic::with_public_identifier(
+            diagnostic::with_public_identifier(entry, "persistent_apply_reason", "lifecycle_hook"),
+            "lifecycle_event",
+            event.as_str(),
+        ),
+        PersistentApplyRejection::Observer { event, scope } => diagnostic::with_public_identifier(
+            diagnostic::with_public_identifier(
+                diagnostic::with_public_identifier(
+                    entry,
+                    "persistent_apply_reason",
+                    "lifecycle_observer",
+                ),
+                "lifecycle_event",
+                event.as_str(),
+            ),
+            "observer_scope",
+            scope.as_str(),
         ),
     }
 }
@@ -1274,7 +1364,7 @@ mod tests {
     use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
         ComponentSchema, ComponentSchemaVersion, ComponentValue, ComponentValueKind,
-        PreparedComponent, Reflect, bevy_reflect,
+        PreparedComponentCandidate, Reflect, bevy_reflect,
     };
     use nara_scene::{
         InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabInstance, SceneEntityRecord,
@@ -2091,7 +2181,7 @@ mod tests {
                 schema,
                 |value| {
                     value.field_i64("x")?;
-                    Ok(PreparedComponent::insert(BadExport))
+                    Ok(PreparedComponentCandidate::insert(BadExport))
                 },
                 |world, entity| {
                     if world.get::<BadExport>(entity).is_some() {

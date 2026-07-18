@@ -9,16 +9,24 @@ use std::{
 };
 
 use bevy_reflect::{GetTypeRegistration, TypeRegistry};
-use nara_ecs::{Component, Entity, Resource, World};
+use nara_ecs::{
+    __private::{
+        PersistentComponentMetadataError, register_persistent_component,
+        validate_persistent_component_registration, validate_registered_persistent_component_apply,
+    },
+    Component, Entity, Resource, World,
+    component::ComponentId,
+};
 
 use crate::{
     ComponentFieldPath, ComponentFieldPathSegment, ComponentValue, PersistentComponentProvider,
     asset_reference::is_asset_reference_value,
     codec::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
-        FnComponentCodec, PreparedComponent,
+        FnComponentCodec,
     },
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
+    persistent_apply::{PreparedComponent, PreparedComponentCandidate},
     schema::{
         AliasError, CatalogFingerprint, ComponentCapability, ComponentFieldId,
         ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
@@ -39,6 +47,12 @@ pub enum ComponentRegistryError {
     },
     UnknownComponentId(ComponentTypeId),
     MissingNativeBinding {
+        component_id: ComponentTypeId,
+    },
+    PersistentComponentRequiresImplicitComponents {
+        component_id: ComponentTypeId,
+    },
+    PersistentComponentHasLifecycleHook {
         component_id: ComponentTypeId,
     },
     InvalidComponentTypeId {
@@ -182,6 +196,14 @@ impl Display for ComponentRegistryError {
                     "component ID '{component_id}' has no native binding"
                 )
             }
+            Self::PersistentComponentRequiresImplicitComponents { component_id } => write!(
+                formatter,
+                "persistent component ID '{component_id}' declares implicit required components"
+            ),
+            Self::PersistentComponentHasLifecycleHook { component_id } => write!(
+                formatter,
+                "persistent component ID '{component_id}' declares an intrinsic lifecycle hook"
+            ),
             Self::InvalidComponentTypeId { component_id } => {
                 write!(formatter, "component ID '{component_id}' is invalid")
             }
@@ -416,6 +438,10 @@ impl Error for ComponentProjectionError {}
 
 struct NativeComponentBinding {
     rust_type_path: &'static str,
+    rust_type_id: TypeId,
+    register_component: fn(&mut World) -> ComponentId,
+    validate_registration: fn() -> Result<(), PersistentComponentMetadataError>,
+    validate_apply: fn(&World, Option<Entity>) -> Result<(), PersistentComponentMetadataError>,
     codec: Box<dyn ComponentCodec>,
 }
 
@@ -624,7 +650,7 @@ impl ComponentRegistry {
         if data.path_indexes.contains_key(id) {
             return Err(ComponentRegistryError::DuplicateComponentId(id.clone()));
         }
-        validate_native_binding::<T>(data, id)
+        validate_native_binding::<T>(data, id, false)
     }
 
     pub fn validate_persistent_component<T>(&self) -> Result<(), ComponentRegistryError>
@@ -664,7 +690,7 @@ impl ComponentRegistry {
             id,
             move |value, _context| {
                 let component = decode(value)?;
-                Ok(PreparedComponent::insert(component))
+                Ok(PreparedComponentCandidate::insert(component))
             },
             move |world, entity, _context| {
                 let Some(component) = world.get::<T>(entity) else {
@@ -690,7 +716,7 @@ impl ComponentRegistry {
             schema,
             move |value, _context| {
                 let component = decode(value)?;
-                Ok(PreparedComponent::insert(component))
+                Ok(PreparedComponentCandidate::insert(component))
             },
             move |world, entity, _context| {
                 let Some(component) = world.get::<T>(entity) else {
@@ -709,7 +735,7 @@ impl ComponentRegistry {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Preflight: Fn(&ComponentValue) -> Result<PreparedComponent, ComponentCodecError>
+        Preflight: Fn(&ComponentValue) -> Result<PreparedComponentCandidate, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -736,7 +762,7 @@ impl ComponentRegistry {
         Preflight: for<'a> Fn(
                 &ComponentValue,
                 &mut ComponentDecodeContext<'a>,
-            ) -> Result<PreparedComponent, ComponentCodecError>
+            ) -> Result<PreparedComponentCandidate, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -762,6 +788,10 @@ impl ComponentRegistry {
             id,
             NativeComponentBinding {
                 rust_type_path: std::any::type_name::<T>(),
+                rust_type_id: TypeId::of::<T>(),
+                register_component: register_persistent_component::<T>,
+                validate_registration: validate_persistent_component_registration::<T>,
+                validate_apply: validate_registered_persistent_component_apply::<T>,
                 codec: Box::new(FnComponentCodec { preflight, encode }),
             },
         );
@@ -776,7 +806,7 @@ impl ComponentRegistry {
     ) -> Result<&mut Self, ComponentRegistryError>
     where
         T: Component,
-        Preflight: Fn(&ComponentValue) -> Result<PreparedComponent, ComponentCodecError>
+        Preflight: Fn(&ComponentValue) -> Result<PreparedComponentCandidate, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -803,7 +833,7 @@ impl ComponentRegistry {
         Preflight: for<'a> Fn(
                 &ComponentValue,
                 &mut ComponentDecodeContext<'a>,
-            ) -> Result<PreparedComponent, ComponentCodecError>
+            ) -> Result<PreparedComponentCandidate, ComponentCodecError>
             + Send
             + Sync
             + 'static,
@@ -820,13 +850,23 @@ impl ComponentRegistry {
         if !data.path_indexes.contains_key(id) {
             return Err(ComponentRegistryError::UnknownComponentId(id.clone()));
         }
-        validate_native_binding::<T>(data, id)?;
+        let persistent_eligible = data
+            .catalog
+            .components
+            .iter()
+            .find(|schema| schema.id() == id)
+            .is_some_and(|schema| schema.has_capability(ComponentCapability::Scene));
+        validate_native_binding::<T>(data, id, persistent_eligible)?;
         let rust_type_id = TypeId::of::<T>();
         data.rust_type_ids.insert(rust_type_id, id.clone());
         data.bindings.insert(
             id.clone(),
             NativeComponentBinding {
                 rust_type_path: std::any::type_name::<T>(),
+                rust_type_id: TypeId::of::<T>(),
+                register_component: register_persistent_component::<T>,
+                validate_registration: validate_persistent_component_registration::<T>,
+                validate_apply: validate_registered_persistent_component_apply::<T>,
                 codec: Box::new(FnComponentCodec { preflight, encode }),
             },
         );
@@ -1070,9 +1110,19 @@ impl ComponentRegistry {
         value: &ComponentValue,
         context: &mut ComponentDecodeContext<'_>,
     ) -> Option<Result<PreparedComponent, ComponentCodecError>> {
-        let binding = self.data().bindings.get(id)?;
-        let schema = self.schema(id)?;
-        let path_index = self.data().path_indexes.get(id);
+        let data = match &self.state {
+            RegistryState::Frozen(data) => data,
+            RegistryState::Building(_) => return None,
+            RegistryState::Transitioning => {
+                unreachable!("component registry transition is synchronous")
+            }
+        };
+        let binding = data.bindings.get(id)?;
+        let schema = data
+            .type_index
+            .get(id)
+            .and_then(|index| data.catalog.components.get(*index))?;
+        let path_index = data.path_indexes.get(id);
         Some(
             self.validate_whole_value_capabilities(id, [ComponentCapability::Scene])
                 .map_err(|error| ComponentCodecError::Message(error.to_string()))
@@ -1080,7 +1130,16 @@ impl ComponentRegistry {
                     let path_index = path_index.ok_or_else(missing_schema_path_index_error)?;
                     validate_component_value_coverage(schema, path_index, value)
                 })
-                .and_then(|()| binding.codec.preflight_with_context(value, context)),
+                .and_then(|()| binding.codec.preflight_with_context(value, context))
+                .and_then(|prepared| {
+                    prepared.bind(
+                        id.clone(),
+                        binding.rust_type_id,
+                        binding.rust_type_path,
+                        binding.register_component,
+                        binding.validate_apply,
+                    )
+                }),
         )
     }
 
@@ -1142,6 +1201,7 @@ impl ComponentRegistry {
 fn validate_native_binding<T: Component>(
     data: &RegistryData,
     id: &ComponentTypeId,
+    persistent_eligible: bool,
 ) -> Result<(), ComponentRegistryError> {
     if data.bindings.contains_key(id) {
         return Err(ComponentRegistryError::DuplicateNativeBinding(id.clone()));
@@ -1153,7 +1213,41 @@ fn validate_native_binding<T: Component>(
             requested_component_id: id.clone(),
         });
     }
+    if persistent_eligible {
+        validate_persistent_metadata::<T>(id)?;
+    }
     Ok(())
+}
+
+fn validate_persistent_metadata<T: Component>(
+    id: &ComponentTypeId,
+) -> Result<(), ComponentRegistryError> {
+    validate_persistent_component_registration::<T>()
+        .map_err(|error| map_persistent_metadata_error(id, error))
+}
+
+fn map_persistent_metadata_error(
+    id: &ComponentTypeId,
+    error: PersistentComponentMetadataError,
+) -> ComponentRegistryError {
+    match error {
+        PersistentComponentMetadataError::RequiredComponents => {
+            ComponentRegistryError::PersistentComponentRequiresImplicitComponents {
+                component_id: id.clone(),
+            }
+        }
+        PersistentComponentMetadataError::LifecycleHook(_) => {
+            ComponentRegistryError::PersistentComponentHasLifecycleHook {
+                component_id: id.clone(),
+            }
+        }
+        PersistentComponentMetadataError::ComponentMissing
+        | PersistentComponentMetadataError::Observer { .. } => {
+            unreachable!(
+                "isolated component registration cannot contain observers or lose metadata"
+            )
+        }
+    }
 }
 
 fn validate_persistent_registration<T: Component>(
@@ -1166,7 +1260,7 @@ fn validate_persistent_registration<T: Component>(
         ));
     }
     validate_schema(schema)?;
-    validate_native_binding::<T>(data, schema.id())
+    validate_native_binding::<T>(data, schema.id(), true)
 }
 
 type TypeIndex = BTreeMap<ComponentTypeId, usize>;
@@ -1179,10 +1273,14 @@ fn validate_registry(
     let catalog = prepare_catalog_candidate(data.catalog.clone(), data.previous_catalog.as_ref())?;
 
     for schema in &catalog.components {
-        if !data.bindings.contains_key(&schema.id) {
+        let Some(binding) = data.bindings.get(&schema.id) else {
             return Err(ComponentRegistryError::MissingNativeBinding {
                 component_id: schema.id.clone(),
             });
+        };
+        if schema.has_capability(ComponentCapability::Scene) {
+            (binding.validate_registration)()
+                .map_err(|error| map_persistent_metadata_error(&schema.id, error))?;
         }
     }
 

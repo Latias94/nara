@@ -19,6 +19,11 @@ pub use types::{
     SceneEntityId, SceneEntityIdError, SceneInstanceId, WorldEntityLocator, WorldIdentityDomainId,
 };
 
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::domain::{IdentitySupportTopologyError, validate_identity_support_topology};
+}
+
 #[cfg(test)]
 pub(crate) use allocator::MonotonicNonZeroU64Allocator;
 #[cfg(test)]

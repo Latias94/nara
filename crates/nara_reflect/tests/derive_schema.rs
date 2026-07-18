@@ -1,9 +1,10 @@
-use nara_ecs::{Component, World};
+use nara_ecs::{Component, Resource, World, lifecycle::HookContext, world::DeferredWorld};
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
-    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentRegistry,
-    ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, PersistentComponent, PersistentComponentProvider,
+    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PersistentComponent, PersistentComponentProvider,
 };
 
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
@@ -29,6 +30,54 @@ struct GeneratedProbe {
     )]
     target: EntityReference,
 }
+
+#[derive(Component, Default)]
+struct ImplicitDependency;
+
+#[derive(Component, PersistentComponent)]
+#[require(ImplicitDependency)]
+#[nara(
+    id = "nara.test.RequiredPersistentProbe",
+    version = 1,
+    alias = "Required persistent probe",
+    component_capabilities(scene),
+    field_capabilities(scene)
+)]
+struct RequiredPersistentProbe {
+    #[nara(id = "value", alias = "Value")]
+    value: i64,
+}
+
+#[derive(Component, PersistentComponent)]
+#[component(on_add = persistent_probe_on_add)]
+#[nara(
+    id = "nara.test.HookedPersistentProbe",
+    version = 1,
+    alias = "Hooked persistent probe",
+    component_capabilities(scene),
+    field_capabilities(scene)
+)]
+struct HookedPersistentProbe {
+    #[nara(id = "value", alias = "Value")]
+    value: i64,
+}
+
+#[derive(Component, Default)]
+struct ManualCodecDependency;
+
+#[derive(Component)]
+#[require(ManualCodecDependency)]
+struct ManualRequiredCodecProbe {
+    value: i64,
+}
+
+#[derive(Component)]
+#[component(on_add = persistent_probe_on_add)]
+struct ManualHookedCodecProbe {
+    value: i64,
+}
+
+fn persistent_probe_on_add(_world: DeferredWorld<'_>, _context: HookContext) {}
 
 #[derive(Component)]
 struct InvalidProviderSchema;
@@ -139,14 +188,170 @@ fn provider_validation_rejects_invalid_schema_without_registering_it() {
 }
 
 #[test]
+fn provider_validation_rejects_implicit_components_and_intrinsic_hooks() {
+    let registry = ComponentRegistry::new();
+
+    assert!(matches!(
+        registry.validate_persistent_component::<RequiredPersistentProbe>(),
+        Err(ComponentRegistryError::PersistentComponentRequiresImplicitComponents {
+            component_id,
+        }) if component_id == ComponentTypeId::new("nara.test.RequiredPersistentProbe")
+    ));
+    assert!(matches!(
+        registry.validate_persistent_component::<HookedPersistentProbe>(),
+        Err(ComponentRegistryError::PersistentComponentHasLifecycleHook { component_id })
+            if component_id == ComponentTypeId::new("nara.test.HookedPersistentProbe")
+    ));
+    assert!(registry.catalog_candidate().components().is_empty());
+
+    let mut registry = registry;
+    assert!(matches!(
+        registry.register_persistent_component::<RequiredPersistentProbe>(),
+        Err(ComponentRegistryError::PersistentComponentRequiresImplicitComponents { .. })
+    ));
+    assert!(matches!(
+        registry.register_persistent_component::<HookedPersistentProbe>(),
+        Err(ComponentRegistryError::PersistentComponentHasLifecycleHook { .. })
+    ));
+    assert!(registry.catalog_candidate().components().is_empty());
+}
+
+#[test]
+fn manual_persistent_codecs_cannot_bypass_component_metadata_validation() {
+    let mut registry = ComponentRegistry::new();
+    let required_id = ComponentTypeId::new("nara.test.ManualRequiredCodecProbe");
+    let required_schema = ComponentSchema::new(
+        required_id.clone(),
+        "Manual required codec probe",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities([ComponentCapability::Scene])
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("value"),
+        "Value",
+        ComponentFieldPath::from_fields(["value"]),
+        ComponentValueKind::I64,
+    )
+    .with_capabilities([ComponentCapability::Scene])]);
+
+    let required_error = registry
+        .register_persistent_component_with_codec::<ManualRequiredCodecProbe, _, _>(
+            required_schema,
+            |_| Ok(ManualRequiredCodecProbe { value: 0 }),
+            |component| {
+                Ok(ComponentValue::map([(
+                    "value",
+                    ComponentValue::I64(component.value),
+                )]))
+            },
+        )
+        .err()
+        .expect("manual required-component codec must reject");
+    assert!(
+        matches!(
+            &required_error,
+            ComponentRegistryError::PersistentComponentRequiresImplicitComponents { component_id }
+                if component_id == &required_id
+        ),
+        "unexpected required-component error: {required_error:?}"
+    );
+
+    let hooked_id = ComponentTypeId::new("nara.test.ManualHookedCodecProbe");
+    let hooked_schema = ComponentSchema::new(
+        hooked_id.clone(),
+        "Manual hooked codec probe",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities([ComponentCapability::Scene])
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("value"),
+        "Value",
+        ComponentFieldPath::from_fields(["value"]),
+        ComponentValueKind::I64,
+    )
+    .with_capabilities([ComponentCapability::Scene])]);
+    let hooked_error = registry
+        .register_persistent_component_with_codec::<ManualHookedCodecProbe, _, _>(
+            hooked_schema,
+            |_| Ok(ManualHookedCodecProbe { value: 0 }),
+            |component| {
+                Ok(ComponentValue::map([(
+                    "value",
+                    ComponentValue::I64(component.value),
+                )]))
+            },
+        )
+        .err()
+        .expect("manual intrinsic-hook codec must reject");
+    assert!(
+        matches!(
+            &hooked_error,
+            ComponentRegistryError::PersistentComponentHasLifecycleHook { component_id }
+                if component_id == &hooked_id
+        ),
+        "unexpected intrinsic-hook error: {hooked_error:?}"
+    );
+    assert!(registry.catalog_candidate().components().is_empty());
+}
+
+#[test]
 fn runtime_only_component_needs_no_persistent_provider() {
+    #[derive(Resource, Default)]
+    struct HookRuns(u32);
+
+    #[derive(Component, Default)]
+    struct RuntimeRequired;
+
     #[derive(Component)]
+    #[require(RuntimeRequired)]
+    #[component(on_add = runtime_only_on_add)]
     struct RuntimeOnly(u32);
 
+    fn runtime_only_on_add(mut world: DeferredWorld<'_>, _context: HookContext) {
+        world.resource_mut::<HookRuns>().0 += 1;
+    }
+
     let mut world = World::new();
+    world.init_resource::<HookRuns>();
     let entity = world.spawn(RuntimeOnly(9)).id();
     assert_eq!(
         world.get::<RuntimeOnly>(entity).map(|value| value.0),
         Some(9)
     );
+    assert!(world.get::<RuntimeRequired>(entity).is_some());
+    assert_eq!(world.resource::<HookRuns>().0, 1);
+}
+
+#[test]
+fn inspect_only_native_binding_keeps_normal_bevy_component_semantics() {
+    #[derive(Component, Default)]
+    struct InspectRequired;
+
+    #[derive(Component)]
+    #[require(InspectRequired)]
+    #[component(on_add = inspect_only_on_add)]
+    struct InspectOnly;
+
+    fn inspect_only_on_add(_world: DeferredWorld<'_>, _context: HookContext) {}
+
+    let id = ComponentTypeId::new("nara.test.InspectOnly");
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_component_schema(
+            ComponentSchema::new(id.clone(), "Inspect only", ComponentSchemaVersion::ONE)
+                .with_capabilities([ComponentCapability::Inspect]),
+        )
+        .unwrap();
+    registry
+        .register_native_component_with_codec::<InspectOnly, _, _>(
+            &id,
+            |_value| Ok(InspectOnly),
+            |_component| Ok(ComponentValue::Map(Default::default())),
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+
+    let mut world = World::new();
+    let entity = world.spawn(InspectOnly).id();
+    assert!(world.get::<InspectRequired>(entity).is_some());
 }

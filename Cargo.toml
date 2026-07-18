@@ -321,6 +321,11 @@ path = "tests/scene_authoring_session.rs"
 required-features = ["runtime-core"]
 
 [[test]]
+name = "scene_component_composition"
+path = "tests/scene_component_composition.rs"
+required-features = ["runtime-core"]
+
+[[test]]
 name = "scene_file_workspace"
 path = "tests/scene_file_workspace.rs"
 required-features = ["tooling", "serde"]

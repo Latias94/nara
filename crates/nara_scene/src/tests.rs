@@ -7,7 +7,13 @@ use nara_asset::{
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticValueRef};
-use nara_ecs::{Component, Entity, Mut, World};
+use nara_ecs::{
+    Commands, Component, Entity, Mut, Resource, World,
+    lifecycle::{Add, HookContext, Remove},
+    observer::On,
+    system::ResMut,
+    world::DeferredWorld,
+};
 use nara_identity::{
     EntityLookup, EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
     PersistentRuntimeReference, SpawnedSceneInstance, TombstoneCause, WorldEntityLocator,
@@ -18,7 +24,7 @@ use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentFieldId,
     ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema,
     ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponent, Reflect,
+    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponentCandidate, Reflect,
 };
 #[derive(Clone, Debug, PartialEq, Component, Reflect)]
 struct TestPosition {
@@ -35,6 +41,13 @@ struct TestBrokenExport;
 
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestApplyFails;
+
+#[derive(Debug, Default, Resource)]
+struct PersistentApplyCanary(u32);
+
+fn persistent_apply_hook(mut world: DeferredWorld<'_>, _context: HookContext) {
+    world.resource_mut::<PersistentApplyCanary>().0 += 1;
+}
 
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestEntityLink {
@@ -934,6 +947,132 @@ fn invalid_component_payload_does_not_mutate_world() {
 }
 
 #[test]
+fn component_observer_rejects_fresh_scene_before_target_allocation() {
+    let registry = test_registry();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("observed"))
+        .with_component(position_type_id(), position_record(4))]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    world.add_observer(
+        |_: On<Add, TestPosition>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.instance.is_none());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+            && diagnostic_has_text_field(
+                diagnostic,
+                "persistent-apply-reason",
+                "lifecycle-observer",
+            )
+            && diagnostic_has_text_field(diagnostic, "lifecycle-event", "add")
+            && diagnostic_has_text_field(diagnostic, "observer-scope", "component-global")
+    }));
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline
+    );
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert!(!world.contains_resource::<WorldIdentityDomain>());
+}
+
+#[test]
+fn deferred_dynamic_hook_rejects_fresh_scene_before_target_allocation() {
+    let registry = test_registry();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("hooked"))
+        .with_component(position_type_id(), position_record(5))]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    world.register_component::<TestPosition>();
+    world.commands().queue(|world: &mut World| {
+        world
+            .register_component_hooks::<TestPosition>()
+            .on_add(persistent_apply_hook);
+    });
+    let baseline = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.instance.is_none());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+            && diagnostic_has_text_field(diagnostic, "persistent-apply-reason", "lifecycle-hook")
+            && diagnostic_has_text_field(diagnostic, "lifecycle-event", "add")
+    }));
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline
+    );
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert!(!world.contains_resource::<WorldIdentityDomain>());
+}
+
+#[test]
+fn hierarchy_observer_installed_during_publication_applies_only_to_later_persistent_work() {
+    let registry = test_registry();
+    let parent_id = scene_id("parent");
+    let child_id = scene_id("child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(parent_id.clone())
+            .with_component(position_type_id(), position_record(1)),
+        SceneEntityRecord::new(child_id)
+            .with_parent(parent_id)
+            .with_component(position_type_id(), position_record(2)),
+    ]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    world.add_observer(|_: On<Add, Parent>, mut commands: Commands| {
+        commands.add_observer(
+            |_: On<Add, TestPosition>, mut canary: ResMut<PersistentApplyCanary>| {
+                canary.0 += 1;
+            },
+        );
+    });
+    world.flush();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(!report.diagnostics.has_errors());
+    assert!(report.instance.is_some());
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    world.flush();
+
+    let later_target = world.spawn_empty().id();
+    let prepared = registry
+        .preflight_component(
+            &position_type_id(),
+            &ComponentValue::map([("x", ComponentValue::I64(3))]),
+        )
+        .unwrap()
+        .unwrap();
+    let error = prepared.apply(&mut world, later_target).unwrap_err();
+    assert!(matches!(
+        error,
+        ComponentCodecError::PersistentApplyRejected { .. }
+    ));
+    assert!(world.get::<TestPosition>(later_target).is_none());
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+}
+
+#[test]
 fn component_migration_runs_before_scene_preflight_without_mutating_document() {
     let registry = migrated_position_registry();
     let id = scene_id("player");
@@ -1036,6 +1175,122 @@ fn path_asset_ref_resolves_before_scene_spawn_without_database() {
 }
 
 #[test]
+fn asset_server_observer_rejects_scene_before_target_allocation() {
+    let registry = test_asset_registry();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
+        asset_link_type_id(),
+        asset_link_record(AssetRef::path("textures/player.png").unwrap()),
+    )]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    world.add_observer(
+        |_: On<Add, AssetServer>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1,
+    );
+    world.flush();
+    let baseline = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.instance.is_none());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+            && diagnostic_has_text_field(diagnostic, "lifecycle-event", "add")
+            && diagnostic_has_text_field(diagnostic, "observer-scope", "component-global")
+    }));
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline
+    );
+    assert!(!world.contains_resource::<AssetServer>());
+    assert!(!world.contains_resource::<WorldIdentityDomain>());
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+}
+
+#[test]
+fn deferred_asset_prepare_declares_resource_access_before_target_allocation() {
+    let registry = deferred_asset_registry();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
+        asset_link_type_id(),
+        asset_link_record(AssetRef::path("textures/player.png").unwrap()),
+    )]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    world.add_observer(
+        |_: On<Add, AssetServer>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1,
+    );
+    world.flush();
+    let baseline = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.instance.is_none());
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+        })
+    );
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline
+    );
+    assert!(!world.contains_resource::<AssetServer>());
+    assert!(!world.contains_resource::<WorldIdentityDomain>());
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+}
+
+#[test]
+fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
+    let registry = test_registry();
+    let first_document = SceneDocument::new([SceneEntityRecord::new(scene_id("first"))
+        .with_component(position_type_id(), position_record(1))]);
+    let second_document = SceneDocument::new([SceneEntityRecord::new(scene_id("second"))
+        .with_component(position_type_id(), position_record(2))]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    let first = spawn_scene(&mut world, &registry, &first_document);
+    assert!(!first.diagnostics.has_errors());
+    world.add_observer(
+        |_: On<Remove, WorldIdentityDomain>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+
+    let report = spawn_scene(&mut world, &registry, &second_document);
+
+    assert!(report.instance.is_none());
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.identity-support-ineligible"
+        })
+    );
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline
+    );
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+}
+
+#[test]
 #[allow(clippy::default_constructed_unit_structs)]
 fn scene_instance_allocation_is_world_global_across_every_spawner_entrypoint() {
     let registry = test_registry();
@@ -1091,6 +1346,40 @@ fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
     assert_eq!(stats.claimed_scene_instances, 2);
     assert_eq!(stats.active_scene_instances, 2);
     assert_eq!(stats.active_scene_entities, 0);
+}
+
+#[test]
+fn empty_persistent_set_rejects_event_global_observer_before_target_allocation() {
+    let mut registry = ComponentRegistry::new();
+    registry.freeze().unwrap();
+    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("empty"))]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    world.add_observer(|_: On<Add>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1);
+    world.flush();
+    world.resource_mut::<PersistentApplyCanary>().0 = 0;
+    let baseline = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(report.instance.is_none());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+            && diagnostic_has_text_field(diagnostic, "lifecycle-event", "add")
+            && diagnostic_has_text_field(diagnostic, "observer-scope", "event-global")
+    }));
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline
+    );
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert!(!world.contains_resource::<WorldIdentityDomain>());
 }
 
 #[test]
@@ -1241,6 +1530,133 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
         EntityLookup::Resolved(first_entity)
     );
     assert_eq!(world.get::<TestPosition>(first_entity).unwrap().x, 1);
+}
+
+#[test]
+fn entity_component_observer_rejects_authoring_replacement_before_retirement() {
+    let registry = test_registry();
+    let id = scene_id("player");
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(1))]));
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+
+    let first_sync = session.sync_world(&mut world, &registry);
+    assert!(first_sync.synced);
+    let first = first_sync.live_instance.unwrap();
+    let first_entity = match first.resolve(&world, &id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("first authoring instance did not resolve: {lookup:?}"),
+    };
+    world.entity_mut(first_entity).observe(
+        |_: On<Remove, TestPosition>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
+
+    session
+        .replace_document(SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(2))]));
+    let baseline_revision = session.revision();
+    let failed = session.sync_world(&mut world, &registry);
+
+    assert!(!failed.synced);
+    assert!(failed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+            && diagnostic_has_text_field(
+                diagnostic,
+                "persistent-apply-reason",
+                "lifecycle-observer",
+            )
+            && diagnostic_has_text_field(diagnostic, "lifecycle-event", "remove")
+            && diagnostic_has_text_field(diagnostic, "observer-scope", "entity-component")
+    }));
+    assert_eq!(failed.removed_entities, 0);
+    assert_eq!(failed.live_instance.as_ref(), Some(&first));
+    assert_eq!(session.live_instance(), Some(&first));
+    assert_eq!(session.revision(), baseline_revision);
+    assert!(session.is_live_dirty());
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline_entities
+    );
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        baseline_stats
+    );
+    assert_eq!(
+        first.resolve(&world, &id),
+        EntityLookup::Resolved(first_entity)
+    );
+    assert_eq!(world.get::<TestPosition>(first_entity).unwrap().x, 1);
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+}
+
+#[test]
+fn entity_component_observer_rejects_authoring_clear_before_retirement() {
+    let registry = test_registry();
+    let id = scene_id("player");
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(1))]));
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+
+    let sync = session.sync_world(&mut world, &registry);
+    assert!(sync.synced);
+    let live = sync.live_instance.unwrap();
+    let entity = match live.resolve(&world, &id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("authoring instance did not resolve: {lookup:?}"),
+    };
+    world.entity_mut(entity).observe(
+        |_: On<Remove, TestPosition>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
+    let baseline_revision = session.revision();
+
+    let clear = session.clear_live_world(&mut world);
+
+    assert!(!clear.cleared);
+    assert_eq!(clear.removed_entities, 0);
+    assert_eq!(clear.live_instance.as_ref(), Some(&live));
+    assert_eq!(session.live_instance(), Some(&live));
+    assert_eq!(session.revision(), baseline_revision);
+    assert!(clear.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+            && diagnostic_has_text_field(diagnostic, "lifecycle-event", "remove")
+            && diagnostic_has_text_field(diagnostic, "observer-scope", "entity-component")
+    }));
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline_entities
+    );
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        baseline_stats
+    );
+    assert_eq!(world.get::<TestPosition>(entity).unwrap().x, 1);
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
 }
 
 #[test]
@@ -2279,21 +2695,23 @@ fn test_asset_registry() -> ComponentRegistry {
             |value, context| {
                 let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
                 let prepared = prepare_test_asset_handle(context, "asset.value", asset_ref)?;
-                Ok(PreparedComponent::new(move |context| {
-                    let handle = match prepared {
-                        PreparedTestAsset::Resolved(handle) => handle,
-                        PreparedTestAsset::Deferred(asset_ref) => context
-                            .resolve_asset_ref::<TestAsset>(&asset_ref)
-                            .map_err(|error| {
-                                ComponentCodecError::invalid_asset_ref(
-                                    "asset.value",
-                                    asset_ref.to_string(),
-                                    error.to_string(),
-                                )
-                            })?,
-                    };
-                    Ok(TestAssetLink { handle })
-                }))
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        let handle = match prepared {
+                            PreparedTestAsset::Resolved(handle) => handle,
+                            PreparedTestAsset::Deferred(asset_ref) => context
+                                .resolve_asset_ref::<TestAsset>(&asset_ref)
+                                .map_err(|error| {
+                                    ComponentCodecError::invalid_asset_ref(
+                                        "asset.value",
+                                        asset_ref.to_string(),
+                                        error.to_string(),
+                                    )
+                                })?,
+                        };
+                        Ok(TestAssetLink { handle })
+                    },
+                ))
             },
             |world, entity, _context| {
                 let Some(link) = world.get::<TestAssetLink>(entity) else {
@@ -2304,6 +2722,47 @@ fn test_asset_registry() -> ComponentRegistry {
                     ComponentValue::U64(link.handle.id().raw()),
                 )])))
             },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn deferred_asset_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        asset_link_type_id(),
+        "Deferred asset link",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "asset",
+            "Asset",
+            ComponentFieldPath::from_fields(["asset"]),
+            ComponentValueKind::AssetRef,
+            true,
+        )],
+    );
+    registry
+        .register_persistent_component_codec_with_context::<TestAssetLink, _, _>(
+            schema,
+            |value, _context| {
+                let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        let handle = context.resolve_asset_ref::<TestAsset>(&asset_ref).map_err(
+                            |error| {
+                                ComponentCodecError::invalid_asset_ref(
+                                    "asset.value",
+                                    asset_ref.to_string(),
+                                    error.to_string(),
+                                )
+                            },
+                        )?;
+                        Ok(TestAssetLink { handle })
+                    },
+                ))
+            },
+            |_world, _entity, _context| Ok(None),
         )
         .unwrap();
     registry.freeze().unwrap();
@@ -2327,7 +2786,7 @@ fn broken_export_registry() -> ComponentRegistry {
     registry
         .register_persistent_component_codec_with_context::<TestBrokenExport, _, _>(
             schema,
-            |_value, _context| Ok(PreparedComponent::insert(TestBrokenExport)),
+            |_value, _context| Ok(PreparedComponentCandidate::insert(TestBrokenExport)),
             |_world, _entity, _context| Err(ComponentCodecError::invalid_field("broken", "boom")),
         )
         .unwrap();
@@ -2355,19 +2814,20 @@ fn failing_apply_registry() -> ComponentRegistry {
             resolves_asset_schema,
             |value, _context| {
                 let asset_ref = read_asset_ref(value.field("asset")?, "asset")?;
-                Ok(PreparedComponent::new(move |context| {
-                    let handle =
-                        context
-                            .resolve_asset_ref::<TestAsset>(&asset_ref)
-                            .map_err(|error| {
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        let handle = context.resolve_asset_ref::<TestAsset>(&asset_ref).map_err(
+                            |error| {
                                 ComponentCodecError::invalid_asset_ref(
                                     "asset.value",
                                     asset_ref.to_string(),
                                     error.to_string(),
                                 )
-                            })?;
-                    Ok(TestAssetLink { handle })
-                }))
+                            },
+                        )?;
+                        Ok(TestAssetLink { handle })
+                    },
+                ))
             },
             |_world, _entity, _context| Ok(None),
         )
@@ -2401,7 +2861,7 @@ fn failing_apply_registry() -> ComponentRegistry {
                     }
                 }
 
-                Ok(PreparedComponent::new(|_context| {
+                Ok(PreparedComponentCandidate::deferred(|| {
                     Err::<TestApplyFails, _>(ComponentCodecError::invalid_field(
                         "apply",
                         "intentional failure",

@@ -12,7 +12,7 @@ use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
     ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponent,
+    ComponentValue, ComponentValueKind, PreparedComponentCandidate,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -278,17 +278,35 @@ pub fn register_sprite_components(
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
             let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
 
-            Ok(PreparedComponent::new(move |context| {
-                let material = resolve_prepared_material(context, material)?;
-                Ok(Sprite {
+            if material.requires_asset_server() {
+                Ok(PreparedComponentCandidate::with_asset_server(
+                    move |context| {
+                        let material = resolve_prepared_material(context, material)?;
+                        Ok(Sprite {
+                            material,
+                            texture_region,
+                            size,
+                            anchor,
+                            layer,
+                            sort_key,
+                        })
+                    },
+                ))
+            } else {
+                let material = material.into_resolved().ok_or_else(|| {
+                    ComponentCodecError::Message(
+                        "prepared sprite material unexpectedly requires AssetServer".to_string(),
+                    )
+                })?;
+                Ok(PreparedComponentCandidate::insert(Sprite {
                     material,
                     texture_region,
                     size,
                     anchor,
                     layer,
                     sort_key,
-                })
-            }))
+                }))
+            }
         },
         |world, entity, context| {
             let Some(sprite) = world.get::<Sprite>(entity) else {
@@ -514,6 +532,26 @@ struct PreparedSpriteMaterial {
     sampler: SamplerDescriptor,
     alpha_mode: AlphaMode2d,
     tint: Color,
+}
+
+impl PreparedSpriteMaterial {
+    fn requires_asset_server(&self) -> bool {
+        matches!(self.image, Some(PreparedTexture::Deferred(_)))
+    }
+
+    fn into_resolved(self) -> Option<SpriteMaterial> {
+        let image = match self.image {
+            None => None,
+            Some(PreparedTexture::Resolved(handle)) => Some(handle),
+            Some(PreparedTexture::Deferred(_)) => return None,
+        };
+        Some(SpriteMaterial {
+            image,
+            sampler: self.sampler,
+            alpha_mode: self.alpha_mode,
+            tint: self.tint,
+        })
+    }
 }
 
 fn read_sprite_material(

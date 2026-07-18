@@ -3,10 +3,12 @@ use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
     PublicDiagnosticIdentifier, SafeSummary,
 };
-use nara_identity::{EntityIdentityAxis, IdentityDomainError};
+use nara_identity::{
+    __private::IdentitySupportTopologyError, EntityIdentityAxis, IdentityDomainError,
+};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldPath, ComponentFieldPathError,
-    ComponentFieldPathSegment, ComponentMigrationError,
+    ComponentFieldPathSegment, ComponentMigrationError, PersistentApplyRejection,
 };
 
 const MAX_SCENE_FIELD_PATH_LOCATOR_BYTES: usize = 96;
@@ -200,9 +202,89 @@ pub(crate) fn with_codec_error(diagnostic: Diagnostic, error: &ComponentCodecErr
         ComponentCodecError::AssetServerChanged => {
             with_public_identifier(diagnostic, "codec-error-kind", "asset-server-changed")
         }
+        ComponentCodecError::PreparedComponentTypeMismatch { .. } => with_secret(
+            with_public_identifier(
+                diagnostic,
+                "codec-error-kind",
+                "prepared-component-type-mismatch",
+            ),
+            "codec-detail",
+        ),
+        ComponentCodecError::PersistentApplyReceiptMissing => with_public_identifier(
+            diagnostic,
+            "codec-error-kind",
+            "persistent-apply-receipt-missing",
+        ),
+        ComponentCodecError::PersistentApplyTargetNotEmpty => with_public_identifier(
+            diagnostic,
+            "codec-error-kind",
+            "persistent-apply-target-not-empty",
+        ),
+        ComponentCodecError::PersistentApplyBindingConflict { component_id } => {
+            with_public_locator(
+                with_public_identifier(
+                    diagnostic,
+                    "codec-error-kind",
+                    "persistent-apply-binding-conflict",
+                ),
+                "persistent-component-id",
+                component_id.as_str(),
+            )
+        }
+        ComponentCodecError::PersistentApplySupportRejected { reason } => {
+            with_persistent_apply_rejection(
+                with_public_identifier(
+                    diagnostic,
+                    "codec-error-kind",
+                    "persistent-apply-support-rejected",
+                ),
+                reason,
+            )
+        }
+        ComponentCodecError::PersistentApplyRejected {
+            component_id,
+            reason,
+        } => {
+            let diagnostic = with_public_locator(
+                with_public_identifier(diagnostic, "codec-error-kind", "persistent-apply-rejected"),
+                "persistent-component-id",
+                component_id.as_str(),
+            );
+            with_persistent_apply_rejection(diagnostic, reason)
+        }
         ComponentCodecError::Message(_) => with_secret(
             with_public_identifier(diagnostic, "codec-error-kind", "message"),
             "codec-detail",
+        ),
+    }
+}
+
+fn with_persistent_apply_rejection(
+    diagnostic: Diagnostic,
+    reason: &PersistentApplyRejection,
+) -> Diagnostic {
+    match reason {
+        PersistentApplyRejection::ComponentMetadataMissing => with_public_identifier(
+            diagnostic,
+            "persistent-apply-reason",
+            "component-metadata-missing",
+        ),
+        PersistentApplyRejection::RequiredComponents => {
+            with_public_identifier(diagnostic, "persistent-apply-reason", "required-components")
+        }
+        PersistentApplyRejection::LifecycleHook { event } => with_public_identifier(
+            with_public_identifier(diagnostic, "persistent-apply-reason", "lifecycle-hook"),
+            "lifecycle-event",
+            event.as_str(),
+        ),
+        PersistentApplyRejection::Observer { event, scope } => with_public_identifier(
+            with_public_identifier(
+                with_public_identifier(diagnostic, "persistent-apply-reason", "lifecycle-observer"),
+                "lifecycle-event",
+                event.as_str(),
+            ),
+            "observer-scope",
+            scope.as_str(),
         ),
     }
 }
@@ -393,6 +475,20 @@ pub(crate) fn with_identity_error(
             "retirement-sequence-exhausted",
         ),
     }
+}
+
+pub(crate) fn with_identity_support_error(
+    diagnostic: Diagnostic,
+    error: &IdentitySupportTopologyError,
+) -> Diagnostic {
+    with_public_identifier(
+        diagnostic,
+        "identity-support-error-kind",
+        match error {
+            IdentitySupportTopologyError::LifecycleConflict => "lifecycle-conflict",
+            IdentitySupportTopologyError::TargetMissing => "target-missing",
+        },
+    )
 }
 
 pub(crate) fn with_capability(

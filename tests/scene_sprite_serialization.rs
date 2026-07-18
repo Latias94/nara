@@ -1,12 +1,16 @@
 use nara::{
     advanced_prelude::*,
     diagnostic::DiagnosticValueRef,
+    ecs::{lifecycle::Add, observer::On, system::ResMut},
     scene::{
         SceneExportOptions, SceneSpawnReport, export_scene_with_options,
         spawn_prefab_with_asset_database, spawn_prefab_with_patch,
         spawn_prefab_with_patch_and_asset_database, spawn_scene_with_asset_database,
     },
 };
+
+#[derive(Resource, Default)]
+struct AssetServerObserverCanary(u32);
 
 const PLAYER_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const TILESET_STABLE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
@@ -140,6 +144,25 @@ fn sprite_path_asset_ref_still_resolves_without_project_database() {
         world.resource::<AssetServer>().path(texture.id()),
         Some("textures/player.png")
     );
+}
+
+#[test]
+fn asset_free_sprite_does_not_claim_or_insert_an_asset_server() {
+    let registry = component_registry();
+    let document = sprite_scene(ComponentValue::Null);
+    let mut world = World::new();
+    world.init_resource::<AssetServerObserverCanary>();
+    world.add_observer(
+        |_: On<Add, AssetServer>, mut canary: ResMut<AssetServerObserverCanary>| canary.0 += 1,
+    );
+    world.flush();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+
+    assert!(!report.diagnostics.has_errors());
+    assert!(report.instance.is_some());
+    assert_eq!(world.resource::<AssetServerObserverCanary>().0, 0);
+    assert!(!world.contains_resource::<AssetServer>());
 }
 
 #[test]

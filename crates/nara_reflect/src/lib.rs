@@ -11,6 +11,7 @@ mod entity_reference;
 mod format;
 mod migration;
 mod path;
+mod persistent_apply;
 mod plugin;
 mod provider;
 mod registry;
@@ -22,8 +23,7 @@ pub use asset_reference::{
 };
 pub use authoring::PersistentComponentProvider;
 pub use codec::{
-    ComponentApplyBatch, ComponentApplyContext, ComponentCodec, ComponentCodecError,
-    ComponentDecodeContext, ComponentEncodeContext, PreparedComponent,
+    ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
 };
 pub use entity_reference::{
     ComponentEntityReferenceRewriteError, EntityReferenceTraversalLimits,
@@ -38,6 +38,10 @@ pub use migration::{ComponentMigrationError, MigratedComponentValue};
 pub use nara_identity::EntityReference;
 pub use nara_reflect_derive::PersistentComponent;
 pub use path::{ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment};
+pub use persistent_apply::{
+    ComponentApplyBatch, ComponentApplyContext, PersistentApplyRejection, PersistentLifecycleEvent,
+    PersistentObserverScope, PreparedComponent, PreparedComponentCandidate,
+};
 pub use plugin::{
     COMPONENT_REGISTRY_PLUGIN_ID, COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentRegistryPlugin,
     registry_for_plugin_preflight,
@@ -64,6 +68,14 @@ pub mod __macro_support {
     };
 }
 
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::persistent_apply::{
+        declare_persistent_apply_targets, validate_declared_persistent_apply_targets,
+        validate_fresh_persistent_component_apply, validate_persistent_apply_support_topology,
+    };
+}
+
 pub mod prelude {
     pub use crate::{
         ComponentApplyContext, ComponentCapability, ComponentCatalogGenerationError,
@@ -75,8 +87,8 @@ pub mod prelude {
         ComponentValueError, ComponentValueKind, DeclaredAssetReference,
         DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,
         MigratedComponentValue, PersistentComponent, PersistentComponentProvider,
-        PreparedComponent, collect_declared_asset_references, remap_declared_entity_references,
-        rewrite_declared_entity_references,
+        PreparedComponent, PreparedComponentCandidate, collect_declared_asset_references,
+        remap_declared_entity_references, rewrite_declared_entity_references,
     };
     pub use bevy_reflect::prelude::*;
 }

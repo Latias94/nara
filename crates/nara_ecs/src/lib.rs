@@ -14,6 +14,9 @@ pub use bevy_ecs::{
 
 pub use bevy_ecs::prelude::*;
 
+#[doc(hidden)]
+pub mod __private;
+
 pub mod prelude {
     pub use crate::{Component, Resource, ScheduleLabel, SystemSet};
     pub use bevy_ecs::prelude::*;

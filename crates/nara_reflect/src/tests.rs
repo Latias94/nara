@@ -1,8 +1,14 @@
-use std::{cell::Cell, collections::BTreeMap};
+use std::{any::TypeId, cell::Cell, collections::BTreeMap};
 
 use nara_asset::{AssetRef, AssetServer};
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_ecs::{Component, Resource, World};
+use nara_ecs::{
+    Component, Resource, World,
+    component::ComponentId,
+    lifecycle::{Add, HookContext},
+    observer::On,
+    world::DeferredWorld,
+};
 use nara_identity::{
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference, SceneEntityId,
     WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
@@ -29,6 +35,77 @@ struct TestAsset;
 
 #[derive(Component)]
 struct AssetCarrier;
+
+#[derive(Component)]
+struct ApplyProbe(i64);
+
+fn apply_probe_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.test.ApplyProbe"),
+        "Apply probe",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("value"),
+        "Value",
+        ComponentFieldPath::from_fields(["value"]),
+        ComponentValueKind::I64,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
+}
+
+fn frozen_apply_probe_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component_with_codec::<ApplyProbe, _, _>(
+            apply_probe_schema(),
+            |value| {
+                Ok(ApplyProbe(
+                    value
+                        .get("value")
+                        .and_then(ComponentValue::as_i64)
+                        .ok_or_else(|| ComponentCodecError::invalid_field("value", "i64"))?,
+                ))
+            },
+            |component| {
+                Ok(ComponentValue::map([(
+                    "value",
+                    ComponentValue::I64(component.0),
+                )]))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn apply_probe_value(value: i64) -> ComponentValue {
+    ComponentValue::map([("value", ComponentValue::I64(value))])
+}
+
+fn register_test_component<T: Component>(world: &mut World) -> ComponentId {
+    world.register_component::<T>()
+}
+
+fn bind_test_component<T: Component>(
+    prepared: PreparedComponentCandidate,
+    component_id: &str,
+) -> PreparedComponent {
+    prepared
+        .bind(
+            ComponentTypeId::new(component_id),
+            TypeId::of::<T>(),
+            std::any::type_name::<T>(),
+            register_test_component::<T>,
+            nara_ecs::__private::validate_registered_persistent_component_apply::<T>,
+        )
+        .unwrap()
+}
+
+fn test_component<T: Component>(component: T, component_id: &str) -> PreparedComponent {
+    bind_test_component::<T>(PreparedComponentCandidate::insert(component), component_id)
+}
 
 #[test]
 fn component_value_cost_counts_nodes_and_logical_bytes_deterministically() {
@@ -526,9 +603,12 @@ fn failed_prepared_component_does_not_mutate_existing_world_state() {
     let mut world = World::new();
     world.insert_resource(ExistingApplyState(1));
     let entity = world.spawn_empty().id();
-    let prepared = PreparedComponent::new(|_context| {
-        Err::<Position, _>(ComponentCodecError::invalid_field("apply", "success"))
-    });
+    let prepared = bind_test_component::<Position>(
+        PreparedComponentCandidate::deferred(|| {
+            Err::<Position, _>(ComponentCodecError::invalid_field("apply", "success"))
+        }),
+        "nara.test.Position",
+    );
 
     let result = prepared.apply(&mut world, entity);
 
@@ -538,13 +618,119 @@ fn failed_prepared_component_does_not_mutate_existing_world_state() {
 }
 
 #[test]
+fn custom_codec_cannot_prepare_a_different_rust_component_type() {
+    let mut registry = ComponentRegistry::new();
+    let id = ComponentTypeId::new("nara.test.ApplyProbe");
+    registry
+        .register_persistent_component_codec::<ApplyProbe, _, _>(
+            apply_probe_schema(),
+            |_value| {
+                Ok(PreparedComponentCandidate::insert(Velocity {
+                    dx: 1.0,
+                    dy: 2.0,
+                }))
+            },
+            |_world, _entity| Ok(Some(apply_probe_value(0))),
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+
+    let error = registry
+        .preflight_component(&id, &apply_probe_value(1))
+        .unwrap()
+        .err()
+        .expect("mismatched prepared component type must reject");
+
+    assert!(matches!(
+        error,
+        ComponentCodecError::PreparedComponentTypeMismatch { .. }
+    ));
+}
+
+#[test]
+fn deferred_dynamic_hook_rejects_existing_target_before_component_mutation() {
+    #[derive(Resource, Default)]
+    struct HookCanary(u32);
+
+    fn rejected_hook(mut world: DeferredWorld<'_>, _context: HookContext) {
+        world.resource_mut::<HookCanary>().0 += 1;
+    }
+
+    let registry = frozen_apply_probe_registry();
+    let id = ComponentTypeId::new("nara.test.ApplyProbe");
+    let prepared = registry
+        .preflight_component(&id, &apply_probe_value(7))
+        .unwrap()
+        .unwrap();
+    let mut world = World::new();
+    world.init_resource::<HookCanary>();
+    let entity = world.spawn_empty().id();
+    world.register_component::<ApplyProbe>();
+    world.commands().queue(|world: &mut World| {
+        world
+            .register_component_hooks::<ApplyProbe>()
+            .on_add(rejected_hook);
+    });
+
+    let error = prepared.apply(&mut world, entity).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ComponentCodecError::PersistentApplyRejected {
+            reason: PersistentApplyRejection::LifecycleHook {
+                event: PersistentLifecycleEvent::Add,
+            },
+            ..
+        }
+    ));
+    assert!(world.get::<ApplyProbe>(entity).is_none());
+    assert_eq!(world.resource::<HookCanary>().0, 0);
+}
+
+#[test]
+fn entity_component_observer_rejects_existing_target_before_component_mutation() {
+    #[derive(Resource, Default)]
+    struct ObserverCanary(u32);
+
+    let registry = frozen_apply_probe_registry();
+    let id = ComponentTypeId::new("nara.test.ApplyProbe");
+    let prepared = registry
+        .preflight_component(&id, &apply_probe_value(8))
+        .unwrap()
+        .unwrap();
+    let mut world = World::new();
+    world.init_resource::<ObserverCanary>();
+    let entity = world.spawn_empty().id();
+    world.entity_mut(entity).observe(
+        |_: On<Add, ApplyProbe>, mut canary: nara_ecs::system::ResMut<ObserverCanary>| {
+            canary.0 += 1;
+        },
+    );
+
+    let error = prepared.apply(&mut world, entity).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ComponentCodecError::PersistentApplyRejected {
+            reason: PersistentApplyRejection::Observer {
+                event: PersistentLifecycleEvent::Add,
+                scope: PersistentObserverScope::EntityComponent,
+            },
+            ..
+        }
+    ));
+    assert!(world.get::<ApplyProbe>(entity).is_none());
+    assert_eq!(world.resource::<ObserverCanary>().0, 0);
+}
+
+#[test]
 fn component_batch_rejects_a_different_world_with_equal_entity_bits() {
     let mut source = World::new();
     let source_entity = source.spawn_empty().id();
     let batch = ComponentApplyBatch::from_world(&source)
         .stage(
             source_entity,
-            PreparedComponent::insert(Position { x: 1.0, y: 2.0 }),
+            test_component(Position { x: 1.0, y: 2.0 }, "nara.test.Position"),
         )
         .unwrap();
     let mut target = World::new();
@@ -574,12 +760,12 @@ fn missing_batch_target_rejects_every_component_and_scratch_asset() {
     let batch = batch
         .stage(
             first,
-            PreparedComponent::insert(Position { x: 1.0, y: 2.0 }),
+            test_component(Position { x: 1.0, y: 2.0 }, "nara.test.Position"),
         )
         .unwrap()
         .stage(
             missing,
-            PreparedComponent::insert(Velocity { dx: 3.0, dy: 4.0 }),
+            test_component(Velocity { dx: 3.0, dy: 4.0 }, "nara.test.Velocity"),
         )
         .unwrap();
     world.despawn(missing);
@@ -611,7 +797,7 @@ fn asset_server_drift_rejects_the_batch_without_overwriting_newer_state() {
     let batch = batch
         .stage(
             entity,
-            PreparedComponent::insert(Position { x: 1.0, y: 2.0 }),
+            test_component(Position { x: 1.0, y: 2.0 }, "nara.test.Position"),
         )
         .unwrap();
     let live = world
@@ -648,7 +834,7 @@ fn component_batch_publishes_components_and_scratch_assets_together() {
     let batch = batch
         .stage(
             entity,
-            PreparedComponent::insert(Position { x: 1.0, y: 2.0 }),
+            test_component(Position { x: 1.0, y: 2.0 }, "nara.test.Position"),
         )
         .unwrap();
 
