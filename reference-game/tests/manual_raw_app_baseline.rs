@@ -3,9 +3,15 @@ mod manual_raw_app_boot;
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use manual_raw_app_boot::{ManualRawAppFault, run_manual_raw_app_boot, run_manual_raw_app_fault};
+use manual_raw_app_boot::{
+    ManualRawAppBootError, ManualRawAppFault, ManualRetirementCustody, run_manual_raw_app_boot,
+    run_manual_raw_app_fault, run_manual_raw_app_incomplete_retirement,
+    run_manual_raw_app_pre_owner_failure,
+};
 use nara::prelude::Vec2;
-use nara::tasks::TaskPoolKind;
+use nara::tasks::{TaskPoolKind, TaskShutdownPhase};
+
+use crate::project_content_fixture::ProjectContentFixtureError;
 
 #[test]
 fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owners() {
@@ -65,4 +71,47 @@ fn late_persistent_hook_rejects_before_scene_allocation() {
     assert_eq!(rejection.entities_before, rejection.entities_after);
     assert!(!rejection.scene_published);
     assert!(!rejection.task_shutdown.timed_out());
+}
+
+#[test]
+fn project_content_failure_precedes_manual_app_ownership() {
+    let failure = run_manual_raw_app_pre_owner_failure().unwrap_err();
+
+    assert_eq!(
+        failure.primary,
+        ManualRawAppBootError::ProjectContent(ProjectContentFixtureError::OpenManifest)
+    );
+    assert!(failure.retirement.is_none());
+}
+
+#[test]
+fn stalled_required_task_retains_app_custody_until_retry_completes() {
+    let report = run_manual_raw_app_incomplete_retirement().unwrap();
+
+    assert_eq!(report.diagnostic_class, ManualRawAppBootError::TaskShutdown);
+    assert_eq!(report.first_tick.tick, 1);
+    assert_eq!(report.first_tick.player_position, Vec2::new(1.0, 0.0));
+    assert_eq!(report.first_tick.enemy_hit_points, 10);
+    assert!(report.scene_published);
+    assert!(!report.runtime_published);
+    assert!(report.incomplete_task_shutdown.timed_out());
+    assert!(
+        report
+            .incomplete_task_shutdown
+            .for_kind(TaskPoolKind::Io)
+            .timed_out()
+    );
+    assert_eq!(report.incomplete_phase, TaskShutdownPhase::Join);
+    assert_eq!(report.custody, ManualRetirementCustody::AppWorld);
+    assert_eq!(report.joined_task_workers, report.expected_task_workers);
+    for kind in TaskPoolKind::ALL {
+        assert_eq!(
+            report
+                .completed_task_shutdown
+                .for_kind(kind)
+                .panicked_workers,
+            0
+        );
+    }
+    assert!(report.plugin_shutdown_complete);
 }

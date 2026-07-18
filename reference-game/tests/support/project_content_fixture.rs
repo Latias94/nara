@@ -66,7 +66,18 @@ pub fn load_project_content() -> LoadedProjectContent {
 }
 
 pub fn try_load_project_content() -> Result<LoadedProjectContent, ProjectContentFixtureError> {
-    let (candidate, plan, root) = try_candidate_plan_and_root(ImageImportLimits::default(), false)?;
+    try_load_project_content_from_path(Path::new(env!("CARGO_MANIFEST_DIR")))
+}
+
+pub fn try_load_project_content_from_path(
+    path: &Path,
+) -> Result<LoadedProjectContent, ProjectContentFixtureError> {
+    let root = try_project_root_capability_at(path)?;
+    let (candidate, plan, root) = try_candidate_plan_and_root_with(
+        root,
+        ImageImportLimits::default(),
+        false,
+    )?;
     let loader = ProjectContentLoader::new(root)
         .map_err(|_| ProjectContentFixtureError::CreateContentLoader)?;
     let snapshot = loader
@@ -94,6 +105,15 @@ pub fn try_candidate_plan_and_root(
 ) -> Result<(ProjectSettingsCandidate, RuntimePlan, DirectoryCapability), ProjectContentFixtureError>
 {
     let root = try_project_root_capability()?;
+    try_candidate_plan_and_root_with(root, image_limits, include_tilemap)
+}
+
+fn try_candidate_plan_and_root_with(
+    root: DirectoryCapability,
+    image_limits: ImageImportLimits,
+    include_tilemap: bool,
+) -> Result<(ProjectSettingsCandidate, RuntimePlan, DirectoryCapability), ProjectContentFixtureError>
+{
     let manifest_path = RelativePath::new("nara.toml")
         .map_err(|_| ProjectContentFixtureError::ParseManifestPath)?;
     let manifest = root
@@ -243,7 +263,13 @@ fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
 }
 
 fn try_project_root_capability() -> Result<DirectoryCapability, ProjectContentFixtureError> {
-    let root = host_directory(Path::new(env!("CARGO_MANIFEST_DIR")))
+    try_project_root_capability_at(Path::new(env!("CARGO_MANIFEST_DIR")))
+}
+
+fn try_project_root_capability_at(
+    path: &Path,
+) -> Result<DirectoryCapability, ProjectContentFixtureError> {
+    let root = host_directory(path)
         .map_err(|_| ProjectContentFixtureError::OpenProjectRoot)?;
     DirectoryCapability::from_host_handle(
         root,
