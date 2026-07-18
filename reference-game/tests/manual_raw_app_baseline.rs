@@ -5,6 +5,7 @@ mod project_content_fixture;
 
 use manual_raw_app_boot::{ManualRawAppFault, run_manual_raw_app_boot, run_manual_raw_app_fault};
 use nara::prelude::Vec2;
+use nara::tasks::TaskPoolKind;
 
 #[test]
 fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owners() {
@@ -44,7 +45,10 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
         "42d5de0e3c23bd3d731f1d2a116f767adb43fa4df7f2722692058f480a888c2b"
     );
     assert!(!report.task_shutdown.timed_out());
-    assert!(report.joined_task_workers > 0);
+    assert_eq!(report.joined_task_workers, report.expected_task_workers);
+    for kind in TaskPoolKind::ALL {
+        assert_eq!(report.task_shutdown.for_kind(kind).panicked_workers, 0);
+    }
 }
 
 #[test]

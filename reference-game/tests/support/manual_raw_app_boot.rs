@@ -147,6 +147,7 @@ pub struct ManualRawAppBootReport {
     pub content_digest: String,
     pub command_digest: String,
     pub task_shutdown: TaskShutdownReport,
+    pub expected_task_workers: usize,
     pub joined_task_workers: usize,
 }
 
@@ -205,6 +206,19 @@ pub fn run_manual_raw_app_boot() -> Result<ManualRawAppBootReport, ManualRawAppF
         Err(_) => unreachable!("the retirement failure was handled above"),
     };
     let joined_task_workers = joined_task_workers(&task_shutdown);
+    let expected_task_workers = TaskPoolKind::ALL
+        .into_iter()
+        .map(|kind| {
+            loaded
+                .plan
+                .settings()
+                .tasks
+                .pool_config
+                .kind(kind)
+                .workers()
+                .get()
+        })
+        .sum();
 
     Ok(ManualRawAppBootReport {
         first_tick,
@@ -216,6 +230,7 @@ pub fn run_manual_raw_app_boot() -> Result<ManualRawAppBootReport, ManualRawAppF
         content_digest: digest_hex(*loaded.snapshot.content_digest().as_bytes()),
         command_digest: digest_hex(*ContentDigest::of_bytes(COMMAND_INPUT).as_bytes()),
         task_shutdown,
+        expected_task_workers,
         joined_task_workers,
     })
 }
