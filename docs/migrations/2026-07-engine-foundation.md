@@ -41,6 +41,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U10-1 | RGF-U10 | `RGF-U10` | `rust-api/behavior/safety/cache` | Image importer input, bounded file reads, PNG decode/publication, reload failure semantics, and image artifact identity | Supply owned bytes or an opened capability, use the audited bounded PNG importer, and publish only through the reservation-bearing candidate; rebuild image import caches. |
 | RGF-U4-1 | RGF-U4 | `RGF-U4` | `rust-api/behavior` | Plugin declarations, groups, slots, product planning, schema-provider input, App sealing/shutdown, and custom schedules | Replace imperative metadata/group installation and lifecycle aliases with static declarations, typed repeatable definitions, pure plans, `App::seal`, `App::shutdown_plugins`, and the unified typed schedule API. |
 | RGF-U5-1 | RGF-U5 | `RGF-U5` | `rust-api/behavior` | Code-first runtime ownership, exact stepping, typed faults, task close ownership, and Winit driving | Admit a sealed App through `RuntimeCandidate`, drive `RuntimeInstance`, use observable controls and retryable close, call `WinitRunner::run(&mut runtime)`, and rename standalone task shutdown to `shutdown_blocking`. |
+| RGF-U29-1 | RGF-U29 | `RGF-U29` | `rust-api/behavior` | Persistent codec output, registry binding, explicit component composition, and target-World apply eligibility | Return `PreparedComponentCandidate`, freeze the registry before runtime preflight, remove implicit required components/hooks from persistent types, and handle fail-closed target-World rejection. |
 
 ## Entry Contract
 
@@ -1590,6 +1591,84 @@ publication as compatibility paths.
 `reference-game/tests/prefab_startup.rs` prove authorized randomized-directory boot, strict
 formats/references, aggregate `limit + 1`, high-water/release accounting, immutable shared
 residency, source stability, and the World-independent boundary.
+
+## RGF-U29-1: Explicit Persistent Composition and Guarded Apply
+
+**Removed contract**:
+
+- Public `PreparedComponent::new` / `PreparedComponent::insert`, which allowed a codec to construct
+  an applicable value without proving that its Rust type matched the registry binding.
+- Treating a codec result from a building registry as runtime-ready state.
+- Allowing Bevy `#[require]` metadata or intrinsic component hooks to add persistent composition
+  that was absent from the Scene/Prefab record.
+- Applying persistent values to a target `World` without rechecking late required-component
+  metadata, lifecycle hooks, and matching lifecycle observers.
+
+**Canonical replacement or deletion rationale**: codecs now return the non-applicable
+`PreparedComponentCandidate`. `insert` owns a complete value, `deferred` proves through its closure
+signature that delayed work cannot access target-World resources, and `with_asset_server` declares
+possible apply-time asset resolution. Only a frozen `ComponentRegistry` can bind a candidate's Rust
+`TypeId`, stable component ID, registration function, and target-World validator into
+`PreparedComponent`.
+
+Persistent Scene/Prefab records are the complete persistent component set. Provider validation
+rejects intrinsic requirements and hooks. Every public persistent apply flushes deferred
+registration, validates the applicable target topology, and rejects late requirements, hooks, or
+matching Add/Insert/Discard/Remove/Despawn observers before its first persistent mutation. This is
+a guarded apply contract, not rollback for arbitrary hook side effects. Runtime-only ECS behavior
+remains unchanged.
+
+**Before**:
+
+```rust
+Ok(PreparedComponent::new(move |context| {
+    let image = context.resolve_asset_ref::<ImageAsset>(&image_ref)?;
+    Ok(Sprite::from_image(image))
+}))
+```
+
+**After**:
+
+```rust
+Ok(PreparedComponentCandidate::with_asset_server(move |context| {
+    let image = context.resolve_asset_ref::<ImageAsset>(&image_ref)?;
+    Ok(Sprite::from_image(image))
+}))
+```
+
+For an already decoded value, return `PreparedComponentCandidate::insert(value)`. For delayed work
+that cannot resolve assets, use `PreparedComponentCandidate::deferred(|| ...)`.
+
+**Affected examples and fixtures**: built-in Sprite, Tilemap, and runtime UI codecs now declare
+asset access only when their decoded value contains a deferred asset reference. Scene, Prefab,
+authoring, Play Mode, direct apply, derive, and independent reference-game fixtures all use the
+registry-bound path.
+
+**User action**: update hand-written codec preflight closures to return
+`PreparedComponentCandidate`. Remove `#[require]` and intrinsic component hooks from persistent
+types; model every stored component explicitly in Scene/Prefab data and perform derived/runtime
+projection after persistent publication. Freeze the registry before calling runtime preflight and
+handle `ComponentCodecError::PersistentApplyRejected` or
+`ComponentCodecError::PersistentApplySupportRejected` without retrying in place.
+
+**Source action**: `none`; the canonical Scene/Prefab component records already express the stored
+set explicitly.
+
+**Cache action**: `keep`; rebuild Rust artifacts after the API change.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert the complete RGF-U29 code and callers together. Do not restore public
+applicable-value construction or infer missing persistent components through Bevy lifecycle
+metadata.
+
+**Verification anchors**: `crates/nara_ecs/src/__private.rs#tests`,
+`crates/nara_reflect/src/persistent_apply.rs#persistent_apply_contract_tests`,
+`crates/nara_reflect/tests/registry_contract.rs`, `crates/nara_scene/src/tests.rs`,
+`tests/scene_component_composition.rs`, `tests/scene_sprite_serialization.rs`, and
+`reference-game/tests/authoring.rs` cover static provider rejection, frozen binding, every
+lifecycle event and observer scope, late required metadata, binding authority, asset-access
+classification, exact persistent composition, and external construction denial.
 
 ## Persistent Format Matrix
 

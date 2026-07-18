@@ -2,7 +2,9 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-07-18
+**Implemented Slices**: Scene/Prefab/Patch document foundation; RGF-U29 explicit persistent
+composition and guarded target-World apply on 2026-07-18
 **Refined By**: ADR 0038: Scene/Prefab Authoring Identity and Provenance; ADR 0043:
 Scene, Prefab, and Patch Document Migration Policy; ADR 0049: Untrusted Project Input and Parse
 Budget Policy; ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures
@@ -205,3 +207,6 @@ but process-local ECS behavior is not implicit persistent meaning.
 - Stable catalog and runtime binding: [0081-schema-source-stable-identity-catalog-and-runtime-binding.md](0081-schema-source-stable-identity-catalog-and-runtime-binding.md)
 - Bevy required-component implementation: `repo-ref/bevy/crates/bevy_ecs/src/component/required.rs`
 - Bevy component hook invocation: `repo-ref/bevy/crates/bevy_ecs/src/bundle/spawner.rs`
+- RGF-U29 verification:
+  `docs/knowledge/engineering/verification/2026-07/2026-07-18T102650Z-rgf-u29-explicit-persistent-composition-verification-57a04a45133744909a7c43441c99c9e0.md`
+- RGF-U29 implementation: commit `e95cd4b`

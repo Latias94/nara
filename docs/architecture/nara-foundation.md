@@ -493,8 +493,8 @@ second real adapter or stronger isolation pressure.
   are absent from the canonical-v1 catalog fingerprint; persistent bindings may not depend on them
   for durable composition, defaults, or construction side effects. RGF-U12 now certifies bounded
   document/schema truth and the explicit expanded stable-ID set, but never a future target `World`
-  topology. In parallel, RGF-U29
-  must reject required-component/intrinsic-hook metadata at provider freeze and recheck actual
+  topology. RGF-U29 now rejects required-component/intrinsic-hook metadata at provider freeze and
+  binds codec candidates through the frozen registry before rechecking actual
   `ComponentInfo` metadata including World-registered hooks plus matching
   `Add`/`Insert`/`Discard`/`Remove`/`Despawn` observers before every target-World apply. Each apply
   first flushes deferred registration, captures a post-flush rejection baseline, then holds the
@@ -506,8 +506,11 @@ second real adapter or stronger isolation pressure.
   Post-publication World-local hooks/observers remain valid runtime behavior, but a later persistent
   apply repeats the check. A matching hook rejects while it remains installed; a matching observer
   either rejects or waits for an explicit Host safe point that disables it.
-  U12 and U29 converge before RGF-U26 first materializes the snapshot. OQ-043 owns any future
-  authoring preset or catalog-derived closure.
+  Private per-target receipts and a World-global bidirectional stable/runtime binding authority
+  reject missing authority, collisions, and temporal rebinding. Candidate preparation also
+  distinguishes asset-free work from possible `AssetServer` access, avoiding false resource
+  admission. U12 and U29 now converge before RGF-U26 first materializes the snapshot. OQ-043 owns
+  any future authoring preset or catalog-derived closure.
 - One-shot scene patch and inverse transactions are implemented. ADR 0026 also selects a future
   toolkit-neutral `Begin -> bounded Preview -> Commit / Cancel` lifecycle for continuous controls,
   but the first real slider/gizmo/curve/text consumer still owns its carrier and conformance proof.

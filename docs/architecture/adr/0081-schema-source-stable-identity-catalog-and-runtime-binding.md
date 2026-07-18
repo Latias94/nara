@@ -5,7 +5,8 @@
 **Last Revised**: 2026-07-18
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
-content/fingerprint handoff on 2026-07-18
+content/fingerprint handoff on 2026-07-18; RGF-U29 explicit persistent composition and guarded
+target-World eligibility on 2026-07-18
 **Refines**: ADR 0011, ADR 0045, ADR 0051
 **Related**: ADR 0034, ADR 0058, ADR 0076
 
@@ -228,9 +229,33 @@ catalog reject before snapshot publication.
 The immutable `ProjectContentSnapshot` carries the same opaque project lineage, catalog
 fingerprint, and schema generation together with the explicit expanded stable-ID document set,
 content revision, and content digest. It stores no native type/codec binding and does not certify a
-future target `World`'s required-component, hook, or observer topology. RGF-U29 remains the owner of
-provider-freeze and per-apply target-World eligibility; U24 later compares the fresh runtime
-registry before materialization.
+future target `World`'s required-component, hook, or observer topology. RGF-U29 now supplies the
+separate provider-freeze and per-apply target-World eligibility proof; U24 later compares the fresh
+runtime registry before materialization.
+
+### Implemented RGF-U29 Persistent Apply Slice
+
+Persistent codecs produce `PreparedComponentCandidate`, which has no public apply operation. A
+frozen `ComponentRegistry` alone may bind the candidate's stable component identity, Rust type,
+registration function, and target-World validator into `PreparedComponent`. Building registries
+expose no applicable candidate, and compile-fail coverage prevents external construction of the
+bound type.
+
+Provider validation rejects Scene-capable component types with Bevy required-component metadata or
+intrinsic lifecycle hooks. Each real persistent apply then flushes deferred registration and checks
+the target World under one exclusive borrow. Fresh targets cover real component metadata plus
+event-global/component-global Add, Insert, Discard, Remove, and Despawn observers before allocation;
+existing or reserved targets also cover entity and entity+component scopes before mutation.
+
+Private target receipts and a World-global bidirectional stable/runtime binding authority preserve
+identity across target retirement and reject missing authority, collisions, temporal rebinding, and
+cross-World use. Asset preparation separately declares whether it may need `AssetServer`, so an
+asset-free value neither rejects an unrelated resource observer nor inserts the resource.
+
+The Bevy-version-coupled hook and observer probes remain in `nara_ecs::__private`. Runtime-only
+components and post-publication runtime behavior remain valid; later persistent work rechecks the
+current topology. This slice proves pre-mutation rejection, not rollback of arbitrary lifecycle or
+native-service side effects.
 
 ### Persistent File Boundary
 

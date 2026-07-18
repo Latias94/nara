@@ -42,6 +42,45 @@ registry.register_persistent_component::<Player>()?;
 The registry owner freezes the complete catalog during plugin `finish`. A failed registration or
 freeze leaves the building candidate repairable; a frozen registry rejects every mutation.
 
+Only a frozen registry may turn codec output into an applicable component. A building registry
+returns no runtime preflight result, so plugin preparation cannot publish a value before the final
+schema, native binding, and stable identity are fixed.
+
+## Manual Codecs and Apply Preparation
+
+Use the derive for supported Rust field types. A domain that needs a hand-written codec returns a
+`PreparedComponentCandidate`; it never constructs `PreparedComponent` directly:
+
+```rust
+registry.register_persistent_component_with_codec::<Health, _, _>(
+    schema,
+    |value| {
+        let current = value.field_i64("current")?;
+        Ok(PreparedComponentCandidate::insert(Health { current }))
+    },
+    |health| Ok(ComponentValue::map([
+        ("current", ComponentValue::I64(health.current)),
+    ])),
+)?;
+```
+
+Choose the candidate constructor by the work it can perform:
+
+- `insert(value)` for a fully decoded component;
+- `deferred(|| ...)` for fallible delayed preparation that cannot access target-World resources;
+- `with_asset_server(|context| ...)` only when apply-time work may resolve an `AssetRef` through
+  `ComponentApplyContext`.
+
+The distinction is enforced by the closure signature. Do not use the asset-server constructor for
+an asset-free value: fresh-scene admission must know every resource insertion that may occur before
+it allocates targets.
+
+Persistent components describe the complete stored component set. They may not declare Bevy
+`#[require]` metadata or intrinsic component hooks. A target `World` that later registers required
+components, lifecycle hooks, or matching lifecycle observers rejects the affected persistent apply
+before its first persistent mutation. Runtime-only components may continue to use those Bevy
+features normally.
+
 ## Stable IDs, Aliases, Versions, and Tombstones
 
 - Component and field `id` values are opaque persistent identities. Never derive them from Rust
