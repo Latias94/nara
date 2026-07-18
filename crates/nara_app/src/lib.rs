@@ -32,7 +32,9 @@ pub use plugin::{
     PluginPlanFingerprint, PluginPreflightContext, PluginPreflightResource, PluginPrepareError,
     PluginPrepareFailure, PluginProductCapability, PluginSchemaProviderId, PluginServiceId,
     PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId, PluginSlot,
-    PluginSlotId, PluginSlotPresence, Plugins, ReplayablePlugins, ResolvedPluginGroup, SealedApp,
+    PluginSlotId, PluginSlotPresence, Plugins, ReplayablePlugins, ResolvedPluginGroup,
+    RetainedPluginInstantiationFailure, RuntimeConstructionError, RuntimeConstructionFailure,
+    SealedApp,
 };
 pub use runtime::*;
 
@@ -1159,6 +1161,14 @@ impl App {
             active_plugin_hook: None,
             started: false,
         }
+    }
+
+    pub(crate) fn new_with_runtime_obligations(
+        runtime_obligations: RuntimeObligationLedger,
+    ) -> Self {
+        let mut app = Self::new();
+        app.runtime_obligations = runtime_obligations;
+        app
     }
 
     #[must_use]

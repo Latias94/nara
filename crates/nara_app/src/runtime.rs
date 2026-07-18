@@ -15,8 +15,8 @@ use bevy_ecs::error::{
     BevyError, ErrorContext, ErrorHandler, FallbackErrorHandler, Severity, match_severity,
 };
 use nara_ecs::{
-    Mut, Resource, World, change_detection::Tick, component::Mutable, lifecycle::HookContext,
-    world::DeferredWorld,
+    Command, Mut, Resource, World, change_detection::Tick, component::Mutable,
+    lifecycle::HookContext, world::DeferredWorld,
 };
 use thiserror::Error;
 
@@ -467,6 +467,15 @@ pub struct RuntimeDriverScope<'world> {
     world: &'world mut World,
 }
 
+/// Short-lived command application while a runtime candidate is still unpublished.
+///
+/// This scope exists for product Hosts that must materialize validated project state before
+/// startup. The candidate revalidates its sticky fault bridge after the scope returns, so replacing
+/// protected runtime authority cannot silently publish a healthy runtime.
+pub struct RuntimeCandidateScope<'world> {
+    world: &'world mut World,
+}
+
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeWorldAccessError {
     #[error("runtime-managed ECS type {type_name} is protected from scoped mutation")]
@@ -516,6 +525,16 @@ impl RuntimeDriverScope<'_> {
     ) -> Result<Option<Mut<'_, R>>, RuntimeWorldAccessError> {
         ensure_scoped_type_is_unprotected::<R>()?;
         Ok(self.world.get_non_send_mut::<R>())
+    }
+}
+
+impl RuntimeCandidateScope<'_> {
+    /// Applies one owned ECS command immediately inside the exclusive admission transaction.
+    ///
+    /// The command cannot retain the candidate `World`, and protected runtime authority is
+    /// revalidated after the enclosing admission scope returns.
+    pub fn apply_command(&mut self, command: impl Command<Out = ()>) {
+        command.apply(self.world);
     }
 }
 
@@ -1170,6 +1189,22 @@ impl RuntimeCandidate {
         self.owner.reporter().clone()
     }
 
+    /// Runs one exclusive Host admission transaction before startup and publication.
+    ///
+    /// The mutable World reference cannot escape the closure. Runtime fault authority is checked
+    /// before and after the operation, and any bridge mutation becomes a sticky candidate fault.
+    pub fn with_admission_scope<R>(
+        &mut self,
+        operation: impl FnOnce(&mut RuntimeCandidateScope<'_>) -> R,
+    ) -> Result<R, RuntimeScopeError> {
+        self.owner
+            .capture_driver_scope(|world| {
+                let mut scope = RuntimeCandidateScope { world };
+                operation(&mut scope)
+            })
+            .map_err(|fault| RuntimeScopeError::Faulted { fault })
+    }
+
     pub fn begin_retirement(mut self) -> RuntimeRetirement {
         self.owner.begin_close();
         RuntimeRetirement::new(self.owner, self.generation)
@@ -1226,9 +1261,221 @@ impl RuntimeCandidate {
     }
 }
 
+/// Retryable owner retained when a repeatable plugin plan cannot be instantiated.
+///
+/// Retained-only preparation may fail before an `App` exists and therefore start complete.
+/// Managed runtime construction creates the `App` with the Host ledger before preparation, so its
+/// preparation, build, and finish failures retain that `App` and every registered runtime close
+/// participant until cleanup completes or ownership moves to process quarantine during unwinding.
+#[must_use = "failed runtime preparation retains close authority until cleanup completes"]
+pub(crate) struct RuntimePreparationRetirement {
+    owner: Option<RuntimeOwner>,
+}
+
+impl Debug for RuntimePreparationRetirement {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimePreparationRetirement")
+            .field("state", &self.retirement_state())
+            .finish_non_exhaustive()
+    }
+}
+
+impl RuntimePreparationRetirement {
+    pub(crate) fn complete() -> Self {
+        Self { owner: None }
+    }
+
+    pub(crate) fn from_app(app: App, close_policy: RuntimeClosePolicy) -> Self {
+        Self::from_app_with_obligations(app, RuntimeObligationLedger::new(), close_policy)
+    }
+
+    pub(crate) fn from_app_with_obligations(
+        mut app: App,
+        mut obligations: RuntimeObligationLedger,
+        close_policy: RuntimeClosePolicy,
+    ) -> Self {
+        obligations.append_for_retirement(app.take_runtime_obligations());
+        let reporter = app.runtime_fault_reporter.clone();
+        let mut owner = RuntimeOwner::new(app, obligations, reporter, close_policy);
+        owner.begin_close();
+        Self { owner: Some(owner) }
+    }
+
+    #[must_use]
+    pub fn retirement_state(&self) -> RuntimeCandidateRetirementState {
+        self.owner
+            .as_ref()
+            .map_or(RuntimeCandidateRetirementState::Retired, |owner| {
+                owner.close_state()
+            })
+    }
+
+    #[must_use]
+    pub fn close_evidence(&self) -> Option<&RuntimeCloseEvidence> {
+        self.owner.as_ref().map(|owner| owner.close_evidence())
+    }
+
+    pub fn drive_retirement(&mut self) -> RuntimeCandidateRetirementState {
+        let Some(owner) = &mut self.owner else {
+            return RuntimeCandidateRetirementState::Retired;
+        };
+        if owner.close_state() == RuntimeCandidateRetirementState::RetirementIncomplete {
+            owner.retry_close();
+        }
+        owner.drive_close();
+        owner.close_state()
+    }
+}
+
 pub struct ReadyRuntimeCandidate {
     owner: RuntimeOwner,
     generation: RuntimeGeneration,
+}
+
+/// Host-owned destination for one atomically published runtime owner.
+///
+/// The contained runtime cannot be replaced through this API. A product Host reserves the slot,
+/// publishes one ready candidate into it, then drives or retires that same owner.
+#[must_use = "runtime publication slots retain the published runtime owner"]
+pub struct RuntimePublicationSlot {
+    state: RuntimePublicationSlotState,
+}
+
+enum RuntimePublicationSlotState {
+    Vacant,
+    Published(Box<RuntimeInstance>),
+    Consumed,
+}
+
+impl Debug for RuntimePublicationSlot {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimePublicationSlot")
+            .field(
+                "state",
+                &match &self.state {
+                    RuntimePublicationSlotState::Vacant => "vacant",
+                    RuntimePublicationSlotState::Published(_) => "published",
+                    RuntimePublicationSlotState::Consumed => "consumed",
+                },
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for RuntimePublicationSlot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RuntimePublicationSlot {
+    pub const fn new() -> Self {
+        Self {
+            state: RuntimePublicationSlotState::Vacant,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_vacant(&self) -> bool {
+        matches!(self.state, RuntimePublicationSlotState::Vacant)
+    }
+
+    #[must_use]
+    pub const fn runtime(&self) -> Option<&RuntimeInstance> {
+        match &self.state {
+            RuntimePublicationSlotState::Published(runtime) => Some(runtime),
+            RuntimePublicationSlotState::Vacant | RuntimePublicationSlotState::Consumed => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn runtime_mut(&mut self) -> Option<&mut RuntimeInstance> {
+        match &mut self.state {
+            RuntimePublicationSlotState::Published(runtime) => Some(runtime),
+            RuntimePublicationSlotState::Vacant | RuntimePublicationSlotState::Consumed => None,
+        }
+    }
+
+    #[must_use]
+    pub fn take(&mut self) -> Option<RuntimeInstance> {
+        let state = std::mem::replace(&mut self.state, RuntimePublicationSlotState::Consumed);
+        match state {
+            RuntimePublicationSlotState::Published(runtime) => Some(*runtime),
+            RuntimePublicationSlotState::Vacant => {
+                self.state = RuntimePublicationSlotState::Vacant;
+                None
+            }
+            RuntimePublicationSlotState::Consumed => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuntimePublicationError {
+    DestinationOccupied,
+    CandidateFault(RuntimeFault),
+    InvalidCandidatePhase,
+}
+
+/// Retryable owner retained when atomic publication rejects a ready candidate.
+#[must_use = "failed runtime publication retains close authority until cleanup completes"]
+pub struct RuntimePublicationFailure {
+    error: RuntimePublicationError,
+    retirement: RuntimeRetirement,
+}
+
+impl RuntimePublicationFailure {
+    fn rejected(mut candidate: ReadyRuntimeCandidate, error: RuntimePublicationError) -> Self {
+        candidate.owner.begin_close();
+        Self {
+            error,
+            retirement: RuntimeRetirement::new(candidate.owner, candidate.generation),
+        }
+    }
+
+    fn faulted(
+        mut owner: RuntimeOwner,
+        generation: RuntimeGeneration,
+        fault: RuntimeFault,
+    ) -> Self {
+        owner.reporter().record_canonical(fault.clone());
+        owner.begin_close();
+        Self {
+            error: RuntimePublicationError::CandidateFault(fault),
+            retirement: RuntimeRetirement::new(owner, generation),
+        }
+    }
+
+    #[must_use]
+    pub const fn error(&self) -> &RuntimePublicationError {
+        &self.error
+    }
+
+    #[must_use]
+    pub fn retirement_state(&self) -> RuntimeCandidateRetirementState {
+        self.retirement.retirement_state()
+    }
+
+    #[must_use]
+    pub fn close_evidence(&self) -> &RuntimeCloseEvidence {
+        self.retirement.close_evidence()
+    }
+
+    pub fn drive_retirement(&mut self) -> RuntimeCandidateRetirementState {
+        self.retirement.drive_retirement()
+    }
+}
+
+impl Debug for RuntimePublicationFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimePublicationFailure")
+            .field("error", &self.error)
+            .field("retirement", &self.retirement_state())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Debug for ReadyRuntimeCandidate {
@@ -1249,20 +1496,46 @@ impl ReadyRuntimeCandidate {
     #[must_use]
     pub fn promote(self) -> RuntimeInstance {
         let fault = self.owner.reporter().publish();
-        RuntimeInstance {
-            owner: self.owner,
-            generation: self.generation,
-            state: if fault.is_some() {
-                RuntimeState::Faulted
-            } else {
-                RuntimeState::Running
-            },
-            pending_control: None,
-            control_results: VecDeque::new(),
-            next_control_ticket: 1,
-            stop_ticket: None,
-            active_close_ticket: None,
+        RuntimeInstance::from_promotion(self.owner, self.generation, fault)
+    }
+
+    /// Publishes this candidate directly into an empty Host-owned runtime slot.
+    ///
+    /// The fault reporter is locked across the final candidate check, owner transfer, and
+    /// publication marker. A concurrent fault therefore either rejects the candidate before the
+    /// transfer or observes a runtime that is already owned by the destination slot.
+    ///
+    pub fn publish_into(
+        self,
+        destination: &mut RuntimePublicationSlot,
+    ) -> Result<(), RuntimePublicationFailure> {
+        if !destination.is_vacant() {
+            return Err(RuntimePublicationFailure::rejected(
+                self,
+                RuntimePublicationError::DestinationOccupied,
+            ));
         }
+
+        let Self { owner, generation } = self;
+        let reporter = owner.reporter().clone();
+        let mut state = lock_unpoisoned(&reporter.cell.state);
+        if state.publication != RuntimePublicationPhase::Candidate {
+            drop(state);
+            return Err(RuntimePublicationFailure::rejected(
+                Self { owner, generation },
+                RuntimePublicationError::InvalidCandidatePhase,
+            ));
+        }
+        if let Some(fault) = reporter.cell.first_fault.get().cloned() {
+            drop(state);
+            return Err(RuntimePublicationFailure::faulted(owner, generation, fault));
+        }
+
+        destination.state = RuntimePublicationSlotState::Published(Box::new(
+            RuntimeInstance::from_promotion(owner, generation, None),
+        ));
+        state.publication = RuntimePublicationPhase::Published;
+        Ok(())
     }
 }
 
@@ -1519,6 +1792,27 @@ impl Debug for RuntimeInstance {
 }
 
 impl RuntimeInstance {
+    fn from_promotion(
+        owner: RuntimeOwner,
+        generation: RuntimeGeneration,
+        fault: Option<RuntimeFault>,
+    ) -> Self {
+        Self {
+            owner,
+            generation,
+            state: if fault.is_some() {
+                RuntimeState::Faulted
+            } else {
+                RuntimeState::Running
+            },
+            pending_control: None,
+            control_results: VecDeque::new(),
+            next_control_ticket: 1,
+            stop_ticket: None,
+            active_close_ticket: None,
+        }
+    }
+
     #[must_use]
     pub const fn generation(&self) -> RuntimeGeneration {
         self.generation

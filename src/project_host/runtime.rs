@@ -1,0 +1,1306 @@
+use std::{
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
+
+use nara_app::{
+    PluginError, PluginHook, PluginHookMutation, PluginInstantiationError, PluginPlanError,
+    PluginPrepareError, RuntimeAdmissionError, RuntimeCandidateFailure,
+    RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseErrorDisposition,
+    RuntimeCloseEvidence, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
+    RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
+    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeInstance, RuntimeObligationLedger,
+    RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
+};
+use nara_diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
+    PublicDiagnosticIdentifier, SafeSummary,
+};
+use nara_ecs::{Resource, World};
+use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
+use nara_reflect::{CatalogFingerprint, ComponentRegistry};
+use nara_scene::spawn_scene;
+
+use super::{
+    CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
+    RuntimePlan, RuntimePlanError,
+};
+
+const PROJECT_MANIFEST: &str = "nara.toml";
+
+mod action;
+
+pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
+
+struct RuntimeStartAttempt {
+    owner: Arc<HostStartClaim>,
+    epoch: u64,
+    stamp: RuntimeStartStamp,
+    inputs: Option<RuntimeStartInputs>,
+}
+
+struct RuntimeStartInputs {
+    snapshot: ProjectContentSnapshot,
+    plan: RuntimePlan,
+    commands: Vec<GameplayCommandSubmission>,
+    obligations: RuntimeObligationLedger,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct RuntimeStartStamp {
+    lineage: ProjectSettingsLineage,
+    content_revision: ProjectContentRevision,
+    schema_fingerprint: CatalogFingerprint,
+}
+
+impl RuntimeStartStamp {
+    fn capture(snapshot: &ProjectContentSnapshot) -> Self {
+        Self {
+            lineage: snapshot.lineage(),
+            content_revision: snapshot.revision(),
+            schema_fingerprint: snapshot.schema_fingerprint(),
+        }
+    }
+
+    fn matches(&self, snapshot: &ProjectContentSnapshot, plan: &RuntimePlan) -> bool {
+        self.lineage == snapshot.lineage()
+            && self.lineage == plan.lineage()
+            && self.content_revision == snapshot.revision()
+            && self.schema_fingerprint == snapshot.schema_fingerprint()
+            && self.schema_fingerprint == plan.schema_validation().fingerprint()
+    }
+}
+
+struct HostStartClaim {
+    active_epoch: AtomicU64,
+}
+
+impl HostStartClaim {
+    const NONE: u64 = 0;
+
+    const fn new() -> Self {
+        Self {
+            active_epoch: AtomicU64::new(Self::NONE),
+        }
+    }
+
+    fn try_begin(&self, epoch: u64) -> bool {
+        debug_assert_ne!(epoch, Self::NONE);
+        self.active_epoch
+            .compare_exchange(Self::NONE, epoch, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    fn is_active(&self, epoch: u64) -> bool {
+        self.active_epoch.load(Ordering::Acquire) == epoch
+    }
+
+    fn finish(&self, epoch: u64) -> bool {
+        self.active_epoch
+            .compare_exchange(epoch, Self::NONE, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    fn any_active(&self) -> bool {
+        self.active_epoch.load(Ordering::Acquire) != Self::NONE
+    }
+}
+
+struct ActiveStartClaim {
+    owner: Arc<HostStartClaim>,
+    epoch: u64,
+    active: bool,
+}
+
+impl ActiveStartClaim {
+    fn new(owner: Arc<HostStartClaim>, epoch: u64) -> Self {
+        Self {
+            owner,
+            epoch,
+            active: true,
+        }
+    }
+
+    fn finish(mut self) {
+        let released = self.owner.finish(self.epoch);
+        debug_assert!(released, "the Host must own the completed start claim");
+        self.active = false;
+    }
+}
+
+impl Drop for ActiveStartClaim {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self.owner.finish(self.epoch);
+        }
+    }
+}
+
+impl RuntimeStartAttempt {
+    fn take_for(&mut self, host: &ProjectHost) -> Result<RuntimeStartInputs, HostFault> {
+        let valid_owner = Arc::ptr_eq(&self.owner, &host.start_claim);
+        let valid_epoch = self.owner.is_active(self.epoch);
+        let valid_slot = matches!(host.slot, ProjectHostSlot::Empty);
+        let valid_stamp = self
+            .inputs
+            .as_ref()
+            .is_some_and(|inputs| self.stamp.matches(&inputs.snapshot, &inputs.plan));
+        if !valid_owner || !valid_epoch || !valid_slot || !valid_stamp {
+            return Err(HostFault::new(single_error(
+                "project.run.stale-start",
+                "Project run start identity is stale",
+            )));
+        }
+        self.inputs.take().ok_or_else(|| {
+            HostFault::new(single_error(
+                "project.run.stale-start",
+                "Project run start identity is stale",
+            ))
+        })
+    }
+}
+
+impl Drop for RuntimeStartAttempt {
+    fn drop(&mut self) {
+        if self.inputs.is_some() {
+            // No integration code can register into this private ledger before `take_for`.
+            // Dropping an unclaimed attempt therefore releases an empty reservation ledger.
+            let _ = self.owner.finish(self.epoch);
+        }
+    }
+}
+
+struct ProjectHost {
+    start_claim: Arc<HostStartClaim>,
+    next_epoch: u64,
+    cleanup_policy: RuntimeClosePolicy,
+    slot: ProjectHostSlot,
+}
+
+enum ProjectHostSlot {
+    Empty,
+    Running(Box<PublishedProjectRuntime>),
+    Cleaning {
+        epoch: u64,
+        owner: Box<CleanupOwner>,
+    },
+}
+
+struct PublishedProjectRuntime {
+    epoch: u64,
+    runtime: RuntimePublicationSlot,
+    _snapshot: ProjectContentSnapshot,
+    _plan: RuntimePlan,
+}
+
+impl PublishedProjectRuntime {
+    fn runtime(&self) -> &RuntimeInstance {
+        self.runtime
+            .runtime()
+            .expect("a visible project runtime slot is fully published")
+    }
+
+    fn runtime_mut(&mut self) -> &mut RuntimeInstance {
+        self.runtime
+            .runtime_mut()
+            .expect("a visible project runtime slot is fully published")
+    }
+
+    fn take_runtime(&mut self) -> RuntimeInstance {
+        self.runtime
+            .take()
+            .expect("a visible project runtime slot is fully published")
+    }
+}
+
+struct HostPublicationReservation<'host> {
+    host: &'host mut ProjectHost,
+    active: bool,
+}
+
+impl<'host> HostPublicationReservation<'host> {
+    fn new(
+        host: &'host mut ProjectHost,
+        epoch: u64,
+        snapshot: ProjectContentSnapshot,
+        plan: RuntimePlan,
+    ) -> Self {
+        debug_assert!(matches!(host.slot, ProjectHostSlot::Empty));
+        host.slot = ProjectHostSlot::Running(Box::new(PublishedProjectRuntime {
+            epoch,
+            runtime: RuntimePublicationSlot::new(),
+            _snapshot: snapshot,
+            _plan: plan,
+        }));
+        Self { host, active: true }
+    }
+
+    fn destination(&mut self) -> &mut RuntimePublicationSlot {
+        match &mut self.host.slot {
+            ProjectHostSlot::Running(published) => &mut published.runtime,
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => {
+                unreachable!("an active publication reservation owns the publishing slot")
+            }
+        }
+    }
+
+    fn commit(mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for HostPublicationReservation<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.host.slot = ProjectHostSlot::Empty;
+        }
+    }
+}
+
+enum CleanupOwner {
+    Construction(RuntimeConstructionFailure),
+    Candidate(RuntimeRetirement),
+    Publication(RuntimePublicationFailure),
+    Startup(RuntimeCandidateFailure),
+}
+
+enum CleanupDriveOutcome {
+    Incomplete,
+    Complete {
+        failed: bool,
+        diagnostics: DiagnosticReport,
+    },
+}
+
+impl CleanupOwner {
+    fn state(&self) -> RuntimeCandidateRetirementState {
+        match self {
+            Self::Construction(owner) => owner.retirement_state(),
+            Self::Candidate(owner) => owner.retirement_state(),
+            Self::Publication(owner) => owner.retirement_state(),
+            Self::Startup(owner) => owner.retirement_state(),
+        }
+    }
+
+    fn drive(&mut self) -> RuntimeCandidateRetirementState {
+        match self {
+            Self::Construction(owner) => owner.drive_retirement(),
+            Self::Candidate(owner) => owner.drive_retirement(),
+            Self::Publication(owner) => owner.drive_retirement(),
+            Self::Startup(owner) => owner.drive_retirement(),
+        }
+    }
+
+    fn close_evidence(&self) -> Option<&RuntimeCloseEvidence> {
+        match self {
+            Self::Construction(owner) => owner.close_evidence(),
+            Self::Candidate(owner) => Some(owner.close_evidence()),
+            Self::Publication(owner) => Some(owner.close_evidence()),
+            Self::Startup(owner) => Some(owner.close_evidence()),
+        }
+    }
+
+    fn completion_failure_report(&self) -> DiagnosticReport {
+        let mut diagnostics = DiagnosticReport::default();
+        if let Some(evidence) = self.close_evidence()
+            && close_evidence_has_terminal_failure(evidence)
+        {
+            diagnostics.extend(cleanup_failed_report(evidence));
+        }
+        if matches!(self, Self::Candidate(owner) if owner.fault().is_some()) {
+            diagnostics.extend(runtime_faulted_report());
+        }
+        diagnostics
+    }
+}
+
+impl ProjectHost {
+    fn new(cleanup_policy: RuntimeClosePolicy) -> Self {
+        Self {
+            start_claim: Arc::new(HostStartClaim::new()),
+            next_epoch: 1,
+            cleanup_policy,
+            slot: ProjectHostSlot::Empty,
+        }
+    }
+
+    fn begin_start(
+        &mut self,
+        snapshot: ProjectContentSnapshot,
+        plan: RuntimePlan,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Result<RuntimeStartAttempt, HostFault> {
+        if !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active() {
+            return Err(HostFault::new(single_error(
+                "project.run.busy",
+                "Project Host already owns an active run",
+            )));
+        }
+        if snapshot.lineage() != plan.lineage() {
+            return Err(HostFault::new(single_error(
+                "project.run.lineage-mismatch",
+                "Project content and runtime plan lineages do not match",
+            )));
+        }
+        if snapshot.schema_fingerprint() != plan.schema_validation().fingerprint() {
+            return Err(HostFault::new(single_error(
+                "project.run.schema-mismatch",
+                "Project content and runtime plan schemas do not match",
+            )));
+        }
+        let epoch = self.next_epoch;
+        self.next_epoch = self.next_epoch.checked_add(1).ok_or_else(|| {
+            HostFault::new(single_error(
+                "project.run.epoch-exhausted",
+                "Project Host run identities are exhausted",
+            ))
+        })?;
+        if !self.start_claim.try_begin(epoch) {
+            return Err(HostFault::new(single_error(
+                "project.run.busy",
+                "Project Host already owns an active run",
+            )));
+        }
+        let stamp = RuntimeStartStamp::capture(&snapshot);
+        Ok(RuntimeStartAttempt {
+            owner: Arc::clone(&self.start_claim),
+            epoch,
+            stamp,
+            inputs: Some(RuntimeStartInputs {
+                snapshot,
+                plan,
+                commands,
+                obligations: RuntimeObligationLedger::new(),
+            }),
+        })
+    }
+
+    fn complete_start(
+        &mut self,
+        attempt: &mut RuntimeStartAttempt,
+    ) -> Result<DiagnosticReport, HostFault> {
+        let epoch = attempt.epoch;
+        let inputs = attempt.take_for(self)?;
+        let claim = ActiveStartClaim::new(Arc::clone(&self.start_claim), epoch);
+        let RuntimeStartInputs {
+            snapshot,
+            plan,
+            commands,
+            obligations,
+        } = inputs;
+
+        let mut candidate = match plan
+            .plugin_plan()
+            .instantiate_runtime_candidate(obligations, self.cleanup_policy)
+        {
+            Ok(candidate) => candidate,
+            Err(owner) => {
+                let diagnostics = runtime_construction_failure_report(owner.error());
+                self.install_start_cleanup(epoch, CleanupOwner::Construction(owner));
+                return Err(HostFault::new(diagnostics));
+            }
+        };
+
+        let admission_plan = plan.clone();
+        let admission_snapshot = snapshot.clone();
+        let admission = candidate.with_admission_scope(move |scope| {
+            let result = Arc::new(OnceLock::new());
+            let command_result = Arc::clone(&result);
+            scope.apply_command(move |world: &mut World| {
+                let value = materialize_project_runtime(
+                    world,
+                    &admission_plan,
+                    &admission_snapshot,
+                    commands,
+                );
+                assert!(
+                    command_result.set(value).is_ok(),
+                    "one candidate admission command publishes one result"
+                );
+            });
+            let result = match Arc::try_unwrap(result) {
+                Ok(result) => result,
+                Err(_) => unreachable!("the synchronous admission command releases its result"),
+            };
+            result
+                .into_inner()
+                .expect("the synchronous admission command publishes its result")
+        });
+        let diagnostics = match admission {
+            Ok(Ok(diagnostics)) => diagnostics,
+            Ok(Err(fault)) => {
+                self.install_start_cleanup(
+                    epoch,
+                    CleanupOwner::Candidate(candidate.begin_retirement()),
+                );
+                return Err(fault);
+            }
+            Err(_) => {
+                self.install_start_cleanup(
+                    epoch,
+                    CleanupOwner::Candidate(candidate.begin_retirement()),
+                );
+                return Err(HostFault::new(single_error(
+                    "project.run.candidate-scope-failed",
+                    "Project runtime candidate admission failed",
+                )));
+            }
+        };
+
+        #[cfg(test)]
+        let publication_reporter = candidate.fault_reporter();
+        let ready = match candidate.complete_startup() {
+            Ok(ready) => ready,
+            Err(owner) => {
+                self.install_start_cleanup(epoch, CleanupOwner::Startup(owner));
+                return Err(HostFault::new(single_error(
+                    "project.run.startup-failed",
+                    "Project runtime startup failed",
+                )));
+            }
+        };
+        // `complete_start` has exclusive access to the Host, so a validated empty publication slot
+        // cannot change between claim and this commit boundary.
+        debug_assert!(matches!(self.slot, ProjectHostSlot::Empty));
+
+        #[cfg(test)]
+        inject_publication_fault_if_armed(&publication_reporter);
+
+        let mut reservation = HostPublicationReservation::new(self, epoch, snapshot, plan);
+        match ready.publish_into(reservation.destination()) {
+            Ok(()) => reservation.commit(),
+            Err(owner) => {
+                drop(reservation);
+                self.install_start_cleanup(epoch, CleanupOwner::Publication(owner));
+                return Err(HostFault::new(single_error(
+                    "project.run.publication-faulted",
+                    "Project runtime faulted at the publication boundary",
+                )));
+            }
+        }
+
+        claim.finish();
+        if diagnostics.has_errors() {
+            unreachable!("scene admission rejects error diagnostics before publication");
+        }
+        Ok(diagnostics)
+    }
+
+    fn drive_one_fixed_tick(&mut self) -> Result<(), HostFault> {
+        let ProjectHostSlot::Running(published) = &mut self.slot else {
+            return Err(HostFault::new(single_error(
+                "project.run.runtime-unavailable",
+                "Project runtime is not available for a fixed tick",
+            )));
+        };
+
+        let runtime = published.runtime_mut();
+        if runtime.state() == RuntimeState::Running {
+            let RuntimeControlRequestResult::Accepted(pause) =
+                runtime.request_control(RuntimeControl::Pause)
+            else {
+                return Err(HostFault::new(single_error(
+                    "project.run.pause-rejected",
+                    "Project runtime rejected exact-step preparation",
+                )));
+            };
+            runtime.drive(Duration::ZERO).map_err(|_| {
+                HostFault::new(single_error(
+                    "project.run.pause-failed",
+                    "Project runtime could not enter exact-step mode",
+                ))
+            })?;
+            if runtime.state() != RuntimeState::Paused
+                || runtime.control_status(pause) != Some(RuntimeControlStatus::Applied)
+            {
+                return Err(HostFault::new(single_error(
+                    "project.run.pause-failed",
+                    "Project runtime could not enter exact-step mode",
+                )));
+            }
+        }
+        if runtime.state() != RuntimeState::Paused {
+            return Err(HostFault::new(single_error(
+                "project.run.exact-step-unavailable",
+                "Project runtime is not available for exact fixed stepping",
+            )));
+        }
+
+        let RuntimeControlRequestResult::Accepted(step) =
+            runtime.request_control(RuntimeControl::StepFixedTick)
+        else {
+            return Err(HostFault::new(single_error(
+                "project.run.exact-step-rejected",
+                "Project runtime rejected an exact fixed step",
+            )));
+        };
+        let outcome = runtime.drive(Duration::ZERO).map_err(|_| {
+            HostFault::new(single_error(
+                "project.run.drive-failed",
+                "Project runtime fixed tick failed",
+            ))
+        })?;
+        let actual = outcome.frame().map_or(0, |frame| frame.status.fixed_steps);
+        if actual != 1
+            || runtime.state() != RuntimeState::Paused
+            || runtime.control_status(step) != Some(RuntimeControlStatus::Applied)
+        {
+            return Err(HostFault::new(single_error_with_u64(
+                "project.run.fixed-step-mismatch",
+                "Project runtime did not execute exactly one fixed tick",
+                "actual",
+                u64::from(actual),
+            )));
+        }
+        Ok(())
+    }
+
+    fn capture_outcome<O>(&self) -> Result<O, HostFault>
+    where
+        O: Resource + Clone,
+    {
+        let ProjectHostSlot::Running(published) = &self.slot else {
+            return Err(HostFault::new(single_error(
+                "project.run.runtime-unavailable",
+                "Project runtime is not available for outcome capture",
+            )));
+        };
+        if published.runtime().fault().is_some() {
+            return Err(HostFault::new(runtime_faulted_report()));
+        }
+        published
+            .runtime()
+            .world()
+            .get_resource::<O>()
+            .cloned()
+            .ok_or_else(|| {
+                HostFault::new(single_error(
+                    "project.run.outcome-missing",
+                    "Project runtime did not publish its typed outcome",
+                ))
+            })
+    }
+
+    fn stop_running(&mut self) -> Result<(), HostFault> {
+        let slot = std::mem::replace(&mut self.slot, ProjectHostSlot::Empty);
+        let ProjectHostSlot::Running(mut published) = slot else {
+            self.slot = slot;
+            return Err(HostFault::new(single_error(
+                "project.run.runtime-unavailable",
+                "Project runtime is not available for bounded stop",
+            )));
+        };
+        if matches!(
+            published
+                .runtime_mut()
+                .request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Rejected(_)
+        ) {
+            let epoch = published.epoch;
+            self.install_cleanup(
+                epoch,
+                CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+            );
+            return Err(HostFault::new(single_error(
+                "project.run.stop-rejected",
+                "Project runtime rejected bounded stop",
+            )));
+        }
+
+        // RuntimeInstance applies Stop on one drive and polls close participants on the next. Do
+        // exactly those two bounded transitions; unfinished work is retained for a later caller
+        // drive instead of spinning the Host thread until a wall-clock deadline.
+        for _ in 0..2 {
+            if published.runtime_mut().drive(Duration::ZERO).is_err() {
+                let epoch = published.epoch;
+                self.install_cleanup(
+                    epoch,
+                    CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+                );
+                return Err(HostFault::new(single_error(
+                    "project.run.stop-drive-failed",
+                    "Project runtime stop drive failed",
+                )));
+            }
+            if matches!(
+                published.runtime().state(),
+                RuntimeState::Stopped | RuntimeState::CloseIncomplete
+            ) {
+                break;
+            }
+        }
+
+        match published.runtime().state() {
+            RuntimeState::Stopped => {
+                if close_evidence_has_terminal_failure(published.runtime().close_evidence()) {
+                    Err(HostFault::new(cleanup_failed_report(
+                        published.runtime().close_evidence(),
+                    )))
+                } else if published.runtime().fault().is_some() {
+                    Err(HostFault::new(runtime_faulted_report()))
+                } else {
+                    Ok(())
+                }
+            }
+            RuntimeState::Stopping | RuntimeState::CloseIncomplete => {
+                let epoch = published.epoch;
+                let mut diagnostics =
+                    cleanup_incomplete_report(published.runtime().close_evidence());
+                if published.runtime().fault().is_some() {
+                    diagnostics.extend(runtime_faulted_report());
+                }
+                if close_evidence_has_terminal_failure(published.runtime().close_evidence()) {
+                    diagnostics.extend(single_error(
+                        "project.run.cleanup-failed",
+                        "Project runtime cleanup reported a terminal failure",
+                    ));
+                }
+                self.install_cleanup(
+                    epoch,
+                    CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+                );
+                Err(HostFault::new(diagnostics))
+            }
+            RuntimeState::Running
+            | RuntimeState::Paused
+            | RuntimeState::Faulted
+            | RuntimeState::Stepping => {
+                let epoch = published.epoch;
+                self.install_cleanup(
+                    epoch,
+                    CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+                );
+                Err(HostFault::new(single_error(
+                    "project.run.stop-drive-failed",
+                    "Project runtime stop drive failed",
+                )))
+            }
+        }
+    }
+
+    fn retire_running(&mut self) {
+        let slot = std::mem::replace(&mut self.slot, ProjectHostSlot::Empty);
+        if let ProjectHostSlot::Running(mut published) = slot {
+            let epoch = published.epoch;
+            self.install_cleanup(
+                epoch,
+                CleanupOwner::Candidate(published.take_runtime().begin_retirement()),
+            );
+        } else {
+            self.slot = slot;
+        }
+    }
+
+    fn install_start_cleanup(&mut self, epoch: u64, owner: CleanupOwner) {
+        self.install_cleanup(epoch, owner);
+    }
+
+    fn install_cleanup(&mut self, epoch: u64, owner: CleanupOwner) {
+        debug_assert!(matches!(self.slot, ProjectHostSlot::Empty));
+        self.slot = if owner.state() == RuntimeCandidateRetirementState::Retired {
+            ProjectHostSlot::Empty
+        } else {
+            ProjectHostSlot::Cleaning {
+                epoch,
+                owner: Box::new(owner),
+            }
+        };
+    }
+
+    fn has_cleanup_owner(&self) -> bool {
+        matches!(self.slot, ProjectHostSlot::Cleaning { .. })
+    }
+
+    fn drive_cleanup_once(&mut self) -> CleanupDriveOutcome {
+        let slot = std::mem::replace(&mut self.slot, ProjectHostSlot::Empty);
+        let ProjectHostSlot::Cleaning { epoch, mut owner } = slot else {
+            self.slot = slot;
+            return CleanupDriveOutcome::Complete {
+                failed: false,
+                diagnostics: DiagnosticReport::default(),
+            };
+        };
+        owner.drive();
+        if owner.state() == RuntimeCandidateRetirementState::Retired {
+            let diagnostics = owner.completion_failure_report();
+            CleanupDriveOutcome::Complete {
+                failed: diagnostics.has_errors(),
+                diagnostics,
+            }
+        } else {
+            self.slot = ProjectHostSlot::Cleaning { epoch, owner };
+            CleanupDriveOutcome::Incomplete
+        }
+    }
+}
+
+fn materialize_project_runtime(
+    world: &mut World,
+    plan: &RuntimePlan,
+    snapshot: &ProjectContentSnapshot,
+    commands: Vec<GameplayCommandSubmission>,
+) -> Result<DiagnosticReport, HostFault> {
+    verify_runtime_registry(world, plan)?;
+    if !world.contains_resource::<GameplayCommandQueue>() {
+        return Err(HostFault::new(single_error(
+            "project.run.command-queue-missing",
+            "Project runtime has no semantic command queue",
+        )));
+    }
+    world.insert_resource(plan.settings().runtime.runtime_time_settings());
+    world.insert_resource(plan.settings().runtime.fixed_time());
+
+    let scene = spawn_scene(
+        world,
+        plan.schema_validation().registry(),
+        snapshot.expanded_startup_scene(),
+    );
+    if scene.diagnostics.has_errors() || scene.instance.is_none() {
+        return Err(HostFault::new(scene.diagnostics));
+    }
+    let diagnostics = scene.diagnostics;
+    let mut queue = world
+        .get_resource_mut::<GameplayCommandQueue>()
+        .expect("the queue presence was checked before scene allocation");
+    for command in commands {
+        queue.submit(command).map_err(|_| {
+            HostFault::new(single_error(
+                "project.run.command-rejected",
+                "Project semantic control input was rejected",
+            ))
+        })?;
+    }
+    Ok(diagnostics)
+}
+
+fn verify_runtime_registry(world: &World, plan: &RuntimePlan) -> Result<(), HostFault> {
+    let registry = world.get_resource::<ComponentRegistry>().ok_or_else(|| {
+        HostFault::new(single_error(
+            "project.run.registry-missing",
+            "Project runtime component registry is missing",
+        ))
+    })?;
+    let fingerprint = registry.catalog().map_err(|_| {
+        HostFault::new(single_error(
+            "project.run.registry-unavailable",
+            "Project runtime component registry is unavailable",
+        ))
+    })?;
+    if fingerprint.fingerprint() != plan.schema_validation().fingerprint() {
+        return Err(HostFault::new(single_error(
+            "project.run.registry-mismatch",
+            "Project runtime component registry changed before scene admission",
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct HostFault {
+    diagnostics: DiagnosticReport,
+}
+
+impl HostFault {
+    const fn new(diagnostics: DiagnosticReport) -> Self {
+        Self { diagnostics }
+    }
+}
+
+fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
+    match error {
+        RuntimePlanError::Composition(error) => composition_failure_report(error),
+        RuntimePlanError::PluginPlan(error) => plugin_plan_failure_report(error),
+    }
+}
+
+fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
+    let reason = match error {
+        CompositionError::ProjectLineageMismatch => "project-lineage-mismatch",
+        CompositionError::UnknownProductCapability { .. } => "unknown-product-capability",
+        CompositionError::UncompiledProductCapability { .. } => "uncompiled-product-capability",
+        CompositionError::UnrequestedProductCapability { .. } => "unrequested-product-capability",
+        CompositionError::MissingSchemaProvider { .. } => "missing-schema-provider",
+        CompositionError::DivergentSchemaProvider { .. } => "divergent-schema-provider",
+        CompositionError::AmbiguousSchemaProviderOwner { .. } => "ambiguous-schema-provider-owner",
+        CompositionError::SchemaProviderRejected { .. } => "schema-provider-rejected",
+        CompositionError::SchemaProviderPanicked { .. } => "schema-provider-panicked",
+        CompositionError::SchemaFreezeRejected { .. } => "schema-freeze-rejected",
+    };
+    let mut diagnostic = failure_diagnostic(
+        "project.run.composition-invalid",
+        "Project runtime composition could not be admitted",
+        reason,
+    );
+    match error {
+        CompositionError::UnknownProductCapability { plugin, capability } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "capability", capability.as_str());
+        }
+        CompositionError::UncompiledProductCapability { plugin, capability }
+        | CompositionError::UnrequestedProductCapability { plugin, capability } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "capability", capability.as_str());
+        }
+        CompositionError::MissingSchemaProvider { provider }
+        | CompositionError::DivergentSchemaProvider { provider }
+        | CompositionError::AmbiguousSchemaProviderOwner { provider }
+        | CompositionError::SchemaProviderRejected { provider, .. }
+        | CompositionError::SchemaProviderPanicked { provider } => {
+            diagnostic = attach_identifier(diagnostic, "provider", provider.as_str());
+        }
+        CompositionError::ProjectLineageMismatch
+        | CompositionError::SchemaFreezeRejected { .. } => {}
+    }
+    single_diagnostic(diagnostic)
+}
+
+fn plugin_plan_failure_report(error: &PluginPlanError) -> DiagnosticReport {
+    let reason = match error {
+        PluginPlanError::DeclarationPanicked => "declaration-panicked",
+        PluginPlanError::GroupPanicked { .. } => "group-panicked",
+        PluginPlanError::GroupCycle { .. } => "group-cycle",
+        PluginPlanError::DivergentGroup { .. } => "divergent-group",
+        PluginPlanError::SlotPluginMismatch { .. } => "slot-plugin-mismatch",
+        PluginPlanError::MissingEditTarget => "missing-edit-target",
+        PluginPlanError::AmbiguousEditTarget => "ambiguous-edit-target",
+        PluginPlanError::RequiredSlotDisabled { .. } => "required-slot-disabled",
+        PluginPlanError::DuplicateSlot { .. } => "duplicate-slot",
+        PluginPlanError::DivergentSlotContract { .. } => "divergent-slot-contract",
+        PluginPlanError::ActiveSlotDisabled { .. } => "active-slot-disabled",
+        PluginPlanError::DuplicatePlugin { .. } => "duplicate-plugin",
+        PluginPlanError::DivergentDefinition { .. } => "divergent-definition",
+        PluginPlanError::MissingPlugin { .. } => "missing-plugin",
+        PluginPlanError::MissingCapability { .. } => "missing-capability",
+        PluginPlanError::MissingService { .. } => "missing-service",
+        PluginPlanError::MissingSchemaProvider { .. } => "missing-schema-provider",
+        PluginPlanError::Conflict { .. } => "plugin-conflict",
+        PluginPlanError::OrderingCycle { .. } => "ordering-cycle",
+        PluginPlanError::ImmutablePrefix => "immutable-prefix",
+    };
+    let mut diagnostic = failure_diagnostic(
+        "project.run.plugin-plan-invalid",
+        "Project plugin plan could not be resolved",
+        reason,
+    );
+    match error {
+        PluginPlanError::GroupPanicked { group } | PluginPlanError::DivergentGroup { group } => {
+            diagnostic = attach_identifier(diagnostic, "group", group.as_str());
+        }
+        PluginPlanError::GroupCycle { chain } => {
+            if let Some(group) = chain.first() {
+                diagnostic = attach_identifier(diagnostic, "first-group", group.as_str());
+            }
+            diagnostic = attach_u64(diagnostic, "group-count", chain.len());
+        }
+        PluginPlanError::SlotPluginMismatch {
+            slot,
+            expected,
+            actual,
+        } => {
+            diagnostic = attach_identifier(diagnostic, "slot", slot.as_str());
+            diagnostic = attach_identifier(diagnostic, "expected-plugin", expected.as_str());
+            diagnostic = attach_identifier(diagnostic, "actual-plugin", actual.as_str());
+        }
+        PluginPlanError::RequiredSlotDisabled { slot }
+        | PluginPlanError::DivergentSlotContract { slot }
+        | PluginPlanError::ActiveSlotDisabled { slot } => {
+            diagnostic = attach_identifier(diagnostic, "slot", slot.as_str());
+        }
+        PluginPlanError::DuplicateSlot {
+            slot,
+            first,
+            duplicate,
+        } => {
+            diagnostic = attach_identifier(diagnostic, "slot", slot.as_str());
+            diagnostic = attach_identifier(diagnostic, "first-plugin", first.as_str());
+            diagnostic = attach_identifier(diagnostic, "duplicate-plugin", duplicate.as_str());
+        }
+        PluginPlanError::DuplicatePlugin { plugin }
+        | PluginPlanError::DivergentDefinition { plugin } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+        }
+        PluginPlanError::MissingPlugin { plugin, required }
+        | PluginPlanError::Conflict {
+            plugin,
+            conflict: required,
+        } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "related-plugin", required.as_str());
+        }
+        PluginPlanError::MissingCapability { plugin, required } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "capability", required.as_str());
+        }
+        PluginPlanError::MissingService { plugin, required } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "service", required.as_str());
+        }
+        PluginPlanError::MissingSchemaProvider { plugin, required } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "provider", required.as_str());
+        }
+        PluginPlanError::OrderingCycle { plugins } => {
+            if let Some(plugin) = plugins.first() {
+                diagnostic = attach_identifier(diagnostic, "first-plugin", plugin.as_str());
+            }
+            diagnostic = attach_u64(diagnostic, "plugin-count", plugins.len());
+        }
+        PluginPlanError::DeclarationPanicked
+        | PluginPlanError::MissingEditTarget
+        | PluginPlanError::AmbiguousEditTarget
+        | PluginPlanError::ImmutablePrefix => {}
+    }
+    single_diagnostic(diagnostic)
+}
+
+fn runtime_plan_selected_report(plan: &RuntimePlan) -> DiagnosticReport {
+    let fingerprint = format!("{:?}", plan.plugin_plan().fingerprint());
+    let fingerprint = PublicDiagnosticIdentifier::new(&fingerprint)
+        .expect("a plugin plan fingerprint is a valid public identifier");
+    let diagnostic = Diagnostic::info(
+        diagnostic_code("project.run.plan-selected"),
+        safe_summary("Project runtime plan was selected"),
+    )
+    .try_with_field(DiagnosticField::public_identifier(
+        field_key("plugin-plan-fingerprint"),
+        fingerprint,
+    ))
+    .expect("the selected-plan diagnostic has one bounded field");
+    single_diagnostic(diagnostic)
+}
+
+fn runtime_construction_failure_report(error: &RuntimeConstructionError) -> DiagnosticReport {
+    match error {
+        RuntimeConstructionError::Plugin(PluginInstantiationError::Prepare(error)) => {
+            plugin_prepare_failure_report(error)
+        }
+        RuntimeConstructionError::Plugin(PluginInstantiationError::Plugin(error)) => {
+            plugin_hook_failure_report(error)
+        }
+        RuntimeConstructionError::Admission(error) => admission_failure_report(error),
+    }
+}
+
+fn plugin_prepare_failure_report(error: &PluginPrepareError) -> DiagnosticReport {
+    let (reason, plugin, failure_code) = match error {
+        PluginPrepareError::Failed { plugin, code } => ("failed", *plugin, Some(*code)),
+        PluginPrepareError::Panicked { plugin } => ("panicked", *plugin, None),
+    };
+    let mut diagnostic = failure_diagnostic(
+        "project.run.plugin-prepare-failed",
+        "Project plugin preparation failed",
+        reason,
+    );
+    diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+    if let Some(code) = failure_code {
+        diagnostic = attach_identifier(diagnostic, "failure-code", code);
+    }
+    single_diagnostic(diagnostic)
+}
+
+fn plugin_hook_failure_report(error: &PluginError) -> DiagnosticReport {
+    let mut diagnostic = failure_diagnostic(
+        "project.run.plugin-hook-failed",
+        "Project plugin lifecycle hook failed",
+        plugin_error_reason(error),
+    );
+    match error {
+        PluginError::HookMutationForbidden {
+            plugin,
+            hook,
+            mutation,
+        } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "hook", plugin_hook_id(*hook));
+            diagnostic = attach_identifier(diagnostic, "mutation", plugin_mutation_id(*mutation));
+        }
+        PluginError::SetupFailed { plugin, .. }
+        | PluginError::ComponentRegistrationFailed { plugin, .. } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            if let PluginError::ComponentRegistrationFailed { component, .. } = error {
+                diagnostic = attach_identifier(diagnostic, "component", component);
+            }
+        }
+        PluginError::HookPanicked { plugin, hook } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "hook", plugin_hook_id(*hook));
+        }
+        PluginError::CommittedPreflightRejected { plugin, source } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "cause", plugin_error_reason(source));
+        }
+        PluginError::MissingShutdownObligation { plugin, obligation }
+        | PluginError::UndeclaredShutdownObligation { plugin, obligation }
+        | PluginError::DuplicateShutdownObligation { plugin, obligation } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "obligation", obligation.as_str());
+        }
+        PluginError::DuplicateRuntimeCloseParticipant {
+            plugin,
+            obligation,
+            participant_id,
+        } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(diagnostic, "obligation", obligation.as_str());
+            diagnostic = attach_identifier(diagnostic, "participant", participant_id.as_str());
+        }
+        PluginError::AppSealed
+        | PluginError::RawBuiltInScheduleMutationForbidden
+        | PluginError::ScheduleCompatibility(_)
+        | PluginError::ShutdownObligationOutsideBuild
+        | PluginError::LifecycleShutdown
+        | PluginError::LifecyclePoisoned
+        | PluginError::FinishReentered => {}
+    }
+    single_diagnostic(diagnostic)
+}
+
+fn plugin_error_reason(error: &PluginError) -> &'static str {
+    match error {
+        PluginError::HookMutationForbidden { .. } => "hook-mutation-forbidden",
+        PluginError::AppSealed => "app-sealed",
+        PluginError::RawBuiltInScheduleMutationForbidden => "raw-schedule-mutation-forbidden",
+        PluginError::ScheduleCompatibility(_) => "schedule-compatibility",
+        PluginError::SetupFailed { .. } => "setup-failed",
+        PluginError::ComponentRegistrationFailed { .. } => "component-registration-failed",
+        PluginError::HookPanicked { .. } => "hook-panicked",
+        PluginError::CommittedPreflightRejected { .. } => "committed-preflight-rejected",
+        PluginError::MissingShutdownObligation { .. } => "missing-shutdown-obligation",
+        PluginError::UndeclaredShutdownObligation { .. } => "undeclared-shutdown-obligation",
+        PluginError::DuplicateShutdownObligation { .. } => "duplicate-shutdown-obligation",
+        PluginError::DuplicateRuntimeCloseParticipant { .. } => {
+            "duplicate-runtime-close-participant"
+        }
+        PluginError::ShutdownObligationOutsideBuild => "shutdown-obligation-outside-build",
+        PluginError::LifecycleShutdown => "lifecycle-shutdown",
+        PluginError::LifecyclePoisoned => "lifecycle-poisoned",
+        PluginError::FinishReentered => "finish-reentered",
+    }
+}
+
+fn admission_failure_report(error: &RuntimeAdmissionError) -> DiagnosticReport {
+    let reason = match error {
+        RuntimeAdmissionError::AppStarted => "app-started",
+        RuntimeAdmissionError::RawRunnerInstalled => "raw-runner-installed",
+        RuntimeAdmissionError::AppNotReady { .. } => "app-not-ready",
+        RuntimeAdmissionError::GenerationExhausted => "generation-exhausted",
+        RuntimeAdmissionError::Obligation(_) => "obligation-invalid",
+    };
+    single_diagnostic(failure_diagnostic(
+        "project.run.admission-failed",
+        "Project runtime candidate admission failed",
+        reason,
+    ))
+}
+
+fn runtime_faulted_report() -> DiagnosticReport {
+    single_error(
+        "project.run.runtime-faulted",
+        "Project runtime reported a fault before product completion",
+    )
+}
+
+fn cleanup_incomplete_report(evidence: &RuntimeCloseEvidence) -> DiagnosticReport {
+    let mut report = single_warning(
+        "project.run.cleanup-incomplete",
+        "Project runtime cleanup is incomplete",
+    );
+    append_close_cause_diagnostics(&mut report, evidence);
+    report
+}
+
+fn cleanup_failed_report(evidence: &RuntimeCloseEvidence) -> DiagnosticReport {
+    let mut report = single_error(
+        "project.run.cleanup-failed",
+        "Project runtime cleanup reported a terminal failure",
+    );
+    append_close_cause_diagnostics(&mut report, evidence);
+    report
+}
+
+fn append_close_cause_diagnostics(report: &mut DiagnosticReport, evidence: &RuntimeCloseEvidence) {
+    for cause in evidence.causes() {
+        let diagnostic = match cause {
+            RuntimeCloseCause::PluginShutdown => Diagnostic::error(
+                diagnostic_code("project.run.cleanup-plugin-shutdown"),
+                safe_summary("Project plugin shutdown failed"),
+            ),
+            RuntimeCloseCause::ParticipantError {
+                participant,
+                phase,
+                code,
+                disposition,
+            } => {
+                let diagnostic = match disposition {
+                    RuntimeCloseErrorDisposition::Retryable => Diagnostic::warning(
+                        diagnostic_code("project.run.cleanup-participant-error"),
+                        safe_summary("Project runtime cleanup participant can be retried"),
+                    ),
+                    RuntimeCloseErrorDisposition::Terminal => Diagnostic::error(
+                        diagnostic_code("project.run.cleanup-participant-error"),
+                        safe_summary("Project runtime cleanup participant failed terminally"),
+                    ),
+                };
+                let diagnostic = attach_identifier(diagnostic, "participant", participant.as_str());
+                let diagnostic = attach_identifier(diagnostic, "phase", close_phase_id(*phase));
+                let diagnostic = attach_identifier(diagnostic, "failure-code", code);
+                attach_identifier(
+                    diagnostic,
+                    "disposition",
+                    close_disposition_id(*disposition),
+                )
+            }
+            RuntimeCloseCause::DeadlineExceeded => Diagnostic::warning(
+                diagnostic_code("project.run.cleanup-deadline-exceeded"),
+                safe_summary("Project runtime cleanup exceeded its bounded deadline"),
+            ),
+        };
+        report.push(diagnostic);
+    }
+}
+
+fn close_evidence_has_terminal_failure(evidence: &RuntimeCloseEvidence) -> bool {
+    evidence.causes().iter().any(|cause| {
+        matches!(cause, RuntimeCloseCause::PluginShutdown)
+            || matches!(
+                cause,
+                RuntimeCloseCause::ParticipantError {
+                    disposition: RuntimeCloseErrorDisposition::Terminal,
+                    ..
+                }
+            )
+    })
+}
+
+fn failure_diagnostic(
+    code: &'static str,
+    summary: &'static str,
+    reason: &'static str,
+) -> Diagnostic {
+    attach_identifier(
+        Diagnostic::error(diagnostic_code(code), safe_summary(summary)),
+        "reason",
+        reason,
+    )
+}
+
+fn attach_identifier(diagnostic: Diagnostic, key: &'static str, value: &str) -> Diagnostic {
+    let field = PublicDiagnosticIdentifier::new(value).map_or_else(
+        |_| DiagnosticField::sensitive(field_key(key)),
+        |value| DiagnosticField::public_identifier(field_key(key), value),
+    );
+    diagnostic
+        .try_with_field(field)
+        .expect("project Host diagnostics use unique bounded fields")
+}
+
+fn attach_u64(diagnostic: Diagnostic, key: &'static str, value: usize) -> Diagnostic {
+    diagnostic
+        .try_with_field(DiagnosticField::public_u64(
+            field_key(key),
+            u64::try_from(value).unwrap_or(u64::MAX),
+        ))
+        .expect("project Host diagnostics use unique bounded fields")
+}
+
+const fn plugin_hook_id(hook: PluginHook) -> &'static str {
+    match hook {
+        PluginHook::Preflight => "preflight",
+        PluginHook::Build => "build",
+        PluginHook::Finish => "finish",
+        PluginHook::Shutdown => "shutdown",
+    }
+}
+
+const fn plugin_mutation_id(mutation: PluginHookMutation) -> &'static str {
+    match mutation {
+        PluginHookMutation::PluginMembership => "plugin-membership",
+        PluginHookMutation::RunnerSelection => "runner-selection",
+    }
+}
+
+const fn close_phase_id(phase: RuntimeCloseParticipantPhase) -> &'static str {
+    match phase {
+        RuntimeCloseParticipantPhase::Begin => "begin",
+        RuntimeCloseParticipantPhase::Poll => "poll",
+    }
+}
+
+const fn close_disposition_id(disposition: RuntimeCloseErrorDisposition) -> &'static str {
+    match disposition {
+        RuntimeCloseErrorDisposition::Retryable => "retryable",
+        RuntimeCloseErrorDisposition::Terminal => "terminal",
+    }
+}
+
+fn single_error(code: &'static str, summary: &'static str) -> DiagnosticReport {
+    single_diagnostic(Diagnostic::error(
+        diagnostic_code(code),
+        safe_summary(summary),
+    ))
+}
+
+fn single_warning(code: &'static str, summary: &'static str) -> DiagnosticReport {
+    single_diagnostic(Diagnostic::warning(
+        diagnostic_code(code),
+        safe_summary(summary),
+    ))
+}
+
+fn single_error_with_u64(
+    code: &'static str,
+    summary: &'static str,
+    key: &'static str,
+    value: u64,
+) -> DiagnosticReport {
+    let diagnostic = Diagnostic::error(diagnostic_code(code), safe_summary(summary))
+        .try_with_field(DiagnosticField::public_u64(field_key(key), value))
+        .expect("project Host diagnostics use unique bounded fields");
+    single_diagnostic(diagnostic)
+}
+
+fn single_diagnostic(diagnostic: Diagnostic) -> DiagnosticReport {
+    let mut report = DiagnosticReport::default();
+    report.push(diagnostic);
+    report
+}
+
+fn diagnostic_code(code: &'static str) -> DiagnosticCode {
+    DiagnosticCode::new(code).expect("project Host diagnostic codes are engine-owned")
+}
+
+fn safe_summary(summary: &'static str) -> SafeSummary {
+    SafeSummary::new(summary).expect("project Host summaries are engine-owned")
+}
+
+fn field_key(key: &'static str) -> DiagnosticFieldKey {
+    DiagnosticFieldKey::new(key).expect("project Host diagnostic field keys are engine-owned")
+}
+
+#[cfg(test)]
+thread_local! {
+    static PUBLICATION_FAULT_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn arm_publication_fault_for_test() {
+    PUBLICATION_FAULT_ARMED.with(|armed| armed.set(true));
+}
+
+#[cfg(test)]
+fn inject_publication_fault_if_armed(reporter: &nara_app::RuntimeFaultReporter) {
+    PUBLICATION_FAULT_ARMED.with(|armed| {
+        if armed.replace(false) {
+            reporter.report(nara_app::RuntimeFault::engine(
+                nara_app::RuntimeFaultKind::RequiredService,
+                "nara.test.project-publication",
+            ));
+        }
+    });
+}
+
+#[cfg(all(test, feature = "serde", feature = "runtime-2d"))]
+mod tests;

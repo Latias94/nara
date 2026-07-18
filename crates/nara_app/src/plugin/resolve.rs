@@ -8,7 +8,11 @@ use std::{
 use nara_ecs::World;
 use thiserror::Error;
 
-use crate::App;
+use crate::{
+    App, RuntimeAdmissionError, RuntimeAdmissionRetirement, RuntimeCandidate,
+    RuntimeCandidateRetirementState, RuntimeCloseEvidence, RuntimeClosePolicy,
+    RuntimeObligationLedger, RuntimePreparationRetirement,
+};
 
 use super::{
     Plugin, PluginCapability, PluginDeclaration, PluginError, PluginGroupId, PluginId,
@@ -318,13 +322,99 @@ impl PluginPlan {
     }
 
     pub fn instantiate(&self) -> Result<SealedApp, PluginInstantiationError> {
-        let prepared = self
-            .definitions
+        self.instantiate_retained()
+            .map_err(RetainedPluginInstantiationFailure::into_error)
+    }
+
+    /// Instantiates this repeatable plan while retaining failed App ownership for bounded cleanup.
+    pub fn instantiate_retained(&self) -> Result<SealedApp, RetainedPluginInstantiationFailure> {
+        self.instantiate_retained_with_close_policy(RuntimeClosePolicy::default())
+    }
+
+    /// Instantiates this repeatable plan with an explicit failed-preparation cleanup policy.
+    pub fn instantiate_retained_with_close_policy(
+        &self,
+        close_policy: RuntimeClosePolicy,
+    ) -> Result<SealedApp, RetainedPluginInstantiationFailure> {
+        let prepared = match self.prepare_definitions() {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return Err(RetainedPluginInstantiationFailure::new(
+                    error.into(),
+                    RuntimePreparationRetirement::complete(),
+                ));
+            }
+        };
+        self.commit_and_seal(App::new(), prepared, close_policy)
+            .map_err(|failure| {
+                RetainedPluginInstantiationFailure::new(failure.error.into(), failure.retirement)
+            })
+    }
+
+    /// Builds one sealed App and transfers the caller's complete ledger directly into an
+    /// unpublished runtime candidate.
+    ///
+    /// The supplied ledger exists before plugin preparation begins. Every failure path retains the
+    /// fresh App, caller reservations, and plugin-registered close participants in one retryable
+    /// owner.
+    pub fn instantiate_runtime_candidate(
+        &self,
+        obligations: RuntimeObligationLedger,
+        close_policy: RuntimeClosePolicy,
+    ) -> Result<RuntimeCandidate, RuntimeConstructionFailure> {
+        let app = App::new_with_runtime_obligations(obligations);
+        let prepared = match self.prepare_definitions() {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return Err(RuntimeConstructionFailure::plugin(
+                    error.into(),
+                    RuntimePreparationRetirement::from_app(app, close_policy),
+                ));
+            }
+        };
+        let sealed = self
+            .commit_and_seal(app, prepared, close_policy)
+            .map_err(|failure| {
+                RuntimeConstructionFailure::plugin(failure.error.into(), failure.retirement)
+            })?;
+        RuntimeCandidate::admit_with(sealed, RuntimeObligationLedger::new(), close_policy).map_err(
+            |failure| {
+                let error = failure.error();
+                RuntimeConstructionFailure::admission(error, failure.begin_retirement())
+            },
+        )
+    }
+
+    fn prepare_definitions(&self) -> Result<Vec<Arc<dyn Plugin>>, PluginPrepareError> {
+        self.definitions
             .iter()
             .map(PluginDefinition::prepare)
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut app = App::new();
-        app.commit_plugin_batch(PluginCommitBatch {
+            .collect()
+    }
+
+    fn commit_and_seal(
+        &self,
+        mut app: App,
+        prepared: Vec<Arc<dyn Plugin>>,
+        close_policy: RuntimeClosePolicy,
+    ) -> Result<SealedApp, PreparedAppFailure> {
+        if let Err(error) = app.commit_plugin_batch(self.commit_batch(prepared)) {
+            return Err(PreparedAppFailure {
+                error,
+                retirement: RuntimePreparationRetirement::from_app(app, close_policy),
+            });
+        }
+        if let Err(error) = app.seal_internal() {
+            return Err(PreparedAppFailure {
+                error,
+                retirement: RuntimePreparationRetirement::from_app(app, close_policy),
+            });
+        }
+        Ok(SealedApp { app })
+    }
+
+    fn commit_batch(&self, prepared: Vec<Arc<dyn Plugin>>) -> PluginCommitBatch {
+        PluginCommitBatch {
             entries: self.entries.clone(),
             witnesses: self
                 .definitions
@@ -337,10 +427,13 @@ impl PluginPlan {
             fingerprint: self.fingerprint,
             prefix_len: 0,
             prepared,
-        })?;
-        app.seal_internal()?;
-        Ok(SealedApp { app })
+        }
     }
+}
+
+struct PreparedAppFailure {
+    error: PluginError,
+    retirement: RuntimePreparationRetirement,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -358,6 +451,151 @@ impl PluginInstantiationError {
             Self::Prepare(error) => Some(error),
             Self::Plugin(_) => None,
         }
+    }
+}
+
+/// Plugin-instantiation failure that keeps every acquired runtime owner retryable.
+#[must_use = "plugin instantiation failures may retain unfinished cleanup authority"]
+pub struct RetainedPluginInstantiationFailure {
+    error: PluginInstantiationError,
+    retirement: RuntimePreparationRetirement,
+}
+
+impl RetainedPluginInstantiationFailure {
+    fn new(error: PluginInstantiationError, retirement: RuntimePreparationRetirement) -> Self {
+        Self { error, retirement }
+    }
+
+    #[must_use]
+    pub const fn error(&self) -> &PluginInstantiationError {
+        &self.error
+    }
+
+    #[must_use]
+    pub fn retirement_state(&self) -> crate::RuntimeCandidateRetirementState {
+        self.retirement.retirement_state()
+    }
+
+    #[must_use]
+    pub fn close_evidence(&self) -> Option<&crate::RuntimeCloseEvidence> {
+        self.retirement.close_evidence()
+    }
+
+    pub fn drive_retirement(&mut self) -> crate::RuntimeCandidateRetirementState {
+        self.retirement.drive_retirement()
+    }
+
+    #[must_use]
+    pub fn into_error(self) -> PluginInstantiationError {
+        self.error
+    }
+}
+
+impl Debug for RetainedPluginInstantiationFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RetainedPluginInstantiationFailure")
+            .field("error", &self.error)
+            .field("retirement", &self.retirement)
+            .finish()
+    }
+}
+
+impl fmt::Display for RetainedPluginInstantiationFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.error, formatter)
+    }
+}
+
+impl std::error::Error for RetainedPluginInstantiationFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum RuntimeConstructionError {
+    #[error("runtime plugin construction failed: {0}")]
+    Plugin(PluginInstantiationError),
+    #[error("runtime candidate admission failed: {0}")]
+    Admission(RuntimeAdmissionError),
+}
+
+enum RuntimeConstructionCleanup {
+    Plugin(RuntimePreparationRetirement),
+    Admission(RuntimeAdmissionRetirement),
+}
+
+/// Construction failure that retains the one pre-publication owner until cleanup completes.
+#[must_use = "runtime construction failures may retain unfinished cleanup authority"]
+pub struct RuntimeConstructionFailure {
+    error: RuntimeConstructionError,
+    cleanup: RuntimeConstructionCleanup,
+}
+
+impl RuntimeConstructionFailure {
+    fn plugin(error: PluginInstantiationError, retirement: RuntimePreparationRetirement) -> Self {
+        Self {
+            error: RuntimeConstructionError::Plugin(error),
+            cleanup: RuntimeConstructionCleanup::Plugin(retirement),
+        }
+    }
+
+    fn admission(error: RuntimeAdmissionError, retirement: RuntimeAdmissionRetirement) -> Self {
+        Self {
+            error: RuntimeConstructionError::Admission(error),
+            cleanup: RuntimeConstructionCleanup::Admission(retirement),
+        }
+    }
+
+    #[must_use]
+    pub const fn error(&self) -> &RuntimeConstructionError {
+        &self.error
+    }
+
+    #[must_use]
+    pub fn retirement_state(&self) -> RuntimeCandidateRetirementState {
+        match &self.cleanup {
+            RuntimeConstructionCleanup::Plugin(retirement) => retirement.retirement_state(),
+            RuntimeConstructionCleanup::Admission(retirement) => retirement.retirement_state(),
+        }
+    }
+
+    #[must_use]
+    pub fn close_evidence(&self) -> Option<&RuntimeCloseEvidence> {
+        match &self.cleanup {
+            RuntimeConstructionCleanup::Plugin(retirement) => retirement.close_evidence(),
+            RuntimeConstructionCleanup::Admission(retirement) => Some(retirement.close_evidence()),
+        }
+    }
+
+    pub fn drive_retirement(&mut self) -> RuntimeCandidateRetirementState {
+        match &mut self.cleanup {
+            RuntimeConstructionCleanup::Plugin(retirement) => retirement.drive_retirement(),
+            RuntimeConstructionCleanup::Admission(retirement) => retirement.drive_retirement(),
+        }
+    }
+}
+
+impl Debug for RuntimeConstructionFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeConstructionFailure")
+            .field("error", &self.error)
+            .field("retirement_state", &self.retirement_state())
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for RuntimeConstructionFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.error, formatter)
+    }
+}
+
+impl std::error::Error for RuntimeConstructionFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
     }
 }
 

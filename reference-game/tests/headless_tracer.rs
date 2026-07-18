@@ -2,11 +2,11 @@ use std::{process::Command, time::Duration};
 
 use nara::{
     app::{AddPluginsError, PluginLifecycleState, PluginPlanError},
-    prelude::{App, FixedTime, MinimalPlugins},
+    prelude::{App, FixedTime, HeadlessRuntimePlugins},
 };
 use nara_reference_game::{
-    REFERENCE_GAME_PLUGIN_ID, ReferenceGameError, ReferenceGamePlugin, TracerSnapshot,
-    run_headless_ticks,
+    REFERENCE_GAME_PLUGIN_ID, ReferenceGameError, ReferenceGamePlugin,
+    ReferenceTracerSeedPlugin, TracerSnapshot, run_headless_ticks,
 };
 
 #[test]
@@ -18,8 +18,12 @@ fn fixed_tick_tracer_is_deterministic_and_zero_time_does_not_advance() {
     assert_eq!(first, TracerSnapshot::after_three_ticks());
 
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))
-        .unwrap();
+    app.add_plugins((
+        HeadlessRuntimePlugins,
+        ReferenceGamePlugin,
+        ReferenceTracerSeedPlugin,
+    ))
+    .unwrap();
 
     let startup = app.run_once(Duration::ZERO).unwrap();
     assert_eq!(startup.status.fixed_steps, 0);
@@ -57,7 +61,7 @@ fn headless_binary_runs_the_public_tracer() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        "tick=3 enemy_hp=7\n"
+        "tick=3 enemy_hp=10\n"
     );
 }
 
@@ -80,15 +84,19 @@ fn missing_declared_registry_plugin_fails_pure_planning_and_is_retryable() {
         PluginLifecycleState::Configuring
     );
 
-    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))
+    app.add_plugins((HeadlessRuntimePlugins, ReferenceGamePlugin))
         .unwrap();
 }
 
 #[test]
 fn snapshot_capture_reports_a_missing_fixed_clock() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))
-        .unwrap();
+    app.add_plugins((
+        HeadlessRuntimePlugins,
+        ReferenceGamePlugin,
+        ReferenceTracerSeedPlugin,
+    ))
+    .unwrap();
     app.run_once(Duration::ZERO).unwrap();
     app.world_mut().unwrap().remove_resource::<FixedTime>();
 

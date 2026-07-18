@@ -6,6 +6,7 @@ mod systems;
 use std::{
     error::Error,
     fmt,
+    num::NonZeroU32,
     time::{Duration, Instant},
 };
 
@@ -18,25 +19,38 @@ use nara::{
         RuntimeDriveError, RuntimeRetirement, RuntimeState,
     },
     ecs::schedule::IntoScheduleConfigs,
-    fs::FileCapability,
-    gameplay::GameplayCommandPlugin,
+    fs::{DirectoryCapability, FileCapability},
+    gameplay::{
+        GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
+        GameplayCommandPlugin, GameplayCommandSet, GameplayCommandSourceSequence,
+        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
+    },
+    image::ImageImportLimits,
     prelude::{
-        App, ComponentRegistry, CoreStage, FixedTime, FixedUpdateSet, MinimalPlugins,
-        PersistentComponentProvider, Plugin, RuntimeTimeSettings, StartupStage, Vec2, World,
+        App, ComponentRegistry, CoreStage, FixedTime, FixedUpdateSet, HeadlessRuntimePlugins,
+        PersistentComponentProvider, Plugin, Resource, RuntimeTimeSettings, StartupStage, Vec2,
+        World,
     },
     project_host::{
-        ProjectCandidateError, ProjectRuntimePlugins, ProjectSettingsCandidate,
-        ingest_project_manifest, project_runtime_plugins,
+        HeadlessRun, HeadlessRunIntent, ProjectCandidateError, ProjectRuntimePlugins,
+        ProjectSettingsCandidate, ingest_project_manifest, project_runtime_plugins,
     },
     reflect::{
         COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentRegistryError,
         ComponentSchemaProviderDefinition,
     },
+    tilemap::TilemapPlugin,
 };
 
 pub use components::{Enemy, Player, Projectile, RuntimeOnlyTag, Weapon};
 
 pub const REFERENCE_GAME_PLUGIN_ID: PluginId = PluginId::new("reference-game.gameplay");
+pub const REFERENCE_FIRST_TICK_COMMAND_TYPE: &str = "reference-game.no-op-v1";
+pub const REFERENCE_FIRST_TICK_COMMAND_SOURCE: &str = "u26-manual";
+pub const REFERENCE_TRACER_SEED_PLUGIN_ID: PluginId =
+    PluginId::new("reference-game.tracer-seed");
+pub const REFERENCE_PROJECT_OUTCOME_PLUGIN_ID: PluginId =
+    PluginId::new("reference-game.project-outcome");
 pub const REFERENCE_GAME_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
     PluginSchemaProviderId::new("reference-game.components");
 pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
@@ -49,6 +63,15 @@ pub const REFERENCE_GAME_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_GAME_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
         .provides_schema(&[REFERENCE_GAME_SCHEMA_PROVIDER_ID]);
+const REFERENCE_TRACER_SEED_REQUIREMENTS: &[PluginId] = &[REFERENCE_GAME_PLUGIN_ID];
+const REFERENCE_TRACER_SEED_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(REFERENCE_TRACER_SEED_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(REFERENCE_TRACER_SEED_REQUIREMENTS);
+const REFERENCE_PROJECT_OUTCOME_REQUIREMENTS: &[PluginId] =
+    &[REFERENCE_GAME_PLUGIN_ID, nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID];
+const REFERENCE_PROJECT_OUTCOME_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(REFERENCE_PROJECT_OUTCOME_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(REFERENCE_PROJECT_OUTCOME_REQUIREMENTS);
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ReferenceGamePlugin;
@@ -86,18 +109,53 @@ impl Plugin for ReferenceGamePlugin {
             })?;
         }
 
-        app.add_systems(StartupStage::Scene, systems::seed_tracer)?
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            (
+                systems::move_players,
+                systems::move_enemies,
+                systems::tick_weapons,
+                systems::move_projectiles,
+                systems::resolve_projectile_hits,
+            )
+                .chain()
+                .in_set(FixedUpdateSet::Simulate),
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ReferenceTracerSeedPlugin;
+
+impl Plugin for ReferenceTracerSeedPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &REFERENCE_TRACER_SEED_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(StartupStage::Scene, systems::seed_tracer)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ReferenceProjectOutcomePlugin;
+
+impl Plugin for ReferenceProjectOutcomePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &REFERENCE_PROJECT_OUTCOME_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.insert_resource(ReferenceProjectSnapshot::default())?
             .add_systems(
                 CoreStage::FixedUpdate,
-                (
-                    systems::move_players,
-                    systems::move_enemies,
-                    systems::tick_weapons,
-                    systems::move_projectiles,
-                    systems::resolve_projectile_hits,
-                )
-                    .chain()
-                    .in_set(FixedUpdateSet::Simulate),
+                systems::observe_project_commands.in_set(GameplayCommandSet::Consume),
+            )?
+            .add_systems(
+                CoreStage::FixedUpdate,
+                systems::capture_project_snapshot.in_set(GameplayCommandSet::Capture),
             )?;
         Ok(())
     }
@@ -108,10 +166,58 @@ pub fn plugin() -> PluginDefinition {
     PluginDefinition::for_default::<ReferenceGamePlugin>()
 }
 
+fn project_outcome_plugin() -> PluginDefinition {
+    PluginDefinition::for_default::<ReferenceProjectOutcomePlugin>()
+}
+
 /// Adds the reference game after the semantic gameplay-command ingress in a project plan.
 #[must_use]
 pub fn runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectRuntimePlugins {
-    project_runtime_plugins(candidate).insert_after::<GameplayCommandPlugin>(plugin())
+    project_runtime_plugins(candidate)
+        .insert_after::<GameplayCommandPlugin>(plugin())
+        .insert_after::<ReferenceGamePlugin>(project_outcome_plugin())
+}
+
+/// Creates the reference game's project-backed product action.
+#[must_use]
+pub fn project_headless_run(
+    project_root: DirectoryCapability,
+    fixed_ticks: NonZeroU32,
+) -> HeadlessRun<ReferenceProjectSnapshot> {
+    HeadlessRun::new(
+        project_root,
+        project_headless_intent(fixed_ticks),
+        [project_first_tick_command()],
+    )
+}
+
+/// Creates the reference game's project-backed run intent.
+#[must_use]
+pub fn project_headless_intent(
+    fixed_ticks: NonZeroU32,
+) -> HeadlessRunIntent<ReferenceProjectSnapshot> {
+    HeadlessRunIntent::new(fixed_ticks)
+        .configure(nara::image::plugin(ImageImportLimits::default()))
+        .disable::<TilemapPlugin>()
+        .insert_after::<GameplayCommandPlugin>(plugin())
+        .insert_after::<ReferenceGamePlugin>(project_outcome_plugin())
+        .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
+}
+
+/// Returns the first semantic input used by the committed reference task.
+#[must_use]
+pub fn project_first_tick_command() -> GameplayCommandSubmission {
+    GameplayCommandSubmission::new(
+        GameplayCommandTick::new(1).expect("the reference command tick is non-zero"),
+        GameplayCommandIngressSource::test(REFERENCE_FIRST_TICK_COMMAND_SOURCE)
+            .expect("the reference command source is engine-owned and valid"),
+        GameplayCommandSourceSequence::new(1)
+            .expect("the reference command sequence is non-zero"),
+        GameplayCommandDraft::new(
+            GameplayCommandTypeId::new(REFERENCE_FIRST_TICK_COMMAND_TYPE)
+                .expect("the reference command type is engine-owned and valid"),
+        ),
+    )
 }
 
 fn component_registry_unavailable() -> PluginError {
@@ -146,6 +252,22 @@ where
     T: PersistentComponentProvider,
 {
     registry.register_persistent_component::<T>().map(|_| ())
+}
+
+/// Authoritative project-scene state captured after the latest fixed tick.
+#[derive(Debug, Default, Clone, PartialEq, Resource)]
+pub struct ReferenceProjectSnapshot {
+    pub tick: u64,
+    pub player_position: Vec2,
+    pub player_hit_points: i64,
+    pub enemy_position: Vec2,
+    pub enemy_hit_points: i64,
+    pub weapon_remaining_ticks: u64,
+    pub commands_seen: u64,
+    pub first_command_key: Option<GameplayCommandKey>,
+    pub first_command_type: Option<GameplayCommandTypeId>,
+    pub runtime_only_entities: u64,
+    pub unbound_gameplay_components: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -487,7 +609,11 @@ fn run_headless_ticks_with_time(
     time: Option<(RuntimeTimeSettings, FixedTime)>,
 ) -> Result<TracerSnapshot, ReferenceGameError> {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))?;
+    app.add_plugins((
+        HeadlessRuntimePlugins,
+        ReferenceGamePlugin,
+        ReferenceTracerSeedPlugin,
+    ))?;
     if let Some((runtime_time, fixed_time)) = time {
         app.insert_resource(runtime_time)?;
         app.insert_resource(fixed_time)?;

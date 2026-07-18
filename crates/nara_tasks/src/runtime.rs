@@ -1068,15 +1068,112 @@ pub struct TaskPools {
     close_owner: Mutex<Option<TaskPoolsCloseOwner>>,
 }
 
+pub(crate) struct TaskPoolsConstructionFailure {
+    error: TaskPoolError,
+    close_owner: Option<TaskPoolsCloseOwner>,
+}
+
+impl TaskPoolsConstructionFailure {
+    fn invalid(error: TaskPoolError) -> Self {
+        Self {
+            error,
+            close_owner: None,
+        }
+    }
+
+    fn with_executor_failure(
+        failure: TaskPoolExecutorConstructionFailure,
+        mut close_owner: TaskPoolsCloseOwner,
+    ) -> Self {
+        let TaskPoolExecutorConstructionFailure {
+            error,
+            close_owner: executor_owner,
+        } = failure;
+        let kind = match &error {
+            TaskPoolError::WorkerSpawnFailed { kind, .. } => *kind,
+            TaskPoolError::InvalidConfig(_) => {
+                unreachable!("executor construction receives validated configuration")
+            }
+        };
+        close_owner.insert(kind, executor_owner);
+        Self {
+            error,
+            close_owner: Some(close_owner),
+        }
+    }
+
+    fn into_error(self) -> TaskPoolError {
+        self.error
+    }
+
+    fn into_parts(self) -> (TaskPoolError, Option<TaskPoolsCloseOwner>) {
+        (self.error, self.close_owner)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn error(&self) -> &TaskPoolError {
+        &self.error
+    }
+
+    #[cfg(test)]
+    pub(crate) fn drive_cleanup(&mut self) -> TaskPoolsCloseProgress {
+        self.close_owner
+            .as_mut()
+            .map_or(TaskPoolsCloseProgress::Complete, |owner| owner.poll_close())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn report(&self) -> TaskShutdownReport {
+        self.close_owner
+            .as_ref()
+            .map_or_else(TaskShutdownReport::default, TaskPoolsCloseOwner::report)
+    }
+}
+
 impl TaskPools {
     pub fn try_new(config: TaskPoolConfig) -> Result<Self, TaskPoolError> {
-        config.validate().map_err(TaskPoolError::InvalidConfig)?;
+        Self::try_new_retained(config).map_err(TaskPoolsConstructionFailure::into_error)
+    }
+
+    fn try_new_retained(config: TaskPoolConfig) -> Result<Self, TaskPoolsConstructionFailure> {
+        config
+            .validate()
+            .map_err(TaskPoolError::InvalidConfig)
+            .map_err(TaskPoolsConstructionFailure::invalid)?;
         prewarm_task_owner_reaper();
-        let (io, io_close_owner) = TaskPoolExecutor::threaded(TaskPoolKind::Io, config)?;
+        let mut close_owner = TaskPoolsCloseOwner::empty();
+        let (io, io_close_owner) = match TaskPoolExecutor::threaded(TaskPoolKind::Io, config) {
+            Ok(executor) => executor,
+            Err(error) => {
+                return Err(TaskPoolsConstructionFailure::with_executor_failure(
+                    error,
+                    close_owner,
+                ));
+            }
+        };
+        close_owner.insert(TaskPoolKind::Io, io_close_owner);
         let (compute, compute_close_owner) =
-            TaskPoolExecutor::threaded(TaskPoolKind::Compute, config)?;
+            match TaskPoolExecutor::threaded(TaskPoolKind::Compute, config) {
+                Ok(executor) => executor,
+                Err(error) => {
+                    return Err(TaskPoolsConstructionFailure::with_executor_failure(
+                        error,
+                        close_owner,
+                    ));
+                }
+            };
+        close_owner.insert(TaskPoolKind::Compute, compute_close_owner);
         let (async_compute, async_compute_close_owner) =
-            TaskPoolExecutor::threaded(TaskPoolKind::AsyncCompute, config)?;
+            match TaskPoolExecutor::threaded(TaskPoolKind::AsyncCompute, config) {
+                Ok(executor) => executor,
+                Err(error) => {
+                    return Err(TaskPoolsConstructionFailure::with_executor_failure(
+                        error,
+                        close_owner,
+                    ));
+                }
+            };
+        close_owner.insert(TaskPoolKind::AsyncCompute, async_compute_close_owner);
         Ok(Self {
             config,
             next_id: AtomicU64::new(1),
@@ -1084,11 +1181,7 @@ impl TaskPools {
             io,
             compute,
             async_compute,
-            close_owner: Mutex::new(Some(TaskPoolsCloseOwner::new(
-                io_close_owner,
-                compute_close_owner,
-                async_compute_close_owner,
-            ))),
+            close_owner: Mutex::new(Some(close_owner)),
         })
     }
 
@@ -1120,7 +1213,21 @@ impl TaskPools {
         config: TaskPoolConfig,
         kind: TaskPoolKind,
         fail_index: usize,
-    ) -> (Result<Self, TaskPoolError>, WorkerSpawnFailureProbe) {
+    ) -> (
+        Result<Self, TaskPoolsConstructionFailure>,
+        WorkerSpawnFailureProbe,
+    ) {
+        Self::with_worker_spawn_failure_for_tests(kind, fail_index, || {
+            Self::try_new_retained(config)
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_worker_spawn_failure_for_tests<R>(
+        kind: TaskPoolKind,
+        fail_index: usize,
+        operation: impl FnOnce() -> R,
+    ) -> (R, WorkerSpawnFailureProbe) {
         let probe = WorkerSpawnFailureProbe::default();
         let previous = WORKER_SPAWN_FAILURE.with(|injection| {
             injection.replace(Some(WorkerSpawnFailureInjection {
@@ -1128,6 +1235,7 @@ impl TaskPools {
                 fail_index,
                 started: probe.started.clone(),
                 exited: probe.exited.clone(),
+                cleanup_polls: probe.cleanup_polls.clone(),
             }))
         });
         assert!(
@@ -1135,7 +1243,7 @@ impl TaskPools {
             "worker spawn failure injection is nested"
         );
         let _reset = WorkerSpawnFailureReset;
-        (Self::try_new(config), probe)
+        (operation(), probe)
     }
 
     #[must_use]
@@ -1308,6 +1416,7 @@ impl TaskPools {
             .as_mut()
             .expect("standalone test pools retain their close owner")
             .executor_mut(kind)
+            .expect("complete task pools retain every executor close owner")
             .shutdown()
     }
 
@@ -1344,7 +1453,7 @@ pub struct TaskInlineRunReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TaskPoolsCloseProgress {
+pub(crate) enum TaskPoolsCloseProgress {
     Pending,
     Incomplete,
     Complete,
@@ -1624,6 +1733,8 @@ struct TaskPoolCloseOwner {
     close_phase: TaskPoolClosePhase,
     shutdown_report: TaskPoolShutdownReport,
     shutdown_recorded: bool,
+    #[cfg(test)]
+    construction_cleanup_polls: Option<Arc<AtomicUsize>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1649,11 +1760,16 @@ enum TaskPoolCloseProgress {
     Complete,
 }
 
+struct TaskPoolExecutorConstructionFailure {
+    error: TaskPoolError,
+    close_owner: TaskPoolCloseOwner,
+}
+
 impl TaskPoolExecutor {
     fn threaded(
         kind: TaskPoolKind,
         config: TaskPoolConfig,
-    ) -> Result<(Self, TaskPoolCloseOwner), TaskPoolError> {
+    ) -> Result<(Self, TaskPoolCloseOwner), TaskPoolExecutorConstructionFailure> {
         let kind_config = config.kind(kind);
         let thread_count = kind_config.workers().get();
         let shared = Arc::new(ExecutorShared::new(
@@ -1672,14 +1788,22 @@ impl TaskPoolExecutor {
                         queue.lifecycle = QueueLifecycle::Closed;
                         shared.changed.notify_all();
                     }
-                    wait_for_workers_finished(
-                        &workers,
-                        config.shutdown_policy().join_timeout().get(),
-                    );
-                    retain_abandoned_workers(workers);
-                    return Err(TaskPoolError::WorkerSpawnFailed {
-                        kind,
-                        message: error.to_string(),
+                    let close_owner =
+                        TaskPoolCloseOwner::new(shared, workers, config.shutdown_policy(), false);
+                    #[cfg(test)]
+                    let close_owner = {
+                        let mut close_owner = close_owner;
+                        close_owner.construction_cleanup_polls =
+                            worker_spawn_failure_injection(kind)
+                                .map(|injection| injection.cleanup_polls);
+                        close_owner
+                    };
+                    return Err(TaskPoolExecutorConstructionFailure {
+                        error: TaskPoolError::WorkerSpawnFailed {
+                            kind,
+                            message: error.to_string(),
+                        },
+                        close_owner,
                     });
                 }
             };
@@ -1846,6 +1970,8 @@ impl TaskPoolCloseOwner {
             close_phase: TaskPoolClosePhase::Open,
             shutdown_report: TaskPoolShutdownReport::default(),
             shutdown_recorded: false,
+            #[cfg(test)]
+            construction_cleanup_polls: None,
         }
     }
 
@@ -1873,6 +1999,10 @@ impl TaskPoolCloseOwner {
     }
 
     fn poll_close(&mut self) -> TaskPoolCloseProgress {
+        #[cfg(test)]
+        if let Some(polls) = &self.construction_cleanup_polls {
+            polls.fetch_add(1, Ordering::AcqRel);
+        }
         if self.close_phase == TaskPoolClosePhase::Open {
             self.begin_close();
         }
@@ -2093,27 +2223,47 @@ impl Drop for TaskPoolCloseOwner {
 }
 
 struct TaskPoolsCloseOwner {
-    io: TaskPoolCloseOwner,
-    compute: TaskPoolCloseOwner,
-    async_compute: TaskPoolCloseOwner,
+    io: Option<TaskPoolCloseOwner>,
+    compute: Option<TaskPoolCloseOwner>,
+    async_compute: Option<TaskPoolCloseOwner>,
 }
 
 impl TaskPoolsCloseOwner {
+    const fn empty() -> Self {
+        Self {
+            io: None,
+            compute: None,
+            async_compute: None,
+        }
+    }
+
     fn new(
         io: TaskPoolCloseOwner,
         compute: TaskPoolCloseOwner,
         async_compute: TaskPoolCloseOwner,
     ) -> Self {
         Self {
-            io,
-            compute,
-            async_compute,
+            io: Some(io),
+            compute: Some(compute),
+            async_compute: Some(async_compute),
         }
+    }
+
+    fn insert(&mut self, kind: TaskPoolKind, owner: TaskPoolCloseOwner) {
+        let destination = match kind {
+            TaskPoolKind::Io => &mut self.io,
+            TaskPoolKind::Compute => &mut self.compute,
+            TaskPoolKind::AsyncCompute => &mut self.async_compute,
+        };
+        debug_assert!(destination.is_none());
+        *destination = Some(owner);
     }
 
     fn begin_close(&mut self) {
         for kind in TaskPoolKind::ALL {
-            self.executor_mut(kind).begin_close();
+            if let Some(owner) = self.executor_mut(kind) {
+                owner.begin_close();
+            }
         }
     }
 
@@ -2121,7 +2271,10 @@ impl TaskPoolsCloseOwner {
         self.begin_close();
         let mut aggregate = TaskPoolsCloseProgress::Complete;
         for kind in TaskPoolKind::ALL {
-            let progress = self.executor_mut(kind).poll_close();
+            let Some(owner) = self.executor_mut(kind) else {
+                continue;
+            };
+            let progress = owner.poll_close();
             aggregate = match (aggregate, progress) {
                 (TaskPoolsCloseProgress::Incomplete, _)
                 | (_, TaskPoolCloseProgress::Incomplete) => TaskPoolsCloseProgress::Incomplete,
@@ -2134,36 +2287,37 @@ impl TaskPoolsCloseOwner {
         aggregate
     }
 
-    fn executor_mut(&mut self, kind: TaskPoolKind) -> &mut TaskPoolCloseOwner {
+    fn executor_mut(&mut self, kind: TaskPoolKind) -> Option<&mut TaskPoolCloseOwner> {
         match kind {
-            TaskPoolKind::Io => &mut self.io,
-            TaskPoolKind::Compute => &mut self.compute,
-            TaskPoolKind::AsyncCompute => &mut self.async_compute,
+            TaskPoolKind::Io => self.io.as_mut(),
+            TaskPoolKind::Compute => self.compute.as_mut(),
+            TaskPoolKind::AsyncCompute => self.async_compute.as_mut(),
         }
     }
 
-    fn executor(&self, kind: TaskPoolKind) -> &TaskPoolCloseOwner {
+    fn executor(&self, kind: TaskPoolKind) -> Option<&TaskPoolCloseOwner> {
         match kind {
-            TaskPoolKind::Io => &self.io,
-            TaskPoolKind::Compute => &self.compute,
-            TaskPoolKind::AsyncCompute => &self.async_compute,
+            TaskPoolKind::Io => self.io.as_ref(),
+            TaskPoolKind::Compute => self.compute.as_ref(),
+            TaskPoolKind::AsyncCompute => self.async_compute.as_ref(),
         }
     }
 
     fn report(&self) -> TaskShutdownReport {
         let mut report = TaskShutdownReport::default();
         for kind in TaskPoolKind::ALL {
-            report
-                .per_kind
-                .insert(kind, self.executor(kind).shutdown_report);
+            if let Some(owner) = self.executor(kind) {
+                report.per_kind.insert(kind, owner.shutdown_report);
+            }
         }
         report
     }
 
     fn is_complete(&self) -> bool {
-        TaskPoolKind::ALL
-            .into_iter()
-            .all(|kind| self.executor(kind).close_phase == TaskPoolClosePhase::Complete)
+        TaskPoolKind::ALL.into_iter().all(|kind| {
+            self.executor(kind)
+                .is_none_or(|owner| owner.close_phase == TaskPoolClosePhase::Complete)
+        })
     }
 }
 
@@ -2207,6 +2361,7 @@ struct WorkerSpawnFailureInjection {
     fail_index: usize,
     started: Arc<AtomicUsize>,
     exited: Arc<AtomicUsize>,
+    cleanup_polls: Arc<AtomicUsize>,
 }
 
 #[cfg(test)]
@@ -2244,6 +2399,7 @@ impl Drop for WorkerSpawnFailureReset {
 pub(crate) struct WorkerSpawnFailureProbe {
     started: Arc<AtomicUsize>,
     exited: Arc<AtomicUsize>,
+    cleanup_polls: Arc<AtomicUsize>,
 }
 
 #[cfg(test)]
@@ -2254,6 +2410,10 @@ impl WorkerSpawnFailureProbe {
 
     pub(crate) fn exited(&self) -> usize {
         self.exited.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn cleanup_polls(&self) -> usize {
+        self.cleanup_polls.load(Ordering::Acquire)
     }
 }
 
@@ -2317,21 +2477,6 @@ fn update_counters(counters: &SharedTaskCounters, update: impl FnOnce(&mut TaskC
 fn deadline_after(duration: Duration) -> Instant {
     let now = Instant::now();
     now.checked_add(duration).unwrap_or(now)
-}
-
-fn wait_for_workers_finished(workers: &[JoinHandle<()>], timeout: Duration) {
-    let deadline = deadline_after(timeout);
-    while workers.iter().any(|worker| !worker.is_finished()) {
-        let now = Instant::now();
-        if now >= deadline {
-            break;
-        }
-        thread::sleep(
-            deadline
-                .saturating_duration_since(now)
-                .min(Duration::from_millis(1)),
-        );
-    }
 }
 
 fn item_limit_or_one(value: usize) -> ItemLimit {
@@ -2790,13 +2935,6 @@ impl TaskOwnerReaperSupervisor {
     }
 }
 
-fn retain_abandoned_workers(workers: Vec<JoinHandle<()>>) {
-    let _ = retain_abandoned_task_owner(AbandonedTaskPoolOwner {
-        pending: VecDeque::new(),
-        workers,
-    });
-}
-
 fn retain_abandoned_task_owner(owner: AbandonedTaskPoolOwner) -> TaskOwnerReapReceipt {
     if owner.pending.is_empty() && owner.workers.is_empty() {
         return TaskOwnerReapReceipt::completed();
@@ -3113,30 +3251,42 @@ impl Plugin for TaskPlugin {
                 .chain(),
         )?;
 
-        let mut owned_pools = None;
         if !app.world().contains_resource::<TaskPools>() {
-            let mut pools =
-                TaskPools::try_new(self.config).map_err(|error| PluginError::SetupFailed {
-                    plugin: TASK_PLUGIN_ID,
-                    message: error.to_string(),
-                })?;
+            let mut pools = match TaskPools::try_new_retained(self.config) {
+                Ok(pools) => pools,
+                Err(failure) => {
+                    let (error, close_owner) = failure.into_parts();
+                    if let Some(close_owner) = close_owner {
+                        app.register_plugin_runtime_close_participant(
+                            TASK_POOLS_SHUTDOWN_OBLIGATION,
+                            TASK_POOLS_CLOSE_PARTICIPANT,
+                            TaskPoolsCloseParticipant {
+                                instance_token: None,
+                                close_owner,
+                            },
+                        )?;
+                    }
+                    return Err(PluginError::SetupFailed {
+                        plugin: TASK_PLUGIN_ID,
+                        message: error.to_string(),
+                    });
+                }
+            };
             let instance_token = pools.ownership_token();
             let close_owner = pools
                 .take_close_owner()
                 .expect("new task pools retain their close owner");
-            app.insert_resource(pools)?;
-            owned_pools = Some((instance_token, close_owner));
-        }
-        if let Some((instance_token, close_owner)) = owned_pools {
             app.register_plugin_runtime_close_participant(
                 TASK_POOLS_SHUTDOWN_OBLIGATION,
                 TASK_POOLS_CLOSE_PARTICIPANT,
                 TaskPoolsCloseParticipant {
-                    instance_token,
+                    instance_token: Some(instance_token),
                     close_owner,
                 },
             )?;
+            app.insert_resource(pools)?;
         } else {
+            // A pre-existing pool is externally owned and participates only in plugin shutdown.
             app.register_plugin_shutdown_obligation(TASK_POOLS_SHUTDOWN_OBLIGATION)?;
         }
         Ok(())
@@ -3144,7 +3294,7 @@ impl Plugin for TaskPlugin {
 }
 
 struct TaskPoolsCloseParticipant {
-    instance_token: Arc<TaskPoolInstanceToken>,
+    instance_token: Option<Arc<TaskPoolInstanceToken>>,
     close_owner: TaskPoolsCloseOwner,
 }
 
@@ -3168,10 +3318,13 @@ impl RuntimeCloseParticipant for TaskPoolsCloseParticipant {
             )),
             TaskPoolsCloseProgress::Complete => {
                 let report = self.close_owner.report();
-                let owns_world_facade = context
-                    .world()
-                    .get_resource::<TaskPools>()
-                    .is_some_and(|pools| pools.has_ownership_token(&self.instance_token));
+                let owns_world_facade =
+                    self.instance_token.as_ref().is_some_and(|instance_token| {
+                        context
+                            .world()
+                            .get_resource::<TaskPools>()
+                            .is_some_and(|pools| pools.has_ownership_token(instance_token))
+                    });
                 if owns_world_facade {
                     context.remove_resource::<TaskPools>().map_err(|_| {
                         RuntimeCloseParticipantError::terminal("nara.tasks.runtime-resource-access")

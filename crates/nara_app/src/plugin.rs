@@ -21,7 +21,8 @@ pub use group::{
 };
 pub use resolve::{
     AddPluginsError, PluginInstantiationError, PluginPlan, PluginPlanEntry, PluginPlanError,
-    ResolvedPluginGroup, SealedApp,
+    ResolvedPluginGroup, RetainedPluginInstantiationFailure, RuntimeConstructionError,
+    RuntimeConstructionFailure, SealedApp,
 };
 
 pub(crate) use fingerprint::empty_plan_fingerprint;

@@ -10,8 +10,9 @@ use std::{
 
 use nara_app::{
     AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-    PluginLifecycleState, RuntimeCandidate, RuntimeClosePolicy, RuntimeControl,
-    RuntimeControlRequestResult, RuntimeInstance, RuntimeState,
+    PluginLifecycleState, PluginPlan, RuntimeCandidate, RuntimeCandidateRetirementState,
+    RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult, RuntimeInstance,
+    RuntimeObligationLedger, RuntimeState,
 };
 
 use super::*;
@@ -400,6 +401,42 @@ fn plugin_shutdown_shuts_down_only_plugin_owned_pools() {
             .world()
             .contains_resource::<TaskShutdownReport>()
     );
+}
+
+#[test]
+fn task_plugin_construction_failure_keeps_partial_workers_in_the_runtime_ledger() {
+    let config = test_config(1)
+        .with_kind(
+            TaskPoolKind::Io,
+            TaskKindConfig::new(items(2), ItemLimit::ONE),
+        )
+        .unwrap();
+    let plan = PluginPlan::resolve(plugin(config)).unwrap();
+    let (result, probe) =
+        TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, 1, || {
+            plan.instantiate_runtime_candidate(
+                RuntimeObligationLedger::new(),
+                RuntimeClosePolicy::default(),
+            )
+        });
+    let mut failure = result.unwrap_err();
+
+    assert_eq!(probe.started(), 1);
+    assert_eq!(probe.cleanup_polls(), 0);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while failure.retirement_state() != RuntimeCandidateRetirementState::Retired
+        && Instant::now() < deadline
+    {
+        failure.drive_retirement();
+        std::thread::yield_now();
+    }
+
+    assert_eq!(
+        failure.retirement_state(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert!(probe.cleanup_polls() > 0);
+    assert_eq!(probe.exited(), 1);
 }
 
 #[test]

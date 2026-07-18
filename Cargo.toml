@@ -301,6 +301,16 @@ path = "tests/project_content_limits.rs"
 required-features = ["runtime-2d", "serde"]
 
 [[test]]
+name = "project_host_boundary"
+path = "tests/project_host_boundary.rs"
+required-features = ["runtime-2d", "serde"]
+
+[[test]]
+name = "project_runtime_boot"
+path = "tests/project_runtime_boot.rs"
+required-features = ["runtime-2d", "serde"]
+
+[[test]]
 name = "plugin_composition"
 path = "tests/plugin_composition.rs"
 required-features = ["runtime-core"]

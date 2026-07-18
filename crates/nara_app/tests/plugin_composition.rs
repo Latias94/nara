@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -9,9 +9,12 @@ use std::{
 use nara_app::{
     AddPluginsError, App, Plugin, PluginCapability, PluginCategory, PluginDeclaration,
     PluginDefinition, PluginDefinitionId, PluginError, PluginGroup, PluginGroupBuilder,
-    PluginGroupId, PluginHook, PluginHookMutation, PluginId, PluginLifecycleState, PluginPlan,
-    PluginPlanError, PluginPrepareFailure, PluginServiceId, PluginShutdownContext,
-    PluginShutdownError, PluginShutdownObligationId, PluginSlot, PluginSlotId,
+    PluginGroupId, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
+    PluginLifecycleState, PluginPlan, PluginPlanError, PluginPrepareFailure, PluginServiceId,
+    PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId, PluginSlot,
+    PluginSlotId, RuntimeCandidateRetirementState, RuntimeCloseContext, RuntimeCloseParticipant,
+    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
+    RuntimeCloseProgress, RuntimeConstructionError, RuntimeObligationLedger,
 };
 use nara_ecs::Resource;
 
@@ -877,6 +880,486 @@ fn preparation_failure_creates_no_app_and_a_corrected_plan_still_instantiates() 
     let corrected = PluginPlan::resolve(core_definition(sequence)).unwrap();
     let app = corrected.instantiate().unwrap();
     assert_eq!(app.world().resource::<InstanceProbe>().0, 9);
+}
+
+const RETAINED_OWNER_PLUGIN_ID: PluginId = PluginId::new("nara.test.plan.retained-owner");
+const RETAINED_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.plan.retained-failure");
+const RETAINED_OWNER_OBLIGATION: PluginShutdownObligationId =
+    PluginShutdownObligationId::new("nara.test.plan.retained-owner");
+const RETAINED_OWNER_PARTICIPANT: RuntimeCloseParticipantId =
+    RuntimeCloseParticipantId::new("nara.test.plan.retained-owner");
+const RETAINED_OWNER_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.plan.retained-owner", 1);
+const RETAINED_FAILURE_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.plan.retained-failure", 1);
+const RETAINED_OWNER_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(RETAINED_OWNER_PLUGIN_ID, PluginCategory::Service)
+        .shutdown_obligations(&[RETAINED_OWNER_OBLIGATION]);
+const RETAINED_FAILURE_REQUIREMENT: &[PluginId] = &[RETAINED_OWNER_PLUGIN_ID];
+const RETAINED_FAILURE_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(RETAINED_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(RETAINED_FAILURE_REQUIREMENT);
+const ORDERED_OWNER_PLUGIN_ID: PluginId = PluginId::new("nara.test.plan.ordered-owner");
+const ORDERED_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.plan.ordered-failure");
+const ORDERED_OWNER_OBLIGATION: PluginShutdownObligationId =
+    PluginShutdownObligationId::new("nara.test.plan.ordered-owner");
+const ORDERED_HOST_PARTICIPANT: RuntimeCloseParticipantId =
+    RuntimeCloseParticipantId::new("nara.test.plan.ordered-host");
+const ORDERED_PLUGIN_PARTICIPANT: RuntimeCloseParticipantId =
+    RuntimeCloseParticipantId::new("nara.test.plan.ordered-plugin");
+const ORDERED_OWNER_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.plan.ordered-owner", 1);
+const ORDERED_FAILURE_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.plan.ordered-failure", 1);
+const ORDERED_OWNER_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(ORDERED_OWNER_PLUGIN_ID, PluginCategory::Service)
+        .shutdown_obligations(&[ORDERED_OWNER_OBLIGATION]);
+const ORDERED_FAILURE_REQUIREMENT: &[PluginId] = &[ORDERED_OWNER_PLUGIN_ID];
+const ORDERED_FAILURE_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(ORDERED_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(ORDERED_FAILURE_REQUIREMENT);
+
+#[derive(Debug)]
+struct RetainedOwnerPlugin {
+    released: Arc<AtomicBool>,
+    polls: Arc<AtomicU64>,
+}
+
+impl Plugin for RetainedOwnerPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &RETAINED_OWNER_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.register_plugin_runtime_close_participant(
+            RETAINED_OWNER_OBLIGATION,
+            RETAINED_OWNER_PARTICIPANT,
+            RetainedOwnerParticipant {
+                released: Arc::clone(&self.released),
+                polls: Arc::clone(&self.polls),
+            },
+        )?;
+        Ok(())
+    }
+}
+
+struct RetainedOwnerParticipant {
+    released: Arc<AtomicBool>,
+    polls: Arc<AtomicU64>,
+}
+
+impl RuntimeCloseParticipant for RetainedOwnerParticipant {
+    fn begin_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
+        Ok(if self.released.load(Ordering::SeqCst) {
+            RuntimeCloseProgress::Complete
+        } else {
+            RuntimeCloseProgress::Pending
+        })
+    }
+
+    fn poll_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
+        Ok(if self.released.load(Ordering::SeqCst) {
+            RuntimeCloseProgress::Complete
+        } else {
+            RuntimeCloseProgress::Pending
+        })
+    }
+}
+
+struct OrderedParticipant {
+    label: &'static str,
+    log: Arc<Mutex<Vec<&'static str>>>,
+}
+
+struct RetainedOrderedParticipant {
+    label: &'static str,
+    log: Arc<Mutex<Vec<&'static str>>>,
+    released: Arc<AtomicBool>,
+    begins: Arc<AtomicU64>,
+    polls: Arc<AtomicU64>,
+}
+
+impl RuntimeCloseParticipant for RetainedOrderedParticipant {
+    fn begin_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.begins.fetch_add(1, Ordering::SeqCst);
+        self.log
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(self.label);
+        Ok(RuntimeCloseProgress::Pending)
+    }
+
+    fn poll_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
+        Ok(if self.released.load(Ordering::SeqCst) {
+            RuntimeCloseProgress::Complete
+        } else {
+            RuntimeCloseProgress::Pending
+        })
+    }
+}
+
+impl RuntimeCloseParticipant for OrderedParticipant {
+    fn begin_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        self.log
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(self.label);
+        Ok(RuntimeCloseProgress::Complete)
+    }
+
+    fn poll_close(
+        &mut self,
+        _context: &mut RuntimeCloseContext<'_>,
+    ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+        panic!("an immediately complete participant must not be polled")
+    }
+}
+
+#[derive(Debug)]
+struct OrderedOwnerPlugin {
+    log: Arc<Mutex<Vec<&'static str>>>,
+}
+
+impl Plugin for OrderedOwnerPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &ORDERED_OWNER_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.register_plugin_runtime_close_participant(
+            ORDERED_OWNER_OBLIGATION,
+            ORDERED_PLUGIN_PARTICIPANT,
+            OrderedParticipant {
+                label: "plugin",
+                log: Arc::clone(&self.log),
+            },
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct OrderedFailurePlugin;
+
+impl Plugin for OrderedFailurePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &ORDERED_FAILURE_DECLARATION
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        Err(PluginError::SetupFailed {
+            plugin: ORDERED_FAILURE_PLUGIN_ID,
+            message: "ordered failure probe".to_owned(),
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct OrderedFinishFailurePlugin;
+
+impl Plugin for OrderedFinishFailurePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &ORDERED_FAILURE_DECLARATION
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn finish(&self, _app: &mut App) -> Result<(), PluginError> {
+        Err(PluginError::SetupFailed {
+            plugin: ORDERED_FAILURE_PLUGIN_ID,
+            message: "ordered finish failure probe".to_owned(),
+        })
+    }
+}
+
+fn ordered_owner_definition(log: &Arc<Mutex<Vec<&'static str>>>) -> PluginDefinition {
+    let log = Arc::clone(log);
+    PluginDefinition::infallible::<OrderedOwnerPlugin, _>(
+        ORDERED_OWNER_DEFINITION_ID,
+        b"ordered-owner-v1",
+        move || OrderedOwnerPlugin {
+            log: Arc::clone(&log),
+        },
+    )
+}
+
+fn ordered_host_obligations(log: &Arc<Mutex<Vec<&'static str>>>) -> RuntimeObligationLedger {
+    let mut obligations = RuntimeObligationLedger::new();
+    obligations
+        .register(
+            ORDERED_HOST_PARTICIPANT,
+            OrderedParticipant {
+                label: "host",
+                log: Arc::clone(log),
+            },
+        )
+        .unwrap();
+    obligations
+}
+
+fn retained_ordered_host_obligations(
+    log: &Arc<Mutex<Vec<&'static str>>>,
+    released: &Arc<AtomicBool>,
+    begins: &Arc<AtomicU64>,
+    polls: &Arc<AtomicU64>,
+) -> RuntimeObligationLedger {
+    let mut obligations = RuntimeObligationLedger::new();
+    obligations
+        .register(
+            ORDERED_HOST_PARTICIPANT,
+            RetainedOrderedParticipant {
+                label: "host",
+                log: Arc::clone(log),
+                released: Arc::clone(released),
+                begins: Arc::clone(begins),
+                polls: Arc::clone(polls),
+            },
+        )
+        .unwrap();
+    obligations
+}
+
+#[derive(Debug, Default)]
+struct RetainedFailurePlugin;
+
+impl Plugin for RetainedFailurePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &RETAINED_FAILURE_DECLARATION
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        Err(PluginError::SetupFailed {
+            plugin: RETAINED_FAILURE_PLUGIN_ID,
+            message: "retained failure probe".to_owned(),
+        })
+    }
+}
+
+#[test]
+fn retained_plan_failure_keeps_unfinished_close_owner_retryable() {
+    let released = Arc::new(AtomicBool::new(false));
+    let polls = Arc::new(AtomicU64::new(0));
+    let owner_definition = PluginDefinition::infallible::<RetainedOwnerPlugin, _>(
+        RETAINED_OWNER_DEFINITION_ID,
+        b"retained-owner-v1",
+        {
+            let released = Arc::clone(&released);
+            let polls = Arc::clone(&polls);
+            move || RetainedOwnerPlugin {
+                released: Arc::clone(&released),
+                polls: Arc::clone(&polls),
+            }
+        },
+    );
+    let failure_definition = PluginDefinition::infallible::<RetainedFailurePlugin, _>(
+        RETAINED_FAILURE_DEFINITION_ID,
+        b"retained-failure-v1",
+        RetainedFailurePlugin::default,
+    );
+    let plan = PluginPlan::resolve((owner_definition, failure_definition)).unwrap();
+
+    let mut failure = plan
+        .instantiate_retained_with_close_policy(RuntimeClosePolicy::new(Duration::ZERO))
+        .unwrap_err();
+
+    assert_eq!(
+        failure.retirement_state(),
+        RuntimeCandidateRetirementState::Retiring
+    );
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::RetirementIncomplete
+    );
+    let first_polls = polls.load(Ordering::SeqCst);
+
+    released.store(true, Ordering::SeqCst);
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(first_polls, 2);
+    assert_eq!(polls.load(Ordering::SeqCst), first_polls + 1);
+}
+
+#[test]
+fn runtime_construction_uses_one_reverse_ordered_obligation_ledger() {
+    let success_log = Arc::new(Mutex::new(Vec::new()));
+    let success_plan = PluginPlan::resolve(ordered_owner_definition(&success_log)).unwrap();
+    let candidate = success_plan
+        .instantiate_runtime_candidate(
+            ordered_host_obligations(&success_log),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
+    let mut retirement = candidate.begin_retirement();
+
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(
+        *success_log
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ["plugin", "host"]
+    );
+
+    let failure_log = Arc::new(Mutex::new(Vec::new()));
+    let failure_definition = PluginDefinition::infallible::<OrderedFailurePlugin, _>(
+        ORDERED_FAILURE_DEFINITION_ID,
+        b"ordered-failure-v1",
+        OrderedFailurePlugin::default,
+    );
+    let failure_plan =
+        PluginPlan::resolve((ordered_owner_definition(&failure_log), failure_definition)).unwrap();
+    let mut failure = failure_plan
+        .instantiate_runtime_candidate(
+            ordered_host_obligations(&failure_log),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(
+        *failure_log
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ["plugin", "host"]
+    );
+}
+
+#[test]
+fn runtime_prepare_failure_retains_the_host_owner_for_exactly_once_retry() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let released = Arc::new(AtomicBool::new(false));
+    let begins = Arc::new(AtomicU64::new(0));
+    let polls = Arc::new(AtomicU64::new(0));
+    let failing = PluginDefinition::fallible::<CorePlugin, _>(
+        CORE_POLICY_A,
+        b"runtime-prepare-failure-v1",
+        || Err(PluginPrepareFailure::new("test.runtime.prepare.rejected")),
+    );
+    let plan = PluginPlan::resolve(failing).unwrap();
+
+    let mut failure = plan
+        .instantiate_runtime_candidate(
+            retained_ordered_host_obligations(&log, &released, &begins, &polls),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        RuntimeConstructionError::Plugin(PluginInstantiationError::Prepare(error))
+            if error.code() == "test.runtime.prepare.rejected"
+    ));
+    assert_eq!(
+        failure.retirement_state(),
+        RuntimeCandidateRetirementState::Retiring
+    );
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::RetirementIncomplete
+    );
+    assert_eq!(begins.load(Ordering::SeqCst), 1);
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ["host"]
+    );
+
+    released.store(true, Ordering::SeqCst);
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(begins.load(Ordering::SeqCst), 1);
+    assert_eq!(polls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ["host"]
+    );
+}
+
+#[test]
+fn runtime_finish_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let released = Arc::new(AtomicBool::new(false));
+    let begins = Arc::new(AtomicU64::new(0));
+    let polls = Arc::new(AtomicU64::new(0));
+    let failure_definition = PluginDefinition::infallible::<OrderedFinishFailurePlugin, _>(
+        ORDERED_FAILURE_DEFINITION_ID,
+        b"ordered-finish-failure-v1",
+        OrderedFinishFailurePlugin::default,
+    );
+    let plan = PluginPlan::resolve((ordered_owner_definition(&log), failure_definition)).unwrap();
+
+    let mut failure = plan
+        .instantiate_runtime_candidate(
+            retained_ordered_host_obligations(&log, &released, &begins, &polls),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        RuntimeConstructionError::Plugin(PluginInstantiationError::Plugin(
+            PluginError::SetupFailed { plugin, .. }
+        )) if *plugin == ORDERED_FAILURE_PLUGIN_ID
+    ));
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::RetirementIncomplete
+    );
+    assert_eq!(begins.load(Ordering::SeqCst), 1);
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ["plugin", "host"]
+    );
+
+    released.store(true, Ordering::SeqCst);
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(begins.load(Ordering::SeqCst), 1);
+    assert_eq!(polls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ["plugin", "host"]
+    );
 }
 
 #[derive(Debug, Clone, Copy)]

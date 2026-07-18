@@ -32,7 +32,7 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
 
     assert_eq!(
         report.plugin_plan_fingerprint,
-        "957780ddaae1597b3a3925cabac17330ca1c99d357246b9a60091f14cd08d701"
+        "f499fbeb8c84c4592b5a5bf503bf75e9b85898ba17ac7ae8d5107b90f5f6f38f"
     );
     assert_eq!(
         report.schema_fingerprint,

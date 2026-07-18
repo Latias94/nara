@@ -65,6 +65,10 @@ pub fn load_project_content() -> LoadedProjectContent {
     try_load_project_content().expect("reference project content should load")
 }
 
+pub fn project_root_capability() -> DirectoryCapability {
+    try_project_root_capability().expect("reference project root should be authorized")
+}
+
 pub fn try_load_project_content() -> Result<LoadedProjectContent, ProjectContentFixtureError> {
     try_load_project_content_from_path(Path::new(env!("CARGO_MANIFEST_DIR")))
 }
@@ -266,7 +270,7 @@ fn try_project_root_capability() -> Result<DirectoryCapability, ProjectContentFi
     try_project_root_capability_at(Path::new(env!("CARGO_MANIFEST_DIR")))
 }
 
-fn try_project_root_capability_at(
+pub fn try_project_root_capability_at(
     path: &Path,
 ) -> Result<DirectoryCapability, ProjectContentFixtureError> {
     let root = host_directory(path)

@@ -1,41 +1,81 @@
-use std::{ffi::OsString, fs::File, io, path::Path, process::ExitCode};
+use std::{
+    fs::File,
+    io::{self, Write},
+    num::NonZeroU32,
+    path::Path,
+    process::ExitCode,
+    time::{Duration, Instant},
+};
 
 #[cfg(windows)]
 use std::fs::OpenOptions;
 
 use nara::{
     fs::{
-        CapabilityRights, DirectoryCapability, FileCapability, FsError, FsOperation,
-        HostCapabilityOptions, RelativePath, TrustMode,
+        CapabilityRights, DirectoryCapability, FsError, FsOperation, HostCapabilityOptions,
+        TrustMode,
     },
-    project_host::ProjectCandidateError,
+    project_host::{HeadlessRunOutcome, ProjectCandidateError},
 };
-use nara_reference_game::{ReferenceGameError, TracerSnapshot, run_headless_ticks_from_manifest};
-
-const MANIFEST_OVERRIDE: &str = "NARA_REFERENCE_GAME_MANIFEST";
+use nara_reference_game::project_headless_run;
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(snapshot) => {
-            println!(
-                "tick={} enemy_hp={}",
-                snapshot.tick, snapshot.enemy_hit_points
-            );
-            ExitCode::SUCCESS
-        }
+    let root = match open_project_root() {
+        Ok(root) => root,
         Err(error) => {
-            eprintln!("{error}");
-            ExitCode::FAILURE
+            emit_diagnostics(error.diagnostics());
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut run = project_headless_run(root, NonZeroU32::new(3).unwrap());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let report = run.execute_bounded();
+        match report.outcome() {
+            HeadlessRunOutcome::Completed(snapshot) => {
+                println!(
+                    "tick={} enemy_hp={}",
+                    snapshot.tick, snapshot.enemy_hit_points
+                );
+                return ExitCode::SUCCESS;
+            }
+            HeadlessRunOutcome::Failed => {
+                emit_diagnostics(report.diagnostics());
+                return ExitCode::FAILURE;
+            }
+            HeadlessRunOutcome::CleanupIncomplete if Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            HeadlessRunOutcome::CleanupIncomplete => {
+                emit_diagnostics(report.diagnostics());
+                return ExitCode::FAILURE;
+            }
         }
     }
 }
 
-fn run() -> Result<TracerSnapshot, ReferenceGameError> {
-    let manifest = open_manifest()?;
-    run_headless_ticks_from_manifest(&manifest, None, 3)
+fn emit_diagnostics(report: &nara::diagnostic::DiagnosticReport) {
+    let stderr = io::stderr();
+    let mut stderr = stderr.lock();
+    let _ = write_diagnostics(&mut stderr, report);
 }
 
-fn open_manifest() -> Result<FileCapability, ProjectCandidateError> {
+fn write_diagnostics(
+    writer: &mut impl Write,
+    report: &nara::diagnostic::DiagnosticReport,
+) -> io::Result<()> {
+    for diagnostic in report.iter() {
+        writeln!(
+            writer,
+            "{}: {}",
+            diagnostic.code().as_str(),
+            diagnostic.summary().as_str()
+        )?;
+    }
+    Ok(())
+}
+
+fn open_project_root() -> Result<DirectoryCapability, ProjectCandidateError> {
     let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = host_directory(project_root).map_err(|source| {
         ProjectCandidateError::from_manifest_authority(FsError::Io {
@@ -43,16 +83,19 @@ fn open_manifest() -> Result<FileCapability, ProjectCandidateError> {
             source,
         })
     })?;
-    let root = DirectoryCapability::from_host_handle(
+    DirectoryCapability::from_host_handle(
         directory,
-        HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::Untrusted),
+        HostCapabilityOptions::new(CapabilityRights::ReadOnly, portable_trust()),
     )
-    .map_err(ProjectCandidateError::from_manifest_authority)?;
-    let name = std::env::var_os(MANIFEST_OVERRIDE).unwrap_or_else(|| OsString::from("nara.toml"));
-    let relative = RelativePath::new(Path::new(&name))
-        .map_err(|error| ProjectCandidateError::from_manifest_authority(FsError::from(error)))?;
-    root.open_file(&relative)
-        .map_err(ProjectCandidateError::from_manifest_authority)
+    .map_err(ProjectCandidateError::from_manifest_authority)
+}
+
+fn portable_trust() -> TrustMode {
+    if cfg!(any(windows, target_os = "linux")) {
+        TrustMode::Untrusted
+    } else {
+        TrustMode::TrustedLocal
+    }
 }
 
 fn host_directory(path: &Path) -> io::Result<File> {
@@ -74,5 +117,26 @@ fn host_directory(path: &Path) -> io::Result<File> {
     #[cfg(unix)]
     {
         File::open(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authority_failures_use_the_structured_cli_sink() {
+        let error = ProjectCandidateError::from_manifest_authority(FsError::Io {
+            operation: FsOperation::OpenDirectory,
+            source: io::Error::new(io::ErrorKind::NotFound, "sensitive host path"),
+        });
+        let mut output = Vec::new();
+
+        write_diagnostics(&mut output, error.diagnostics()).unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "project.manifest.host-io: Project manifest host I/O failed\n"
+        );
     }
 }

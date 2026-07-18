@@ -569,7 +569,7 @@ fn task_pool_constructors_defensively_revalidate_configuration() {
 }
 
 #[test]
-fn partial_worker_spawn_failure_reclaims_started_workers_before_returning() {
+fn partial_worker_spawn_failure_returns_a_pollable_owner_without_waiting() {
     let config = test_config(1)
         .with_kind(
             TaskPoolKind::Io,
@@ -580,17 +580,49 @@ fn partial_worker_spawn_failure_reclaims_started_workers_before_returning() {
 
     let (result, probe) =
         TaskPools::try_new_with_worker_spawn_failure_for_tests(config, TaskPoolKind::Io, 1);
+    let mut failure = result.unwrap_err();
 
     assert!(matches!(
-        result,
-        Err(TaskPoolError::WorkerSpawnFailed {
+        failure.error(),
+        TaskPoolError::WorkerSpawnFailed {
             kind: TaskPoolKind::Io,
             ..
-        })
+        }
     ));
     assert!(started_at.elapsed() < Duration::from_secs(2));
     assert_eq!(probe.started(), 1);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while failure.drive_cleanup() != TaskPoolsCloseProgress::Complete && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
     assert_eq!(probe.exited(), 1);
+}
+
+#[test]
+fn cross_executor_construction_failure_retains_earlier_pool_owners() {
+    let config = test_config(1);
+    let (result, probe) =
+        TaskPools::try_new_with_worker_spawn_failure_for_tests(config, TaskPoolKind::Compute, 0);
+    let mut failure = result.unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        TaskPoolError::WorkerSpawnFailed {
+            kind: TaskPoolKind::Compute,
+            ..
+        }
+    ));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while failure.drive_cleanup() != TaskPoolsCloseProgress::Complete && Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+
+    assert_eq!(
+        failure.report().for_kind(TaskPoolKind::Io).joined_workers,
+        1
+    );
+    assert_eq!(probe.started(), 0);
+    assert_eq!(probe.exited(), 0);
 }
 
 #[test]

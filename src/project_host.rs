@@ -2,6 +2,9 @@ mod composition;
 mod ingest;
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+mod runtime;
+
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use crate::project_content::{
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentError, ProjectContentErrorKind,
@@ -15,3 +18,5 @@ pub use composition::{
     resolve_runtime_plan,
 };
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub use runtime::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};

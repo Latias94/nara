@@ -1,7 +1,7 @@
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc,
     },
@@ -13,19 +13,21 @@ use bevy_ecs::error::{BevyError, ErrorContext, ErrorHandler, FallbackErrorHandle
 use nara::{
     app::{
         App, CoreStage, FixedCatchUpPolicy, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
-        PluginDeclaration, PluginError, PluginId, PluginShutdownContext, RealTime, RenderTime,
-        RuntimeAdmissionError, RuntimeCandidate, RuntimeCandidateRetirementState,
-        RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseParticipant,
-        RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseParticipantPhase,
-        RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeControlFailure,
-        RuntimeControlRejection, RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFault,
-        RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger,
-        RuntimeState, RuntimeTimeSettings, RuntimeWorldAccessError, StartupStage, VirtualTime,
+        PluginDeclaration, PluginError, PluginId, PluginShutdownContext,
+        PluginShutdownObligationId, RealTime, RenderTime, RuntimeAdmissionError, RuntimeCandidate,
+        RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
+        RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
+        RuntimeCloseParticipantPhase, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl,
+        RuntimeControlFailure, RuntimeControlRejection, RuntimeControlRequestResult,
+        RuntimeControlStatus, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
+        RuntimeInstance, RuntimeObligationLedger, RuntimePublicationError,
+        RuntimePublicationFailure, RuntimePublicationSlot, RuntimeScopeError, RuntimeState,
+        RuntimeTimeSettings, RuntimeWorldAccessError, StartupStage, VirtualTime,
         drive_runtime_quarantine, runtime_quarantine_status,
     },
     core::{ItemLimit, TimeLimit},
     ecs::{
-        Commands, Event, On, Res, ResMut, Resource, change_detection::DetectChangesMut,
+        Commands, Event, On, Res, ResMut, Resource, World, change_detection::DetectChangesMut,
         schedule::IntoScheduleConfigs,
     },
     gameplay::{
@@ -100,6 +102,21 @@ fn finish_runtime(runtime: RuntimeInstance) {
         retirement.retirement_state(),
         RuntimeCandidateRetirementState::Retired,
         "runtime retirement did not complete before the test deadline"
+    );
+}
+
+fn finish_publication_failure(mut failure: RuntimePublicationFailure) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while failure.retirement_state() != RuntimeCandidateRetirementState::Retired
+        && Instant::now() < deadline
+    {
+        failure.drive_retirement();
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        failure.retirement_state(),
+        RuntimeCandidateRetirementState::Retired,
+        "publication failure retirement did not complete before the test deadline"
     );
 }
 
@@ -1577,22 +1594,128 @@ fn dropping_a_live_runtime_begins_best_effort_close_once() {
 }
 
 #[test]
-fn admission_failure_retains_and_retires_transferred_owners() {
-    let released = Arc::new(AtomicBool::new(true));
-    let begins = Arc::new(AtomicUsize::new(0));
-    let polls = Arc::new(AtomicUsize::new(0));
+fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
+    const PLUGIN_ID: PluginId = PluginId::new("nara.test.admission.plugin-owner");
+    const OBLIGATION_ID: PluginShutdownObligationId =
+        PluginShutdownObligationId::new("nara.test.admission.plugin-owner");
+    const PLUGIN_PARTICIPANT_ID: RuntimeCloseParticipantId =
+        RuntimeCloseParticipantId::new("nara.test.admission.plugin-owner");
+    const HOST_PARTICIPANT_ID: RuntimeCloseParticipantId =
+        RuntimeCloseParticipantId::new("nara.test.admission.host-owner");
+    const DECLARATION: PluginDeclaration =
+        PluginDeclaration::new(PLUGIN_ID, PluginCategory::Runtime)
+            .shutdown_obligations(&[OBLIGATION_ID]);
+
+    #[derive(Debug)]
+    struct AdmissionOwnerPlugin {
+        log: Arc<Mutex<Vec<&'static str>>>,
+        released: Arc<AtomicBool>,
+        begins: Arc<AtomicUsize>,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl Plugin for AdmissionOwnerPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.register_plugin_runtime_close_participant(
+                OBLIGATION_ID,
+                PLUGIN_PARTICIPANT_ID,
+                RetainedAdmissionOwner {
+                    log: Arc::clone(&self.log),
+                    released: Arc::clone(&self.released),
+                    begins: Arc::clone(&self.begins),
+                    polls: Arc::clone(&self.polls),
+                },
+            )?;
+            Ok(())
+        }
+    }
+
+    struct RetainedAdmissionOwner {
+        log: Arc<Mutex<Vec<&'static str>>>,
+        released: Arc<AtomicBool>,
+        begins: Arc<AtomicUsize>,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl RuntimeCloseParticipant for RetainedAdmissionOwner {
+        fn begin_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.begins.fetch_add(1, Ordering::SeqCst);
+            self.log
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push("plugin");
+            Ok(RuntimeCloseProgress::Pending)
+        }
+
+        fn poll_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.polls.fetch_add(1, Ordering::SeqCst);
+            Ok(if self.released.load(Ordering::SeqCst) {
+                RuntimeCloseProgress::Complete
+            } else {
+                RuntimeCloseProgress::Pending
+            })
+        }
+    }
+
+    struct ImmediateAdmissionOwner {
+        log: Arc<Mutex<Vec<&'static str>>>,
+        begins: Arc<AtomicUsize>,
+    }
+
+    impl RuntimeCloseParticipant for ImmediateAdmissionOwner {
+        fn begin_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.begins.fetch_add(1, Ordering::SeqCst);
+            self.log
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push("host");
+            Ok(RuntimeCloseProgress::Complete)
+        }
+
+        fn poll_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            panic!("an immediately complete owner must not be polled")
+        }
+    }
+
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let released = Arc::new(AtomicBool::new(false));
+    let plugin_begins = Arc::new(AtomicUsize::new(0));
+    let plugin_polls = Arc::new(AtomicUsize::new(0));
+    let host_begins = Arc::new(AtomicUsize::new(0));
     let mut obligations = RuntimeObligationLedger::new();
     obligations
         .register(
-            RuntimeCloseParticipantId::new("nara.test.admission-owner"),
-            TestCloseParticipant {
-                released,
-                begins: begins.clone(),
-                polls,
+            HOST_PARTICIPANT_ID,
+            ImmediateAdmissionOwner {
+                log: Arc::clone(&log),
+                begins: Arc::clone(&host_begins),
             },
         )
         .unwrap();
     let mut app = configured_app(FixedTime::default());
+    app.add_plugin(AdmissionOwnerPlugin {
+        log: Arc::clone(&log),
+        released: Arc::clone(&released),
+        begins: Arc::clone(&plugin_begins),
+        polls: Arc::clone(&plugin_polls),
+    })
+    .unwrap();
     app.set_runner(|_| Ok(nara::app::AppExit::Success)).unwrap();
 
     let failure = RuntimeCandidate::admit_with(
@@ -1603,13 +1726,37 @@ fn admission_failure_retains_and_retires_transferred_owners() {
     .unwrap_err();
 
     assert_eq!(failure.error(), RuntimeAdmissionError::RawRunnerInstalled);
-    assert_eq!(begins.load(Ordering::SeqCst), 0);
+    assert_eq!(plugin_begins.load(Ordering::SeqCst), 0);
+    assert_eq!(host_begins.load(Ordering::SeqCst), 0);
     let mut retirement = failure.begin_retirement();
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::RetirementIncomplete
+    );
+    assert_eq!(plugin_begins.load(Ordering::SeqCst), 1);
+    assert_eq!(plugin_polls.load(Ordering::SeqCst), 1);
+    assert_eq!(host_begins.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ["plugin", "host"]
+    );
+
+    released.store(true, Ordering::SeqCst);
     assert_eq!(
         retirement.drive_retirement(),
         RuntimeCandidateRetirementState::Retired
     );
-    assert_eq!(begins.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert_eq!(plugin_begins.load(Ordering::SeqCst), 1);
+    assert_eq!(plugin_polls.load(Ordering::SeqCst), 2);
+    assert_eq!(host_begins.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        ["plugin", "host"]
+    );
 }
 
 #[test]
@@ -1882,6 +2029,56 @@ fn missing_or_replaced_candidate_error_handler_prevents_startup() {
             RuntimeCandidateRetirementState::Retired
         );
     }
+}
+
+#[derive(Debug, Resource)]
+struct CandidateAdmissionProbe(u64);
+
+#[test]
+fn unpublished_candidate_scope_materializes_host_state_before_startup() {
+    let app = configured_app(FixedTime::default());
+    let mut candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+
+    candidate
+        .with_admission_scope(|scope| {
+            scope.apply_command(|world: &mut World| {
+                world.insert_resource(CandidateAdmissionProbe(7));
+            });
+        })
+        .unwrap();
+
+    let runtime = candidate.complete_startup().unwrap().promote();
+    assert_eq!(runtime.world().resource::<CandidateAdmissionProbe>().0, 7);
+    finish_runtime(runtime);
+}
+
+#[test]
+fn unpublished_candidate_scope_rejects_replaced_fault_authority() {
+    let app = configured_app(FixedTime::default());
+    let mut candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+
+    let error = candidate
+        .with_admission_scope(|scope| {
+            scope.apply_command(|world: &mut World| {
+                world.insert_resource(FallbackErrorHandler(ignore_bevy_error));
+            });
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimeScopeError::Faulted { ref fault }
+            if fault.kind() == RuntimeFaultKind::FaultReporterAuthority
+    ));
+    let mut failure = candidate.complete_startup().unwrap_err();
+    assert_eq!(
+        failure.fault().kind(),
+        RuntimeFaultKind::FaultReporterAuthority
+    );
+    assert_eq!(
+        failure.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
 }
 
 #[test]
@@ -2333,6 +2530,110 @@ fn a_fault_after_readiness_is_not_published_as_running() {
 
     assert_eq!(runtime.state(), RuntimeState::Faulted);
     assert_eq!(runtime.fault(), Some(&fault));
+}
+
+#[test]
+fn atomic_publication_rejects_a_fault_that_wins_the_reporter_lock() {
+    let candidate =
+        RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
+    let reporter = candidate.fault_reporter();
+    let ready = candidate.complete_startup().unwrap();
+    let fault = RuntimeFault::engine(
+        RuntimeFaultKind::RequiredService,
+        "nara.test.publication-report-first",
+    );
+    let reporter_thread = std::thread::spawn(move || reporter.report(fault));
+    assert!(reporter_thread.join().unwrap());
+
+    let mut slot = RuntimePublicationSlot::new();
+    let failure = ready.publish_into(&mut slot).unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        RuntimePublicationError::CandidateFault(fault)
+            if fault.source() == "nara.test.publication-report-first"
+    ));
+    assert!(slot.is_vacant());
+    finish_publication_failure(failure);
+}
+
+#[test]
+fn atomic_publication_installs_the_owner_before_a_later_reported_fault() {
+    let candidate =
+        RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
+    let reporter = candidate.fault_reporter();
+    let ready = candidate.complete_startup().unwrap();
+    let mut slot = RuntimePublicationSlot::new();
+
+    ready.publish_into(&mut slot).unwrap();
+    let reporter_thread = std::thread::spawn(move || {
+        reporter.report(RuntimeFault::engine(
+            RuntimeFaultKind::RequiredService,
+            "nara.test.publication-publish-first",
+        ))
+    });
+    assert!(reporter_thread.join().unwrap());
+
+    let runtime = slot
+        .take()
+        .expect("successful publication installs one runtime owner");
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
+    assert_eq!(
+        runtime.fault().map(RuntimeFault::source),
+        Some("nara.test.publication-publish-first")
+    );
+    finish_runtime(runtime);
+}
+
+#[test]
+fn atomic_publication_preserves_an_occupied_slot_and_retires_the_rejected_owner() {
+    let first = RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap())
+        .unwrap()
+        .complete_startup()
+        .unwrap();
+    let second = RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap())
+        .unwrap()
+        .complete_startup()
+        .unwrap();
+    let mut slot = RuntimePublicationSlot::new();
+    first.publish_into(&mut slot).unwrap();
+    let first_generation = slot.runtime().unwrap().generation();
+
+    let failure = second.publish_into(&mut slot).unwrap_err();
+
+    assert_eq!(
+        failure.error(),
+        &RuntimePublicationError::DestinationOccupied
+    );
+    assert_eq!(slot.runtime().unwrap().generation(), first_generation);
+    finish_publication_failure(failure);
+    finish_runtime(slot.take().unwrap());
+}
+
+#[test]
+fn a_consumed_publication_slot_cannot_publish_another_generation() {
+    let first = RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap())
+        .unwrap()
+        .complete_startup()
+        .unwrap();
+    let second = RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap())
+        .unwrap()
+        .complete_startup()
+        .unwrap();
+    let mut slot = RuntimePublicationSlot::new();
+    first.publish_into(&mut slot).unwrap();
+    let runtime = slot.take().unwrap();
+    assert!(!slot.is_vacant());
+
+    let failure = second.publish_into(&mut slot).unwrap_err();
+
+    assert_eq!(
+        failure.error(),
+        &RuntimePublicationError::DestinationOccupied
+    );
+    assert!(slot.runtime().is_none());
+    finish_publication_failure(failure);
+    finish_runtime(runtime);
 }
 
 #[test]

@@ -5,9 +5,9 @@ use nara::{
         RuntimeCandidate, RuntimeControl, RuntimeControlRequestResult, RuntimeControlStatus,
         RuntimeState,
     },
-    prelude::{App, FixedTime, MinimalPlugins},
+    prelude::{App, FixedTime, HeadlessRuntimePlugins},
 };
-use nara_reference_game::{ReferenceGamePlugin, TracerSnapshot};
+use nara_reference_game::{ReferenceGamePlugin, ReferenceTracerSeedPlugin, TracerSnapshot};
 
 fn accepted_ticket(result: RuntimeControlRequestResult) -> nara::app::RuntimeControlTicket {
     match result {
@@ -21,8 +21,12 @@ fn accepted_ticket(result: RuntimeControlRequestResult) -> nara::app::RuntimeCon
 #[test]
 fn manifest_free_code_first_runtime_pauses_steps_resumes_and_stops() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, ReferenceGamePlugin))
-        .unwrap();
+    app.add_plugins((
+        HeadlessRuntimePlugins,
+        ReferenceGamePlugin,
+        ReferenceTracerSeedPlugin,
+    ))
+    .unwrap();
     let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
     let mut runtime = candidate.complete_startup().unwrap().promote();
 
