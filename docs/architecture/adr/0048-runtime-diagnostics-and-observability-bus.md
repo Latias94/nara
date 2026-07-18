@@ -19,12 +19,12 @@ truth, behavior depends on a subscriber and retained history cannot be queried d
 
 `nara_diagnostic` owns `RuntimeDiagnostics`, the engine-level bounded runtime observation resource.
 Producer domains retain their typed errors and local status resources. Composition bridges lower
-stabilized producer outcomes into `RuntimeDiagnosticDraft`; those bridges are U31 work and are not
-implemented by this core decision.
+stabilized producer outcomes into `RuntimeDiagnosticDraft`; those bridges remain legacy U31 trigger
+backlog and are not implemented by this core decision.
 
 ```mermaid
 flowchart TD
-    Domain[Typed producer outcome] --> Bridge[Composition bridge - U31]
+    Domain[Typed producer outcome] --> Bridge[Composition bridge - legacy U31 trigger]
     Bridge --> Draft[RuntimeDiagnosticDraft]
     Draft --> Publish[publish with frame]
     Publish --> Bus[RuntimeDiagnostics]
@@ -82,7 +82,8 @@ Rules:
   explicit tooling capture may serialize bounded snapshots later, but replay behavior cannot depend
   on them.
 - **Producer integration:** Asset, watcher, task, window, render, project, and editor bridges remain
-  U31. Until those bridges land, this ADR's shared core is intentionally implementation-partial.
+  legacy U31 trigger backlog. Until admitted successor slices land, this ADR's shared core is
+  intentionally implementation-partial.
 
 ## Alternatives Considered
 
@@ -117,7 +118,8 @@ errors depend upward.
 
 - Runtime tools have one headless-safe diagnostic resource and stable filters.
 - Domain crates keep typed error ownership; `nara_diagnostic` does not become an error-string sink.
-- U31 must add and verify each producer bridge after its typed outcomes stabilize.
+- A named successor workflow may add and verify a producer bridge after its typed outcomes
+  stabilize; the legacy U31 backlog is not an unconditional implementation sequence.
 - Metrics and pressure values remain outside the event buffer under ADR 0068.
 - Offline product evidence remains outside both runtime observation resources and crosses its own
   bounded expected-identity boundary before trusted publication.
@@ -131,7 +133,7 @@ errors depend upward.
 | Retention | Manual and frame-window behavior is deterministic | Cleanup tests |
 | Headless inspection | Both observation resources work without UI/tracing | Plugin integration test |
 | Logging split | Cursor emission never repeats an unchanged history | Thread-local subscriber test |
-| Producer coverage | All named runtime domains bridge typed outcomes | U31 integration tests |
+| Producer coverage | Every admitted runtime domain bridges typed outcomes | Focused successor integration tests |
 
 ## Risks and Mitigations
 

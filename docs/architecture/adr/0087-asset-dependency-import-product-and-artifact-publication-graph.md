@@ -2,6 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
+**Last Revised**: 2026-07-16
 **Owner**: `nara_asset`, importer-owning domains, and authoring hosts
 **Admission Trigger**: A bounded multi-product importer proves tracked dependency discovery,
 stable product reconciliation, exact invalidation, and crash-safe old-or-new artifact-group
@@ -30,8 +31,9 @@ source, import cache, runtime residency, and GPU resources into one database.
 
 ## Decision
 
-If accepted, `nara_asset` will own a typed dependency and product graph. Importers read immutable
-inputs only through a bounded tracked `ImportContext` and publish one immutable artifact group.
+If accepted, `nara_asset` will own a typed dependency and product graph. Conforming importers obtain
+declared immutable inputs through a bounded tracked `ImportContext` and publish one immutable
+artifact group.
 
 ```mermaid
 flowchart LR
@@ -74,10 +76,17 @@ The first graph distinguishes:
 | Runtime soft | Optional/addressable reference that does not force acquisition | Product/runtime policy |
 | Build-only | Required to cook/package but not mounted as a runtime dependency | Target build pipeline |
 
-Every importer read of source bytes, dependent products, canonical settings, tool implementation,
-or target-sensitive input goes through `ImportContext`. The context records exact edges and digests.
-Importer code receives no ambient filesystem capability, environment iterator, clock, mutable ECS
-`World`, or global asset-service escape hatch.
+Every publishable importer input from Nara, including source bytes, dependent products, canonical
+settings, tool implementation identity, and target-sensitive data, goes through `ImportContext`.
+The context records exact edges and digests and exposes no filesystem capability, environment
+iterator, clock, mutable ECS `World`, or global asset-service escape hatch.
+
+An in-process native Rust importer is nevertheless trusted author code with the ambient authority
+of the process. It can call `std::fs`, environment, network, clock, process, or thread APIs without
+using `ImportContext`; Nara's trait cannot sandbox or forcibly terminate it. Such access is a
+contract violation detected through audit and reproducibility tests, not a capability-enforcement
+guarantee. Only an isolated process or platform sandbox with explicit evidence may claim that
+undeclared environment access is prevented and hostile execution can be terminated.
 
 Cycles, depth, fan-out, product count, input bytes, output bytes, diagnostics, time, and task count
 are bounded before publication. A cycle is a typed graph error unless a later ADR defines a
@@ -162,13 +171,14 @@ and gives reload/cook one verified immutable publication unit.
 | Stale result safety | Cancelled, timed-out, stale, and superseded jobs publish zero manifests | Task integration tests |
 | Budget safety | Cycle, depth, fan-out, product-count, and byte-limit fixtures terminate within bounds | Hostile importer tests |
 | Backend isolation | Artifacts and graph records contain no GPU/native handles | Schema and dependency audit |
+| Trust honesty | In-process native importers are labeled trusted; only an isolated Adapter with enforcement evidence may claim ambient-authority denial or hostile termination | Admission review and Adapter conformance tests |
 | Format durability | Current/predecessor manifests migrate or reject according to the compatibility matrix | Golden fixture tests |
 
 ## Risks and Mitigations
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| Importer observes an untracked input | Critical | Medium | Supply inputs only through tracked context and fail admission for ambient authority. |
+| Importer observes an untracked input | Critical | Medium | Treat in-process importers as trusted, audit and reproducibility-test them, and require an isolated Adapter before claiming ambient-authority enforcement. |
 | Product reconciliation aliases the wrong output | Critical | Medium | Validate the full candidate set; require explicit continuity or remap; reject ambiguity. |
 | Dependency graph becomes an allocation attack | High | Medium | Enforce edge, depth, fan-out, byte, time, and diagnostic budgets before decode/publication. |
 | Artifact groups consume excessive disk | Medium | High | Use manifest reachability, bounded quarantine, retention metrics, and deliberate GC. |
@@ -193,10 +203,15 @@ GPU preparation policy, editor save transaction, or arbitrary plugin sandbox.
 
 ## Admission Evidence
 
+ADR 0083's durable source/product identity must already be Accepted or replaced by a named
+compatible Accepted successor. This proposal cannot make a Proposed identity model authoritative
+by accepting the import graph first.
+
 Acceptance requires the complete success-metric matrix with at least one real compound importer,
 one transitive dependency fixture, last-good reimport behavior, and crash recovery across every
-artifact-group publication boundary. A struct named `ImportContext` or a multi-output vector alone
-is insufficient.
+artifact-group publication boundary. It must label in-process native importers as trusted and
+separate reproducibility evidence from any enforceable isolated-Adapter claim. A struct named
+`ImportContext` or a multi-output vector alone is insufficient.
 
 ## Citations
 

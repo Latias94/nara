@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
+**Last Revised**: 2026-07-16
 **Owner**: Rust authoring, executable/runtime hosts, optional scripting adapter packages
 **Supersedes**: [ADR 0021](0021-scripting-and-wasm-boundary.md)
 **Related**: ADR 0034, ADR 0039, ADR 0042, ADR 0045, ADR 0076, ADR 0084, ADR 0086
@@ -105,6 +106,11 @@ until measured with the reference game and is not part of the runtime correctnes
 - A trusted in-process Rust adapter must disclose that it is not a sandbox. Trust describes the
   native host package's process privileges; it does not widen the script module's data-access
   contract.
+- Every concrete Adapter declares the script-module trust level, allowed Host capabilities/imports,
+  default filesystem/network/process policy, instruction or fuel/time/memory/stack/handle/output
+  budgets, cancellation and fault isolation, module provenance, persistent-state policy, and
+  diagnostic disclosure rules. A VM or OS boundary may be called a sandbox only when enforcement
+  and termination/reclamation behavior are tested on every supported target.
 - Wasm is one possible adapter for a concrete sandboxing or portability use case. It is neither the
   default scripting runtime nor the universal plugin ABI.
 - Shared scripting contracts move into Nara-owned APIs only after at least two independent adapters
@@ -165,6 +171,7 @@ hot-reload claim.
 | Optional core | Default and minimal feature trees contain no script VM or hot-patch toolchain dependency | Cargo tree checks |
 | Quiescent application | No patch applies during an active schedule or participating callback/task | runtime state-machine tests |
 | Adapter locality | Adapter-only lifecycle/VM types remain outside core until the shared-consumer gate is met | dependency and API review |
+| Adapter security honesty | Every scripting Adapter publishes enforceable capability/resource/fault limits and never uses `sandbox` without target-specific enforcement evidence | Adapter conformance and hostile-module tests |
 
 Numeric latency gates are set after the first reference-game baseline. A patch prototype must
 outperform ordinary incremental rebuild plus restart for its supported edit class to remain a

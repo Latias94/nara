@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-07-16
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State
 
@@ -93,6 +94,29 @@ Undo/redo should be transaction-based:
 - Failed patches do not enter undo history.
 - Diagnostics should identify the failed operation and field path.
 
+## Continuous Interaction Transactions
+
+Long-running slider, gizmo, curve, drag, and text-composition edits use one toolkit-neutral
+authoring transaction:
+
+```text
+Begin -> bounded Preview* -> Commit(one patch + inverse) | Cancel
+```
+
+- `Begin` captures stable targets, the base document revision, authorization scope, and restorable
+  state.
+- `Preview` updates are bounded and cancellable. They create no undo entries and do not become
+  persistent document commits.
+- `Commit` emits exactly one validated atomic `ScenePatchDocument` plus its inverse through the
+  normal workspace command path.
+- Explicit cancel, pointer-capture or focus loss, window/tool close, target deletion, and revision
+  conflict must restore, reject, or report the transaction explicitly. None may silently commit a
+  partial preview.
+- First-party and third-party tools use the same command/validation path.
+
+This decision does not select a public gesture trait, toolkit event model, preview storage format,
+or edit-while-playing merge policy.
+
 ## Alternatives Considered
 
 ### Option A: Editor mutates ECS World directly
@@ -119,6 +143,16 @@ Undo/redo should be transaction-based:
 
 **Decision**: Chosen.
 
+### Option D: Commit every preview and rely on toolkit-specific merge behavior
+
+**Pros**: Individual widgets can implement dragging with their native undo facilities.
+
+**Cons**: Undo history becomes frame-rate dependent, cancellation and revision conflicts diverge by
+toolkit, and third-party tools bypass the document transaction authority.
+
+**Decision**: Rejected. Continuous interaction is authoring semantics, not a widget implementation
+detail.
+
 ## Consequences
 
 - `nara_editor` should operate on scene/prefab documents through patch transactions.
@@ -126,6 +160,8 @@ Undo/redo should be transaction-based:
 - Scene validation and component schema systems must support field paths and typed values.
 - Hot reload and conflict handling can reuse patch diagnostics and validation.
 - AI agents can propose patches instead of rewriting entire scenes blindly.
+- Continuous UI gestures produce one document commit and one inverse regardless of preview rate or
+  UI toolkit.
 
 ## Success Metrics
 
@@ -137,6 +173,7 @@ Undo/redo should be transaction-based:
 | Stable paths | Patch paths use `SceneEntityId`, `ComponentTypeId`, and `ComponentFieldPath` | Schema and patch tests |
 | Validation | Invalid field edits fail before apply | patch and prefab override no-mutation tests |
 | Live projection safety | Authoring sync does not remove unrelated runtime entities | `scene_authoring_session` tests |
+| Continuous edit atomicity | A slider or gizmo sequence produces exactly one patch and inverse; every cancellation/conflict path leaves no partial document write or extra undo entry | Continuous transaction fixture |
 
 ## Risks and Mitigations
 
@@ -146,6 +183,8 @@ Undo/redo should be transaction-based:
 | Field paths break on schema migration | High | Medium | Run component migrations during scene/prefab preflight and version patch payloads if needed |
 | Undo data is too large | Medium | Medium | Use inverse patches where cheap, snapshots for complex operations |
 | Runtime command and scene patch diverge | Medium | Medium | Keep explicit conversion paths and tests |
+| Continuous gestures add one undo record per preview | High | High | Keep previews outside undo history and commit one validated patch at the end |
+| Lost focus or a deleted target leaves a partial edit | High | Medium | Make every interruption an explicit cancel/reject path tied to the base revision and stable targets |
 
 ## Remaining Follow-Up Questions
 
@@ -161,3 +200,5 @@ Undo/redo should be transaction-based:
 - Diagnostics decision: [0009-diagnostics-errors-and-logging.md](0009-diagnostics-errors-and-logging.md)
 - Editor/tooling boundary: [0015-editor-tooling-and-dogfooding-boundary.md](0015-editor-tooling-and-dogfooding-boundary.md)
 - Event/command model: [0023-event-message-and-command-model.md](0023-event-message-and-command-model.md)
+- Godot undo merge semantics: `repo-ref/godot/core/object/undo_redo.h`
+- Godot editor undo manager: `repo-ref/godot/editor/editor_undo_redo_manager.h`

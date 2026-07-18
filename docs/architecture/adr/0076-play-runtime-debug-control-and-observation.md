@@ -94,6 +94,17 @@ flowchart LR
     Replay --> Tick
 ```
 
+### Remote adapter security boundary
+
+This ADR does not authorize a network listener or make a remote debugging endpoint enabled by
+default. A future remote Host Adapter must bind every request to an authenticated session and
+authorize runtime control, observation, and persistent capture separately. Requests carry the
+target runtime generation plus session/anti-replay identity; stale or replayed control cannot reach
+a new runtime. The Adapter enforces request-rate, concurrency, work, and output budgets in addition
+to the observation payload limits below. Cross-host transport must provide confidentiality and
+integrity, and local-only development endpoints must still use explicit enablement and binding
+policy. Exact protocol and credential technology remain a separate deployment decision.
+
 ### Runtime control
 
 `nara_app` owns the accepted execution semantics and now implements the code-first
@@ -156,6 +167,11 @@ under the proposed owner split, the Host requests a bounded scene/edit-capable e
 point; the current local controller performs the equivalent export directly. In either topology,
 tooling derives a candidate `ScenePatchDocument`, and normal revision validation and undo apply it
 to the edit document. No UI or tooling model receives unrestricted `World` access.
+
+The UI-neutral operation model distinguishes `Pending`, `Applied` with runtime generation and tick,
+`Rejected`, `Stale`, `Unsupported`, and `Faulted`. It also reports when later simulation supersedes
+or overwrites an applied transient edit. The tooling view labels runtime edits as transient and
+reports Apply Changes eligibility and persistence results separately.
 
 ### Observation snapshots and timelines
 
@@ -413,6 +429,7 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
 | Lifecycle honesty | Unfinished owners never report `Stopped`; terminal plugin failure keeps failed control/teardown evidence; startup failure publishes no runtime | RGF-U5 close tests plus RGF-U24 start-attempt tests |
 | Stable observation | Snapshot/diff/remote records contain no runtime `Entity`, Bevy `NodeId`, or backend handle | `nara_tooling` snapshot tests and `tests/stable_runtime_identity.rs` |
 | Bounded/privacy-safe capture | Every observation path enforces declared count/byte/depth/retention and field capability limits | Hostile/budget tests |
+| Remote default-deny | No network control/observation endpoint exists without explicit enablement, authenticated session binding, scoped authorization, anti-replay, and transport protection | Adapter admission and security tests before any remote listener ships |
 | Cursor honesty | A subject is highlighted only from a domain-provided stable cursor/source map | Domain/tooling tests |
 | Causality honesty | Uninstrumented command/system/change links are labeled correlation, not causation | Model/API tests and UI review |
 | Historical recovery | A future same-build compatible checkpoint restores and forward-replays to the expected canonical checksum | Replay integration tests before enabling persistence |

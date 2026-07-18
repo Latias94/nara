@@ -2,6 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
+**Last Revised**: 2026-07-16
 **Owner**: `nara_tooling`, persistent document owners, `nara_fs`, and editor hosts
 **Admission Trigger**: Editor workspace fixtures prove receipt-backed save, external conflict,
 read-only second writer, bounded journal recovery, and old-or-new multi-document transaction
@@ -142,11 +143,25 @@ content, permanent undo history, or a package artifact. Each record contains:
   recovery binding, and monotonic sequence;
 - transaction ID, baseline digest(s), candidate digest(s), and staged relative locations;
 - bounded operation list and a durable commit/abort record;
-- no secrets, absolute paths in diagnostics, or unbounded component payload duplication.
+- no deliberately captured credentials, absolute paths in diagnostics, or unbounded component
+  payload duplication. Recovery bytes and metadata are nevertheless potentially sensitive project
+  data.
+
+Journal, staging, and quarantine material inherits or tightens the project's local access
+protection. It is excluded from source control, build/package inputs, and telemetry; Host-owned
+locations or supported exclusion metadata keep it out of default sync discovery where possible.
+Nara does not claim control over external backup/sync tools or secure erase where the platform
+cannot prove either property. Retention is bounded and cleanup state remains observable.
 
 Replay applies byte, record, depth, time, snapshot, and diagnostic budgets before any mutation.
 Truncated, corrupt, incompatible, or over-budget journals are quarantined and open the affected
 workspace read-only with `RecoveryRequired`; they do not partially replay.
+
+`RecoveryRequired` exposes the reason and the provable old/new states. The user may inspect a
+bounded diff, export or Save As without destroying evidence, retry a provably valid completion or
+rebind flow, or explicitly abandon recovery. No journal, staged bytes, dirty state, or recovery
+evidence is cleared before a matching receipt proves the chosen outcome; ambiguous rollback or
+continue actions remain unavailable.
 
 After a crash, recovery must prove one of:
 
@@ -260,7 +275,7 @@ state before editor polish.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Network/removable filesystem lacks required guarantees | High | Medium | Fail closed or expose explicit cooperative/read-only tier. |
-| Recovery journal leaks project data | High | Medium | Keep local/ignored, minimize payload, bound size, and apply diagnostic redaction. |
+| Recovery journal leaks project data | High | Medium | Apply local access protection, exclude it from source/package/telemetry/sync paths, minimize payload, bound retention, and redact diagnostics. |
 | Rollback fails after partial multi-file replace | Critical | Medium | Retain old/staged evidence and journal; enter recovery-required read-only instead of guessing. |
 | Lock gives false confidence against Git/IDE | High | High | Treat lock as cooperative only and always enforce expected digest/identity. |
 | Autosave competes with explicit save | Medium | Medium | Serialize persistence transactions per document and stamp expected revisions. |

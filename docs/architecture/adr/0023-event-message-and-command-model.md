@@ -84,5 +84,4 @@ flowchart TD
 
 - What exact event retention policy should nara use?
 - Do fixed-update events and frame-update events use separate channels?
-- What is the first editor command/patch data shape?
 - How should diagnostics point to a failed command?

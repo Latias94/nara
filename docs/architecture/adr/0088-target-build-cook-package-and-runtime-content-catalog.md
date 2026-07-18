@@ -2,6 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
+**Last Revised**: 2026-07-16
 **Owner**: product build hosts, `nara_asset`, cook providers, and runtime content adapters
 **Admission Trigger**: A reference-game desktop and headless/server build proves deterministic
 dependency closure, target cooking, capability stripping, package/catalog publication, validated
@@ -145,8 +146,13 @@ large allocation, member decode, or mount publication.
   observable and cannot invalidate a live value's dependency closure.
 - Content digest/integrity is separate from signature/authenticity. Signing keys, notarization,
   store credentials, and signature operations belong to trusted release/platform adapters.
-- Untrusted or unsigned package policy is explicit per product. Native code packages are trusted
-  executable extensions, not sandboxed content.
+- A package manifest cannot authorize its own package ID, base binding, product namespace,
+  override/precedence, or version freshness. The Host supplies the expected package identity and
+  digest plus allowed namespace/base/override policy independently of package bytes. Source
+  substitution, unauthorized overlay, and rollback reject before mount publication.
+- The first accepted scope may be Host-trusted local build output only. Any untrusted or unsigned
+  package policy must be explicit per product and prove the independent authorization rule above.
+  Native code packages are trusted executable extensions, not sandboxed content.
 - Package filesystem access follows ADR 0050/0070 containment and guarantee tiers.
 
 Exact archive/container layout, compression algorithm, encryption, store SDK, CDN, install
@@ -192,6 +198,7 @@ tests before visual export tooling exists.
 | Server stripping | Server package contains zero forbidden client/editor capability members | Package audit |
 | Runtime independence | Packaged runtime opens with no source tree, `.meta`, or import-cache access | Export integration test |
 | Corruption rejection | Damaged member/catalog/base binding is rejected before mount publication | Hostile package tests |
+| Mount authorization | Package bytes cannot self-authorize identity, namespace, base/override precedence, or rollback; all must match Host-provided expectation | Source-substitution, unauthorized-overlay, and rollback fixtures |
 | Resolver atomicity | Every patch/mount fault point leaves a complete old or complete new mount resolver active | Fault-injection matrix |
 | Snapshot consistency | In-flight load resolves all dependencies within one captured mount-set generation | Concurrent load/update test |
 | Residency provenance | Every resident value reports its origin mount-set generation across resolver updates | Runtime asset test |
@@ -227,10 +234,16 @@ If accepted:
 
 ## Admission Evidence
 
+ADR 0087 and ADR 0091 must already be Accepted, be replaced by named compatible Accepted
+successors, or this ADR must be split so its accepted subset no longer depends on their import-
+publication and committed-project-snapshot semantics. Partial promotion of the coupled model is
+invalid.
+
 Acceptance requires desktop and headless/server package fixtures, deterministic clean rebuilds,
 complete closure/stripping cases, source-free runtime boot, corruption rejection, and old-or-new
-base/patch mount-resolver publication, including resident-value origin-generation tests. Creating a
-zip file or serializing a catalog map alone is insufficient.
+base/patch mount-resolver publication, including resident-value origin-generation tests. It also
+requires independently expected package identity plus source-substitution, unauthorized-overlay,
+and rollback rejection. Creating a zip file or serializing a catalog map alone is insufficient.
 
 ## Citations
 

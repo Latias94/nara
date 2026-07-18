@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
-description = "A Rust-native, declarative, data-driven game engine foundation."
+description = "An open-source game engine written in Rust."
 
 [workspace]
 resolver = "3"

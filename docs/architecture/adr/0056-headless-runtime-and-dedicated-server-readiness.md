@@ -175,11 +175,5 @@ exists.
 
 ## Open Questions
 
-- What exact type owns persistent runtime entity identity distinct from `SceneEntityId` and future
-  network IDs?
-- What is the first minimal gameplay command schema: typed Rust events, schema-registered command
-  values, or action outcomes plus payloads?
-- Should plugin metadata expose profile suitability such as `headless_safe`, `client_only`, or
-  `server_ready`, or should groups encode that policy manually first?
 - Which metrics should exist before a real server: tick time, fixed catch-up, task queue depth,
   diagnostic counts, asset load states, or entity/component counts?

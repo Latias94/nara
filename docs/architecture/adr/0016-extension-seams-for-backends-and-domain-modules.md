@@ -20,7 +20,11 @@ Examples:
 
 ## Decision
 
-nara will define **extension seams** around major backend/domain responsibilities, but will avoid making every feature a generic trait before there are at least two plausible adapters.
+nara will define **extension seams** around major backend/domain responsibilities, but will not
+freeze a public Adapter Interface until one production-shaped consumer creates real variation
+pressure and an independent implementation challenges the proposed seam. A second real Adapter is
+required before compatibility freeze. Fakes remain useful conformance and fault-injection oracles,
+but do not by themselves prove replaceability.
 
 Core rule:
 
@@ -131,6 +135,9 @@ This keeps tests and headless runs replaceable.
   template. Rendering follows ADR 0094.
 - Core ECS data must avoid storing raw backend handles in serializable components.
 - Backend plugins need diagnostics for unsupported component combinations or invalid data.
+- Fake backends may prove deterministic failure handling and conformance, but replaceability claims
+  require production-shaped independent pressure and, before compatibility freeze, a second real
+  Adapter.
 - Render backend observation currently uses plugin-installed resources and `RenderBackendStatus`;
   ADR 0094 accepts only the stock serialized wgpu execution boundary today. A public feature,
   interop, replacement-Host, or other render-execution seam waits for its own tracer and decision.
@@ -143,7 +150,7 @@ This keeps tests and headless runs replaceable.
 | Physics replaceability | A Box2D adapter can be replaced without changing high-level `RigidBody2d` scene data | Future design test |
 | Testability | Headless tests can install fake backends | Future unit tests |
 | Plugin integration | Domain modules enter through documented schedules/resources | Code review |
-| No premature trait soup | Traits exist only at real adapter seams | Design review |
+| No premature trait soup | A production-shaped consumer and independent implementation pressure select a seam; a second real Adapter exists before compatibility freeze | Design and conformance review |
 
 ## Risks and Mitigations
 
@@ -151,7 +158,7 @@ This keeps tests and headless runs replaceable.
 |---|---|---:|---|
 | Stable high-level components underspecify backend needs | High | Medium | Start with concrete backend spikes before freezing component schemas |
 | Adapter sync logic becomes complex | Medium | High | Use generation IDs, diagnostics, and clear ownership rules |
-| Trait abstractions become shallow | Medium | Medium | Require at least two plausible adapters or a strong backend-isolation reason |
+| Trait abstractions become shallow | Medium | Medium | Require production-shaped pressure plus an independent implementation, then a second real Adapter before compatibility freeze; mocks alone do not qualify |
 | Backend replacement promise is overstated | Medium | Medium | Document compatibility levels per domain module |
 
 ## Follow-Up Questions
@@ -159,7 +166,6 @@ This keeps tests and headless runs replaceable.
 - What is the first stable physics component set: `RigidBody2d`, `Collider2d`, `Sensor2d`, `PhysicsMaterial2d`, `CollisionLayers`?
 - Should physics use fixed timestep only, or support variable stepping?
 - How do backend plugins persist backend-created state across hot reload?
-- What compatibility promise does nara make for domain components before 1.0?
 - How are fake/test backends registered?
 
 ## Citations

@@ -2,6 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
+**Last Revised**: 2026-07-16
 **Owner**: executable hosts, build tooling, and Rust project composition
 **Admission Trigger**: An independent reference-game workspace builds locked desktop and headless
 development/release executables, starts them through ADR 0082/0084, rejects stale candidates, and
@@ -113,6 +114,14 @@ The build coordinator is host/tooling state, not an ECS resource, `nara_project`
 gameplay task pool. It owns compiler processes/jobs, diagnostics, staged artifacts, retention, and
 current/last-good activation pointers.
 
+Raw Cargo, rustc, build-script, linker, and external-tool output is a bounded, access-restricted,
+short-retention local build artifact. It may contain absolute paths, source fragments, environment
+values, private registry locations, or credentials and therefore never enters the ADR 0048 runtime
+bus, remote tooling, package provenance/manifests, telemetry, or durable review evidence directly
+or by default. Those sinks receive only structured summaries that follow ADR 0068 field
+classification and retention policy. A future authenticated raw-log viewer requires its own
+access, disclosure, transport, and retention contract.
+
 1. resolve Cargo metadata from the trusted build profile and validate package/bin/profile/target;
 2. preflight the captured lock revision, explicit feature set, toolchain, and compiled ceiling;
 3. run a locked generation-stamped build job into an isolated staging location;
@@ -125,6 +134,12 @@ current/last-good activation pointers.
 If source, lock, project, or selection state advances during a build, the old job may finish for
 diagnostics/cache reuse but is `Superseded` and cannot publish. Cancellation is best effort; a late
 compiler result remains unable to publish.
+
+Editor Play and other integrated launchers expose which source/project/content revision is current,
+which executable is building, which candidate is staged, which exact executable/host/runtime
+generation is active, and which last-good record is available. Play must not silently run an older
+generation. Building, build failure, candidate-start failure, explicit last-good launch, retry, and
+cancel are distinct observable states and actions.
 
 ### Structural Change and Last-Good Policy
 
@@ -206,6 +221,8 @@ last-good behavior, and desktop/headless parity.
 | Capability parity | Artifact ceiling and ADR 0079 subset checks reject mismatch before `App` mutation | Composition tests |
 | Release hygiene | Release dependency graph excludes editor/tooling/hot-patch/VM unless explicitly requested | Cargo metadata audit |
 | Provenance | Every generation binds byte digest/length and manifest digest covering package/bin, target/profile, lock, toolchain, features, and request ID | Manifest fixture |
+| Generation visibility | Integrated Play always identifies current source/content, building candidate, active executable/runtime, and explicit last-good use | Tooling state and failure-flow tests |
+| Diagnostic privacy | Raw tool output remains local/restricted; every exported sink receives classified structured fields only | Sink boundary tests and canary scan |
 
 ## Risks and Mitigations
 
@@ -216,6 +233,7 @@ last-good behavior, and desktop/headless parity.
 | Build success is mistaken for runtime success | High | Medium | Advance last-good only after runtime publication. |
 | Stale compiler result replaces newer code | High | Medium | Stamp every request and validate expected revision immediately before publication. |
 | Native build code is mistaken for sandboxed content | Critical | Low | Declare trusted-code authority and require explicit host action before compilation/execution. |
+| Raw build output leaks host or credential data | Critical | Medium | Keep raw output local, bounded, access-restricted, and short-lived; export only classified structured summaries. |
 | Artifact/input retention grows without bound | Medium | High | Use leases, budgets, activation roots, and deliberate garbage collection. |
 
 ## Consequences
@@ -234,10 +252,15 @@ If accepted:
 
 ## Admission Evidence
 
+ADR 0082 and ADR 0084 must already be Accepted, or their required Host/runtime authority must be
+owned by named compatible Accepted successors. Native project-code trust must also have an Accepted
+owner, or this ADR's admission must explicitly remain limited to already trusted code-first builds.
+
 Acceptance requires the independent-workspace build matrix, concurrent stale-build proof,
 capability mismatch rejection, and end-to-end last-good fault matrix through editor, desktop, and
 headless activation. A wrapper around `cargo build` without immutable generation and runtime
-publication semantics is insufficient.
+publication semantics is insufficient. The same evidence must prove observable active/candidate/
+last-good generations and reject raw build-output canaries at every external diagnostic sink.
 
 ## Citations
 

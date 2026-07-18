@@ -108,8 +108,8 @@ flowchart TD
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
 | `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, checked `limit + 1` bounded reads, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; unsupported platform primitives remain explicit |
-| `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule` | Product-facing ECS conventions over `bevy_ecs` |
-| `nara_ecs_derive` | `Component` derive behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, declaration diagnostics, and renamed-package path resolution |
+| `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule`, `ScheduleLabel`, and `SystemSet` | Product-facing ECS conventions over `bevy_ecs`, with facade-safe derive exports for root-only and renamed dependencies |
+| `nara_ecs_derive` | `Component`, `Resource`, `ScheduleLabel`, and `SystemSet` derives behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, Bevy-compatible expansion, declaration diagnostics, and renamed-package path resolution |
 | `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, and stable non-`Entity` observation vocabulary |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, runtime-independent `ComponentSchemaCatalog`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext` | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, atomic Building-to-Frozen publication, asset-aware scene preflight, schema/capability export, and migrations |
@@ -293,13 +293,15 @@ second real adapter or stronger isolation pressure.
   (schedule label) plus joinable `FixedUpdateSet::Simulate`, `GameplayCommandSet::Consume`, and
   `GameplayCommandSet::Capture`; unlisted public variants are not ordering promises. Extensions may
   register in the schedule label and join/order only against the three set anchors, not concrete
-  system functions, private sets, or registration order. RGF-U28 still needs to prove each anchor's
-  deferred, skip, App/domain fault, and cleanup
-  behavior from a renamed-dependency external fixture and make `App::seal` reject an invalid owning
-  schedule or set graph, require automatic deferred insertion, and reassert final deferred
-  application before configuration closes. Ignore-deferred relations remain a trusted advanced
-  opt-out and cannot claim anchor compatibility; no scheduler wrapper is added solely to police
-  them. This certifies no total order among otherwise unordered phase peers.
+  system functions, private sets, or registration order. `App::seal` now requires automatic
+  deferred insertion, reasserts final deferred application, builds the owning fixed schedule, and
+  returns structured `ScheduleCompatibilityError` values for policy or graph failure before the App
+  becomes immutable. The renamed-root extension fixture proves entry/completion state, deferred
+  visibility, conditional skip, App/domain fault handling, batch retention/cleanup, registration
+  permutation, and absent/cross-schedule non-guarantees using only public APIs. Ignore-deferred
+  relations remain a trusted advanced opt-out that can seal but cannot satisfy the visibility
+  oracle; no scheduler wrapper is added solely to police them. This certifies no total order among
+  otherwise unordered phase peers.
 - `nara_app::RuntimeCandidate` admits one sealed unstarted App with no raw runner and owns every
   explicitly transferred close participant. Startup failure retains that owner for retirement;
   successful startup consumes it infallibly into `RuntimeInstance`. The instance delegates all

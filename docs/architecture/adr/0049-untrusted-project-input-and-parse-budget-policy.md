@@ -185,7 +185,6 @@ artifact acquisition and temporary-root handling.
 
 ## Open Questions
 
-- Which crate owns the shared `ProjectInputBudget` type?
 - Should budget profiles be named `dev`, `editor`, `package`, and `headless`, or derive from project profiles later?
 - Which additional image codec has a concrete product consumer and can prove an equivalent bounded
   metadata/decode/publication contract?

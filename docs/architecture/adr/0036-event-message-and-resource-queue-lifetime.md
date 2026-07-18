@@ -125,4 +125,3 @@ auditable.
 
 - Should nara provide a small reusable `Events<T>`/`Requests<T>` wrapper with stage metadata?
 - Which channels belong in future deterministic replay capture first?
-- Should diagnostics have a bounded ring-buffer mode for long-running editor sessions?

@@ -2,6 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
+**Last Revised**: 2026-07-16
 **Owner**: `nara_scene`, `nara_identity`, executable runtimes, and scene-consuming services
 **Admission Trigger**: A reference game proves asynchronous additive load, safe-point activation,
 precise unload, last-good replace travel, multi-instance identity, and bounded service retirement in
@@ -241,6 +242,10 @@ If accepted:
   adoption require later concrete decisions.
 
 ## Admission Evidence
+
+ADR 0084's executable runtime ownership must already be Accepted or replaced by a named compatible
+Accepted successor. This ADR cannot accept scene lifecycle against a runtime owner that remains
+non-authoritative.
 
 Acceptance requires additive and replace travel, two instances of one scene, stale/cancelled load,
 unload/tombstone precision, Nara-owned cross-scope hierarchy rejection plus direct-mutation fault

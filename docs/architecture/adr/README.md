@@ -19,6 +19,12 @@ ADR decision status is one of:
 
 New ADRs use the next unassigned monotonic number; IDs reserved by an active accepted plan are not reused for a different decision. ADRs must contain Context, Decision, at least two Alternatives Considered, Consequences, Success Metrics, and Risks and Mitigations. Cross-domain or stateful decisions include a Mermaid flow or state diagram. Refinement and supersession links must be bidirectional.
 
+Some early Accepted ADRs predate this complete template and still lack a standalone
+`Consequences` section. That is documentation debt, not permission for new ADRs to omit it and not
+a reason to fabricate empty boilerplate. The next semantic revision of an affected ADR must add
+concrete costs and ownership effects; RGF closure records any remainder in the architecture
+handoff. Decision authority remains governed by status and supersession meanwhile.
+
 Mutually dependent proposals may declare an atomic admission group. Every member remains
 non-authoritative until one review accepts the complete group; partial promotion is invalid. Use
 `Refines`/`Refined By` for decisions that replace only part of an ADR. Reserve `Superseded` for a
@@ -58,7 +64,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0007](0007-asset-identity-and-import-pipeline.md): Asset Identity and Import Pipeline
 - [ADR 0008](0008-runtime-concurrency-and-task-pools.md): Runtime Concurrency and Task Pools
 - [ADR 0009](0009-diagnostics-errors-and-logging.md): Diagnostics, Errors, and Logging
-- [ADR 0010](0010-plugin-lifecycle-dependencies-and-failure.md): Plugin Lifecycle, Dependencies, and Failure
+- [ADR 0010](0010-plugin-lifecycle-dependencies-and-failure.md): Plugin Lifecycle, Dependencies, and Failure Containment
 - [ADR 0011](0011-component-schema-ids-and-migrations.md): Component Schema IDs and Migrations
 - [ADR 0012](0012-render-crate-boundaries.md): Render Crate Boundaries
 - [ADR 0013](0013-platform-window-and-runner-boundaries.md): Platform, Window, and Runner Boundaries
