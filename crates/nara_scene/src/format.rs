@@ -341,6 +341,112 @@ pub struct PrefabDocumentCandidate {
     limits: SceneFileLimits,
 }
 
+/// A migrated canonical scene candidate that is not yet published authoring state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanonicalSceneDocumentCandidate {
+    document: SceneDocument,
+    source_upgrade_required: bool,
+}
+
+impl CanonicalSceneDocumentCandidate {
+    /// Returns the canonical value for host policy checks before semantic publication.
+    #[must_use]
+    pub const fn document(&self) -> &SceneDocument {
+        &self.document
+    }
+
+    pub fn publish(
+        self,
+        registry: &ComponentRegistry,
+    ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
+        let diagnostics = self.document.validate_authoring(registry);
+        if diagnostics.has_errors() {
+            return Err(SceneFilePublicationError::new(diagnostics));
+        }
+        Ok(PublishedSceneDocument {
+            document: self.document,
+            source_upgrade_required: self.source_upgrade_required,
+        })
+    }
+}
+
+/// A migrated canonical prefab candidate that is not yet published authoring state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanonicalPrefabDocumentCandidate {
+    document: PrefabDocument,
+    source_upgrade_required: bool,
+}
+
+impl CanonicalPrefabDocumentCandidate {
+    /// Returns the canonical value for host policy checks before semantic publication.
+    #[must_use]
+    pub const fn document(&self) -> &PrefabDocument {
+        &self.document
+    }
+
+    pub fn publish(
+        self,
+        registry: &ComponentRegistry,
+    ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
+        let diagnostics = self.document.instantiate().validate_authoring(registry);
+        if diagnostics.has_errors() {
+            return Err(SceneFilePublicationError::new(diagnostics));
+        }
+        Ok(PublishedPrefabDocument {
+            document: self.document,
+            source_upgrade_required: self.source_upgrade_required,
+        })
+    }
+}
+
+/// A canonical scene value validated against one frozen schema authority.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublishedSceneDocument {
+    document: SceneDocument,
+    source_upgrade_required: bool,
+}
+
+impl PublishedSceneDocument {
+    #[must_use]
+    pub const fn document(&self) -> &SceneDocument {
+        &self.document
+    }
+
+    #[must_use]
+    pub const fn source_upgrade_required(&self) -> bool {
+        self.source_upgrade_required
+    }
+
+    #[must_use]
+    pub fn into_document(self) -> SceneDocument {
+        self.document
+    }
+}
+
+/// A canonical prefab value validated against one frozen schema authority.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublishedPrefabDocument {
+    document: PrefabDocument,
+    source_upgrade_required: bool,
+}
+
+impl PublishedPrefabDocument {
+    #[must_use]
+    pub const fn document(&self) -> &PrefabDocument {
+        &self.document
+    }
+
+    #[must_use]
+    pub const fn source_upgrade_required(&self) -> bool {
+        self.source_upgrade_required
+    }
+
+    #[must_use]
+    pub fn into_document(self) -> PrefabDocument {
+        self.document
+    }
+}
+
 /// A standalone patch file that passed encoded, structural, envelope, and domain-count checks.
 ///
 /// Patch semantics depend on the target document and are validated by the apply transaction.
@@ -563,6 +669,24 @@ pub(crate) fn validate_patch_publication_shape(
 }
 
 impl SceneDocumentCandidate {
+    pub fn canonicalize(
+        self,
+        registry: &ComponentRegistry,
+    ) -> Result<CanonicalSceneDocumentCandidate, SceneFilePublicationError> {
+        let (document, source_upgrade_required) = self.into_canonical_document(registry)?;
+        Ok(CanonicalSceneDocumentCandidate {
+            document,
+            source_upgrade_required,
+        })
+    }
+
+    pub fn publish(
+        self,
+        registry: &ComponentRegistry,
+    ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
+        self.canonicalize(registry)?.publish(registry)
+    }
+
     pub(crate) fn into_canonical_document(
         self,
         registry: &ComponentRegistry,
@@ -572,6 +696,24 @@ impl SceneDocumentCandidate {
 }
 
 impl PrefabDocumentCandidate {
+    pub fn canonicalize(
+        self,
+        registry: &ComponentRegistry,
+    ) -> Result<CanonicalPrefabDocumentCandidate, SceneFilePublicationError> {
+        let (document, source_upgrade_required) = self.into_canonical_document(registry)?;
+        Ok(CanonicalPrefabDocumentCandidate {
+            document,
+            source_upgrade_required,
+        })
+    }
+
+    pub fn publish(
+        self,
+        registry: &ComponentRegistry,
+    ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
+        self.canonicalize(registry)?.publish(registry)
+    }
+
     pub(crate) fn into_canonical_document(
         self,
         registry: &ComponentRegistry,

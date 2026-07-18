@@ -5,6 +5,14 @@ name = "Nara Reference Game"
 stable_id = "nara-reference-game"
 version = "0.1.0"
 
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
 [runtime]
 preset = "local-headless"
 fixed_timestep_seconds = 0.02

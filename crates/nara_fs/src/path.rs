@@ -36,12 +36,34 @@ pub struct RelativePath {
     components: Vec<RelativeComponent>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelativePathPreflight {
+    components: usize,
+    path_units: usize,
+}
+
+impl RelativePathPreflight {
+    #[must_use]
+    pub const fn components(self) -> usize {
+        self.components
+    }
+
+    #[must_use]
+    pub const fn path_units(self) -> usize {
+        self.path_units
+    }
+}
+
 impl RelativePath {
+    pub fn preflight(path: impl AsRef<Path>) -> Result<RelativePathPreflight, PathValidationError> {
+        preflight_relative_path(path.as_ref())
+    }
+
     pub fn new(path: impl AsRef<Path>) -> Result<Self, PathValidationError> {
         let path = path.as_ref();
-        validate_separator_shape(path.as_os_str())?;
+        let preflight = Self::preflight(path)?;
 
-        let mut components = Vec::new();
+        let mut components = Vec::with_capacity(preflight.components());
         for component in path.components() {
             match component {
                 Component::Normal(value) => components.push(RelativeComponent::new(value)?),
@@ -51,20 +73,6 @@ impl RelativePath {
                     return Err(PathValidationError::AbsoluteOrPrefixed);
                 }
             }
-        }
-
-        if components.is_empty() {
-            return Err(PathValidationError::Empty);
-        }
-        if components.len() > MAX_COMPONENTS
-            || components
-                .iter()
-                .map(|component| unit_len(component.as_os_str()))
-                .sum::<usize>()
-                .saturating_add(components.len().saturating_sub(1))
-                > MAX_PATH_UNITS
-        {
-            return Err(PathValidationError::PathTooLong);
         }
 
         Ok(Self { components })
@@ -95,51 +103,114 @@ impl Debug for RelativePath {
 }
 
 fn validate_component(value: &OsStr) -> Result<(), PathValidationError> {
-    let units = os_units(value);
-    if units.is_empty() {
-        return Err(PathValidationError::EmptyComponent);
-    }
-    if units.len() > MAX_COMPONENT_UNITS {
-        return Err(PathValidationError::ComponentTooLong);
-    }
-    if units.iter().copied().any(is_forbidden_unit)
-        || units
-            .last()
-            .is_some_and(|unit| *unit == u32::from(b'.') || *unit == u32::from(b' '))
-    {
-        return Err(PathValidationError::ForbiddenCharacter);
+    let mut unit_count = 0_usize;
+    let mut last = None;
+    let mut stem = [0_u32; 4];
+    let mut stem_len = 0_usize;
+    let mut before_extension = true;
+
+    for unit in os_units(value) {
+        unit_count = unit_count
+            .checked_add(1)
+            .ok_or(PathValidationError::ComponentTooLong)?;
+        if unit_count > MAX_COMPONENT_UNITS {
+            return Err(PathValidationError::ComponentTooLong);
+        }
+        if is_forbidden_unit(unit) {
+            return Err(PathValidationError::ForbiddenCharacter);
+        }
+        if before_extension {
+            if unit == u32::from(b'.') {
+                before_extension = false;
+            } else {
+                if stem_len < stem.len() {
+                    stem[stem_len] = unit;
+                }
+                stem_len = stem_len
+                    .checked_add(1)
+                    .ok_or(PathValidationError::ComponentTooLong)?;
+            }
+        }
+        last = Some(unit);
     }
 
-    let stem_end = units
-        .iter()
-        .position(|unit| *unit == u32::from(b'.'))
-        .unwrap_or(units.len());
-    let stem = &units[..stem_end];
-    if is_reserved_device_stem(stem) {
+    if unit_count == 0 {
+        return Err(PathValidationError::EmptyComponent);
+    }
+    if last.is_some_and(|unit| unit == u32::from(b'.') || unit == u32::from(b' ')) {
+        return Err(PathValidationError::ForbiddenCharacter);
+    }
+    if stem_len <= stem.len() && is_reserved_device_stem(&stem[..stem_len]) {
         return Err(PathValidationError::ReservedDeviceName);
     }
     Ok(())
 }
 
 fn validate_separator_shape(value: &OsStr) -> Result<(), PathValidationError> {
-    let units = os_units(value);
-    if units.is_empty() {
+    let is_separator = |unit: u32| unit == u32::from(b'/') || unit == u32::from(b'\\');
+    let mut unit_count = 0_usize;
+    let mut previous_was_separator = false;
+    for unit in os_units(value) {
+        if unit == u32::from(b'\\') {
+            return Err(PathValidationError::ForbiddenCharacter);
+        }
+        let separator = is_separator(unit);
+        if (unit_count == 0 && separator) || (previous_was_separator && separator) {
+            return Err(PathValidationError::EmptyComponent);
+        }
+        previous_was_separator = separator;
+        unit_count = unit_count
+            .checked_add(1)
+            .ok_or(PathValidationError::PathTooLong)?;
+    }
+    if unit_count == 0 {
         return Err(PathValidationError::Empty);
     }
-
-    let is_separator = |unit: u32| unit == u32::from(b'/') || unit == u32::from(b'\\');
-    if units.iter().any(|unit| *unit == u32::from(b'\\')) {
-        return Err(PathValidationError::ForbiddenCharacter);
-    }
-    if units.first().copied().is_some_and(is_separator)
-        || units.last().copied().is_some_and(is_separator)
-        || units
-            .windows(2)
-            .any(|pair| is_separator(pair[0]) && is_separator(pair[1]))
-    {
+    if previous_was_separator {
         return Err(PathValidationError::EmptyComponent);
     }
     Ok(())
+}
+
+fn preflight_relative_path(path: &Path) -> Result<RelativePathPreflight, PathValidationError> {
+    validate_separator_shape(path.as_os_str())?;
+
+    let mut components = 0_usize;
+    let mut path_units = 0_usize;
+    for component in path.components() {
+        let Component::Normal(value) = component else {
+            return Err(match component {
+                Component::CurDir => PathValidationError::CurrentDirectory,
+                Component::ParentDir => PathValidationError::ParentTraversal,
+                Component::RootDir | Component::Prefix(_) => {
+                    PathValidationError::AbsoluteOrPrefixed
+                }
+                Component::Normal(_) => unreachable!(),
+            });
+        };
+        validate_component(value)?;
+        components = components
+            .checked_add(1)
+            .ok_or(PathValidationError::PathTooLong)?;
+        if components > MAX_COMPONENTS {
+            return Err(PathValidationError::PathTooLong);
+        }
+        path_units = path_units
+            .checked_add(usize::from(components > 1))
+            .and_then(|total| total.checked_add(unit_len(value)))
+            .ok_or(PathValidationError::PathTooLong)?;
+        if path_units > MAX_PATH_UNITS {
+            return Err(PathValidationError::PathTooLong);
+        }
+    }
+    if components == 0 {
+        return Err(PathValidationError::Empty);
+    }
+
+    Ok(RelativePathPreflight {
+        components,
+        path_units,
+    })
 }
 
 fn is_forbidden_unit(unit: u32) -> bool {
@@ -159,52 +230,52 @@ fn is_forbidden_unit(unit: u32) -> bool {
 }
 
 fn is_reserved_device_stem(stem: &[u32]) -> bool {
-    let folded = stem
-        .iter()
-        .copied()
-        .map(|unit| {
-            if (u32::from(b'a')..=u32::from(b'z')).contains(&unit) {
-                unit - 32
-            } else {
-                unit
-            }
-        })
-        .collect::<Vec<_>>();
+    let fold = |unit| {
+        if (u32::from(b'a')..=u32::from(b'z')).contains(&unit) {
+            unit - 32
+        } else {
+            unit
+        }
+    };
     let ascii = |value: &[u8]| {
-        folded.len() == value.len()
-            && folded
+        stem.len() == value.len()
+            && stem
                 .iter()
                 .zip(value)
-                .all(|(left, right)| *left == u32::from(*right))
+                .all(|(left, right)| fold(*left) == u32::from(*right))
     };
 
     ascii(b"CON")
         || ascii(b"PRN")
         || ascii(b"AUX")
         || ascii(b"NUL")
-        || (folded.len() == 4
-            && (folded[..3] == [u32::from(b'C'), u32::from(b'O'), u32::from(b'M')]
-                || folded[..3] == [u32::from(b'L'), u32::from(b'P'), u32::from(b'T')])
-            && (u32::from(b'1')..=u32::from(b'9')).contains(&folded[3]))
+        || (stem.len() == 4
+            && ((fold(stem[0]) == u32::from(b'C')
+                && fold(stem[1]) == u32::from(b'O')
+                && fold(stem[2]) == u32::from(b'M'))
+                || (fold(stem[0]) == u32::from(b'L')
+                    && fold(stem[1]) == u32::from(b'P')
+                    && fold(stem[2]) == u32::from(b'T')))
+            && (u32::from(b'1')..=u32::from(b'9')).contains(&stem[3]))
 }
 
 fn unit_len(value: &OsStr) -> usize {
-    os_units(value).len()
+    os_units(value).count()
 }
 
 #[cfg(windows)]
-fn os_units(value: &OsStr) -> Vec<u32> {
+fn os_units(value: &OsStr) -> impl Iterator<Item = u32> + '_ {
     use std::os::windows::ffi::OsStrExt;
-    value.encode_wide().map(u32::from).collect()
+    value.encode_wide().map(u32::from)
 }
 
 #[cfg(unix)]
-fn os_units(value: &OsStr) -> Vec<u32> {
+fn os_units(value: &OsStr) -> impl Iterator<Item = u32> + '_ {
     use std::os::unix::ffi::OsStrExt;
-    value.as_bytes().iter().copied().map(u32::from).collect()
+    value.as_bytes().iter().copied().map(u32::from)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn os_units(value: &OsStr) -> Vec<u32> {
-    value.to_string_lossy().chars().map(u32::from).collect()
+fn os_units(value: &OsStr) -> impl Iterator<Item = u32> + '_ {
+    value.as_encoded_bytes().iter().copied().map(u32::from)
 }

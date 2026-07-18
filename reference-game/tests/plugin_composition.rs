@@ -1,32 +1,30 @@
-use std::{fs::File, path::PathBuf};
-
 use nara::{
     core::ByteLimit,
-    fs::{FileCapability, TrustMode},
     gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
     image::{IMAGE_PLUGIN_ID, ImageImportLimits},
     project::ProductCapability,
-    project_host::{built_in_schema_providers, ingest_project_manifest, resolve_runtime_plan},
     reflect::ComponentRegistry,
     render::RENDER_SCHEMA_PROVIDER_ID,
     sprite::SPRITE_SCHEMA_PROVIDER_ID,
-    tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_PROVIDER_ID, TilemapPlugin},
+    tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_PROVIDER_ID},
 };
-use nara_reference_game::{
-    REFERENCE_GAME_PLUGIN_ID, REFERENCE_GAME_SCHEMA_PROVIDER, REFERENCE_GAME_SCHEMA_PROVIDER_ID,
-    runtime_plugins,
-};
+use nara_reference_game::{REFERENCE_GAME_PLUGIN_ID, REFERENCE_GAME_SCHEMA_PROVIDER_ID};
+
+#[path = "support/project_content_fixture.rs"]
+mod project_content_fixture;
+
+use project_content_fixture::{candidate_plan_and_root, resolve_reference_plan};
 
 #[test]
 fn reference_game_configures_a_repeatable_headless_product_plan() {
-    let candidate = project_candidate();
     let limits = ImageImportLimits::default().with_max_encoded_bytes(
         ByteLimit::new(8 * 1024 * 1024).expect("test image limit is non-zero"),
     );
+    let (candidate, _baseline, _root) = candidate_plan_and_root(limits, false);
 
-    let first = resolve_reference_plan(&candidate, limits);
-    let repeated = resolve_reference_plan(&candidate, limits);
-    let with_tilemap = resolve_reference_plan_with_tilemap(&candidate, limits);
+    let first = resolve_reference_plan(&candidate, limits, false);
+    let repeated = resolve_reference_plan(&candidate, limits, false);
+    let with_tilemap = resolve_reference_plan(&candidate, limits, true);
 
     assert_eq!(first.lineage(), candidate.lineage());
     assert_eq!(
@@ -109,41 +107,4 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
         second_registry.catalog().fingerprint(),
         first.schema_validation().fingerprint()
     );
-}
-
-fn resolve_reference_plan(
-    candidate: &nara::project_host::ProjectSettingsCandidate,
-    limits: ImageImportLimits,
-) -> nara::project_host::RuntimePlan {
-    let request = runtime_plugins(candidate)
-        .disable::<TilemapPlugin>()
-        .configure(nara::image::plugin(limits));
-    resolve_reference_request(candidate, request)
-}
-
-fn resolve_reference_plan_with_tilemap(
-    candidate: &nara::project_host::ProjectSettingsCandidate,
-    limits: ImageImportLimits,
-) -> nara::project_host::RuntimePlan {
-    resolve_reference_request(
-        candidate,
-        runtime_plugins(candidate).configure(nara::image::plugin(limits)),
-    )
-}
-
-fn resolve_reference_request(
-    candidate: &nara::project_host::ProjectSettingsCandidate,
-    request: nara::project_host::ProjectRuntimePlugins,
-) -> nara::project_host::RuntimePlan {
-    let mut providers = built_in_schema_providers();
-    providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
-    resolve_runtime_plan(candidate, request, providers).unwrap()
-}
-
-fn project_candidate() -> nara::project_host::ProjectSettingsCandidate {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("nara.toml");
-    let capability =
-        FileCapability::from_host_handle(File::open(manifest).unwrap(), TrustMode::TrustedLocal, 1)
-            .unwrap();
-    ingest_project_manifest(&capability, None).unwrap()
 }

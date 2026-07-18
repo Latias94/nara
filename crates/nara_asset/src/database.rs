@@ -34,6 +34,7 @@ impl Display for AssetSourceKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct AssetMeta {
     pub stable_id: StableAssetId,
     pub path: AssetPath,

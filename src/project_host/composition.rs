@@ -9,6 +9,7 @@ use nara_app::{
     EditedPluginGroup, Plugin, PluginDefinition, PluginGroup, PluginId, PluginPlan,
     PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
 };
+use nara_fs::FileIdentity;
 use nara_project::{EffectiveProjectSettings, ProductCapability, ProductCapabilitySet};
 use nara_reflect::{
     CatalogFingerprint, ComponentRegistry, ComponentRegistryError,
@@ -56,13 +57,28 @@ pub const fn compiled_product_capabilities() -> CompiledProductCapabilities {
     CompiledProductCapabilities(capabilities)
 }
 
-/// Opaque identity of one authorized manifest byte sequence and selected profile.
+/// Opaque identity of one authorized project root, manifest byte sequence, and selected profile.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ProjectSettingsLineage(pub(super) [u8; 32]);
+pub struct ProjectSettingsLineage {
+    pub(super) settings_digest: [u8; 32],
+    pub(super) project_root_identity: Option<FileIdentity>,
+}
 
 impl fmt::Debug for ProjectSettingsLineage {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("ProjectSettingsLineage(..)")
+    }
+}
+
+impl ProjectSettingsLineage {
+    #[cfg(all(feature = "serde", feature = "runtime-2d"))]
+    pub(crate) const fn settings_digest(self) -> [u8; 32] {
+        self.settings_digest
+    }
+
+    #[cfg(all(feature = "serde", feature = "runtime-2d"))]
+    pub(crate) const fn project_root_identity(self) -> Option<FileIdentity> {
+        self.project_root_identity
     }
 }
 

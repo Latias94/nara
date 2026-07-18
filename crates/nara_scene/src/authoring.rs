@@ -105,13 +105,10 @@ impl SceneAuthoringSession {
         candidate: crate::SceneDocumentCandidate,
         registry: &ComponentRegistry,
     ) -> Result<Self, crate::SceneFilePublicationError> {
-        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
-        let diagnostics = document.validate_authoring(registry);
-        if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics));
-        }
+        let published = candidate.publish(registry)?;
+        let source_upgrade_required = published.source_upgrade_required();
         Ok(Self::new_with_source_state(
-            document,
+            published.into_document(),
             source_upgrade_required,
         ))
     }
@@ -165,12 +162,9 @@ impl SceneAuthoringSession {
         candidate: crate::SceneDocumentCandidate,
         registry: &ComponentRegistry,
     ) -> Result<(), crate::SceneFilePublicationError> {
-        let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
-        let diagnostics = document.validate_authoring(registry);
-        if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics));
-        }
-        self.replace_document_with_source_state(document, source_upgrade_required);
+        let published = candidate.publish(registry)?;
+        let source_upgrade_required = published.source_upgrade_required();
+        self.replace_document_with_source_state(published.into_document(), source_upgrade_required);
         Ok(())
     }
 

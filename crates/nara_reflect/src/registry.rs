@@ -13,6 +13,7 @@ use nara_ecs::{Component, Entity, Resource, World};
 
 use crate::{
     ComponentFieldPath, ComponentFieldPathSegment, ComponentValue, PersistentComponentProvider,
+    asset_reference::is_asset_reference_value,
     codec::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         FnComponentCodec, PreparedComponent,
@@ -1604,20 +1605,9 @@ fn validate_component_field_default(
 
 fn component_value_matches_kind(value: &ComponentValue, expected: ComponentValueKind) -> bool {
     match expected {
-        ComponentValueKind::AssetRef => is_asset_ref_value(value),
+        ComponentValueKind::AssetRef => is_asset_reference_value(value),
         expected => value.kind() == expected,
     }
-}
-
-fn is_asset_ref_value(value: &ComponentValue) -> bool {
-    let ComponentValue::Map(fields) = value else {
-        return false;
-    };
-    matches!(
-        (fields.get("kind"), fields.get("value")),
-        (Some(ComponentValue::String(kind)), Some(ComponentValue::String(_)))
-            if kind == "path" || kind == "stable_id"
-    )
 }
 
 fn validate_component_value_coverage(

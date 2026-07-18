@@ -14,8 +14,8 @@ use nara_asset::{
     AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind,
     AssetReloadRequests, AssetServer, AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind,
     AssetStates, AssetVersion, Assets, Handle, ImportArtifactPathError, ImportDependencyDigest,
-    ImportProfile, ImportRequest, ImportSettingsHash, ImporterRegistry, ImporterSelectionError,
-    LoadState, SourceExtension, SourceHash, StableAssetId,
+    ImportProfile, ImportRequest, ImportSettingsHash, Importer, ImporterRegistry,
+    ImporterSelectionError, LoadState, SourceExtension, SourceHash, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
@@ -2422,6 +2422,75 @@ fn descriptor_hash_changes_when_content_descriptor_changes() {
         image_descriptor_hash(&image),
         image_descriptor_hash(&changed)
     );
+}
+
+#[test]
+fn image_asset_reuses_the_admitted_pixel_allocation() {
+    let record = image_record("textures/player.png");
+    let source_bytes = b"image allocation fixture";
+    let artifact = ImageImporter::default()
+        .import(request(&record, source_bytes))
+        .unwrap();
+    let pixels = vec![24, 120, 220, 255];
+    let admitted_allocation = pixels.as_ptr();
+
+    let image = ImageAsset::new(
+        ImageSourceMetadata::new(
+            record.stable_id(),
+            record.path().clone(),
+            SourceHash::from_bytes(source_bytes),
+            artifact,
+        ),
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        ImageColorSpace::Srgb,
+        pixels,
+    );
+
+    assert_eq!(image.pixels().as_ptr(), admitted_allocation);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn shared_image_pixels_keep_the_canonical_byte_content_wire_shape() {
+    let record = image_record("textures/player.png");
+    let bytes = rgba_png(1, 1, &[24, 120, 220, 255]);
+    let image = import_uncommitted(&ImageImporter::default(), &record, &bytes).into_image();
+
+    let encoded = serde_json::to_value(&image).unwrap();
+    assert_eq!(
+        encoded.get("pixels"),
+        Some(&serde_json::json!([24, 120, 220, 255])),
+    );
+
+    let decoded = serde_json::from_value::<ImageAsset>(encoded).unwrap();
+    assert_eq!(decoded, image);
+    assert_eq!(decoded.pixels(), &[24, 120, 220, 255]);
+    assert!(!std::ptr::eq(decoded.pixels(), image.pixels()));
+}
+
+#[test]
+fn unpublished_byte_preflight_matches_the_import_memory_plan() {
+    let record = image_record("textures/player.png");
+    let bytes = rgba_png(1, 1, &[24, 120, 220, 255]);
+    let importer = ImageImporter::default();
+
+    let preflight = importer
+        .preflight_unpublished_import(bytes_request(&record, &bytes))
+        .unwrap();
+    let memory_plan = preflight.memory_plan();
+    let image = preflight.import().unwrap();
+    let unpublished_budget = importer.budget_snapshot();
+    assert_eq!(unpublished_budget.active_reservations(), 0);
+    assert_eq!(
+        unpublished_budget.high_water_bytes(),
+        memory_plan.peak_bytes()
+    );
+    let imported = import_uncommitted(&importer, &record, &bytes);
+
+    assert_eq!(memory_plan, imported.memory_plan());
+    assert_eq!(memory_plan.publication_overlap_bytes(), 0);
+    assert_eq!(image, *imported.image());
 }
 
 fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {

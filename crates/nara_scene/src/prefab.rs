@@ -212,12 +212,7 @@ impl InMemoryPrefabSourceResolver {
         candidate: crate::PrefabDocumentCandidate,
         registry: &ComponentRegistry,
     ) -> Result<Option<PrefabDocument>, crate::SceneFilePublicationError> {
-        let (prefab, _) = candidate.into_canonical_document(registry)?;
-        let diagnostics = prefab.instantiate().validate_authoring(registry);
-        if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics));
-        }
-        Ok(self.insert(source, prefab))
+        Ok(self.insert(source, candidate.publish(registry)?.into_document()))
     }
 
     #[cfg(feature = "serde")]

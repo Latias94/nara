@@ -9,15 +9,18 @@ license.workspace = true
 bevy_ecs.workspace = true
 blake3.workspace = true
 nara_app.workspace = true
+nara_core = { workspace = true, optional = true }
 nara_diagnostic.workspace = true
 nara_ecs.workspace = true
 nara_tasks.workspace = true
 serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 uuid.workspace = true
 
 [dev-dependencies]
+nara_core.workspace = true
 serde_json.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde"]
+serde = ["dep:nara_core", "dep:serde", "dep:serde_json", "nara_core/serde"]

@@ -4,8 +4,11 @@ use nara_fs::{PathValidationError, RelativeComponent, RelativePath};
 
 #[test]
 fn accepts_only_canonical_relative_components() {
+    let preflight = RelativePath::preflight(Path::new("assets/textures/player.png")).unwrap();
     let path = RelativePath::new(Path::new("assets/textures/player.png")).unwrap();
 
+    assert_eq!(preflight.components(), 3);
+    assert_eq!(preflight.path_units(), "assets/textures/player.png".len());
     assert_eq!(path.len(), 3);
     assert!(!path.is_empty());
 }

@@ -3,6 +3,7 @@
 pub use bevy_reflect;
 pub use bevy_reflect::prelude::*;
 
+mod asset_reference;
 mod authoring;
 mod codec;
 mod entity_reference;
@@ -16,6 +17,9 @@ mod registry;
 mod schema;
 mod value;
 
+pub use asset_reference::{
+    DeclaredAssetReference, DeclaredAssetReferenceError, collect_declared_asset_references,
+};
 pub use authoring::PersistentComponentProvider;
 pub use codec::{
     ComponentApplyBatch, ComponentApplyContext, ComponentCodec, ComponentCodecError,
@@ -68,9 +72,11 @@ pub mod prelude {
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
         ComponentMigrationError, ComponentRegistry, ComponentRegistryError, ComponentSchema,
         ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-        ComponentValueError, ComponentValueKind, EntityReference, EntityReferenceTraversalLimits,
+        ComponentValueError, ComponentValueKind, DeclaredAssetReference,
+        DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,
         MigratedComponentValue, PersistentComponent, PersistentComponentProvider,
-        PreparedComponent, remap_declared_entity_references, rewrite_declared_entity_references,
+        PreparedComponent, collect_declared_asset_references, remap_declared_entity_references,
+        rewrite_declared_entity_references,
     };
     pub use bevy_reflect::prelude::*;
 }

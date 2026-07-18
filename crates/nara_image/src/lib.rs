@@ -13,7 +13,7 @@ pub use import::{
     AdmittedImageImport, ImageBytesImportRequest, ImageFileImportRequest, ImageImportError,
     ImageImportStage, ImageImportedAsset, ImageImporter, ImageImporterCreateError,
     ImagePngFailureKind, ImagePublicationFailureKind, ImageSourceDirectory, ImageSourceFailureKind,
-    ImageUnsupportedFeature,
+    ImageUnsupportedFeature, UnpublishedImageImport,
 };
 pub use limits::{
     IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageImportBudgetError, ImageImportLimitKind,

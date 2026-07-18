@@ -143,12 +143,14 @@ nara_winit = { workspace = true, optional = true }
 [dev-dependencies]
 bevy_ecs.workspace = true
 image.workspace = true
+proc-macro2.workspace = true
 raw-window-handle.workspace = true
 ron.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 syn.workspace = true
 tracing.workspace = true
+trybuild.workspace = true
 
 [features]
 default = ["runtime-core"]
@@ -282,6 +284,21 @@ required-features = ["runtime-core"]
 name = "project_composition"
 path = "tests/project_composition.rs"
 required-features = ["runtime-core"]
+
+[[test]]
+name = "project_content_boot"
+path = "tests/project_content_boot.rs"
+required-features = ["runtime-2d", "serde"]
+
+[[test]]
+name = "project_content_boundary"
+path = "tests/project_content_boundary.rs"
+required-features = ["runtime-2d", "serde"]
+
+[[test]]
+name = "project_content_limits"
+path = "tests/project_content_limits.rs"
+required-features = ["runtime-2d", "serde"]
 
 [[test]]
 name = "plugin_composition"

@@ -16,6 +16,9 @@ fn manifest_and_sources_use_only_the_public_root_package() {
     assert!(!sources.contains("crates/nara_"));
     assert!(!sources.contains("ComponentFieldSchema"));
     assert!(!sources.contains("ComponentValue::"));
+    assert!(!sources.contains("ImageImporter"));
+    assert!(!sources.contains("ImageFileImportRequest"));
+    assert!(!sources.contains("ImageBytesImportRequest"));
 }
 
 fn contains_private_engine_import(sources: &str) -> bool {

@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use nara_asset::ImportRequest;
+use nara_asset::{AssetRecord, ImportRequest};
 use nara_tasks::TaskCancellationToken;
 
 use crate::budget::{ImageImportCharge, ImageImportReservation};
@@ -26,23 +26,23 @@ impl ImageImporter {
         validate_extension(request.source().path())?;
         check_cancelled(cancellation, ImageImportStage::Header)?;
 
-        let preflight = preflight_png(request.source_bytes())?;
-        if preflight.interlaced {
-            return Err(ImageImportError::Unsupported {
-                stage: ImageImportStage::Header,
-                feature: ImageUnsupportedFeature::Interlacing,
-            });
-        }
-        reject_unbounded_metadata(request.source_bytes())?;
-        let memory_plan = ImageImportMemoryPlan::for_png(
-            self.limits,
-            request.source_bytes().len(),
+        let (preflight, memory_plan) = self.preflight_png_memory_plan(
+            request.source(),
+            request.source_bytes(),
             encoded_allocation_bytes,
-            preflight.width,
-            preflight.height,
             publication_overlap_bytes,
-        )
-        .map_err(|error| ImageImportError::budget(plan_error_stage(error), error))?;
+        )?;
+        self.decode_png_with_preflight(request, preflight, memory_plan, reservation, cancellation)
+    }
+
+    pub(super) fn decode_png_with_preflight(
+        &self,
+        request: ImportRequest<'_>,
+        preflight: PngHeaderPreflight,
+        memory_plan: ImageImportMemoryPlan,
+        reservation: &mut ImageImportReservation,
+        cancellation: Option<&TaskCancellationToken>,
+    ) -> Result<(ImageAsset, ImageImportMemoryPlan), ImageImportError> {
         reservation
             .resize(ImageImportCharge::peak(memory_plan))
             .map_err(|error| ImageImportError::budget(ImageImportStage::Metadata, error))?;
@@ -178,10 +178,38 @@ impl ImageImporter {
         );
         Ok((image, memory_plan))
     }
+
+    pub(super) fn preflight_png_memory_plan(
+        &self,
+        source: &AssetRecord,
+        source_bytes: &[u8],
+        encoded_allocation_bytes: usize,
+        publication_overlap_bytes: usize,
+    ) -> Result<(PngHeaderPreflight, ImageImportMemoryPlan), ImageImportError> {
+        validate_extension(source.path())?;
+        let preflight = preflight_png(source_bytes)?;
+        if preflight.interlaced {
+            return Err(ImageImportError::Unsupported {
+                stage: ImageImportStage::Header,
+                feature: ImageUnsupportedFeature::Interlacing,
+            });
+        }
+        reject_unbounded_metadata(source_bytes)?;
+        let memory_plan = ImageImportMemoryPlan::for_png(
+            self.limits,
+            source_bytes.len(),
+            encoded_allocation_bytes,
+            preflight.width,
+            preflight.height,
+            publication_overlap_bytes,
+        )
+        .map_err(|error| ImageImportError::budget(plan_error_stage(error), error))?;
+        Ok((preflight, memory_plan))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PngHeaderPreflight {
+pub(super) struct PngHeaderPreflight {
     width: u32,
     height: u32,
     interlaced: bool,

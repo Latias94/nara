@@ -18,11 +18,12 @@ use crate::budget::{
     ImageImportBudgetHost, ImageImportBudgetSnapshot, ImageImportCharge, ImageImportReservation,
 };
 use crate::limits::{
-    ImageImportBudgetError, ImageImportLimits, ImageImportLimitsError, file_admission_ceiling,
+    ImageImportBudgetError, ImageImportLimits, ImageImportLimitsError, ImageImportMemoryPlan,
+    file_admission_ceiling,
 };
 use crate::{ImageAsset, ImageColorSpace};
 
-use png::check_encoded_limit;
+use png::{PngHeaderPreflight, check_encoded_limit};
 pub use publication::ImageImportedAsset;
 use publication::ImagePublicationAdmission;
 pub(crate) use publication::ImagePublicationSnapshot;
@@ -300,7 +301,7 @@ impl Debug for ImageSourceDirectory {
 
 pub struct ImageBytesImportRequest {
     source: AssetRecord,
-    source_bytes: Box<[u8]>,
+    source_bytes: Vec<u8>,
     dependency_digest: ImportDependencyDigest,
     settings_hash: ImportSettingsHash,
     profile: ImportProfile,
@@ -310,14 +311,14 @@ impl ImageBytesImportRequest {
     #[must_use]
     pub fn new(
         source: AssetRecord,
-        source_bytes: Box<[u8]>,
+        source_bytes: impl Into<Vec<u8>>,
         dependency_digest: ImportDependencyDigest,
         settings_hash: ImportSettingsHash,
         profile: ImportProfile,
     ) -> Self {
         Self {
             source,
-            source_bytes,
+            source_bytes: source_bytes.into(),
             dependency_digest,
             settings_hash,
             profile,
@@ -447,6 +448,77 @@ impl BudgetedImageInput {
         let Self { bytes, reservation } = self;
         drop(bytes);
         reservation
+    }
+}
+
+/// An immutable image import preflight that is not bound to a runtime asset slot.
+///
+/// The token owns the exact source bytes used for preflight. Callers can reserve a wider host
+/// budget from [`Self::memory_plan`] before consuming the token with [`Self::import`].
+pub struct UnpublishedImageImport {
+    importer: ImageImporter,
+    request: ImageBytesImportRequest,
+    preflight: PngHeaderPreflight,
+    memory_plan: ImageImportMemoryPlan,
+}
+
+impl UnpublishedImageImport {
+    #[must_use]
+    pub const fn memory_plan(&self) -> ImageImportMemoryPlan {
+        self.memory_plan
+    }
+
+    pub fn import(self) -> Result<ImageAsset, ImageImportError> {
+        let Self {
+            importer,
+            request,
+            preflight,
+            memory_plan,
+        } = self;
+        let ImageBytesImportRequest {
+            source,
+            source_bytes,
+            dependency_digest,
+            settings_hash,
+            profile,
+        } = request;
+        let charge = ImageImportCharge::admission(
+            source_bytes.len(),
+            0,
+            importer.limits.max_in_flight_bytes(),
+        )
+        .map_err(|error| ImageImportError::budget(ImageImportStage::Admission, error))?;
+        let reservation = importer
+            .budget_host
+            .reserve(charge)
+            .map_err(|error| ImageImportError::budget(ImageImportStage::Admission, error))?;
+        let mut input = BudgetedImageInput::new(source_bytes, reservation);
+        let image = {
+            let (bytes, reservation) = input.parts_mut();
+            let request =
+                ImportRequest::new(&source, bytes, dependency_digest, settings_hash, profile);
+            let (image, observed_plan) = importer.decode_png_with_preflight(
+                request,
+                preflight,
+                memory_plan,
+                reservation,
+                None,
+            )?;
+            debug_assert_eq!(observed_plan, memory_plan);
+            image
+        };
+        drop(input.release_encoded());
+        Ok(image)
+    }
+}
+
+impl Debug for UnpublishedImageImport {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("UnpublishedImageImport")
+            .field("request", &self.request)
+            .field("memory_plan", &self.memory_plan)
+            .finish_non_exhaustive()
     }
 }
 
@@ -609,6 +681,28 @@ impl ImageImporter {
         self.budget_host.clone()
     }
 
+    /// Preflights an immutable source buffer for an unpublished content snapshot.
+    ///
+    /// The returned token performs no decode allocation and assumes no last-good publication
+    /// overlap. It binds the memory plan to the exact bytes later consumed by the decode.
+    pub fn preflight_unpublished_import(
+        &self,
+        request: ImageBytesImportRequest,
+    ) -> Result<UnpublishedImageImport, ImageImportError> {
+        let (preflight, memory_plan) = self.preflight_png_memory_plan(
+            &request.source,
+            &request.source_bytes,
+            request.source_bytes.len(),
+            0,
+        )?;
+        Ok(UnpublishedImageImport {
+            importer: self.clone(),
+            request,
+            preflight,
+            memory_plan,
+        })
+    }
+
     pub fn admit_file(
         &self,
         request: ImageFileImportRequest,
@@ -701,7 +795,7 @@ impl ImageImporter {
             .budget_host
             .reserve(charge)
             .map_err(|error| ImageImportError::budget(ImageImportStage::Admission, error))?;
-        let mut input = BudgetedImageInput::new(source_bytes.into_vec(), reservation);
+        let mut input = BudgetedImageInput::new(source_bytes, reservation);
         let (image, memory_plan) = {
             let (bytes, reservation) = input.parts_mut();
             let import_request =

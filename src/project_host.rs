@@ -1,6 +1,13 @@
 mod composition;
 mod ingest;
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub use crate::project_content::{
+    ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
+    ProjectContentBudgetSnapshot, ProjectContentError, ProjectContentErrorKind,
+    ProjectContentLimits, ProjectContentLoader, ProjectContentRevision, ProjectContentSnapshot,
+    ProjectImageContent, ProjectPrefabContent,
+};
 pub use composition::{
     CompiledProductCapabilities, CompositionError, ProjectRuntimePlugins, ProjectSettingsCandidate,
     ProjectSettingsLineage, RuntimePlan, RuntimePlanError, SchemaValidationInput,

@@ -1555,12 +1555,14 @@ dependencies = [
  "nara_ui_render",
  "nara_window",
  "nara_winit",
+ "proc-macro2",
  "raw-window-handle",
  "ron",
  "serde",
  "serde_json",
  "syn",
  "tracing",
+ "trybuild",
 ]
 
 [[package]]
@@ -1580,6 +1582,7 @@ dependencies = [
  "bevy_ecs",
  "blake3",
  "nara_app",
+ "nara_core",
  "nara_diagnostic",
  "nara_ecs",
  "nara_tasks",

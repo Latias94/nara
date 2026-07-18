@@ -1,4 +1,7 @@
-use std::fmt::{self, Formatter};
+use std::{
+    fmt::{self, Formatter},
+    sync::Arc,
+};
 
 use nara_asset::{AssetPath, ImportArtifactRecord, SourceHash, StableAssetId};
 
@@ -89,7 +92,8 @@ pub struct ImageAsset {
     extent: ImageExtent,
     format: ImageFormat,
     color_space: ImageColorSpace,
-    pixels: Vec<u8>,
+    #[cfg_attr(feature = "serde", serde(with = "shared_bytes"))]
+    pixels: Arc<Vec<u8>>,
 }
 
 impl ImageAsset {
@@ -106,7 +110,7 @@ impl ImageAsset {
             extent,
             format,
             color_space,
-            pixels,
+            pixels: Arc::new(pixels),
         }
     }
 
@@ -132,7 +136,28 @@ impl ImageAsset {
 
     #[must_use]
     pub fn pixels(&self) -> &[u8] {
-        &self.pixels
+        self.pixels.as_slice()
+    }
+}
+
+#[cfg(feature = "serde")]
+mod shared_bytes {
+    use std::sync::Arc;
+
+    use serde::{Deserialize, Serialize};
+
+    pub fn serialize<S>(value: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        value.as_slice().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<Vec<u8>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Vec::<u8>::deserialize(deserializer).map(Arc::new)
     }
 }
 

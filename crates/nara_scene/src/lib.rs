@@ -28,9 +28,10 @@ pub use export::{
 };
 #[cfg(feature = "serde")]
 pub use format::{
-    PrefabDocumentCandidate, SceneDocumentCandidate, SceneFileBudgetError, SceneFileBudgetKind,
-    SceneFileEncoding, SceneFileLimits, SceneFilePublicationError, SceneFormatError,
-    ScenePatchDocumentCandidate,
+    CanonicalPrefabDocumentCandidate, CanonicalSceneDocumentCandidate, PrefabDocumentCandidate,
+    PublishedPrefabDocument, PublishedSceneDocument, SceneDocumentCandidate, SceneFileBudgetError,
+    SceneFileBudgetKind, SceneFileEncoding, SceneFileLimits, SceneFilePublicationError,
+    SceneFormatError, ScenePatchDocumentCandidate,
 };
 pub use hierarchy::{
     Children, HIERARCHY_PLUGIN_DECLARATION, HIERARCHY_PLUGIN_ID, HIERARCHY_SCHEMA_PROVIDER,

@@ -24,7 +24,7 @@ pub use error::{FsError, FsOperation, PathValidationError};
 pub use file::{CapabilityReader, FileCapability};
 pub use identity::{CapabilityGeneration, CapabilitySessionId, FileIdentity, FileKind};
 pub use lock::{FileLock, LockGuarantee, LockMode, LockScope};
-pub use path::{RelativeComponent, RelativePath};
+pub use path::{RelativeComponent, RelativePath, RelativePathPreflight};
 pub use proof::{
     ConflictProtection, DirectorySyncTier, DurabilityProgress, FileSyncTier,
     ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus, PublicationAtomicity,

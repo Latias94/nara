@@ -9,10 +9,10 @@ const TEXTURE_BYTES: &[u8] = include_bytes!("../assets/textures/player.png");
 fn independent_game_imports_committed_png_through_the_public_bounded_path() {
     let record = AssetRecord::new(
         StableAssetId::parse_str(TEXTURE_ID).unwrap(),
-        AssetPath::new("assets/textures/player.png").unwrap(),
+        AssetPath::new("textures/player.png").unwrap(),
         AssetSourceKind::Image,
     );
-    let source = source_directory(Path::new(env!("CARGO_MANIFEST_DIR")));
+    let source = source_directory(&Path::new(env!("CARGO_MANIFEST_DIR")).join("assets"));
     let limits = ImageImportLimits::default()
         .with_max_encoded_bytes(ByteLimit::new(TEXTURE_BYTES.len()).unwrap());
     let importer = ImageImporter::with_limits(limits).unwrap();

@@ -27,6 +27,9 @@ struct ExistingApplyState(u32);
 
 struct TestAsset;
 
+#[derive(Component)]
+struct AssetCarrier;
+
 #[test]
 fn component_value_cost_counts_nodes_and_logical_bytes_deterministically() {
     let value = ComponentValue::map([
@@ -41,6 +44,155 @@ fn component_value_cost_counts_nodes_and_logical_bytes_deterministically() {
 
     assert_eq!(cost.nodes(), 5);
     assert_eq!(cost.logical_bytes(), 20);
+}
+
+#[test]
+fn declared_asset_reference_traversal_uses_schema_paths_only() {
+    let mut registry = ComponentRegistry::new();
+    let id = ComponentTypeId::new("nara.test.AssetCarrier");
+    let schema = ComponentSchema::new(id.clone(), "AssetCarrier", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("image"),
+                "Image",
+                ComponentFieldPath::from_fields(["material", "image"]),
+                ComponentValueKind::AssetRef,
+            )
+            .with_capabilities([
+                ComponentCapability::Scene,
+                ComponentCapability::Inspect,
+                ComponentCapability::Edit,
+                ComponentCapability::AssetRef,
+            ]),
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("metadata"),
+                "Metadata",
+                ComponentFieldPath::from_fields(["metadata"]),
+                ComponentValueKind::Map,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ]);
+    registry
+        .register_persistent_component_with_codec::<AssetCarrier, _, _>(
+            schema,
+            |_| Ok(AssetCarrier),
+            |_| Ok(ComponentValue::Null),
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+
+    let declared = AssetRef::path("textures/player.png").unwrap();
+    let value = ComponentValue::map([
+        (
+            "material",
+            ComponentValue::map([("image", asset_ref_value(&declared))]),
+        ),
+        (
+            "metadata",
+            ComponentValue::map([
+                ("kind", ComponentValue::String("path".to_owned())),
+                (
+                    "value",
+                    ComponentValue::String("textures/not-an-asset.png".to_owned()),
+                ),
+            ]),
+        ),
+    ]);
+
+    let references =
+        collect_declared_asset_references(&registry, &id, ComponentSchemaVersion::ONE, &value)
+            .unwrap();
+
+    assert_eq!(references.len(), 1);
+    assert_eq!(references[0].field_id().as_str(), "image");
+    assert_eq!(references[0].asset_ref(), &declared);
+
+    let invalid_value = ComponentValue::map([
+        (
+            "material",
+            ComponentValue::map([(
+                "image",
+                ComponentValue::map([
+                    ("kind", ComponentValue::String("path".to_owned())),
+                    (
+                        "value",
+                        ComponentValue::String("textures/player.png".to_owned()),
+                    ),
+                    ("unexpected", ComponentValue::Bool(true)),
+                ]),
+            )]),
+        ),
+        ("metadata", ComponentValue::Map(BTreeMap::new())),
+    ]);
+    let error = collect_declared_asset_references(
+        &registry,
+        &id,
+        ComponentSchemaVersion::ONE,
+        &invalid_value,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        DeclaredAssetReferenceError::InvalidValueShape { .. }
+    ));
+}
+
+#[test]
+fn asset_reference_defaults_require_the_exact_canonical_shape() {
+    let mut registry = ComponentRegistry::new();
+    let id = ComponentTypeId::new("nara.test.AssetDefault");
+    let invalid_default = ComponentValue::map([
+        ("kind", ComponentValue::String("path".to_owned())),
+        (
+            "value",
+            ComponentValue::String("textures/player.png".to_owned()),
+        ),
+        ("unexpected", ComponentValue::Bool(true)),
+    ]);
+    let schema = ComponentSchema::new(id.clone(), "AssetDefault", ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields([ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("image"),
+            "Image",
+            ComponentFieldPath::from_fields(["image"]),
+            ComponentValueKind::AssetRef,
+            invalid_default,
+        )
+        .with_capabilities([
+            ComponentCapability::Scene,
+            ComponentCapability::Inspect,
+            ComponentCapability::Edit,
+            ComponentCapability::AssetRef,
+        ])]);
+
+    let error = match registry.register_persistent_component_with_codec::<AssetCarrier, _, _>(
+        schema,
+        |_| Ok(AssetCarrier),
+        |_| Ok(ComponentValue::Null),
+    ) {
+        Ok(_) => panic!("asset reference defaults with unknown fields must reject"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        error,
+        ComponentRegistryError::InvalidComponentFieldDefault { component_id, .. }
+            if component_id == id
+    ));
+}
+
+fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
+    match asset_ref {
+        AssetRef::Path(path) => ComponentValue::map([
+            ("kind", ComponentValue::String("path".to_owned())),
+            ("value", ComponentValue::String(path.as_str().to_owned())),
+        ]),
+        AssetRef::StableId(id) => ComponentValue::map([
+            ("kind", ComponentValue::String("stable_id".to_owned())),
+            ("value", ComponentValue::String(id.to_string())),
+        ]),
+    }
 }
 
 #[test]

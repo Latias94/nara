@@ -2,6 +2,8 @@
 
 mod artifact;
 mod database;
+#[cfg(feature = "serde")]
+mod format;
 mod identity;
 mod import;
 mod reload;
@@ -26,6 +28,8 @@ pub use database::{
     AssetDatabaseError, AssetMeta, AssetRecord, AssetSourceKind, MissingMetaPolicy,
     ProjectAssetDatabase,
 };
+#[cfg(feature = "serde")]
+pub use format::{AssetMetaCandidate, AssetMetaFileLimits, AssetMetaFormatError};
 pub use identity::{
     AssetId, AssetPath, AssetPathError, AssetRef, StableAssetId, StableAssetIdError,
 };

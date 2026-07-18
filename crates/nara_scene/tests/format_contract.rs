@@ -445,6 +445,29 @@ fn semantic_scene_publication_requires_frozen_registry_and_is_atomic() {
 }
 
 #[test]
+fn scene_and_prefab_candidates_publish_world_independent_documents() {
+    let registry = frozen_scene_registry();
+    let scene = SceneDocument::default();
+    let prefab = PrefabDocument::default();
+
+    let published_scene =
+        SceneDocumentCandidate::decode_json_bytes(scene.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .publish(&registry)
+            .unwrap();
+    let published_prefab =
+        PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .publish(&registry)
+            .unwrap();
+
+    assert_eq!(published_scene.document(), &scene);
+    assert_eq!(published_prefab.document(), &prefab);
+    assert!(!published_scene.source_upgrade_required());
+    assert!(!published_prefab.source_upgrade_required());
+}
+
+#[test]
 fn scene_candidate_migrates_to_the_current_schema_and_requires_source_save() {
     let registry = migrating_text_registry(0);
     let player = scene_id("player");

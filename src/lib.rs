@@ -67,6 +67,12 @@ pub use nara_winit as winit;
 pub mod project_host;
 
 #[cfg(feature = "runtime-core")]
+mod project_diagnostic_ids;
+
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+mod project_content;
+
+#[cfg(feature = "runtime-core")]
 #[doc(hidden)]
 pub mod __macro_support {
     pub use nara_reflect::__macro_support::*;

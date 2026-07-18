@@ -1,0 +1,131 @@
+{
+  "kind": "prefab",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "entities": [
+      {
+        "id": "enemy",
+        "components": {
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "layer": {
+                  "type": "i64",
+                  "value": 0
+                },
+                "material": {
+                  "type": "map",
+                  "value": {
+                    "image": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "path"
+                        },
+                        "value": {
+                          "type": "string",
+                          "value": "textures/player.png"
+                        }
+                      }
+                    },
+                    "tint": {
+                      "type": "map",
+                      "value": {
+                        "a": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "b": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "g": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "r": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    }
+                  }
+                },
+                "size": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 16.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 16.0
+                    }
+                  }
+                },
+                "sort_key": {
+                  "type": "i64",
+                  "value": 0
+                }
+              }
+            }
+          },
+          "reference_game.Enemy": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "hit-points": {
+                  "type": "i64",
+                  "value": 10
+                },
+                "position": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 5.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                },
+                "target": {
+                  "type": "entity_ref",
+                  "value": {
+                    "kind": "scene_local",
+                    "entity": "player"
+                  }
+                },
+                "velocity": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": -0.5
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

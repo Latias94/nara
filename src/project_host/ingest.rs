@@ -13,6 +13,7 @@ use nara_project::{
 use super::composition::{
     ProjectSettingsCandidate, ProjectSettingsLineage, compiled_product_capabilities,
 };
+use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectCandidateErrorKind {
@@ -107,6 +108,7 @@ pub fn ingest_project_manifest(
     manifest: &FileCapability,
     profile: Option<&str>,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
+    let project_root_identity = manifest.parent_identity();
     let bytes = read_manifest_bytes(manifest)?;
     let load = ProjectManifest::parse_toml_bytes(&bytes);
     if load.has_errors() || load.manifest.is_none() {
@@ -122,7 +124,11 @@ pub fn ingest_project_manifest(
     let settings = manifest
         .resolve_profile(profile)
         .map_err(project_profile_error)?;
-    let lineage = project_settings_lineage(&bytes, settings.profile_name.as_deref());
+    let lineage = project_settings_lineage(
+        &bytes,
+        settings.profile_name.as_deref(),
+        project_root_identity,
+    );
     validate_product_request(settings, lineage)
 }
 
@@ -205,7 +211,11 @@ fn validate_product_request(
     })
 }
 
-fn project_settings_lineage(bytes: &[u8], profile: Option<&str>) -> ProjectSettingsLineage {
+fn project_settings_lineage(
+    bytes: &[u8],
+    profile: Option<&str>,
+    project_root_identity: Option<nara_fs::FileIdentity>,
+) -> ProjectSettingsLineage {
     let manifest = ContentDigest::of_bytes(bytes);
     let profile = profile.map(|profile| ContentDigest::of_bytes(profile.as_bytes()));
     let mut framed = Vec::with_capacity(96);
@@ -220,7 +230,10 @@ fn project_settings_lineage(bytes: &[u8], profile: Option<&str>) -> ProjectSetti
         }
         None => framed.push(0),
     }
-    ProjectSettingsLineage(*ContentDigest::of_bytes(&framed).as_bytes())
+    ProjectSettingsLineage {
+        settings_digest: *ContentDigest::of_bytes(&framed).as_bytes(),
+        project_root_identity,
+    }
 }
 
 fn project_profile_error(error: ProjectProfileError) -> ProjectCandidateError {
@@ -419,39 +432,4 @@ fn attach_field(diagnostic: Diagnostic, field: DiagnosticField) -> Diagnostic {
     diagnostic
         .try_with_field(field)
         .expect("project host diagnostics use unique bounded fields")
-}
-
-fn fs_operation_id(operation: FsOperation) -> &'static str {
-    match operation {
-        FsOperation::InspectHandle => "inspect-handle",
-        FsOperation::OpenDirectory => "open-directory",
-        FsOperation::OpenFile => "open-file",
-        FsOperation::ReadDirectory => "read-directory",
-        FsOperation::CreateTemporary => "create-temporary",
-        FsOperation::RemoveTemporary => "remove-temporary",
-        FsOperation::Rename => "rename",
-        FsOperation::Unlink => "unlink",
-        FsOperation::Replace => "replace",
-        FsOperation::SyncFile => "sync-file",
-        FsOperation::SyncDirectory => "sync-directory",
-        FsOperation::Lock => "lock",
-        FsOperation::Unlock => "unlock",
-        FsOperation::CloneHandle => "clone-handle",
-        FsOperation::Read => "read",
-    }
-}
-
-fn io_error_kind_id(kind: std::io::ErrorKind) -> &'static str {
-    match kind {
-        std::io::ErrorKind::NotFound => "not-found",
-        std::io::ErrorKind::PermissionDenied => "permission-denied",
-        std::io::ErrorKind::AlreadyExists => "already-exists",
-        std::io::ErrorKind::InvalidInput => "invalid-input",
-        std::io::ErrorKind::InvalidData => "invalid-data",
-        std::io::ErrorKind::TimedOut => "timed-out",
-        std::io::ErrorKind::Interrupted => "interrupted",
-        std::io::ErrorKind::UnexpectedEof => "unexpected-eof",
-        std::io::ErrorKind::OutOfMemory => "out-of-memory",
-        _ => "other",
-    }
 }
