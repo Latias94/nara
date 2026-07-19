@@ -17,6 +17,13 @@ pub use bevy_ecs::prelude::*;
 #[doc(hidden)]
 pub mod __private;
 
+mod transaction;
+
+pub use transaction::{
+    LifecycleFreeDespawn, LifecycleFreeDespawnError, LifecycleFreeInsertionError,
+    LifecycleFreeInsertionPlan, prepare_lifecycle_free_despawn,
+};
+
 pub mod prelude {
     pub use crate::{Component, Resource, ScheduleLabel, SystemSet};
     pub use bevy_ecs::prelude::*;

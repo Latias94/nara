@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
@@ -116,10 +117,20 @@ fn fixture_claims_exactly_the_documented_compatibility_anchors() {
 fn reference_game_uses_only_documented_schedule_anchors() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let surface = RustSurface::from_directory(&repository.join("reference-game/src"));
+    let test_surface =
+        RustSurface::from_schedule_files_in_directory(&repository.join("reference-game/tests"));
 
     assert!(surface.contains_path(&["CoreStage", "FixedUpdate"]));
     assert!(surface.contains_path(&["FixedUpdateSet", "Simulate"]));
     assert_only_documented_schedule_variants("reference game", repository, &surface);
+    assert_only_documented_schedule_variants("reference game tests", repository, &test_surface);
+    for private_schedule_type in ["StartupStage", "TaskUpdateSet"] {
+        assert!(
+            !surface.contains_identifier(private_schedule_type)
+                && !test_surface.contains_identifier(private_schedule_type),
+            "reference game depends on non-anchor schedule type {private_schedule_type}"
+        );
+    }
     assert!(
         !surface.has_external_glob(),
         "reference game must not hide schedule dependencies behind a public-root glob import"
@@ -132,7 +143,8 @@ fn reference_game_uses_only_documented_schedule_anchors() {
         &["acknowledge_gameplay_commands"],
     ] {
         assert!(
-            !surface.contains_identifier(non_anchor[0]),
+            !surface.contains_identifier(non_anchor[0])
+                && !test_surface.contains_identifier(non_anchor[0]),
             "reference game depends on non-anchor {}",
             non_anchor.join("::")
         );
@@ -201,6 +213,15 @@ fn rust_surface_recurses_into_module_files() {
 
     assert!(surface.contains_path(&["FixedUpdateSet", "Prepare"]));
     assert!(surface.contains_identifier("Prepare"));
+    assert_eq!(
+        unsupported_enum_members(
+            &surface,
+            &repository.join("crates/nara_app/src/lib.rs"),
+            "FixedUpdateSet",
+            &["Simulate"],
+        ),
+        ["FixedUpdateSet::Prepare", "FixedUpdateSet::Finalize"]
+    );
 }
 
 #[test]
@@ -267,15 +288,17 @@ fn unsupported_enum_members(
     allowed: &[&str],
 ) -> Vec<String> {
     let (variants, associated) = enum_members(declaration, enum_name);
+    let type_names = surface.aliases_for(enum_name);
     variants
         .into_iter()
         .filter(|variant| {
-            !allowed.contains(&variant.as_str()) && surface.contains_identifier(variant)
+            !allowed.contains(&variant.as_str())
+                && surface.contains_member_access(&type_names, variant)
         })
         .chain(
             associated
                 .into_iter()
-                .filter(|member| surface.contains_identifier(member)),
+                .filter(|member| surface.contains_member_access(&type_names, member)),
         )
         .map(|member| format!("{enum_name}::{member}"))
         .collect()
@@ -329,6 +352,7 @@ fn enum_members(declaration: &Path, enum_name: &str) -> (Vec<String>, Vec<String
 #[derive(Default)]
 struct RustSurface {
     paths: Vec<Vec<String>>,
+    aliases: Vec<(String, String)>,
     methods: Vec<String>,
     glob_imports: Vec<Vec<String>>,
     identifiers: Vec<String>,
@@ -346,6 +370,12 @@ impl RustSurface {
     }
 
     fn from_directory(directory: &Path) -> Self {
+        let mut surface = Self::default();
+        surface.visit_directory(directory);
+        surface
+    }
+
+    fn from_schedule_files_in_directory(directory: &Path) -> Self {
         let mut surface = Self::default();
         surface.visit_directory(directory);
         surface
@@ -373,6 +403,7 @@ impl RustSurface {
         self.identifiers
             .extend(imports.paths.iter().flatten().cloned());
         self.paths.extend(imports.paths);
+        self.aliases.extend(imports.aliases);
         self.glob_imports.extend(imports.glob_imports);
         PathSurface { surface: self }.visit_file(syntax);
     }
@@ -385,6 +416,38 @@ impl RustSurface {
                     .map(String::as_str)
                     .eq(expected.iter().copied())
         })
+    }
+
+    fn aliases_for(&self, root: &str) -> BTreeSet<String> {
+        let mut aliases = BTreeSet::from([root.to_owned()]);
+        loop {
+            let before = aliases.len();
+            for (alias, target) in &self.aliases {
+                if aliases.contains(target) {
+                    aliases.insert(alias.clone());
+                }
+            }
+            if aliases.len() == before {
+                return aliases;
+            }
+        }
+    }
+
+    fn contains_member_access(&self, type_names: &BTreeSet<String>, member: &str) -> bool {
+        let qualified = self.paths.iter().any(|path| {
+            path.len() >= 2
+                && path.last().is_some_and(|segment| segment == member)
+                && type_names.contains(&path[path.len() - 2])
+        });
+        qualified
+            || (self
+                .macro_identifiers
+                .iter()
+                .any(|identifier| identifier == member)
+                && self
+                    .macro_identifiers
+                    .iter()
+                    .any(|identifier| type_names.contains(identifier)))
     }
 
     fn has_root(&self, expected: &str) -> bool {
@@ -440,6 +503,7 @@ impl RustSurface {
 struct ImportSurface {
     paths: Vec<Vec<String>>,
     glob_imports: Vec<Vec<String>>,
+    aliases: Vec<(String, String)>,
 }
 
 impl ImportSurface {
@@ -470,6 +534,10 @@ impl ImportSurface {
                 let mut path = prefix.clone();
                 if rename.ident != "self" {
                     path.push(identifier_text(&rename.ident));
+                }
+                if let Some(target) = path.last() {
+                    self.aliases
+                        .push((identifier_text(&rename.rename), target.clone()));
                 }
                 self.paths.push(path);
             }
@@ -512,6 +580,17 @@ impl<'ast> Visit<'ast> for PathSurface<'_> {
 
     fn visit_ident(&mut self, ident: &'ast syn::Ident) {
         self.surface.identifiers.push(identifier_text(ident));
+    }
+
+    fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
+        if let syn::Type::Path(target) = item.ty.as_ref()
+            && let Some(target) = target.path.segments.last()
+        {
+            self.surface
+                .aliases
+                .push((identifier_text(&item.ident), identifier_text(&target.ident)));
+        }
+        syn::visit::visit_item_type(self, item);
     }
 
     fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {

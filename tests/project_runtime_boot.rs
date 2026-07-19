@@ -15,10 +15,10 @@ use std::{
 
 use nara::{
     app::{
-        App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration,
-        PluginDefinition, PluginDefinitionId, PluginError, PluginId, PluginShutdownObligationId,
-        RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-        RuntimeCloseParticipantId, RuntimeCloseProgress,
+        App, AppExitRequests, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
+        PluginDeclaration, PluginDefinition, PluginDefinitionId, PluginError, PluginId,
+        PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
+        RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
     },
     ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs},
     gameplay::{
@@ -38,6 +38,13 @@ const BOOT_OUTCOME_REQUIREMENTS: &[PluginId] = &[GAMEPLAY_COMMAND_PLUGIN_ID];
 const BOOT_OUTCOME_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(BOOT_OUTCOME_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(BOOT_OUTCOME_REQUIREMENTS);
+const EXIT_AFTER_TICK_PLUGIN_ID: PluginId = PluginId::new("nara.test.exit-after-tick");
+const EXIT_AFTER_TICK_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.exit-after-tick", 1);
+const EXIT_AFTER_TICK_REQUIREMENTS: &[PluginId] = &[BOOT_OUTCOME_PLUGIN_ID];
+const EXIT_AFTER_TICK_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(EXIT_AFTER_TICK_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(EXIT_AFTER_TICK_REQUIREMENTS);
 const STALLED_CLOSE_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-stalled-close");
 const STALLED_CLOSE_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.project-stalled-close", 1);
@@ -71,6 +78,23 @@ impl Plugin for BootOutcomePlugin {
             capture_boot_outcome
                 .in_set(FixedUpdateSet::Finalize)
                 .after(GameplayCommandSet::Capture),
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct ExitAfterTickPlugin;
+
+impl Plugin for ExitAfterTickPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &EXIT_AFTER_TICK_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            request_exit_after_tick.in_set(FixedUpdateSet::Finalize),
         )?;
         Ok(())
     }
@@ -141,11 +165,23 @@ fn capture_boot_outcome(
     outcome.scene_entities.sort();
 }
 
+fn request_exit_after_tick(mut exit: ResMut<AppExitRequests>) {
+    exit.request_exit();
+}
+
 fn boot_outcome_plugin() -> PluginDefinition {
     PluginDefinition::infallible::<BootOutcomePlugin, _>(
         BOOT_OUTCOME_DEFINITION_ID,
         b"project-boot-outcome-v1",
         BootOutcomePlugin::default,
+    )
+}
+
+fn exit_after_tick_plugin() -> PluginDefinition {
+    PluginDefinition::infallible::<ExitAfterTickPlugin, _>(
+        EXIT_AFTER_TICK_DEFINITION_ID,
+        b"project-exit-after-tick-v1",
+        ExitAfterTickPlugin::default,
     )
 }
 
@@ -288,6 +324,29 @@ fn product_action_stops_on_the_first_terminal_snapshot() {
         panic!("terminal project action failed: {report:#?}");
     };
     assert_eq!(outcome.tick, 2);
+    assert!(!report.diagnostics().has_errors());
+}
+
+#[test]
+fn product_action_propagates_an_app_exit_from_the_completed_fixed_tick() {
+    let project = TestProject::with_prefab_startup();
+    select_local_headless_profile(&project);
+    let intent = HeadlessRunIntent::new(NonZeroU32::new(4).unwrap())
+        .stop_when(|_: &BootOutcome| false)
+        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin())
+        .insert_after::<BootOutcomePlugin>(exit_after_tick_plugin());
+    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+
+    let report = execute_to_terminal(&mut run);
+
+    assert_eq!(
+        report.outcome(),
+        &HeadlessRunOutcome::Completed(BootOutcome {
+            tick: 1,
+            scene_entities: vec!["enemy-anchor".to_owned(), "enemy-anchor/enemy".to_owned()],
+        }),
+        "{report:?}"
+    );
     assert!(!report.diagnostics().has_errors());
 }
 

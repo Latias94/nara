@@ -2450,6 +2450,36 @@ fn image_asset_reuses_the_admitted_pixel_allocation() {
     assert_eq!(image.pixels().as_ptr(), admitted_allocation);
 }
 
+#[test]
+fn shared_image_pixels_retain_their_accounting_owner_until_runtime_release() {
+    struct RetentionProbe(Arc<std::sync::atomic::AtomicBool>);
+
+    impl Drop for RetentionProbe {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    let record = image_record("textures/player.png");
+    let bytes = rgba_png(1, 1, &[24, 120, 220, 255]);
+    let mut image = import_uncommitted(&ImageImporter::default(), &record, &bytes).into_image();
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let owner = Arc::new(RetentionProbe(Arc::clone(&dropped)));
+
+    assert!(image.share_retained().is_none());
+    assert!(image.try_attach_retention_owner(Arc::clone(&owner)));
+    assert!(!image.try_attach_retention_owner(Arc::new(())));
+    let shared = image.share_retained().unwrap();
+    drop(owner);
+
+    assert!(!dropped.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(shared.pixels().as_ptr(), image.pixels().as_ptr());
+    drop(image);
+    assert!(!dropped.load(std::sync::atomic::Ordering::SeqCst));
+    drop(shared);
+    assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+}
+
 #[cfg(feature = "serde")]
 #[test]
 fn shared_image_pixels_keep_the_canonical_byte_content_wire_shape() {

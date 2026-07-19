@@ -7,8 +7,8 @@ use std::{
 };
 
 use nara_app::{
-    PluginError, PluginHook, PluginHookMutation, PluginInstantiationError, PluginPlanError,
-    PluginPrepareError, RuntimeAdmissionError, RuntimeCandidateFailure,
+    AppExit, PluginError, PluginHook, PluginHookMutation, PluginInstantiationError,
+    PluginPlanError, PluginPrepareError, RuntimeAdmissionError, RuntimeCandidateFailure,
     RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseErrorDisposition,
     RuntimeCloseEvidence, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
     RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
@@ -16,12 +16,16 @@ use nara_app::{
     RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger, RuntimePublicationFailure,
     RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
 };
+use nara_asset::{
+    AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, Handle,
+};
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
     PublicDiagnosticIdentifier, SafeSummary,
 };
-use nara_ecs::{Resource, World};
+use nara_ecs::{Mut, Resource, World};
 use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
+use nara_image::ImageAsset;
 use nara_reflect::{CatalogFingerprint, ComponentRegistry};
 use nara_scene::spawn_scene;
 
@@ -34,6 +38,8 @@ const PROJECT_MANIFEST: &str = "nara.toml";
 
 mod action;
 
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+pub use action::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunReport};
 pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
 
 struct RuntimeStartAttempt {
@@ -328,6 +334,32 @@ impl ProjectHost {
         }
     }
 
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    fn running_runtime_mut(&mut self) -> Option<&mut RuntimeInstance> {
+        match &mut self.slot {
+            ProjectHostSlot::Running(published) => Some(published.runtime_mut()),
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    fn running_runtime_state(&self) -> Option<RuntimeState> {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => Some(published.runtime().state()),
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
+    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+    fn running_runtime_close_evidence(&self) -> Option<RuntimeCloseEvidence> {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => {
+                Some(published.runtime().close_evidence().clone())
+            }
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
     fn begin_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
@@ -506,7 +538,7 @@ impl ProjectHost {
         Ok(diagnostics)
     }
 
-    fn drive_one_fixed_tick(&mut self) -> Result<(), HostFault> {
+    fn drive_one_fixed_tick(&mut self) -> Result<Option<AppExit>, HostFault> {
         let ProjectHostSlot::Running(published) = &mut self.slot else {
             return Err(HostFault::new(single_error(
                 "project.run.runtime-unavailable",
@@ -572,7 +604,7 @@ impl ProjectHost {
                 u64::from(actual),
             )));
         }
-        Ok(())
+        Ok(outcome.frame().and_then(|frame| frame.exit))
     }
 
     fn capture_outcome<O>(&self) -> Result<O, HostFault>
@@ -796,6 +828,7 @@ fn materialize_project_runtime(
         return Err(HostFault::new(scene.diagnostics));
     }
     let diagnostics = scene.diagnostics;
+    publish_snapshot_images(world, snapshot)?;
     let faults = world
         .get_resource::<RuntimeFaultReporter>()
         .cloned()
@@ -821,6 +854,84 @@ fn materialize_project_runtime(
         })?;
     }
     Ok(diagnostics)
+}
+
+fn publish_snapshot_images(
+    world: &mut World,
+    snapshot: &ProjectContentSnapshot,
+) -> Result<(), HostFault> {
+    if snapshot.images().is_empty() {
+        return Ok(());
+    }
+    if !world.contains_resource::<AssetServer>()
+        || !world.contains_resource::<Assets<ImageAsset>>()
+        || !world.contains_resource::<AssetStates>()
+        || !world.contains_resource::<AssetEvents>()
+    {
+        return Err(HostFault::new(single_error(
+            "project.run.image-resources-missing",
+            "Project runtime image resources are unavailable",
+        )));
+    }
+
+    let mut publications = Vec::with_capacity(snapshot.images().len());
+    {
+        let mut server = world.resource_mut::<AssetServer>();
+        for (index, content) in snapshot.images().iter().enumerate() {
+            let source = content.image().source();
+            let record = AssetRecord::new(
+                source.stable_id(),
+                source.path().clone(),
+                AssetSourceKind::Image,
+            );
+            let handle = server.reserve_record::<ImageAsset>(&record).map_err(|_| {
+                HostFault::new(single_error(
+                    "project.run.image-identity-failed",
+                    "Project runtime image identity could not be reserved",
+                ))
+            })?;
+            let image = snapshot.share_image_for_runtime(index).ok_or_else(|| {
+                HostFault::new(single_error(
+                    "project.run.image-snapshot-invalid",
+                    "Project runtime image snapshot is inconsistent",
+                ))
+            })?;
+            publications.push((
+                handle,
+                image,
+                source.source_hash(),
+                source.artifact().key().digest(),
+            ));
+        }
+    }
+
+    world.resource_scope(
+        |world, mut images: Mut<'_, Assets<ImageAsset>>| -> Result<(), HostFault> {
+            world.resource_scope(
+                |world, mut states: Mut<'_, AssetStates>| -> Result<(), HostFault> {
+                    let mut events = world.resource_mut::<AssetEvents>();
+                    for (handle, image, source_hash, import_hash) in publications {
+                        images
+                            .commit_loaded(
+                                Handle::new(handle.id()),
+                                image,
+                                &mut states,
+                                &mut events,
+                                Some(source_hash),
+                                Some(import_hash),
+                            )
+                            .map_err(|_| {
+                                HostFault::new(single_error(
+                                    "project.run.image-publication-failed",
+                                    "Project runtime image publication failed",
+                                ))
+                            })?;
+                    }
+                    Ok(())
+                },
+            )
+        },
+    )
 }
 
 fn verify_runtime_registry(world: &World, plan: &RuntimePlan) -> Result<(), HostFault> {

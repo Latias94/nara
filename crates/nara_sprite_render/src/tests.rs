@@ -285,7 +285,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
 }
 
 #[test]
-fn material_image_sort_groups_matching_keys_and_splits_batches() {
+fn transparent_material_changes_preserve_painter_order_and_split_adjacent_batches() {
     let texture_a = image_resource_key(Handle::new(AssetId::from_raw(1)));
     let texture_b = image_resource_key(Handle::new(AssetId::from_raw(2)));
     let mut items = vec![
@@ -311,17 +311,16 @@ fn material_image_sort_groups_matching_keys_and_splits_batches() {
             .iter()
             .map(|item| item.source_order)
             .collect::<Vec<_>>(),
-        vec![0, 2, 1]
+        vec![0, 1, 2]
     );
     assert_eq!(
         batches
             .iter()
             .map(|batch| batch.material.image)
             .collect::<Vec<_>>(),
-        vec![Some(texture_a), Some(texture_b)]
+        vec![Some(texture_a), Some(texture_b), Some(texture_a)]
     );
-    assert_eq!(batches[0].instances.len(), 2);
-    assert_eq!(batches[1].instances.len(), 1);
+    assert!(batches.iter().all(|batch| batch.instances.len() == 1));
 }
 
 #[test]

@@ -160,6 +160,7 @@ pub struct WindowTargetSnapshot {
     pub phase: WindowTargetPhase,
     pub fault: Option<WindowTargetFault>,
     pub surface_active: bool,
+    pub surface_generation: Option<u64>,
     pub provider_present: bool,
     pub native_destroyed: bool,
 }
@@ -263,6 +264,7 @@ impl BackendWindowEntry {
             phase: self.phase,
             fault: self.fault,
             surface_active: self.active_surface_generation.is_some(),
+            surface_generation: self.active_surface_generation,
             provider_present: self.provider.is_some(),
             native_destroyed: self.native_destroyed(),
         }
@@ -312,6 +314,12 @@ impl BackendWindowHandles {
         self.registry
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Returns whether two handles share the same provider/surface ownership registry.
+    #[must_use]
+    pub fn shares_authority_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.registry, &other.registry)
     }
 
     pub fn insert(

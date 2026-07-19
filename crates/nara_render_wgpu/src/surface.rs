@@ -274,10 +274,3 @@ pub(crate) fn configure_surface(
     surface_state.dirty = false;
     Ok(())
 }
-
-pub(crate) fn target_window_id(
-    target: nara_render::RenderTarget,
-    primary_window_id: Option<WindowId>,
-) -> Option<WindowId> {
-    target.window_id(primary_window_id)
-}

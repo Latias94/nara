@@ -27,8 +27,9 @@ pub use queue::{
 };
 
 use nara_app::{
-    App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError, RuntimeFault, RuntimeFaultKind,
-    RuntimeFaultReporter,
+    __RuntimeDriverPort, App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError,
+    RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
+    RuntimeWorldAccessError,
 };
 use nara_ecs::{
     Res, ResMut,
@@ -75,6 +76,22 @@ pub enum GameplayCommandSet {
     ///
     /// This engine-owned phase is not a public semantic ordering anchor.
     Acknowledge,
+}
+
+impl __RuntimeDriverPort for GameplayCommandQueue {
+    type Input = GameplayCommandSubmission;
+    type Output = Result<GameplayCommandKey, GameplayCommandRejection>;
+
+    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
+        self.submit(input)
+    }
+}
+
+pub fn submit_gameplay_driver_command(
+    scope: &mut RuntimeDriverScope<'_>,
+    submission: GameplayCommandSubmission,
+) -> Result<Result<GameplayCommandKey, GameplayCommandRejection>, RuntimeWorldAccessError> {
+    scope.__apply_port::<GameplayCommandQueue>(submission)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -416,7 +433,8 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Space);
+            .press(KeyCode::Space)
+            .unwrap();
 
         app.run_once(Duration::ZERO).unwrap();
         assert_eq!(
@@ -485,17 +503,20 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter);
+            .press(KeyCode::Enter)
+            .unwrap();
         app.run_once(Duration::ZERO).unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .release(KeyCode::Enter);
+            .release(KeyCode::Enter)
+            .unwrap();
         app.run_once(Duration::ZERO).unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter);
+            .press(KeyCode::Enter)
+            .unwrap();
         app.run_once(Duration::ZERO).unwrap();
         app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
@@ -567,7 +588,8 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter);
+            .press(KeyCode::Enter)
+            .unwrap();
 
         app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
@@ -609,12 +631,14 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Escape);
+            .press(KeyCode::Escape)
+            .unwrap();
         app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .release(KeyCode::Escape);
+            .release(KeyCode::Escape)
+            .unwrap();
         app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         let observed = &app.world().resource::<CommandsByTick>().0;
@@ -1282,7 +1306,8 @@ mod tests {
         app.world_mut()
             .unwrap()
             .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter);
+            .press(KeyCode::Enter)
+            .unwrap();
 
         app.run_once(Duration::ZERO).unwrap();
 

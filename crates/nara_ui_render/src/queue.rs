@@ -32,7 +32,7 @@ pub fn queue_ui(
         else {
             continue;
         };
-        let Some(clip_rect) = resolve_clip_rect(item) else {
+        let Some(clip_rect) = resolve_clip_rect(item, view.viewport) else {
             continue;
         };
         let material = resolve_ui_material(
@@ -184,12 +184,12 @@ fn resolve_ui_material(
     material_key(item.material, image)
 }
 
-fn resolve_clip_rect(item: &ExtractedUiItem) -> Option<Option<UiClipRect>> {
+fn resolve_clip_rect(item: &ExtractedUiItem, viewport: ViewportRect) -> Option<Option<UiClipRect>> {
     match item.clip_rect {
         None => Some(None),
         Some(clip_rect) => {
             clip_rect.intersect(item.rect)?;
-            Some(UiClipRect::from_rect(clip_rect))
+            Some(Some(UiClipRect::from_rect_clamped(clip_rect, viewport)?))
         }
     }
 }

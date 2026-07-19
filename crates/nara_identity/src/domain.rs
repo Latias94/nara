@@ -10,7 +10,7 @@ use nara_ecs::{
         validate_registered_persistent_component_apply, validate_resource_insertion,
         validate_resource_scope,
     },
-    Component, Entity, Resource, World,
+    Component, Entity, Resource, World, prepare_lifecycle_free_despawn,
     world::WorldId,
 };
 use thiserror::Error;
@@ -200,7 +200,7 @@ pub fn validate_identity_support_topology(
 mod identity_support_topology_tests {
     use nara_ecs::{
         Resource,
-        lifecycle::Despawn,
+        lifecycle::{Add, Despawn},
         observer::{Observer, On},
         system::ResMut,
     };
@@ -231,6 +231,26 @@ mod identity_support_topology_tests {
 
         assert_eq!(error, IdentitySupportTopologyError::LifecycleConflict);
         assert!(world.get_entity(target).is_ok());
+        assert_eq!(world.resource::<SupportCanary>().0, 0);
+    }
+
+    #[test]
+    fn identity_spawn_rejects_event_global_add_observer_before_allocation() {
+        let mut world = World::new();
+        world.init_resource::<SupportCanary>();
+        let domain =
+            WorldIdentityDomain::new(&world, WorldIdentityDomainSettings::default()).unwrap();
+        world.insert_resource(domain);
+        world.add_observer(|_: On<Add>, mut canary: ResMut<SupportCanary>| canary.0 += 1);
+        world.flush();
+        let baseline_entities = world.iter_entities().count();
+
+        assert_eq!(
+            spawn_identity_entity(&mut world),
+            Err(IdentityDomainError::LifecycleConflict)
+        );
+
+        assert_eq!(world.iter_entities().count(), baseline_entities);
         assert_eq!(world.resource::<SupportCanary>().0, 0);
     }
 }
@@ -537,16 +557,131 @@ impl WorldIdentityDomain {
         self.preflight_scene_entry_count(instance, entity_count)
     }
 
+    /// Returns a validated handle for one scene instance that is currently active in this World.
+    ///
+    /// The returned membership reflects the entities that remain active at the time of capture.
+    /// Callers that need an immutable original roster must retain the handle before retiring any
+    /// members from the instance.
+    pub fn active_scene_instance(
+        &self,
+        world: &World,
+        instance: SceneInstanceId,
+    ) -> Result<SpawnedSceneInstance, IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        let entity_ids = self
+            .active_scene_instances
+            .get(&instance)
+            .ok_or(IdentityDomainError::SceneInstanceNotActive { instance })?;
+        for entity_id in entity_ids {
+            let reference = RuntimeEntityReference::scene(instance, entity_id.clone());
+            let entity = self
+                .scene_entities
+                .get(&reference)
+                .copied()
+                .ok_or(IdentityDomainError::SceneInstanceMembershipMismatch { instance })?;
+            if !self.is_live_owned_entity(world, entity) {
+                return Err(IdentityDomainError::StaleRegistration);
+            }
+        }
+        Ok(SpawnedSceneInstance {
+            domain: self.id,
+            instance,
+            entity_ids: entity_ids.iter().cloned().collect(),
+        })
+    }
+
     pub fn preflight_scene_instance_replacement(
         &self,
         world: &World,
         current: &SpawnedSceneInstance,
         entity_count: usize,
         cause: TombstoneCause,
-    ) -> Result<(), IdentityDomainError> {
+    ) -> Result<SceneInstanceId, IdentityDomainError> {
         self.preflight_scene_instance_registration(world, entity_count)?;
         self.prepare_scene_instance_retirement(world, current, cause)?;
-        Ok(())
+        self.scene_instance_allocator
+            .peek()
+            .map(SceneInstanceId::from_non_zero)
+            .map_err(|_| IdentityDomainError::SceneInstanceExhausted)
+    }
+
+    /// Replaces one scene identity group and retires its prior runtime entities atomically.
+    ///
+    /// The operation rejects lifecycle hooks or observers that could mutate the replacement while
+    /// the prior entities are despawned. The detached identity authority is published only after
+    /// every retirement completes without lifecycle work.
+    pub fn replace_scene_instance_and_despawn(
+        world: &mut World,
+        current: &SpawnedSceneInstance,
+        entries: &[(SceneEntityId, WorldEntityToken)],
+        retirements: &[Entity],
+        cause: TombstoneCause,
+    ) -> Result<(SpawnedSceneInstance, Vec<Entity>), IdentityDomainError> {
+        validate_identity_support_topology(world, entries.iter().map(|(_, token)| token.entity()))
+            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+        let Some(mut domain) = world.remove_resource::<Self>() else {
+            return Err(IdentityDomainError::WorldDomainUnavailable);
+        };
+        let scene_retirement = match domain.prepare_scene_instance_retirement(world, current, cause)
+        {
+            Ok(retirement) => retirement,
+            Err(error) => {
+                world.insert_resource(domain);
+                return Err(error);
+            }
+        };
+        if scene_retirement
+            .entities
+            .iter()
+            .any(|entity| !retirements.contains(entity))
+        {
+            world.insert_resource(domain);
+            return Err(IdentityDomainError::LifecycleConflict);
+        }
+        let retirement_set = retirements.iter().copied().collect::<BTreeSet<_>>();
+        if retirement_set.len() != retirements.len()
+            || entries
+                .iter()
+                .any(|(_, token)| retirement_set.contains(&token.entity()))
+        {
+            world.insert_resource(domain);
+            return Err(IdentityDomainError::LifecycleConflict);
+        }
+        let scene_retirement_set = scene_retirement
+            .entities
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if retirement_set.iter().any(|entity| {
+            !scene_retirement_set.contains(entity)
+                && domain.identities_by_entity.contains_key(entity)
+        }) {
+            world.insert_resource(domain);
+            return Err(IdentityDomainError::LifecycleConflict);
+        }
+        let retirement = match prepare_lifecycle_free_despawn(world, retirements) {
+            Ok(retirement) => retirement,
+            Err(_) => {
+                world.insert_resource(domain);
+                return Err(IdentityDomainError::LifecycleConflict);
+            }
+        };
+        let replacement = domain.replace_scene_instance(
+            retirement.world(),
+            current,
+            entries.iter().cloned(),
+            cause,
+        );
+        match replacement {
+            Ok(replacement) => {
+                retirement.commit().insert_resource(domain);
+                Ok(replacement)
+            }
+            Err(error) => {
+                retirement.cancel().insert_resource(domain);
+                Err(error)
+            }
+        }
     }
 
     pub fn replace_scene_instance(
@@ -1354,6 +1489,8 @@ pub fn resolve_in_world(world: &World, locator: &WorldEntityLocator) -> EntityLo
 }
 
 pub fn spawn_identity_entity(world: &mut World) -> Result<WorldEntityToken, IdentityDomainError> {
+    validate_identity_support_topology(world, std::iter::empty())
+        .map_err(|_| IdentityDomainError::LifecycleConflict)?;
     let domain = {
         let domain = world
             .get_resource::<WorldIdentityDomain>()
@@ -1456,6 +1593,8 @@ pub enum IdentityDomainError {
     StaleRegistration,
     #[error("identity retirement sequence is exhausted")]
     RetirementSequenceExhausted,
+    #[error("identity replacement lifecycle topology is incompatible with atomic retirement")]
+    LifecycleConflict,
 }
 
 impl From<IdentityAllocationError> for IdentityDomainError {

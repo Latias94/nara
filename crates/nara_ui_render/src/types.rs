@@ -154,29 +154,41 @@ pub struct QueuedUiItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiClipRect {
-    pub min_x: u32,
-    pub min_y: u32,
+    pub x: u32,
+    pub y: u32,
     pub width: u32,
     pub height: u32,
 }
 
 impl UiClipRect {
     #[must_use]
-    pub fn from_rect(rect: UiRect) -> Option<Self> {
-        rect.is_non_empty().then_some(Self {
-            min_x: rect.min.x.to_bits(),
-            min_y: rect.min.y.to_bits(),
-            width: rect.size.x.to_bits(),
-            height: rect.size.y.to_bits(),
-        })
-    }
+    pub fn from_rect_clamped(rect: UiRect, viewport: nara_render::ViewportRect) -> Option<Self> {
+        if !rect.is_non_empty() {
+            return None;
+        }
 
-    #[must_use]
-    pub fn to_rect(self) -> UiRect {
-        UiRect::new(
-            nara_core::Vec2::new(f32::from_bits(self.min_x), f32::from_bits(self.min_y)),
-            nara_core::Vec2::new(f32::from_bits(self.width), f32::from_bits(self.height)),
-        )
+        let viewport_left = f64::from(viewport.physical_x);
+        let viewport_top = f64::from(viewport.physical_y);
+        let viewport_right = viewport_left + f64::from(viewport.physical_width);
+        let viewport_bottom = viewport_top + f64::from(viewport.physical_height);
+        let left = f64::from(rect.min.x).floor().max(viewport_left);
+        let top = f64::from(rect.min.y).floor().max(viewport_top);
+        let right = f64::from(rect.max().x).ceil().min(viewport_right);
+        let bottom = f64::from(rect.max().y).ceil().min(viewport_bottom);
+        if right <= left || bottom <= top {
+            return None;
+        }
+
+        let x = left as u32;
+        let y = top as u32;
+        let right = right as u32;
+        let bottom = bottom as u32;
+        Some(Self {
+            x,
+            y,
+            width: right.saturating_sub(x),
+            height: bottom.saturating_sub(y),
+        })
     }
 }
 

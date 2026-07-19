@@ -1987,6 +1987,7 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "nara_gameplay",
  "nara_input",
  "nara_window",
  "raw-window-handle",

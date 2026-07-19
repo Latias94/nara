@@ -3,7 +3,7 @@ use bytemuck::{Pod, Zeroable};
 use nara_asset::Assets;
 use nara_image::{ImageAsset, PreparedImageResource};
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_render::{PreparedRenderResources, RenderPhaseLabel, RenderResourceKey};
+use nara_render::{PreparedRenderResources, RenderPhaseLabel, RenderResourceKey, ViewportRect};
 use wgpu::util::DeviceExt;
 
 const VERTICES_PER_QUAD: u32 = 6;
@@ -39,8 +39,17 @@ pub(crate) struct WgpuQuadMaterialKey {
 pub(crate) struct WgpuQuadBatch {
     pub(crate) phase: RenderPhaseLabel,
     pub(crate) material: WgpuQuadMaterialKey,
+    pub(crate) scissor: Option<WgpuScissorRect>,
     pub(crate) instances: Vec<WgpuQuadInstance>,
     pub(crate) counts_as_sprites: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WgpuScissorRect {
+    pub(crate) x: u32,
+    pub(crate) y: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +76,7 @@ pub(crate) struct WgpuQuadBatchBuffer {
     bind_group: wgpu::BindGroup,
     phase: RenderPhaseLabel,
     alpha_mode: AlphaMode2d,
+    scissor: Option<WgpuScissorRect>,
     instance_count: u32,
 }
 
@@ -187,6 +197,7 @@ pub(crate) fn create_quad_batch_buffers(
                 bind_group,
                 phase: batch.phase,
                 alpha_mode: batch.material.alpha_mode,
+                scissor: batch.scissor,
                 instance_count,
             })
         })
@@ -198,6 +209,7 @@ pub(crate) fn draw_quad_batch_buffers_for_phase<'pass>(
     pipelines: &'pass [WgpuQuadPipelineDrawRef],
     buffers: &'pass [WgpuQuadBatchBuffer],
     phase: RenderPhaseLabel,
+    viewport: ViewportRect,
 ) {
     if buffers.iter().all(|buffer| buffer.phase != phase) {
         return;
@@ -216,6 +228,13 @@ pub(crate) fn draw_quad_batch_buffers_for_phase<'pass>(
             render_pass.set_pipeline(pipeline);
             bound_alpha_mode = Some(buffer.alpha_mode);
         }
+        let scissor = buffer.scissor.unwrap_or(WgpuScissorRect {
+            x: viewport.physical_x,
+            y: viewport.physical_y,
+            width: viewport.physical_width,
+            height: viewport.physical_height,
+        });
+        render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
         render_pass.set_bind_group(0, &buffer.bind_group, &[]);
         render_pass.set_vertex_buffer(0, buffer.buffer.slice(..));
         render_pass.draw(0..VERTICES_PER_QUAD, 0..buffer.instance_count);

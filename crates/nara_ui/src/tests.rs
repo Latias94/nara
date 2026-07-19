@@ -290,7 +290,8 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<ButtonInput<MouseButton>>()
-        .press(MouseButton::Left);
+        .press(MouseButton::Left)
+        .unwrap();
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -303,7 +304,8 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<ButtonInput<MouseButton>>()
-        .release(MouseButton::Left);
+        .release(MouseButton::Left)
+        .unwrap();
     app.run_once(Duration::ZERO).unwrap();
 
     let interaction = app.world().resource::<UiInteractionState>();
@@ -413,7 +415,8 @@ fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<ButtonInput<MouseButton>>()
-        .press(MouseButton::Left);
+        .press(MouseButton::Left)
+        .unwrap();
 
     app.run_once(Duration::ZERO).unwrap();
     assert_eq!(
@@ -440,7 +443,8 @@ fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<ButtonInput<MouseButton>>()
-        .release(MouseButton::Left);
+        .release(MouseButton::Left)
+        .unwrap();
     app.run_once(Duration::ZERO).unwrap();
 
     assert_eq!(app.world().resource::<UiInteractionState>().pressed(), None);

@@ -1,12 +1,6 @@
 #![allow(dead_code)]
 
-use std::{
-    error::Error,
-    fmt,
-    path::Path,
-    sync::mpsc,
-    time::Duration,
-};
+use std::{error::Error, fmt, path::Path, sync::mpsc, time::Duration};
 
 use nara::{
     app::AppFrameOutcome,
@@ -252,8 +246,8 @@ pub fn run_manual_raw_app_boot() -> Result<ManualRawAppBootReport, ManualRawAppF
 }
 
 pub fn run_manual_raw_app_pre_owner_failure() -> Result<(), ManualRawAppFailure> {
-    let invalid_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/missing-project-manifest");
+    let invalid_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/missing-project-manifest");
     try_load_project_content_from_path(&invalid_root)
         .map(drop)
         .map_err(|error| {
@@ -261,8 +255,8 @@ pub fn run_manual_raw_app_pre_owner_failure() -> Result<(), ManualRawAppFailure>
         })
 }
 
-pub fn run_manual_raw_app_incomplete_retirement(
-) -> Result<ManualRawAppIncompleteRetirementReport, ManualRawAppFailure> {
+pub fn run_manual_raw_app_incomplete_retirement()
+-> Result<ManualRawAppIncompleteRetirementReport, ManualRawAppFailure> {
     let (mut app, loaded) = prepare_manual_raw_app()?;
     let first_tick = match execute_manual_first_tick(&mut app, &loaded) {
         Ok((first_tick, _, _)) => first_tick,
@@ -284,13 +278,13 @@ pub fn run_manual_raw_app_incomplete_retirement(
         ));
     };
     let spawn = pools.spawn(
-            TaskPoolKind::Io,
-            TaskSpawnRequest::new(first_tick.tick, TaskDomainKey::new(26)),
-            move |_| {
-                let _ = started_sender.send(());
-                let _ = release_receiver.recv();
-            },
-        );
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(first_tick.tick, TaskDomainKey::new(26)),
+        move |_| {
+            let _ = started_sender.send(());
+            let _ = release_receiver.recv();
+        },
+    );
     let task = match spawn.into_handle() {
         Ok(task) => task,
         Err(_) => {
@@ -520,10 +514,7 @@ fn prepare_manual_raw_app() -> Result<(App, LoadedProjectContent), ManualRawAppF
 fn execute_manual_first_tick(
     app: &mut App,
     loaded: &LoadedProjectContent,
-) -> Result<
-    (ManualFirstTickSnapshot, GameplayCommandQueueStats, bool),
-    ManualRawAppBootError,
-> {
+) -> Result<(ManualFirstTickSnapshot, GameplayCommandQueueStats, bool), ManualRawAppBootError> {
     let report = spawn_snapshot_scene(app, loaded)?;
     if report.diagnostics.has_errors() {
         return Err(ManualRawAppBootError::SceneSpawn);
@@ -642,8 +633,7 @@ fn shutdown_manual_raw_app(app: &mut App) -> ManualRawAppRetirementReport {
 }
 
 fn shutdown_manual_tasks(app: &App) -> Result<TaskShutdownReport, ManualRawAppBootError> {
-    app
-        .world()
+    app.world()
         .get_resource::<TaskPools>()
         .ok_or(ManualRawAppBootError::TaskShutdown)
         .and_then(|pools| {
@@ -660,10 +650,7 @@ fn joined_task_workers(report: &TaskShutdownReport) -> usize {
         .sum()
 }
 
-fn incomplete_task_phase(
-    report: &TaskShutdownReport,
-    kind: TaskPoolKind,
-) -> TaskShutdownPhase {
+fn incomplete_task_phase(report: &TaskShutdownReport, kind: TaskPoolKind) -> TaskShutdownPhase {
     let report = report.for_kind(kind);
     if report.join_timed_out {
         TaskShutdownPhase::Join

@@ -3,7 +3,10 @@ mod project_content_fixture;
 
 use std::{num::NonZeroU32, time::Duration};
 
-use nara::{prelude::Vec2, project_host::{HeadlessRun, HeadlessRunOutcome}};
+use nara::{
+    prelude::Vec2,
+    project_host::{HeadlessRun, HeadlessRunOutcome},
+};
 use nara_reference_game::{
     EnemySnapshot, ProjectileSnapshot, WaveOutcome, bundled_wave_commands, wave_headless_intent,
 };
@@ -13,11 +16,7 @@ use project_content_fixture::project_root_capability;
 fn authoritative_snapshot_uses_sorted_stable_game_identities() {
     let maximum = NonZeroU32::new(3).unwrap();
     let intent = wave_headless_intent(maximum).stop_when(|snapshot| snapshot.tick == 3);
-    let mut run = HeadlessRun::new(
-        project_root_capability(),
-        intent,
-        bundled_wave_commands(),
-    );
+    let mut run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
     let snapshot = loop {
         let report = run.execute_bounded();
         match report.outcome() {

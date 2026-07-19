@@ -474,6 +474,9 @@ pub(crate) fn with_identity_error(
             "identity-error-kind",
             "retirement-sequence-exhausted",
         ),
+        IdentityDomainError::LifecycleConflict => {
+            with_public_identifier(diagnostic, "identity-error-kind", "lifecycle-conflict")
+        }
     }
 }
 

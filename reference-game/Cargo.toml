@@ -6,8 +6,22 @@ rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+default = []
+desktop = ["nara/runtime-ui", "nara/desktop-winit", "nara/render-wgpu"]
+
 [workspace]
 resolver = "3"
 
 [dependencies]
 nara = { path = "..", default-features = false, features = ["runtime-2d", "serde"] }
+
+[[bin]]
+name = "desktop"
+path = "src/bin/desktop.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "desktop_render_probe"
+path = "src/bin/desktop_render_probe.rs"
+required-features = ["desktop"]

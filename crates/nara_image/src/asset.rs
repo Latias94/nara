@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     fmt::{self, Formatter},
     sync::Arc,
 };
@@ -85,7 +86,6 @@ impl ImageSourceMetadata {
     }
 }
 
-#[derive(PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ImageAsset {
     source: ImageSourceMetadata,
@@ -94,6 +94,8 @@ pub struct ImageAsset {
     color_space: ImageColorSpace,
     #[cfg_attr(feature = "serde", serde(with = "shared_bytes"))]
     pixels: Arc<Vec<u8>>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    retention: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl ImageAsset {
@@ -111,7 +113,36 @@ impl ImageAsset {
             format,
             color_space,
             pixels: Arc::new(pixels),
+            retention: None,
         }
+    }
+
+    /// Installs the owner that accounts for this shared pixel allocation.
+    ///
+    /// Returns `false` without replacing the existing owner when one is already attached.
+    #[must_use]
+    pub fn try_attach_retention_owner<R>(&mut self, retention: Arc<R>) -> bool
+    where
+        R: Send + Sync + 'static,
+    {
+        if self.retention.is_some() {
+            return false;
+        }
+        self.retention = Some(retention);
+        true
+    }
+
+    /// Shares immutable pixels only when their existing accounting owner can be retained.
+    #[must_use]
+    pub fn share_retained(&self) -> Option<Self> {
+        Some(Self {
+            source: self.source.clone(),
+            extent: self.extent,
+            format: self.format,
+            color_space: self.color_space,
+            pixels: Arc::clone(&self.pixels),
+            retention: Some(Arc::clone(self.retention.as_ref()?)),
+        })
     }
 
     #[must_use]
@@ -139,6 +170,18 @@ impl ImageAsset {
         self.pixels.as_slice()
     }
 }
+
+impl PartialEq for ImageAsset {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.extent == other.extent
+            && self.format == other.format
+            && self.color_space == other.color_space
+            && self.pixels == other.pixels
+    }
+}
+
+impl Eq for ImageAsset {}
 
 #[cfg(feature = "serde")]
 mod shared_bytes {
@@ -170,6 +213,7 @@ impl fmt::Debug for ImageAsset {
             .field("format", &self.format)
             .field("color_space", &self.color_space)
             .field("pixel_len", &self.pixels.len())
+            .field("retained", &self.retention.is_some())
             .finish()
     }
 }

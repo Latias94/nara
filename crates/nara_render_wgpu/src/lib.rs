@@ -19,10 +19,16 @@ use crate::quad::{
     WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers_for_phase,
 };
 use crate::surface::{SurfaceDropReason, WgpuSurfaceState};
-use nara_app::{App, CoreStage, Plugin, PluginError, PluginShutdownContext, RuntimeDriverScope};
+use nara_app::{
+    __RuntimeDriverPort, App, CoreStage, Plugin, PluginError, PluginShutdownContext,
+    RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
+    RuntimeState, RuntimeWorldAccessError,
+};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_asset::Assets;
-use nara_ecs::{Query, Res, ResMut, schedule::IntoScheduleConfigs, system::NonSendMarker};
+use nara_ecs::{
+    Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs, system::NonSendMarker,
+};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_image::{ImageAsset, PreparedImageResource};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -35,8 +41,8 @@ use nara_render::PreparedRenderResources;
 use nara_render::RenderPassStepLabel;
 use nara_render::{
     Color, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
-    RenderFrameSkipReason, RenderPassPlan, RenderPassStep, RenderPhaseInput, begin_render_frame,
-    build_render_pass_plan,
+    RenderFramePacket, RenderFramePacketError, RenderFrameSkipReason, RenderPassStep,
+    RenderPhaseInput, build_render_frame_packet,
 };
 #[cfg(feature = "sprite-submitter")]
 use nara_sprite_render::SpriteBatches;
@@ -47,7 +53,7 @@ use nara_window::{
     backend::{BackendWindowHandles, WindowSurfaceRetirementDriver, WindowSurfaceRetirementError},
 };
 
-pub use crate::backend::{WgpuBackendState, WgpuRenderBackend};
+pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats, WgpuRenderBackend};
 pub use crate::error::WgpuRenderError;
 
 pub use crate::surface::{
@@ -80,6 +86,7 @@ impl Plugin for WgpuRenderPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<WgpuRenderBackend>()?;
+        app.init_resource::<WgpuFramePacketSlot>()?;
         app.init_resource::<RenderBackendStatus>()?;
         let world = app.world_mut()?;
         if let Some(driver) = world.get_resource::<WindowSurfaceRetirementDriver>() {
@@ -100,7 +107,9 @@ impl Plugin for WgpuRenderPlugin {
             .mark_state(WGPU_RENDER_BACKEND, RenderBackendState::Uninitialized);
         app.add_systems(
             CoreStage::Render,
-            render_wgpu_surfaces.after(begin_render_frame),
+            (capture_wgpu_frame_packet, render_wgpu_surfaces)
+                .chain()
+                .after(nara_render::begin_render_frame),
         )?;
         app.register_plugin_shutdown_obligation(WGPU_BACKEND_SHUTDOWN_OBLIGATION)?;
         Ok(())
@@ -123,66 +132,187 @@ fn retire_wgpu_window_surfaces(
     scope: &mut RuntimeDriverScope<'_>,
     window_ids: &[WindowId],
 ) -> Result<(), WindowSurfaceRetirementError> {
-    let Some(mut backend) = scope.get_resource_mut::<WgpuRenderBackend>().map_err(|_| {
-        WindowSurfaceRetirementError::DriverFailed {
+    match scope.__apply_port::<WgpuRenderBackend>(WgpuSurfaceRetirementRequest(window_ids.to_vec()))
+    {
+        Ok(result) => result.map_err(|_| WindowSurfaceRetirementError::DriverFailed {
             driver: WGPU_RENDER_BACKEND,
+        }),
+        // The backend resource owns every live surface. Its absence means Drop already released
+        // and acknowledged those owners, so the window authority can finish retirement.
+        Err(RuntimeWorldAccessError::MissingResource { .. }) => Ok(()),
+        Err(_) => Err(WindowSurfaceRetirementError::DriverFailed {
+            driver: WGPU_RENDER_BACKEND,
+        }),
+    }
+}
+
+pub struct WgpuSurfaceRetirementRequest(Vec<WindowId>);
+
+impl __RuntimeDriverPort for WgpuRenderBackend {
+    type Input = WgpuSurfaceRetirementRequest;
+    type Output = Result<(), WgpuRenderError>;
+
+    fn accepts_driver_state(state: RuntimeState) -> bool {
+        matches!(
+            state,
+            RuntimeState::Running
+                | RuntimeState::Paused
+                | RuntimeState::Faulted
+                | RuntimeState::Stopping
+                | RuntimeState::CloseIncomplete
+        )
+    }
+
+    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
+        self.retire_targets(&input.0, SurfaceDropReason::TargetShutdown)
+    }
+}
+
+#[derive(Debug, Default)]
+struct WgpuFramePayload {
+    #[cfg(feature = "sprite-submitter")]
+    sprite_batches: Option<SpriteBatches>,
+    #[cfg(feature = "ui-submitter")]
+    ui_batches: Option<UiBatches>,
+}
+
+#[derive(Debug)]
+struct WgpuCapturedFrame {
+    topology: RenderFramePacket,
+    payload: WgpuFramePayload,
+}
+
+impl WgpuFramePayload {
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn quad_batches(&self) -> Vec<WgpuQuadBatch> {
+        let mut batches = Vec::new();
+        #[cfg(feature = "sprite-submitter")]
+        if let Some(sprite_batches) = &self.sprite_batches {
+            batches.extend(sprite::collect_sprite_quad_batches(sprite_batches, 0));
         }
-    })?
-    else {
-        return Ok(());
+        #[cfg(feature = "ui-submitter")]
+        if let Some(ui_batches) = &self.ui_batches {
+            batches.extend(ui::collect_ui_quad_batches(ui_batches, 0));
+        }
+        batches
+    }
+
+    fn phase_inputs(&self) -> Vec<RenderPhaseInput> {
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        let mut inputs = Vec::new();
+        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        let inputs = Vec::new();
+        #[cfg(feature = "sprite-submitter")]
+        if let Some(sprite_batches) = &self.sprite_batches {
+            sprite::append_sprite_phase_inputs(sprite_batches, &mut inputs);
+        }
+        #[cfg(feature = "ui-submitter")]
+        if let Some(ui_batches) = &self.ui_batches {
+            ui::append_ui_phase_inputs(ui_batches, &mut inputs);
+        }
+        inputs
+    }
+}
+
+#[derive(Debug, Default, Resource)]
+struct WgpuFramePacketSlot {
+    current: Option<Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>>,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum WgpuFrameCaptureError {
+    #[error("managed runtime generation is unavailable")]
+    MissingRuntimeGeneration,
+    #[error(transparent)]
+    Topology(#[from] RenderFramePacketError),
+    #[error("a render batch does not belong to the admitted view and target")]
+    BatchTopologyMismatch,
+}
+
+fn capture_wgpu_frame_packet(
+    generation: Option<Res<RuntimeGeneration>>,
+    frame: Res<RenderFrame>,
+    primary_window_id: Option<Res<PrimaryWindowId>>,
+    windows: Query<&Window>,
+    views: Res<ExtractedViews>,
+    #[cfg(feature = "sprite-submitter")] sprite_batches: Option<Res<SpriteBatches>>,
+    #[cfg(feature = "ui-submitter")] ui_batches: Option<Res<UiBatches>>,
+    mut slot: ResMut<WgpuFramePacketSlot>,
+) {
+    let Some(generation) = generation.map(|generation| *generation) else {
+        slot.current = Some(Err(WgpuFrameCaptureError::MissingRuntimeGeneration));
+        return;
     };
-    backend
-        .retire_targets(window_ids, SurfaceDropReason::TargetShutdown)
-        .map_err(|_| WindowSurfaceRetirementError::DriverFailed {
-            driver: WGPU_RENDER_BACKEND,
-        })
+    let payload = WgpuFramePayload {
+        #[cfg(feature = "sprite-submitter")]
+        sprite_batches: sprite_batches.as_deref().cloned(),
+        #[cfg(feature = "ui-submitter")]
+        ui_batches: ui_batches.as_deref().cloned(),
+    };
+    if !payload_batches_match_topology(&payload, &views) {
+        slot.current = Some(Err(WgpuFrameCaptureError::BatchTopologyMismatch));
+        return;
+    }
+    let phases = payload.phase_inputs();
+    slot.current = Some(
+        build_render_frame_packet(
+            generation,
+            frame.index,
+            primary_window_id.map(|primary| primary.0),
+            windows.iter(),
+            &views,
+            phases,
+        )
+        .map(|topology| topology.map(|topology| WgpuCapturedFrame { topology, payload }))
+        .map_err(WgpuFrameCaptureError::from),
+    );
+}
+
+fn payload_batches_match_topology(payload: &WgpuFramePayload, views: &ExtractedViews) -> bool {
+    let Some(view) = views.as_slice().first() else {
+        return true;
+    };
+    #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    let _ = (payload, view);
+    #[cfg(feature = "sprite-submitter")]
+    if payload.sprite_batches.as_ref().is_some_and(|batches| {
+        batches
+            .as_slice()
+            .iter()
+            .any(|batch| batch.view_index != 0 || batch.target != view.target)
+    }) {
+        return false;
+    }
+    #[cfg(feature = "ui-submitter")]
+    if payload.ui_batches.as_ref().is_some_and(|batches| {
+        batches
+            .as_slice()
+            .iter()
+            .any(|batch| batch.view_index != 0 || batch.target != view.target)
+    }) {
+        return false;
+    }
+    true
 }
 
 #[derive(Clone, Copy)]
-struct SubmitterInputs<'a> {
+struct RenderResourceInputs<'a> {
     _lifetime: PhantomData<&'a ()>,
-    #[cfg(feature = "sprite-submitter")]
-    sprite_batches: Option<&'a SpriteBatches>,
-    #[cfg(feature = "ui-submitter")]
-    ui_batches: Option<&'a UiBatches>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     images: Option<&'a Assets<ImageAsset>>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     prepared_images: Option<&'a PreparedRenderResources<PreparedImageResource>>,
 }
 
-impl SubmitterInputs<'_> {
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    fn quad_batches(self, view_index: usize) -> Vec<WgpuQuadBatch> {
-        let mut batches = Vec::new();
-        #[cfg(feature = "sprite-submitter")]
-        if let Some(sprite_batches) = self.sprite_batches {
-            batches.extend(sprite::collect_sprite_quad_batches(
-                sprite_batches,
-                view_index,
-            ));
+impl Default for RenderResourceInputs<'_> {
+    fn default() -> Self {
+        Self {
+            _lifetime: PhantomData,
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            images: None,
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            prepared_images: None,
         }
-        #[cfg(feature = "ui-submitter")]
-        if let Some(ui_batches) = self.ui_batches {
-            batches.extend(ui::collect_ui_quad_batches(ui_batches, view_index));
-        }
-        batches
-    }
-
-    fn phase_inputs(self) -> Vec<RenderPhaseInput> {
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        let mut inputs = Vec::new();
-        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-        let inputs = Vec::new();
-        #[cfg(feature = "sprite-submitter")]
-        if let Some(sprite_batches) = self.sprite_batches {
-            sprite::append_sprite_phase_inputs(sprite_batches, &mut inputs);
-        }
-        #[cfg(feature = "ui-submitter")]
-        if let Some(ui_batches) = self.ui_batches {
-            ui::append_ui_phase_inputs(ui_batches, &mut inputs);
-        }
-        inputs
     }
 }
 
@@ -196,51 +326,115 @@ struct PreparedSubmitterDraw {
     sprites: u32,
 }
 
-pub fn render_wgpu_surfaces(
+fn render_wgpu_surfaces(
     mut backend: ResMut<WgpuRenderBackend>,
     handles: Option<Res<BackendWindowHandles>>,
-    windows: Query<&Window>,
-    views: Res<ExtractedViews>,
-    #[cfg(feature = "sprite-submitter")] sprite_batches: Option<Res<SpriteBatches>>,
-    #[cfg(feature = "ui-submitter")] ui_batches: Option<Res<UiBatches>>,
+    mut packet_slot: ResMut<WgpuFramePacketSlot>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))] images: Option<
         Res<Assets<ImageAsset>>,
     >,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))] prepared_images: Option<
         Res<PreparedRenderResources<PreparedImageResource>>,
     >,
-    primary_window_id: Option<Res<PrimaryWindowId>>,
     mut frame: ResMut<RenderFrame>,
     mut stats: ResMut<FrameStats>,
     mut status: ResMut<RenderBackendStatus>,
+    faults: Option<Res<RuntimeFaultReporter>>,
     _main_thread: NonSendMarker,
 ) {
-    let submitters = SubmitterInputs {
+    backend.begin_frame_transaction(frame.index);
+    let resources = RenderResourceInputs {
         _lifetime: PhantomData,
-        #[cfg(feature = "sprite-submitter")]
-        sprite_batches: sprite_batches.as_deref(),
-        #[cfg(feature = "ui-submitter")]
-        ui_batches: ui_batches.as_deref(),
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         images: images.as_deref(),
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         prepared_images: prepared_images.as_deref(),
     };
-    let result = backend.render_surfaces(
-        handles.as_deref(),
-        &windows,
-        &views,
-        submitters,
-        primary_window_id.map(|resource| resource.0),
-        &mut frame,
-        &mut stats,
-        &mut status,
-    );
+    let capture = packet_slot.current.take();
+    let result = match capture {
+        Some(Ok(Some(packet))) => backend.render_packet(
+            handles.as_deref(),
+            packet,
+            resources,
+            &mut frame,
+            &mut stats,
+            &mut status,
+        ),
+        Some(Ok(None)) | None => {
+            stats.draw_calls = 0;
+            stats.sprites = 0;
+            status.clear_skip();
+            status.mark_skipped_with_message(
+                frame.index,
+                RenderFrameSkipReason::NoViews,
+                "no admitted render frame packet",
+            );
+            frame.mark_skipped();
+            Ok(())
+        }
+        Some(Err(error)) => {
+            backend.reject_captured_packet();
+            stats.draw_calls = 0;
+            stats.sprites = 0;
+            status.clear_skip();
+            status.mark_skipped_with_message(
+                frame.index,
+                RenderFrameSkipReason::InvalidTopology,
+                error.to_string(),
+            );
+            if let Some(faults) = faults.as_deref() {
+                faults.report(RuntimeFault::engine(
+                    RuntimeFaultKind::System,
+                    "nara.render.frame-packet",
+                ));
+            }
+            frame.mark_skipped();
+            Ok(())
+        }
+    };
     if let Err(error) = result {
-        let message = backend.mark_error(&error);
-        status.mark_unavailable(WGPU_RENDER_BACKEND, message.clone());
-        status.mark_skipped_with_message(frame.index, RenderFrameSkipReason::BackendError, message);
+        handle_wgpu_render_error(
+            &mut backend,
+            error,
+            frame.index,
+            &mut status,
+            faults.as_deref(),
+        );
         frame.mark_skipped();
+    }
+}
+
+fn handle_wgpu_render_error(
+    backend: &mut WgpuRenderBackend,
+    error: WgpuRenderError,
+    frame_index: u64,
+    status: &mut RenderBackendStatus,
+    faults: Option<&RuntimeFaultReporter>,
+) {
+    if error.is_packet_admission_rejection() {
+        status.clear_skip();
+        status.mark_skipped_with_message(
+            frame_index,
+            RenderFrameSkipReason::InvalidTopology,
+            error.to_string(),
+        );
+        if let Some(faults) = faults {
+            faults.report(RuntimeFault::engine(
+                RuntimeFaultKind::System,
+                "nara.render.frame-packet",
+            ));
+        }
+        return;
+    }
+
+    let message = backend.mark_error(&error);
+    status.mark_unavailable(WGPU_RENDER_BACKEND, message.clone());
+    status.mark_skipped_with_message(frame_index, RenderFrameSkipReason::BackendError, message);
+    if let Some(faults) = faults {
+        faults.report(RuntimeFault::engine(
+            RuntimeFaultKind::RequiredService,
+            "nara.render-wgpu.frame",
+        ));
     }
 }
 
@@ -265,10 +459,13 @@ fn render_acquired_texture(
     window_id: WindowId,
     surface_state: &WgpuSurfaceState,
     surface_texture: wgpu::SurfaceTexture,
+    viewport: nara_render::ViewportRect,
     clear_color: Color,
     draw: &PreparedSubmitterDraw,
     pass_steps: &[RenderPassStep],
 ) -> Result<(), WgpuRenderError> {
+    #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    let _ = viewport;
     let config = surface_state
         .config
         .as_ref()
@@ -300,9 +497,24 @@ fn render_acquired_texture(
             multiview_mask: None,
         });
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        pass.set_viewport(
+            viewport.physical_x as f32,
+            viewport.physical_y as f32,
+            viewport.physical_width as f32,
+            viewport.physical_height as f32,
+            0.0,
+            1.0,
+        );
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         for step in pass_steps {
             if let RenderPassStepLabel::Phase(phase) = step.node.label {
-                draw_quad_batch_buffers_for_phase(&mut pass, &draw.pipelines, &draw.buffers, phase);
+                draw_quad_batch_buffers_for_phase(
+                    &mut pass,
+                    &draw.pipelines,
+                    &draw.buffers,
+                    phase,
+                    viewport,
+                );
             }
         }
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
@@ -313,17 +525,27 @@ fn render_acquired_texture(
     Ok(())
 }
 
-fn build_wgpu_render_pass_plan(
-    views: &ExtractedViews,
-    submitters: SubmitterInputs<'_>,
-) -> RenderPassPlan {
-    build_render_pass_plan(views, submitters.phase_inputs())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_ecs::system::{IntoSystem, System};
+    use nara_ecs::{
+        Commands,
+        system::{IntoSystem, System},
+    };
+
+    #[derive(Debug, Default, Resource)]
+    struct SecondCameraInjection(bool);
+
+    fn inject_second_camera_after_capture(
+        mut commands: Commands,
+        mut injection: ResMut<SecondCameraInjection>,
+    ) {
+        if injection.0 {
+            return;
+        }
+        injection.0 = true;
+        commands.spawn(nara_render::Camera2d::default());
+    }
 
     #[test]
     fn plugin_installs_backend_and_render_resources() {
@@ -350,6 +572,110 @@ mod tests {
                 .driver(),
             WGPU_RENDER_BACKEND
         );
+    }
+
+    #[test]
+    fn managed_frame_keeps_the_backend_terminal_state_after_render_schedule_completion() {
+        let mut app = App::new();
+        app.add_plugins((
+            nara_reflect::ComponentRegistryPlugin,
+            nara_render::RenderPlugin,
+            WgpuRenderPlugin,
+        ))
+        .unwrap();
+        let candidate = nara_app::RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+
+        assert_eq!(
+            runtime.world().resource::<RenderFrame>().state,
+            nara_render::RenderFrameState::Skipped,
+            "the renderer's terminal state must not be overwritten by a second begin system",
+        );
+    }
+
+    #[test]
+    fn captured_topology_is_immutable_and_next_frame_rejects_before_surface_work() {
+        let mut app = App::new();
+        app.add_plugins((
+            nara_reflect::ComponentRegistryPlugin,
+            nara_window::WindowPlugin::default(),
+            nara_render::RenderPlugin,
+            WgpuRenderPlugin,
+        ))
+        .unwrap();
+        app.insert_resource(SecondCameraInjection::default())
+            .unwrap();
+        app.world_mut()
+            .unwrap()
+            .spawn(nara_render::Camera2d::default());
+        app.add_systems(
+            CoreStage::Render,
+            inject_second_camera_after_capture
+                .after(capture_wgpu_frame_packet)
+                .before(render_wgpu_surfaces),
+        )
+        .unwrap();
+        let candidate = nara_app::RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        let first_frame = *runtime.world().resource::<RenderFrame>();
+        let first = runtime
+            .world()
+            .resource::<WgpuRenderBackend>()
+            .frame_transaction_stats();
+        assert_eq!(first.frame_index(), Some(first_frame.index));
+        assert_eq!(first.packet_admissions(), 1);
+        assert_eq!(first.packet_rejections(), 0);
+        assert_eq!(first.surface_acquire_attempts(), 0);
+        assert_eq!(first.surface_acquires(), 0);
+        assert_eq!(first.queue_submissions(), 0);
+        assert_eq!(first.presents(), 0);
+
+        let failure = runtime.drive(std::time::Duration::ZERO).unwrap_err();
+        assert_eq!(failure.fault().kind(), RuntimeFaultKind::System);
+        assert_eq!(failure.fault().source(), "nara.render.frame-packet");
+        let rejected_frame = *runtime.world().resource::<RenderFrame>();
+        let rejected = runtime
+            .world()
+            .resource::<WgpuRenderBackend>()
+            .frame_transaction_stats();
+        assert_eq!(rejected.frame_index(), Some(rejected_frame.index));
+        assert_eq!(rejected.packet_admissions(), 0);
+        assert_eq!(rejected.packet_rejections(), 1);
+        assert_eq!(rejected.surface_acquire_attempts(), 0);
+        assert_eq!(rejected.surface_acquires(), 0);
+        assert_eq!(rejected.queue_submissions(), 0);
+        assert_eq!(rejected.presents(), 0);
+    }
+
+    #[test]
+    fn retirement_driver_accepts_an_already_dropped_backend_resource() {
+        let mut app = App::new();
+        app.add_plugins((
+            nara_reflect::ComponentRegistryPlugin,
+            nara_render::RenderPlugin,
+            WgpuRenderPlugin,
+        ))
+        .unwrap();
+        let retirement_driver = *app.world().resource::<WindowSurfaceRetirementDriver>();
+        assert!(
+            app.world_mut()
+                .unwrap()
+                .remove_resource::<WgpuRenderBackend>()
+                .is_some()
+        );
+        let candidate = nara_app::RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+
+        runtime
+            .with_driver_scope(|scope| {
+                retirement_driver.retire_targets(scope, &[WindowId::PRIMARY])
+            })
+            .unwrap()
+            .unwrap();
     }
 
     #[test]
@@ -395,17 +721,6 @@ mod tests {
 
     #[test]
     fn base_submitter_input_has_no_phase_work() {
-        let inputs = SubmitterInputs {
-            _lifetime: PhantomData,
-            #[cfg(feature = "sprite-submitter")]
-            sprite_batches: None,
-            #[cfg(feature = "ui-submitter")]
-            ui_batches: None,
-            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-            images: None,
-            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-            prepared_images: None,
-        };
-        assert!(inputs.phase_inputs().is_empty());
+        assert!(WgpuFramePayload::default().phase_inputs().is_empty());
     }
 }

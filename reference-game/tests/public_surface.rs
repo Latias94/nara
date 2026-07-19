@@ -32,7 +32,10 @@ fn headless_cli_accepts_only_bundled_input_and_a_bounded_tick_option() {
         "MAXIMUM_CLI_TICKS",
         "HeadlessRunOutcome",
     ] {
-        assert!(source.contains(required), "headless CLI is missing {required}");
+        assert!(
+            source.contains(required),
+            "headless CLI is missing {required}"
+        );
     }
     for forbidden in [
         "--scenario",

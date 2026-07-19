@@ -3,6 +3,7 @@
 use bevy_ecs::{
     component::{Component, ComponentId},
     entity::Entity,
+    event::EventKey,
     lifecycle::{ADD, ComponentHooks, DESPAWN, DISCARD, HookContext, INSERT, REMOVE},
     resource::{IS_RESOURCE, IsResource, Resource},
     world::{DeferredWorld, World},
@@ -106,6 +107,150 @@ pub fn validate_resource_scope<R: Resource>(
         .get(resource_id)
         .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
     validate_component_observers(world, resource_id, Some(target))
+}
+
+/// Validates that despawning one entity cannot run component hooks or lifecycle observers.
+pub fn validate_entity_despawn(
+    world: &World,
+    target: Entity,
+    component_ids: &[ComponentId],
+) -> Result<(), PersistentComponentMetadataError> {
+    const EVENTS: [(PersistentLifecycleEvent, EventKey); 3] = [
+        (PersistentLifecycleEvent::Discard, DISCARD),
+        (PersistentLifecycleEvent::Remove, REMOVE),
+        (PersistentLifecycleEvent::Despawn, DESPAWN),
+    ];
+
+    for component_id in component_ids {
+        let info = world
+            .components()
+            .get_info(*component_id)
+            .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+        for (event, _) in EVENTS {
+            if hook_is_registered(info.hooks(), event) {
+                return Err(PersistentComponentMetadataError::LifecycleHook(event));
+            }
+        }
+    }
+
+    for (event, event_key) in EVENTS {
+        let Some(observers) = world.observers().try_get_observers(event_key) else {
+            continue;
+        };
+        if !observers.global_observers().is_empty() {
+            return Err(PersistentComponentMetadataError::Observer {
+                event,
+                scope: PersistentObserverScope::EventGlobal,
+            });
+        }
+        if observers
+            .entity_observers()
+            .get(&target)
+            .is_some_and(|observers| !observers.is_empty())
+        {
+            return Err(PersistentComponentMetadataError::Observer {
+                event,
+                scope: PersistentObserverScope::Entity,
+            });
+        }
+        for component_id in component_ids {
+            let Some(component_observers) = observers.component_observers().get(component_id)
+            else {
+                continue;
+            };
+            if !component_observers.global_observers().is_empty() {
+                return Err(PersistentComponentMetadataError::Observer {
+                    event,
+                    scope: PersistentObserverScope::ComponentGlobal,
+                });
+            }
+            if component_observers
+                .entity_component_observers()
+                .get(&target)
+                .is_some_and(|observers| !observers.is_empty())
+            {
+                return Err(PersistentComponentMetadataError::Observer {
+                    event,
+                    scope: PersistentObserverScope::EntityComponent,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates that inserting the selected components cannot run implicit lifecycle work.
+pub fn validate_entity_insertion(
+    world: &World,
+    target: Entity,
+    component_ids: &[ComponentId],
+) -> Result<(), PersistentComponentMetadataError> {
+    const EVENTS: [(PersistentLifecycleEvent, EventKey); 2] = [
+        (PersistentLifecycleEvent::Add, ADD),
+        (PersistentLifecycleEvent::Insert, INSERT),
+    ];
+
+    for component_id in component_ids {
+        let info = world
+            .components()
+            .get_info(*component_id)
+            .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+        if info.required_components().iter_ids().next().is_some() {
+            return Err(PersistentComponentMetadataError::RequiredComponents);
+        }
+        for (event, _) in EVENTS {
+            if hook_is_registered(info.hooks(), event) {
+                return Err(PersistentComponentMetadataError::LifecycleHook(event));
+            }
+        }
+    }
+
+    for (event, event_key) in EVENTS {
+        let Some(observers) = world.observers().try_get_observers(event_key) else {
+            continue;
+        };
+        if !observers.global_observers().is_empty() {
+            return Err(PersistentComponentMetadataError::Observer {
+                event,
+                scope: PersistentObserverScope::EventGlobal,
+            });
+        }
+        if observers
+            .entity_observers()
+            .get(&target)
+            .is_some_and(|observers| !observers.is_empty())
+        {
+            return Err(PersistentComponentMetadataError::Observer {
+                event,
+                scope: PersistentObserverScope::Entity,
+            });
+        }
+        for component_id in component_ids {
+            let Some(component_observers) = observers.component_observers().get(component_id)
+            else {
+                continue;
+            };
+            if !component_observers.global_observers().is_empty() {
+                return Err(PersistentComponentMetadataError::Observer {
+                    event,
+                    scope: PersistentObserverScope::ComponentGlobal,
+                });
+            }
+            if component_observers
+                .entity_component_observers()
+                .get(&target)
+                .is_some_and(|observers| !observers.is_empty())
+            {
+                return Err(PersistentComponentMetadataError::Observer {
+                    event,
+                    scope: PersistentObserverScope::EntityComponent,
+                });
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_resource_metadata(

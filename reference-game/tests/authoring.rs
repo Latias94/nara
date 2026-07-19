@@ -13,8 +13,8 @@ use nara::{
     },
 };
 use nara_reference_game::{
-    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin,
-    RuntimeOnlyTag, WaveSpawn, Weapon,
+    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin, RuntimeOnlyTag,
+    WaveSpawn, Weapon,
 };
 
 const LINEAGE_PROBE_ID: &str = "nara.test.LineageProbe";
@@ -140,11 +140,7 @@ fn five_game_components_register_and_round_trip_through_public_api() {
 
     assert_round_trip(Player::fixture(), "reference_game.Player", registry);
     assert_round_trip(Enemy::fixture(), "reference_game.Enemy", registry);
-    assert_round_trip(
-        WaveSpawn::fixture(),
-        "reference_game.WaveSpawn",
-        registry,
-    );
+    assert_round_trip(WaveSpawn::fixture(), "reference_game.WaveSpawn", registry);
     assert_round_trip(Weapon::fixture(), "reference_game.Weapon", registry);
     assert_round_trip(Projectile::fixture(), "reference_game.Projectile", registry);
 }
@@ -421,14 +417,15 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
                 weapon_id.clone(),
                 scene_component_record(Weapon::fixture(), &weapon_id, &registry),
             ),
-        SceneEntityRecord::new(scene_id("enemy")).with_component(
-            enemy_id.clone(),
-            scene_component_record(Enemy::fixture(), &enemy_id, &registry),
-        )
-        .with_component(
-            wave_spawn_id.clone(),
-            scene_component_record(WaveSpawn::fixture(), &wave_spawn_id, &registry),
-        ),
+        SceneEntityRecord::new(scene_id("enemy"))
+            .with_component(
+                enemy_id.clone(),
+                scene_component_record(Enemy::fixture(), &enemy_id, &registry),
+            )
+            .with_component(
+                wave_spawn_id.clone(),
+                scene_component_record(WaveSpawn::fixture(), &wave_spawn_id, &registry),
+            ),
         SceneEntityRecord::new(scene_id("projectile")).with_component(
             projectile_id.clone(),
             scene_component_record(Projectile::fixture(), &projectile_id, &registry),
@@ -530,7 +527,9 @@ where
     let mut registry =
         ComponentRegistry::successor_of(reference_game_predecessor_catalog()).unwrap();
     register_reference_game_v1_components_with_player::<T>(&mut registry);
-    registry.register_persistent_component::<WaveSpawn>().unwrap();
+    registry
+        .register_persistent_component::<WaveSpawn>()
+        .unwrap();
     registry
 }
 

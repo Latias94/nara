@@ -9,8 +9,8 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticValueRef};
 use nara_ecs::{
     Commands, Component, Entity, Mut, Resource, World,
-    lifecycle::{Add, HookContext, Remove},
-    observer::On,
+    lifecycle::{Add, Despawn, HookContext, Remove},
+    observer::{Observer, On},
     system::ResMut,
     world::DeferredWorld,
 };
@@ -41,6 +41,9 @@ struct TestBrokenExport;
 
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestApplyFails;
+
+#[derive(Clone, Debug, PartialEq, Component)]
+struct RuntimeRetirementProbe;
 
 #[derive(Debug, Default, Resource)]
 struct PersistentApplyCanary(u32);
@@ -1670,6 +1673,71 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
         EntityLookup::Resolved(first_entity)
     );
     assert_eq!(world.get::<TestPosition>(first_entity).unwrap().x, 1);
+}
+
+#[test]
+fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
+    let registry = test_registry();
+    let id = scene_id("player");
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    let mut spawner = SceneSpawner::new();
+    let first = spawner.spawn(
+        &mut world,
+        &registry,
+        &SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(1))]),
+    );
+    assert!(!first.diagnostics.has_errors());
+    let current = spawned_instance(&first).clone();
+    let old_entity = spawned_entity(&world, &first, &id);
+    world.entity_mut(old_entity).insert(RuntimeRetirementProbe);
+    let runtime_component = world
+        .component_id::<RuntimeRetirementProbe>()
+        .expect("the runtime retirement component should be registered");
+    world.spawn(
+        Observer::new(|_: On<Despawn>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1)
+            .with_entity(old_entity)
+            .with_component(runtime_component),
+    );
+    world.flush();
+    let baseline_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
+
+    let failed = spawner.replace(
+        &mut world,
+        &registry,
+        &SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(2))]),
+        &current,
+    );
+
+    assert!(failed.instance.is_none());
+    assert_eq!(failed.retired_entities(), 0);
+    assert!(failed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.identity-replacement-failed"
+            && diagnostic_has_text_field(diagnostic, "identity-error-kind", "lifecycle-conflict")
+    }));
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline_entities
+    );
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        baseline_stats
+    );
+    assert_eq!(
+        current.resolve(&world, &id),
+        EntityLookup::Resolved(old_entity)
+    );
+    assert_eq!(world.get::<TestPosition>(old_entity).unwrap().x, 1);
 }
 
 #[test]

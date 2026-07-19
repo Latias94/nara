@@ -191,9 +191,9 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
         phase_order(left.phase),
         left.layer,
         left.sort_key,
-        left.material,
         left.source_order,
         left.entity_bits,
+        left.material,
     )
         .cmp(&(
             right.view_order,
@@ -201,9 +201,9 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
             phase_order(right.phase),
             right.layer,
             right.sort_key,
-            right.material,
             right.source_order,
             right.entity_bits,
+            right.material,
         ))
 }
 

@@ -3,7 +3,7 @@
 mod pass_plan;
 mod prepare;
 
-use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
+use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext, RuntimeGeneration};
 use nara_asset::Handle;
 pub use nara_core::Color;
 use nara_core::Vec2;
@@ -14,7 +14,7 @@ use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_transform::Transform2d;
-use nara_window::{PrimaryWindowId, Window, WindowId, WindowResolution};
+use nara_window::{PresentMode, PrimaryWindowId, Window, WindowId, WindowResolution};
 
 pub use pass_plan::{
     RenderPassDependency, RenderPassDependencyError, RenderPassNodeId, RenderPassPlan,
@@ -223,6 +223,126 @@ impl ExtractedViews {
     }
 }
 
+/// Immutable window state admitted for one render-frame submission.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RenderWindowPacket {
+    pub id: WindowId,
+    pub resolution: WindowResolution,
+    pub present_mode: PresentMode,
+}
+
+/// Owned backend-neutral render input captured before any surface acquisition.
+#[derive(Debug, PartialEq)]
+pub struct RenderFramePacket {
+    generation: RuntimeGeneration,
+    frame_index: u64,
+    window: RenderWindowPacket,
+    view: ExtractedView,
+    pass_plan: RenderPassPlan,
+}
+
+impl RenderFramePacket {
+    #[must_use]
+    pub const fn generation(&self) -> RuntimeGeneration {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn frame_index(&self) -> u64 {
+        self.frame_index
+    }
+
+    #[must_use]
+    pub const fn window(&self) -> RenderWindowPacket {
+        self.window
+    }
+
+    #[must_use]
+    pub const fn view(&self) -> &ExtractedView {
+        &self.view
+    }
+
+    #[must_use]
+    pub const fn pass_plan(&self) -> &RenderPassPlan {
+        &self.pass_plan
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RenderFramePacketError {
+    #[error("the desktop renderer supports exactly one view, but captured {actual}")]
+    UnsupportedViewCount { actual: usize },
+    #[error("the desktop renderer supports exactly one window, but captured {actual}")]
+    UnsupportedWindowCount { actual: usize },
+    #[error("the desktop renderer does not support image render targets")]
+    UnsupportedImageTarget,
+    #[error("render target window {window_id:?} is not the admitted window")]
+    TargetWindowMismatch { window_id: WindowId },
+    #[error("the render viewport lies outside window {window_id:?}")]
+    ViewportOutsideTarget { window_id: WindowId },
+}
+
+/// Captures the supported desktop topology without retaining a `World` borrow.
+///
+/// No surface operation may occur until this function has returned an admitted packet.
+pub fn build_render_frame_packet<'a>(
+    generation: RuntimeGeneration,
+    frame_index: u64,
+    primary_window_id: Option<WindowId>,
+    windows: impl IntoIterator<Item = &'a Window>,
+    views: &ExtractedViews,
+    phases: impl IntoIterator<Item = RenderPhaseInput>,
+) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
+    if views.is_empty() {
+        return Ok(None);
+    }
+    if views.len() != 1 {
+        return Err(RenderFramePacketError::UnsupportedViewCount {
+            actual: views.len(),
+        });
+    }
+
+    let windows = windows.into_iter().collect::<Vec<_>>();
+    if windows.len() != 1 {
+        return Err(RenderFramePacketError::UnsupportedWindowCount {
+            actual: windows.len(),
+        });
+    }
+
+    let view = views.as_slice()[0];
+    let window_id = match view.target {
+        RenderTarget::PrimaryWindow => primary_window_id.unwrap_or(WindowId::PRIMARY),
+        RenderTarget::Window(window_id) => window_id,
+        RenderTarget::Image(_) => return Err(RenderFramePacketError::UnsupportedImageTarget),
+    };
+    let window = windows[0];
+    if window.id != window_id {
+        return Err(RenderFramePacketError::TargetWindowMismatch { window_id });
+    }
+
+    let viewport_right =
+        u64::from(view.viewport.physical_x).saturating_add(u64::from(view.viewport.physical_width));
+    let viewport_bottom = u64::from(view.viewport.physical_y)
+        .saturating_add(u64::from(view.viewport.physical_height));
+    if viewport_right > u64::from(window.resolution.physical_width)
+        || viewport_bottom > u64::from(window.resolution.physical_height)
+    {
+        return Err(RenderFramePacketError::ViewportOutsideTarget { window_id });
+    }
+
+    Ok(Some(RenderFramePacket {
+        generation,
+        frame_index,
+        window: RenderWindowPacket {
+            id: window.id,
+            resolution: window.resolution,
+            present_mode: window.present_mode,
+        },
+        view,
+        pass_plan: build_render_pass_plan(views, phases),
+    }))
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum RenderFrameState {
     #[default]
@@ -276,6 +396,7 @@ pub enum RenderBackendState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderFrameSkipReason {
     NoViews,
+    InvalidTopology,
     NoRenderableTarget,
     SurfaceUnavailable,
     BackendError,
@@ -722,7 +843,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use nara_app::App;
+    use nara_app::{App, RuntimeCandidate, RuntimeCandidateRetirementState};
     use nara_asset::AssetId;
     use nara_reflect::ComponentRegistryPlugin;
     use nara_window::WindowPlugin;
@@ -751,6 +872,123 @@ mod tests {
     }
 
     #[test]
+    fn frame_packet_admits_one_window_view() {
+        let generation = test_runtime_generation();
+        let window = Window::default();
+        let mut views = ExtractedViews::default();
+        views.push(test_extracted_view());
+
+        let packet = build_render_frame_packet(
+            generation,
+            9,
+            Some(WindowId::PRIMARY),
+            [&window],
+            &views,
+            [RenderPhaseInput {
+                view_index: 0,
+                phase: RenderPhaseLabel::TRANSPARENT_2D,
+            }],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(packet.generation(), generation);
+        assert_eq!(packet.frame_index(), 9);
+        assert_eq!(packet.window().id, WindowId::PRIMARY);
+        assert_eq!(packet.view(), &test_extracted_view());
+        assert_eq!(packet.pass_plan().len(), 2);
+    }
+
+    #[test]
+    fn frame_packet_rejects_extra_or_unsupported_topology() {
+        let generation = test_runtime_generation();
+        let window = Window::default();
+        let mut views = ExtractedViews::default();
+        views.push(test_extracted_view());
+        views.push(ExtractedView {
+            camera_entity: Entity::from_raw_u32(2).unwrap(),
+            ..test_extracted_view()
+        });
+        assert!(matches!(
+            build_render_frame_packet(generation, 1, None, [&window], &views, []),
+            Err(RenderFramePacketError::UnsupportedViewCount { actual: 2 })
+        ));
+
+        let mut views = ExtractedViews::default();
+        views.push(test_extracted_view());
+        let second_window = Window::default().with_id(WindowId::new(2));
+        assert!(matches!(
+            build_render_frame_packet(generation, 1, None, [&window, &second_window], &views, [],),
+            Err(RenderFramePacketError::UnsupportedWindowCount { actual: 2 })
+        ));
+
+        let mut image_views = ExtractedViews::default();
+        image_views.push(ExtractedView {
+            target: RenderTarget::Image(Handle::new(AssetId::from_raw(17))),
+            ..test_extracted_view()
+        });
+        assert!(matches!(
+            build_render_frame_packet(generation, 1, None, [&window], &image_views, []),
+            Err(RenderFramePacketError::UnsupportedImageTarget)
+        ));
+    }
+
+    #[test]
+    fn frame_packet_rejects_mismatched_window_and_out_of_bounds_viewport() {
+        let generation = test_runtime_generation();
+        let window = Window::default();
+        let target_window = WindowId::new(2);
+        let mut mismatched = ExtractedViews::default();
+        mismatched.push(ExtractedView {
+            target: RenderTarget::Window(target_window),
+            ..test_extracted_view()
+        });
+        assert_eq!(
+            build_render_frame_packet(generation, 1, None, [&window], &mismatched, []),
+            Err(RenderFramePacketError::TargetWindowMismatch {
+                window_id: target_window,
+            })
+        );
+
+        let mut outside = ExtractedViews::default();
+        outside.push(ExtractedView {
+            viewport: ViewportRect::new(1_279, 719, 2, 2).unwrap(),
+            ..test_extracted_view()
+        });
+        assert_eq!(
+            build_render_frame_packet(generation, 1, None, [&window], &outside, []),
+            Err(RenderFramePacketError::ViewportOutsideTarget {
+                window_id: WindowId::PRIMARY,
+            })
+        );
+    }
+
+    #[test]
+    fn captured_packet_ignores_later_topology_mutation_and_next_capture_rejects() {
+        let generation = test_runtime_generation();
+        let window = Window::default();
+        let mut views = ExtractedViews::default();
+        views.push(test_extracted_view());
+        let packet = build_render_frame_packet(generation, 1, None, [&window], &views, [])
+            .unwrap()
+            .unwrap();
+
+        views.push(ExtractedView {
+            camera_entity: Entity::from_raw_u32(2).unwrap(),
+            ..test_extracted_view()
+        });
+
+        assert_eq!(
+            packet.view().camera_entity,
+            Entity::from_raw_u32(1).unwrap()
+        );
+        assert!(matches!(
+            build_render_frame_packet(generation, 2, None, [&window], &views, []),
+            Err(RenderFramePacketError::UnsupportedViewCount { actual: 2 })
+        ));
+    }
+
+    #[test]
     fn extracts_primary_window_camera_view() {
         let mut app = App::new();
         app.add_plugin(ComponentRegistryPlugin).unwrap();
@@ -772,6 +1010,30 @@ mod tests {
             ViewportRect::new(0, 0, 1280, 720).unwrap()
         );
         assert_eq!(views.as_slice()[0].clear_color, Color::BLACK);
+    }
+
+    fn test_extracted_view() -> ExtractedView {
+        ExtractedView {
+            camera_entity: Entity::from_raw_u32(1).unwrap(),
+            target: RenderTarget::PrimaryWindow,
+            viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),
+            world_position: Vec2::ZERO,
+            viewport_height: 720.0,
+            order: 0,
+            clear_color: Color::BLACK,
+        }
+    }
+
+    fn test_runtime_generation() -> RuntimeGeneration {
+        let candidate = RuntimeCandidate::admit(App::new().seal().unwrap()).unwrap();
+        let ready = candidate.complete_startup().unwrap();
+        let runtime = ready.promote();
+        let generation = runtime.generation();
+        let mut retirement = runtime.begin_retirement();
+        while retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {
+            retirement.drive_retirement();
+        }
+        generation
     }
 
     #[test]

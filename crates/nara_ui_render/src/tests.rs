@@ -154,9 +154,43 @@ fn clipping_splits_batches_with_same_material() {
         .map(|batch| batch.clip_rect)
         .collect::<Vec<_>>();
     assert!(clip_rects.contains(&None));
-    assert!(clip_rects.contains(&Some(
-        UiClipRect::from_rect(UiRect::from_origin_size(0.0, 0.0, 64.0, 64.0)).unwrap()
-    )));
+    assert!(
+        clip_rects.contains(&Some(
+            UiClipRect::from_rect_clamped(
+                UiRect::from_origin_size(0.0, 0.0, 64.0, 64.0),
+                ViewportRect::new(0, 0, 200, 100).unwrap(),
+            )
+            .unwrap()
+        ))
+    );
+}
+
+#[test]
+fn clip_rect_rejects_non_finite_values_and_clamps_to_the_viewport() {
+    let viewport = ViewportRect::new(10, 20, 100, 50).unwrap();
+    assert_eq!(
+        UiClipRect::from_rect_clamped(
+            UiRect::from_origin_size(-50.5, 10.2, 200.0, 100.0),
+            viewport,
+        ),
+        Some(UiClipRect {
+            x: 10,
+            y: 20,
+            width: 100,
+            height: 50,
+        })
+    );
+    assert_eq!(
+        UiClipRect::from_rect_clamped(
+            UiRect::from_origin_size(f32::NAN, 0.0, 10.0, 10.0),
+            viewport,
+        ),
+        None
+    );
+    assert_eq!(
+        UiClipRect::from_rect_clamped(UiRect::from_origin_size(200.0, 200.0, 10.0, 10.0), viewport,),
+        None
+    );
 }
 
 #[test]

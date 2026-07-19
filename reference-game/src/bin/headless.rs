@@ -205,10 +205,12 @@ fn write_diagnostics(
 fn open_project_root() -> Result<DirectoryCapability, Box<ProjectCandidateError>> {
     let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = host_directory(project_root).map_err(|source| {
-        Box::new(ProjectCandidateError::from_manifest_authority(FsError::Io {
-            operation: FsOperation::OpenDirectory,
-            source,
-        }))
+        Box::new(ProjectCandidateError::from_manifest_authority(
+            FsError::Io {
+                operation: FsOperation::OpenDirectory,
+                source,
+            },
+        ))
     })?;
     DirectoryCapability::from_host_handle(
         directory,
@@ -318,11 +320,7 @@ mod tests {
             || {
                 let read = clock_reads.get();
                 clock_reads.set(read + 1);
-                if read == 0 {
-                    start
-                } else {
-                    deadline
-                }
+                if read == 0 { start } else { deadline }
             },
             || waits.set(waits.get() + 1),
             &mut stdout,

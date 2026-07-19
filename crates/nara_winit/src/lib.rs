@@ -1,7 +1,7 @@
 //! Winit runner and native window adapter for nara.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -9,9 +9,11 @@ use std::{
 use nara_app::{
     AppExit, AppRunError, RuntimeControl, RuntimeControlRequestResult, RuntimeDriveError,
     RuntimeDriverScope, RuntimeFault, RuntimeInstance, RuntimeScopeError, RuntimeState,
-    RuntimeWorldAccessError,
 };
-use nara_input::{ButtonInput, KeyCode, MouseButton, PointerState};
+use nara_input::{
+    ButtonDriverInput, ButtonInputDriverError, KeyCode, MouseButton, PointerDriverInput,
+    apply_keyboard_driver_input, apply_mouse_driver_input, apply_pointer_driver_input,
+};
 use nara_window::{
     Window, WindowEvent, WindowId, WindowResolution,
     backend::{BackendWindowHandles, WindowHandleProvider, WindowSurfaceRetirementDriver},
@@ -21,7 +23,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
     event::{
-        ElementState, KeyEvent, MouseButton as WinitMouseButton, WindowEvent as WinitWindowEvent,
+        ElementState, MouseButton as WinitMouseButton, RawKeyEvent, WindowEvent as WinitWindowEvent,
     },
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode as WinitKeyCode, PhysicalKey},
@@ -78,7 +80,7 @@ impl WinitRunner {
         })?;
         event_loop.set_control_flow(self.control_flow.into_winit());
 
-        let mut state = WinitApp::new(runtime)?;
+        let mut state = WinitApp::with_session(runtime)?;
         let run_result = event_loop.run_app(&mut state);
         if let Err(error) = run_result {
             state.record_primary_failure(AppRunError::runner(format!(
@@ -137,10 +139,92 @@ struct WinitApp<'runtime> {
     backend_windows: BackendWindowHandles,
     shutdown: WinitShutdownState,
     runtime_close_incomplete_observed: bool,
+    input_gate: WinitInputGate,
+}
+
+#[derive(Debug)]
+struct WinitInputGate {
+    focused: bool,
+    suppressed_keys: HashSet<KeyCode>,
+    suppressed_mouse_buttons: HashSet<MouseButton>,
+}
+
+impl Default for WinitInputGate {
+    fn default() -> Self {
+        Self::reset_for_focus(true)
+    }
+}
+
+impl WinitInputGate {
+    fn reset_for_focus(focused: bool) -> Self {
+        Self {
+            focused,
+            suppressed_keys: HashSet::new(),
+            suppressed_mouse_buttons: HashSet::new(),
+        }
+    }
+
+    fn lose_focus(
+        &mut self,
+        released_keys: impl IntoIterator<Item = KeyCode>,
+        released_mouse_buttons: impl IntoIterator<Item = MouseButton>,
+    ) {
+        self.focused = false;
+        self.suppressed_keys.extend(released_keys);
+        self.suppressed_mouse_buttons.extend(released_mouse_buttons);
+    }
+
+    fn gain_focus(&mut self) {
+        self.focused = true;
+    }
+
+    fn keyboard_input(
+        &mut self,
+        key: KeyCode,
+        state: ElementState,
+        repeat: bool,
+    ) -> Option<ButtonDriverInput<KeyCode>> {
+        match state {
+            ElementState::Released => {
+                self.suppressed_keys.remove(&key);
+                self.focused.then_some(ButtonDriverInput::Release(key))
+            }
+            ElementState::Pressed
+                if self.focused && !repeat && !self.suppressed_keys.contains(&key) =>
+            {
+                Some(ButtonDriverInput::Press(key))
+            }
+            ElementState::Pressed => None,
+        }
+    }
+
+    fn mouse_input(
+        &mut self,
+        button: MouseButton,
+        state: ElementState,
+    ) -> Option<ButtonDriverInput<MouseButton>> {
+        match state {
+            ElementState::Released => {
+                self.suppressed_mouse_buttons.remove(&button);
+                self.focused.then_some(ButtonDriverInput::Release(button))
+            }
+            ElementState::Pressed
+                if self.focused && !self.suppressed_mouse_buttons.contains(&button) =>
+            {
+                Some(ButtonDriverInput::Press(button))
+            }
+            ElementState::Pressed => None,
+        }
+    }
 }
 
 impl<'runtime> WinitApp<'runtime> {
+    #[cfg(test)]
     fn new(runtime: &'runtime mut RuntimeInstance) -> Result<Self, AppRunError> {
+        Self::with_session(runtime)
+    }
+
+    fn with_session(runtime: &'runtime mut RuntimeInstance) -> Result<Self, AppRunError> {
         let backend_windows = runtime
             .world()
             .get_resource::<BackendWindowHandles>()
@@ -159,12 +243,13 @@ impl<'runtime> WinitApp<'runtime> {
             backend_windows,
             shutdown: WinitShutdownState::Running,
             runtime_close_incomplete_observed: false,
+            input_gate: WinitInputGate::default(),
         })
     }
 
-    fn with_driver_scope<R>(
+    fn with_driver_scope<R, E>(
         &mut self,
-        operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, RuntimeWorldAccessError>,
+        operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, E>,
     ) -> Result<R, AppRunError> {
         with_runtime_driver_scope(self.runtime, operation)
     }
@@ -278,9 +363,7 @@ impl<'runtime> WinitApp<'runtime> {
                 })?;
             }
             WinitWindowEvent::Focused(focused) => {
-                self.with_driver_scope(|scope| {
-                    push_window_driver_event(scope, WindowEvent::Focused { window_id, focused })
-                })?;
+                self.apply_focus_driver_event(window_id, focused)?;
             }
             WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.with_driver_scope(|scope| {
@@ -299,21 +382,76 @@ impl<'runtime> WinitApp<'runtime> {
                 })?;
             }
             WinitWindowEvent::KeyboardInput { event, .. } => {
-                self.with_driver_scope(|scope| apply_keyboard_input(scope, &event))?;
+                self.apply_physical_keyboard_driver_event(
+                    RawKeyEvent {
+                        physical_key: event.physical_key,
+                        state: event.state,
+                    },
+                    event.repeat,
+                )?;
             }
             WinitWindowEvent::MouseInput { state, button, .. } => {
-                self.with_driver_scope(|scope| apply_mouse_input(scope, state, button))?;
+                let button = convert_mouse_button(button);
+                if let Some(input) = self.mouse_driver_input(state, button) {
+                    self.with_driver_scope(|scope| apply_mouse_driver_input(scope, input))?;
+                }
             }
             WinitWindowEvent::CursorMoved { position, .. } => {
-                self.with_driver_scope(|scope| apply_cursor_moved(scope, position.x, position.y))?;
+                let position = nara_core::Vec2::new(position.x as f32, position.y as f32);
+                self.with_driver_scope(|scope| {
+                    apply_pointer_driver_input(scope, PointerDriverInput::Moved(position))
+                })?;
             }
             WinitWindowEvent::CursorLeft { .. } => {
-                self.with_driver_scope(apply_cursor_left)?;
+                self.with_driver_scope(|scope| {
+                    apply_pointer_driver_input(scope, PointerDriverInput::Left)
+                })?;
             }
             _ => {}
         }
 
         Ok(())
+    }
+
+    fn apply_physical_keyboard_driver_event(
+        &mut self,
+        event: RawKeyEvent,
+        repeat: bool,
+    ) -> Result<bool, AppRunError> {
+        let Some(key) = convert_physical_key(event.physical_key) else {
+            return Ok(false);
+        };
+        let Some(input) = self.input_gate.keyboard_input(key, event.state, repeat) else {
+            return Ok(false);
+        };
+        self.with_driver_scope(|scope| apply_keyboard_driver_input(scope, input))?;
+        Ok(true)
+    }
+
+    fn apply_focus_driver_event(
+        &mut self,
+        window_id: WindowId,
+        focused: bool,
+    ) -> Result<(), AppRunError> {
+        if focused {
+            self.input_gate.gain_focus();
+        } else {
+            let (released_keys, released_mouse_buttons) =
+                self.with_driver_scope(release_all_input)?;
+            self.input_gate
+                .lose_focus(released_keys, released_mouse_buttons);
+        }
+        self.with_driver_scope(|scope| {
+            push_window_driver_event(scope, WindowEvent::Focused { window_id, focused })
+        })
+    }
+
+    fn mouse_driver_input(
+        &mut self,
+        state: ElementState,
+        button: MouseButton,
+    ) -> Option<ButtonDriverInput<MouseButton>> {
+        self.input_gate.mouse_input(button, state)
     }
 
     fn handle_destroyed_window(
@@ -409,11 +547,21 @@ impl<'runtime> WinitApp<'runtime> {
     }
 
     fn poll_native_shutdown(&mut self, event_loop: &ActiveEventLoop, now: Instant) {
+        let directive = self.poll_native_shutdown_once(now);
+        apply_event_loop_directive(event_loop, directive);
+    }
+
+    fn poll_native_shutdown_once(&mut self, now: Instant) -> EventLoopDirective {
+        if matches!(
+            self.shutdown,
+            WinitShutdownState::Complete | WinitShutdownState::Aborted
+        ) {
+            return EventLoopDirective::Exit;
+        }
         if let Err(error) = self.poll_runtime_close() {
             self.record_runtime_close_failure(error);
         }
-        let directive = self.poll_native_shutdown_transition(now);
-        apply_event_loop_directive(event_loop, directive);
+        self.poll_native_shutdown_transition(now)
     }
 
     fn poll_native_shutdown_transition(&mut self, now: Instant) -> EventLoopDirective {
@@ -482,8 +630,22 @@ impl<'runtime> WinitApp<'runtime> {
         self.platform_windows.clear();
         self.nara_windows_by_winit.clear();
         self.shutdown = WinitShutdownState::Aborted;
-        if let Err(error) = self.begin_runtime_close() {
-            self.record_runtime_close_failure(error);
+        match self.runtime.state() {
+            RuntimeState::Stopping => {}
+            RuntimeState::CloseIncomplete => self.record_runtime_close_incomplete(),
+            RuntimeState::Stopped => {
+                if let Err(error) = self.runtime_close_result() {
+                    self.record_runtime_close_failure(error);
+                }
+            }
+            RuntimeState::Running | RuntimeState::Paused | RuntimeState::Faulted => {
+                if let Err(error) = self.begin_runtime_close() {
+                    self.record_runtime_close_failure(error);
+                }
+            }
+            RuntimeState::Stepping => self.record_runtime_close_failure(AppRunError::runner(
+                "managed runtime remained in an in-flight step after the event loop ended",
+            )),
         }
         match retirement_result {
             Ok(()) => self.record_native_retirement_failure(AppRunError::runner(
@@ -646,17 +808,27 @@ fn retire_runtime_targets(
         .map_err(|_| AppRunError::runner("renderer did not retire every surface before shutdown"))
 }
 
-fn configured_primary_window(runtime: &mut RuntimeInstance) -> Result<Window, AppRunError> {
-    Ok(runtime
+fn configured_primary_window(runtime: &RuntimeInstance) -> Result<Window, AppRunError> {
+    let mut windows = runtime
         .world()
         .iter_entities()
-        .find_map(|entity| entity.get::<Window>().cloned())
-        .unwrap_or_else(Window::default))
+        .filter_map(|entity| entity.get::<Window>().cloned());
+    let Some(window) = windows.next() else {
+        return Err(AppRunError::runner(
+            "managed runtime has no configured window target",
+        ));
+    };
+    if windows.next().is_some() {
+        return Err(AppRunError::runner(
+            "managed runtime has more than one configured window target",
+        ));
+    }
+    Ok(window)
 }
 
-fn with_runtime_driver_scope<R>(
+fn with_runtime_driver_scope<R, E>(
     runtime: &mut RuntimeInstance,
-    operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, RuntimeWorldAccessError>,
+    operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> Result<R, E>,
 ) -> Result<R, AppRunError> {
     runtime
         .with_driver_scope(operation)
@@ -681,48 +853,14 @@ fn runtime_fault_error(fault: &RuntimeFault) -> AppRunError {
     AppRunError::managed_runtime(fault.kind(), fault.source())
 }
 
-fn apply_keyboard_input(
+fn release_all_input(
     scope: &mut RuntimeDriverScope<'_>,
-    event: &KeyEvent,
-) -> Result<(), RuntimeWorldAccessError> {
-    let Some(key_code) = convert_physical_key(event.physical_key) else {
-        return Ok(());
-    };
-    let mut input = scope.resource_mut::<ButtonInput<KeyCode>>()?;
-    match event.state {
-        ElementState::Pressed => input.press(key_code),
-        ElementState::Released => input.release(key_code),
-    }
-    Ok(())
-}
-
-fn apply_mouse_input(
-    scope: &mut RuntimeDriverScope<'_>,
-    state: ElementState,
-    button: WinitMouseButton,
-) -> Result<(), RuntimeWorldAccessError> {
-    let mut input = scope.resource_mut::<ButtonInput<MouseButton>>()?;
-    let button = convert_mouse_button(button);
-    match state {
-        ElementState::Pressed => input.press(button),
-        ElementState::Released => input.release(button),
-    }
-    Ok(())
-}
-
-fn apply_cursor_moved(
-    scope: &mut RuntimeDriverScope<'_>,
-    x: f64,
-    y: f64,
-) -> Result<(), RuntimeWorldAccessError> {
-    let mut pointer = scope.resource_mut::<PointerState>()?;
-    pointer.set_position(nara_core::Vec2::new(x as f32, y as f32));
-    Ok(())
-}
-
-fn apply_cursor_left(scope: &mut RuntimeDriverScope<'_>) -> Result<(), RuntimeWorldAccessError> {
-    scope.resource_mut::<PointerState>()?.clear_position();
-    Ok(())
+) -> Result<(Vec<KeyCode>, Vec<MouseButton>), ButtonInputDriverError> {
+    let keys = apply_keyboard_driver_input(scope, ButtonDriverInput::ReleaseAll)?;
+    let mouse_buttons = apply_mouse_driver_input(scope, ButtonDriverInput::ReleaseAll)?;
+    apply_pointer_driver_input(scope, PointerDriverInput::Left)
+        .map_err(ButtonInputDriverError::WorldAccess)?;
+    Ok((keys, mouse_buttons))
 }
 
 #[must_use]

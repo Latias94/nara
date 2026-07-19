@@ -40,7 +40,7 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
     );
     assert_eq!(
         report.content_revision,
-        "6ec7a8df1db5054c230ab4044087a02a33d577ae03cd912d682013625af005e2"
+        "d60509291cf37b577fdbc685898e27923c5cc56590e8a168845e7638a2725e13"
     );
     assert_eq!(
         report.content_digest,

@@ -23,13 +23,19 @@ use nara_app::{
     RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeFault, RuntimeFaultKind,
     RuntimeFaultReporter, StartupStage, drive_runtime_quarantine, runtime_quarantine_status,
 };
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+use nara_app::{RuntimeControl, RuntimeControlRequestResult};
+use nara_asset::{AssetMeta, AssetPath, AssetRef, StableAssetId};
 use nara_diagnostic::DiagnosticValueRef;
 use nara_ecs::{Resource, error::BevyError};
 use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
-use nara_scene::SceneDocument;
+use nara_image::PreparedImageResource;
+use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+use nara_render::PreparedRenderResources;
+use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 use nara_tasks::{
     TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
 };
@@ -537,6 +543,51 @@ fn publication_is_one_visibility_cut_and_repeated_starts_use_fresh_generations()
 }
 
 #[test]
+fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() {
+    let project = TestProject::with_image("image-publication");
+    let (snapshot, plan) = project.snapshot_and_plan(false);
+    assert_eq!(snapshot.images().len(), 1);
+    let snapshot_pixels = snapshot.images()[0].image().pixels().as_ptr();
+    let snapshot_source = snapshot.images()[0].image().source().clone();
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    host.complete_start(&mut attempt).unwrap();
+
+    {
+        let ProjectHostSlot::Running(published) = &host.slot else {
+            panic!("runtime is not visible in the Host slot");
+        };
+        let runtime_images = published.runtime().world().resource::<Assets<ImageAsset>>();
+        let runtime_images = runtime_images.iter().collect::<Vec<_>>();
+        assert_eq!(runtime_images.len(), 1);
+        let runtime_image = runtime_images[0].1;
+        assert_eq!(runtime_image.source(), &snapshot_source);
+        assert_eq!(
+            runtime_image.pixels().as_ptr(),
+            snapshot_pixels,
+            "runtime publication must share the snapshot-owned pixel allocation and its lease",
+        );
+    }
+
+    let ProjectHostSlot::Running(published) = &mut host.slot else {
+        panic!("runtime is not visible in the Host slot");
+    };
+    published.runtime_mut().drive(Duration::ZERO).unwrap();
+    let prepared = published
+        .runtime()
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>();
+    assert_eq!(
+        prepared.len(),
+        1,
+        "the production Host publication must reach render preparation",
+    );
+
+    close_host(&mut host);
+}
+
+#[test]
 fn concurrent_starts_share_immutable_content_but_isolate_every_runtime_owner() {
     let project = TestProject::new("runtime-owner-isolation");
     let (snapshot, plan) = project.snapshot_and_plan(false);
@@ -612,7 +663,7 @@ fn dropping_an_unclaimed_attempt_releases_the_host_start_slot() {
 }
 
 #[test]
-fn product_tick_uses_exact_step_independent_of_frame_time_settings() {
+fn product_tick_uses_one_exact_step() {
     let project = TestProject::new("exact-step");
     let (snapshot, plan) = project.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
@@ -621,26 +672,13 @@ fn product_tick_uses_exact_step_independent_of_frame_time_settings() {
     let ProjectHostSlot::Running(published) = &mut host.slot else {
         panic!("runtime was not published");
     };
-    published
-        .runtime_mut()
-        .with_driver_scope(|scope| {
-            let mut settings = scope
-                .resource_mut::<nara_app::RuntimeTimeSettings>()
-                .unwrap();
-            settings.set_paused(true);
-            settings.set_time_scale(0.25).unwrap();
-            settings
-                .set_max_delta(std::time::Duration::from_nanos(1))
-                .unwrap();
-        })
-        .unwrap();
     let tick_before = published
         .runtime()
         .world()
         .resource::<nara_app::FixedTime>()
         .tick();
 
-    host.drive_one_fixed_tick().unwrap();
+    assert_eq!(host.drive_one_fixed_tick().unwrap(), None);
 
     let ProjectHostSlot::Running(published) = &host.slot else {
         panic!("runtime was not retained after exact stepping");
@@ -736,6 +774,102 @@ fn delayed_cleanup_preserves_plugin_shutdown_failure_until_terminal_result() {
         CleanupDriveOutcome::Complete { failed: true, .. }
     ));
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[test]
+fn desktop_host_preserves_real_close_evidence_until_retry_finishes() {
+    let project = TestProject::new("desktop-close-evidence");
+    let control = Arc::new(CloseFailureControl::new(false));
+    let (snapshot, plan) = project.snapshot_and_fault_plan(
+        close_probe_definition(
+            &Arc::new(AtomicUsize::new(0)),
+            &Arc::new(AtomicUsize::new(0)),
+        ),
+        close_failure_definition(&control, false, false),
+    );
+    let close_timeout = Duration::from_millis(50);
+    let mut host = ProjectHost::new(RuntimeClosePolicy::new(close_timeout));
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    host.complete_start(&mut attempt).unwrap();
+
+    {
+        let runtime = host.running_runtime_mut().unwrap();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        std::thread::sleep(close_timeout + Duration::from_millis(10));
+        for _ in 0..8 {
+            if runtime.state() == RuntimeState::CloseIncomplete {
+                break;
+            }
+            runtime.drive(Duration::ZERO).unwrap();
+        }
+        assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
+    }
+    assert!(
+        host.running_runtime_close_evidence()
+            .unwrap()
+            .causes()
+            .contains(&RuntimeCloseCause::DeadlineExceeded)
+    );
+
+    control.release();
+    {
+        let runtime = host.running_runtime_mut().unwrap();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::RetryClose),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        for _ in 0..8 {
+            if runtime.state() == RuntimeState::Stopped {
+                break;
+            }
+            runtime.drive(Duration::ZERO).unwrap();
+        }
+        assert_eq!(runtime.state(), RuntimeState::Stopped);
+    }
+    assert!(
+        host.running_runtime_close_evidence()
+            .unwrap()
+            .causes()
+            .contains(&RuntimeCloseCause::DeadlineExceeded)
+    );
+    host.retire_running();
+    drain_host_cleanup(&mut host);
+    assert!(matches!(host.slot, ProjectHostSlot::Empty));
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[test]
+fn desktop_product_report_preserves_a_real_candidate_startup_failure() {
+    let project = TestProject::new("desktop-startup-failure");
+    let builds = Arc::new(AtomicUsize::new(0));
+    let closes = Arc::new(AtomicUsize::new(0));
+    let intent = DesktopRunIntent::new()
+        .insert_after::<GameplayCommandPlugin>(close_probe_definition(&builds, &closes))
+        .insert_after::<CloseProbePlugin>(startup_failure_definition());
+    let mut run = DesktopRun::new(project.capability(), intent);
+
+    let first = run.execute();
+    assert_eq!(first.outcome(), DesktopRunOutcome::CleanupIncomplete);
+    let report = (0..8)
+        .find_map(|_| {
+            let report = run.execute();
+            (report.outcome() != DesktopRunOutcome::CleanupIncomplete).then_some(report)
+        })
+        .expect("desktop startup-failure cleanup should reach a bounded terminal report");
+
+    assert_eq!(report.outcome(), DesktopRunOutcome::Failed);
+    assert!(report.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.run.startup-failed"
+            && diagnostic.summary().as_str() == "Project runtime startup failed"
+    }));
+    assert_eq!(builds.load(Ordering::SeqCst), 1);
+    assert_eq!(closes.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -988,7 +1122,7 @@ fn real_task_shutdown_retains_the_host_epoch_and_owner_until_later_drives_comple
     let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
     let epoch = attempt.epoch;
     host.complete_start(&mut attempt).unwrap();
-    host.drive_one_fixed_tick().unwrap();
+    assert_eq!(host.drive_one_fixed_tick().unwrap(), None);
 
     let stop_started = std::time::Instant::now();
     let error = host.stop_running().unwrap_err();
@@ -1084,6 +1218,14 @@ fn admission_scope_failure_definition() -> PluginDefinition {
         ADMISSION_SCOPE_FAILURE_DEFINITION_ID,
         b"project-admission-scope-failure-v1",
         AdmissionScopeFailurePlugin::default,
+    )
+}
+
+fn startup_failure_definition() -> PluginDefinition {
+    PluginDefinition::infallible::<StartupFailurePlugin, _>(
+        STARTUP_FAILURE_DEFINITION_ID,
+        b"project-startup-failure-v1",
+        StartupFailurePlugin::default,
     )
 }
 
@@ -1247,6 +1389,40 @@ requested = ["runtime-2d"]
         Self { root }
     }
 
+    fn with_image(name: &str) -> Self {
+        let project = Self::new(name);
+        fs::create_dir_all(project.root.join("assets/textures")).unwrap();
+
+        let image = AssetRef::path("textures/player.png").unwrap();
+        let entity = SceneEntityRecord::new(nara_identity::SceneEntityId::new("player").unwrap())
+            .with_component(
+                ComponentTypeId::new("nara.sprite.Sprite"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
+            );
+        fs::write(
+            project.root.join("scenes/startup.scene.json"),
+            SceneDocument::new([entity]).to_json_string().unwrap(),
+        )
+        .unwrap();
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+            project.root.join("assets/textures/player.png"),
+        )
+        .unwrap();
+        let meta = AssetMeta::new(
+            StableAssetId::parse_str("3c7c5be4-fd4e-4b65-b8d4-c671f5982186").unwrap(),
+            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        fs::write(
+            project.root.join("assets/textures/player.png.meta"),
+            meta.to_json_string().unwrap(),
+        )
+        .unwrap();
+
+        project
+    }
+
     fn snapshot_and_plan(&self, disable_tilemap: bool) -> (ProjectContentSnapshot, RuntimePlan) {
         let root = self.capability();
         let manifest = root
@@ -1335,6 +1511,44 @@ requested = ["runtime-2d"]
         )
         .unwrap()
     }
+}
+
+fn sprite_value(image: &AssetRef) -> ComponentValue {
+    ComponentValue::map([
+        (
+            "size",
+            ComponentValue::map([
+                ("x", ComponentValue::f64(16.0).unwrap()),
+                ("y", ComponentValue::f64(16.0).unwrap()),
+            ]),
+        ),
+        (
+            "material",
+            ComponentValue::map([
+                (
+                    "image",
+                    ComponentValue::map([
+                        ("kind", ComponentValue::String("path".to_owned())),
+                        (
+                            "value",
+                            ComponentValue::String(image.as_path().unwrap().as_str().to_owned()),
+                        ),
+                    ]),
+                ),
+                (
+                    "tint",
+                    ComponentValue::map([
+                        ("r", ComponentValue::f64(1.0).unwrap()),
+                        ("g", ComponentValue::f64(1.0).unwrap()),
+                        ("b", ComponentValue::f64(1.0).unwrap()),
+                        ("a", ComponentValue::f64(1.0).unwrap()),
+                    ]),
+                ),
+            ]),
+        ),
+        ("layer", ComponentValue::I64(0)),
+        ("sort_key", ComponentValue::I64(0)),
+    ])
 }
 
 impl Drop for TestProject {

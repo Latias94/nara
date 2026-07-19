@@ -14,4 +14,5 @@ nara_window.workspace = true
 winit.workspace = true
 
 [dev-dependencies]
+nara_gameplay.workspace = true
 raw-window-handle.workspace = true

@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc, Mutex,
@@ -12,8 +13,8 @@ use bevy_ecs::error::{BevyError, ErrorContext, ErrorHandler, FallbackErrorHandle
 
 use nara::{
     app::{
-        App, CoreStage, FixedCatchUpPolicy, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
-        PluginDeclaration, PluginError, PluginId, PluginShutdownContext,
+        __RuntimeDriverPort, App, CoreStage, FixedCatchUpPolicy, FixedTime, FixedUpdateSet, Plugin,
+        PluginCategory, PluginDeclaration, PluginError, PluginId, PluginShutdownContext,
         PluginShutdownObligationId, RealTime, RenderTime, RuntimeAdmissionError, RuntimeCandidate,
         RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
         RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
@@ -34,7 +35,7 @@ use nara::{
         GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
         GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandRejection, GameplayCommandSet,
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
-        GameplayCommandTypeId,
+        GameplayCommandTypeId, submit_gameplay_driver_command,
     },
     tasks::{
         TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
@@ -509,16 +510,17 @@ fn exact_step_runs_one_complete_gameplay_command_transaction() {
     let mut runtime = start_runtime(app);
     runtime
         .with_driver_scope(|scope| {
-            scope
-                .resource_mut::<GameplayCommandQueue>()
-                .unwrap()
-                .submit(GameplayCommandSubmission::new(
+            submit_gameplay_driver_command(
+                scope,
+                GameplayCommandSubmission::new(
                     GameplayCommandTick::new(1).unwrap(),
                     GameplayCommandIngressSource::test("runtime-step").unwrap(),
                     GameplayCommandSourceSequence::new(1).unwrap(),
                     GameplayCommandDraft::new(GameplayCommandTypeId::new("runtime.step").unwrap()),
-                ))
-                .unwrap();
+                ),
+            )
+            .unwrap()
+            .unwrap();
         })
         .unwrap();
 
@@ -1993,22 +1995,6 @@ fn missing_or_replaced_candidate_fault_reporter_prevents_startup() {
 }
 
 #[test]
-fn runtime_scope_protects_the_fault_reporter_from_mutation() {
-    let mut runtime = start_runtime(configured_app(FixedTime::default()));
-    runtime
-        .with_driver_scope(|scope| {
-            assert!(matches!(
-                scope.resource_mut::<RuntimeFaultReporter>(),
-                Err(RuntimeWorldAccessError::ProtectedType { .. })
-            ));
-        })
-        .unwrap();
-    runtime.drive(Duration::ZERO).unwrap();
-    assert_eq!(runtime.state(), RuntimeState::Running);
-    assert_eq!(runtime.fault(), None);
-}
-
-#[test]
 fn missing_or_replaced_candidate_error_handler_prevents_startup() {
     for replace in [false, true] {
         let mut app = app_with_runtime_scope_observer();
@@ -2082,22 +2068,6 @@ fn unpublished_candidate_scope_rejects_replaced_fault_authority() {
 }
 
 #[test]
-fn runtime_scope_protects_the_fallback_error_handler_from_mutation() {
-    let mut runtime = start_runtime(configured_app(FixedTime::default()));
-    runtime
-        .with_driver_scope(|scope| {
-            assert!(matches!(
-                scope.resource_mut::<FallbackErrorHandler>(),
-                Err(RuntimeWorldAccessError::ProtectedType { .. })
-            ));
-        })
-        .unwrap();
-    runtime.drive(Duration::ZERO).unwrap();
-    assert_eq!(runtime.state(), RuntimeState::Running);
-    assert_eq!(runtime.fault(), None);
-}
-
-#[test]
 fn control_tickets_are_scoped_to_their_runtime_generation() {
     let mut first = start_runtime(configured_app(FixedTime::default()));
     let mut second = start_runtime(configured_app(FixedTime::default()));
@@ -2129,18 +2099,19 @@ fn runtime_generations_do_not_share_world_time_or_gameplay_queue_state() {
 
     first
         .with_driver_scope(|scope| {
-            scope
-                .resource_mut::<GameplayCommandQueue>()
-                .unwrap()
-                .submit(GameplayCommandSubmission::new(
+            submit_gameplay_driver_command(
+                scope,
+                GameplayCommandSubmission::new(
                     GameplayCommandTick::new(1).unwrap(),
                     GameplayCommandIngressSource::test("first-runtime").unwrap(),
                     GameplayCommandSourceSequence::new(1).unwrap(),
                     GameplayCommandDraft::new(
                         GameplayCommandTypeId::new("runtime.isolation").unwrap(),
                     ),
-                ))
-                .unwrap();
+                ),
+            )
+            .unwrap()
+            .unwrap();
         })
         .unwrap();
     first.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
@@ -2320,21 +2291,27 @@ fn panic_system() {
     panic!("injected Rust system panic");
 }
 
-struct NestedRuntimeDrive {
-    runtime: Option<RuntimeInstance>,
+thread_local! {
+    static NESTED_RUNTIME: RefCell<Option<RuntimeInstance>> = const { RefCell::new(None) };
+}
+
+#[derive(Debug, Default, Resource)]
+struct NestedRuntimeDriveObservation {
     fault: Option<RuntimeFaultKind>,
 }
 
-fn drive_nested_runtime(mut nested: nara::ecs::NonSendMut<NestedRuntimeDrive>) {
-    let fault = nested
-        .runtime
-        .as_mut()
-        .expect("nested runtime remains present until the test reclaims it")
-        .drive(Duration::ZERO)
-        .unwrap_err()
-        .fault()
-        .kind();
-    nested.fault = Some(fault);
+fn drive_nested_runtime(mut observation: ResMut<NestedRuntimeDriveObservation>) {
+    observation.fault = NESTED_RUNTIME.with(|slot| {
+        Some(
+            slot.borrow_mut()
+                .as_mut()
+                .expect("nested runtime remains present until the test reclaims it")
+                .drive(Duration::ZERO)
+                .unwrap_err()
+                .fault()
+                .kind(),
+        )
+    });
 }
 
 #[test]
@@ -2453,11 +2430,31 @@ fn exact_step_rejects_a_temporarily_replaced_error_handler() {
     assert_eq!(runtime.state(), RuntimeState::Faulted);
 }
 
-#[test]
-fn faulted_runtime_keeps_driver_scope_available_for_retirement_work() {
-    #[derive(Resource)]
-    struct RetirementMarker(bool);
+#[derive(Resource)]
+struct RetirementMarker(bool);
 
+impl __RuntimeDriverPort for RetirementMarker {
+    type Input = ();
+    type Output = ();
+
+    fn accepts_driver_state(state: RuntimeState) -> bool {
+        matches!(
+            state,
+            RuntimeState::Running
+                | RuntimeState::Paused
+                | RuntimeState::Faulted
+                | RuntimeState::Stopping
+                | RuntimeState::CloseIncomplete
+        )
+    }
+
+    fn apply_driver_input(&mut self, (): Self::Input) {
+        self.0 = true;
+    }
+}
+
+#[test]
+fn faulted_runtime_keeps_typed_retirement_ports_available() {
     let mut app = configured_app(FixedTime::default());
     app.insert_resource(RetirementMarker(false)).unwrap();
     let mut runtime = start_runtime(app);
@@ -2469,7 +2466,7 @@ fn faulted_runtime_keeps_driver_scope_available_for_retirement_work() {
 
     runtime
         .with_driver_scope(|scope| {
-            scope.resource_mut::<RetirementMarker>().unwrap().0 = true;
+            scope.__apply_port::<RetirementMarker>(()).unwrap();
         })
         .unwrap();
 
@@ -2679,14 +2676,14 @@ fn rust_system_panics_unwind_from_variable_and_every_fixed_set() {
 #[test]
 fn nested_runtime_drive_is_typed_instead_of_deadlocking() {
     let inner = start_runtime(configured_app(FixedTime::default()));
+    NESTED_RUNTIME.with(|slot| {
+        assert!(slot.replace(Some(inner)).is_none());
+    });
     let mut outer_app = configured_app(FixedTime::default());
     outer_app
         .world_mut()
         .unwrap()
-        .insert_non_send(NestedRuntimeDrive {
-            runtime: Some(inner),
-            fault: None,
-        });
+        .insert_resource(NestedRuntimeDriveObservation::default());
     outer_app
         .add_systems(CoreStage::Update, drive_nested_runtime)
         .unwrap();
@@ -2694,21 +2691,18 @@ fn nested_runtime_drive_is_typed_instead_of_deadlocking() {
 
     outer.drive(Duration::ZERO).unwrap();
 
-    let (fault, mut inner) = outer
-        .with_driver_scope(|scope| {
-            let mut nested = scope
-                .get_non_send_resource_mut::<NestedRuntimeDrive>()
-                .unwrap()
-                .unwrap();
-            let fault = nested.fault;
-            let runtime = nested
-                .runtime
-                .take()
-                .expect("nested runtime is reclaimed exactly once");
-            (fault, runtime)
-        })
-        .unwrap();
-    assert_eq!(fault, Some(RuntimeFaultKind::ScheduleAuthority));
+    assert_eq!(
+        outer
+            .world()
+            .resource::<NestedRuntimeDriveObservation>()
+            .fault,
+        Some(RuntimeFaultKind::ScheduleAuthority)
+    );
+    let mut inner = NESTED_RUNTIME.with(|slot| {
+        slot.borrow_mut()
+            .take()
+            .expect("nested runtime is reclaimed exactly once")
+    });
     assert_eq!(inner.state(), RuntimeState::Faulted);
     accepted_ticket(inner.request_control(RuntimeControl::Stop));
     inner.drive(Duration::ZERO).unwrap();
@@ -2755,10 +2749,13 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
     );
     runtime
         .with_driver_scope(|scope| {
-            let mut queue = scope.resource_mut::<GameplayCommandQueue>().unwrap();
-            queue.submit(submission.clone()).unwrap();
+            submit_gameplay_driver_command(scope, submission.clone())
+                .unwrap()
+                .unwrap();
             assert_eq!(
-                queue.submit(submission).unwrap_err(),
+                submit_gameplay_driver_command(scope, submission)
+                    .unwrap()
+                    .unwrap_err(),
                 GameplayCommandRejection::Duplicate
             );
         })
@@ -2766,18 +2763,19 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
     runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
     runtime
         .with_driver_scope(|scope| {
-            let rejection = scope
-                .resource_mut::<GameplayCommandQueue>()
-                .unwrap()
-                .submit(GameplayCommandSubmission::new(
+            let rejection = submit_gameplay_driver_command(
+                scope,
+                GameplayCommandSubmission::new(
                     GameplayCommandTick::new(1).unwrap(),
                     GameplayCommandIngressSource::external("late-rejection").unwrap(),
                     GameplayCommandSourceSequence::new(2).unwrap(),
                     GameplayCommandDraft::new(
                         GameplayCommandTypeId::new("runtime.external").unwrap(),
                     ),
-                ))
-                .unwrap_err();
+                ),
+            )
+            .unwrap()
+            .unwrap_err();
             assert!(matches!(rejection, GameplayCommandRejection::Late { .. }));
         })
         .unwrap();
@@ -2851,18 +2849,10 @@ fn paused_driving_runs_real_time_work_without_variable_simulation() {
 }
 
 #[test]
-fn paused_runtime_state_cannot_be_bypassed_by_mutating_time_settings() {
+fn paused_runtime_state_remains_authoritative_during_elapsed_drive() {
     let mut runtime = start_runtime(configured_app(FixedTime::default()));
     accepted_ticket(runtime.request_control(RuntimeControl::Pause));
     runtime.drive(Duration::ZERO).unwrap();
-    runtime
-        .with_driver_scope(|scope| {
-            scope
-                .resource_mut::<RuntimeTimeSettings>()
-                .unwrap()
-                .set_paused(false);
-        })
-        .unwrap();
     let before = *runtime.world().resource::<FixedTime>();
 
     runtime.drive(before.timestep() * 2).unwrap();

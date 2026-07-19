@@ -1,16 +1,21 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
-const ALLOWED_RUNTIME_EXPORTS: [&str; 4] = [
+const ALLOWED_RUNTIME_EXPORTS: [&str; 8] = [
+    "DesktopRun",
+    "DesktopRunIntent",
+    "DesktopRunOutcome",
+    "DesktopRunReport",
     "HeadlessRun",
     "HeadlessRunIntent",
     "HeadlessRunOutcome",
     "HeadlessRunReport",
 ];
 
-const ALLOWED_PUBLIC_METHODS: [&str; 13] = [
+const ALLOWED_PUBLIC_METHODS: [&str; 15] = [
     "configure",
     "diagnostics",
     "disable",
+    "execute",
     "execute_bounded",
     "insert_after",
     "insert_before",
@@ -19,6 +24,7 @@ const ALLOWED_PUBLIC_METHODS: [&str; 13] = [
     "outcome",
     "stop_when",
     "with_cleanup_timeout",
+    "with_control_flow",
     "with_profile",
     "with_schema_provider",
 ];
@@ -52,6 +58,9 @@ fn concrete_product_action_exposes_only_the_reviewed_carriers() {
     let compact_host = host_source.split_whitespace().collect::<String>();
     assert!(compact_host.contains(
         "pubuseruntime::{HeadlessRun,HeadlessRunIntent,HeadlessRunOutcome,HeadlessRunReport};"
+    ));
+    assert!(compact_host.contains(
+        "pubuseruntime::{DesktopRun,DesktopRunIntent,DesktopRunOutcome,DesktopRunReport};"
     ));
 
     let runtime_source = read(root.join("src/project_host/runtime/action.rs"));
@@ -114,6 +123,31 @@ fn ordinary_reference_binary_names_only_product_level_concepts() {
         assert!(
             identifiers.contains(required),
             "ordinary caller does not exercise product concept {required}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_desktop_binary_names_only_product_level_concepts() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = read(root.join("reference-game/src/bin/desktop.rs"));
+    let identifiers = source_identifiers(&source);
+
+    for forbidden in FORBIDDEN_CALLER_CONCEPTS {
+        assert!(
+            !identifiers.contains(forbidden),
+            "ordinary desktop caller names internal lifecycle concept {forbidden}"
+        );
+    }
+    for required in [
+        "DesktopRunOutcome",
+        "bundled_desktop_run",
+        "diagnostics",
+        "execute",
+    ] {
+        assert!(
+            identifiers.contains(required),
+            "ordinary desktop caller does not exercise product concept {required}"
         );
     }
 }

@@ -24,18 +24,16 @@ use nara::{
         App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
         PluginError, PluginId,
     },
+    diagnostic::DiagnosticValueRef,
     ecs::{
         Resource,
         lifecycle::{Add, HookContext},
         observer::On,
         world::DeferredWorld,
     },
-    diagnostic::DiagnosticValueRef,
     project_host::{HeadlessRun, HeadlessRunOutcome},
     sprite::Sprite,
-    tasks::{
-        TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
-    },
+    tasks::{TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest},
 };
 use nara_reference_game::{
     REFERENCE_FIRST_TICK_COMMAND_SOURCE, REFERENCE_FIRST_TICK_COMMAND_TYPE,
@@ -103,9 +101,11 @@ impl Plugin for LateEventObserverPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.world_mut()?.commands().queue(|world: &mut nara::prelude::World| {
-            world.add_observer(|_: On<Add>| {});
-        });
+        app.world_mut()?
+            .commands()
+            .queue(|world: &mut nara::prelude::World| {
+                world.add_observer(|_: On<Add>| {});
+            });
         Ok(())
     }
 }
@@ -119,9 +119,11 @@ impl Plugin for LateComponentObserverPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.world_mut()?.commands().queue(|world: &mut nara::prelude::World| {
-            world.add_observer(|_: On<Add, Sprite>| {});
-        });
+        app.world_mut()?
+            .commands()
+            .queue(|world: &mut nara::prelude::World| {
+                world.add_observer(|_: On<Add, Sprite>| {});
+            });
         Ok(())
     }
 }
@@ -155,8 +157,8 @@ impl Plugin for BlockingTaskPlugin {
                 {
                     let control = Arc::clone(&self.control);
                     move |_| {
-                    let _ = started_sender.send(());
-                    let _ = release_receiver.recv();
+                        let _ = started_sender.send(());
+                        let _ = release_receiver.recv();
                         control.finished.fetch_add(1, Ordering::SeqCst);
                     }
                 },
@@ -220,10 +222,7 @@ fn product_action_matches_the_manual_first_tick_without_rust_seed_content() {
     assert_eq!(canonical_command.source_sequence().get(), 1);
     let expected_command_key = canonical_command.key();
     let expected_command_type = canonical_command.command().command_type().clone();
-    let mut product = project_headless_run(
-        project_root_capability(),
-        NonZeroU32::new(1).unwrap(),
-    );
+    let mut product = project_headless_run(project_root_capability(), NonZeroU32::new(1).unwrap());
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let report = loop {
@@ -279,9 +278,12 @@ fn missing_manifest_fails_before_product_runtime_ownership() {
     let report = product.execute_bounded();
 
     assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
-    assert!(report.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "project.manifest.host-io"
-    }));
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "project.manifest.host-io" })
+    );
 }
 
 #[test]
@@ -303,9 +305,12 @@ fn late_persistent_hook_matches_the_manual_rejection_before_publication() {
     };
 
     assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed, "{report:?}");
-    assert!(report.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code().as_str() == manual.diagnostic_code
-    }));
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == manual.diagnostic_code })
+    );
     assert!(!manual.scene_published);
     assert_eq!(manual.hook_calls, 0);
     assert_eq!(LATE_HOOK_CALLS.load(Ordering::SeqCst), 0);
@@ -313,12 +318,8 @@ fn late_persistent_hook_matches_the_manual_rejection_before_publication() {
 
 #[test]
 fn deferred_global_observers_reject_project_scene_before_publication() {
-    assert_global_observer_rejected(PluginDefinition::for_default::<
-        LateEventObserverPlugin,
-    >());
-    assert_global_observer_rejected(PluginDefinition::for_default::<
-        LateComponentObserverPlugin,
-    >());
+    assert_global_observer_rejected(PluginDefinition::for_default::<LateEventObserverPlugin>());
+    assert_global_observer_rejected(PluginDefinition::for_default::<LateComponentObserverPlugin>());
 }
 
 fn assert_global_observer_rejected(definition: PluginDefinition) {
@@ -336,9 +337,11 @@ fn assert_global_observer_rejected(definition: PluginDefinition) {
     };
 
     assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed, "{report:?}");
-    assert!(report.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
-    }));
+    assert!(
+        report.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+        })
+    );
 }
 
 #[test]
@@ -365,13 +368,13 @@ fn incomplete_retirement_stays_with_the_product_action_until_retry() {
     let first_drive_started = Instant::now();
     let incomplete = product.execute_bounded();
     assert!(first_drive_started.elapsed() < Duration::from_secs(1));
-    assert_eq!(
-        incomplete.outcome(),
-        &HeadlessRunOutcome::CleanupIncomplete
+    assert_eq!(incomplete.outcome(), &HeadlessRunOutcome::CleanupIncomplete);
+    assert!(
+        incomplete
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "project.run.cleanup-incomplete" })
     );
-    assert!(incomplete.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "project.run.cleanup-incomplete"
-    }));
     assert!(incomplete.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == "project.run.cleanup-deadline-exceeded"
     }));
@@ -399,7 +402,10 @@ fn incomplete_retirement_stays_with_the_product_action_until_retry() {
     };
     assert_eq!(snapshot.tick, manual.first_tick.tick);
     assert_eq!(snapshot.player_position, manual.first_tick.player_position);
-    assert_eq!(snapshot.enemy_hit_points, manual.first_tick.enemy_hit_points);
+    assert_eq!(
+        snapshot.enemy_hit_points,
+        manual.first_tick.enemy_hit_points
+    );
     assert_eq!(snapshot.commands_seen, 1);
     assert_eq!(control.builds.load(Ordering::SeqCst), 1);
     assert_eq!(control.finished.load(Ordering::SeqCst), 1);

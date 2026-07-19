@@ -410,6 +410,9 @@ fn managed_runtime_scopes_do_not_expose_raw_world_mutation() {
         &mut driver_scope_methods,
     );
     for structural_mutator in [
+        "get_resource_mut",
+        "resource_mut",
+        "get_non_send_resource_mut",
         "insert_resource",
         "remove_resource",
         "remove_non_send_resource",
@@ -425,6 +428,36 @@ fn managed_runtime_scopes_do_not_expose_raw_world_mutation() {
             "managed runtime driver scope regained generic structural mutation through {structural_mutator}"
         );
     }
+    let mut visible_driver_scope_methods = driver_scope_methods
+        .iter()
+        .filter(|method| !method.starts_with("__"))
+        .cloned()
+        .collect::<Vec<_>>();
+    visible_driver_scope_methods.sort();
+    assert_eq!(
+        visible_driver_scope_methods,
+        Vec::<String>::new(),
+        "managed runtime driver scope must not expose ambient World access"
+    );
+    let mut hidden_driver_scope_methods = driver_scope_methods
+        .iter()
+        .filter(|method| method.starts_with("__"))
+        .cloned()
+        .collect::<Vec<_>>();
+    hidden_driver_scope_methods.sort();
+    assert_eq!(
+        hidden_driver_scope_methods,
+        ["__apply_port"],
+        "first-party driver plumbing must remain one explicitly hidden, removable entry"
+    );
+    assert!(
+        runtime_source.contains("#[doc(hidden)]\npub trait __RuntimeDriverPort"),
+        "first-party driver plumbing must not be presented as a stable public Adapter contract"
+    );
+    assert!(
+        !runtime_source.contains("RuntimeDriverLocalPort"),
+        "a test-only local port must not freeze a second driver abstraction"
+    );
     let mut conversion_impls = Vec::new();
     forbidden_conversion_impls(&runtime_file.items, &mut conversion_impls);
     assert!(
@@ -438,6 +471,16 @@ fn managed_runtime_scopes_do_not_expose_raw_world_mutation() {
         !file_uses_identifier(&winit_source, "world_mut"),
         "nara_winit regained ambient runtime World mutation"
     );
+    for forbidden in [
+        "resource_mut",
+        "get_resource_mut",
+        "get_non_send_resource_mut",
+    ] {
+        assert!(
+            !file_uses_identifier(&winit_source, forbidden),
+            "nara_winit regained generic driver mutation through {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -565,8 +608,6 @@ fn signature_guard_is_insensitive_to_formatting_and_lifetimes() {
 #[test]
 fn driver_scope_is_short_lived_and_does_not_expose_app() {
     let mut runtime = start_runtime(App::new());
-    let frame = runtime
-        .with_driver_scope(|scope| scope.world().resource::<nara::app::RealTime>().frame)
-        .unwrap();
-    assert_eq!(frame, 0);
+    let marker = runtime.with_driver_scope(|_| 17_u32).unwrap();
+    assert_eq!(marker, 17);
 }

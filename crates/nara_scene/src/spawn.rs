@@ -524,13 +524,7 @@ impl SceneSpawner {
             }
         };
 
-        let retired_entities = despawn_entities(world, &retired);
-        if retired_entities != retired.len() {
-            diagnostics.push(crate::diagnostics::warning(
-                "scene.retired-entity-already-missing",
-                "A retired scene entity was already absent",
-            ));
-        }
+        let retired_entities = retired.len();
         for (entity, parent) in parent_links {
             world.entity_mut(entity).insert(Parent(parent));
         }
@@ -793,45 +787,36 @@ fn commit_scene_identity(
     commit: SceneIdentityCommit<'_>,
     new_domain: Option<WorldIdentityDomain>,
 ) -> Result<(SpawnedSceneInstance, Vec<Entity>), IdentityDomainError> {
-    if let Some(mut domain) = new_domain {
-        debug_assert!(!world.contains_resource::<WorldIdentityDomain>());
-        let result =
-            commit_scene_identity_with_domain(&mut domain, world, identity_tokens, commit)?;
-        world.insert_resource(domain);
-        return Ok(result);
-    }
-
-    world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
-        commit_scene_identity_with_domain(&mut domain, world, identity_tokens, commit)
-    })
-}
-
-fn commit_scene_identity_with_domain(
-    domain: &mut WorldIdentityDomain,
-    world: &mut World,
-    identity_tokens: &BTreeMap<SceneEntityId, WorldEntityToken>,
-    commit: SceneIdentityCommit<'_>,
-) -> Result<(SpawnedSceneInstance, Vec<Entity>), IdentityDomainError> {
     let entries = identity_tokens
         .iter()
         .map(|(entity_id, token)| (entity_id.clone(), *token))
         .collect::<Vec<_>>();
     match commit {
-        SceneIdentityCommit::Register => domain
-            .register_new_scene_instance(world, entries)
-            .map(|instance| (instance, Vec::new())),
+        SceneIdentityCommit::Register => {
+            if let Some(mut domain) = new_domain {
+                debug_assert!(!world.contains_resource::<WorldIdentityDomain>());
+                let instance = domain.register_new_scene_instance(world, entries)?;
+                world.insert_resource(domain);
+                return Ok((instance, Vec::new()));
+            }
+            world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
+                domain
+                    .register_new_scene_instance(world, entries)
+                    .map(|instance| (instance, Vec::new()))
+            })
+        }
         SceneIdentityCommit::Replace(current) => {
-            domain.replace_scene_instance(world, current, entries, TombstoneCause::Replaced)
+            debug_assert!(new_domain.is_none());
+            let retirements = resolved_scene_targets(world, current);
+            WorldIdentityDomain::replace_scene_instance_and_despawn(
+                world,
+                current,
+                &entries,
+                &retirements,
+                TombstoneCause::Replaced,
+            )
         }
     }
-}
-
-fn despawn_entities(world: &mut World, entities: &[Entity]) -> usize {
-    entities
-        .iter()
-        .copied()
-        .filter(|entity| world.despawn(*entity))
-        .count()
 }
 
 /// Retires one scene-managed stable identity before removing its runtime entity.

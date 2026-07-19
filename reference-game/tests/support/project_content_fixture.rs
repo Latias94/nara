@@ -2,10 +2,14 @@
 
 use std::{error::Error, fmt, fs::File, io, path::Path};
 
+#[cfg(feature = "desktop")]
+use std::time::{Duration, Instant};
+
 #[cfg(windows)]
 use std::fs::OpenOptions;
 
 use nara::{
+    app::PluginDefinition,
     asset::{AssetRef, AssetSourceKind, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     image::ImageImportLimits,
@@ -21,11 +25,40 @@ use nara::{
     },
     tilemap::TilemapPlugin,
 };
+use nara::{gameplay::GameplayCommandPlugin, project_host::project_runtime_plugins};
 use nara_reference_game::{
-    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, WaveSpawn, Weapon, runtime_plugins,
+    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin,
+    ReferenceWavePlugin, WaveSpawn, Weapon, plugin, runtime_plugins, wave_plugin,
 };
 
+#[cfg(feature = "desktop")]
+use nara::app::{RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, RuntimeState};
+#[cfg(feature = "desktop")]
+use nara_reference_game::desktop_plugin;
+
 pub const TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
+
+#[cfg(feature = "desktop")]
+pub fn stop_runtime(mut runtime: RuntimeInstance) {
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Stop),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        runtime.drive(Duration::ZERO).unwrap();
+        match runtime.state() {
+            RuntimeState::Stopped => return,
+            RuntimeState::CloseIncomplete => {
+                panic!("desktop test runtime close became incomplete")
+            }
+            _ if Instant::now() < deadline => {
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+            state => panic!("desktop test runtime remained in {state:?} past its deadline"),
+        }
+    }
+}
 
 pub struct LoadedProjectContent {
     pub candidate: ProjectSettingsCandidate,
@@ -100,6 +133,62 @@ pub fn candidate_plan_and_root(
 ) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
     try_candidate_plan_and_root(image_limits, include_tilemap)
         .expect("reference project plan should resolve")
+}
+
+#[cfg(feature = "desktop")]
+pub fn desktop_candidate_plan_and_root()
+-> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
+    let root = try_project_root_capability().expect("reference project root should be authorized");
+    let manifest_path = RelativePath::new("nara.toml").unwrap();
+    let manifest = root.open_file(&manifest_path).unwrap();
+    let candidate = ingest_project_manifest(&manifest, Some("desktop")).unwrap();
+    drop(manifest);
+
+    let request = project_runtime_plugins(&candidate)
+        .configure(nara::image::plugin(ImageImportLimits::default()))
+        .disable::<TilemapPlugin>()
+        .insert_after::<GameplayCommandPlugin>(plugin())
+        .insert_after::<ReferenceGamePlugin>(wave_plugin())
+        .insert_after::<ReferenceWavePlugin>(desktop_plugin());
+    let mut providers = built_in_schema_providers();
+    providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
+    let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
+    (candidate, plan, root)
+}
+
+pub fn headless_wave_candidate_plan_and_root()
+-> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
+    headless_wave_candidate_plan_and_root_with_test_plugin(None)
+}
+
+pub fn headless_wave_candidate_plan_and_root_with(
+    test_plugin: PluginDefinition,
+) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
+    headless_wave_candidate_plan_and_root_with_test_plugin(Some(test_plugin))
+}
+
+fn headless_wave_candidate_plan_and_root_with_test_plugin(
+    test_plugin: Option<PluginDefinition>,
+) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
+    let root = try_project_root_capability().expect("reference project root should be authorized");
+    let manifest_path = RelativePath::new("nara.toml").unwrap();
+    let manifest = root.open_file(&manifest_path).unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    drop(manifest);
+
+    let request = project_runtime_plugins(&candidate)
+        .configure(nara::image::plugin(ImageImportLimits::default()))
+        .disable::<TilemapPlugin>()
+        .insert_after::<GameplayCommandPlugin>(plugin())
+        .insert_after::<ReferenceGamePlugin>(wave_plugin());
+    let request = match test_plugin {
+        Some(definition) => request.insert_after::<ReferenceWavePlugin>(definition),
+        None => request,
+    };
+    let mut providers = built_in_schema_providers();
+    providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
+    let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
+    (candidate, plan, root)
 }
 
 pub fn try_candidate_plan_and_root(

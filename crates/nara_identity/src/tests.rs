@@ -4,7 +4,12 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nara_ecs::{Entity, World};
+use nara_ecs::{
+    Entity, Resource, World,
+    lifecycle::Despawn,
+    observer::{Observer, On},
+    system::ResMut,
+};
 
 use crate::{
     EntityLookup, EntityReference, EntityReferenceRemap, IdentityAllocationError,
@@ -757,6 +762,183 @@ fn scene_instance_replacement_retires_the_old_group_and_publishes_the_new_group(
             domain.lookup(world, &replacement.runtime_reference(&entity_id).unwrap()),
             EntityLookup::Resolved(new_token.entity())
         );
+    });
+}
+
+#[derive(Resource, Default)]
+struct RetirementObserverRuns(u32);
+
+#[test]
+fn atomic_scene_replacement_rejects_old_entity_observer_before_publication() {
+    let mut world = world_with_domain(16, 8);
+    world.init_resource::<RetirementObserverRuns>();
+    let old_token = spawn_token(&mut world);
+    let new_token = spawn_token(&mut world);
+    let entity_id = scene_id("entity");
+    let current = with_domain(&mut world, |world, domain| {
+        domain
+            .register_new_scene_instance(world, [(entity_id.clone(), old_token)])
+            .unwrap()
+    });
+    let old_reference = current.runtime_reference(&entity_id).unwrap();
+    let before = world.resource::<WorldIdentityDomain>().stats();
+    world.spawn(
+        Observer::new(|_: On<Despawn>, mut runs: ResMut<RetirementObserverRuns>| runs.0 += 1)
+            .with_entity(old_token.entity()),
+    );
+
+    assert_eq!(
+        WorldIdentityDomain::replace_scene_instance_and_despawn(
+            &mut world,
+            &current,
+            &[(entity_id, new_token)],
+            &[old_token.entity()],
+            TombstoneCause::Replaced,
+        ),
+        Err(IdentityDomainError::LifecycleConflict)
+    );
+
+    assert_eq!(world.resource::<RetirementObserverRuns>().0, 0);
+    assert!(world.get_entity(old_token.entity()).is_ok());
+    assert!(world.get_entity(new_token.entity()).is_ok());
+    let domain = world.resource::<WorldIdentityDomain>();
+    assert_eq!(domain.stats(), before);
+    assert_eq!(
+        domain.lookup(&world, &old_reference),
+        EntityLookup::Resolved(old_token.entity())
+    );
+    assert_eq!(domain.locators_for_token(&world, new_token).unwrap(), None);
+}
+
+#[test]
+fn atomic_scene_replacement_validates_the_complete_retirement_set() {
+    let mut world = world_with_domain(32, 16);
+    let old_token = spawn_token(&mut world);
+    let new_token = spawn_token(&mut world);
+    let foreign_token = spawn_token(&mut world);
+    let runtime_extra = spawn_token(&mut world);
+    let entity_id = scene_id("entity");
+    let foreign_id = scene_id("foreign");
+    let current = with_domain(&mut world, |world, domain| {
+        domain
+            .register_new_scene_instance(world, [(entity_id.clone(), old_token)])
+            .unwrap()
+    });
+    let foreign = with_domain(&mut world, |world, domain| {
+        domain
+            .register_new_scene_instance(world, [(foreign_id.clone(), foreign_token)])
+            .unwrap()
+    });
+    let old_reference = current.runtime_reference(&entity_id).unwrap();
+    let foreign_reference = foreign.runtime_reference(&foreign_id).unwrap();
+    let before = world.resource::<WorldIdentityDomain>().stats();
+
+    assert_eq!(
+        WorldIdentityDomain::replace_scene_instance_and_despawn(
+            &mut world,
+            &current,
+            &[(entity_id.clone(), new_token)],
+            &[old_token.entity(), new_token.entity()],
+            TombstoneCause::Replaced,
+        ),
+        Err(IdentityDomainError::LifecycleConflict)
+    );
+    assert_eq!(
+        WorldIdentityDomain::replace_scene_instance_and_despawn(
+            &mut world,
+            &current,
+            &[(entity_id.clone(), new_token)],
+            &[old_token.entity(), foreign_token.entity()],
+            TombstoneCause::Replaced,
+        ),
+        Err(IdentityDomainError::LifecycleConflict)
+    );
+    assert_eq!(
+        WorldIdentityDomain::replace_scene_instance_and_despawn(
+            &mut world,
+            &current,
+            &[(entity_id.clone(), new_token)],
+            &[old_token.entity(), old_token.entity()],
+            TombstoneCause::Replaced,
+        ),
+        Err(IdentityDomainError::LifecycleConflict)
+    );
+
+    assert!(world.get_entity(old_token.entity()).is_ok());
+    assert!(world.get_entity(new_token.entity()).is_ok());
+    assert!(world.get_entity(foreign_token.entity()).is_ok());
+    assert!(world.get_entity(runtime_extra.entity()).is_ok());
+    {
+        let domain = world.resource::<WorldIdentityDomain>();
+        assert_eq!(domain.stats(), before);
+        assert_eq!(
+            domain.lookup(&world, &old_reference),
+            EntityLookup::Resolved(old_token.entity())
+        );
+        assert_eq!(
+            domain.lookup(&world, &foreign_reference),
+            EntityLookup::Resolved(foreign_token.entity())
+        );
+        assert_eq!(domain.locators_for_token(&world, new_token).unwrap(), None);
+        assert_eq!(
+            domain.locators_for_token(&world, runtime_extra).unwrap(),
+            None
+        );
+    }
+
+    let (replacement, retired) = WorldIdentityDomain::replace_scene_instance_and_despawn(
+        &mut world,
+        &current,
+        &[(entity_id.clone(), new_token)],
+        &[old_token.entity(), runtime_extra.entity()],
+        TombstoneCause::Replaced,
+    )
+    .unwrap();
+
+    assert_eq!(retired, [old_token.entity()]);
+    assert!(world.get_entity(old_token.entity()).is_err());
+    assert!(world.get_entity(runtime_extra.entity()).is_err());
+    assert!(world.get_entity(new_token.entity()).is_ok());
+    assert!(world.get_entity(foreign_token.entity()).is_ok());
+    let domain = world.resource::<WorldIdentityDomain>();
+    assert_eq!(
+        domain.lookup(&world, &replacement.runtime_reference(&entity_id).unwrap()),
+        EntityLookup::Resolved(new_token.entity())
+    );
+    assert_eq!(
+        domain.lookup(&world, &foreign_reference),
+        EntityLookup::Resolved(foreign_token.entity())
+    );
+}
+
+#[test]
+fn active_scene_instance_capture_validates_and_freezes_current_membership() {
+    let mut world = world_with_domain(16, 8);
+    let first = spawn_token(&mut world);
+    let second = spawn_token(&mut world);
+    let first_id = scene_id("first");
+    let second_id = scene_id("second");
+
+    with_domain(&mut world, |world, domain| {
+        let original = domain
+            .register_new_scene_instance(
+                world,
+                [(first_id.clone(), first), (second_id.clone(), second)],
+            )
+            .unwrap();
+        let captured = domain
+            .active_scene_instance(world, original.instance_id())
+            .unwrap();
+        assert_eq!(captured, original);
+
+        domain
+            .retire_entity(world, second, TombstoneCause::Despawned)
+            .unwrap();
+        let remaining = domain
+            .active_scene_instance(world, original.instance_id())
+            .unwrap();
+        assert_eq!(remaining.entity_ids(), &[first_id]);
+        assert_eq!(captured.entity_ids(), &[scene_id("first"), second_id]);
     });
 }
 

@@ -465,6 +465,26 @@ pub struct RuntimeCloseContext<'world> {
 
 pub struct RuntimeDriverScope<'world> {
     world: &'world mut World,
+    state: RuntimeState,
+}
+
+/// First-party workspace plumbing for a typed managed-runtime operation.
+///
+/// Implementations define the complete input and output surface for their own resource. Rust's
+/// orphan rules prevent downstream adapters from adding driver access to an engine-owned resource.
+/// This is intentionally hidden and may be replaced without a compatibility migration; it is not
+/// the public shared Adapter contract tracked by OQ-038.
+#[doc(hidden)]
+pub trait __RuntimeDriverPort: Resource<Mutability = Mutable> {
+    type Input;
+    type Output;
+
+    #[must_use]
+    fn accepts_driver_state(state: RuntimeState) -> bool {
+        matches!(state, RuntimeState::Running | RuntimeState::Paused)
+    }
+
+    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output;
 }
 
 /// Short-lived command application while a runtime candidate is still unpublished.
@@ -482,6 +502,11 @@ pub enum RuntimeWorldAccessError {
     ProtectedType { type_name: &'static str },
     #[error("runtime scoped resource {type_name} is missing")]
     MissingResource { type_name: &'static str },
+    #[error("runtime driver port {type_name} is unavailable while runtime state is {state:?}")]
+    PortUnavailable {
+        type_name: &'static str,
+        state: RuntimeState,
+    },
 }
 
 fn ensure_scoped_type_is_unprotected<T: 'static>() -> Result<(), RuntimeWorldAccessError> {
@@ -499,32 +524,24 @@ fn ensure_scoped_type_is_unprotected<T: 'static>() -> Result<(), RuntimeWorldAcc
 }
 
 impl RuntimeDriverScope<'_> {
-    #[must_use]
-    pub fn world(&self) -> &World {
-        self.world
-    }
-
-    pub fn get_resource_mut<R: Resource<Mutability = Mutable>>(
+    #[doc(hidden)]
+    pub fn __apply_port<R: __RuntimeDriverPort>(
         &mut self,
-    ) -> Result<Option<Mut<'_, R>>, RuntimeWorldAccessError> {
-        ensure_scoped_type_is_unprotected::<R>()?;
-        Ok(self.world.get_resource_mut::<R>())
-    }
-
-    pub fn resource_mut<R: Resource<Mutability = Mutable>>(
-        &mut self,
-    ) -> Result<Mut<'_, R>, RuntimeWorldAccessError> {
-        self.get_resource_mut::<R>()?
-            .ok_or(RuntimeWorldAccessError::MissingResource {
+        input: R::Input,
+    ) -> Result<R::Output, RuntimeWorldAccessError> {
+        if !R::accepts_driver_state(self.state) {
+            return Err(RuntimeWorldAccessError::PortUnavailable {
                 type_name: type_name::<R>(),
-            })
-    }
-
-    pub fn get_non_send_resource_mut<R: 'static>(
-        &mut self,
-    ) -> Result<Option<Mut<'_, R>>, RuntimeWorldAccessError> {
-        ensure_scoped_type_is_unprotected::<R>()?;
-        Ok(self.world.get_non_send_mut::<R>())
+                state: self.state,
+            });
+        }
+        let mut resource =
+            self.world
+                .get_resource_mut::<R>()
+                .ok_or(RuntimeWorldAccessError::MissingResource {
+                    type_name: type_name::<R>(),
+                })?;
+        Ok(resource.apply_driver_input(input))
     }
 }
 
@@ -1863,10 +1880,12 @@ impl RuntimeInstance {
 
     /// Grants a platform or Host one short-lived managed runtime scope.
     ///
-    /// The scope exposes immutable World inspection plus guarded mutable resource access.
-    /// Runtime-managed fault resources cannot be selected through that mutable surface. A
-    /// previously faulted runtime still permits this scope so the driver can retire surfaces and
-    /// other owned services; the existing fault remains sticky and observable.
+    /// The scope admits only typed, resource-local driver ports and applies each port's runtime
+    /// state gate. It exposes neither the `World` nor generic resource access. A previously faulted
+    /// runtime still permits ports that explicitly accept that state so the driver can retire
+    /// surfaces and other owned services; the existing fault remains sticky and observable. The
+    /// hidden cross-crate carrier is pre-1.0 plumbing, not the shared Adapter contract tracked by
+    /// OQ-038.
     ///
     /// # Errors
     ///
@@ -1883,7 +1902,7 @@ impl RuntimeInstance {
         }
         self.owner
             .capture_driver_scope(|world| {
-                let mut scope = RuntimeDriverScope { world };
+                let mut scope = RuntimeDriverScope { world, state };
                 operation(&mut scope)
             })
             .map_err(|fault| RuntimeScopeError::Faulted { fault })

@@ -1,9 +1,13 @@
 //! Independent public-surface reference game.
 
 mod components;
+#[cfg(feature = "desktop")]
+mod input;
 mod resources;
 mod snapshot;
 mod systems;
+#[cfg(feature = "desktop")]
+mod ui;
 
 use std::num::NonZeroU32;
 
@@ -12,7 +16,7 @@ use nara::{
         PluginCategory, PluginDeclaration, PluginDefinition, PluginError, PluginId,
         PluginPreflightContext, PluginSchemaProviderId,
     },
-    ecs::schedule::IntoScheduleConfigs,
+    ecs::{SystemSet, schedule::IntoScheduleConfigs},
     fs::DirectoryCapability,
     gameplay::{
         GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
@@ -36,9 +40,19 @@ use nara::{
     tilemap::TilemapPlugin,
 };
 
+#[cfg(feature = "desktop")]
+use nara::project_host::{DesktopRun, DesktopRunIntent};
+
 pub use components::{Enemy, Player, Projectile, RuntimeOnlyTag, WaveSpawn, Weapon};
-pub use resources::{MovementCommandError, MovementDirection, ProjectileId};
+pub use resources::{
+    MovementCommandError, MovementDirection, ProjectileId, RetryCommandError, WaveRetryPhase,
+    WaveRetryRejection, WaveRetryStatus, WaveRunGeneration,
+};
 pub use snapshot::{EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot};
+#[cfg(feature = "desktop")]
+pub use ui::{
+    REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, ReferenceHudProjection, desktop_plugin,
+};
 
 pub const REFERENCE_GAME_PLUGIN_ID: PluginId = PluginId::new("reference-game.gameplay");
 pub const REFERENCE_WAVE_PLUGIN_ID: PluginId = PluginId::new("reference-game.wave");
@@ -72,6 +86,12 @@ const REFERENCE_PROJECT_OUTCOME_REQUIREMENTS: &[PluginId] = &[
 const REFERENCE_PROJECT_OUTCOME_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_PROJECT_OUTCOME_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(REFERENCE_PROJECT_OUTCOME_REQUIREMENTS);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+enum ReferenceWaveCaptureSet {
+    Snapshot,
+    Presentation,
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ReferenceGamePlugin;
@@ -123,7 +143,19 @@ impl Plugin for ReferenceWavePlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(resources::WaveState::default())?
+            .insert_resource(WaveRunGeneration::default())?
+            .insert_resource(WaveRetryStatus::default())?
+            .insert_resource(resources::WaveResetTemplate::default())?
             .insert_resource(WaveSnapshot::default())?
+            .configure_sets(
+                CoreStage::FixedUpdate,
+                (
+                    ReferenceWaveCaptureSet::Snapshot,
+                    ReferenceWaveCaptureSet::Presentation,
+                )
+                    .chain()
+                    .in_set(GameplayCommandSet::Capture),
+            )?
             .add_systems(
                 CoreStage::FixedUpdate,
                 systems::begin_wave_tick
@@ -132,7 +164,12 @@ impl Plugin for ReferenceWavePlugin {
             )?
             .add_systems(
                 CoreStage::FixedUpdate,
-                systems::consume_movement_commands.in_set(GameplayCommandSet::Consume),
+                (
+                    systems::consume_retry_commands,
+                    systems::consume_movement_commands,
+                )
+                    .chain()
+                    .in_set(GameplayCommandSet::Consume),
             )?
             .add_systems(
                 CoreStage::FixedUpdate,
@@ -154,7 +191,7 @@ impl Plugin for ReferenceWavePlugin {
             )?
             .add_systems(
                 CoreStage::FixedUpdate,
-                snapshot::capture_wave_snapshot.in_set(GameplayCommandSet::Capture),
+                snapshot::capture_wave_snapshot.in_set(ReferenceWaveCaptureSet::Snapshot),
             )?;
         Ok(())
     }
@@ -250,6 +287,27 @@ pub fn wave_headless_run(
     )
 }
 
+/// Creates the bundled manually playable desktop product action.
+#[cfg(feature = "desktop")]
+#[must_use]
+pub fn bundled_desktop_run(project_root: DirectoryCapability) -> DesktopRun {
+    DesktopRun::new(project_root, wave_desktop_intent())
+}
+
+/// Creates the desktop profile intent over the same committed wave content closure.
+#[cfg(feature = "desktop")]
+#[must_use]
+pub fn wave_desktop_intent() -> DesktopRunIntent {
+    DesktopRunIntent::new()
+        .with_profile("desktop")
+        .configure(nara::image::plugin(ImageImportLimits::default()))
+        .disable::<TilemapPlugin>()
+        .insert_after::<GameplayCommandPlugin>(plugin())
+        .insert_after::<ReferenceGamePlugin>(wave_plugin())
+        .insert_after::<ReferenceWavePlugin>(desktop_plugin())
+        .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
+}
+
 /// Creates the complete wave run intent over the committed project content.
 #[must_use]
 pub fn wave_headless_intent(maximum_fixed_ticks: NonZeroU32) -> HeadlessRunIntent<WaveSnapshot> {
@@ -280,6 +338,33 @@ pub fn movement_command(
     let tick = GameplayCommandTick::new(tick).ok_or(MovementCommandError::ZeroTick)?;
     let sequence =
         GameplayCommandSourceSequence::new(sequence).ok_or(MovementCommandError::ZeroSequence)?;
+    Ok(GameplayCommandSubmission::new(
+        tick,
+        GameplayCommandIngressSource::test(resources::COMMAND_SOURCE)
+            .expect("the movement command source is engine-owned and valid"),
+        sequence,
+        movement_draft(direction),
+    ))
+}
+
+/// Creates one trusted semantic Retry command for adapters, tests, replay, or AI drivers.
+pub fn retry_command(
+    tick: u64,
+    sequence: u64,
+) -> Result<GameplayCommandSubmission, RetryCommandError> {
+    let tick = GameplayCommandTick::new(tick).ok_or(RetryCommandError::ZeroTick)?;
+    let sequence =
+        GameplayCommandSourceSequence::new(sequence).ok_or(RetryCommandError::ZeroSequence)?;
+    Ok(GameplayCommandSubmission::new(
+        tick,
+        GameplayCommandIngressSource::test(resources::COMMAND_SOURCE)
+            .expect("the retry command source is engine-owned and valid"),
+        sequence,
+        retry_draft(),
+    ))
+}
+
+fn movement_draft(direction: MovementDirection) -> GameplayCommandDraft {
     let (x, y) = direction.velocity();
     let mut payload = GameplayCommandPayload::new();
     payload
@@ -288,17 +373,18 @@ pub fn movement_command(
     payload
         .insert(resources::MOVE_Y_FIELD, GameplayCommandValue::I64(y))
         .expect("the engine-owned movement payload is bounded");
-    Ok(GameplayCommandSubmission::new(
-        tick,
-        GameplayCommandIngressSource::test(resources::COMMAND_SOURCE)
-            .expect("the movement command source is engine-owned and valid"),
-        sequence,
-        GameplayCommandDraft::new(
-            GameplayCommandTypeId::new(resources::MOVE_COMMAND_TYPE)
-                .expect("the movement command type is engine-owned and valid"),
-        )
-        .with_payload(payload),
-    ))
+    GameplayCommandDraft::new(
+        GameplayCommandTypeId::new(resources::MOVE_COMMAND_TYPE)
+            .expect("the movement command type is engine-owned and valid"),
+    )
+    .with_payload(payload)
+}
+
+fn retry_draft() -> GameplayCommandDraft {
+    GameplayCommandDraft::new(
+        GameplayCommandTypeId::new(resources::RETRY_COMMAND_TYPE)
+            .expect("the retry command type is engine-owned and valid"),
+    )
 }
 
 /// Creates the reference game's project-backed run intent.

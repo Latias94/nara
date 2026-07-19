@@ -19,3 +19,17 @@ fixed_timestep_seconds = 0.02
 
 [capabilities]
 requested = ["runtime-2d"]
+
+[profiles.desktop.capabilities]
+requested = ["runtime-2d", "runtime-ui", "desktop-winit", "render-wgpu"]
+
+[profiles.desktop.runtime]
+preset = "local-headless"
+
+[profiles.desktop.window]
+enabled = true
+title = "Nara Reference Wave"
+width = 1280
+height = 720
+present_mode = "fifo"
+resizable = true

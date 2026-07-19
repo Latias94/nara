@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, btree_map::Values};
 
 use nara_app::{
-    App, AppExitRequests, CoreStage, Plugin, PluginError, RuntimeDriverScope,
+    __RuntimeDriverPort, App, AppExitRequests, CoreStage, Plugin, PluginError, RuntimeDriverScope,
     RuntimeWorldAccessError,
 };
 use nara_ecs::{Component, Query, ResMut, Resource, World, schedule::IntoScheduleConfigs};
@@ -211,8 +211,47 @@ impl WindowEvents {
     }
 }
 
+/// First-party input token for the synchronized platform event path.
+///
+/// The private field prevents callers from bypassing [`push_window_driver_event`] and publishing
+/// an observation without also queueing its retained window-state update.
+#[doc(hidden)]
+pub struct __WindowDriverEvent(WindowEvent);
+
+impl __RuntimeDriverPort for WindowEvents {
+    type Input = __WindowDriverEvent;
+    type Output = ();
+
+    fn apply_driver_input(&mut self, input: Self::Input) {
+        self.push(input.0);
+    }
+}
+
+const MAX_PENDING_WINDOW_EVENTS: usize = 4_096;
+
 #[derive(Debug, Default, Resource)]
 struct PendingWindowEvents(Vec<WindowEvent>);
+
+impl __RuntimeDriverPort for PendingWindowEvents {
+    type Input = WindowEvent;
+    type Output = Result<(), WindowDriverEventError>;
+
+    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
+        if self.0.len() >= MAX_PENDING_WINDOW_EVENTS {
+            return Err(WindowDriverEventError::CapacityExceeded);
+        }
+        self.0.push(input);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum WindowDriverEventError {
+    #[error("managed window driver access failed")]
+    Access(#[from] RuntimeWorldAccessError),
+    #[error("the bounded window driver event queue is full")]
+    CapacityExceeded,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowCloseRequest {
@@ -347,18 +386,9 @@ pub fn push_window_event(world: &mut World, event: WindowEvent) {
 pub fn push_window_driver_event(
     scope: &mut RuntimeDriverScope<'_>,
     event: WindowEvent,
-) -> Result<(), RuntimeWorldAccessError> {
-    let window_id = event.window_id();
-    if matches!(event, WindowEvent::CloseRequested { .. }) {
-        scope
-            .resource_mut::<WindowCloseRequests>()?
-            .request(window_id);
-    }
-    scope
-        .resource_mut::<PendingWindowEvents>()?
-        .0
-        .push(event.clone());
-    scope.resource_mut::<WindowEvents>()?.push(event);
+) -> Result<(), WindowDriverEventError> {
+    scope.__apply_port::<PendingWindowEvents>(event.clone())??;
+    scope.__apply_port::<WindowEvents>(__WindowDriverEvent(event))?;
     Ok(())
 }
 
@@ -462,20 +492,23 @@ impl Plugin for WindowPlugin {
 
 fn apply_pending_window_events(
     mut pending: ResMut<PendingWindowEvents>,
+    mut close_requests: ResMut<WindowCloseRequests>,
     mut windows: Query<&mut Window>,
 ) {
     for event in pending.0.drain(..) {
-        if !matches!(
+        if matches!(event, WindowEvent::CloseRequested { .. }) {
+            close_requests.request(event.window_id());
+        }
+        if matches!(
             &event,
             WindowEvent::Resized { .. }
                 | WindowEvent::Focused { .. }
                 | WindowEvent::ScaleFactorChanged { .. }
         ) {
-            continue;
-        }
-        for mut window in &mut windows {
-            if window_event_changes_window(&window, &event) {
-                apply_window_event_to_window(&mut window, &event);
+            for mut window in &mut windows {
+                if window_event_changes_window(&window, &event) {
+                    apply_window_event_to_window(&mut window, &event);
+                }
             }
         }
     }
@@ -508,6 +541,15 @@ mod tests {
 
     #[derive(Debug, Default, Resource)]
     struct ChangedWindowIds(Vec<WindowId>);
+
+    impl __RuntimeDriverPort for ChangedWindowIds {
+        type Input = ();
+        type Output = ();
+
+        fn apply_driver_input(&mut self, (): Self::Input) {
+            self.0.clear();
+        }
+    }
 
     fn record_changed_windows(
         changed: Query<&Window, Changed<Window>>,
@@ -694,7 +736,7 @@ mod tests {
         runtime.drive(Duration::ZERO).unwrap();
         runtime
             .with_driver_scope(|scope| {
-                scope.resource_mut::<ChangedWindowIds>().unwrap().0.clear();
+                scope.__apply_port::<ChangedWindowIds>(()).unwrap();
             })
             .unwrap();
 
@@ -733,7 +775,7 @@ mod tests {
         );
         runtime
             .with_driver_scope(|scope| {
-                scope.resource_mut::<ChangedWindowIds>().unwrap().0.clear();
+                scope.__apply_port::<ChangedWindowIds>(()).unwrap();
                 push_window_driver_event(
                     scope,
                     WindowEvent::Resized {
@@ -805,5 +847,15 @@ mod tests {
         let handles = backend::BackendWindowHandles::default();
 
         assert!(!handles.is_registered(WindowId::PRIMARY));
+    }
+
+    #[test]
+    fn cloned_backend_handles_share_one_authority_registry() {
+        let handles = backend::BackendWindowHandles::default();
+        let clone = handles.clone();
+        let independent = backend::BackendWindowHandles::default();
+
+        assert!(handles.shares_authority_with(&clone));
+        assert!(!handles.shares_authority_with(&independent));
     }
 }

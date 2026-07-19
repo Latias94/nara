@@ -30,6 +30,7 @@ fn sprite_quad_batch(batch: &SpriteBatch) -> WgpuQuadBatch {
             sampler: batch.material.sampler,
             alpha_mode: batch.material.alpha_mode,
         },
+        scissor: None,
         instances: batch.instances.iter().map(sprite_quad_instance).collect(),
         counts_as_sprites: true,
     }

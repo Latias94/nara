@@ -13,6 +13,12 @@ pub enum WgpuRenderError {
     DeviceUnavailable { message: String },
     #[error("wgpu device was lost")]
     DeviceLost,
+    #[error("wgpu device epoch was exhausted")]
+    DeviceEpochExhausted,
+    #[error("render frame generation {actual} does not match active generation {expected}")]
+    StaleFrameGeneration { expected: u64, actual: u64 },
+    #[error("render frame {frame_index} was already consumed")]
+    FrameAlreadyConsumed { frame_index: u64 },
     #[error("wgpu surface creation failed for window {window_id:?}: {message}")]
     SurfaceCreation {
         window_id: WindowId,
@@ -34,4 +40,14 @@ pub enum WgpuRenderError {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     #[error("wgpu quad texture error: {message}")]
     QuadTexture { message: String },
+}
+
+impl WgpuRenderError {
+    #[must_use]
+    pub(crate) const fn is_packet_admission_rejection(&self) -> bool {
+        matches!(
+            self,
+            Self::StaleFrameGeneration { .. } | Self::FrameAlreadyConsumed { .. }
+        )
+    }
 }

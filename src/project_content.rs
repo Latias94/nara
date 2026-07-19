@@ -176,6 +176,13 @@ impl ProjectContentSnapshot {
     pub fn images(&self) -> &[ProjectImageContent] {
         &self.inner.images
     }
+
+    pub(crate) fn share_image_for_runtime(&self, index: usize) -> Option<ImageAsset> {
+        self.inner
+            .images
+            .get(index)
+            .and_then(|content| content.image.share_retained())
+    }
 }
 
 impl fmt::Debug for ProjectContentSnapshot {
@@ -614,13 +621,28 @@ impl<'a> LoadContext<'a> {
                 .map(|(path, document)| ProjectPrefabContent { path, document }),
         );
         let prefabs = prefab_values.into_boxed_slice();
-        let images = images.into_boxed_slice();
+        let mut images = images.into_boxed_slice();
 
         let budget = self
             .budget
             .take()
             .expect("load context owns one budget ticket until publication");
         let lease = budget.into_lease().map_err(ProjectContentError::budget)?;
+        if !images.is_empty() {
+            let image_retention = Arc::new(lease.clone());
+            for content in &mut images {
+                if !content
+                    .image
+                    .try_attach_retention_owner(Arc::clone(&image_retention))
+                {
+                    return Err(ProjectContentError::single(
+                        ProjectContentErrorKind::ImageImport,
+                        "project.content.image-retention-conflict",
+                        "Project image retention owner was already installed",
+                    ));
+                }
+            }
+        }
 
         Ok(ProjectContentSnapshot {
             inner: Arc::new(ProjectContentSnapshotInner {
@@ -1444,6 +1466,8 @@ const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
 const BTREE_ENTRY_OVERHEAD: usize = 6 * size_of::<usize>();
 const ARC_CONTROL_BLOCK_BYTES: usize = 4 * size_of::<usize>();
 const SNAPSHOT_LEASE_OVERHEAD: usize = 128;
+const IMAGE_RETENTION_OWNER_OVERHEAD: usize =
+    ARC_CONTROL_BLOCK_BYTES + size_of::<ProjectContentLease>();
 const IMAGE_METADATA_OVERHEAD: usize = 256;
 const VALUE_NODE_ALLOCATION_BYTES: usize = 32;
 const ENTITY_WORK_BYTES: usize = 128;
@@ -1799,6 +1823,11 @@ fn snapshot_retained_overhead(
             ARC_CONTROL_BLOCK_BYTES,
             2 * ARC_CONTROL_BLOCK_BYTES,
             SNAPSHOT_LEASE_OVERHEAD,
+            if images.is_empty() {
+                0
+            } else {
+                IMAGE_RETENTION_OWNER_OVERHEAD
+            },
             checked_plan_product(
                 ProjectContentBudgetKind::RetainedBytes,
                 prefabs.len(),

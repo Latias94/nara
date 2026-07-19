@@ -1,4 +1,6 @@
 use std::error::Error;
+use std::io;
+use std::process::{Child, Command, ExitStatus};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -12,8 +14,106 @@ mod runtime_retirement;
 use runtime_retirement::finish_runtime_after_winit;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let drop_backend_before_exit =
-        std::env::args().any(|argument| argument == "--drop-backend-before-exit");
+    let invocation = SmokeInvocation::from_args(std::env::args().skip(1))?;
+    if invocation.child {
+        return run_smoke_child(invocation.drop_backend_before_exit);
+    }
+    run_smoke_parent(invocation.drop_backend_before_exit)
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct SmokeInvocation {
+    child: bool,
+    drop_backend_before_exit: bool,
+}
+
+impl SmokeInvocation {
+    fn from_args(args: impl IntoIterator<Item = String>) -> Result<Self, io::Error> {
+        let mut invocation = Self::default();
+        for argument in args {
+            match argument.as_str() {
+                "--smoke-child" => invocation.child = true,
+                "--drop-backend-before-exit" => invocation.drop_backend_before_exit = true,
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "the surface retirement smoke received an unsupported argument",
+                    ));
+                }
+            }
+        }
+        Ok(invocation)
+    }
+}
+
+fn run_smoke_parent(drop_backend_before_exit: bool) -> Result<(), Box<dyn Error>> {
+    let mut command = Command::new(std::env::current_exe()?);
+    command.arg("--smoke-child");
+    if drop_backend_before_exit {
+        command.arg("--drop-backend-before-exit");
+    }
+    let mut child = command.spawn()?;
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return finish_smoke_child(status),
+            Ok(None) => {}
+            Err(poll_error) => {
+                let reap_error = terminate_and_reap(&mut child).err();
+                return Err(io::Error::other(format!(
+                    "surface retirement smoke polling failed: {poll_error}; reap={reap_error:?}"
+                ))
+                .into());
+            }
+        }
+        if Instant::now() >= deadline {
+            let status = terminate_and_reap(&mut child)?;
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("surface retirement smoke exceeded its hard deadline: {status}"),
+            )
+            .into());
+        }
+        std::thread::park_timeout(Duration::from_millis(10));
+    }
+}
+
+fn terminate_and_reap(child: &mut Child) -> Result<ExitStatus, io::Error> {
+    let kill_error = child.kill().err();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::park_timeout(Duration::from_millis(10));
+            }
+            Ok(None) => {
+                return Err(io::Error::other(match kill_error {
+                    Some(kill_error) => {
+                        format!("kill={kill_error}; child remained live past the reap deadline")
+                    }
+                    None => "child remained live past the reap deadline".to_owned(),
+                }));
+            }
+            Err(poll_error) => {
+                return Err(io::Error::other(match kill_error {
+                    Some(kill_error) => format!("kill={kill_error}; poll={poll_error}"),
+                    None => format!("poll={poll_error}"),
+                }));
+            }
+        }
+    }
+}
+
+fn finish_smoke_child(status: ExitStatus) -> Result<(), Box<dyn Error>> {
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("surface retirement smoke child failed: {status}")).into())
+    }
+}
+
+fn run_smoke_child(drop_backend_before_exit: bool) -> Result<(), Box<dyn Error>> {
     let resize_observed = Arc::new(AtomicBool::new(false));
     let backend_removed = Arc::new(AtomicBool::new(false));
     let timed_out = Arc::new(AtomicBool::new(false));
@@ -113,12 +213,28 @@ fn verify_resize_then_exit(
     mut exit: ResMut<AppExitRequests>,
 ) {
     if enforce_smoke_deadline(Instant::now(), state.deadline, &state.timed_out, &mut exit) {
+        eprintln!(
+            "surface smoke timeout: frame={:?}, backend_state={:?}, backend_error={:?}, configured_extent={:?}, resize_requested={}",
+            frame.state,
+            backend.state(),
+            backend.last_error(),
+            backend.configured_surface_extent(WindowId::PRIMARY),
+            state.resize_requested,
+        );
         return;
     }
 
     if frame.state != RenderFrameState::Submitted {
         return;
     }
+    let transaction = backend.frame_transaction_stats();
+    assert_eq!(transaction.frame_index(), Some(frame.index));
+    assert_eq!(transaction.packet_admissions(), 1);
+    assert_eq!(transaction.packet_rejections(), 0);
+    assert_eq!(transaction.surface_acquire_attempts(), 1);
+    assert_eq!(transaction.surface_acquires(), 1);
+    assert_eq!(transaction.queue_submissions(), 1);
+    assert_eq!(transaction.presents(), 1);
 
     let resized = Extent2d::new(400, 240).expect("smoke extent is non-zero");
     if !state.resize_requested {
@@ -188,5 +304,25 @@ mod tests {
         ));
         assert!(!timed_out.load(Ordering::SeqCst));
         assert_eq!(exit.requested(), None);
+    }
+
+    #[test]
+    fn invocation_routes_parent_and_child_modes_without_recursion() {
+        assert_eq!(
+            SmokeInvocation::from_args(Vec::<String>::new()).unwrap(),
+            SmokeInvocation::default()
+        );
+        assert_eq!(
+            SmokeInvocation::from_args([
+                "--smoke-child".to_owned(),
+                "--drop-backend-before-exit".to_owned(),
+            ])
+            .unwrap(),
+            SmokeInvocation {
+                child: true,
+                drop_backend_before_exit: true,
+            }
+        );
+        assert!(SmokeInvocation::from_args(["--unknown".to_owned()]).is_err());
     }
 }

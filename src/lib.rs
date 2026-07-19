@@ -123,7 +123,9 @@ pub mod prelude {
     };
     pub use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionOutcome, ActionOutcomes,
-        ActionPhase, ActionValue, ButtonInput, InputBinding, KeyCode, MouseButton, PointerState,
+        ActionPhase, ActionValue, ButtonInput, ButtonInputError, ButtonTransition,
+        ButtonTransitionPhase, InputBinding, KeyCode, MAX_BUTTON_TRANSITIONS_PER_FRAME,
+        MouseButton, PointerState,
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
@@ -319,7 +321,7 @@ pub mod backend_prelude {
     #[cfg(feature = "render-wgpu")]
     pub use nara_render_wgpu::{
         SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, WgpuBackendState,
-        WgpuRenderBackend, WgpuRenderError, WgpuRenderPlugin,
+        WgpuFrameTransactionStats, WgpuRenderBackend, WgpuRenderError, WgpuRenderPlugin,
     };
     pub use nara_window::{
         PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowCloseRequest,

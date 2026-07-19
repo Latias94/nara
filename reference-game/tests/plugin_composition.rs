@@ -15,6 +15,17 @@ mod project_content_fixture;
 
 use project_content_fixture::{candidate_plan_and_root, resolve_reference_plan};
 
+#[cfg(feature = "desktop")]
+use nara::{
+    project::ProductCapabilitySet, project_host::ProjectContentLoader, window::WINDOW_PLUGIN_ID,
+};
+#[cfg(feature = "desktop")]
+use nara_reference_game::REFERENCE_DESKTOP_PLUGIN_ID;
+#[cfg(feature = "desktop")]
+use project_content_fixture::{
+    desktop_candidate_plan_and_root, headless_wave_candidate_plan_and_root,
+};
+
 #[test]
 fn reference_game_configures_a_repeatable_headless_product_plan() {
     let limits = ImageImportLimits::default().with_max_encoded_bytes(
@@ -107,4 +118,100 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
         second_registry.catalog().fingerprint(),
         first.schema_validation().fingerprint()
     );
+}
+
+#[cfg(feature = "desktop")]
+#[test]
+fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
+    let (candidate, first, root) = desktop_candidate_plan_and_root();
+    let (repeated_candidate, repeated, repeated_root) = desktop_candidate_plan_and_root();
+
+    assert_eq!(
+        first.plugin_plan().fingerprint(),
+        repeated.plugin_plan().fingerprint()
+    );
+    assert!(
+        [
+            ProductCapability::Runtime2d,
+            ProductCapability::RuntimeUi,
+            ProductCapability::DesktopWinit,
+            ProductCapability::RenderWgpu,
+        ]
+        .into_iter()
+        .all(|capability| first.required_capabilities().contains(capability))
+    );
+    assert_eq!(
+        candidate.normalized_capabilities(),
+        ProductCapabilitySet::from_capabilities([
+            ProductCapability::RuntimeCore,
+            ProductCapability::Runtime2d,
+            ProductCapability::RuntimeUi,
+            ProductCapability::DesktopWinit,
+            ProductCapability::RenderWgpu,
+        ])
+    );
+
+    let window_entries = first
+        .plugin_plan()
+        .entries()
+        .iter()
+        .filter(|entry| entry.plugin_id() == WINDOW_PLUGIN_ID)
+        .collect::<Vec<_>>();
+    assert_eq!(window_entries.len(), 1);
+    assert_eq!(
+        window_entries[0].definition_key(),
+        nara::window::plugin(candidate.settings().window.to_window()).key()
+    );
+    assert!(
+        first
+            .plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == REFERENCE_DESKTOP_PLUGIN_ID)
+    );
+
+    let desktop_loader = ProjectContentLoader::new(root).unwrap();
+    let desktop_snapshot = desktop_loader.load(&candidate, &first).unwrap();
+    let repeated_loader = ProjectContentLoader::new(repeated_root).unwrap();
+    let repeated_snapshot = repeated_loader
+        .load(&repeated_candidate, &repeated)
+        .unwrap();
+    assert_eq!(
+        desktop_snapshot.expanded_startup_scene(),
+        repeated_snapshot.expanded_startup_scene()
+    );
+    assert_eq!(
+        desktop_snapshot.images()[0].image().source().source_hash(),
+        repeated_snapshot.images()[0].image().source().source_hash()
+    );
+
+    let (headless_candidate, headless_plan, headless_root) =
+        headless_wave_candidate_plan_and_root();
+    let headless_loader = ProjectContentLoader::new(headless_root).unwrap();
+    let headless_snapshot = headless_loader
+        .load(&headless_candidate, &headless_plan)
+        .unwrap();
+    assert_ne!(
+        headless_snapshot.lineage(),
+        desktop_snapshot.lineage(),
+        "profile-specific plans retain their own settings lineage",
+    );
+    assert_eq!(
+        headless_snapshot.content_digest(),
+        desktop_snapshot.content_digest(),
+        "the profiles authorize the same committed content closure",
+    );
+    assert_eq!(
+        headless_snapshot.images()[0].image().source().source_hash(),
+        desktop_snapshot.images()[0].image().source().source_hash(),
+    );
+    assert_eq!(headless_loader.budget_snapshot().active_reservations(), 1);
+    assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 1);
+
+    drop(headless_snapshot);
+    drop(desktop_snapshot);
+    drop(repeated_snapshot);
+    assert_eq!(headless_loader.budget_snapshot().active_reservations(), 0);
+    assert_eq!(desktop_loader.budget_snapshot().active_reservations(), 0);
+    assert_eq!(repeated_loader.budget_snapshot().active_reservations(), 0);
 }

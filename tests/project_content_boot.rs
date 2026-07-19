@@ -3,9 +3,13 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
+use std::sync::Arc;
+
 use nara::project_host::{ProjectContentBudgetKind, ProjectContentLoader};
 use nara::scene::{PrefabDocument, SceneEntityRecord};
 use project_content_fixture::{TestProject, scene_id};
+
+struct EscapeOwner;
 
 #[test]
 fn authorized_startup_closure_publishes_an_immutable_snapshot() {
@@ -38,6 +42,8 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
         snapshot.images()[0].image().pixels(),
         cloned.images()[0].image().pixels(),
     ));
+    let mut escaped = snapshot.images()[0].image().share_retained().unwrap();
+    assert!(!escaped.try_attach_retention_owner(Arc::new(EscapeOwner)));
 
     let leased = loader.budget_snapshot();
     assert!(leased.active(ProjectContentBudgetKind::ArtifactBytes) > 0);
@@ -47,6 +53,8 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     drop(snapshot);
     assert_eq!(loader.budget_snapshot(), leased);
     drop(cloned);
+    assert_eq!(loader.budget_snapshot(), leased);
+    drop(escaped);
     let released = loader.budget_snapshot();
     assert_eq!(released.active(ProjectContentBudgetKind::ArtifactBytes), 0);
     assert_eq!(released.active(ProjectContentBudgetKind::RetainedBytes), 0);

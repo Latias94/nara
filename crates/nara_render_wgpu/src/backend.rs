@@ -2,19 +2,19 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
-use nara_ecs::{Query, Resource};
+use nara_ecs::Resource;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_material::AlphaMode2d;
 use nara_render::{
-    Color, Extent2d, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus,
-    RenderFrame, RenderFrameSkipReason, RenderPassStep,
+    Color, Extent2d, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
+    RenderFrameSkipReason, RenderWindowPacket,
 };
 use nara_window::{
-    Window, WindowId,
+    WindowId,
     backend::{BackendWindowHandles, WindowTargetError},
 };
 
@@ -30,9 +30,25 @@ use crate::surface::{
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::texture::WgpuSpriteTextureCache;
 use crate::{
-    PreparedSubmitterDraw, SubmitterInputs, WGPU_RENDER_BACKEND, WgpuRenderError,
-    build_wgpu_render_pass_plan, render_acquired_texture,
+    PreparedSubmitterDraw, RenderResourceInputs, WGPU_RENDER_BACKEND, WgpuCapturedFrame,
+    WgpuFramePayload, WgpuRenderError, render_acquired_texture,
 };
+
+static NEXT_WGPU_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug)]
+struct WgpuBackendInstanceId(u64);
+
+impl Default for WgpuBackendInstanceId {
+    fn default() -> Self {
+        let id = NEXT_WGPU_BACKEND_INSTANCE_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .unwrap_or_else(|_| std::process::abort());
+        Self(id)
+    }
+}
 
 #[derive(Debug, Default)]
 struct DeviceLossSignal(AtomicBool);
@@ -56,15 +72,80 @@ pub enum WgpuBackendState {
     Unavailable,
 }
 
+/// Read-only evidence for the most recent backend frame transaction.
+///
+/// This remains backend observation rather than a renderer abstraction. Every render stage resets
+/// the counters before packet capture is consumed, so capture and admission rejection can both
+/// prove that no surface was acquired, submitted, or presented.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct WgpuFrameTransactionStats {
+    frame_index: Option<u64>,
+    packet_admissions: u64,
+    packet_rejections: u64,
+    surface_acquire_attempts: u64,
+    surface_acquires: u64,
+    queue_submissions: u64,
+    presents: u64,
+}
+
+impl WgpuFrameTransactionStats {
+    #[must_use]
+    pub const fn frame_index(self) -> Option<u64> {
+        self.frame_index
+    }
+
+    #[must_use]
+    pub const fn packet_admissions(self) -> u64 {
+        self.packet_admissions
+    }
+
+    #[must_use]
+    pub const fn packet_rejections(self) -> u64 {
+        self.packet_rejections
+    }
+
+    #[must_use]
+    pub const fn surface_acquires(self) -> u64 {
+        self.surface_acquires
+    }
+
+    #[must_use]
+    pub const fn surface_acquire_attempts(self) -> u64 {
+        self.surface_acquire_attempts
+    }
+
+    #[must_use]
+    pub const fn queue_submissions(self) -> u64 {
+        self.queue_submissions
+    }
+
+    #[must_use]
+    pub const fn presents(self) -> u64 {
+        self.presents
+    }
+
+    fn begin(frame_index: u64) -> Self {
+        Self {
+            frame_index: Some(frame_index),
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Debug, Default, Resource)]
 pub struct WgpuRenderBackend {
+    instance_id: WgpuBackendInstanceId,
     state: WgpuBackendState,
     instance: Option<wgpu::Instance>,
     adapter: Option<wgpu::Adapter>,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     device_loss_signal: Option<Arc<DeviceLossSignal>>,
+    device_epoch: u64,
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
+    runtime_generation: Option<u64>,
+    last_frame_index: Option<u64>,
+    frame_transaction_stats: WgpuFrameTransactionStats,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -75,6 +156,12 @@ pub struct WgpuRenderBackend {
 }
 
 impl WgpuRenderBackend {
+    /// Process-local non-reused identity of this backend owner.
+    #[must_use]
+    pub const fn instance_id(&self) -> u64 {
+        self.instance_id.0
+    }
+
     #[must_use]
     pub const fn state(&self) -> WgpuBackendState {
         self.state
@@ -96,6 +183,29 @@ impl WgpuRenderBackend {
             .get(&window_id)
             .filter(|surface| surface.config.is_some())
             .map(|surface| surface.size)
+    }
+
+    #[must_use]
+    pub const fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
+        self.frame_transaction_stats
+    }
+
+    /// Monotonic identity of the currently initialized device within this backend instance.
+    ///
+    /// Zero means no device has been initialized. Clearing or losing a device never rewinds the
+    /// epoch; a later device receives a strictly newer value.
+    #[must_use]
+    pub const fn device_epoch(&self) -> u64 {
+        self.device_epoch
+    }
+
+    pub(super) fn begin_frame_transaction(&mut self, frame_index: u64) {
+        self.frame_transaction_stats = WgpuFrameTransactionStats::begin(frame_index);
+    }
+
+    pub(super) fn reject_captured_packet(&mut self) {
+        self.frame_transaction_stats.packet_admissions = 0;
+        self.frame_transaction_stats.packet_rejections = 1;
     }
 
     pub(super) fn clear_gpu_resources(
@@ -130,34 +240,32 @@ impl WgpuRenderBackend {
         self.quad_textures.stats()
     }
 
-    pub(super) fn render_surfaces(
+    pub(super) fn render_packet(
         &mut self,
         handles: Option<&BackendWindowHandles>,
-        windows: &Query<&Window>,
-        views: &ExtractedViews,
-        submitters: SubmitterInputs<'_>,
-        primary_window_id: Option<WindowId>,
+        captured: WgpuCapturedFrame,
+        resources: RenderResourceInputs<'_>,
         frame: &mut RenderFrame,
         stats: &mut FrameStats,
         status: &mut RenderBackendStatus,
     ) -> Result<(), WgpuRenderError> {
+        let WgpuCapturedFrame {
+            topology: packet,
+            payload,
+        } = captured;
         stats.draw_calls = 0;
         stats.sprites = 0;
+        self.begin_frame_transaction(packet.frame_index());
+        if let Err(error) = self.admit_packet(packet.generation().get(), packet.frame_index()) {
+            self.frame_transaction_stats.packet_rejections = 1;
+            return Err(error);
+        }
+        self.frame_transaction_stats.packet_admissions = 1;
         self.fail_if_device_lost()?;
         status.mark_state(WGPU_RENDER_BACKEND, render_backend_state(self.state));
         status.clear_skip();
 
         self.retire_requested_surfaces()?;
-
-        if views.is_empty() {
-            frame.mark_skipped();
-            status.mark_skipped_with_message(
-                frame.index,
-                RenderFrameSkipReason::NoViews,
-                "no extracted render views",
-            );
-            return Ok(());
-        }
 
         if self.state == WgpuBackendState::Unavailable {
             let message = self
@@ -174,78 +282,118 @@ impl WgpuRenderBackend {
             return Ok(());
         }
 
-        self.ensure_device()?;
+        let window = packet.window();
+        let Some(size) = surface_extent(
+            window.resolution.physical_width,
+            window.resolution.physical_height,
+        ) else {
+            frame.mark_skipped();
+            status.mark_skipped_with_message(
+                frame.index,
+                RenderFrameSkipReason::NoRenderableTarget,
+                "the admitted render target is zero sized",
+            );
+            return Ok(());
+        };
+        if !self.surfaces.contains_key(&window.id) {
+            let Some(handles) = handles else {
+                frame.mark_skipped();
+                status.mark_skipped_with_message(
+                    frame.index,
+                    RenderFrameSkipReason::SurfaceUnavailable,
+                    "backend window handles resource is missing",
+                );
+                return Ok(());
+            };
+            self.ensure_instance()?;
+            if !self.create_surface_if_missing(window, handles, size)? {
+                frame.mark_skipped();
+                status.mark_skipped_with_message(
+                    frame.index,
+                    RenderFrameSkipReason::SurfaceUnavailable,
+                    "the admitted native window target is unavailable",
+                );
+                return Ok(());
+            }
+        }
+        self.ensure_device(window.id)?;
         self.fail_if_device_lost()?;
         status.mark_ready(WGPU_RENDER_BACKEND);
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         self.quad_textures.begin_frame(frame.index);
-        let pass_plan = build_wgpu_render_pass_plan(views, submitters);
-
-        let mut submitted_any = false;
-        for (view_index, view) in views.as_slice().iter().enumerate() {
-            let Some(window_id) = crate::surface::target_window_id(view.target, primary_window_id)
-            else {
-                continue;
-            };
-            let Some(window) = windows.iter().find(|window| window.id == window_id) else {
-                continue;
-            };
-            let Some(size) = surface_extent(
-                window.resolution.physical_width,
-                window.resolution.physical_height,
-            ) else {
-                continue;
-            };
-
-            if !self.surfaces.contains_key(&window_id) {
-                let Some(handles) = handles else {
-                    continue;
-                };
-                if !self.create_surface_if_missing(window, handles, size)? {
-                    continue;
-                }
-            }
-            self.configure_surface_if_needed(window, size)?;
-            if !self
-                .surfaces
-                .get(&window_id)
-                .is_some_and(WgpuSurfaceState::can_acquire_frame)
-            {
-                continue;
-            }
-            let view_format = self.surface_view_format(window.id)?;
-
-            let draw =
-                self.prepare_submitter_draw(view_index, view_format, submitters, frame.index)?;
-            let pass_steps = pass_plan.for_view(view_index).copied().collect::<Vec<_>>();
-            if self.render_window(window.id, view.clear_color, &draw, &pass_steps)? {
-                stats.draw_calls = stats.draw_calls.saturating_add(draw.draw_calls);
-                stats.sprites = stats.sprites.saturating_add(draw.sprites);
-                submitted_any = true;
-            }
+        self.configure_surface_if_needed(window, size)?;
+        if !self
+            .surfaces
+            .get(&window.id)
+            .is_some_and(WgpuSurfaceState::can_acquire_frame)
+        {
+            frame.mark_skipped();
+            status.mark_skipped_with_message(
+                frame.index,
+                RenderFrameSkipReason::SurfaceUnavailable,
+                "the admitted surface cannot acquire a frame",
+            );
+            return Ok(());
         }
+        let view_format = self.surface_view_format(window.id)?;
+        let draw = self.prepare_submitter_draw(view_format, &payload, resources, frame.index)?;
+        let submitted = self.render_window(
+            window.id,
+            packet.view().viewport,
+            packet.view().clear_color,
+            &draw,
+            packet.pass_plan().steps(),
+        )?;
 
-        if submitted_any {
+        if submitted {
+            stats.draw_calls = draw.draw_calls;
+            stats.sprites = draw.sprites;
             frame.mark_submitted();
         } else {
             frame.mark_skipped();
-            let (reason, message) = if handles.is_none() {
-                (
-                    RenderFrameSkipReason::SurfaceUnavailable,
-                    "backend window handles resource is missing",
-                )
-            } else {
-                (
-                    RenderFrameSkipReason::NoRenderableTarget,
-                    "no view resolved to an available backend surface",
-                )
-            };
-            status.mark_skipped_with_message(frame.index, reason, message);
+            status.mark_skipped_with_message(
+                frame.index,
+                RenderFrameSkipReason::SurfaceUnavailable,
+                "the admitted surface did not produce a presentable frame",
+            );
         }
         Ok(())
     }
 
-    fn ensure_device(&mut self) -> Result<(), WgpuRenderError> {
+    fn admit_packet(&mut self, generation: u64, frame_index: u64) -> Result<(), WgpuRenderError> {
+        if let Some(expected) = self.runtime_generation {
+            if expected != generation {
+                return Err(WgpuRenderError::StaleFrameGeneration {
+                    expected,
+                    actual: generation,
+                });
+            }
+        } else {
+            self.runtime_generation = Some(generation);
+        }
+        if self
+            .last_frame_index
+            .is_some_and(|last_frame_index| frame_index <= last_frame_index)
+        {
+            return Err(WgpuRenderError::FrameAlreadyConsumed { frame_index });
+        }
+        self.last_frame_index = Some(frame_index);
+        Ok(())
+    }
+
+    fn ensure_instance(&mut self) -> Result<(), WgpuRenderError> {
+        if self.state == WgpuBackendState::Unavailable {
+            return Err(WgpuRenderError::BackendUnavailable);
+        }
+        if self.instance.is_none() {
+            self.instance = Some(wgpu::Instance::new(
+                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn ensure_device(&mut self, window_id: WindowId) -> Result<(), WgpuRenderError> {
         if self.state == WgpuBackendState::Ready {
             return Ok(());
         }
@@ -254,13 +402,23 @@ impl WgpuRenderBackend {
         }
 
         self.state = WgpuBackendState::Initializing;
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter =
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-                .map_err(|error| WgpuRenderError::AdapterUnavailable {
-                message: error.to_string(),
-            })?;
+        self.ensure_instance()?;
+        let instance = self
+            .instance
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        let surface = self
+            .surfaces
+            .get(&window_id)
+            .ok_or(WgpuRenderError::SurfaceMissing { window_id })?
+            .surface(window_id)?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(surface),
+            ..Default::default()
+        }))
+        .map_err(|error| WgpuRenderError::AdapterUnavailable {
+            message: error.to_string(),
+        })?;
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .map_err(|error| WgpuRenderError::DeviceUnavailable {
@@ -269,11 +427,15 @@ impl WgpuRenderBackend {
         let device_loss_signal = Arc::new(DeviceLossSignal::default());
         let callback_signal = Arc::clone(&device_loss_signal);
         device.set_device_lost_callback(move |_reason, _message| callback_signal.mark_lost());
-        self.instance = Some(instance);
+        let device_epoch = self
+            .device_epoch
+            .checked_add(1)
+            .ok_or(WgpuRenderError::DeviceEpochExhausted)?;
         self.adapter = Some(adapter);
         self.device = Some(device);
         self.queue = Some(queue);
         self.device_loss_signal = Some(device_loss_signal);
+        self.device_epoch = device_epoch;
         self.state = WgpuBackendState::Ready;
         self.last_error = None;
         Ok(())
@@ -329,9 +491,10 @@ impl WgpuRenderBackend {
     fn render_window(
         &mut self,
         window_id: WindowId,
+        viewport: nara_render::ViewportRect,
         clear_color: Color,
         draw: &PreparedSubmitterDraw,
-        pass_steps: &[RenderPassStep],
+        pass_steps: &[nara_render::RenderPassStep],
     ) -> Result<bool, WgpuRenderError> {
         let device = self
             .device
@@ -348,24 +511,42 @@ impl WgpuRenderBackend {
             .get_mut(&window_id)
             .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
 
+        self.frame_transaction_stats.surface_acquire_attempts += 1;
         match surface_state.surface(window_id)?.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => {
+                self.frame_transaction_stats.surface_acquires += 1;
                 render_acquired_texture(
                     &device,
                     &queue,
                     window_id,
                     surface_state,
                     texture,
+                    viewport,
                     clear_color,
                     draw,
                     pass_steps,
                 )?;
+                self.frame_transaction_stats.queue_submissions += 1;
+                self.frame_transaction_stats.presents += 1;
                 Ok(true)
             }
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
-                drop(texture);
+                self.frame_transaction_stats.surface_acquires += 1;
+                render_acquired_texture(
+                    &device,
+                    &queue,
+                    window_id,
+                    surface_state,
+                    texture,
+                    viewport,
+                    clear_color,
+                    draw,
+                    pass_steps,
+                )?;
+                self.frame_transaction_stats.queue_submissions += 1;
+                self.frame_transaction_stats.presents += 1;
                 surface_state.dirty = true;
-                Ok(false)
+                Ok(true)
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 Ok(false)
@@ -386,7 +567,7 @@ impl WgpuRenderBackend {
 
     fn create_surface_if_missing(
         &mut self,
-        window: &Window,
+        window: RenderWindowPacket,
         handles: &BackendWindowHandles,
         size: Extent2d,
     ) -> Result<bool, WgpuRenderError> {
@@ -416,7 +597,7 @@ impl WgpuRenderBackend {
 
     fn configure_surface_if_needed(
         &mut self,
-        window: &Window,
+        window: RenderWindowPacket,
         size: Extent2d,
     ) -> Result<(), WgpuRenderError> {
         let adapter = self
@@ -465,14 +646,14 @@ impl WgpuRenderBackend {
 
     fn prepare_submitter_draw(
         &mut self,
-        view_index: usize,
         view_format: wgpu::TextureFormat,
-        submitters: SubmitterInputs<'_>,
+        payload: &WgpuFramePayload,
+        resources: RenderResourceInputs<'_>,
         frame_index: u64,
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
-            let batches = submitters.quad_batches(view_index);
+            let batches = payload.quad_batches();
             let stats = quad_batch_draw_stats(&batches);
             if batches.is_empty() {
                 return Ok(PreparedSubmitterDraw::default());
@@ -502,24 +683,24 @@ impl WgpuRenderBackend {
                 &batches,
                 &texture_layout,
                 &mut self.quad_textures,
-                submitters.images,
-                submitters.prepared_images,
+                resources.images,
+                resources.prepared_images,
                 frame_index,
             )
             .map_err(|error| WgpuRenderError::QuadTexture {
                 message: error.to_string(),
             })?;
-            return Ok(PreparedSubmitterDraw {
+            Ok(PreparedSubmitterDraw {
                 pipelines,
                 buffers,
                 draw_calls: stats.draw_calls,
                 sprites: stats.sprites,
-            });
+            })
         }
 
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
         {
-            let _ = (view_index, view_format, submitters, frame_index);
+            let _ = (view_format, payload, resources, frame_index);
             Ok(PreparedSubmitterDraw::default())
         }
     }
@@ -617,8 +798,12 @@ fn render_backend_state(state: WgpuBackendState) -> RenderBackendState {
 mod tests {
     use std::sync::Arc;
 
-    use nara_ecs::{Schedule, World};
-    use nara_render::{ExtractedView, RenderFrameState, RenderTarget, ViewportRect};
+    use nara_app::{App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeGeneration};
+    use nara_ecs::Entity;
+    use nara_render::{
+        ExtractedView, ExtractedViews, RenderTarget, ViewportRect, build_render_frame_packet,
+    };
+    use nara_window::Window;
     use nara_window::backend::{WindowHandleProvider, WindowTargetPhase};
     use raw_window_handle::{
         DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
@@ -661,18 +846,86 @@ mod tests {
         (backend, handles)
     }
 
-    fn insert_render_resources(world: &mut World, backend: WgpuRenderBackend) {
-        world.insert_resource(backend);
-        world.init_resource::<ExtractedViews>();
-        world.init_resource::<RenderFrame>();
-        world.init_resource::<FrameStats>();
-        world.init_resource::<RenderBackendStatus>();
+    #[test]
+    fn device_epoch_is_not_rewound_by_gpu_resource_cleanup() {
+        let mut backend = WgpuRenderBackend {
+            device_epoch: 7,
+            ..WgpuRenderBackend::default()
+        };
+
+        backend
+            .clear_gpu_resources(SurfaceDropReason::BackendCleanup)
+            .unwrap();
+
+        assert_eq!(backend.device_epoch(), 7);
     }
 
-    fn run_render_system(world: &mut World) {
-        let mut schedule = Schedule::default();
-        schedule.add_systems(crate::render_wgpu_surfaces);
-        schedule.run(world);
+    #[test]
+    fn backend_instances_receive_non_reused_process_local_identities() {
+        let first = WgpuRenderBackend::default();
+        let second = WgpuRenderBackend::default();
+
+        assert_ne!(first.instance_id(), 0);
+        assert_ne!(second.instance_id(), 0);
+        assert_ne!(first.instance_id(), second.instance_id());
+    }
+
+    fn test_runtime_generation() -> RuntimeGeneration {
+        let candidate = RuntimeCandidate::admit(App::new().seal().unwrap()).unwrap();
+        let ready = candidate.complete_startup().unwrap();
+        let runtime = ready.promote();
+        let generation = runtime.generation();
+        let mut retirement = runtime.begin_retirement();
+        while retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {
+            retirement.drive_retirement();
+        }
+        generation
+    }
+
+    fn test_packet(generation: RuntimeGeneration, frame_index: u64) -> WgpuCapturedFrame {
+        let window = Window::default();
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            camera_entity: Entity::from_raw_u32(1).unwrap(),
+            target: RenderTarget::PrimaryWindow,
+            viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),
+            world_position: nara_core::Vec2::ZERO,
+            viewport_height: 720.0,
+            order: 0,
+            clear_color: Color::BLACK,
+        });
+        let topology = build_render_frame_packet(
+            generation,
+            frame_index,
+            Some(WindowId::PRIMARY),
+            [&window],
+            &views,
+            [],
+        )
+        .unwrap()
+        .unwrap();
+        WgpuCapturedFrame {
+            topology,
+            payload: WgpuFramePayload::default(),
+        }
+    }
+
+    fn render_packet_without_surface(
+        backend: &mut WgpuRenderBackend,
+        packet: WgpuCapturedFrame,
+    ) -> Result<(), WgpuRenderError> {
+        let mut frame = RenderFrame {
+            index: packet.topology.frame_index(),
+            state: nara_render::RenderFrameState::Rendering,
+        };
+        backend.render_packet(
+            None,
+            packet,
+            RenderResourceInputs::default(),
+            &mut frame,
+            &mut FrameStats::default(),
+            &mut RenderBackendStatus::default(),
+        )
     }
 
     #[test]
@@ -681,6 +934,82 @@ mod tests {
         assert_eq!(backend.state(), WgpuBackendState::Uninitialized);
         assert_eq!(backend.surface_count(), 0);
         assert_eq!(backend.last_error(), None);
+    }
+
+    #[test]
+    fn render_packet_rejects_stale_generation_and_repeat_with_zero_surface_work() {
+        let (mut backend, handles) = backend_with_lease_only_surface(WindowId::PRIMARY);
+        let generation = test_runtime_generation();
+        let stale_generation = test_runtime_generation();
+        let surface_generation = handles
+            .snapshot(WindowId::PRIMARY)
+            .unwrap()
+            .surface_generation;
+
+        backend.runtime_generation = Some(generation.get());
+        backend.last_frame_index = Some(10);
+        let stale_error =
+            render_packet_without_surface(&mut backend, test_packet(stale_generation, 12))
+                .unwrap_err();
+        assert!(matches!(
+            stale_error,
+            WgpuRenderError::StaleFrameGeneration { .. }
+        ));
+        crate::handle_wgpu_render_error(
+            &mut backend,
+            stale_error,
+            12,
+            &mut RenderBackendStatus::default(),
+            None,
+        );
+        assert_eq!(
+            backend.frame_transaction_stats(),
+            WgpuFrameTransactionStats {
+                frame_index: Some(12),
+                packet_rejections: 1,
+                ..WgpuFrameTransactionStats::default()
+            }
+        );
+        assert_eq!(backend.surface_count(), 1);
+        assert_eq!(
+            handles
+                .snapshot(WindowId::PRIMARY)
+                .unwrap()
+                .surface_generation,
+            surface_generation
+        );
+
+        let repeat_error =
+            render_packet_without_surface(&mut backend, test_packet(generation, 10)).unwrap_err();
+        assert!(matches!(
+            repeat_error,
+            WgpuRenderError::FrameAlreadyConsumed { frame_index: 10 }
+        ));
+        crate::handle_wgpu_render_error(
+            &mut backend,
+            repeat_error,
+            10,
+            &mut RenderBackendStatus::default(),
+            None,
+        );
+        assert_eq!(
+            backend.frame_transaction_stats(),
+            WgpuFrameTransactionStats {
+                frame_index: Some(10),
+                packet_rejections: 1,
+                ..WgpuFrameTransactionStats::default()
+            }
+        );
+        assert_eq!(backend.surface_count(), 1);
+        assert_eq!(backend.state(), WgpuBackendState::Uninitialized);
+        assert_eq!(backend.last_error(), None);
+        assert!(backend.instance.is_none());
+        assert!(backend.adapter.is_none());
+        assert!(backend.device.is_none());
+        let snapshot = handles.snapshot(WindowId::PRIMARY).unwrap();
+        assert!(snapshot.surface_active);
+        assert_eq!(snapshot.surface_generation, surface_generation);
+        assert!(snapshot.provider_present);
     }
 
     #[test]
@@ -699,39 +1028,25 @@ mod tests {
     }
 
     #[test]
-    fn render_system_device_loss_invalidates_surfaces_and_reports_backend_failure() {
+    fn device_loss_invalidates_surfaces_without_releasing_window_authority() {
         let (mut backend, handles) = backend_with_lease_only_surface(WindowId::PRIMARY);
         let signal = Arc::new(DeviceLossSignal::default());
         backend.state = WgpuBackendState::Ready;
         backend.device_loss_signal = Some(Arc::clone(&signal));
-        let mut world = World::new();
-        insert_render_resources(&mut world, backend);
-        world.insert_resource(handles.clone());
         signal.mark_lost();
 
-        run_render_system(&mut world);
+        let error = backend.fail_if_device_lost().unwrap_err();
+        backend.mark_error(&error);
 
         let snapshot = handles.snapshot(WindowId::PRIMARY).unwrap();
         assert_eq!(snapshot.phase, WindowTargetPhase::Active);
         assert!(!snapshot.surface_active);
         assert!(snapshot.provider_present);
         assert!(handles.is_surface_target_active(WindowId::PRIMARY));
-        let backend = world.resource::<WgpuRenderBackend>();
         assert_eq!(backend.state(), WgpuBackendState::Unavailable);
         assert_eq!(backend.surface_count(), 0);
         assert_eq!(backend.last_error(), Some("wgpu device was lost"));
         assert!(backend.device_loss_signal.is_none());
-        let status = world.resource::<RenderBackendStatus>();
-        assert_eq!(status.state(), RenderBackendState::Unavailable);
-        assert_eq!(status.last_error(), Some("wgpu device was lost"));
-        assert_eq!(
-            status.last_skip().map(|skip| skip.reason()),
-            Some(RenderFrameSkipReason::BackendError)
-        );
-        assert_eq!(
-            world.resource::<RenderFrame>().state,
-            RenderFrameState::Skipped
-        );
     }
 
     #[test]
@@ -752,7 +1067,11 @@ mod tests {
 
         assert!(matches!(
             backend.create_surface_if_missing(
-                &Window::default(),
+                RenderWindowPacket {
+                    id: WindowId::PRIMARY,
+                    resolution: nara_window::WindowResolution::new(320, 180),
+                    present_mode: nara_window::PresentMode::AutoVsync,
+                },
                 &handles,
                 Extent2d::new(320, 180).unwrap(),
             ),
@@ -767,47 +1086,6 @@ mod tests {
         assert!(!snapshot.surface_active);
         assert!(snapshot.provider_present);
         assert!(handles.acquire_surface(WindowId::PRIMARY).is_ok());
-    }
-
-    #[test]
-    fn unregistered_render_target_skips_without_poisoning_the_backend() {
-        let mut world = World::new();
-        let window_entity = world.spawn(Window::default()).id();
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            camera_entity: window_entity,
-            target: RenderTarget::PrimaryWindow,
-            viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),
-            world_position: nara_core::Vec2::ZERO,
-            viewport_height: 720.0,
-            order: 0,
-            clear_color: Color::BLACK,
-        });
-        let backend = WgpuRenderBackend {
-            state: WgpuBackendState::Ready,
-            ..WgpuRenderBackend::default()
-        };
-        insert_render_resources(&mut world, backend);
-        world.insert_resource(views);
-        world.insert_resource(BackendWindowHandles::default());
-
-        run_render_system(&mut world);
-
-        let backend = world.resource::<WgpuRenderBackend>();
-        assert_eq!(backend.state(), WgpuBackendState::Ready);
-        assert_eq!(backend.surface_count(), 0);
-        assert_eq!(backend.last_error(), None);
-        let status = world.resource::<RenderBackendStatus>();
-        assert_eq!(status.state(), RenderBackendState::Ready);
-        assert_eq!(status.last_error(), None);
-        assert_eq!(
-            status.last_skip().map(|skip| skip.reason()),
-            Some(RenderFrameSkipReason::NoRenderableTarget)
-        );
-        assert_eq!(
-            world.resource::<RenderFrame>().state,
-            RenderFrameState::Skipped
-        );
     }
 
     #[test]
@@ -877,7 +1155,7 @@ mod tests {
         };
 
         assert_eq!(
-            backend.ensure_device(),
+            backend.ensure_device(WindowId::PRIMARY),
             Err(WgpuRenderError::BackendUnavailable)
         );
         assert_eq!(backend.state(), WgpuBackendState::Unavailable);

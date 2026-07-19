@@ -1,18 +1,18 @@
 use super::*;
-use std::{
-    collections::BTreeMap,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
-
 use nara_app::{
-    App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, PluginShutdownContext,
-    RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
+    __RuntimeDriverPort, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
+    PluginShutdownContext, RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
     RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
     RuntimeClosePolicy, RuntimeCloseProgress, RuntimeDriverScope, RuntimeFaultKind,
     RuntimeObligationLedger,
+};
+use nara_ecs::Resource;
+use nara_gameplay::{
+    ActionCommandBinding, ActionCommandMap, GameplayCommandPlugin, GameplayCommandQueue,
+    GameplayCommandTypeId,
+};
+use nara_input::{
+    ActionBinding, ActionId, ActionMap, ActionPhase, ButtonInput, InputPlugin, PointerState,
 };
 use nara_window::{
     WindowEvents, WindowPlugin,
@@ -20,6 +20,13 @@ use nara_window::{
 };
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
+};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 #[derive(Debug)]
@@ -87,9 +94,41 @@ struct FakeSurfaceState {
     lease: WindowSurfaceLease,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Resource)]
 struct FakeSurfaceBackend {
     surfaces: BTreeMap<WindowId, FakeSurfaceState>,
+}
+
+impl __RuntimeDriverPort for FakeSurfaceBackend {
+    type Input = Vec<WindowId>;
+    type Output = Result<(), WindowSurfaceRetirementError>;
+
+    fn accepts_driver_state(state: RuntimeState) -> bool {
+        matches!(
+            state,
+            RuntimeState::Running
+                | RuntimeState::Paused
+                | RuntimeState::Faulted
+                | RuntimeState::Stopping
+                | RuntimeState::CloseIncomplete
+        )
+    }
+
+    fn apply_driver_input(&mut self, window_ids: Self::Input) -> Self::Output {
+        let mut first_error = None;
+        for window_id in window_ids {
+            let Some(FakeSurfaceState { owner, lease }) = self.surfaces.remove(&window_id) else {
+                continue;
+            };
+            drop(owner);
+            if lease.confirm_owner_dropped().is_err() {
+                first_error.get_or_insert(WindowSurfaceRetirementError::DriverFailed {
+                    driver: "test.surface",
+                });
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -200,7 +239,7 @@ fn stop_runtime(runtime: &mut RuntimeInstance) {
 
 fn install_fake_surface_driver(app: &mut App) {
     let world = app.world_mut().unwrap();
-    world.insert_non_send(FakeSurfaceBackend::default());
+    world.insert_resource(FakeSurfaceBackend::default());
     world.insert_resource(WindowSurfaceRetirementDriver::new(
         "test.surface",
         retire_fake_surfaces,
@@ -216,7 +255,7 @@ fn add_fake_surface(
     let (handle_source, lease) = handles.acquire_surface(window_id).unwrap().into_parts();
     app.world_mut()
         .unwrap()
-        .non_send_mut::<FakeSurfaceBackend>()
+        .resource_mut::<FakeSurfaceBackend>()
         .surfaces
         .insert(
             window_id,
@@ -234,27 +273,11 @@ fn retire_fake_surfaces(
     scope: &mut RuntimeDriverScope<'_>,
     window_ids: &[WindowId],
 ) -> Result<(), WindowSurfaceRetirementError> {
-    let Some(mut backend) = scope
-        .get_non_send_resource_mut::<FakeSurfaceBackend>()
+    scope
+        .__apply_port::<FakeSurfaceBackend>(window_ids.to_vec())
         .map_err(|_| WindowSurfaceRetirementError::DriverFailed {
             driver: "test.surface",
         })?
-    else {
-        return Ok(());
-    };
-    let mut first_error = None;
-    for window_id in window_ids {
-        let Some(FakeSurfaceState { owner, lease }) = backend.surfaces.remove(window_id) else {
-            continue;
-        };
-        drop(owner);
-        if lease.confirm_owner_dropped().is_err() {
-            first_error.get_or_insert(WindowSurfaceRetirementError::DriverFailed {
-                driver: "test.surface",
-            });
-        }
-    }
-    first_error.map_or(Ok(()), Err)
 }
 
 #[test]
@@ -276,6 +299,208 @@ fn converts_common_keyboard_codes() {
     assert_eq!(
         convert_key_code(WinitKeyCode::Digit1),
         Some(KeyCode::Character('1'))
+    );
+}
+
+#[test]
+fn focus_gate_rejects_repeats_and_requires_a_fresh_press_after_regain() {
+    let key = KeyCode::Character('w');
+    let mut gate = WinitInputGate::default();
+
+    assert_eq!(
+        gate.keyboard_input(key, ElementState::Pressed, false),
+        Some(ButtonDriverInput::Press(key))
+    );
+    assert_eq!(gate.keyboard_input(key, ElementState::Pressed, true), None);
+
+    gate.lose_focus([key], []);
+    gate.gain_focus();
+    assert_eq!(gate.keyboard_input(key, ElementState::Pressed, false), None);
+    assert_eq!(
+        gate.keyboard_input(key, ElementState::Released, false),
+        Some(ButtonDriverInput::Release(key))
+    );
+    assert_eq!(
+        gate.keyboard_input(key, ElementState::Pressed, false),
+        Some(ButtonDriverInput::Press(key))
+    );
+}
+
+#[test]
+fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
+    let mut app = App::new();
+    app.add_plugin(InputPlugin).unwrap();
+    app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    let action = ActionId::new("test.move-up").unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ActionMap>()
+        .bind(ActionBinding::key(action.clone(), KeyCode::Character('w')));
+    {
+        let mut commands = app.world_mut().unwrap().resource_mut::<ActionCommandMap>();
+        commands
+            .bind(ActionCommandBinding::new(
+                action.clone(),
+                ActionPhase::Started,
+                GameplayCommandTypeId::new("test.move.started").unwrap(),
+            ))
+            .unwrap();
+        commands
+            .bind(ActionCommandBinding::new(
+                action,
+                ActionPhase::Released,
+                GameplayCommandTypeId::new("test.move.stop").unwrap(),
+            ))
+            .unwrap();
+    }
+    let mut runtime = start_runtime(app);
+    let mut state = WinitApp::new(&mut runtime).unwrap();
+    let key = convert_key_code(WinitKeyCode::KeyW).unwrap();
+    assert!(
+        state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
+                false,
+            )
+            .unwrap()
+    );
+    state.runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        state
+            .runtime
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        1
+    );
+
+    state
+        .apply_focus_driver_event(WindowId::PRIMARY, false)
+        .unwrap();
+    state.runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        state
+            .runtime
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        2,
+        "focus loss must lower the released action into its semantic stop command",
+    );
+    assert!(
+        !state
+            .runtime
+            .world()
+            .resource::<ButtonInput<KeyCode>>()
+            .pressed(key)
+    );
+
+    state
+        .apply_focus_driver_event(WindowId::PRIMARY, true)
+        .unwrap();
+    assert!(
+        !state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
+                true,
+            )
+            .unwrap()
+    );
+    assert!(
+        !state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
+                false,
+            )
+            .unwrap(),
+        "the pre-focus-loss held key remains suppressed until its physical release"
+    );
+    assert!(
+        state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::KeyW, ElementState::Released),
+                false,
+            )
+            .unwrap()
+    );
+    assert!(
+        state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::KeyW, ElementState::Pressed),
+                false,
+            )
+            .unwrap()
+    );
+    state.runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        state
+            .runtime
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        3
+    );
+
+    drop(state);
+    stop_runtime(&mut runtime);
+}
+
+#[test]
+fn keyboard_input_arm_delegates_to_the_tested_physical_event_path() {
+    let source = include_str!("lib.rs");
+    let handler = source
+        .split_once("    fn handle_window_event(")
+        .and_then(|(_, source)| {
+            source
+                .split_once("    fn apply_physical_keyboard_driver_event(")
+                .map(|(handler, _)| handler)
+        })
+        .expect("the production window-event handler must remain inspectable");
+    let keyboard_arm = handler
+        .split_once("WinitWindowEvent::KeyboardInput")
+        .and_then(|(_, source)| {
+            source
+                .split_once("WinitWindowEvent::MouseInput")
+                .map(|(keyboard_arm, _)| keyboard_arm)
+        })
+        .expect("the production handler must retain one KeyboardInput arm");
+    assert!(
+        keyboard_arm.contains("self.apply_physical_keyboard_driver_event("),
+        "the KeyboardInput arm must delegate to the tested physical-event path"
+    );
+    let compact = keyboard_arm
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    assert!(
+        compact.contains(
+            "self.apply_physical_keyboard_driver_event(RawKeyEvent{physical_key:event.physical_key,state:event.state,},event.repeat,)?;"
+        ),
+        "the KeyboardInput arm must forward physical_key, state, and repeat without substitution"
+    );
+}
+
+fn raw_key_event(code: WinitKeyCode, state: ElementState) -> RawKeyEvent {
+    RawKeyEvent {
+        physical_key: PhysicalKey::Code(code),
+        state,
+    }
+}
+
+#[test]
+fn initial_focus_state_is_applied_to_the_input_gate() {
+    let key = KeyCode::Character('w');
+    let mut gate = WinitInputGate::reset_for_focus(false);
+
+    assert_eq!(gate.keyboard_input(key, ElementState::Pressed, false), None);
+    gate.gain_focus();
+    assert_eq!(
+        gate.keyboard_input(key, ElementState::Pressed, false),
+        Some(ButtonDriverInput::Press(key))
     );
 }
 
@@ -326,6 +551,32 @@ fn runner_configuration_does_not_install_runtime_prerequisites() {
     assert!(!app.world().contains_resource::<ButtonInput<KeyCode>>());
     assert!(!app.world().contains_resource::<ButtonInput<MouseButton>>());
     assert!(!app.world().contains_resource::<PointerState>());
+}
+
+#[test]
+fn configured_window_requires_exactly_one_runtime_target() {
+    let mut missing = start_runtime(App::new());
+    assert!(configured_primary_window(&missing).is_err());
+    stop_runtime(&mut missing);
+
+    let mut one_app = App::new();
+    one_app.add_plugin(WindowPlugin::default()).unwrap();
+    let mut one = start_runtime(one_app);
+    assert_eq!(
+        configured_primary_window(&one).unwrap().id,
+        WindowId::PRIMARY
+    );
+    stop_runtime(&mut one);
+
+    let mut multiple_app = App::new();
+    multiple_app.add_plugin(WindowPlugin::default()).unwrap();
+    multiple_app
+        .world_mut()
+        .unwrap()
+        .spawn(Window::default().with_id(WindowId::new(2)));
+    let mut multiple = start_runtime(multiple_app);
+    assert!(configured_primary_window(&multiple).is_err());
+    stop_runtime(&mut multiple);
 }
 
 #[test]
@@ -547,6 +798,111 @@ fn event_loop_finish_does_not_replace_the_primary_failure() {
             .unwrap()
             .provider_present
     );
+}
+
+#[test]
+fn event_loop_finish_does_not_redrive_an_already_stopping_runtime() {
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let polls = Arc::new(AtomicUsize::new(0));
+    let mut runtime = start_runtime_with_counted_pending_close(
+        app,
+        released.clone(),
+        polls.clone(),
+        Duration::from_secs(5),
+    );
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Stop),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Stopping);
+    let polls_before_finish = polls.load(Ordering::SeqCst);
+
+    let mut state = WinitApp::new(&mut runtime).unwrap();
+    state.shutdown = WinitShutdownState::Aborted;
+    state.finish_after_event_loop();
+
+    assert_eq!(state.runtime.state(), RuntimeState::Stopping);
+    assert_eq!(polls.load(Ordering::SeqCst), polls_before_finish);
+    assert!(state.runtime_close_failure.is_none());
+    drop(state);
+
+    released.store(true, Ordering::SeqCst);
+    let mut retirement = runtime.begin_retirement();
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+}
+
+#[test]
+fn event_loop_finish_records_close_incomplete_without_retrying_it() {
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let polls = Arc::new(AtomicUsize::new(0));
+    let mut runtime = start_runtime_with_counted_pending_close(
+        app,
+        released.clone(),
+        polls.clone(),
+        Duration::ZERO,
+    );
+    stop_runtime(&mut runtime);
+    assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
+    let polls_before_finish = polls.load(Ordering::SeqCst);
+
+    let mut state = WinitApp::new(&mut runtime).unwrap();
+    state.shutdown = WinitShutdownState::Aborted;
+    state.finish_after_event_loop();
+
+    assert_eq!(state.runtime.state(), RuntimeState::CloseIncomplete);
+    assert_eq!(polls.load(Ordering::SeqCst), polls_before_finish);
+    assert!(state.runtime_close_incomplete_observed);
+    drop(state);
+
+    released.store(true, Ordering::SeqCst);
+    let mut retirement = runtime.begin_retirement();
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+}
+
+#[test]
+fn aborted_native_shutdown_poll_does_not_drive_the_running_app_again() {
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    let mut runtime = start_runtime(app);
+    let frame_before = runtime
+        .world()
+        .resource::<nara_app::RuntimeFrameStatus>()
+        .frame;
+    let primary = AppRunError::runner("injected native retirement failure");
+
+    {
+        let mut state = WinitApp::new(&mut runtime).unwrap();
+        state.shutdown = WinitShutdownState::Aborted;
+        state.record_primary_failure(primary.clone());
+
+        assert_eq!(
+            state.poll_native_shutdown_once(Instant::now()),
+            EventLoopDirective::Exit
+        );
+        assert_eq!(state.primary_failure, Some(primary));
+    }
+
+    assert_eq!(runtime.state(), RuntimeState::Running);
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<nara_app::RuntimeFrameStatus>()
+            .frame,
+        frame_before
+    );
+    stop_runtime(&mut runtime);
+    assert_eq!(runtime.state(), RuntimeState::Stopped);
 }
 
 #[test]
