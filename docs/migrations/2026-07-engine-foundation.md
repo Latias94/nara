@@ -43,6 +43,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U5-1 | RGF-U5 | `RGF-U5` | `rust-api/behavior` | Code-first runtime ownership, exact stepping, typed faults, task close ownership, and Winit driving | Admit a sealed App through `RuntimeCandidate`, drive `RuntimeInstance`, use observable controls and retryable close, call `WinitRunner::run(&mut runtime)`, and rename standalone task shutdown to `shutdown_blocking`. |
 | RGF-U29-1 | RGF-U29 | `RGF-U29` | `rust-api/behavior` | Persistent codec output, registry binding, explicit component composition, and target-World apply eligibility | Return `PreparedComponentCandidate`, freeze the registry before runtime preflight, remove implicit required components/hooks from persistent types, and handle fail-closed target-World rejection. |
 | RGF-U13-1 | RGF-U13 | `198a680` | `rust-api/behavior` | Managed runtime driver access, physical button transitions, App-exit propagation, and desktop frame/shutdown semantics | Replace generic driver World/resource access with typed resource-local ports, propagate fallible button-edge admission, and handle the one-target desktop result/close contract. |
+| RGF-U8-1 | RGF-U8 | `60292e7` | `rust-api/behavior` | Task-update set ownership, ordered task result polling, and filesystem watcher admission/observability | Import asset phases from `nara_asset`, capture a task-pool completion cutoff before consuming ordered results, and send watcher batches through the bounded non-blocking sender while handling sticky `RescanRequired`. |
 
 ## Entry Contract
 
@@ -1881,6 +1882,90 @@ managed-World mutation, collapse same-frame edges, or hide App exit from a produ
 `reference-game/tests/{desktop_flow,desktop_parity}.rs`, and the U13 verification record prove
 ordered/fallible input, focus release, typed driver state gates, headless/desktop exit parity, and
 truthful desktop shutdown.
+
+## RGF-U8-1: Domain-Owned Task Integration and Bounded Watcher Admission
+
+**Removed contract**:
+
+- `nara_app::TaskUpdateSet::{Poll, CoalesceAssetChanges, SpawnAssetJobs,
+  ApplyAssetResults}` and `TaskPlugin` configuration of that asset-specific chain.
+- `OrderedTaskResults::drain_ready_prefix`, whose call time could include a terminal published
+  after a domain Poll system began.
+- The watcher queue's unbounded `push`/`push_error` path and best-effort callback failures, which
+  could lose events without a durable rescan state.
+
+**Canonical replacement or deletion rationale**: `nara_app` retains only
+`CoreStage::TaskUpdate`. `nara_asset::AssetTaskUpdateSet::{Poll, ResolveSourceChanges, SpawnJobs,
+ApplyResults}` owns the asset-domain chain, while `nara_tasks` remains execution-only.
+`TaskPools::capture_completion_cutoff` creates an instance-bound linearization point and
+`OrderedTaskResults::capture_ready_prefix` moves only the ordered terminal prefix published at or
+before it into an owned snapshot.
+
+`AssetWatchEventQueue` now has explicit event and retained-byte limits. Callbacks use
+`AssetWatchEventSender::try_send` or `try_send_batch`; Poll drains one published prefix. Any
+overflow, producer contention, disconnect, backend/translation failure, or unavailable queue state
+is counted and moves the runtime to sticky `AssetWatchRuntimeState::RescanRequired`. Recovery is a
+Host-authorized full scan followed by watcher reconstruction, not an in-place flag clear.
+
+**Before**:
+
+```rust
+app.add_systems(
+    CoreStage::TaskUpdate,
+    poll_results.in_set(TaskUpdateSet::Poll),
+)?;
+let ready = ordered_results.drain_ready_prefix();
+
+let queue = AssetWatchEventQueue::new();
+queue.push(AssetWatchEvent::modified(path))?;
+```
+
+**After**:
+
+```rust
+app.add_systems(
+    CoreStage::TaskUpdate,
+    poll_results.in_set(AssetTaskUpdateSet::Poll),
+)?;
+let cutoff = task_pools.capture_completion_cutoff();
+let ready = ordered_results
+    .capture_ready_prefix(&cutoff)?
+    .into_terminals()?;
+
+let mut queue = AssetWatchEventQueue::with_limits(limits);
+let sender = queue.sender();
+sender.try_send(AssetWatchEvent::modified(path))?;
+let captured = queue.drain();
+```
+
+**Affected examples and fixtures**: `nara_asset`, `nara_asset_watch`, `nara_image`, root facade
+exports, schedule-contract tests, and the independent reference-game asset task flow now use the
+domain-owned set and bounded entry-snapshot contracts.
+
+**User action**: advanced asset-domain plugins must import `AssetTaskUpdateSet` from `nara_asset`.
+Consumers of ordered task streams must capture a cutoff from the same `TaskPools` instance and
+handle pool mismatch/snapshot errors. Watcher integrations must retain the receiver queue, send via
+its `AssetWatchEventSender`, observe `AssetWatchRuntimeStatus`, and rebuild from an authorized full
+rescan after `RescanRequired`.
+
+**Source action**: `none`; no persistent project format changes are required.
+
+**Cache action**: `keep`; rebuild Rust artifacts after the API change. A watcher Host that observes
+`RescanRequired` must rebuild its in-memory source index from an authorized full scan.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No `TaskUpdateSet` alias,
+unbounded watcher queue, or in-place rescan reset is retained.
+
+**Rollback**: revert commit `60292e7` and every migrated caller together. Do not restore
+asset-specific vocabulary to `nara_app`/`nara_tasks`, let Poll consume post-entry task completions,
+or continue incremental watching after an observed event loss.
+
+**Verification anchors**: `crates/nara_tasks/src/tests/execution.rs`,
+`crates/nara_asset_watch/src/tests.rs`, `crates/nara_image/src/tests.rs`,
+`tests/task_update_integration.rs`, `tests/schedule_extension_contract.rs`, and
+`reference-game/tests/asset_task_flow.rs` prove pool-bound entry cutoffs, same/next-frame behavior,
+stale retirement, bounded non-blocking watcher admission, observable loss, ownership, and public
+last-good reload behavior.
 
 ## Persistent Format Matrix
 

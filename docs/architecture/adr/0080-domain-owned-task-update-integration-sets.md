@@ -48,7 +48,8 @@ describe outcomes rather than one implementation: each Poll system captures one 
 membership or queue prefix from its source at system entry, ResolveSourceChanges coalesces and
 lowers source events, SpawnJobs attempts bounded work, and ApplyResults commits eligible typed
 outcomes under generation/version and ordered-prefix guards. Task pollers snapshot ready terminal
-IDs; watcher pollers atomically take the queue prefix present at entry.
+work against one task-pool-instance completion cutoff; watcher pollers capture one published batch
+sequence and take only the queue prefix at or below that cutoff.
 
 ```mermaid
 sequenceDiagram
@@ -116,14 +117,30 @@ The asset chain has three exact cases:
 Apply systems continue to enforce expected generation/version, ordered-prefix, and last-good asset
 policy. Schedule ordering does not authorize stale results or partial publication.
 
+### Watcher admission and loss semantics
+
+The native watcher callback publishes whole translated event batches through a bounded,
+non-blocking queue. Admission reserves both event count and retained bytes before publishing; a
+batch is either accepted in full or rejected in full. Polling never holds the producer admission
+lock, and a poll invocation drains only batches whose published sequence was visible at entry.
+
+Overflow, concurrent-producer contention, receiver disconnect, backend failure, callback/path
+translation failure, and internal queue unavailability are observable loss, not best-effort noise.
+The first such loss moves `AssetWatchRuntimeStatus` to sticky `RescanRequired`, increments bounded
+queue/pressure counters, emits a structured runtime diagnostic, and stops the live `notify`
+backend. Later callback batches are suppressed and counted. There is no in-place clear operation:
+a Host must perform a complete authorized source rescan and reconstruct the watcher runtime before
+incremental events can be authoritative again.
+
 ### Migration
 
-U33 deletes `nara_app::TaskUpdateSet` without a compatibility alias, migrates every app/task/asset/
-watch/image caller, and updates canonical ADR and facade vocabulary in one unit. Tests first
-characterize current same-frame and next-frame behavior so the move is ownership-only unless this
-ADR explicitly changes a case. Stale-symbol checks cover live Rust source, facade exports, examples,
-tests, and current-policy ownership statements. ADR migration explanations and immutable historical
-engineering-memory records may retain the old name as evidence.
+RGF-U8 deleted `nara_app::TaskUpdateSet` without a compatibility alias, migrated every
+app/task/asset/watch/image caller, and updated canonical ADR and facade vocabulary in one unit.
+Tests characterize same-frame and next-frame behavior around one entry cutoff, and the independent
+reference game proves last-good reload behavior through the public root package. Stale-symbol
+checks cover live Rust source, facade exports, examples, tests, and current-policy ownership
+statements. ADR migration explanations and immutable historical engineering-memory records may
+retain the old name as evidence.
 
 ## Alternatives Considered
 
@@ -176,6 +193,8 @@ domain must import its schedule vocabulary rather than one global enum.
 | Next-frame async result | Work accepted after its poller's snapshot never applies until the next frame Poll | Controlled task test |
 | Same-frame rejection | An eligible synchronous SpawnJobs rejection/removal applies in that frame | Failure-path integration test |
 | Stale retirement | An outcome that becomes stale after Poll but before ApplyResults is retired once rather than buffered or retried | Apply-time generation race test |
+| Bounded watcher callback | Event count and retained bytes never exceed configured limits; callback admission never blocks behind Poll | Capacity, retained-byte, and concurrent Poll tests |
+| Observable watcher loss | Overflow, producer contention, disconnect, backend/translation failure, and unavailable state publish counters, pressure, a structured diagnostic, and sticky `RescanRequired` | Failure-injection and live-backend tests |
 | Consumer migration | Watcher, resolver, image spawn/poll/apply, facade, live source, tests, and current-policy docs use only `AssetTaskUpdateSet`; migration/history evidence may name the old symbol | Scoped stale-symbol search |
 | Domain independence | An unrelated domain set has no dependency edge relative to assets unless composition declares one | Schedule graph/ambiguity inspection test |
 
@@ -190,6 +209,7 @@ domain must import its schedule vocabulary rather than one global enum.
 | Independent domains accidentally rely on insertion order | High | Medium | Declare no implicit cross-domain order and require a named composition relation plus integration test for real dependencies. |
 | Advanced set type leaks into gameplay prelude | Medium | Medium | Export through the asset module and `advanced_prelude` only. |
 | Domain-owned sets duplicate generic mechanics | Medium | Low | Keep typed terminal ordering/cancellation/backpressure helpers in `nara_tasks`; domain sets own only workflow policy. |
+| Incremental watch loss is mistaken for a complete source view | Critical | Medium | Enter sticky `RescanRequired`, stop the backend, suppress later batches, and require an authorized full rescan plus watcher reconstruction. |
 
 ## Consequences
 
@@ -200,6 +220,8 @@ domain must import its schedule vocabulary rather than one global enum.
   `nara_asset::AssetTaskUpdateSet`.
 - Same-frame visibility is a domain contract rather than an accidental consequence of where a
   global enum lives.
+- Watcher overload or translation loss cannot silently continue as an authoritative incremental
+  source stream.
 - Future task-consuming domains do not add variants to an app-global business workflow.
 
 ## Deferred Decisions
@@ -221,5 +243,6 @@ domain must import its schedule vocabulary rather than one global enum.
 - `crates/nara_app/src/lib.rs`
 - `crates/nara_tasks/src/runtime.rs`
 - `crates/nara_asset/src/reload.rs`
-- `crates/nara_asset_watch/src/lib.rs`
-- `crates/nara_image/src/lib.rs`
+- `crates/nara_asset_watch/src/queue.rs`
+- `crates/nara_asset_watch/src/observability.rs`
+- `crates/nara_image/src/reload.rs`
