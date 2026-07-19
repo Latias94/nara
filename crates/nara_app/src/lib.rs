@@ -117,14 +117,6 @@ fn is_built_in_schedule(schedule: InternedScheduleLabel) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
-pub enum TaskUpdateSet {
-    Poll,
-    CoalesceAssetChanges,
-    SpawnAssetJobs,
-    ApplyAssetResults,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum FixedUpdateSet {
     /// Admit tick-scoped inputs and prepare simulation data.
     ///
@@ -2397,22 +2389,6 @@ mod tests {
         order.0.push("last");
     }
 
-    fn push_task_poll(mut order: ResMut<Order>) {
-        order.0.push("task_poll");
-    }
-
-    fn push_task_coalesce(mut order: ResMut<Order>) {
-        order.0.push("task_coalesce");
-    }
-
-    fn push_task_spawn(mut order: ResMut<Order>) {
-        order.0.push("task_spawn");
-    }
-
-    fn push_task_apply(mut order: ResMut<Order>) {
-        order.0.push("task_apply");
-    }
-
     fn request_exit(mut requests: ResMut<AppExitRequests>) {
         requests.request_exit();
     }
@@ -3203,50 +3179,6 @@ mod tests {
                 "fixed_update",
                 "update"
             ]
-        );
-    }
-
-    #[test]
-    fn task_update_sets_run_in_order() {
-        let mut app = App::new();
-        app.insert_resource(Order::default()).unwrap();
-        app.configure_sets(
-            CoreStage::TaskUpdate,
-            (
-                TaskUpdateSet::Poll,
-                TaskUpdateSet::CoalesceAssetChanges,
-                TaskUpdateSet::SpawnAssetJobs,
-                TaskUpdateSet::ApplyAssetResults,
-            )
-                .chain(),
-        )
-        .unwrap();
-        app.add_systems(
-            CoreStage::TaskUpdate,
-            push_task_apply.in_set(TaskUpdateSet::ApplyAssetResults),
-        )
-        .unwrap();
-        app.add_systems(
-            CoreStage::TaskUpdate,
-            push_task_spawn.in_set(TaskUpdateSet::SpawnAssetJobs),
-        )
-        .unwrap();
-        app.add_systems(
-            CoreStage::TaskUpdate,
-            push_task_poll.in_set(TaskUpdateSet::Poll),
-        )
-        .unwrap();
-        app.add_systems(
-            CoreStage::TaskUpdate,
-            push_task_coalesce.in_set(TaskUpdateSet::CoalesceAssetChanges),
-        )
-        .unwrap();
-
-        app.run_once(Duration::ZERO).unwrap();
-
-        assert_eq!(
-            app.world().resource::<Order>().0,
-            ["task_poll", "task_coalesce", "task_spawn", "task_apply"]
         );
     }
 

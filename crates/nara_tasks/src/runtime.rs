@@ -14,11 +14,11 @@ use std::{
 };
 
 use nara_app::{
-    App, CoreStage, Plugin, PluginError, RuntimeCloseContext, RuntimeCloseParticipant,
-    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress, TaskUpdateSet,
+    App, Plugin, PluginError, RuntimeCloseContext, RuntimeCloseParticipant,
+    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
 };
 use nara_core::{ItemLimit, TimeLimit};
-use nara_ecs::{Resource, schedule::IntoScheduleConfigs};
+use nara_ecs::Resource;
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -714,6 +714,7 @@ enum TaskPhase {
 struct TaskStateInner<T> {
     phase: TaskPhase,
     terminal: Option<TaskTerminal<T>>,
+    completion_sequence: Option<u64>,
 }
 
 struct TaskState<T> {
@@ -721,18 +722,21 @@ struct TaskState<T> {
     finished: AtomicBool,
     token: TaskCancellationToken,
     counters: SharedTaskCounters,
+    instance_token: Arc<TaskPoolInstanceToken>,
 }
 
 impl<T> TaskState<T> {
-    fn new(counters: SharedTaskCounters) -> Self {
+    fn new(counters: SharedTaskCounters, instance_token: Arc<TaskPoolInstanceToken>) -> Self {
         Self {
             inner: Mutex::new(TaskStateInner {
                 phase: TaskPhase::Pending,
                 terminal: None,
+                completion_sequence: None,
             }),
             finished: AtomicBool::new(false),
             token: TaskCancellationToken::new(),
             counters,
+            instance_token,
         }
     }
 
@@ -750,16 +754,21 @@ impl<T> TaskState<T> {
     }
 
     fn complete(&self, value: T) -> bool {
+        let mut publication = lock_unpoisoned(&self.instance_token.completion_publication);
         let mut inner = lock_unpoisoned(&self.inner);
         if inner.phase == TaskPhase::Terminal {
             drop(inner);
+            drop(publication);
             drop(value);
             return false;
         }
+        let completion_sequence = publication.next_sequence();
         inner.phase = TaskPhase::Terminal;
         inner.terminal = Some(TaskTerminal::Completed(value));
+        inner.completion_sequence = Some(completion_sequence);
         self.finished.store(true, Ordering::Release);
         drop(inner);
+        drop(publication);
         update_counters(&self.counters, |counters| {
             counters.completed = counters.completed.saturating_add(1);
         });
@@ -767,14 +776,18 @@ impl<T> TaskState<T> {
     }
 
     fn fail(&self, failure: TaskFailure) -> bool {
+        let mut publication = lock_unpoisoned(&self.instance_token.completion_publication);
         let mut inner = lock_unpoisoned(&self.inner);
         if inner.phase == TaskPhase::Terminal {
             return false;
         }
+        let completion_sequence = publication.next_sequence();
         inner.phase = TaskPhase::Terminal;
         inner.terminal = Some(TaskTerminal::Failed(failure));
+        inner.completion_sequence = Some(completion_sequence);
         self.finished.store(true, Ordering::Release);
         drop(inner);
+        drop(publication);
         update_counters(&self.counters, |counters| {
             counters.failed = counters.failed.saturating_add(1);
         });
@@ -782,19 +795,23 @@ impl<T> TaskState<T> {
     }
 
     fn cancel(&self, reason: TaskCancellationReason) -> bool {
+        let mut publication = lock_unpoisoned(&self.instance_token.completion_publication);
         let mut inner = lock_unpoisoned(&self.inner);
         if inner.phase == TaskPhase::Terminal {
             return false;
         }
         let before_start = inner.phase == TaskPhase::Pending;
+        let completion_sequence = publication.next_sequence();
         inner.phase = TaskPhase::Terminal;
         inner.terminal = Some(TaskTerminal::Cancelled(TaskCancellation {
             reason,
             before_start,
         }));
+        inner.completion_sequence = Some(completion_sequence);
         self.token.mark_cancelled();
         self.finished.store(true, Ordering::Release);
         drop(inner);
+        drop(publication);
         update_counters(&self.counters, |counters| {
             counters.cancelled = counters.cancelled.saturating_add(1);
         });
@@ -816,6 +833,16 @@ impl<T> TaskState<T> {
             });
         }
         terminal
+    }
+
+    fn belongs_to(&self, cutoff: &TaskCompletionCutoff) -> bool {
+        Arc::ptr_eq(&self.instance_token, &cutoff.instance_token)
+    }
+
+    fn completed_by(&self, cutoff: &TaskCompletionCutoff) -> bool {
+        lock_unpoisoned(&self.inner)
+            .completion_sequence
+            .is_some_and(|sequence| sequence <= cutoff.sequence)
     }
 }
 
@@ -963,6 +990,71 @@ pub struct OrderedTaskResults<T> {
     pending: BTreeMap<TaskOrderKey, TaskHandle<T>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct TaskCompletionCutoff {
+    instance_token: Arc<TaskPoolInstanceToken>,
+    sequence: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskCompletionCutoffError {
+    PoolMismatch { task: TaskDescriptor },
+}
+
+impl Display for TaskCompletionCutoffError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PoolMismatch { .. } => formatter.write_str(
+                "ordered task results contain a task from a different task-pool instance",
+            ),
+        }
+    }
+}
+
+impl Error for TaskCompletionCutoffError {}
+
+#[derive(Debug)]
+pub struct OrderedTaskReadySnapshot<T> {
+    handles: Vec<(TaskOrderKey, TaskHandle<T>)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskReadySnapshotError {
+    task: TaskDescriptor,
+}
+
+impl TaskReadySnapshotError {
+    #[must_use]
+    pub const fn task(self) -> TaskDescriptor {
+        self.task
+    }
+}
+
+impl Display for TaskReadySnapshotError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a captured task terminal was unavailable")
+    }
+}
+
+impl Error for TaskReadySnapshotError {}
+
+impl<T> OrderedTaskReadySnapshot<T> {
+    pub fn into_terminals(self) -> Result<Vec<OrderedTaskTerminal<T>>, TaskReadySnapshotError> {
+        let mut terminals = Vec::with_capacity(self.handles.len());
+        for (order_key, mut handle) in self.handles {
+            let task = handle.descriptor();
+            let Some(terminal) = handle.try_take() else {
+                return Err(TaskReadySnapshotError { task });
+            };
+            terminals.push(OrderedTaskTerminal {
+                order_key,
+                terminal,
+            });
+        }
+        Ok(terminals)
+    }
+}
+
 impl<T> Default for OrderedTaskResults<T> {
     fn default() -> Self {
         Self {
@@ -991,23 +1083,40 @@ impl<T> OrderedTaskResults<T> {
         Ok(())
     }
 
-    pub fn drain_ready_prefix(&mut self) -> Vec<OrderedTaskTerminal<T>> {
-        let mut ready = Vec::new();
-        while let Some((&key, handle)) = self.pending.first_key_value() {
-            if !handle.is_finished() {
-                break;
-            }
-            let Some(mut handle) = self.pending.remove(&key) else {
+    pub fn validate_completion_cutoff(
+        &self,
+        cutoff: &TaskCompletionCutoff,
+    ) -> Result<(), TaskCompletionCutoffError> {
+        if let Some(handle) = self
+            .pending
+            .values()
+            .find(|handle| !handle.state.belongs_to(cutoff))
+        {
+            return Err(TaskCompletionCutoffError::PoolMismatch {
+                task: handle.descriptor(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn capture_ready_prefix(
+        &mut self,
+        cutoff: &TaskCompletionCutoff,
+    ) -> Result<OrderedTaskReadySnapshot<T>, TaskCompletionCutoffError> {
+        self.validate_completion_cutoff(cutoff)?;
+        let ready_count = self
+            .pending
+            .values()
+            .take_while(|handle| handle.state.completed_by(cutoff))
+            .count();
+        let mut handles = Vec::with_capacity(ready_count);
+        for _ in 0..ready_count {
+            let Some((order_key, handle)) = self.pending.pop_first() else {
                 break;
             };
-            if let Some(terminal) = handle.try_take() {
-                ready.push(OrderedTaskTerminal {
-                    order_key: key,
-                    terminal,
-                });
-            }
+            handles.push((order_key, handle));
         }
-        ready
+        Ok(OrderedTaskReadySnapshot { handles })
     }
 }
 
@@ -1055,7 +1164,22 @@ impl TaskStats {
     }
 }
 
-struct TaskPoolInstanceToken;
+#[derive(Debug, Default)]
+struct TaskCompletionPublication {
+    sequence: u64,
+}
+
+impl TaskCompletionPublication {
+    fn next_sequence(&mut self) -> u64 {
+        self.sequence += 1;
+        self.sequence
+    }
+}
+
+#[derive(Debug, Default)]
+struct TaskPoolInstanceToken {
+    completion_publication: Mutex<TaskCompletionPublication>,
+}
 
 #[derive(Resource)]
 pub struct TaskPools {
@@ -1177,7 +1301,7 @@ impl TaskPools {
         Ok(Self {
             config,
             next_id: AtomicU64::new(1),
-            instance_token: Arc::new(TaskPoolInstanceToken),
+            instance_token: Arc::new(TaskPoolInstanceToken::default()),
             io,
             compute,
             async_compute,
@@ -1196,7 +1320,7 @@ impl TaskPools {
         Ok(Self {
             config,
             next_id: AtomicU64::new(1),
-            instance_token: Arc::new(TaskPoolInstanceToken),
+            instance_token: Arc::new(TaskPoolInstanceToken::default()),
             io,
             compute,
             async_compute,
@@ -1260,6 +1384,15 @@ impl TaskPools {
         stats
     }
 
+    #[must_use]
+    pub fn capture_completion_cutoff(&self) -> TaskCompletionCutoff {
+        let publication = lock_unpoisoned(&self.instance_token.completion_publication);
+        TaskCompletionCutoff {
+            instance_token: self.instance_token.clone(),
+            sequence: publication.sequence,
+        }
+    }
+
     pub fn spawn<T, F>(
         &self,
         kind: TaskPoolKind,
@@ -1288,7 +1421,7 @@ impl TaskPools {
             order_key,
         };
         let counters = self.executor(kind).shared.counters.clone();
-        let state = Arc::new(TaskState::new(counters));
+        let state = Arc::new(TaskState::new(counters, self.instance_token.clone()));
         let handle = TaskHandle {
             descriptor,
             state: state.clone(),
@@ -3124,6 +3257,7 @@ impl TaskOwnerReaperHarness {
         on_drop: Vec<Box<dyn FnOnce() + Send>>,
     ) -> TaskOwnerReapReceipt {
         let counters = Arc::new(Mutex::new(TaskCounters::default()));
+        let instance_token = Arc::new(TaskPoolInstanceToken::default());
         let pending = on_drop
             .into_iter()
             .enumerate()
@@ -3134,7 +3268,10 @@ impl TaskOwnerReaperHarness {
                     kind: TaskPoolKind::Io,
                     order_key: TaskOrderKey::new(0, TaskDomainKey::new(0), id),
                 };
-                let state = Arc::new(TaskState::<()>::new(Arc::clone(&counters)));
+                let state = Arc::new(TaskState::<()>::new(
+                    Arc::clone(&counters),
+                    Arc::clone(&instance_token),
+                ));
                 PendingJob {
                     descriptor,
                     coalesce_key: None,
@@ -3240,17 +3377,6 @@ impl Plugin for TaskPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.configure_sets(
-            CoreStage::TaskUpdate,
-            (
-                TaskUpdateSet::Poll,
-                TaskUpdateSet::CoalesceAssetChanges,
-                TaskUpdateSet::SpawnAssetJobs,
-                TaskUpdateSet::ApplyAssetResults,
-            )
-                .chain(),
-        )?;
-
         if !app.world().contains_resource::<TaskPools>() {
             let mut pools = match TaskPools::try_new_retained(self.config) {
                 Ok(pools) => pools,

@@ -1599,6 +1599,8 @@ dependencies = [
  "bevy_ecs",
  "nara_app",
  "nara_asset",
+ "nara_core",
+ "nara_diagnostic",
  "nara_ecs",
  "nara_tasks",
  "notify",

@@ -472,11 +472,24 @@ fn ordered_results_hold_later_completions_until_the_prefix_is_ready() {
         .recv_timeout(Duration::from_secs(10))
         .unwrap();
 
-    assert!(ordered.drain_ready_prefix().is_empty());
+    let cutoff = pools.capture_completion_cutoff();
+    assert!(
+        ordered
+            .capture_ready_prefix(&cutoff)
+            .unwrap()
+            .into_terminals()
+            .unwrap()
+            .is_empty()
+    );
     first_release_tx.send(()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let ready = loop {
-        let ready = ordered.drain_ready_prefix();
+        let cutoff = pools.capture_completion_cutoff();
+        let ready = ordered
+            .capture_ready_prefix(&cutoff)
+            .unwrap()
+            .into_terminals()
+            .unwrap();
         if !ready.is_empty() || Instant::now() >= deadline {
             break ready;
         }
@@ -486,6 +499,86 @@ fn ordered_results_hold_later_completions_until_the_prefix_is_ready() {
     assert!(matches!(ready[0].terminal, TaskTerminal::Completed(1)));
     assert!(matches!(ready[1].terminal, TaskTerminal::Completed(2)));
     let _ = pools.shutdown_blocking().unwrap();
+}
+
+#[test]
+fn ordered_ready_snapshot_excludes_completion_after_cutoff_before_capture() {
+    let pools = TaskPools::try_new(config_with_compute_workers(1, 1)).unwrap();
+    let (release_tx, release_rx) = mpsc::channel();
+    let (done_tx, done_rx) = mpsc::channel();
+    let task = accepted(pools.spawn(TaskPoolKind::Compute, request(1), move |_| {
+        release_rx.recv().unwrap();
+        done_tx.send(()).unwrap();
+        1_u32
+    }));
+    let mut ordered = OrderedTaskResults::default();
+    ordered.push(task).unwrap();
+
+    let first_cutoff = pools.capture_completion_cutoff();
+    release_tx.send(()).unwrap();
+    done_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let completion_deadline = Instant::now() + Duration::from_secs(10);
+    while pools.stats().for_kind(TaskPoolKind::Compute).completed < 1
+        && Instant::now() < completion_deadline
+    {
+        thread::yield_now();
+    }
+    assert_eq!(
+        pools.stats().for_kind(TaskPoolKind::Compute).completed,
+        1,
+        "task completion must publish before the stream captures against the old cutoff"
+    );
+
+    let first_poll = ordered
+        .capture_ready_prefix(&first_cutoff)
+        .unwrap()
+        .into_terminals()
+        .unwrap();
+    assert!(first_poll.is_empty());
+    assert_eq!(ordered.len(), 1);
+
+    let second_cutoff = pools.capture_completion_cutoff();
+    let second_poll = ordered
+        .capture_ready_prefix(&second_cutoff)
+        .unwrap()
+        .into_terminals()
+        .unwrap();
+    assert_eq!(second_poll.len(), 1);
+    assert!(matches!(
+        second_poll[0].terminal,
+        TaskTerminal::Completed(1)
+    ));
+    let _ = pools.shutdown_blocking().unwrap();
+}
+
+#[test]
+fn ordered_ready_snapshot_rejects_a_foreign_cutoff_without_mutation() {
+    let own_pools = inline_pools(1);
+    let foreign_pools = inline_pools(1);
+    let foreign_task = accepted(foreign_pools.spawn(TaskPoolKind::Io, request(1), |_| 7_u32));
+    let foreign_descriptor = foreign_task.descriptor();
+    let mut ordered = OrderedTaskResults::default();
+    ordered.push(foreign_task).unwrap();
+    assert_eq!(foreign_pools.run_pending_for_tests().executed, 1);
+
+    let error = ordered
+        .capture_ready_prefix(&own_pools.capture_completion_cutoff())
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        TaskCompletionCutoffError::PoolMismatch {
+            task: foreign_descriptor
+        }
+    );
+    assert_eq!(ordered.len(), 1);
+    let ready = ordered
+        .capture_ready_prefix(&foreign_pools.capture_completion_cutoff())
+        .unwrap()
+        .into_terminals()
+        .unwrap();
+    assert_eq!(ready.len(), 1);
+    assert!(matches!(ready[0].terminal, TaskTerminal::Completed(7)));
 }
 
 #[test]

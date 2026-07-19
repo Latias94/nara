@@ -8,27 +8,30 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use nara_app::App;
+use nara_app::{App, CoreStage};
 use nara_asset::{
     AssetEventKind, AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
     AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind,
     AssetReloadRequests, AssetServer, AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind,
-    AssetStates, AssetVersion, Assets, Handle, ImportArtifactPathError, ImportDependencyDigest,
-    ImportProfile, ImportRequest, ImportSettingsHash, Importer, ImporterRegistry,
-    ImporterSelectionError, LoadState, SourceExtension, SourceHash, StableAssetId,
+    AssetStates, AssetTaskUpdateSet, AssetVersion, Assets, Handle, ImportArtifactPathError,
+    ImportDependencyDigest, ImportProfile, ImportRequest, ImportSettingsHash, Importer,
+    ImporterRegistry, ImporterSelectionError, LoadState, SourceExtension, SourceHash,
+    StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
     Diagnostic, DiagnosticFieldClass, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
 };
+use nara_ecs::{ResMut, schedule::IntoScheduleConfigs};
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 use nara_render::{
     PreparedRenderResources, RenderPrepareInvalidationReason, RenderPrepareInvalidations,
 };
 use nara_tasks::{
-    TaskCancellation, TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey, TaskFailure,
-    TaskHandle, TaskKindConfig, TaskOverloadPolicy, TaskPoolConfig, TaskPoolKind, TaskPools,
-    TaskRejectReason, TaskRejection, TaskShutdownPolicy, TaskSpawnOutcome, TaskSpawnRequest,
+    TaskCancellation, TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey,
+    TaskCompletionCutoffError, TaskFailure, TaskHandle, TaskKindConfig, TaskOverloadPolicy,
+    TaskPoolConfig, TaskPoolKind, TaskPools, TaskRejectReason, TaskRejection, TaskShutdownPolicy,
+    TaskSpawnOutcome, TaskSpawnRequest,
 };
 use tracing::{Event, Metadata, Subscriber, field::Visit, span};
 
@@ -1679,6 +1682,55 @@ fn ordered_image_stream_waits_for_earlier_task_before_reverse_completion_apply()
 }
 
 #[test]
+fn result_becoming_stale_after_poll_is_retired_once_before_apply() {
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(Path::new("."), record.clone());
+    let (handle, request, last_good_hash) =
+        reserve_loaded_image_request(&mut app, &record, &[255, 0, 0, 255]);
+    let replacement = imported_image_for_request(
+        &app,
+        &ImageImporter::default(),
+        &record,
+        &request,
+        &[0, 255, 0, 255],
+    );
+    let task = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN),
+        move |_| Ok(replacement),
+    ));
+    track_image_task(&mut app, request, task);
+    let report = app.world().resource::<TaskPools>().run_pending_for_tests();
+    assert_eq!(report.executed, 1);
+    let asset_id = handle.id();
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        (move |mut states: ResMut<AssetStates>| {
+            states.set_loading(asset_id);
+        })
+        .in_set(AssetTaskUpdateSet::ResolveSourceChanges),
+    )
+    .unwrap();
+
+    app.update().unwrap();
+
+    assert_eq!(
+        app.world()
+            .resource::<Assets<ImageAsset>>()
+            .get(handle)
+            .unwrap()
+            .source()
+            .source_hash(),
+        last_good_hash
+    );
+    assert!(app.world().resource::<AssetEvents>().is_empty());
+    let stats = app.world().resource::<ImageReloadStats>();
+    assert_eq!(stats.applied, 0);
+    assert_eq!(stats.stale, 1);
+    assert_eq!(stats.pending, 0);
+}
+
+#[test]
 fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
     let first_record = image_record_with_id(
         "textures/a.png",
@@ -1693,7 +1745,7 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
         Handle::new(second_asset),
         AssetVersion::ZERO,
     );
-    let mut pools = TaskPools::try_new(bounded_task_config(4, 8)).unwrap();
+    let pools = TaskPools::try_new(bounded_task_config(4, 8)).unwrap();
     let (first_started_tx, first_started_rx) = mpsc::channel();
     let (first_release_tx, first_release_rx) = mpsc::channel();
 
@@ -1744,7 +1796,7 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
         .unwrap();
 
     wait_for_io_completions(&pools, 2);
-    let first_snapshot = drain_ready_image_jobs(&mut pending);
+    let first_snapshot = drain_ready_image_jobs(&pools, &mut pending);
     assert_eq!(
         first_snapshot
             .iter()
@@ -1771,7 +1823,7 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
 
     first_release_tx.send(()).unwrap();
     wait_for_io_completions(&pools, 4);
-    let mut second_snapshot = drain_ready_image_jobs(&mut pending);
+    let mut second_snapshot = drain_ready_image_jobs(&pools, &mut pending);
     assert_eq!(
         second_snapshot
             .iter()
@@ -1796,6 +1848,73 @@ fn image_ordering_is_per_asset_and_ready_snapshots_follow_task_order_keys() {
     );
 
     let _ = pools.shutdown_blocking();
+}
+
+#[test]
+fn image_ready_capture_rejects_mixed_task_pools_without_mutating_any_stream() {
+    let first_record = image_record_with_id(
+        "textures/a.png",
+        StableAssetId::parse_str("933965e8-6d5a-4a72-9bda-65af6bc52296").unwrap(),
+    );
+    let second_record = image_record("textures/b.png");
+    let first_asset = AssetId::from_raw(10);
+    let second_asset = AssetId::from_raw(20);
+    let own_pools = TaskPools::inline_for_tests(bounded_task_config(2, 2)).unwrap();
+    let foreign_pools = TaskPools::inline_for_tests(bounded_task_config(2, 2)).unwrap();
+    let own_task = accepted_image_handle(own_pools.spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(10, IMAGE_RELOAD_TASK_DOMAIN),
+        |_| Err(ImageReloadError::MissingSourceDirectory),
+    ));
+    let foreign_task = accepted_image_handle(foreign_pools.spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(20, IMAGE_RELOAD_TASK_DOMAIN),
+        |_| Err(ImageReloadError::MissingSourceDirectory),
+    ));
+    let foreign_descriptor = foreign_task.descriptor();
+    let mut pending = PendingImageJobs::default();
+    pending
+        .imports
+        .entry(first_asset)
+        .or_default()
+        .push(
+            detached_attempt(reload_request(
+                &first_record,
+                Handle::new(first_asset),
+                AssetVersion::ZERO,
+            )),
+            own_task,
+        )
+        .unwrap();
+    pending
+        .imports
+        .entry(second_asset)
+        .or_default()
+        .push(
+            detached_attempt(reload_request(
+                &second_record,
+                Handle::new(second_asset),
+                AssetVersion::ZERO,
+            )),
+            foreign_task,
+        )
+        .unwrap();
+    assert_eq!(own_pools.run_pending_for_tests().executed, 1);
+    assert_eq!(foreign_pools.run_pending_for_tests().executed, 1);
+
+    let error = match pending.capture_ready_prefixes(&own_pools.capture_completion_cutoff()) {
+        Ok(_) => panic!("mixed task pools must reject the shared cutoff"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error,
+        TaskCompletionCutoffError::PoolMismatch {
+            task: foreign_descriptor
+        }
+    );
+    assert_eq!(pending.imports[&first_asset].len(), 1);
+    assert_eq!(pending.imports[&second_asset].len(), 1);
 }
 
 #[test]
@@ -2855,12 +2974,13 @@ fn wait_for_io_completions(pools: &TaskPools, expected: u64) {
     );
 }
 
-fn drain_ready_image_jobs(pending: &mut PendingImageJobs) -> Vec<ReadyImageImportJob> {
-    pending
-        .imports
-        .values_mut()
-        .flat_map(PendingImageImportStream::drain_ready_prefix)
-        .collect()
+fn drain_ready_image_jobs(
+    pools: &TaskPools,
+    pending: &mut PendingImageJobs,
+) -> Vec<ReadyImageImportJob> {
+    let cutoff = pools.capture_completion_cutoff();
+    let snapshots = pending.capture_ready_prefixes(&cutoff).unwrap();
+    pending.consume_ready_prefixes(snapshots).unwrap()
 }
 
 fn assert_image_diagnostic_case(case: ImageDiagnosticCase) {
@@ -2966,8 +3086,7 @@ fn capture_tracing(emit: impl FnOnce()) -> String {
     let captured = Arc::new(Mutex::new(Vec::new()));
     let subscriber = RecordingSubscriber::new(Arc::clone(&captured));
     tracing::subscriber::with_default(subscriber, emit);
-    let output = captured.lock().unwrap().join("\n");
-    output
+    captured.lock().unwrap().join("\n")
 }
 
 #[derive(Clone)]

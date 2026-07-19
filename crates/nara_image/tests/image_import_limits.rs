@@ -364,7 +364,7 @@ fn pending_and_running_cancellation_release_admission_charge_exactly_once() {
     let importer = ImageImporter::default();
 
     let pending = admit_file(&importer, &source, record.clone()).unwrap();
-    let mut inline = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
+    let inline = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
     let mut pending_handle = accepted_task(inline.spawn(
         TaskPoolKind::Io,
         TaskSpawnRequest::new(1, TaskDomainKey::new(1)),
@@ -380,7 +380,7 @@ fn pending_and_running_cancellation_release_admission_charge_exactly_once() {
     let _ = inline.shutdown_blocking();
 
     let running = admit_file(&importer, &source, record).unwrap();
-    let mut threaded = TaskPools::try_new(TaskPoolConfig::default()).unwrap();
+    let threaded = TaskPools::try_new(TaskPoolConfig::default()).unwrap();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let mut running_handle = accepted_task(threaded.spawn(
@@ -413,7 +413,7 @@ fn panic_and_pool_rejection_drop_unpublished_admission_charge() {
     let importer = ImageImporter::default();
 
     let panicking = admit_file(&importer, &source, record.clone()).unwrap();
-    let mut inline = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
+    let inline = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
     let mut handle = accepted_task(inline.spawn(
         TaskPoolKind::Io,
         TaskSpawnRequest::new(1, TaskDomainKey::new(2)),
@@ -428,7 +428,7 @@ fn panic_and_pool_rejection_drop_unpublished_admission_charge() {
     let _ = inline.shutdown_blocking();
 
     let rejected = admit_file(&importer, &source, record).unwrap();
-    let mut closed = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
+    let closed = TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap();
     let _ = closed.shutdown_blocking();
     let outcome = closed.spawn(
         TaskPoolKind::Io,

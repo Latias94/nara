@@ -174,7 +174,7 @@ pub mod advanced_prelude {
         PluginProductCapability, PluginSchemaProviderId, PluginServiceId, PluginShutdownContext,
         PluginShutdownError, PluginShutdownObligationId, PluginSlot, PluginSlotId,
         PluginSlotPresence, RenderTime, ResolvedPluginGroup, RuntimeFrameStatus, SealedApp,
-        TaskUpdateSet, TimeFrameError, TimeFrameResource, TimeSettingsError,
+        TimeFrameError, TimeFrameResource, TimeSettingsError,
     };
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,
@@ -182,13 +182,13 @@ pub mod advanced_prelude {
         AssetMeta, AssetPathError, AssetRecord, AssetRefError, AssetRefExportPolicy,
         AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind,
         AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges,
-        AssetSourceKind, AssetSourceRoot, AssetState, AssetStateError, AssetStates, AssetVersion,
-        DigestParseError, ImportArtifactDigest, ImportArtifactKey, ImportArtifactPath,
-        ImportArtifactRecord, ImportDependency, ImportDependencyDigest, ImportDependencyRole,
-        ImportError, ImportJobInput, ImportProfile, ImportRequest, ImportSettingsHash,
-        ImportedAsset, Importer, ImporterDescriptor, ImporterId, ImporterRegistry, LoadState,
-        MissingMetaPolicy, ProjectAssetDatabase, SourceChangeResolver, SourceExtension, SourceHash,
-        TypedImporter,
+        AssetSourceKind, AssetSourceRoot, AssetState, AssetStateError, AssetStates,
+        AssetTaskUpdateSet, AssetVersion, DigestParseError, ImportArtifactDigest,
+        ImportArtifactKey, ImportArtifactPath, ImportArtifactRecord, ImportDependency,
+        ImportDependencyDigest, ImportDependencyRole, ImportError, ImportJobInput, ImportProfile,
+        ImportRequest, ImportSettingsHash, ImportedAsset, Importer, ImporterDescriptor, ImporterId,
+        ImporterRegistry, LoadState, MissingMetaPolicy, ProjectAssetDatabase, SourceChangeResolver,
+        SourceExtension, SourceHash, TypedImporter,
     };
     pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
     pub use nara_diagnostic::{
@@ -233,20 +233,22 @@ pub mod advanced_prelude {
         MigratedComponentValue, PreparedComponent, PreparedComponentCandidate,
     };
     pub use nara_tasks::{
-        OrderedTaskResults, OrderedTaskTerminal, TaskCancellation, TaskCancellationReason,
-        TaskCancellationToken, TaskCoalesceKey, TaskConfigError, TaskDescriptor, TaskDomainKey,
-        TaskFailure, TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey,
-        TaskOverloadPolicy, TaskPlugin, TaskPoolConfig, TaskPoolError, TaskPoolKind,
-        TaskPoolShutdownReport, TaskPoolStats, TaskPools, TaskRejectReason, TaskRejection,
+        OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,
+        TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey, TaskCompletionCutoff,
+        TaskCompletionCutoffError, TaskConfigError, TaskDescriptor, TaskDomainKey, TaskFailure,
+        TaskHandle, TaskId, TaskInlineRunReport, TaskKindConfig, TaskOrderKey, TaskOverloadPolicy,
+        TaskPlugin, TaskPoolConfig, TaskPoolError, TaskPoolKind, TaskPoolShutdownReport,
+        TaskPoolStats, TaskPools, TaskReadySnapshotError, TaskRejectReason, TaskRejection,
         TaskShutdownPolicy, TaskShutdownReport, TaskSpawnOutcome, TaskSpawnRequest, TaskStats,
         TaskTerminal, TaskTerminalState,
     };
 
     #[cfg(feature = "asset-watch")]
     pub use nara_asset_watch::{
-        AssetWatchDiagnostic, AssetWatchDiagnosticKind, AssetWatchDiagnostics, AssetWatchError,
-        AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue, AssetWatchPlugin,
-        AssetWatchQueueItem, AssetWatchTranslator, AssetWatcher,
+        AssetWatchError, AssetWatchEvent, AssetWatchEventKind, AssetWatchEventQueue,
+        AssetWatchEventSender, AssetWatchPlugin, AssetWatchQueueDrain, AssetWatchQueueLimits,
+        AssetWatchQueueSendError, AssetWatchQueueStats, AssetWatchRuntimeState,
+        AssetWatchRuntimeStatus, AssetWatchTranslator, AssetWatcher,
     };
     #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
     pub use nara_image::{

@@ -14,20 +14,22 @@ use std::{
     sync::Arc,
 };
 
-use nara_app::{App, CoreStage, Plugin, PluginError, RealTime, TaskUpdateSet};
+use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
 use nara_asset::{
     AssetEvents, AssetId, AssetLoadGenerations, AssetPath, AssetReloadDiagnostics,
     AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetSourceKind,
-    AssetStateError, AssetStates, Assets, Handle, ImporterRegistry, ImporterRegistryError,
+    AssetStateError, AssetStates, AssetTaskUpdateSet, Assets, Handle, ImporterRegistry,
+    ImporterRegistryError,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
     SafeSummary,
 };
-use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_ecs::{Res, ResMut, Resource, error::BevyError, schedule::IntoScheduleConfigs};
 use nara_tasks::{
-    OrderedTaskResults, TaskCancellation, TaskCancellationReason, TaskCoalesceKey, TaskDomainKey,
-    TaskFailure, TaskHandle, TaskOrderKey, TaskOverloadPolicy, TaskPoolKind, TaskPools,
+    OrderedTaskReadySnapshot, OrderedTaskResults, TaskCancellation, TaskCancellationReason,
+    TaskCoalesceKey, TaskCompletionCutoff, TaskCompletionCutoffError, TaskDomainKey, TaskFailure,
+    TaskHandle, TaskOrderKey, TaskOverloadPolicy, TaskPoolKind, TaskPools, TaskReadySnapshotError,
     TaskRejection, TaskSpawnOutcome, TaskSpawnRequest, TaskTerminal,
 };
 
@@ -123,9 +125,25 @@ impl PendingImageImportStream {
         }
     }
 
-    pub(super) fn drain_ready_prefix(&mut self) -> Vec<ReadyImageImportJob> {
-        self.ordered
-            .drain_ready_prefix()
+    fn validate_completion_cutoff(
+        &self,
+        cutoff: &TaskCompletionCutoff,
+    ) -> Result<(), TaskCompletionCutoffError> {
+        self.ordered.validate_completion_cutoff(cutoff)
+    }
+
+    pub(super) fn capture_ready_prefix(
+        &mut self,
+        cutoff: &TaskCompletionCutoff,
+    ) -> Result<OrderedTaskReadySnapshot<ImageImportTaskResult>, TaskCompletionCutoffError> {
+        self.ordered.capture_ready_prefix(cutoff)
+    }
+
+    fn consume_ready_terminals(
+        &mut self,
+        terminals: Vec<nara_tasks::OrderedTaskTerminal<ImageImportTaskResult>>,
+    ) -> Vec<ReadyImageImportJob> {
+        terminals
             .into_iter()
             .filter_map(|ordered| {
                 let attempt = self.attempts.remove(&ordered.order_key)?;
@@ -158,6 +176,48 @@ impl PendingImageJobs {
             .values()
             .map(PendingImageImportStream::len)
             .sum()
+    }
+
+    pub(super) fn capture_ready_prefixes(
+        &mut self,
+        cutoff: &TaskCompletionCutoff,
+    ) -> Result<
+        Vec<(AssetId, OrderedTaskReadySnapshot<ImageImportTaskResult>)>,
+        TaskCompletionCutoffError,
+    > {
+        for stream in self.imports.values() {
+            stream.validate_completion_cutoff(cutoff)?;
+        }
+        self.imports
+            .iter_mut()
+            .map(|(&asset_id, stream)| {
+                stream
+                    .capture_ready_prefix(cutoff)
+                    .map(|snapshot| (asset_id, snapshot))
+            })
+            .collect()
+    }
+
+    pub(super) fn consume_ready_prefixes(
+        &mut self,
+        snapshots: Vec<(AssetId, OrderedTaskReadySnapshot<ImageImportTaskResult>)>,
+    ) -> Result<Vec<ReadyImageImportJob>, TaskReadySnapshotError> {
+        let terminals = snapshots
+            .into_iter()
+            .map(|(asset_id, snapshot)| {
+                snapshot
+                    .into_terminals()
+                    .map(|terminals| (asset_id, terminals))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut ready = Vec::new();
+        for (asset_id, terminals) in terminals {
+            if let Some(stream) = self.imports.get_mut(&asset_id) {
+                ready.extend(stream.consume_ready_terminals(terminals));
+            }
+        }
+        self.imports.retain(|_, stream| !stream.is_empty());
+        Ok(ready)
     }
 }
 
@@ -328,7 +388,7 @@ impl Plugin for ImagePlugin {
         register_image_importer(app, self.importer.clone())?;
         app.add_systems(
             CoreStage::TaskUpdate,
-            poll_image_reload_results.in_set(TaskUpdateSet::Poll),
+            poll_image_reload_results.in_set(AssetTaskUpdateSet::Poll),
         )?;
         let source_directory = self.source_directory.clone();
         app.add_systems(
@@ -357,11 +417,11 @@ impl Plugin for ImagePlugin {
                     stats,
                 );
             })
-            .in_set(TaskUpdateSet::SpawnAssetJobs),
+            .in_set(AssetTaskUpdateSet::SpawnJobs),
         )?;
         app.add_systems(
             CoreStage::TaskUpdate,
-            apply_image_reload_results.in_set(TaskUpdateSet::ApplyAssetResults),
+            apply_image_reload_results.in_set(AssetTaskUpdateSet::ApplyResults),
         )?;
         Ok(())
     }
@@ -481,15 +541,22 @@ fn spawn_image_reload_jobs(
 }
 
 fn poll_image_reload_results(
+    task_pools: Res<TaskPools>,
     mut pending: ResMut<PendingImageJobs>,
     mut ready: ResMut<ReadyImageJobs>,
     mut stats: ResMut<ImageReloadStats>,
-) {
-    pending.imports.retain(|_, stream| {
-        ready.imports.extend(stream.drain_ready_prefix());
-        !stream.is_empty()
-    });
+) -> Result<(), BevyError> {
+    let cutoff = task_pools.capture_completion_cutoff();
+    let snapshots = pending
+        .capture_ready_prefixes(&cutoff)
+        .map_err(BevyError::error)?;
+    ready.imports.extend(
+        pending
+            .consume_ready_prefixes(snapshots)
+            .map_err(BevyError::error)?,
+    );
     stats.pending = pending.len().min(u32::MAX as usize) as u32;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

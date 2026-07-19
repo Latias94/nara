@@ -3,18 +3,26 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use nara_app::{App, CoreStage, Plugin, PluginError, TaskUpdateSet};
+use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
     PublicDiagnosticIdentifier, SafeSummary,
 };
-use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_ecs::{Res, ResMut, Resource, SystemSet, schedule::IntoScheduleConfigs};
 
 use crate::{
     AssetDatabaseError, AssetDependencyGraph, AssetError, AssetId, AssetPath, AssetRecord,
     AssetServer, AssetSourceKind, AssetStates, AssetVersion, ImportArtifactDigest,
     ProjectAssetDatabase, StableAssetId,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
+pub enum AssetTaskUpdateSet {
+    Poll,
+    ResolveSourceChanges,
+    SpawnJobs,
+    ApplyResults,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Resource)]
 pub struct AssetSourceRoot {
@@ -565,16 +573,16 @@ impl Plugin for AssetPlugin {
         app.configure_sets(
             CoreStage::TaskUpdate,
             (
-                TaskUpdateSet::Poll,
-                TaskUpdateSet::CoalesceAssetChanges,
-                TaskUpdateSet::SpawnAssetJobs,
-                TaskUpdateSet::ApplyAssetResults,
+                AssetTaskUpdateSet::Poll,
+                AssetTaskUpdateSet::ResolveSourceChanges,
+                AssetTaskUpdateSet::SpawnJobs,
+                AssetTaskUpdateSet::ApplyResults,
             )
                 .chain(),
         )?;
         app.add_systems(
             CoreStage::TaskUpdate,
-            resolve_asset_source_changes.in_set(TaskUpdateSet::CoalesceAssetChanges),
+            resolve_asset_source_changes.in_set(AssetTaskUpdateSet::ResolveSourceChanges),
         )?;
         Ok(())
     }

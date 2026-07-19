@@ -124,7 +124,7 @@ fn reference_game_uses_only_documented_schedule_anchors() {
     assert!(surface.contains_path(&["FixedUpdateSet", "Simulate"]));
     assert_only_documented_schedule_variants("reference game", repository, &surface);
     assert_only_documented_schedule_variants("reference game tests", repository, &test_surface);
-    for private_schedule_type in ["StartupStage", "TaskUpdateSet"] {
+    for private_schedule_type in ["StartupStage", "TaskUpdateSet", "AssetTaskUpdateSet"] {
         assert!(
             !surface.contains_identifier(private_schedule_type)
                 && !test_surface.contains_identifier(private_schedule_type),
