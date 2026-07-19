@@ -42,6 +42,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U4-1 | RGF-U4 | `RGF-U4` | `rust-api/behavior` | Plugin declarations, groups, slots, product planning, schema-provider input, App sealing/shutdown, and custom schedules | Replace imperative metadata/group installation and lifecycle aliases with static declarations, typed repeatable definitions, pure plans, `App::seal`, `App::shutdown_plugins`, and the unified typed schedule API. |
 | RGF-U5-1 | RGF-U5 | `RGF-U5` | `rust-api/behavior` | Code-first runtime ownership, exact stepping, typed faults, task close ownership, and Winit driving | Admit a sealed App through `RuntimeCandidate`, drive `RuntimeInstance`, use observable controls and retryable close, call `WinitRunner::run(&mut runtime)`, and rename standalone task shutdown to `shutdown_blocking`. |
 | RGF-U29-1 | RGF-U29 | `RGF-U29` | `rust-api/behavior` | Persistent codec output, registry binding, explicit component composition, and target-World apply eligibility | Return `PreparedComponentCandidate`, freeze the registry before runtime preflight, remove implicit required components/hooks from persistent types, and handle fail-closed target-World rejection. |
+| RGF-U13-1 | RGF-U13 | `198a680` | `rust-api/behavior` | Managed runtime driver access, physical button transitions, App-exit propagation, and desktop frame/shutdown semantics | Replace generic driver World/resource access with typed resource-local ports, propagate fallible button-edge admission, and handle the one-target desktop result/close contract. |
 
 ## Entry Contract
 
@@ -1806,6 +1807,80 @@ owner.
 `headless_run_rejects_unbounded_commands` compile-fail fixture prove stable terminal ticks, same-tick
 Defeated priority, last-good snapshot retention, privacy-safe CLI sinks, bounded cleanup, public-only
 game code, and the owned command boundary.
+
+## RGF-U13-1: Typed Desktop Driver and Ordered Button Transitions
+
+**Removed contract**:
+
+- `RuntimeDriverScope::{world, get_resource_mut, resource_mut, get_non_send_resource_mut,
+  non_send_resource_mut}`, which let a platform adapter inspect or mutate arbitrary live runtime
+  storage during managed execution.
+- Infallible `ButtonInput::press` and `ButtonInput::release` plus opposite-edge-cancelling
+  `just_pressed`/`just_released` sets. Those sets could not preserve press then release in one
+  platform frame and could not reject input storms atomically.
+- Headless product driving that consumed `AppExitRequests` without returning the exit result to the
+  product Host.
+
+**Canonical replacement or deletion rationale**: `RuntimeDriverScope` now applies only a typed
+resource-local `__RuntimeDriverPort` operation whose resource type owns the complete input/output
+surface and declares accepted runtime states. The carrier is intentionally doc-hidden pre-1.0
+plumbing, not a frozen public Platform Adapter Interface; it prevents ambient `World` access while
+OQ-038 waits for a second production adapter.
+
+`ButtonInput` keeps retained pressed state plus a bounded monotonic `ButtonTransition` list.
+`press`, `release`, and `release_all` return `Result`; capacity and sequence exhaustion leave both
+retained state and transitions unchanged. `ActionMap` consumes edges in sequence order, and the
+engine clears only the transient list at the declared frame boundary. `HeadlessRun` and
+`DesktopRun` both propagate a completed-frame App exit request as a product result.
+
+**Before**:
+
+```rust
+fn update_input(input: &mut ButtonInput<KeyCode>) {
+    input.press(KeyCode::Character('w'));
+    input.release(KeyCode::Character('w'));
+}
+```
+
+**After**:
+
+```rust
+fn update_input(input: &mut ButtonInput<KeyCode>) -> Result<(), ButtonInputError> {
+    input.press(KeyCode::Character('w'))?;
+    input.release(KeyCode::Character('w'))?;
+    Ok(())
+}
+```
+
+Advanced Adapter code replaces each generic scope read/write with a resource-owned
+`__RuntimeDriverPort` operation and calls `RuntimeDriverScope::__apply_port`. That hidden carrier
+may change before 1.0. Ordinary gameplay code should consume `ActionOutcomes` or submit semantic
+gameplay commands rather than driving platform resources.
+
+**Affected examples and fixtures**: `nara_winit`, root runtime/Host tests, the native surface smoke,
+and the independent reference-game headless/desktop paths now use the typed port and fallible
+ordered input contract.
+
+**User action**: propagate or explicitly handle `ButtonInputError` from `press`, `release`, and
+`release_all`. Remove platform code that expects generic managed-World/resource access; keep custom
+Adapter integration behind its own module while the shared Adapter shape remains unfrozen.
+
+**Source action**: `none`; the desktop profile added by the reference game uses existing
+`nara.toml` profile syntax and changes no persistent format version.
+
+**Cache action**: `keep`; rebuild Rust artifacts after the API change.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No generic driver-access shim or
+opposite-edge-cancelling input alias is retained.
+
+**Rollback**: revert commit `198a680` and all desktop callers together. Do not restore ambient
+managed-World mutation, collapse same-frame edges, or hide App exit from a product Host.
+
+**Verification anchors**: `crates/nara_input/src/lib.rs#tests`,
+`crates/nara_winit/src/tests.rs`, `tests/{project_runtime_boot,runtime_driver_boundary}.rs`,
+`reference-game/tests/{desktop_flow,desktop_parity}.rs`, and the U13 verification record prove
+ordered/fallible input, focus release, typed driver state gates, headless/desktop exit parity, and
+truthful desktop shutdown.
 
 ## Persistent Format Matrix
 

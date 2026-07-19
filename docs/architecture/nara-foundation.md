@@ -102,13 +102,13 @@ flowchart TD
 
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
-| `nara` | Facade, layered preludes, authorized project ingest/composition, immutable startup-content publication, and the concrete `HeadlessRun` product action | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs; root-owned content loading plus a private `ProjectHost` start/publication/retirement state machine over opaque filesystem authority |
+| `nara` | Facade, layered preludes, authorized project ingest/composition, immutable startup-content publication, and concrete `HeadlessRun`/`DesktopRun` product actions | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs; root-owned content loading plus a private `ProjectHost` start/publication/retirement state machine over opaque filesystem authority; Winit remains the selected desktop parent rather than a universal Host Interface |
 | `nara_app` | Gameplay authoring through `App`, Plugin declarations/definitions/plans, schedules, time, and frame outcomes; module-specific advanced U5 trial through `SealedApp`, `RuntimeCandidate`, `RuntimeInstance`, and typed control/fault/close values | Data-only group/slot resolution, private preparation, closed hook commit, explicit move-only shutdown obligations, reverse once-only shutdown, raw-runner versus managed-runtime exclusion, safe-point driving, exact fixed-tick execution, sticky fault authority, retryable finite close, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary; ADR 0084 still owns acceptance and final public placement |
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
 | `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, checked `limit + 1` bounded reads, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; unsupported platform primitives remain explicit |
-| `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule`, `ScheduleLabel`, and `SystemSet` | Product-facing ECS conventions over `bevy_ecs`, with facade-safe derive exports for root-only and renamed dependencies |
+| `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule`, `ScheduleLabel`, and `SystemSet`; advanced lifecycle-free insertion/despawn preparation | Product-facing ECS conventions over `bevy_ecs`, facade-safe derive exports for root-only and renamed dependencies, and private/version-coupled hook/observer probes used only to reject persistent transactions that cannot remain atomic |
 | `nara_ecs_derive` | `Component`, `Resource`, `ScheduleLabel`, and `SystemSet` derives behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, Bevy-compatible expansion, declaration diagnostics, and renamed-package path resolution |
 | `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, and stable non-`Entity` observation vocabulary |
 | `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
@@ -118,7 +118,7 @@ flowchart TD
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, O(1) state and persistent slot revisions, hot reload scheduling, dependency graph, reload generations |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, semantic watch event queue, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | `Name`, `Parent`, `Children`, bounded `SceneDocument`/`PrefabDocument` candidates, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation |
-| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, `RenderFrame`, `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data: views, targets, phases, explicit pass planning, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary |
+| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, owned `RenderFramePacket`, `RenderFrame`, `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data and the admitted generation-stamped one-window/one-target/one-view topology; explicit pass planning, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary |
 | `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, async image reload jobs, candidate-owned publication, last-good reload preservation, and backend-neutral image content preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, `Material2dKey` | Backend-neutral 2D material intent shared by sprites, tilemaps, runtime UI images, and future material assets |
 | `nara_sprite` | `Sprite`, `SpriteMaterial`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` material image binding | Sprite authoring component data with material-first image/sampler/alpha/tint; no backend handles |
@@ -126,11 +126,11 @@ flowchart TD
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteMaterialKey`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, and material-keyed textured quad batches |
 | `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState`, `UiPointerRoute`, `UiInteractionTarget` | Runtime ECS UI authoring data, layout projection, and target/view-aware pointer hover/capture/focus state; no editor UI toolkit or backend handles |
 | `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, UI-owned material/instance/UV types, image/color material queueing, clipping, sort, and batching for the UI render phase |
-| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized input state, frame-transient action outcome resolution, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
+| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, bounded ordered `ButtonTransition`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized retained state plus atomic per-frame edge admission, deterministic transition-order action resolution, focus-loss release, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
 | `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonically ordered fixed-tick admission with reserved local-action authority, pending/active/quarantine accounting, terminal fail-closed lifecycle state, and action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
 | `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver over `RuntimeInstance` that owns native windows, updates normalized input/window state through short driver scopes, invokes scoped renderer retirement only for its targets, joins registered runtime close with provider/native teardown, and preserves distinct primary-runner and teardown failures |
-| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, sprite/UI quad submission from `RenderPassPlan`, `SpriteBatches`, and `UiBatches`, and `RenderBackendStatus` updates |
+| `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, `WgpuFrameTransactionStats`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, owned topology and sprite/UI batch capture, pre-acquire generation/topology rejection, at-most-once acquire/submit/present, clamped UI scissor, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, and `RenderBackendStatus` updates |
 | `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldIdentitySnapshot`, `SceneInspectorState`, transitional `SceneEditorState`/`ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, stable identity-only snapshots, open scene document slots, active document, selection sets, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents; the bare-World Play owner remains transitional while RGF-U17 tests a concrete Editor Host under the still-Proposed ADR 0082/0084 topology |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
@@ -351,6 +351,14 @@ second real adapter or stronger isolation pressure.
   calls without reopening project source or resubmitting commands. RGF-U6 now proves this U24
   headless Trial through a complete game loop and CLI; that evidence still does not accept ADR
   0082/0084 or freeze a universal Host/factory Interface.
+- The root `DesktopRun` action reuses that private start/publication/retirement owner with a
+  desktop-profile plan and an independently retained content lease. Winit owns the native parent
+  loop, drives only a published `RuntimeInstance`, applies platform work through typed resource-local
+  ports rather than ambient `World` access, propagates App exit requests, retires every registered
+  surface before releasing its provider/window, and joins runtime close with native teardown. The
+  first workspace binary still resolves project content from the source checkout; executable-relative
+  packaging belongs to RGF-U7. This concrete desktop path is ADR 0082/0084 Trial evidence, not a
+  public universal process Host or Platform Adapter trait.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
 - `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
 - `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age
@@ -372,7 +380,11 @@ second real adapter or stronger isolation pressure.
   snapshot; deterministic snapshots sort stable game identities and retain the last good state.
   The bundled headless CLI accepts only a bounded maximum tick count, emits one versioned JSON
   terminal summary, separates privacy-safe failure diagnostics onto stderr, and drives finite
-  cleanup. Desktop input/render/HUD parity remains RGF-U13 work.
+  cleanup. The desktop profile now lowers ordered WASD/Enter edges into the same semantic command
+  path, renders player/enemy/projectile and clipped HUD/terminal geometry through one admitted
+  Winit/wgpu transaction, and performs an observer-safe atomic wave Retry without replacing the
+  runtime, window, or device generation. Automated U13 gates are complete; the human Windows play
+  check remains the final unit-closure evidence.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_identity` implements the world-scoped identity core, structured references, atomic
   fork/restore remaps, tombstone policy, root facade wiring, and scene/gameplay/reflect/tooling
@@ -420,7 +432,14 @@ second real adapter or stronger isolation pressure.
   their direct focused behavior oracles. This test-only policy is
   not a runtime diagnostics bridge, pressure histogram, production evidence facade, CLI, or
   benchmark runner.
-- `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and `RenderPassPlan`; `nara_render_wgpu` records skipped frames and backend errors through that backend-neutral resource and consumes the explicit pass plan for clear/world/UI/gizmo order.
+- `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`,
+  `RenderPassPlan`, and an owned immutable `RenderFramePacket`. The packet freezes one admitted
+  runtime generation, frame, window, target, view, viewport, and phase sequence before acquisition.
+  `nara_render_wgpu` captures owned sprite/UI batches beside that topology, rejects stale,
+  repeated, extra, mismatched, or invalid topology before surface work, records at-most-once
+  acquire/submit/present counters, and consumes the explicit pass plan for clear/world/UI/gizmo
+  order. Submit-time texture preparation still reads live image/prepared-resource storage; RGF-U14
+  measures packet clone/allocation and retained-byte pressure before that boundary changes.
 - Native window targets use an owning provider plus an explicit lifecycle authority. Atomic surface
   acquisition issues one non-cloneable handle source and one control lease; safe wgpu surface
   creation consumes the handle source, whose `Drop` acknowledges actual owner release. Controlled
@@ -461,8 +480,15 @@ second real adapter or stronger isolation pressure.
 - Direct `ImageAsset::new`, serde construction, and raw image-storage mutation are advanced in-memory paths, not bounded file-ingest APIs; their callers own prior allocation policy. State and slot revisions still invalidate any in-flight official candidate across those mutations.
 - `nara_sprite_render` sorts and batches by `SpriteMaterialKey`, which contains image render resource key plus sampler, alpha mode, and tint. `nara_render_wgpu` caches GPU image textures by prepared image snapshot and caches sampler bind groups by material key.
 - `nara_asset_watch` is an optional desktop watcher adapter behind the root `asset-watch` feature. It owns `notify`, validates its root against `AssetSourceRoot`, preserves in-root rename sides, and translates raw filesystem events into semantic `AssetSourceChange` values without leaking watcher types into `nara_asset`.
-- `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit events.
-- `nara_input::ActionMap` resolves retained key/mouse state into frame-transient `ActionOutcomes` in `InputSet::ResolveActions`, with action IDs, contexts, key/mouse bindings, started/released phases, and deterministic binding order.
+- `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and
+  `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit
+  events. Each button resource retains current state and a bounded, monotonically sequenced
+  transition list, so press/release in one frame is not collapsed. Capacity or sequence exhaustion
+  rejects without changing retained state, and focus loss atomically emits releases before stale
+  repeats are gated.
+- `nara_input::ActionMap` resolves those ordered key/mouse transitions into frame-transient
+  `ActionOutcomes` in `InputSet::ResolveActions`, with action IDs, contexts, key/mouse bindings,
+  started/released phases, and deterministic binding order.
 - `nara_gameplay` owns bounded semantic gameplay command admission. The local action mapper targets
   the next open authoritative tick through its reserved source stream; explicit producers submit a
   validated ingress source, tick, sequence, and draft. Fixed Prepare closes the tick and admits one
@@ -498,9 +524,11 @@ second real adapter or stronger isolation pressure.
   ADR
   [0078](adr/0078-render-host-affinity-webgpu-initialization-and-device-recovery.md).
   The current native Winit/wgpu slice implements safe owning surfaces, unique target leases,
-  main-thread execution, resize/dirty reconfiguration, device-loss detection with full local
-  invalidation, no implicit reinitialization from `Unavailable`, and target retirement. It does not
-  yet implement the complete host, packet, browser, device epoch, or bounded recovery contract.
+  main-thread execution, owned single-target frame capture, at-most-once acquire/submit/present,
+  resize/dirty reconfiguration, device-loss detection with full local invalidation, no implicit
+  reinitialization from `Unavailable`, and target retirement. It does not yet isolate submit-time
+  image/prepared-resource lookup from live ECS storage or implement browser placement, device
+  epochs, bounded recovery, or multi-target coordination.
 - Input is layered through normalized events, retained device state, routing decisions, action maps,
   text/IME streams, UI focus/pointer capture, and future accessibility semantics. See ADR
   [0041](adr/0041-input-routing-actions-text-focus-and-accessibility.md).
@@ -560,9 +588,10 @@ second real adapter or stronger isolation pressure.
   The gameplay prelude remains backend-free, advanced/tooling/backend surfaces are explicit, and
   `nara_audio` has been retired because it had no production consumer. Pure product/plugin closure,
   stable configurable slots, repeatable preparation, and frozen schema-provider input are
-  implemented. Authorized immutable startup content and the concrete headless Host-owned runtime
-  construction/publication action are also implemented. RGF-U6 completes the authoritative
-  headless game/CLI closure; Editor and desktop Host evidence remain separate later units.
+  implemented. Authorized immutable startup content plus the concrete headless and desktop
+  Host-owned runtime construction/publication actions are also implemented. RGF-U6 completes the
+  authoritative headless game/CLI closure, and RGF-U13 supplies the matching Winit/input/render/HUD
+  path; the manual Windows play check and Editor Host evidence remain separate closure work.
   See ADR
   [0079](adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md).
 - `CoreStage::TaskUpdate` remains the app-owned main-thread integration point, while each business

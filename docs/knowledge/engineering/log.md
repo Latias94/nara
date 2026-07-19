@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-19
+* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U13](registry/2026-07/2026-07-19T193816Z-engine-foundation-contract-completion-codex-root-437f122f2a8143f18470951cd1741a80.md) - Record automated completion of the desktop production wave while retaining the manual Windows play check as the final U13 gate.
+* **Verification Evidence**: [RGF-U13 desktop production wave automated verification](verification/2026-07/2026-07-19T192736Z-rgf-u13-desktop-production-wave-automated-verification-9d99f3f9c3c2450ea98dfa0952a1ded3.md) - Commit 198a680 completes the supported desktop product path, ordered input, owned render packet, native surface lifecycle, HUD, and atomic Retry; manual Windows play remains pending.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U13](registry/2026-07/2026-07-19T070109Z-engine-foundation-contract-completion-codex-root-efb5a01385c3477386810dfa9a159aef.md) - Activate desktop parity over the verified U6 authoritative headless wave and U24 product Host.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U6](registry/2026-07/2026-07-19T070051Z-engine-foundation-contract-completion-codex-root-0273ec9e52f842b68da605f678ffc51a.md) - Close RGF-U6 after the deterministic headless wave, stable snapshot, terminal outcome, CLI, and full verification gates passed.
 * **Verification Evidence**: [RGF-U6 deterministic headless wave verification](verification/2026-07/2026-07-19T065918Z-rgf-u6-deterministic-headless-wave-verification-203bdd80f8704a1a8e6440ef7f9069ba.md) - Commit db511a7 closes the authoritative reference-game wave, stable snapshots, terminal outcomes, privacy-safe CLI, and bounded shutdown.
@@ -145,5 +147,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Progress**: [Scene patch prefab schema foundation implemented](progress/2026-07-08T145208Z-scene-patch-prefab-schema-foundation.md)
 * **Memory Event**: [Planning: scene patch prefab schema foundation](logs/2026-07/2026-07-08T133500Z-planning-scene-patch-prefab-schema-foundation.md) - Created the next implementation-ready plan for validated scene patch transactions, field-level prefab overrides, component schema export, and migrations.
 * **Verification**: [Asset Render Resource Seam Review Hardening](verification/2026-07-08T125216Z-asset-render-resource-seam-review-hardening.md)
-* **Memory Event**: [Review hardening: asset render resource seam](logs/2026-07/2026-07-08T125216Z-review-hardening-asset-render-resource-seam.md) - Read-only review findings were resolved for asset identity, source-kind preflight, image prepare cleanup, invalid atlas tiles, and wgpu texture module boundaries.
-* **Verification**: [Asset Render Resource Seam Final Verification](verification/2026-07-08T120928Z-asset-render-resource-seam-final.md)

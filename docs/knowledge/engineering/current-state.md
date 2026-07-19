@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "4775f396610f124afd4feddede1565169d65b5246ff6ec63b24bc77a62e5e4d5"
+source_fingerprint: "aeedcd7c6e1f5c60c03495f9d364a58336173f6a00300bf15708a067e478f483"
 ---
 
 # Current State
@@ -12,17 +12,18 @@ source_fingerprint: "4775f396610f124afd4feddede1565169d65b5246ff6ec63b24bc77a62e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `4775f396610f124afd4feddede1565169d65b5246ff6ec63b24bc77a62e5e4d5`
-- Immutable records: 164
+- Source fingerprint: `aeedcd7c6e1f5c60c03495f9d364a58336173f6a00300bf15708a067e478f483`
+- Immutable records: 166
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game-driven foundation refactor: RGF-U13](registry/2026-07/2026-07-19T070109Z-engine-foundation-contract-completion-codex-root-efb5a01385c3477386810dfa9a159aef.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game-driven foundation refactor: RGF-U13](registry/2026-07/2026-07-19T193816Z-engine-foundation-contract-completion-codex-root-437f122f2a8143f18470951cd1741a80.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGF-U13 desktop production wave automated verification](verification/2026-07/2026-07-19T192736Z-rgf-u13-desktop-production-wave-automated-verification-9d99f3f9c3c2450ea98dfa0952a1ded3.md) - Commit 198a680 completes the supported desktop product path, ordered input, owned render packet, native surface lifecycle, HUD, and atomic Retry; manual Windows play remains pending.
 - **Verification Evidence**: [RGF-U6 deterministic headless wave verification](verification/2026-07/2026-07-19T065918Z-rgf-u6-deterministic-headless-wave-verification-203bdd80f8704a1a8e6440ef7f9069ba.md) - Commit db511a7 closes the authoritative reference-game wave, stable snapshots, terminal outcomes, privacy-safe CLI, and bounded shutdown.
 - **Verification Evidence**: [RGF-U24 concrete project Host verification](verification/2026-07/2026-07-18T225631Z-rgf-u24-concrete-project-host-verification-2471074f91454290a016a1b4f620af34.md) - Commit 5ddbf18 closes the bounded headless product action, atomic runtime publication, and U26 ownership reversal proof.
 - **Verification Evidence**: [RGF-U26 manual ownership counterfactual verification](verification/2026-07/2026-07-18T174414Z-rgf-u26-manual-ownership-counterfactual-verification-9730fc03912d4eaa874e5384771b0fe8.md) - Commit a2d695d freezes the minimal pre-Host success and three-failure ownership baseline without a policy engine.
@@ -34,7 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Subagent Finding**: [LogLog Rust gamedev critique against an optional C# gameplay Adapter](subagents/2026-07/2026-07-17-loglog-rust-gamedev-csharp-gameplay-research.md) - Primary-source review of which Leaving Rust gamedev pain points an optional first-party C#/CoreCLR gameplay path could relieve, which remain engine-product problems, and which CLR/interop risks it introduces.
 - **Verification Evidence**: [RGF-U28 public schedule compatibility verification](verification/2026-07/2026-07-17T100726Z-rgf-u28-public-schedule-compatibility-verification-55f3d96f00e544dba50a1802e35c3190.md) - Commit c24b38a closes the four public schedule anchors and seal-time deferred compatibility contract.
 - **Verification Evidence**: [RGF-U5 managed runtime correction verification](verification/2026-07/2026-07-17T051052Z-rgf-u5-managed-runtime-correction-verification-5a58cbaf030041fe8ead8cfdf4119c51.md) - Supersedes the first U5 verification after raw managed World access exposed a safe Bevy change-detection bypass; ff2e02a structurally seals the scope and re-verifies the six correction regressions.
-- **Verification Evidence**: [RGF-U5 managed runtime verification](verification/2026-07/2026-07-17T014655Z-rgf-u5-managed-runtime-verification-5b37e0cb30ca4d24bb1b30fc98dc7e47.md) - Verified sealed-App admission, sticky fault propagation, exact stepping, bounded close ownership, Winit retirement ordering, and independent reference-game consumption.
 
 # Integration Notes
 
