@@ -12,8 +12,9 @@ use nara_app::{
     RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseErrorDisposition,
     RuntimeCloseEvidence, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
     RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
-    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeInstance, RuntimeObligationLedger,
-    RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
+    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFault, RuntimeFaultKind,
+    RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger, RuntimePublicationFailure,
+    RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
@@ -406,9 +407,9 @@ impl ProjectHost {
 
         let admission_plan = plan.clone();
         let admission_snapshot = snapshot.clone();
+        let materialization = Arc::new(OnceLock::new());
+        let command_result = Arc::clone(&materialization);
         let admission = candidate.with_admission_scope(move |scope| {
-            let result = Arc::new(OnceLock::new());
-            let command_result = Arc::clone(&result);
             scope.apply_command(move |world: &mut World| {
                 let value = materialize_project_runtime(
                     world,
@@ -421,24 +422,40 @@ impl ProjectHost {
                     "one candidate admission command publishes one result"
                 );
             });
-            let result = match Arc::try_unwrap(result) {
-                Ok(result) => result,
-                Err(_) => unreachable!("the synchronous admission command releases its result"),
-            };
-            result
-                .into_inner()
-                .expect("the synchronous admission command publishes its result")
         });
-        let diagnostics = match admission {
-            Ok(Ok(diagnostics)) => diagnostics,
-            Ok(Err(fault)) => {
+        let materialization = Arc::try_unwrap(materialization)
+            .ok()
+            .and_then(OnceLock::into_inner);
+        let Some(materialization) = materialization else {
+            self.install_start_cleanup(
+                epoch,
+                CleanupOwner::Candidate(candidate.begin_retirement()),
+            );
+            let diagnostics = if admission
+                .as_ref()
+                .err()
+                .and_then(|error| error.fault())
+                .is_some()
+            {
+                runtime_faulted_report()
+            } else {
+                single_error(
+                    "project.run.candidate-scope-failed",
+                    "Project runtime candidate admission failed",
+                )
+            };
+            return Err(HostFault::new(diagnostics));
+        };
+        let diagnostics = match materialization {
+            Ok(diagnostics) if admission.is_ok() => diagnostics,
+            Err(fault) => {
                 self.install_start_cleanup(
                     epoch,
                     CleanupOwner::Candidate(candidate.begin_retirement()),
                 );
                 return Err(fault);
             }
-            Err(_) => {
+            Ok(_) => {
                 self.install_start_cleanup(
                     epoch,
                     CleanupOwner::Candidate(candidate.begin_retirement()),
@@ -562,6 +579,24 @@ impl ProjectHost {
     where
         O: Resource + Clone,
     {
+        self.outcome_resource::<O>().cloned()
+    }
+
+    fn capture_outcome_if<O>(
+        &self,
+        predicate: &(dyn Fn(&O) -> bool + Send + 'static),
+    ) -> Result<Option<O>, HostFault>
+    where
+        O: Resource + Clone,
+    {
+        let outcome = self.outcome_resource::<O>()?;
+        Ok(predicate(outcome).then(|| outcome.clone()))
+    }
+
+    fn outcome_resource<O>(&self) -> Result<&O, HostFault>
+    where
+        O: Resource,
+    {
         let ProjectHostSlot::Running(published) = &self.slot else {
             return Err(HostFault::new(single_error(
                 "project.run.runtime-unavailable",
@@ -575,7 +610,6 @@ impl ProjectHost {
             .runtime()
             .world()
             .get_resource::<O>()
-            .cloned()
             .ok_or_else(|| {
                 HostFault::new(single_error(
                     "project.run.outcome-missing",
@@ -762,11 +796,24 @@ fn materialize_project_runtime(
         return Err(HostFault::new(scene.diagnostics));
     }
     let diagnostics = scene.diagnostics;
+    let faults = world
+        .get_resource::<RuntimeFaultReporter>()
+        .cloned()
+        .ok_or_else(|| {
+            HostFault::new(single_error(
+                "project.run.fault-reporter-missing",
+                "Project runtime fault reporter is unavailable",
+            ))
+        })?;
     let mut queue = world
         .get_resource_mut::<GameplayCommandQueue>()
         .expect("the queue presence was checked before scene allocation");
     for command in commands {
         queue.submit(command).map_err(|_| {
+            faults.report(RuntimeFault::engine(
+                RuntimeFaultKind::GameplayLifecycle,
+                "nara.project-host.command-submit",
+            ));
             HostFault::new(single_error(
                 "project.run.command-rejected",
                 "Project semantic control input was rejected",

@@ -3,7 +3,6 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
 };
 
 #[cfg(windows)]
@@ -14,7 +13,6 @@ use nara::{
     project::{ProductCapability, RuntimePreset},
     project_host::ingest_project_manifest,
 };
-use nara_reference_game::{TracerSnapshot, run_headless_ticks_from_manifest};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -46,7 +44,7 @@ impl Drop for TemporaryDirectory {
 }
 
 #[test]
-fn committed_manifest_is_opened_by_capability_and_drives_the_tracer() {
+fn committed_manifest_is_opened_by_capability_and_lowers_product_settings() {
     let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = DirectoryCapability::from_host_handle(
         host_directory(project_root),
@@ -67,12 +65,26 @@ fn committed_manifest_is_opened_by_capability_and_drives_the_tracer() {
             .normalized_capabilities()
             .contains(ProductCapability::RuntimeCore)
     );
-
-    let snapshot = run_headless_ticks_from_manifest(&manifest, None, 3).unwrap();
-    let mut expected = TracerSnapshot::after_three_ticks();
-    expected.fixed_timestep = Duration::from_millis(20);
-
-    assert_eq!(snapshot, expected);
+    assert!(
+        candidate
+            .normalized_capabilities()
+            .contains(ProductCapability::Runtime2d)
+    );
+    assert_eq!(candidate.normalized_capabilities().len(), 2);
+    assert_eq!(
+        candidate.settings().runtime.fixed_time().timestep(),
+        std::time::Duration::from_millis(20)
+    );
+    assert_eq!(
+        candidate
+            .settings()
+            .startup
+            .default_scene
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("startup.scene.json")
+    );
 }
 
 #[test]
@@ -97,7 +109,12 @@ fn headless_cli_opens_the_committed_manifest_from_a_random_working_directory() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        "tick=3 enemy_hp=10\n"
+        concat!(
+            "{\"schema\":\"nara-reference-game.wave-summary-v1\",",
+            "\"outcome\":\"completed\",\"tick\":49,\"score\":300,",
+            "\"player_hit_points\":20,\"enemies_remaining\":0,",
+            "\"projectiles_remaining\":4}\n"
+        )
     );
     assert!(output.stderr.is_empty());
 }

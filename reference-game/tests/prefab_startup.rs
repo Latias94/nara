@@ -42,7 +42,16 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .iter()
         .map(|entity| entity.id.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(startup_ids, ["enemy-anchor", "player"]);
+    assert_eq!(
+        startup_ids,
+        [
+            "enemy-anchor",
+            "enemy-anchor-2",
+            "enemy-anchor-3",
+            "player",
+            "projectile-fixture",
+        ]
+    );
     assert_eq!(
         loaded.snapshot.prefabs()[0].path().as_str(),
         "enemy.prefab.json"
@@ -63,7 +72,16 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .collect::<Vec<_>>();
     assert_eq!(
         expanded_ids,
-        ["enemy-anchor", "enemy-anchor/enemy", "player"],
+        [
+            "enemy-anchor",
+            "enemy-anchor-2",
+            "enemy-anchor-2/enemy",
+            "enemy-anchor-3",
+            "enemy-anchor-3/enemy",
+            "enemy-anchor/enemy",
+            "player",
+            "projectile-fixture",
+        ],
     );
     let player = expanded
         .entities
@@ -90,6 +108,21 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         enemy
             .components
             .contains_key(&ComponentTypeId::new("reference_game.Enemy")),
+    );
+    let second_enemy = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "enemy-anchor-2/enemy")
+        .unwrap();
+    assert_eq!(
+        second_enemy
+            .components
+            .get(&ComponentTypeId::new("reference_game.WaveSpawn"))
+            .unwrap()
+            .value
+            .field_u64("tick")
+            .unwrap(),
+        5,
     );
     let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
     let sprite = enemy.components.get(&sprite_id).unwrap();

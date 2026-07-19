@@ -1,68 +1,46 @@
-use std::{process::Command, time::Duration};
+#[path = "support/project_content_fixture.rs"]
+mod project_content_fixture;
+
+use std::{num::NonZeroU32, time::Duration};
 
 use nara::{
     app::{AddPluginsError, PluginLifecycleState, PluginPlanError},
-    prelude::{App, FixedTime, HeadlessRuntimePlugins},
+    prelude::{App, HeadlessRuntimePlugins},
+    project_host::HeadlessRunOutcome,
 };
 use nara_reference_game::{
-    REFERENCE_GAME_PLUGIN_ID, ReferenceGameError, ReferenceGamePlugin,
-    ReferenceTracerSeedPlugin, TracerSnapshot, run_headless_ticks,
+    REFERENCE_GAME_PLUGIN_ID, ReferenceGamePlugin, WaveOutcome, bundled_wave_run,
 };
+use project_content_fixture::project_root_capability;
 
 #[test]
-fn fixed_tick_tracer_is_deterministic_and_zero_time_does_not_advance() {
-    let first = run_headless_ticks(3).unwrap();
-    let second = run_headless_ticks(3).unwrap();
-    assert_eq!(first, second);
-    assert_eq!(first.tick, 3);
-    assert_eq!(first, TracerSnapshot::after_three_ticks());
-
-    let mut app = App::new();
-    app.add_plugins((
-        HeadlessRuntimePlugins,
-        ReferenceGamePlugin,
-        ReferenceTracerSeedPlugin,
-    ))
-    .unwrap();
-
-    let startup = app.run_once(Duration::ZERO).unwrap();
-    assert_eq!(startup.status.fixed_steps, 0);
-    assert_eq!(
-        TracerSnapshot::capture(app.world()).unwrap(),
-        TracerSnapshot::initial()
+fn typed_headless_run_returns_the_terminal_wave_snapshot() {
+    let mut run = bundled_wave_run(
+        project_root_capability(),
+        NonZeroU32::new(96).expect("the maximum tick count is non-zero"),
     );
 
-    for expected_tick in 1..=3 {
-        let frame = app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
-        assert_eq!(frame.status.fixed_steps, 1);
-        assert_eq!(app.world().resource::<FixedTime>().tick(), expected_tick);
-        if expected_tick == 2 {
-            let before_zero = TracerSnapshot::capture(app.world()).unwrap();
-            let zero = app.run_once(Duration::ZERO).unwrap();
-            assert_eq!(zero.status.fixed_steps, 0);
-            assert_eq!(TracerSnapshot::capture(app.world()).unwrap(), before_zero);
+    let mut terminal_snapshot = None;
+    for _ in 0..64 {
+        let report = run.execute_bounded();
+        match report.outcome() {
+            HeadlessRunOutcome::Completed(snapshot) => {
+                assert!(!report.diagnostics().has_errors(), "{report:#?}");
+                terminal_snapshot = Some(snapshot.clone());
+                break;
+            }
+            HeadlessRunOutcome::CleanupIncomplete => {
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+            HeadlessRunOutcome::Failed => panic!("typed reference-game run failed: {report:#?}"),
         }
     }
-    assert_eq!(
-        TracerSnapshot::capture(app.world()).unwrap(),
-        TracerSnapshot::after_three_ticks()
-    );
-}
+    let snapshot = terminal_snapshot.expect("typed reference-game cleanup should be bounded");
 
-#[test]
-fn headless_binary_runs_the_public_tracer() {
-    let output = Command::new(env!("CARGO_BIN_EXE_headless"))
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap(),
-        "tick=3 enemy_hp=10\n"
-    );
+    assert_eq!(snapshot.outcome, WaveOutcome::Completed);
+    assert_eq!(snapshot.tick, 49);
+    assert_eq!(snapshot.score, 300);
+    assert!(snapshot.enemies.is_empty());
 }
 
 #[test]
@@ -86,22 +64,4 @@ fn missing_declared_registry_plugin_fails_pure_planning_and_is_retryable() {
 
     app.add_plugins((HeadlessRuntimePlugins, ReferenceGamePlugin))
         .unwrap();
-}
-
-#[test]
-fn snapshot_capture_reports_a_missing_fixed_clock() {
-    let mut app = App::new();
-    app.add_plugins((
-        HeadlessRuntimePlugins,
-        ReferenceGamePlugin,
-        ReferenceTracerSeedPlugin,
-    ))
-    .unwrap();
-    app.run_once(Duration::ZERO).unwrap();
-    app.world_mut().unwrap().remove_resource::<FixedTime>();
-
-    assert!(matches!(
-        TracerSnapshot::capture(app.world()),
-        Err(ReferenceGameError::MissingResource("FixedTime"))
-    ));
 }

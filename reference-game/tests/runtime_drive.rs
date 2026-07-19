@@ -290,7 +290,7 @@ fn late_persistent_hook_matches_the_manual_rejection_before_publication() {
     LATE_HOOK_CALLS.store(0, Ordering::SeqCst);
     let intent = project_headless_intent(NonZeroU32::new(1).unwrap())
         .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<LateHookPlugin>());
-    let mut product = HeadlessRun::new(project_root_capability(), intent, []);
+    let mut product = HeadlessRun::new(project_root_capability(), intent, Vec::new());
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let report = loop {
@@ -324,7 +324,7 @@ fn deferred_global_observers_reject_project_scene_before_publication() {
 fn assert_global_observer_rejected(definition: PluginDefinition) {
     let intent = project_headless_intent(NonZeroU32::new(1).unwrap())
         .insert_after::<ReferenceGamePlugin>(definition);
-    let mut product = HeadlessRun::new(project_root_capability(), intent, []);
+    let mut product = HeadlessRun::new(project_root_capability(), intent, Vec::new());
     let deadline = Instant::now() + Duration::from_secs(5);
     let report = loop {
         let report = product.execute_bounded();
@@ -359,7 +359,7 @@ fn incomplete_retirement_stays_with_the_product_action_until_retry() {
     let mut product = HeadlessRun::new(
         project_root_capability(),
         intent,
-        [project_first_tick_command()],
+        vec![project_first_tick_command()],
     );
 
     let first_drive_started = Instant::now();

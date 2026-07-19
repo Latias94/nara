@@ -12,7 +12,10 @@ use nara::{
         ScenePatchOperation,
     },
 };
-use nara_reference_game::{Enemy, Player, Projectile, ReferenceGamePlugin, RuntimeOnlyTag, Weapon};
+use nara_reference_game::{
+    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin,
+    RuntimeOnlyTag, WaveSpawn, Weapon,
+};
 
 const LINEAGE_PROBE_ID: &str = "nara.test.LineageProbe";
 const PLAYER_ID: &str = "reference_game.Player";
@@ -105,7 +108,7 @@ struct PlayerHealthKindChanged {
 }
 
 #[test]
-fn four_game_components_register_and_round_trip_through_public_api() {
+fn five_game_components_register_and_round_trip_through_public_api() {
     let mut app = nara::prelude::App::new();
     app.add_plugins(nara::prelude::MinimalPlugins).unwrap();
     app.add_plugin(ReferenceGamePlugin).unwrap();
@@ -115,6 +118,7 @@ fn four_game_components_register_and_round_trip_through_public_api() {
     for id in [
         "reference_game.Player",
         "reference_game.Enemy",
+        "reference_game.WaveSpawn",
         "reference_game.Weapon",
         "reference_game.Projectile",
     ] {
@@ -136,6 +140,11 @@ fn four_game_components_register_and_round_trip_through_public_api() {
 
     assert_round_trip(Player::fixture(), "reference_game.Player", registry);
     assert_round_trip(Enemy::fixture(), "reference_game.Enemy", registry);
+    assert_round_trip(
+        WaveSpawn::fixture(),
+        "reference_game.WaveSpawn",
+        registry,
+    );
     assert_round_trip(Weapon::fixture(), "reference_game.Weapon", registry);
     assert_round_trip(Projectile::fixture(), "reference_game.Projectile", registry);
 }
@@ -322,23 +331,44 @@ fn generated_catalog_rejects_missing_reused_and_dropped_tombstones() {
 }
 
 #[test]
-fn reference_game_catalog_is_a_real_predecessor_for_all_four_components() {
+fn reference_game_catalog_preserves_v1_and_matches_the_v2_successor() {
+    assert_eq!(REFERENCE_GAME_SCHEMA_PROVIDER.binding().version(), 2);
     let predecessor = reference_game_predecessor_catalog();
-    let fixture = include_str!("../schema/component-schema-v1.json");
+    let v1_fixture = include_str!("../schema/component-schema-v1.json");
+    let v2_fixture = include_str!("../schema/component-schema-v2.json");
     assert_eq!(
         format!("{}\n", predecessor.to_json_string().unwrap()),
-        fixture
+        v1_fixture
     );
+    let expected = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        v2_fixture.as_bytes(),
+        &predecessor,
+        ComponentCatalogFileLimits::default(),
+    )
+    .unwrap();
 
     let mut fresh = ComponentRegistry::new();
-    register_reference_game_components_with_player::<Player>(&mut fresh);
+    register_reference_game_v1_components_with_player::<Player>(&mut fresh);
     fresh.freeze().unwrap();
     assert_eq!(fresh.catalog().unwrap(), &predecessor);
 
     let registry = frozen_reference_game_successor();
+    assert_eq!(registry.catalog().unwrap(), &expected);
+    assert_eq!(
+        format!(
+            "{}\n",
+            registry
+                .catalog()
+                .unwrap()
+                .to_json_string_with_predecessor(Some(&predecessor))
+                .unwrap()
+        ),
+        v2_fixture
+    );
     for id in [
         "reference_game.Player",
         "reference_game.Enemy",
+        "reference_game.WaveSpawn",
         "reference_game.Weapon",
         "reference_game.Projectile",
     ] {
@@ -377,6 +407,7 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     let registry = frozen_reference_game_successor();
     let player_id = ComponentTypeId::new(PLAYER_ID);
     let enemy_id = ComponentTypeId::new("reference_game.Enemy");
+    let wave_spawn_id = ComponentTypeId::new("reference_game.WaveSpawn");
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
     let projectile_id = ComponentTypeId::new("reference_game.Projectile");
     let player_entity_id = scene_id("player");
@@ -393,6 +424,10 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
         SceneEntityRecord::new(scene_id("enemy")).with_component(
             enemy_id.clone(),
             scene_component_record(Enemy::fixture(), &enemy_id, &registry),
+        )
+        .with_component(
+            wave_spawn_id.clone(),
+            scene_component_record(WaveSpawn::fixture(), &wave_spawn_id, &registry),
         ),
         SceneEntityRecord::new(scene_id("projectile")).with_component(
             projectile_id.clone(),
@@ -450,6 +485,10 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     assert_eq!(world.get::<Weapon>(player_entity), Some(&Weapon::fixture()));
     assert_eq!(world.get::<Enemy>(enemy_entity), Some(&Enemy::fixture()));
     assert_eq!(
+        world.get::<WaveSpawn>(enemy_entity),
+        Some(&WaveSpawn::fixture())
+    );
+    assert_eq!(
         world.get::<Projectile>(projectile_entity),
         Some(&Projectile::fixture())
     );
@@ -490,7 +529,8 @@ where
 {
     let mut registry =
         ComponentRegistry::successor_of(reference_game_predecessor_catalog()).unwrap();
-    register_reference_game_components_with_player::<T>(&mut registry);
+    register_reference_game_v1_components_with_player::<T>(&mut registry);
+    registry.register_persistent_component::<WaveSpawn>().unwrap();
     registry
 }
 
@@ -500,7 +540,7 @@ fn frozen_reference_game_successor() -> ComponentRegistry {
     registry
 }
 
-fn register_reference_game_components_with_player<T>(registry: &mut ComponentRegistry)
+fn register_reference_game_v1_components_with_player<T>(registry: &mut ComponentRegistry)
 where
     T: PersistentComponentProvider,
 {

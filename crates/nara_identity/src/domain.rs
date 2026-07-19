@@ -869,7 +869,42 @@ impl WorldIdentityDomain {
     ) -> Result<(), IdentityDomainError> {
         self.validate_world_binding(world)?;
         self.validate_token_domain(token)?;
-        let retirement = self.prepare_retirement(None, vec![token.entity()], cause)?;
+        self.retire_registered_entity(token.entity(), cause)
+    }
+
+    /// Retires an entity only when the caller's semantic reference still names it.
+    pub fn retire_entity_with_reference(
+        &mut self,
+        world: &World,
+        entity: Entity,
+        reference: &RuntimeEntityReference,
+        cause: TombstoneCause,
+    ) -> Result<(), IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        let identity = self
+            .identities_by_entity
+            .get(&entity)
+            .ok_or(IdentityDomainError::EntityNotRegistered)?;
+        if identity.scene.as_ref() != Some(reference)
+            && identity.persistent.as_ref() != Some(reference)
+        {
+            return Err(IdentityDomainError::StaleRegistration);
+        }
+        if !matches!(
+            self.lookup(world, reference),
+            EntityLookup::Resolved(found) if found == entity
+        ) {
+            return Err(IdentityDomainError::StaleRegistration);
+        }
+        self.retire_registered_entity(entity, cause)
+    }
+
+    fn retire_registered_entity(
+        &mut self,
+        entity: Entity,
+        cause: TombstoneCause,
+    ) -> Result<(), IdentityDomainError> {
+        let retirement = self.prepare_retirement(None, vec![entity], cause)?;
         self.commit_retirement(retirement);
         Ok(())
     }

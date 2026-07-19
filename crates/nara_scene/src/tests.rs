@@ -15,9 +15,9 @@ use nara_ecs::{
     world::DeferredWorld,
 };
 use nara_identity::{
-    EntityLookup, EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-    PersistentRuntimeReference, SpawnedSceneInstance, TombstoneCause, WorldEntityLocator,
-    WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
+    EntityLookup, EntityReference, IdentityDomainError, PersistentRuntimeId,
+    PersistentRuntimeNamespaceId, PersistentRuntimeReference, SpawnedSceneInstance, TombstoneCause,
+    WorldEntityLocator, WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
 };
 use nara_reflect::bevy_reflect;
 use nara_reflect::{
@@ -1346,6 +1346,146 @@ fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
     assert_eq!(stats.claimed_scene_instances, 2);
     assert_eq!(stats.active_scene_instances, 2);
     assert_eq!(stats.active_scene_entities, 0);
+}
+
+#[test]
+fn individual_scene_retirement_tombstones_identity_before_despawn() {
+    let registry = test_registry();
+    let id = scene_id("retired");
+    let document =
+        SceneDocument::new([SceneEntityRecord::new(id.clone())
+            .with_component(position_type_id(), position_record(1))]);
+    let mut world = World::new();
+    let report = spawn_scene(&mut world, &registry, &document);
+    let instance = spawned_instance(&report).clone();
+    let entity = spawned_entity(&world, &report, &id);
+
+    retire_and_despawn_scene_entity(&mut world, entity).unwrap();
+
+    assert!(world.get_entity(entity).is_err());
+    let EntityLookup::Tombstoned(Some(tombstone)) = instance.resolve(&world, &id) else {
+        panic!("retired entity must resolve to a retained tombstone");
+    };
+    assert_eq!(tombstone.cause(), TombstoneCause::Despawned);
+    assert_eq!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .stats()
+            .active_scene_entities,
+        0
+    );
+}
+
+#[test]
+fn scene_retirement_rejection_keeps_the_target_alive() {
+    let registry = test_registry();
+    let id = scene_id("retained");
+    let document = SceneDocument::new([SceneEntityRecord::new(id.clone())]);
+    let mut world = World::new();
+    let report = spawn_scene(&mut world, &registry, &document);
+    let entity = spawned_entity(&world, &report, &id);
+
+    let source = world.get::<SceneEntitySource>(entity).unwrap().clone();
+    let forged = world
+        .spawn(SceneEntitySource {
+            instance_id: source.instance_id,
+            entity_id: scene_id("forged"),
+        })
+        .id();
+    let forged_components = world.entity(forged).archetype().components().len();
+    assert!(matches!(
+        retire_and_despawn_scene_entity(&mut world, forged),
+        Err(SceneEntityRetirementError::Identity(
+            IdentityDomainError::EntityNotRegistered
+        ))
+    ));
+    assert_eq!(
+        world.entity(forged).archetype().components().len(),
+        forged_components
+    );
+
+    world.remove_resource::<WorldIdentityDomain>();
+
+    assert!(matches!(
+        retire_and_despawn_scene_entity(&mut world, entity),
+        Err(SceneEntityRetirementError::Identity(
+            IdentityDomainError::WorldDomainUnavailable
+        ))
+    ));
+    assert!(world.get_entity(entity).is_ok());
+
+    let unrelated = world.spawn_empty().id();
+    assert!(matches!(
+        retire_and_despawn_scene_entity(&mut world, unrelated),
+        Err(SceneEntityRetirementError::NotSceneEntity)
+    ));
+    assert!(world.get_entity(unrelated).is_ok());
+}
+
+#[test]
+fn scene_retirement_rejects_a_source_that_disagrees_with_registered_identity() {
+    let registry = test_registry();
+    let id = scene_id("retained");
+    let document = SceneDocument::new([SceneEntityRecord::new(id.clone())]);
+    let mut world = World::new();
+    let report = spawn_scene(&mut world, &registry, &document);
+    let instance = spawned_instance(&report).clone();
+    let entity = spawned_entity(&world, &report, &id);
+    let stats = world.resource::<WorldIdentityDomain>().stats();
+
+    world
+        .get_mut::<SceneEntitySource>(entity)
+        .unwrap()
+        .entity_id = scene_id("forged");
+
+    assert!(matches!(
+        retire_and_despawn_scene_entity(&mut world, entity),
+        Err(SceneEntityRetirementError::Identity(
+            IdentityDomainError::StaleRegistration
+        ))
+    ));
+    assert!(world.get_entity(entity).is_ok());
+    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
+    assert_eq!(
+        instance.resolve(&world, &id),
+        EntityLookup::Resolved(entity)
+    );
+}
+
+#[test]
+fn individual_scene_retirement_rejects_parents_and_unlinks_retired_children() {
+    let registry = test_registry();
+    let parent_id = scene_id("parent");
+    let child_id = scene_id("parent/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(parent_id.clone()),
+        SceneEntityRecord::new(child_id.clone()).with_parent(parent_id.clone()),
+    ]);
+    let mut world = World::new();
+    let report = spawn_scene(&mut world, &registry, &document);
+    let instance = spawned_instance(&report).clone();
+    let parent = spawned_entity(&world, &report, &parent_id);
+    let child = spawned_entity(&world, &report, &child_id);
+
+    assert!(matches!(
+        retire_and_despawn_scene_entity(&mut world, parent),
+        Err(SceneEntityRetirementError::HasChildren)
+    ));
+    assert!(world.get_entity(parent).is_ok());
+    assert!(world.get_entity(child).is_ok());
+    assert!(matches!(
+        instance.resolve(&world, &parent_id),
+        EntityLookup::Resolved(_)
+    ));
+
+    retire_and_despawn_scene_entity(&mut world, child).unwrap();
+
+    assert!(world.get_entity(child).is_err());
+    assert_eq!(world.get::<Children>(parent).unwrap().as_slice(), &[]);
+    assert!(matches!(
+        instance.resolve(&world, &child_id),
+        EntityLookup::Tombstoned(Some(_))
+    ));
 }
 
 #[test]

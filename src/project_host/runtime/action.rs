@@ -1,4 +1,4 @@
-use std::{fmt, marker::PhantomData, num::NonZeroU32, time::Duration};
+use std::{fmt, num::NonZeroU32, time::Duration};
 
 use nara_app::{Plugin, PluginDefinition, RuntimeClosePolicy};
 use nara_diagnostic::DiagnosticReport;
@@ -18,6 +18,7 @@ use super::{
 
 type RuntimePluginEdit =
     Box<dyn FnOnce(ProjectRuntimePlugins) -> ProjectRuntimePlugins + Send + 'static>;
+type TerminalPredicate<O> = Box<dyn Fn(&O) -> bool + Send + 'static>;
 
 /// File-backed headless run intent for one concrete product action.
 ///
@@ -29,7 +30,7 @@ pub struct HeadlessRunIntent<O> {
     cleanup_policy: RuntimeClosePolicy,
     plugin_edits: Vec<RuntimePluginEdit>,
     schema_providers: Vec<ComponentSchemaProviderDefinition>,
-    outcome: PhantomData<fn() -> O>,
+    terminal_predicate: Option<TerminalPredicate<O>>,
 }
 
 impl<O> fmt::Debug for HeadlessRunIntent<O> {
@@ -41,6 +42,10 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
             .field("cleanup_policy", &self.cleanup_policy)
             .field("plugin_edit_count", &self.plugin_edits.len())
             .field("schema_provider_count", &self.schema_providers.len())
+            .field(
+                "stops_on_terminal_outcome",
+                &self.terminal_predicate.is_some(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -54,7 +59,7 @@ impl<O> HeadlessRunIntent<O> {
             cleanup_policy: RuntimeClosePolicy::default(),
             plugin_edits: Vec::new(),
             schema_providers: Vec::new(),
-            outcome: PhantomData,
+            terminal_predicate: None,
         }
     }
 
@@ -103,6 +108,16 @@ impl<O> HeadlessRunIntent<O> {
     #[must_use]
     pub fn with_schema_provider(mut self, provider: ComponentSchemaProviderDefinition) -> Self {
         self.schema_providers.push(provider);
+        self
+    }
+
+    /// Stops after the first complete fixed tick whose typed outcome matches `predicate`.
+    ///
+    /// `fixed_ticks` remains the hard maximum. Reaching it without a match fails the product action
+    /// with `project.run.tick-limit` and drives the same bounded shutdown path as other failures.
+    #[must_use]
+    pub fn stop_when(mut self, predicate: impl Fn(&O) -> bool + Send + 'static) -> Self {
+        self.terminal_predicate = Some(Box::new(predicate));
         self
     }
 }
@@ -169,17 +184,21 @@ impl<O> HeadlessRun<O>
 where
     O: Resource + Clone,
 {
+    /// Creates a product run from an already-owned semantic-command buffer.
+    ///
+    /// Ownership does not bypass admission: every submission is still validated by the runtime
+    /// command queue before the product action can complete.
     #[must_use]
     pub fn new(
         project_root: DirectoryCapability,
         intent: HeadlessRunIntent<O>,
-        commands: impl IntoIterator<Item = GameplayCommandSubmission>,
+        commands: Vec<GameplayCommandSubmission>,
     ) -> Self {
         Self {
             state: HeadlessRunState::Fresh(HeadlessRunInputs {
                 project_root,
                 intent,
-                commands: commands.into_iter().collect(),
+                commands,
             }),
             diagnostics: DiagnosticReport::default(),
         }
@@ -214,7 +233,13 @@ where
     }
 
     fn execute_fresh(&mut self, inputs: HeadlessRunInputs<O>) -> HeadlessRunState<O> {
-        let (mut host, mut attempt, fixed_ticks, plan_diagnostics) = match prepare_start(inputs) {
+        let PreparedStart {
+            mut host,
+            mut attempt,
+            fixed_ticks,
+            terminal_predicate,
+            plan_diagnostics,
+        } = match prepare_start(inputs) {
             Ok(prepared) => prepared,
             Err(fault) => {
                 self.diagnostics.extend(fault.diagnostics);
@@ -233,20 +258,48 @@ where
             }
         }
 
+        let mut terminal_outcome = None;
         for _ in 0..fixed_ticks.get() {
             if let Err(fault) = host.drive_one_fixed_tick() {
                 self.diagnostics.extend(fault.diagnostics);
                 host.retire_running();
                 return state_after_failure(host);
             }
+            if let Some(predicate) = terminal_predicate.as_ref() {
+                let outcome = match host.capture_outcome_if::<O>(predicate.as_ref()) {
+                    Ok(Some(outcome)) => outcome,
+                    Ok(None) => continue,
+                    Err(fault) => {
+                        self.diagnostics.extend(fault.diagnostics);
+                        host.retire_running();
+                        return state_after_failure(host);
+                    }
+                };
+                terminal_outcome = Some(outcome);
+                break;
+            }
         }
 
-        let outcome = match host.capture_outcome::<O>() {
-            Ok(outcome) => outcome,
-            Err(fault) => {
-                self.diagnostics.extend(fault.diagnostics);
-                host.retire_running();
+        let outcome = if terminal_predicate.is_some() {
+            let Some(outcome) = terminal_outcome else {
+                self.diagnostics.extend(single_error(
+                    "project.run.tick-limit",
+                    "Headless project run reached its fixed-tick limit",
+                ));
+                if let Err(fault) = host.stop_running() {
+                    self.diagnostics.extend(fault.diagnostics);
+                }
                 return state_after_failure(host);
+            };
+            outcome
+        } else {
+            match host.capture_outcome::<O>() {
+                Ok(outcome) => outcome,
+                Err(fault) => {
+                    self.diagnostics.extend(fault.diagnostics);
+                    host.retire_running();
+                    return state_after_failure(host);
+                }
             }
         };
 
@@ -290,6 +343,14 @@ struct HeadlessRunInputs<O> {
     project_root: DirectoryCapability,
     intent: HeadlessRunIntent<O>,
     commands: Vec<GameplayCommandSubmission>,
+}
+
+struct PreparedStart<O> {
+    host: ProjectHost,
+    attempt: RuntimeStartAttempt,
+    fixed_ticks: NonZeroU32,
+    terminal_predicate: Option<TerminalPredicate<O>>,
+    plan_diagnostics: DiagnosticReport,
 }
 
 enum HeadlessRunState<O> {
@@ -340,17 +401,7 @@ fn state_after_failure<O>(host: ProjectHost) -> HeadlessRunState<O> {
     }
 }
 
-fn prepare_start<O>(
-    inputs: HeadlessRunInputs<O>,
-) -> Result<
-    (
-        ProjectHost,
-        RuntimeStartAttempt,
-        NonZeroU32,
-        DiagnosticReport,
-    ),
-    HostFault,
-> {
+fn prepare_start<O>(inputs: HeadlessRunInputs<O>) -> Result<PreparedStart<O>, HostFault> {
     let HeadlessRunInputs {
         project_root,
         intent,
@@ -362,7 +413,7 @@ fn prepare_start<O>(
         cleanup_policy,
         plugin_edits,
         schema_providers,
-        outcome: _,
+        terminal_predicate,
     } = intent;
     let manifest_path = RelativePath::new(PROJECT_MANIFEST)
         .expect("the engine-owned manifest name is a valid relative path");
@@ -390,7 +441,13 @@ fn prepare_start<O>(
 
     let mut host = ProjectHost::new(cleanup_policy);
     let attempt = host.begin_start(snapshot, plan, commands)?;
-    Ok((host, attempt, fixed_ticks, plan_diagnostics))
+    Ok(PreparedStart {
+        host,
+        attempt,
+        fixed_ticks,
+        terminal_predicate,
+        plan_diagnostics,
+    })
 }
 
 fn nara_project_failure(error: nara_fs::FsError) -> ProjectCandidateError {

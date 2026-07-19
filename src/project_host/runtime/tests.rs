@@ -85,6 +85,12 @@ const COMMAND_FAILURE_DEFINITION_ID: PluginDefinitionId =
 const COMMAND_FAILURE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(COMMAND_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[CLOSE_PROBE_PLUGIN_ID]);
+const ADMISSION_SCOPE_FAILURE_PLUGIN_ID: PluginId =
+    PluginId::new("nara.test.project-admission-scope-failure");
+const ADMISSION_SCOPE_FAILURE_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.project-admission-scope-failure", 1);
+const ADMISSION_SCOPE_FAILURE_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(ADMISSION_SCOPE_FAILURE_PLUGIN_ID, PluginCategory::Runtime);
 const STARTUP_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-startup-failure");
 const STARTUP_FAILURE_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.project-startup-failure", 1);
@@ -235,6 +241,24 @@ impl Plugin for CommandFailurePlugin {
 
     fn finish(&self, app: &mut App) -> Result<(), PluginError> {
         app.world_mut()?.remove_resource::<GameplayCommandQueue>();
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct AdmissionScopeFailurePlugin;
+
+impl Plugin for AdmissionScopeFailurePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &ADMISSION_SCOPE_FAILURE_DECLARATION
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+        app.world_mut()?.remove_resource::<RuntimeFaultReporter>();
         Ok(())
     }
 }
@@ -913,6 +937,25 @@ fn a_fault_winning_the_publish_lock_is_retired_without_becoming_visible() {
 }
 
 #[test]
+fn admission_scope_failure_before_materialization_is_reported_without_panicking() {
+    let project = TestProject::new("admission-scope-failure");
+    let (snapshot, plan) =
+        project.snapshot_and_plan_with_plugin(admission_scope_failure_definition());
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+
+    let error = host.complete_start(&mut attempt).unwrap_err();
+
+    assert_eq!(
+        first_code(&error.diagnostics),
+        "project.run.runtime-faulted"
+    );
+    assert!(!host.start_claim.any_active());
+    assert!(!matches!(host.slot, ProjectHostSlot::Running(_)));
+    drain_host_cleanup(&mut host);
+}
+
+#[test]
 fn duplicate_completion_rejects_without_disturbing_the_published_runtime() {
     let project = TestProject::new("duplicate-publication");
     let (snapshot, plan) = project.snapshot_and_plan(false);
@@ -1033,6 +1076,14 @@ fn prepare_failure_definition() -> PluginDefinition {
                 "nara.test.project-prepare-failure",
             ))
         },
+    )
+}
+
+fn admission_scope_failure_definition() -> PluginDefinition {
+    PluginDefinition::infallible::<AdmissionScopeFailurePlugin, _>(
+        ADMISSION_SCOPE_FAILURE_DEFINITION_ID,
+        b"project-admission-scope-failure-v1",
+        AdmissionScopeFailurePlugin::default,
     )
 }
 

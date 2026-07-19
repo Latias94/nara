@@ -1,5 +1,7 @@
 use nara::prelude::{Component, EntityReference, PersistentComponent, SceneEntityId, Vec2};
 
+use crate::resources::PLAYER_SCENE_ID;
+
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
 #[nara(
     id = "reference_game.Player",
@@ -59,10 +61,30 @@ impl Enemy {
             velocity: Vec2::new(-0.5, 0.0),
             hit_points: 10,
             target: EntityReference::SceneLocal {
-                entity: SceneEntityId::new("player")
+                entity: SceneEntityId::new(PLAYER_SCENE_ID)
                     .expect("the reference-game player fixture ID is valid"),
             },
         }
+    }
+}
+
+#[derive(Component, PersistentComponent, Debug, Clone, Copy, PartialEq, Eq)]
+#[nara(
+    id = "reference_game.WaveSpawn",
+    version = 1,
+    alias = "Wave spawn",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+pub struct WaveSpawn {
+    #[nara(id = "tick", alias = "Tick")]
+    pub tick: u64,
+}
+
+impl WaveSpawn {
+    #[must_use]
+    pub const fn fixture() -> Self {
+        Self { tick: 1 }
     }
 }
 

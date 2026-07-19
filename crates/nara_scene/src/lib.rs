@@ -46,8 +46,9 @@ pub use prefab::{
     PrefabSourceResolver,
 };
 pub use spawn::{
-    SceneEntitySource, SceneSpawnReport, SceneSpawner, spawn_prefab,
-    spawn_prefab_with_asset_database, spawn_prefab_with_patch,
-    spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
-    spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
+    SceneEntityRetirementError, SceneEntitySource, SceneSpawnReport, SceneSpawner,
+    retire_and_despawn_scene_entity, spawn_prefab, spawn_prefab_with_asset_database,
+    spawn_prefab_with_patch, spawn_prefab_with_patch_and_asset_database, spawn_scene,
+    spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
+    spawn_scene_with_prefab_resolver_and_asset_database,
 };

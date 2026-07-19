@@ -16,7 +16,7 @@ fn run_project(
     command: GameplayCommandSubmission,
 ) -> HeadlessRunReport<ProductOutcome> {
     let intent = HeadlessRunIntent::new(NonZeroU32::new(1).unwrap());
-    let mut run = HeadlessRun::new(project, intent, [command]);
+    let mut run = HeadlessRun::new(project, intent, vec![command]);
     run.execute_bounded()
 }
 

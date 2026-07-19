@@ -21,7 +21,11 @@ use nara::{
         RuntimeCloseParticipantId, RuntimeCloseProgress,
     },
     ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs},
-    gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandPlugin, GameplayCommandSet},
+    gameplay::{
+        GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandDraft, GameplayCommandIngressSource,
+        GameplayCommandPlugin, GameplayCommandSet, GameplayCommandSourceSequence,
+        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
+    },
     project_host::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport},
     scene::SceneEntitySource,
 };
@@ -166,7 +170,7 @@ fn stalled_close_plugin(
 fn project_run(project: &TestProject) -> HeadlessRun<BootOutcome> {
     let intent = HeadlessRunIntent::new(NonZeroU32::new(1).unwrap())
         .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin());
-    HeadlessRun::new(project.root_capability(), intent, [])
+    HeadlessRun::new(project.root_capability(), intent, Vec::new())
 }
 
 fn execute_to_terminal(run: &mut HeadlessRun<BootOutcome>) -> HeadlessRunReport<BootOutcome> {
@@ -251,7 +255,7 @@ fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
         .with_cleanup_timeout(Duration::ZERO)
         .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin())
         .insert_after::<BootOutcomePlugin>(stalled_close_plugin(&released, &instances));
-    let mut run = HeadlessRun::new(project.root_capability(), intent, []);
+    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
 
     let incomplete = run.execute_bounded();
     assert_eq!(incomplete.outcome(), &HeadlessRunOutcome::CleanupIncomplete);
@@ -267,4 +271,77 @@ fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
         })
     );
     assert_eq!(instances.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn product_action_stops_on_the_first_terminal_snapshot() {
+    let project = TestProject::with_prefab_startup();
+    select_local_headless_profile(&project);
+    let intent = HeadlessRunIntent::new(NonZeroU32::new(4).unwrap())
+        .stop_when(|outcome: &BootOutcome| outcome.tick >= 2)
+        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin());
+    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+
+    let report = execute_to_terminal(&mut run);
+
+    let HeadlessRunOutcome::Completed(outcome) = report.outcome() else {
+        panic!("terminal project action failed: {report:#?}");
+    };
+    assert_eq!(outcome.tick, 2);
+    assert!(!report.diagnostics().has_errors());
+}
+
+#[test]
+fn product_action_reports_a_tick_limit_before_publishing_success() {
+    let project = TestProject::with_prefab_startup();
+    select_local_headless_profile(&project);
+    let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap())
+        .stop_when(|_: &BootOutcome| false)
+        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin());
+    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+
+    let report = execute_to_terminal(&mut run);
+
+    assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
+    assert!(report.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.run.tick-limit"
+            && diagnostic.summary().as_str() == "Headless project run reached its fixed-tick limit"
+    }));
+}
+
+#[test]
+fn source_label_cannot_downgrade_a_trusted_product_command_rejection() {
+    let project = TestProject::with_prefab_startup();
+    select_local_headless_profile(&project);
+    let intent = HeadlessRunIntent::new(NonZeroU32::new(1).unwrap())
+        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin());
+    let commands = (1..=4_097)
+        .map(|sequence| {
+            GameplayCommandSubmission::new(
+                GameplayCommandTick::new(1).unwrap(),
+                GameplayCommandIngressSource::external("nara.test.external").unwrap(),
+                GameplayCommandSourceSequence::new(sequence).unwrap(),
+                GameplayCommandDraft::new(
+                    GameplayCommandTypeId::new("nara.test.external-command").unwrap(),
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut run = HeadlessRun::new(project.root_capability(), intent, commands);
+
+    let report = execute_to_terminal(&mut run);
+
+    assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "project.run.command-rejected" })
+    );
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "project.run.runtime-faulted" })
+    );
 }

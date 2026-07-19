@@ -9,19 +9,21 @@ use nara::{
     asset::{AssetRef, AssetSourceKind, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     image::ImageImportLimits,
-    prelude::{Component, ComponentRegistry, World},
+    prelude::{Component, ComponentRegistry, Vec2, World},
     project_host::{
         ProjectContentLoader, ProjectContentSnapshot, ProjectSettingsCandidate, RuntimePlan,
         built_in_schema_providers, ingest_project_manifest, resolve_runtime_plan,
     },
-    reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+    reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
-        ScenePatchDocument,
+        ScenePatchDocument, ScenePatchOperation,
     },
     tilemap::TilemapPlugin,
 };
-use nara_reference_game::{Enemy, Player, REFERENCE_GAME_SCHEMA_PROVIDER, Weapon, runtime_plugins};
+use nara_reference_game::{
+    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, WaveSpawn, Weapon, runtime_plugins,
+};
 
 pub const TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 
@@ -77,11 +79,8 @@ pub fn try_load_project_content_from_path(
     path: &Path,
 ) -> Result<LoadedProjectContent, ProjectContentFixtureError> {
     let root = try_project_root_capability_at(path)?;
-    let (candidate, plan, root) = try_candidate_plan_and_root_with(
-        root,
-        ImageImportLimits::default(),
-        false,
-    )?;
+    let (candidate, plan, root) =
+        try_candidate_plan_and_root_with(root, ImageImportLimits::default(), false)?;
     let loader = ProjectContentLoader::new(root)
         .map_err(|_| ProjectContentFixtureError::CreateContentLoader)?;
     let snapshot = loader
@@ -157,23 +156,21 @@ pub fn reference_runtime_plugins(
     include_tilemap: bool,
 ) -> nara::project_host::ProjectRuntimePlugins {
     let request = runtime_plugins(candidate).configure(nara::image::plugin(image_limits));
-    let request = if include_tilemap {
+    if include_tilemap {
         request
     } else {
         request.disable::<TilemapPlugin>()
-    };
-    request
+    }
 }
 
 pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let registry = plan.schema_validation().registry();
     let player_id = ComponentTypeId::new("reference_game.Player");
+    let projectile_id = ComponentTypeId::new("reference_game.Projectile");
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
-    let mut anchor = SceneEntityRecord::new(scene_id("enemy-anchor"));
-    anchor.prefab = Some(PrefabInstance {
-        source: AssetRef::path("enemy.prefab.json").unwrap(),
-        overrides: ScenePatchDocument::default(),
-    });
+    let anchor = enemy_anchor("enemy-anchor", None);
+    let second_anchor = enemy_anchor("enemy-anchor-2", Some((9.0, 5)));
+    let third_anchor = enemy_anchor("enemy-anchor-3", Some((13.0, 9)));
     let player = SceneEntityRecord::new(scene_id("player"))
         .with_component(
             player_id.clone(),
@@ -183,12 +180,56 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
             weapon_id.clone(),
             component_record(Weapon::fixture(), &weapon_id, registry),
         );
-    SceneDocument::new([anchor, player])
+    let projectile = SceneEntityRecord::new(scene_id("projectile-fixture")).with_component(
+        projectile_id.clone(),
+        component_record(
+            Projectile {
+                position: Vec2::new(-100.0, 0.0),
+                velocity: Vec2::new(-2.0, 0.0),
+                damage: 0,
+                ttl_ticks: 8,
+            },
+            &projectile_id,
+            registry,
+        ),
+    );
+    SceneDocument::new([anchor, second_anchor, third_anchor, player, projectile])
+}
+
+fn enemy_anchor(id: &str, override_values: Option<(f64, u64)>) -> SceneEntityRecord {
+    let overrides = override_values.map_or_else(ScenePatchDocument::default, |(x, spawn_tick)| {
+        ScenePatchDocument::new([
+            ScenePatchOperation::SetField {
+                entity: scene_id("enemy"),
+                component: ComponentTypeId::new("reference_game.Enemy"),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("position"),
+                value: ComponentValue::map([
+                    ("x", ComponentValue::f64(x).unwrap()),
+                    ("y", ComponentValue::f64(0.0).unwrap()),
+                ]),
+            },
+            ScenePatchOperation::SetField {
+                entity: scene_id("enemy"),
+                component: ComponentTypeId::new("reference_game.WaveSpawn"),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("tick"),
+                value: ComponentValue::U64(spawn_tick),
+            },
+        ])
+    });
+    let mut anchor = SceneEntityRecord::new(scene_id(id));
+    anchor.prefab = Some(PrefabInstance {
+        source: AssetRef::path("enemy.prefab.json").unwrap(),
+        overrides,
+    });
+    anchor
 }
 
 pub fn expected_enemy_prefab(plan: &RuntimePlan) -> PrefabDocument {
     let registry = plan.schema_validation().registry();
     let enemy_id = ComponentTypeId::new("reference_game.Enemy");
+    let wave_spawn_id = ComponentTypeId::new("reference_game.WaveSpawn");
     let image = AssetRef::path("textures/player.png").unwrap();
     let enemy = SceneEntityRecord::new(scene_id("enemy"))
         .with_component(
@@ -198,6 +239,10 @@ pub fn expected_enemy_prefab(plan: &RuntimePlan) -> PrefabDocument {
         .with_component(
             enemy_id.clone(),
             component_record(Enemy::fixture(), &enemy_id, registry),
+        )
+        .with_component(
+            wave_spawn_id.clone(),
+            component_record(WaveSpawn::fixture(), &wave_spawn_id, registry),
         );
     PrefabDocument::new([enemy])
 }
@@ -273,8 +318,7 @@ fn try_project_root_capability() -> Result<DirectoryCapability, ProjectContentFi
 pub fn try_project_root_capability_at(
     path: &Path,
 ) -> Result<DirectoryCapability, ProjectContentFixtureError> {
-    let root = host_directory(path)
-        .map_err(|_| ProjectContentFixtureError::OpenProjectRoot)?;
+    let root = host_directory(path).map_err(|_| ProjectContentFixtureError::OpenProjectRoot)?;
     DirectoryCapability::from_host_handle(
         root,
         HostCapabilityOptions::new(CapabilityRights::ReadOnly, portable_trust()),

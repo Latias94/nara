@@ -90,7 +90,7 @@ fn assert_committed_content() {
     assert_eq!(before_clone.high_water(ProjectContentBudgetKind::Files), 4,);
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::DependencyEdges),
-        2,
+        6,
     );
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::QueuedJobs),

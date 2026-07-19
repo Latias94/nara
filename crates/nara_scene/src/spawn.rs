@@ -1,12 +1,13 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, error::Error, fmt};
 
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Component, Entity, Mut, World};
 use nara_identity::{
     __private::{IdentitySupportTopologyError, validate_identity_support_topology},
-    EntityLookup, IdentityDomainError, SceneInstanceId, SpawnedSceneInstance, TombstoneCause,
-    WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
+    EntityLookup, IdentityDomainError, RuntimeEntityReference, SceneInstanceId,
+    SpawnedSceneInstance, TombstoneCause, WorldEntityToken, WorldIdentityDomain,
+    WorldIdentityDomainSettings,
 };
 use nara_reflect::{
     __private::{
@@ -23,6 +24,34 @@ use crate::{
     hierarchy::{Parent, sync_children},
     validation::{PreparedScene, preflight_scene_with_context},
 };
+
+#[derive(Debug)]
+pub enum SceneEntityRetirementError {
+    NotSceneEntity,
+    HasChildren,
+    Identity(IdentityDomainError),
+    DespawnFailed,
+}
+
+impl fmt::Display for SceneEntityRetirementError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NotSceneEntity => "target is not a scene-managed entity",
+            Self::HasChildren => "scene entity retirement requires a leaf entity",
+            Self::Identity(_) => "scene identity retirement failed",
+            Self::DespawnFailed => "scene entity disappeared after identity retirement",
+        })
+    }
+}
+
+impl Error for SceneEntityRetirementError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Identity(error) => Some(error),
+            Self::NotSceneEntity | Self::HasChildren | Self::DespawnFailed => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
 pub struct SceneEntitySource {
@@ -803,6 +832,44 @@ fn despawn_entities(world: &mut World, entities: &[Entity]) -> usize {
         .copied()
         .filter(|entity| world.despawn(*entity))
         .count()
+}
+
+/// Retires one scene-managed stable identity before removing its runtime entity.
+pub fn retire_and_despawn_scene_entity(
+    world: &mut World,
+    entity: Entity,
+) -> Result<(), SceneEntityRetirementError> {
+    let Some(source) = world.get::<SceneEntitySource>(entity).cloned() else {
+        return Err(SceneEntityRetirementError::NotSceneEntity);
+    };
+    if world
+        .query::<&Parent>()
+        .iter(world)
+        .any(|parent| parent.0 == entity)
+    {
+        return Err(SceneEntityRetirementError::HasChildren);
+    }
+    if !world.contains_resource::<WorldIdentityDomain>() {
+        return Err(SceneEntityRetirementError::Identity(
+            IdentityDomainError::WorldDomainUnavailable,
+        ));
+    }
+    let reference = RuntimeEntityReference::scene(source.instance_id, source.entity_id);
+    world
+        .resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
+            domain.retire_entity_with_reference(
+                world,
+                entity,
+                &reference,
+                TombstoneCause::Despawned,
+            )
+        })
+        .map_err(SceneEntityRetirementError::Identity)?;
+    if !world.despawn(entity) {
+        return Err(SceneEntityRetirementError::DespawnFailed);
+    }
+    sync_children(world);
+    Ok(())
 }
 
 #[must_use]

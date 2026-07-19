@@ -23,6 +23,106 @@
         }
       },
       {
+        "id": "enemy-anchor-2",
+        "components": {},
+        "prefab": {
+          "source": {
+            "kind": "path",
+            "value": "enemy.prefab.json"
+          },
+          "overrides": {
+            "format_version": 1,
+            "operations": [
+              {
+                "op": "set_field",
+                "args": {
+                  "entity": "enemy",
+                  "component": "reference_game.Enemy",
+                  "component_version": 1,
+                  "field": "position",
+                  "value": {
+                    "type": "map",
+                    "value": {
+                      "x": {
+                        "type": "f64",
+                        "value": 9.0
+                      },
+                      "y": {
+                        "type": "f64",
+                        "value": 0.0
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "op": "set_field",
+                "args": {
+                  "entity": "enemy",
+                  "component": "reference_game.WaveSpawn",
+                  "component_version": 1,
+                  "field": "tick",
+                  "value": {
+                    "type": "u64",
+                    "value": 5
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "enemy-anchor-3",
+        "components": {},
+        "prefab": {
+          "source": {
+            "kind": "path",
+            "value": "enemy.prefab.json"
+          },
+          "overrides": {
+            "format_version": 1,
+            "operations": [
+              {
+                "op": "set_field",
+                "args": {
+                  "entity": "enemy",
+                  "component": "reference_game.Enemy",
+                  "component_version": 1,
+                  "field": "position",
+                  "value": {
+                    "type": "map",
+                    "value": {
+                      "x": {
+                        "type": "f64",
+                        "value": 13.0
+                      },
+                      "y": {
+                        "type": "f64",
+                        "value": 0.0
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "op": "set_field",
+                "args": {
+                  "entity": "enemy",
+                  "component": "reference_game.WaveSpawn",
+                  "component_version": 1,
+                  "field": "tick",
+                  "value": {
+                    "type": "u64",
+                    "value": 9
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
         "id": "player",
         "components": {
           "reference_game.Player": {
@@ -79,6 +179,53 @@
                 "remaining-ticks": {
                   "type": "u64",
                   "value": 3
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "projectile-fixture",
+        "components": {
+          "reference_game.Projectile": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "damage": {
+                  "type": "i64",
+                  "value": 0
+                },
+                "position": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": -100.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                },
+                "ttl-ticks": {
+                  "type": "u64",
+                  "value": 8
+                },
+                "velocity": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": -2.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
                 }
               }
             }

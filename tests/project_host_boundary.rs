@@ -7,7 +7,7 @@ const ALLOWED_RUNTIME_EXPORTS: [&str; 4] = [
     "HeadlessRunReport",
 ];
 
-const ALLOWED_PUBLIC_METHODS: [&str; 12] = [
+const ALLOWED_PUBLIC_METHODS: [&str; 13] = [
     "configure",
     "diagnostics",
     "disable",
@@ -17,6 +17,7 @@ const ALLOWED_PUBLIC_METHODS: [&str; 12] = [
     "into_outcome",
     "new",
     "outcome",
+    "stop_when",
     "with_cleanup_timeout",
     "with_profile",
     "with_schema_provider",
@@ -54,6 +55,15 @@ fn concrete_product_action_exposes_only_the_reviewed_carriers() {
     ));
 
     let runtime_source = read(root.join("src/project_host/runtime/action.rs"));
+    let compact_runtime = runtime_source.split_whitespace().collect::<String>();
+    assert!(
+        compact_runtime.contains("commands:Vec<GameplayCommandSubmission>"),
+        "the product action must take an already-owned command buffer"
+    );
+    assert!(
+        !compact_runtime.contains("IntoIterator<Item=GameplayCommandSubmission>"),
+        "the product Host must not consume an unbounded command iterator"
+    );
     let mut public_types = BTreeSet::new();
     let mut public_methods = BTreeSet::new();
     for line in runtime_source.lines() {
@@ -97,9 +107,9 @@ fn ordinary_reference_binary_names_only_product_level_concepts() {
     for required in [
         "DirectoryCapability",
         "HeadlessRunOutcome",
+        "bundled_wave_run",
         "diagnostics",
         "execute_bounded",
-        "project_headless_run",
     ] {
         assert!(
             identifiers.contains(required),
@@ -112,6 +122,7 @@ fn ordinary_reference_binary_names_only_product_level_concepts() {
 fn external_consumer_compiles_with_the_product_concepts() {
     let cases = trybuild::TestCases::new();
     cases.pass("tests/fixtures/project-host-boundary/ordinary_product_action.rs");
+    cases.compile_fail("tests/ui/project_host/headless_run_rejects_unbounded_commands.rs");
 }
 
 fn read(path: impl AsRef<Path>) -> String {

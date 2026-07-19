@@ -21,6 +21,35 @@ fn manifest_and_sources_use_only_the_public_root_package() {
     assert!(!sources.contains("ImageBytesImportRequest"));
 }
 
+#[test]
+fn headless_cli_accepts_only_bundled_input_and_a_bounded_tick_option() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = fs::read_to_string(root.join("src/bin/headless.rs")).unwrap();
+
+    for required in [
+        "bundled_wave_run",
+        "--max-ticks",
+        "MAXIMUM_CLI_TICKS",
+        "HeadlessRunOutcome",
+    ] {
+        assert!(source.contains(required), "headless CLI is missing {required}");
+    }
+    for forbidden in [
+        "--scenario",
+        "--replay",
+        "--commands",
+        "command_path",
+        "scenario_path",
+        "serde_json::from",
+        "from_reader",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "headless CLI exposes unadmitted external input: {forbidden}"
+        );
+    }
+}
+
 fn contains_private_engine_import(sources: &str) -> bool {
     sources.lines().any(|line| {
         let line = line.trim_start();

@@ -123,6 +123,18 @@
                 }
               }
             }
+          },
+          "reference_game.WaveSpawn": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "tick": {
+                  "type": "u64",
+                  "value": 1
+                }
+              }
+            }
           }
         }
       }

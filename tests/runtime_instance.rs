@@ -2749,7 +2749,7 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
     let mut runtime = start_runtime(app);
     let submission = GameplayCommandSubmission::new(
         GameplayCommandTick::new(1).unwrap(),
-        GameplayCommandIngressSource::test("external-rejection").unwrap(),
+        GameplayCommandIngressSource::external("external-rejection").unwrap(),
         GameplayCommandSourceSequence::new(1).unwrap(),
         GameplayCommandDraft::new(GameplayCommandTypeId::new("runtime.external").unwrap()),
     );
@@ -2771,7 +2771,7 @@ fn external_submission_rejections_do_not_fault_a_healthy_runtime() {
                 .unwrap()
                 .submit(GameplayCommandSubmission::new(
                     GameplayCommandTick::new(1).unwrap(),
-                    GameplayCommandIngressSource::test("late-rejection").unwrap(),
+                    GameplayCommandIngressSource::external("late-rejection").unwrap(),
                     GameplayCommandSourceSequence::new(2).unwrap(),
                     GameplayCommandDraft::new(
                         GameplayCommandTypeId::new("runtime.external").unwrap(),
