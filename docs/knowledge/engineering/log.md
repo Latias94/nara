@@ -4,6 +4,11 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-19
+* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U13](registry/2026-07/2026-07-19T070109Z-engine-foundation-contract-completion-codex-root-efb5a01385c3477386810dfa9a159aef.md) - Activate desktop parity over the verified U6 authoritative headless wave and U24 product Host.
+* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U6](registry/2026-07/2026-07-19T070051Z-engine-foundation-contract-completion-codex-root-0273ec9e52f842b68da605f678ffc51a.md) - Close RGF-U6 after the deterministic headless wave, stable snapshot, terminal outcome, CLI, and full verification gates passed.
+* **Verification Evidence**: [RGF-U6 deterministic headless wave verification](verification/2026-07/2026-07-19T065918Z-rgf-u6-deterministic-headless-wave-verification-203bdd80f8704a1a8e6440ef7f9069ba.md) - Commit db511a7 closes the authoritative reference-game wave, stable snapshots, terminal outcomes, privacy-safe CLI, and bounded shutdown.
+
 ## 2026-07-18
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U6](registry/2026-07/2026-07-18T225701Z-engine-foundation-contract-completion-codex-root-eab721b330634ab1bccc8cdaa2de90f4.md) - Activate the complete authoritative headless wave on the verified U24 product action.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U24](registry/2026-07/2026-07-18T225700Z-engine-foundation-contract-completion-codex-root-a57044b955be4f35bba73bfa6bfbba80.md) - Close RGF-U24 after the concrete headless product action, atomic publication, reversal matrix, and full repository verification passed review.
@@ -142,6 +147,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification**: [Asset Render Resource Seam Review Hardening](verification/2026-07-08T125216Z-asset-render-resource-seam-review-hardening.md)
 * **Memory Event**: [Review hardening: asset render resource seam](logs/2026-07/2026-07-08T125216Z-review-hardening-asset-render-resource-seam.md) - Read-only review findings were resolved for asset identity, source-kind preflight, image prepare cleanup, invalid atlas tiles, and wgpu texture module boundaries.
 * **Verification**: [Asset Render Resource Seam Final Verification](verification/2026-07-08T120928Z-asset-render-resource-seam-final.md)
-* **Memory Event**: [Verification: U9 asset render resource seam final examples and boundary checks](logs/2026-07/2026-07-08T120928Z-verification-u9-asset-render-resource-seam-final-examples-docs-boundary.md) - U9 added end-to-end asset import texture examples, aligned docs on import-cache, and passed the final asset/render seam verification matrix.
-* **Memory Event**: [Verification: U8 scene and prefab stable asset preflight implemented](logs/2026-07/2026-07-08T115716Z-verification-u8-scene-prefab-stable-asset-preflight-implemented.md) - U8 wired scene/prefab asset references through ProjectAssetDatabase-aware component decode context before World mutation.
-* **Memory Event**: [Verification: U7 wgpu texture cache and shader sampling implemented](logs/2026-07/2026-07-08T113534Z-verification-u7-wgpu-texture-cache-bind-groups-and-shader-sampling-implemented.md) - U7 connected sprite batch image resource keys and UVs to nara_render_wgpu texture upload, bind groups, samplers, and WGSL sampling; later M2 material keys superseded resource-only keys.

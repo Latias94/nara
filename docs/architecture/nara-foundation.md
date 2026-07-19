@@ -337,8 +337,10 @@ second real adapter or stronger isolation pressure.
   `ProjectContentSnapshot` carrying the frozen schema fingerprint without creating an App or
   target World.
 - The root `HeadlessRun` action is the first ordinary file-backed runtime entry. It accepts one
-  host-issued project-root capability, a typed run intent, semantic commands, and an outcome
-  resource type; it returns only `HeadlessRunOutcome` plus a structured diagnostic report. Its
+  host-issued project-root capability, a typed run intent, an owned bounded semantic-command
+  buffer, and an outcome resource type; it returns only `HeadlessRunOutcome` plus a structured
+  diagnostic report. A typed terminal predicate may stop after the first complete matching fixed
+  tick, while the declared tick count remains the hard upper bound. Its
   private `ProjectHost` reuses the immutable plan/content values only when lineage and schema
   fingerprints match, creates one fresh App and obligation ledger, commits and seals the resolved
   plugin plan, transfers ownership into an unpublished `RuntimeCandidate`, repeats registry and
@@ -346,8 +348,9 @@ second real adapter or stronger isolation pressure.
   one reporter-lock-linearized `RuntimePublicationSlot` move makes the `RuntimeInstance` visible.
   Failed preparation, admission, startup, publication, runtime drive, or close retains the same
   owner through bounded retirement; incomplete cleanup blocks replacement and is retried by later
-  calls without reopening project source or resubmitting commands. This is the implemented U24
-  headless Trial slice, not acceptance of ADR 0082/0084 or a universal Host/factory Interface.
+  calls without reopening project source or resubmitting commands. RGF-U6 now proves this U24
+  headless Trial through a complete game loop and CLI; that evidence still does not accept ADR
+  0082/0084 or freeze a universal Host/factory Interface.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
 - `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
 - `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age
@@ -363,9 +366,13 @@ second real adapter or stronger isolation pressure.
   from randomized current/home directories, consumes its fixed timestep, and follows the committed
   startup scene, enemy prefab, canonical image metadata, and PNG source into one immutable content
   snapshot. Its ordinary product path now materializes that snapshot through U29's guarded apply,
-  publishes one fresh managed runtime, executes the same first fixed tick as the frozen U26 manual
-  counterfactual, captures the authoritative outcome, and retains incomplete retirement for retry.
-  The complete movement/combat/wave and final CLI contracts remain RGF-U6 work.
+  publishes one fresh managed runtime, and executes semantic movement, pursuit, automatic fire,
+  collision, damage, stable-identity retirement, score, and both terminal outcomes. Its admitted
+  tick gate prevents a command/topology/runtime failure from publishing a failed-frame success
+  snapshot; deterministic snapshots sort stable game identities and retain the last good state.
+  The bundled headless CLI accepts only a bounded maximum tick count, emits one versioned JSON
+  terminal summary, separates privacy-safe failure diagnostics onto stderr, and drives finite
+  cleanup. Desktop input/render/HUD parity remains RGF-U13 work.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_identity` implements the world-scoped identity core, structured references, atomic
   fork/restore remaps, tombstone policy, root facade wiring, and scene/gameplay/reflect/tooling
@@ -554,8 +561,8 @@ second real adapter or stronger isolation pressure.
   `nara_audio` has been retired because it had no production consumer. Pure product/plugin closure,
   stable configurable slots, repeatable preparation, and frozen schema-provider input are
   implemented. Authorized immutable startup content and the concrete headless Host-owned runtime
-  construction/publication action are also implemented. RGF-U6 now owns the complete authoritative
-  game/CLI closure; Editor and desktop Host evidence remain separate later units.
+  construction/publication action are also implemented. RGF-U6 completes the authoritative
+  headless game/CLI closure; Editor and desktop Host evidence remain separate later units.
   See ADR
   [0079](adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md).
 - `CoreStage::TaskUpdate` remains the app-owned main-thread integration point, while each business
@@ -569,7 +576,10 @@ second real adapter or stronger isolation pressure.
   profiles exclude window/render/audio-device/editor/UI-toolkit adapters by default, run
   deterministic-friendly gameplay through declared simulation stages, consume semantic gameplay
   commands instead of raw device input, keep networking optional, and expose diagnostics/metrics
-  without editor UI. See ADR
+  without editor UI. The RGF-U6 reference product additionally proves real committed-content boot,
+  a complete fixed-tick combat wave, stable terminal snapshots, bounded tick-limit failure, and a
+  privacy-safe standalone CLI. Hosted artifacts, networking transports, metrics bridges, and
+  dedicated-server delivery remain separate evidence. See ADR
   [0056](adr/0056-headless-runtime-and-dedicated-server-readiness.md).
 - Editor workspace state belongs in `nara_tooling`: open document slots, active document, selection
   sets, dirty/saved revisions, external reload conflicts, per-document undo/redo, and workspace

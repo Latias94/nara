@@ -1749,6 +1749,64 @@ phases, or drop an incomplete retirement owner to simulate success.
 `reference-game/tests/manual_raw_app_baseline.rs` prove the caller boundary, lineage/schema
 binding, failure phases, publication linearization, owner retention, and U26 outcome parity.
 
+## RGF-U6-1: Bounded Authoritative Headless Product Contract
+
+**Removed contract**:
+
+- `HeadlessRun::new` accepting an arbitrary `IntoIterator` and collecting it during product action
+  construction, which left the ordinary boundary unable to prove finite caller work.
+- Treating a fixed number of ticks and an arbitrary outcome resource as successful even when the
+  product had not reached a semantic terminal state.
+- The reference-game binary as a first-tick tracer without a stable stdout schema, explicit
+  tick-limit failure, or one bounded cleanup deadline.
+
+**Canonical replacement or deletion rationale**: `HeadlessRun::new` now requires an owned
+`Vec<GameplayCommandSubmission>`. Producers must finish collection and their own untrusted-input
+budgeting before handing commands to the Host; runtime admission still validates every submission.
+`HeadlessRunIntent::stop_when` captures the typed outcome only after a complete matching fixed tick,
+while its `NonZeroU32` tick count remains a hard upper bound. Reaching that bound without a match is
+`project.run.tick-limit`, not success.
+
+The reference game uses this action with bundled typed commands and a `WaveSnapshot` terminal
+predicate. Completed and Defeated emit one
+`nara-reference-game.wave-summary-v1` JSON record on stdout and exit zero. Project, content,
+command, runtime, tick-limit, stdout-write, and cleanup-deadline failures emit only bounded static
+diagnostics on stderr and exit nonzero. External scenario paths and serialized command files remain
+unsupported until a separately budgeted Adapter is admitted.
+
+```rust
+let commands: Vec<GameplayCommandSubmission> = build_bounded_commands()?;
+let intent = HeadlessRunIntent::<WaveSnapshot>::new(maximum_ticks)
+    .stop_when(WaveSnapshot::is_terminal);
+let mut run = HeadlessRun::new(project_root, intent, commands);
+```
+
+**Affected examples and fixtures**: the independent reference-game headless binary, first-wave and
+snapshot tests, root project Host tests, and external compile fixture now use the owned command
+buffer and terminal predicate contract.
+
+**User action**: collect command producers into a finite `Vec` before constructing `HeadlessRun`.
+If commands originate from an untrusted file, network, replay, or package source, enforce encoded
+byte/depth/count budgets in that Adapter before collection. Use `stop_when` for semantic product
+completion and treat `tick-limit` as failure.
+
+**Source action**: `none`; no persistent project format changes are required.
+
+**Cache action**: `keep`; rebuild Rust artifacts after the signature change.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No iterator compatibility shim or
+external scenario loader is retained.
+
+**Rollback**: revert the complete U6 product proof and callers together. Do not restore an
+unbounded iterator boundary, return a failed-frame snapshot as success, or bypass the Host cleanup
+owner.
+
+**Verification anchors**: `reference-game/tests/{first_wave,headless_cli,headless_snapshot}.rs`,
+`tests/{reference_game_contract,project_runtime_boot,project_host_boundary}.rs`, and the
+`headless_run_rejects_unbounded_commands` compile-fail fixture prove stable terminal ticks, same-tick
+Defeated priority, last-good snapshot retention, privacy-safe CLI sinks, bounded cleanup, public-only
+game code, and the owned command boundary.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

@@ -234,6 +234,29 @@ process scope graph, Editor/desktop parity, a public recipe/factory abstraction,
 of advanced runtime types. U17/U13 remain the diffusion challenge, and U23 remains the only
 authority that may accept or reject the two Proposed ADRs.
 
+## RGF-U6 Product Proof
+
+Commit `db511a7` exercises the U24 action through a complete deterministic game workflow instead of
+another lifecycle harness.
+
+- `HeadlessRun::new` accepts an owned `Vec<GameplayCommandSubmission>`. Collection and budgeting
+  happen before runtime construction, so an unbounded iterator cannot keep candidate startup open.
+- `HeadlessRunIntent::stop_when` observes the typed outcome only after a complete exact fixed tick;
+  its fixed-tick count remains the hard failure bound. A nonmatching run reports `tick-limit`, never
+  a nonterminal success value.
+- The reference game loads its committed scene/prefab/image closure, runs movement/combat through
+  public semantic command and schedule anchors, and publishes a sorted stable-identity snapshot
+  only for an admitted fault-free tick.
+- Completed and Defeated use the same bounded retirement path and the same versioned stdout JSON
+  contract. Construction, command, runtime, tick-limit, and cleanup failures remain structured,
+  privacy-safe stderr diagnostics.
+- Source and compile-fail boundaries keep the ordinary game and binary free of `App`, candidate,
+  admission, publication, and retirement choreography.
+
+This proof strengthens the concrete headless carrier without making its Rust spelling universal.
+Desktop and Editor carriers must reuse the same ownership/fault semantics while proving their own
+driver and persistence needs; they may not introduce a parallel publication path.
+
 ## Module And Seam Placement
 
 ```mermaid
