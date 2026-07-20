@@ -21,6 +21,8 @@ use nara_reference_game::{
 use project_content_fixture::{desktop_candidate_plan_and_root, stop_runtime};
 
 const MINIMUM_DESKTOP_INPUT_WINDOW_TICKS: usize = 250;
+const DESKTOP_FRAME_DELTA: Duration = Duration::from_millis(10);
+const DESKTOP_FIXED_TIMESTEP: Duration = Duration::from_millis(100);
 
 #[test]
 fn desktop_wave_leaves_an_input_window_and_applies_wasd_movement() {
@@ -53,6 +55,46 @@ fn desktop_wave_leaves_an_input_window_and_applies_wasd_movement() {
         "W must move the player upward: before={before:?}, after={after:?}"
     );
     stop_runtime(runtime);
+}
+
+#[test]
+fn desktop_profile_keeps_a_short_physical_key_press_visible_and_playable() {
+    let mut runtime = desktop_runtime();
+    let actual_timestep = runtime.world().resource::<FixedTime>().timestep();
+
+    let before = player_position(&runtime);
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Press(KeyCode::Character('w')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_desktop_frames(&mut runtime, 25);
+
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Release(KeyCode::Character('w')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_desktop_frames(&mut runtime, 45);
+
+    let after = player_position(&runtime);
+    let snapshot = runtime.world().resource::<WaveSnapshot>();
+    let outcome = snapshot.outcome;
+    stop_runtime(runtime);
+
+    assert_eq!(
+        actual_timestep, DESKTOP_FIXED_TIMESTEP,
+        "the desktop profile must use a human-observable simulation cadence"
+    );
+    assert_eq!(
+        outcome,
+        WaveOutcome::Running,
+        "a 250 ms key press must not finish the game before the player can react"
+    );
+    assert!(
+        after.y > before.y && after.y <= 4.0,
+        "the player must move visibly without leaving the camera: before={before:?}, after={after:?}"
+    );
 }
 
 #[test]
@@ -233,11 +275,15 @@ fn desktop_runtime() -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let scene = snapshot.expanded_startup_scene().clone();
+    let runtime_time = plan.settings().runtime.runtime_time_settings();
+    let fixed_time = plan.settings().runtime.fixed_time();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeCandidate::admit(sealed).unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
+                world.insert_resource(runtime_time);
+                world.insert_resource(fixed_time);
                 let report = spawn_scene(world, plan.schema_validation().registry(), &scene);
                 assert!(
                     !report.diagnostics.has_errors(),
@@ -271,6 +317,12 @@ fn start_desktop_wave(runtime: &mut RuntimeInstance) {
 fn drive_fixed(runtime: &mut RuntimeInstance) {
     let timestep = runtime.world().resource::<FixedTime>().timestep();
     runtime.drive(timestep).unwrap();
+}
+
+fn drive_desktop_frames(runtime: &mut RuntimeInstance, frames: usize) {
+    for _ in 0..frames {
+        runtime.drive(DESKTOP_FRAME_DELTA).unwrap();
+    }
 }
 
 fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {

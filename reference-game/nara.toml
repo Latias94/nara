@@ -25,6 +25,7 @@ requested = ["runtime-2d", "runtime-ui", "desktop-winit", "render-wgpu"]
 
 [profiles.desktop.runtime]
 preset = "local-headless"
+fixed_timestep_seconds = 0.1
 
 [profiles.desktop.window]
 enabled = true
