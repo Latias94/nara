@@ -1,3 +1,4 @@
 target/
 repo-ref/
+.worktrees/
 .nara/import-cache/
