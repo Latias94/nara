@@ -1,15 +1,16 @@
 use std::{error::Error, fmt};
 
 use nara::{
-    prelude::{Component, Resource},
+    prelude::{Component, Resource, Vec2},
     scene::{SceneEntityId, SpawnedSceneInstance},
 };
 
 use crate::{Enemy, Player, Projectile, WaveSpawn, Weapon, snapshot::WaveOutcome};
 
-pub(crate) const MOVE_COMMAND_TYPE: &str = "reference-game.move-v1";
+pub(crate) const MOVE_COMMAND_TYPE: &str = "reference-game.move-v2";
 pub(crate) const MOVE_X_FIELD: &str = "x";
 pub(crate) const MOVE_Y_FIELD: &str = "y";
+pub(crate) const MOVE_PRESSED_FIELD: &str = "pressed";
 pub(crate) const RETRY_COMMAND_TYPE: &str = "reference-game.retry-v1";
 pub(crate) const PLAYER_SCENE_ID: &str = "player";
 pub(crate) const COMMAND_SOURCE: &str = "reference-game.bundled";
@@ -73,6 +74,48 @@ impl MovementDirection {
             Self::Stop => (0, 0),
         }
     }
+
+    pub(crate) const fn from_velocity(x: i64, y: i64) -> Option<Self> {
+        match (x, y) {
+            (-1, 0) => Some(Self::Left),
+            (1, 0) => Some(Self::Right),
+            (0, 1) => Some(Self::Up),
+            (0, -1) => Some(Self::Down),
+            (0, 0) => Some(Self::Stop),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
+pub(crate) struct MovementIntent {
+    left: bool,
+    right: bool,
+    up: bool,
+    down: bool,
+}
+
+impl MovementIntent {
+    pub(crate) fn apply(&mut self, direction: MovementDirection, pressed: bool) {
+        match direction {
+            MovementDirection::Left => self.left = pressed,
+            MovementDirection::Right => self.right = pressed,
+            MovementDirection::Up => self.up = pressed,
+            MovementDirection::Down => self.down = pressed,
+            MovementDirection::Stop => *self = Self::default(),
+        }
+    }
+
+    pub(crate) fn velocity(self) -> Vec2 {
+        let x = self.right as i8 - self.left as i8;
+        let y = self.up as i8 - self.down as i8;
+        let scale = if x != 0 && y != 0 {
+            std::f32::consts::FRAC_1_SQRT_2
+        } else {
+            1.0
+        };
+        Vec2::new(f32::from(x) * scale, f32::from(y) * scale)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
@@ -119,7 +162,6 @@ impl WaveRunGeneration {
         self.start_fixed_tick = start_fixed_tick;
         Some(())
     }
-
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

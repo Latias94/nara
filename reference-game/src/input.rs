@@ -4,7 +4,10 @@ use nara::{
     prelude::{App, PluginError},
 };
 
-use crate::{MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, movement_draft, retry_draft};
+use crate::{
+    MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, movement_draft, movement_release_draft,
+    retry_draft,
+};
 
 const MOVE_LEFT_ACTION: &str = "reference-game.move-left";
 const MOVE_RIGHT_ACTION: &str = "reference-game.move-right";
@@ -49,12 +52,17 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
         let world = app.world_mut()?;
         let mut command_map = world.resource_mut::<ActionCommandMap>();
         for (id, _, direction) in bindings {
-            bind_movement(&mut command_map, id, ActionPhase::Started, direction)?;
+            bind_movement(
+                &mut command_map,
+                id,
+                ActionPhase::Started,
+                movement_draft(direction),
+            )?;
             bind_movement(
                 &mut command_map,
                 id,
                 ActionPhase::Released,
-                MovementDirection::Stop,
+                movement_release_draft(direction),
             )?;
         }
         command_map
@@ -78,16 +86,13 @@ fn bind_movement(
     command_map: &mut ActionCommandMap,
     action: &'static str,
     phase: ActionPhase,
-    direction: MovementDirection,
+    command: nara::gameplay::GameplayCommandDraft,
 ) -> Result<(), PluginError> {
+    let command_type = command.command_type().clone();
     command_map
         .bind(
-            ActionCommandBinding::new(
-                action_id(action),
-                phase,
-                movement_draft(direction).command_type().clone(),
-            )
-            .with_command(movement_draft(direction)),
+            ActionCommandBinding::new(action_id(action), phase, command_type)
+                .with_command(command),
         )
         .map_err(|_| PluginError::SetupFailed {
             plugin: REFERENCE_DESKTOP_PLUGIN_ID,

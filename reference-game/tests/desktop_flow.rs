@@ -103,6 +103,63 @@ fn desktop_profile_keeps_a_short_physical_key_press_visible_and_playable() {
 }
 
 #[test]
+fn overlapping_wasd_keys_compose_and_releasing_one_preserves_the_other() {
+    let mut runtime = desktop_runtime();
+    let origin = player_position(&runtime);
+
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Press(KeyCode::Character('s')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Press(KeyCode::Character('a')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+
+    let diagonal = player_position(&runtime);
+
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Release(KeyCode::Character('s')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+
+    let left_only = player_position(&runtime);
+
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Release(KeyCode::Character('a')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+
+    let stopped = player_position(&runtime);
+    stop_runtime(runtime);
+
+    assert!(
+        diagonal.x < origin.x && diagonal.y < origin.y,
+        "held S+A must compose into down-left movement: origin={origin:?}, diagonal={diagonal:?}"
+    );
+    let diagonal_distance = (diagonal - origin).length();
+    assert!(
+        (diagonal_distance - 1.0).abs() < 1.0e-6,
+        "diagonal movement must preserve cardinal speed: distance={diagonal_distance}"
+    );
+    assert!(
+        left_only.x < diagonal.x && left_only.y == diagonal.y,
+        "releasing S while A remains held must preserve left movement: diagonal={diagonal:?}, left_only={left_only:?}"
+    );
+    assert_eq!(
+        stopped, left_only,
+        "releasing the final movement key must stop the player"
+    );
+}
+
+#[test]
 fn wasd_edges_lower_to_semantic_commands_and_focus_release_stops() {
     let mut runtime = desktop_runtime();
 

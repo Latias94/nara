@@ -143,6 +143,7 @@ impl Plugin for ReferenceWavePlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(resources::WaveState::default())?
+            .insert_resource(resources::MovementIntent::default())?
             .insert_resource(WaveRunGeneration::default())?
             .insert_resource(WaveRetryStatus::default())?
             .insert_resource(resources::WaveResetTemplate::default())?
@@ -365,6 +366,14 @@ pub fn retry_command(
 }
 
 fn movement_draft(direction: MovementDirection) -> GameplayCommandDraft {
+    movement_intent_draft(direction, true)
+}
+
+fn movement_release_draft(direction: MovementDirection) -> GameplayCommandDraft {
+    movement_intent_draft(direction, false)
+}
+
+fn movement_intent_draft(direction: MovementDirection, pressed: bool) -> GameplayCommandDraft {
     let (x, y) = direction.velocity();
     let mut payload = GameplayCommandPayload::new();
     payload
@@ -372,6 +381,12 @@ fn movement_draft(direction: MovementDirection) -> GameplayCommandDraft {
         .expect("the engine-owned movement payload is bounded");
     payload
         .insert(resources::MOVE_Y_FIELD, GameplayCommandValue::I64(y))
+        .expect("the engine-owned movement payload is bounded");
+    payload
+        .insert(
+            resources::MOVE_PRESSED_FIELD,
+            GameplayCommandValue::Bool(pressed),
+        )
         .expect("the engine-owned movement payload is bounded");
     GameplayCommandDraft::new(
         GameplayCommandTypeId::new(resources::MOVE_COMMAND_TYPE)

@@ -17,9 +17,10 @@ use crate::{
     Enemy, Player, Projectile, ReferenceProjectSnapshot, RuntimeOnlyTag, WaveSpawn, Weapon,
     resources::{
         ENEMY_CONTACT_DAMAGE, KILL_SCORE, MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES,
-        MAX_WAVE_SCENE_ENTITIES, MOVE_COMMAND_TYPE, MOVE_X_FIELD, MOVE_Y_FIELD, PLAYER_SCENE_ID,
-        PROJECTILE_TTL_TICKS, ProjectileId, RETRY_COMMAND_TYPE, WaveEntityTemplate,
-        WaveResetTemplate, WaveRetryStatus, WaveRunGeneration, WaveSceneTemplate, WaveState,
+        MAX_WAVE_SCENE_ENTITIES, MOVE_COMMAND_TYPE, MOVE_PRESSED_FIELD, MOVE_X_FIELD, MOVE_Y_FIELD,
+        MovementDirection, MovementIntent, PLAYER_SCENE_ID, PROJECTILE_TTL_TICKS, ProjectileId,
+        RETRY_COMMAND_TYPE, WaveEntityTemplate, WaveResetTemplate, WaveRetryStatus,
+        WaveRunGeneration, WaveSceneTemplate, WaveState,
     },
     snapshot::WaveOutcome,
 };
@@ -292,6 +293,7 @@ fn apply_wave_reset_with_template(
     debug_assert_eq!(replacement.instance_id(), candidate_instance);
     scene.instance = replacement;
     *world.resource_mut::<WaveRunGeneration>() = next_generation;
+    *world.resource_mut::<MovementIntent>() = MovementIntent::default();
     world.resource_mut::<WaveState>().reset();
     Ok(())
 }
@@ -439,6 +441,7 @@ fn rollback_reset_entities(
 pub(crate) fn consume_movement_commands(
     batch: Res<GameplayCommandBatch>,
     mut state: ResMut<WaveState>,
+    mut movement: ResMut<MovementIntent>,
     mut players: Query<(&SceneEntitySource, &mut Player)>,
 ) -> Result<(), BevyError> {
     if !state.is_running() {
@@ -446,49 +449,74 @@ pub(crate) fn consume_movement_commands(
     }
 
     let result = (|| {
+        let mut next_movement = *movement;
+        let mut changed = false;
         for command in batch.commands() {
             if command.command_type().as_str() != MOVE_COMMAND_TYPE {
                 continue;
             }
-            let velocity = movement_velocity(command.payload())?;
-            let mut player = None;
-            for (source, candidate) in &mut players {
-                if source.entity_id.as_str() != PLAYER_SCENE_ID {
-                    continue;
-                }
-                if player.replace(candidate).is_some() {
-                    return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
-                }
-            }
-            let Some(mut player) = player else {
-                return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
-            };
-            player.velocity = velocity;
+            let command = movement_intent(command.payload())?;
+            next_movement.apply(command.direction, command.pressed);
+            changed = true;
         }
+        if !changed {
+            return Ok(());
+        }
+
+        let mut player = None;
+        for (source, candidate) in &mut players {
+            if source.entity_id.as_str() != PLAYER_SCENE_ID {
+                continue;
+            }
+            if player.replace(candidate).is_some() {
+                return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
+            }
+        }
+        let Some(mut player) = player else {
+            return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
+        };
+        player.velocity = next_movement.velocity();
+        *movement = next_movement;
         Ok(())
     })();
     state.reject_on_error(result)
 }
 
-fn movement_velocity(payload: &nara::gameplay::GameplayCommandPayload) -> Result<Vec2, BevyError> {
-    if payload.len() != 2 {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MovementIntentCommand {
+    direction: MovementDirection,
+    pressed: bool,
+}
+
+fn movement_intent(
+    payload: &nara::gameplay::GameplayCommandPayload,
+) -> Result<MovementIntentCommand, BevyError> {
+    if payload.len() != 3 {
         return Err(BevyError::error(
             ReferenceSimulationError::InvalidMovementCommand,
         ));
     }
-    let (Some(GameplayCommandValue::I64(x)), Some(GameplayCommandValue::I64(y))) =
-        (payload.get(MOVE_X_FIELD), payload.get(MOVE_Y_FIELD))
+    let (
+        Some(GameplayCommandValue::I64(x)),
+        Some(GameplayCommandValue::I64(y)),
+        Some(GameplayCommandValue::Bool(pressed)),
+    ) = (
+        payload.get(MOVE_X_FIELD),
+        payload.get(MOVE_Y_FIELD),
+        payload.get(MOVE_PRESSED_FIELD),
+    )
     else {
         return Err(BevyError::error(
             ReferenceSimulationError::InvalidMovementCommand,
         ));
     };
-    if !(-1..=1).contains(x) || !(-1..=1).contains(y) || (x != &0 && y != &0) {
-        return Err(BevyError::error(
-            ReferenceSimulationError::InvalidMovementCommand,
-        ));
-    }
-    Ok(Vec2::new(*x as f32, *y as f32))
+    let direction = MovementDirection::from_velocity(*x, *y).ok_or_else(|| {
+        BevyError::error(ReferenceSimulationError::InvalidMovementCommand)
+    })?;
+    Ok(MovementIntentCommand {
+        direction,
+        pressed: *pressed,
+    })
 }
 
 pub(crate) fn assign_scene_projectile_ids(world: &mut World) -> Result<(), BevyError> {
