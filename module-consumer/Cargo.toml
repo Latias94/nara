@@ -1,0 +1,17 @@
+[package]
+name = "nara-scene-module-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+nara_reflect = { path = "../crates/nara_reflect" }
+nara_scene = { path = "../crates/nara_scene", default-features = false, features = ["serde"] }
+
+[dev-dependencies]
+bevy_ecs = "0.19"
