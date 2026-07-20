@@ -136,7 +136,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     assert_eq!(references.len(), 1);
     assert_eq!(
         references[0].asset_ref(),
-        &AssetRef::path("textures/player.png").unwrap(),
+        &AssetRef::path("textures/tiny-dungeon.png").unwrap(),
     );
 
     drop(loaded.snapshot);

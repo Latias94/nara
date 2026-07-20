@@ -24,7 +24,7 @@ impl Player {
     pub fn fixture() -> Self {
         Self {
             position: Vec2::ZERO,
-            velocity: Vec2::X,
+            velocity: Vec2::ZERO,
             hit_points: 20,
         }
     }

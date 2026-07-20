@@ -20,13 +20,6 @@ pub(crate) const MAX_WAVE_ENEMIES: usize = 64;
 pub(crate) const MAX_WAVE_PROJECTILES: usize = 128;
 pub(crate) const MAX_WAVE_SCENE_ENTITIES: usize = 256;
 
-/// Desktop keeps the first wave idle until a real movement command arrives.
-///
-/// The marker is installed by the desktop projection only. Headless runs keep
-/// the authoritative simulation behavior used by the deterministic wave tests.
-#[derive(Debug, Default, Clone, Copy, Resource)]
-pub(crate) struct DesktopInputGate;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MovementDirection {
     Left,
@@ -127,14 +120,6 @@ impl WaveRunGeneration {
         Some(())
     }
 
-    pub(crate) fn hold_before_input(&mut self, fixed_tick: u64) {
-        self.start_fixed_tick = fixed_tick;
-    }
-
-    pub(crate) fn begin_from_input(&mut self, fixed_tick: u64) -> Option<()> {
-        self.start_fixed_tick = fixed_tick.checked_sub(1)?;
-        Some(())
-    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -235,7 +220,6 @@ pub(crate) struct WaveState {
     pub(crate) planned_enemies: Option<u64>,
     pub(crate) defeated_enemies: u64,
     pub(crate) next_projectile_id: u64,
-    started: bool,
     tick_gate: WaveTickGate,
 }
 
@@ -244,7 +228,6 @@ enum WaveTickGate {
     #[default]
     Pending,
     Admitted,
-    AwaitingInput,
     Rejected,
 }
 
@@ -256,7 +239,6 @@ impl Default for WaveState {
             planned_enemies: None,
             defeated_enemies: 0,
             next_projectile_id: 1,
-            started: true,
             tick_gate: WaveTickGate::Pending,
         }
     }
@@ -267,13 +249,9 @@ impl WaveState {
         matches!(self.outcome, WaveOutcome::Running)
     }
 
-    pub(crate) fn begin_tick(&mut self, wait_for_input: bool) {
+    pub(crate) fn begin_tick(&mut self) {
         self.tick_gate = if self.is_running() {
-            if wait_for_input && !self.started {
-                WaveTickGate::AwaitingInput
-            } else {
-                WaveTickGate::Pending
-            }
+            WaveTickGate::Pending
         } else {
             WaveTickGate::Rejected
         };
@@ -283,36 +261,18 @@ impl WaveState {
         self.is_running() && matches!(self.tick_gate, WaveTickGate::Pending)
     }
 
-    pub(crate) const fn is_waiting_for_input(&self) -> bool {
-        self.is_running() && matches!(self.tick_gate, WaveTickGate::AwaitingInput)
-    }
-
     pub(crate) const fn can_simulate(&self) -> bool {
         self.is_running() && matches!(self.tick_gate, WaveTickGate::Admitted)
     }
 
     pub(crate) const fn can_publish_snapshot(&self) -> bool {
-        matches!(
-            self.tick_gate,
-            WaveTickGate::Admitted | WaveTickGate::AwaitingInput
-        )
+        matches!(self.tick_gate, WaveTickGate::Admitted)
     }
 
     pub(crate) fn admit_tick(&mut self) {
         if self.tick_is_pending() {
             self.tick_gate = WaveTickGate::Admitted;
         }
-    }
-
-    pub(crate) fn start_from_input(&mut self) {
-        self.started = true;
-        if self.is_waiting_for_input() {
-            self.tick_gate = WaveTickGate::Pending;
-        }
-    }
-
-    pub(crate) fn wait_for_input(&mut self) {
-        self.started = false;
     }
 
     pub(crate) fn reject_tick(&mut self) {
@@ -340,10 +300,7 @@ impl WaveState {
         Some((first..next).map(ProjectileId).collect())
     }
 
-    pub(crate) fn reset(&mut self, wait_for_input: bool) {
+    pub(crate) fn reset(&mut self) {
         *self = Self::default();
-        if wait_for_input {
-            self.wait_for_input();
-        }
     }
 }

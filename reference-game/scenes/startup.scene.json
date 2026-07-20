@@ -125,6 +125,130 @@
       {
         "id": "player",
         "components": {
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "layer": {
+                  "type": "i64",
+                  "value": 0
+                },
+                "material": {
+                  "type": "map",
+                  "value": {
+                    "image": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "path"
+                        },
+                        "value": {
+                          "type": "string",
+                          "value": "textures/tiny-dungeon.png"
+                        }
+                      }
+                    },
+                    "sampler": {
+                      "type": "map",
+                      "value": {
+                        "address_mode_u": {
+                          "type": "string",
+                          "value": "clamp_to_edge"
+                        },
+                        "address_mode_v": {
+                          "type": "string",
+                          "value": "clamp_to_edge"
+                        },
+                        "mag_filter": {
+                          "type": "string",
+                          "value": "nearest"
+                        },
+                        "min_filter": {
+                          "type": "string",
+                          "value": "nearest"
+                        },
+                        "mipmap_filter": {
+                          "type": "string",
+                          "value": "nearest"
+                        }
+                      }
+                    },
+                    "tint": {
+                      "type": "map",
+                      "value": {
+                        "a": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "b": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "g": {
+                          "type": "f64",
+                          "value": 0.84
+                        },
+                        "r": {
+                          "type": "f64",
+                          "value": 0.58
+                        }
+                      }
+                    }
+                  }
+                },
+                "size": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.8
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 1.8
+                    }
+                  }
+                },
+                "sort_key": {
+                  "type": "i64",
+                  "value": 20
+                },
+                "texture_region": {
+                  "type": "map",
+                  "value": {
+                    "min": {
+                      "type": "map",
+                      "value": {
+                        "x": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "y": {
+                          "type": "f64",
+                          "value": 0.7272727272727273
+                        }
+                      }
+                    },
+                    "size": {
+                      "type": "map",
+                      "value": {
+                        "x": {
+                          "type": "f64",
+                          "value": 0.08333333333333333
+                        },
+                        "y": {
+                          "type": "f64",
+                          "value": 0.09090909090909093
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "reference_game.Player": {
             "version": 1,
             "value": {
@@ -152,7 +276,7 @@
                   "value": {
                     "x": {
                       "type": "f64",
-                      "value": 1.0
+                      "value": 0.0
                     },
                     "y": {
                       "type": "f64",

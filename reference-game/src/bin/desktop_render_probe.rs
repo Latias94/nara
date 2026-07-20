@@ -38,6 +38,7 @@ const PRODUCT_RENDER_PROBE_PLUGIN_ID: PluginId =
     PluginId::new("reference-game.product-render-probe");
 const PRODUCT_RENDER_PROBE_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("reference-game.product-render-probe", 1);
+const PRODUCT_RENDER_EVIDENCE_TIMEOUT: Duration = Duration::from_secs(30);
 const PRODUCT_RENDER_PROBE_REQUIREMENTS: &[PluginId] = &[REFERENCE_DESKTOP_PLUGIN_ID];
 const PRODUCT_RENDER_PROBE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(PRODUCT_RENDER_PROBE_PLUGIN_ID, PluginCategory::Tooling)
@@ -116,7 +117,7 @@ impl Plugin for ProductRenderProbePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(ProductRenderProbe {
             evidence: Arc::clone(&self.evidence),
-            deadline: Instant::now() + Duration::from_secs(15),
+            deadline: Instant::now() + PRODUCT_RENDER_EVIDENCE_TIMEOUT,
             phase: ProductProbePhase::InitialFrame,
             baseline: None,
             reset_frame_floor: None,

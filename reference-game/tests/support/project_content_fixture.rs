@@ -36,7 +36,7 @@ use nara::app::{RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, Ru
 #[cfg(feature = "desktop")]
 use nara_reference_game::desktop_plugin;
 
-pub const TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
+pub const TEXTURE_ID: &str = "f840a555-9fca-4ceb-ac1b-e03b55d2f492";
 
 #[cfg(feature = "desktop")]
 pub fn stop_runtime(mut runtime: RuntimeInstance) {
@@ -254,6 +254,7 @@ pub fn reference_runtime_plugins(
 
 pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let registry = plan.schema_validation().registry();
+    let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
     let player_id = ComponentTypeId::new("reference_game.Player");
     let projectile_id = ComponentTypeId::new("reference_game.Projectile");
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
@@ -261,6 +262,20 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let second_anchor = enemy_anchor("enemy-anchor-2", Some((9.0, 5)));
     let third_anchor = enemy_anchor("enemy-anchor-3", Some((13.0, 9)));
     let player = SceneEntityRecord::new(scene_id("player"))
+        .with_component(
+            sprite_id,
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                sprite_value(
+                    &AssetRef::path("textures/tiny-dungeon.png").unwrap(),
+                    (1.8, 1.8),
+                    (0.58, 0.84, 1.0, 1.0),
+                    (0.0, 8.0 / 11.0),
+                    (1.0 / 12.0, 0.090_909_090_909_090_93),
+                    20,
+                ),
+            ),
+        )
         .with_component(
             player_id.clone(),
             component_record(Player::fixture(), &player_id, registry),
@@ -319,11 +334,21 @@ pub fn expected_enemy_prefab(plan: &RuntimePlan) -> PrefabDocument {
     let registry = plan.schema_validation().registry();
     let enemy_id = ComponentTypeId::new("reference_game.Enemy");
     let wave_spawn_id = ComponentTypeId::new("reference_game.WaveSpawn");
-    let image = AssetRef::path("textures/player.png").unwrap();
+    let image = AssetRef::path("textures/tiny-dungeon.png").unwrap();
     let enemy = SceneEntityRecord::new(scene_id("enemy"))
         .with_component(
             ComponentTypeId::new("nara.sprite.Sprite"),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                sprite_value(
+                    &image,
+                    (0.0, 0.0),
+                    (1.0, 0.74, 0.74, 1.0),
+                    (2.0 / 12.0, 9.0 / 11.0),
+                    (1.0 / 12.0, 0.090_909_090_909_090_93),
+                    10,
+                ),
+            ),
         )
         .with_component(
             enemy_id.clone(),
@@ -358,13 +383,20 @@ where
     SceneComponentRecord::new(registry.schema(component_id).unwrap().version(), value)
 }
 
-fn sprite_value(image: &AssetRef) -> ComponentValue {
+fn sprite_value(
+    image: &AssetRef,
+    size: (f64, f64),
+    tint: (f64, f64, f64, f64),
+    texture_min: (f64, f64),
+    texture_size: (f64, f64),
+    sort_key: i64,
+) -> ComponentValue {
     ComponentValue::map([
         (
             "size",
             ComponentValue::map([
-                ("x", ComponentValue::f64(16.0).unwrap()),
-                ("y", ComponentValue::f64(16.0).unwrap()),
+                ("x", ComponentValue::f64(size.0).unwrap()),
+                ("y", ComponentValue::f64(size.1).unwrap()),
             ]),
         ),
         (
@@ -374,16 +406,54 @@ fn sprite_value(image: &AssetRef) -> ComponentValue {
                 (
                     "tint",
                     ComponentValue::map([
-                        ("r", ComponentValue::f64(1.0).unwrap()),
-                        ("g", ComponentValue::f64(1.0).unwrap()),
-                        ("b", ComponentValue::f64(1.0).unwrap()),
-                        ("a", ComponentValue::f64(1.0).unwrap()),
+                        ("r", ComponentValue::f64(tint.0).unwrap()),
+                        ("g", ComponentValue::f64(tint.1).unwrap()),
+                        ("b", ComponentValue::f64(tint.2).unwrap()),
+                        ("a", ComponentValue::f64(tint.3).unwrap()),
+                    ]),
+                ),
+                (
+                    "sampler",
+                    ComponentValue::map([
+                        ("min_filter", ComponentValue::String("nearest".to_owned())),
+                        ("mag_filter", ComponentValue::String("nearest".to_owned())),
+                        (
+                            "mipmap_filter",
+                            ComponentValue::String("nearest".to_owned()),
+                        ),
+                        (
+                            "address_mode_u",
+                            ComponentValue::String("clamp_to_edge".to_owned()),
+                        ),
+                        (
+                            "address_mode_v",
+                            ComponentValue::String("clamp_to_edge".to_owned()),
+                        ),
                     ]),
                 ),
             ]),
         ),
         ("layer", ComponentValue::I64(0)),
-        ("sort_key", ComponentValue::I64(0)),
+        ("sort_key", ComponentValue::I64(sort_key)),
+        (
+            "texture_region",
+            ComponentValue::map([
+                (
+                    "min",
+                    ComponentValue::map([
+                        ("x", ComponentValue::f64(texture_min.0).unwrap()),
+                        ("y", ComponentValue::f64(texture_min.1).unwrap()),
+                    ]),
+                ),
+                (
+                    "size",
+                    ComponentValue::map([
+                        ("x", ComponentValue::f64(texture_size.0).unwrap()),
+                        ("y", ComponentValue::f64(texture_size.1).unwrap()),
+                    ]),
+                ),
+            ]),
+        ),
     ])
 }
 

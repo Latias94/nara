@@ -59,14 +59,24 @@ fn assert_committed_content() {
     assert_eq!(snapshot.revision().to_hex().len(), 64);
     assert_eq!(snapshot.prefabs().len(), 1);
     assert_eq!(snapshot.images().len(), 1);
-    assert_eq!(snapshot.images()[0].path().as_str(), "textures/player.png");
+    assert_eq!(
+        snapshot.images()[0].path().as_str(),
+        "textures/tiny-dungeon.png"
+    );
     assert_eq!(
         snapshot.images()[0].image().source().stable_id(),
         texture_stable_id(),
     );
-    assert_eq!(snapshot.images()[0].image().extent().width, 1);
-    assert_eq!(snapshot.images()[0].image().extent().height, 1);
-    assert_eq!(snapshot.images()[0].image().pixels(), &[24, 120, 220, 255],);
+    assert_eq!(snapshot.images()[0].image().extent().width, 192);
+    assert_eq!(snapshot.images()[0].image().extent().height, 176);
+    assert_eq!(
+        snapshot.images()[0].image().pixels().len(),
+        192 * 176 * 4
+    );
+    assert_eq!(
+        &snapshot.images()[0].image().pixels()[..4],
+        &[118, 59, 54, 255],
+    );
 
     let before_clone = loaded.loader.budget_snapshot();
     let cloned = snapshot.clone();
@@ -90,7 +100,7 @@ fn assert_committed_content() {
     assert_eq!(before_clone.high_water(ProjectContentBudgetKind::Files), 4,);
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::DependencyEdges),
-        6,
+        7,
     );
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::QueuedJobs),

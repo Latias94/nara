@@ -16,7 +16,7 @@ use nara::{
 use crate::{
     Enemy, Player, Projectile, ReferenceProjectSnapshot, RuntimeOnlyTag, WaveSpawn, Weapon,
     resources::{
-        DesktopInputGate, ENEMY_CONTACT_DAMAGE, KILL_SCORE, MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES,
+        ENEMY_CONTACT_DAMAGE, KILL_SCORE, MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES,
         MAX_WAVE_SCENE_ENTITIES, MOVE_COMMAND_TYPE, MOVE_X_FIELD, MOVE_Y_FIELD, PLAYER_SCENE_ID,
         PROJECTILE_TTL_TICKS, ProjectileId, RETRY_COMMAND_TYPE, WaveEntityTemplate,
         WaveResetTemplate, WaveRetryStatus, WaveRunGeneration, WaveSceneTemplate, WaveState,
@@ -57,14 +57,7 @@ pub(crate) fn begin_wave_tick(world: &mut World) -> Result<(), BevyError> {
             .resource_mut::<WaveRetryStatus>()
             .mark_applied(applied_generation);
     }
-    let wait_for_input = world.contains_resource::<DesktopInputGate>();
-    world.resource_mut::<WaveState>().begin_tick(wait_for_input);
-    if world.resource::<WaveState>().is_waiting_for_input() {
-        let fixed_tick = world.resource::<FixedTime>().tick();
-        world
-            .resource_mut::<WaveRunGeneration>()
-            .hold_before_input(fixed_tick);
-    }
+    world.resource_mut::<WaveState>().begin_tick();
     Ok(())
 }
 
@@ -299,8 +292,7 @@ fn apply_wave_reset_with_template(
     debug_assert_eq!(replacement.instance_id(), candidate_instance);
     scene.instance = replacement;
     *world.resource_mut::<WaveRunGeneration>() = next_generation;
-    let wait_for_input = world.contains_resource::<DesktopInputGate>();
-    world.resource_mut::<WaveState>().reset(wait_for_input);
+    world.resource_mut::<WaveState>().reset();
     Ok(())
 }
 
@@ -446,8 +438,6 @@ fn rollback_reset_entities(
 
 pub(crate) fn consume_movement_commands(
     batch: Res<GameplayCommandBatch>,
-    fixed_time: Res<FixedTime>,
-    mut run: ResMut<WaveRunGeneration>,
     mut state: ResMut<WaveState>,
     mut players: Query<(&SceneEntitySource, &mut Player)>,
 ) -> Result<(), BevyError> {
@@ -473,11 +463,6 @@ pub(crate) fn consume_movement_commands(
             let Some(mut player) = player else {
                 return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
             };
-            if state.is_waiting_for_input() && velocity != Vec2::ZERO {
-                run.begin_from_input(fixed_time.tick())
-                    .ok_or_else(|| BevyError::error(ReferenceSimulationError::InvalidRunTick))?;
-                state.start_from_input();
-            }
             player.velocity = velocity;
         }
         Ok(())

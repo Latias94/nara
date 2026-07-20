@@ -1,0 +1,12 @@
+Tiny Dungeon (1.0)
+
+Created/distributed by Kenney (https://kenney.nl/)
+Creation date: 2022-07-05
+
+License: Creative Commons Zero (CC0 1.0 Universal)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+This content is free to use in personal, educational, and commercial projects.
+Crediting Kenney is appreciated but not required.
+
+Source: https://kenney.nl/assets/tiny-dungeon

@@ -18,7 +18,7 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
     let report = run_manual_raw_app_boot().unwrap();
 
     assert_eq!(report.first_tick.tick, 1);
-    assert_eq!(report.first_tick.player_position, Vec2::new(1.0, 0.0));
+    assert_eq!(report.first_tick.player_position, Vec2::ZERO);
     assert_eq!(report.first_tick.player_hit_points, 20);
     assert_eq!(report.first_tick.enemy_position, Vec2::new(4.5, 0.0));
     assert_eq!(report.first_tick.enemy_hit_points, 10);
@@ -40,11 +40,11 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
     );
     assert_eq!(
         report.content_revision,
-        "4ccc18e1fe4a0a2184538a19c441e551edab008cadd3f64c65394b8bff033abf"
+        "64c54b4c331e6a8f26e2d6541bbb3fb7d5f4207e5a96a71c0dee0e4378f957c1"
     );
     assert_eq!(
         report.content_digest,
-        "c25e59fbc34fbd3513e5a1c78adfc8e139af8e61080a91825a48c2b48d1672ad"
+        "92839bdd99fdd1432437e1b13e506cfae11f6e008aa2b3f3bd9ef2de5735ec09"
     );
     assert_eq!(
         report.command_digest,
@@ -90,7 +90,7 @@ fn stalled_required_task_retains_app_custody_until_retry_completes() {
 
     assert_eq!(report.diagnostic_class, ManualRawAppBootError::TaskShutdown);
     assert_eq!(report.first_tick.tick, 1);
-    assert_eq!(report.first_tick.player_position, Vec2::new(1.0, 0.0));
+    assert_eq!(report.first_tick.player_position, Vec2::ZERO);
     assert_eq!(report.first_tick.enemy_hit_points, 10);
     assert!(report.scene_published);
     assert!(!report.runtime_published);

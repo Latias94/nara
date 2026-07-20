@@ -20,27 +20,32 @@ use nara_reference_game::{
 };
 use project_content_fixture::{desktop_candidate_plan_and_root, stop_runtime};
 
-const MINIMUM_DESKTOP_INPUT_WINDOW_TICKS: usize = 250;
 const DESKTOP_FRAME_DELTA: Duration = Duration::from_millis(10);
 const DESKTOP_FIXED_TIMESTEP: Duration = Duration::from_millis(100);
 
 #[test]
-fn desktop_wave_leaves_an_input_window_and_applies_wasd_movement() {
+fn desktop_wave_starts_without_input_and_applies_wasd_movement() {
     let mut runtime = desktop_runtime();
 
-    for _ in 0..MINIMUM_DESKTOP_INPUT_WINDOW_TICKS {
-        drive_fixed(&mut runtime);
-    }
-    let waiting = runtime.world().resource::<WaveSnapshot>();
+    drive_fixed(&mut runtime);
+    let running = runtime.world().resource::<WaveSnapshot>();
     assert_eq!(
-        waiting.outcome,
+        running.outcome,
         WaveOutcome::Running,
-        "the desktop wave must remain interactive for at least five seconds"
+        "the desktop wave must become visibly active without a hidden input gate"
     );
-    assert_eq!(waiting.tick, 0, "waiting must not advance the wave clock");
-    assert!(waiting.enemies.iter().all(|enemy| !enemy.active));
+    assert_eq!(running.tick, 1, "the first desktop fixed step must run");
+    assert!(
+        running.enemies.iter().any(|enemy| enemy.active),
+        "at least one enemy must be visibly active on the first tick"
+    );
 
     let before = player_position(&runtime);
+    assert_eq!(
+        before,
+        nara::prelude::Vec2::ZERO,
+        "the player must start centered until the user chooses a direction"
+    );
     keyboard(
         &mut runtime,
         ButtonDriverInput::Press(KeyCode::Character('w')),
@@ -48,7 +53,7 @@ fn desktop_wave_leaves_an_input_window_and_applies_wasd_movement() {
     runtime.drive(Duration::ZERO).unwrap();
     drive_fixed(&mut runtime);
     let after = player_position(&runtime);
-    assert_eq!(runtime.world().resource::<WaveSnapshot>().tick, 1);
+    assert_eq!(runtime.world().resource::<WaveSnapshot>().tick, 2);
 
     assert!(
         after.y > before.y,
@@ -183,7 +188,7 @@ fn enter_is_terminal_only_and_admits_at_most_one_pending_retry() {
     let snapshot = terminal.world().resource::<WaveSnapshot>();
     assert_eq!(terminal.generation(), runtime_generation);
     assert_eq!(snapshot.run_generation, run_generation + 1);
-    assert_eq!(snapshot.tick, 0);
+    assert_eq!(snapshot.tick, 1);
     assert_eq!(snapshot.outcome, WaveOutcome::Running);
     assert_eq!(snapshot.player.hit_points, 20);
     assert_eq!(snapshot.enemies.len(), 3);

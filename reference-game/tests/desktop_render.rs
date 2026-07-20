@@ -12,12 +12,13 @@ use std::{
 };
 
 use nara::{
-    app::RuntimeCandidate,
+    app::{RuntimeCandidate, RuntimeInstance},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
-    prelude::FixedTime,
+    material::SamplerDescriptor,
+    prelude::{FixedTime, Vec2},
     project_host::ProjectContentLoader,
     scene::spawn_scene,
-    sprite_render::ExtractedSprites,
+    sprite_render::{ExtractedSprites, TextureUvRect},
     ui_render::UiBatches,
 };
 use nara_reference_game::{Enemy, Player, ReferenceHudProjection, WaveOutcome};
@@ -35,11 +36,70 @@ fn desktop_projection_emits_sprites_clipped_hud_and_distinct_terminal_geometry()
     assert!(completed.extracted_sprites >= 1);
     assert!(completed.clipped_batches >= 1);
     assert!(completed.terminal_half_width > defeated.terminal_half_width);
+    assert_eq!(completed.arena_floor_sprites, 15 * 8);
+    assert!(defeated.player_and_enemy_share_atlas);
+    assert!(defeated.player_and_enemy_regions_are_distinct);
+    assert!(defeated.atlas_sprites_use_nearest_sampling);
 
     assert_eq!(defeated.hud.health_current, 0);
     assert_eq!(defeated.hud.health_width, 0.0);
     assert_eq!(defeated.hud.outcome, WaveOutcome::Defeated);
     assert!(defeated.terminal_half_height > completed.terminal_half_height);
+}
+
+#[test]
+fn desktop_first_frame_projects_exact_atlas_regions_before_a_fixed_tick() {
+    let mut runtime = render_runtime(None, 0);
+
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let world = runtime.world();
+    assert_eq!(world.resource::<FixedTime>().tick(), 0);
+    let extracted = world.resource::<ExtractedSprites>();
+    assert_eq!(
+        extracted
+            .as_slice()
+            .iter()
+            .filter(|sprite| sprite.layer == -20)
+            .count(),
+        15 * 8,
+    );
+    let player_entity = world
+        .iter_entities()
+        .find(|entity| entity.contains::<Player>())
+        .expect("the desktop fixture must retain one player")
+        .id();
+    let enemy_entity = world
+        .iter_entities()
+        .find(|entity| entity.contains::<Enemy>())
+        .expect("the desktop fixture must retain at least one enemy")
+        .id();
+    let player = extracted
+        .as_slice()
+        .iter()
+        .find(|sprite| sprite.entity == player_entity)
+        .expect("the first frame must extract the player");
+    let enemy = extracted
+        .as_slice()
+        .iter()
+        .find(|sprite| sprite.entity == enemy_entity)
+        .expect("the first frame must extract an enemy");
+    let atlas_tile_size = Vec2::new(1.0 / 12.0, 1.0 / 11.0);
+
+    assert_eq!(
+        player.texture_region,
+        TextureUvRect::new(Vec2::new(0.0, 8.0 / 11.0), atlas_tile_size),
+    );
+    assert_eq!(
+        enemy.texture_region,
+        TextureUvRect::new(Vec2::new(1.0 / 6.0, 9.0 / 11.0), atlas_tile_size),
+    );
+    assert_eq!(player.material.image, enemy.material.image);
+    assert!(player.material.image.is_some());
+    assert_eq!(player.material.sampler, SamplerDescriptor::NEAREST_CLAMP);
+    assert_eq!(enemy.material.sampler, SamplerDescriptor::NEAREST_CLAMP);
+
+    stop_runtime(runtime);
 }
 
 #[test]
@@ -162,6 +222,10 @@ fn read_and_remove(path: &PathBuf) -> Vec<u8> {
 struct RenderObservation {
     hud: ReferenceHudProjection,
     extracted_sprites: usize,
+    arena_floor_sprites: usize,
+    player_and_enemy_share_atlas: bool,
+    player_and_enemy_regions_are_distinct: bool,
+    atlas_sprites_use_nearest_sampling: bool,
     clipped_batches: usize,
     terminal_half_width: f32,
     terminal_half_height: f32,
@@ -172,6 +236,88 @@ fn render_terminal(
     hit_points: i64,
     defeated_enemies: u64,
 ) -> RenderObservation {
+    let mut runtime = render_runtime(Some(hit_points), defeated_enemies);
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Character('a')))
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let timestep = runtime.world().resource::<FixedTime>().timestep();
+    runtime.drive(timestep).unwrap();
+
+    let world = runtime.world();
+    let hud = *world.resource::<ReferenceHudProjection>();
+    assert_eq!(hud.outcome, outcome);
+    let extracted = world.resource::<ExtractedSprites>();
+    let extracted_sprites = extracted.len();
+    let arena_floor_sprites = extracted
+        .as_slice()
+        .iter()
+        .filter(|sprite| sprite.layer == -20)
+        .count();
+    let player_entity = world
+        .iter_entities()
+        .find(|entity| entity.contains::<Player>())
+        .expect("the desktop fixture must retain one player")
+        .id();
+    let enemy_entity = world
+        .iter_entities()
+        .find(|entity| entity.contains::<Enemy>())
+        .map(|entity| entity.id());
+    let player_sprite = extracted
+        .as_slice()
+        .iter()
+        .find(|sprite| sprite.entity == player_entity)
+        .expect("the player must be extracted as a sprite");
+    let enemy_sprite = enemy_entity.and_then(|enemy_entity| {
+        extracted
+            .as_slice()
+            .iter()
+            .find(|sprite| sprite.entity == enemy_entity)
+    });
+    let player_and_enemy_share_atlas = enemy_sprite.is_some_and(|enemy_sprite| {
+        player_sprite.material.image.is_some()
+            && player_sprite.material.image == enemy_sprite.material.image
+    });
+    let player_and_enemy_regions_are_distinct = enemy_sprite.is_some_and(|enemy_sprite| {
+        player_sprite.texture_region != enemy_sprite.texture_region
+    });
+    let atlas_sprites_use_nearest_sampling = extracted
+        .as_slice()
+        .iter()
+        .filter(|sprite| sprite.material.image == player_sprite.material.image)
+        .all(|sprite| sprite.material.sampler == SamplerDescriptor::NEAREST_CLAMP);
+    let batches = world.resource::<UiBatches>();
+    let clipped_batches = batches
+        .as_slice()
+        .iter()
+        .filter(|batch| batch.clip_rect.is_some())
+        .count();
+    let terminal = batches
+        .as_slice()
+        .iter()
+        .find(|batch| batch.order == 10)
+        .expect("terminal geometry should be queued");
+    let terminal_instance = terminal.instances.first().unwrap();
+    let observation = RenderObservation {
+        hud,
+        extracted_sprites,
+        arena_floor_sprites,
+        player_and_enemy_share_atlas,
+        player_and_enemy_regions_are_distinct,
+        atlas_sprites_use_nearest_sampling,
+        clipped_batches,
+        terminal_half_width: terminal_instance.x_axis.x.abs(),
+        terminal_half_height: terminal_instance.y_axis.y.abs(),
+    };
+
+    stop_runtime(runtime);
+    observation
+}
+
+fn render_runtime(hit_points: Option<i64>, defeated_enemies: u64) -> RuntimeInstance {
     let (project, plan, root) = desktop_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let content = loader.load(&project, &plan).unwrap();
@@ -192,7 +338,9 @@ fn render_terminal(
                 let mut players = world.query::<&mut Player>();
                 let mut player_count = 0;
                 for mut player in players.iter_mut(world) {
-                    player.hit_points = hit_points;
+                    if let Some(hit_points) = hit_points {
+                        player.hit_points = hit_points;
+                    }
                     player_count += 1;
                 }
                 assert_eq!(player_count, 1);
@@ -209,41 +357,5 @@ fn render_terminal(
             });
         })
         .unwrap();
-    let mut runtime = candidate.complete_startup().unwrap().promote();
-    runtime
-        .with_driver_scope(|scope| {
-            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Character('a')))
-        })
-        .unwrap()
-        .unwrap();
-    runtime.drive(Duration::ZERO).unwrap();
-    let timestep = runtime.world().resource::<FixedTime>().timestep();
-    runtime.drive(timestep).unwrap();
-
-    let world = runtime.world();
-    let hud = *world.resource::<ReferenceHudProjection>();
-    assert_eq!(hud.outcome, outcome);
-    let extracted_sprites = world.resource::<ExtractedSprites>().len();
-    let batches = world.resource::<UiBatches>();
-    let clipped_batches = batches
-        .as_slice()
-        .iter()
-        .filter(|batch| batch.clip_rect.is_some())
-        .count();
-    let terminal = batches
-        .as_slice()
-        .iter()
-        .find(|batch| batch.order == 10)
-        .expect("terminal geometry should be queued");
-    let terminal_instance = terminal.instances.first().unwrap();
-    let observation = RenderObservation {
-        hud,
-        extracted_sprites,
-        clipped_batches,
-        terminal_half_width: terminal_instance.x_axis.x.abs(),
-        terminal_half_height: terminal_instance.y_axis.y.abs(),
-    };
-
-    stop_runtime(runtime);
-    observation
+    candidate.complete_startup().unwrap().promote()
 }

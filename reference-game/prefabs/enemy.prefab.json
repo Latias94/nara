@@ -32,7 +32,32 @@
                         },
                         "value": {
                           "type": "string",
-                          "value": "textures/player.png"
+                          "value": "textures/tiny-dungeon.png"
+                        }
+                      }
+                    },
+                    "sampler": {
+                      "type": "map",
+                      "value": {
+                        "address_mode_u": {
+                          "type": "string",
+                          "value": "clamp_to_edge"
+                        },
+                        "address_mode_v": {
+                          "type": "string",
+                          "value": "clamp_to_edge"
+                        },
+                        "mag_filter": {
+                          "type": "string",
+                          "value": "nearest"
+                        },
+                        "min_filter": {
+                          "type": "string",
+                          "value": "nearest"
+                        },
+                        "mipmap_filter": {
+                          "type": "string",
+                          "value": "nearest"
                         }
                       }
                     },
@@ -45,11 +70,11 @@
                         },
                         "b": {
                           "type": "f64",
-                          "value": 1.0
+                          "value": 0.74
                         },
                         "g": {
                           "type": "f64",
-                          "value": 1.0
+                          "value": 0.74
                         },
                         "r": {
                           "type": "f64",
@@ -64,17 +89,48 @@
                   "value": {
                     "x": {
                       "type": "f64",
-                      "value": 16.0
+                      "value": 0.0
                     },
                     "y": {
                       "type": "f64",
-                      "value": 16.0
+                      "value": 0.0
                     }
                   }
                 },
                 "sort_key": {
                   "type": "i64",
-                  "value": 0
+                  "value": 10
+                },
+                "texture_region": {
+                  "type": "map",
+                  "value": {
+                    "min": {
+                      "type": "map",
+                      "value": {
+                        "x": {
+                          "type": "f64",
+                          "value": 0.16666666666666666
+                        },
+                        "y": {
+                          "type": "f64",
+                          "value": 0.8181818181818182
+                        }
+                      }
+                    },
+                    "size": {
+                      "type": "map",
+                      "value": {
+                        "x": {
+                          "type": "f64",
+                          "value": 0.08333333333333333
+                        },
+                        "y": {
+                          "type": "f64",
+                          "value": 0.09090909090909093
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }

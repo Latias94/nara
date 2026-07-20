@@ -1,0 +1,14 @@
+{
+  "kind": "asset_meta",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "stable_id": "f840a555-9fca-4ceb-ac1b-e03b55d2f492",
+    "path": "textures/tiny-dungeon.png",
+    "source_kind": "image"
+  }
+}
