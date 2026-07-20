@@ -344,6 +344,16 @@ path = "tests/scene_file_workspace.rs"
 required-features = ["tooling", "serde"]
 
 [[test]]
+name = "editor_persistence"
+path = "tests/editor_persistence.rs"
+required-features = ["tooling", "runtime-2d", "serde"]
+
+[[test]]
+name = "workspace_play_runtime"
+path = "tests/workspace_play_runtime.rs"
+required-features = ["tooling", "runtime-2d", "serde"]
+
+[[test]]
 name = "scene_inspector"
 path = "tests/scene_inspector.rs"
 required-features = ["tooling"]
@@ -356,7 +366,7 @@ required-features = ["runtime-core"]
 [[test]]
 name = "scene_play_mode"
 path = "tests/scene_play_mode.rs"
-required-features = ["tooling", "runtime-2d"]
+required-features = ["tooling", "runtime-2d", "serde"]
 
 [[test]]
 name = "scene_sprite_serialization"

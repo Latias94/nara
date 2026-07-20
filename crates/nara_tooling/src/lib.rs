@@ -2,6 +2,7 @@
 
 mod diagnostic;
 mod inspector;
+mod persistence;
 mod play;
 mod snapshot;
 mod workspace;
@@ -13,16 +14,28 @@ pub use inspector::{
     SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
     SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState,
 };
+pub use persistence::{
+    EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceFailureStage,
+    EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestResult,
+    EditorPersistenceResult, EditorPersistenceView, EditorProjectView, EditorWorkspaceIntent,
+    EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
+    EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
+};
+#[doc(hidden)]
+pub use play::__export_apply_changes_from_world;
 pub use play::{
-    SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus, SceneApplyChangesReport,
-    SceneApplyChangesRequest, SceneEditorMode, SceneEditorModel, SceneEditorState,
-    ScenePlaySession, ScenePlayTransitionReport,
+    EditorApplyChangesRejection, EditorApplyChangesResult, EditorPlayCommand, EditorPlayFailure,
+    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
+    EditorPlayState, EditorPlayView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
+    EditorRuntimeEditResult, SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus,
+    SceneApplyChangesReport, SceneApplyChangesRequest, SceneEditorModel, SceneEditorState,
 };
 pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
 pub use workspace::{
-    EditorDocumentId, EditorExternalReloadState, EditorSceneModel,
-    EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
-    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
+    EditorDocumentDigest, EditorDocumentId, EditorExternalReloadState, EditorPersistenceCheckpoint,
+    EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel,
+    EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
+    EditorWorkspaceModel,
 };
 
 #[derive(Debug, Default)]

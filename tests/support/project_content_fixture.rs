@@ -131,6 +131,32 @@ requested = ["runtime-2d"]
         .unwrap();
     }
 
+    pub fn select_local_headless_profile(&self) {
+        fs::write(
+            self.root.join("nara.toml"),
+            r#"schema_version = 1
+
+[project]
+name = "Runtime Test"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d"]
+"#,
+        )
+        .unwrap();
+    }
+
     pub fn write_scene_source(&self, document: &SceneDocument) {
         fs::write(
             self.root.join("scenes/startup.scene.json"),

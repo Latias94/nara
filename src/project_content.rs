@@ -183,6 +183,52 @@ impl ProjectContentSnapshot {
             .get(index)
             .and_then(|content| content.image.share_retained())
     }
+
+    pub(crate) fn prepare_editor_startup_scene(
+        &self,
+        document: &SceneDocument,
+        registry: &nara_reflect::ComponentRegistry,
+    ) -> Result<SceneDocument, ProjectContentError> {
+        let resolver = SnapshotPrefabResolver {
+            prefabs: self.prefabs(),
+        };
+        let expansion = document.expand_prefabs_with_options(
+            registry,
+            &resolver,
+            nara_scene::PrefabExpansionOptions::default(),
+        );
+        let expanded = expansion.document.ok_or_else(|| {
+            ProjectContentError::with_report(
+                ProjectContentErrorKind::PrefabExpansion,
+                expansion.diagnostics,
+            )
+        })?;
+        let diagnostics = expanded.validate(registry);
+        if diagnostics.has_errors() {
+            return Err(ProjectContentError::with_report(
+                ProjectContentErrorKind::ScenePublication,
+                diagnostics,
+            ));
+        }
+        reject_unsupported_hierarchy(&expanded, registry)?;
+        Ok(expanded)
+    }
+}
+
+struct SnapshotPrefabResolver<'a> {
+    prefabs: &'a [ProjectPrefabContent],
+}
+
+impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
+    fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
+        let AssetRef::Path(path) = source else {
+            return None;
+        };
+        self.prefabs
+            .iter()
+            .find(|prefab| prefab.path() == path)
+            .map(ProjectPrefabContent::document)
+    }
 }
 
 impl fmt::Debug for ProjectContentSnapshot {

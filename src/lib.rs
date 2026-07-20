@@ -297,15 +297,24 @@ pub mod advanced_prelude {
 pub mod tooling_prelude {
     pub use crate::ToolingPlugins;
     pub use nara_tooling::{
-        EditorDocumentId, EditorExternalReloadState, EditorSceneModel, EditorSceneSlot,
-        EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,
-        EditorWorkspaceCommandReport, EditorWorkspaceModel, SceneApplyChangesComponentReport,
+        EditorApplyChangesRejection, EditorApplyChangesResult, EditorCloseDecision,
+        EditorDocumentDigest, EditorDocumentId, EditorExternalReloadState,
+        EditorPersistenceCheckpoint, EditorPersistenceCommand, EditorPersistenceFailureStage,
+        EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestResult,
+        EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
+        EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection,
+        EditorPlayRequestResult, EditorPlayState, EditorPlayView, EditorProjectView,
+        EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult,
+        EditorSceneModel, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
+        EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
+        EditorWorkspaceIntent, EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
+        EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
+        EditorWorkspaceIntentView, EditorWorkspaceModel, SceneApplyChangesComponentReport,
         SceneApplyChangesComponentStatus, SceneApplyChangesReport, SceneApplyChangesRequest,
-        SceneEditorMode, SceneEditorModel, SceneEditorState, SceneInspectorCommand,
-        SceneInspectorCommandReport, SceneInspectorComponentView, SceneInspectorEntityRow,
-        SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
-        SceneInspectorModel, SceneInspectorState, ScenePlaySession, ScenePlayTransitionReport,
-        ToolingPlugin, WorldIdentitySnapshot,
+        SceneEditorModel, SceneEditorState, SceneInspectorCommand, SceneInspectorCommandReport,
+        SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
+        SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
+        SceneInspectorState, ToolingPlugin, WorldIdentitySnapshot,
     };
     #[cfg(feature = "tooling-egui")]
     pub use nara_tooling_egui::{

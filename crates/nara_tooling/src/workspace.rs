@@ -14,9 +14,7 @@ use nara_scene::{
 
 use crate::diagnostic;
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
-use crate::play::{
-    SceneApplyChangesReport, SceneEditorModel, SceneEditorState, ScenePlayTransitionReport,
-};
+use crate::play::{SceneEditorModel, SceneEditorState};
 use crate::snapshot::WorldIdentitySnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -32,6 +30,41 @@ impl EditorDocumentId {
     pub const fn raw(self) -> u64 {
         self.0
     }
+}
+
+/// Canonical encoded content identity projected into UI-neutral editor state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EditorDocumentDigest {
+    encoded_bytes: u64,
+    hash: [u8; 32],
+}
+
+impl EditorDocumentDigest {
+    #[must_use]
+    pub const fn new(encoded_bytes: u64, hash: [u8; 32]) -> Self {
+        Self {
+            encoded_bytes,
+            hash,
+        }
+    }
+
+    #[must_use]
+    pub const fn encoded_bytes(self) -> u64 {
+        self.encoded_bytes
+    }
+
+    #[must_use]
+    pub const fn hash(self) -> [u8; 32] {
+        self.hash
+    }
+}
+
+/// Facts a concrete persistence Host verified before advancing a saved checkpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorPersistenceCheckpoint {
+    pub document: EditorDocumentId,
+    pub revision: SceneAuthoringRevision,
+    pub digest: EditorDocumentDigest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +121,54 @@ impl EditorWorkspace {
     #[must_use]
     pub fn active_scene(&self) -> Option<&EditorSceneSlot> {
         self.active_document.and_then(|id| self.scenes.get(&id))
+    }
+
+    /// Applies a checkpoint after the concrete Host has validated its persistence receipt.
+    ///
+    /// The checkpoint may lag the current revision when an edit was accepted while a save was in
+    /// flight. It may never target another authoring source, jump ahead, or regress an already
+    /// accepted checkpoint.
+    #[doc(hidden)]
+    pub fn __apply_persistence_checkpoint(
+        &mut self,
+        checkpoint: EditorPersistenceCheckpoint,
+    ) -> EditorWorkspaceCommandReport {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(checkpoint.document));
+        let Some(slot) = self.scenes.get_mut(&checkpoint.document) else {
+            return workspace_document_error_report(context, checkpoint.document);
+        };
+        let current = slot.revision();
+        let saved = slot.saved_revision();
+        let revision_matches_source = checkpoint.revision.source_id() == current.source_id();
+        let revision_not_ahead = checkpoint.revision.generation() <= current.generation();
+        let revision_not_regressed = checkpoint.revision.source_id() == saved.source_id()
+            && checkpoint.revision.generation() >= saved.generation();
+        if !revision_matches_source || !revision_not_ahead || !revision_not_regressed {
+            return workspace_error_report(
+                context,
+                "tooling.workspace-persistence-checkpoint-mismatch",
+                "persistence checkpoint does not match the open document revision",
+            );
+        }
+        slot.apply_persistence_checkpoint(checkpoint);
+        report_for_slot(checkpoint.document, active_document, slot)
+    }
+
+    /// Binds the digest observed when a concrete Host opened the current saved revision.
+    #[doc(hidden)]
+    pub fn __bind_opened_source_digest(
+        &mut self,
+        document: EditorDocumentId,
+        digest: EditorDocumentDigest,
+    ) -> EditorWorkspaceCommandReport {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(slot) = self.scenes.get_mut(&document) else {
+            return workspace_document_error_report(context, document);
+        };
+        slot.saved_digest = Some(digest);
+        report_for_slot(document, active_document, slot)
     }
 
     pub fn open_scene_session(
@@ -150,16 +231,8 @@ impl EditorWorkspace {
             }
             EditorWorkspaceCommand::Undo { document } => self.undo(registry, document),
             EditorWorkspaceCommand::Redo { document } => self.redo(registry, document),
-            EditorWorkspaceCommand::MarkSaved { document } => self.mark_saved(document),
             EditorWorkspaceCommand::MarkExternalChanged { document } => {
                 self.mark_external_changed(document)
-            }
-            EditorWorkspaceCommand::StartPlay { document } => self.start_play(registry, document),
-            EditorWorkspaceCommand::PausePlay { document } => self.pause_play(document),
-            EditorWorkspaceCommand::ResumePlay { document } => self.resume_play(document),
-            EditorWorkspaceCommand::StopPlay { document } => self.stop_play(document),
-            EditorWorkspaceCommand::ApplyChangesStatus { document } => {
-                self.apply_changes_status(document)
             }
         }
     }
@@ -203,9 +276,35 @@ impl EditorWorkspace {
                 "workspace command requires an active document",
             );
         };
-        if self.scenes.remove(&document).is_none() {
+        let Some(slot) = self.scenes.get(&document) else {
+            return workspace_document_error_report(context, document);
+        };
+        if slot.is_dirty() {
+            return workspace_error_report(
+                context,
+                "tooling.workspace-dirty-close-decision-required",
+                "closing a dirty document requires an explicit save, discard, or cancel decision",
+            );
+        }
+        self.remove_scene(document)
+    }
+
+    /// Removes one dirty document after a concrete Host has recorded an explicit discard choice.
+    ///
+    /// This is Host plumbing rather than an author command. Product paths must present the
+    /// Save/Discard/Cancel decision before invoking it.
+    #[doc(hidden)]
+    pub fn __discard_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
+        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
+        if !self.scenes.contains_key(&document) {
             return workspace_document_error_report(context, document);
         }
+        self.remove_scene(document)
+    }
+
+    fn remove_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
+        let removed = self.scenes.remove(&document);
+        debug_assert!(removed.is_some(), "the document was checked before removal");
         if self.active_document == Some(document) {
             self.active_document = self.scenes.keys().next().copied();
         }
@@ -364,16 +463,6 @@ impl EditorWorkspace {
         report
     }
 
-    fn mark_saved(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
-        slot.mark_saved();
-        report_for_slot(document, active_document, slot)
-    }
-
     fn mark_external_changed(
         &mut self,
         document: Option<EditorDocumentId>,
@@ -404,16 +493,6 @@ impl EditorWorkspace {
                 session,
             ));
         };
-        if !slot.editor.mode().is_edit() {
-            return Err(EditorSceneSessionPublicationError::new(
-                workspace_error_report(
-                    context,
-                    "tooling.workspace-reload-play-active",
-                    "external scene reload requires Play Mode to stop first",
-                ),
-                session,
-            ));
-        }
         if slot.session.live_instance().is_some() {
             return Err(EditorSceneSessionPublicationError::new(
                 workspace_error_report(
@@ -449,85 +528,9 @@ impl EditorWorkspace {
         slot.selection.clear();
         slot.editor = SceneEditorState::new();
         slot.saved_revision = slot.session.revision();
+        slot.saved_digest = None;
         slot.external_reload = EditorExternalReloadState::Clean;
         Ok(report_for_slot(document, active_document, slot))
-    }
-
-    fn start_play(
-        &mut self,
-        registry: &ComponentRegistry,
-        document: Option<EditorDocumentId>,
-    ) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
-        let play_report = slot.editor.start_play(&slot.session, registry);
-        let mut report = report_for_slot(document, active_document, slot);
-        report.applied = play_report.applied;
-        report.play_report = Some(play_report.clone());
-        let _ = report.diagnostics.extend(play_report.diagnostics);
-        report
-    }
-
-    fn pause_play(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
-        let play_report = slot.editor.pause_play();
-        let mut report = report_for_slot(document, active_document, slot);
-        report.applied = play_report.applied;
-        report.play_report = Some(play_report.clone());
-        let _ = report.diagnostics.extend(play_report.diagnostics);
-        report
-    }
-
-    fn resume_play(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
-        let play_report = slot.editor.resume_play();
-        let mut report = report_for_slot(document, active_document, slot);
-        report.applied = play_report.applied;
-        report.play_report = Some(play_report.clone());
-        let _ = report.diagnostics.extend(play_report.diagnostics);
-        report
-    }
-
-    fn stop_play(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
-        let play_report = slot.editor.stop_play();
-        let mut report = report_for_slot(document, active_document, slot);
-        report.applied = play_report.applied;
-        report.play_report = Some(play_report.clone());
-        let _ = report.diagnostics.extend(play_report.diagnostics);
-        report
-    }
-
-    fn apply_changes_status(
-        &mut self,
-        document: Option<EditorDocumentId>,
-    ) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
-        let apply_changes_report = slot.editor.apply_changes_status(&slot.session);
-        let mut report = report_for_slot(document, active_document, slot);
-        report.applied = apply_changes_report.applied;
-        report.apply_changes_report = Some(apply_changes_report.clone());
-        let _ = report.diagnostics.extend(apply_changes_report.diagnostics);
-        report
     }
 
     fn allocate_document_id(&mut self) -> EditorDocumentId {
@@ -556,6 +559,7 @@ pub struct EditorSceneSlot {
     editor: SceneEditorState,
     selection: EditorSelectionSet,
     saved_revision: SceneAuthoringRevision,
+    saved_digest: Option<EditorDocumentDigest>,
     external_reload: EditorExternalReloadState,
 }
 
@@ -568,6 +572,7 @@ impl EditorSceneSlot {
             editor: SceneEditorState::new(),
             selection: EditorSelectionSet::default(),
             saved_revision,
+            saved_digest: None,
             external_reload: EditorExternalReloadState::Clean,
         }
     }
@@ -603,6 +608,11 @@ impl EditorSceneSlot {
     }
 
     #[must_use]
+    pub const fn saved_digest(&self) -> Option<EditorDocumentDigest> {
+        self.saved_digest
+    }
+
+    #[must_use]
     pub fn is_dirty(&self) -> bool {
         self.session.revision() != self.saved_revision || self.session.source_upgrade_required()
     }
@@ -612,8 +622,9 @@ impl EditorSceneSlot {
         self.external_reload
     }
 
-    fn mark_saved(&mut self) {
-        self.saved_revision = self.session.revision();
+    fn apply_persistence_checkpoint(&mut self, checkpoint: EditorPersistenceCheckpoint) {
+        self.saved_revision = checkpoint.revision;
+        self.saved_digest = Some(checkpoint.digest);
         self.session.acknowledge_source_saved();
         if self.external_reload != EditorExternalReloadState::Conflict {
             self.external_reload = EditorExternalReloadState::Clean;
@@ -736,25 +747,7 @@ pub enum EditorWorkspaceCommand {
     Redo {
         document: Option<EditorDocumentId>,
     },
-    MarkSaved {
-        document: Option<EditorDocumentId>,
-    },
     MarkExternalChanged {
-        document: Option<EditorDocumentId>,
-    },
-    StartPlay {
-        document: Option<EditorDocumentId>,
-    },
-    PausePlay {
-        document: Option<EditorDocumentId>,
-    },
-    ResumePlay {
-        document: Option<EditorDocumentId>,
-    },
-    StopPlay {
-        document: Option<EditorDocumentId>,
-    },
-    ApplyChangesStatus {
         document: Option<EditorDocumentId>,
     },
 }
@@ -769,8 +762,6 @@ pub struct EditorWorkspaceCommandReport {
     pub revision: Option<SceneAuthoringRevision>,
     pub inspector_report: Option<SceneInspectorCommandReport>,
     pub patch_report: Option<ScenePatchReport>,
-    pub play_report: Option<ScenePlayTransitionReport>,
-    pub apply_changes_report: Option<SceneApplyChangesReport>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -964,6 +955,104 @@ mod tests {
     use nara_scene::{SceneEntityRecord, ScenePatchOperation};
 
     use crate::ToolingPlugin;
+
+    #[test]
+    fn dirty_close_requires_an_explicit_decision() {
+        let registry = frozen_empty_registry();
+        let mut workspace = EditorWorkspace::new();
+        let opened = workspace
+            .open_scene_session("main", SceneAuthoringSession::new(SceneDocument::default()))
+            .unwrap();
+        let document = opened.opened_document.unwrap();
+
+        let edited = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ApplyScenePatch {
+                document: Some(document),
+                patch: add_entity_patch("dirty"),
+            },
+        );
+        assert!(edited.applied);
+
+        let close = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::CloseScene {
+                document: Some(document),
+            },
+        );
+        assert!(!close.applied);
+        assert_eq!(workspace.len(), 1);
+        assert_eq!(workspace.active_document(), Some(document));
+        assert_eq!(
+            close.diagnostics.iter().next().unwrap().code().as_str(),
+            "tooling.workspace-dirty-close-decision-required"
+        );
+
+        let discarded = workspace.__discard_scene(document);
+        assert!(discarded.applied);
+        assert!(workspace.is_empty());
+    }
+
+    #[test]
+    fn persistence_checkpoint_advances_only_the_captured_revision() {
+        let registry = frozen_empty_registry();
+        let mut workspace = EditorWorkspace::new();
+        let opened = workspace
+            .open_scene_session("main", SceneAuthoringSession::new(SceneDocument::default()))
+            .unwrap();
+        let document = opened.opened_document.unwrap();
+
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::ApplyScenePatch {
+                        document: Some(document),
+                        patch: add_entity_patch("captured"),
+                    },
+                )
+                .applied
+        );
+        let captured_revision = workspace.scene(document).unwrap().revision();
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::ApplyScenePatch {
+                        document: Some(document),
+                        patch: add_entity_patch("later"),
+                    },
+                )
+                .applied
+        );
+
+        let digest = EditorDocumentDigest::new(7, [0x5a; 32]);
+        let accepted = workspace.__apply_persistence_checkpoint(EditorPersistenceCheckpoint {
+            document,
+            revision: captured_revision,
+            digest,
+        });
+        assert!(accepted.applied);
+        let slot = workspace.scene(document).unwrap();
+        assert_eq!(slot.saved_revision(), captured_revision);
+        assert_eq!(slot.saved_digest(), Some(digest));
+        assert!(slot.is_dirty());
+
+        let stale = workspace.__apply_persistence_checkpoint(EditorPersistenceCheckpoint {
+            document,
+            revision: opened.revision.unwrap(),
+            digest: EditorDocumentDigest::new(3, [0x11; 32]),
+        });
+        assert!(!stale.applied);
+        assert_eq!(
+            stale.diagnostics.iter().next().unwrap().code().as_str(),
+            "tooling.workspace-persistence-checkpoint-mismatch"
+        );
+        assert_eq!(
+            workspace.scene(document).unwrap().saved_revision(),
+            captured_revision
+        );
+    }
 
     #[test]
     fn two_open_scene_slots_keep_selection_and_dirty_isolated() {
@@ -1341,47 +1430,6 @@ mod tests {
         );
         assert!(error.into_session().live_instance().is_some());
         assert!(workspace.is_empty());
-    }
-
-    #[test]
-    fn external_reload_is_rejected_until_play_stops() {
-        let registry = frozen_empty_registry();
-        let mut workspace = EditorWorkspace::new();
-        let document = open_scene(&mut workspace, "scene", SceneDocument::default());
-        let start = workspace.apply_command(
-            &registry,
-            EditorWorkspaceCommand::StartPlay {
-                document: Some(document),
-            },
-        );
-        assert!(start.applied);
-        let replacement = SceneAuthoringSession::new(scene_with_entity(entity_id("replacement")));
-
-        let error = workspace
-            .reload_external_session(Some(document), replacement)
-            .unwrap_err();
-
-        assert!(
-            error
-                .report()
-                .diagnostics
-                .iter()
-                .any(|entry| entry.code().as_str() == "tooling.workspace-reload-play-active")
-        );
-        assert!(workspace.scene(document).unwrap().editor().mode().is_play());
-        let replacement = error.into_session();
-        let stop = workspace.apply_command(
-            &registry,
-            EditorWorkspaceCommand::StopPlay {
-                document: Some(document),
-            },
-        );
-        assert!(stop.applied);
-        assert!(
-            workspace
-                .reload_external_session(Some(document), replacement)
-                .is_ok()
-        );
     }
 
     #[test]

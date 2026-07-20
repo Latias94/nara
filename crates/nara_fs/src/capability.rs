@@ -126,6 +126,15 @@ impl DirectoryCapability {
         self.inner.identity
     }
 
+    /// Shares the same Host-issued directory authority without creating a new session or
+    /// re-resolving an ambient path.
+    #[must_use]
+    pub fn share(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     #[must_use]
     pub fn options(&self) -> HostCapabilityOptions {
         self.inner.options
@@ -166,6 +175,63 @@ impl DirectoryCapability {
 
     pub fn open_file(&self, path: &RelativePath) -> Result<FileCapability, FsError> {
         self.open_file_with_observer(path, |_, _| {})
+    }
+
+    /// Resolves the authorized parent directory and leaf of a file target.
+    pub fn resolve_file_parent(
+        &self,
+        path: &RelativePath,
+    ) -> Result<(Self, RelativeComponent), FsError> {
+        self.ensure_strict_resolution(FsOperation::OpenDirectory)?;
+        let Some((leaf, parents)) = path.components().split_last() else {
+            return Err(crate::PathValidationError::Empty.into());
+        };
+        let mut current = Arc::clone(&self.inner);
+        for component in parents {
+            let file = platform::open_directory(
+                &current.file,
+                component,
+                self.inner.options.trust.is_strict(),
+            )?;
+            let facts = platform::facts(&file)?;
+            validate_directory_facts(&self.inner, facts)?;
+            current = Arc::new(DirectoryInner {
+                file,
+                identity: FileIdentity::new(
+                    self.inner.identity.session(),
+                    self.inner.options.generation,
+                    facts.identity,
+                ),
+                root_native: self.inner.root_native,
+                options: self.inner.options,
+                resolution: self.inner.resolution,
+            });
+        }
+        Ok((Self { inner: current }, leaf.clone()))
+    }
+
+    /// Opens one direct child file through this directory authority.
+    pub fn open_child_file(&self, child: &RelativeComponent) -> Result<FileCapability, FsError> {
+        self.ensure_strict_resolution(FsOperation::OpenFile)?;
+        let file = platform::open_file(
+            &self.inner.file,
+            child,
+            self.inner.options.trust.is_strict(),
+        )?;
+        let facts = platform::facts(&file)?;
+        validate_file_facts(&self.inner, facts)?;
+        Ok(FileCapability::from_opened(
+            file,
+            FileIdentity::new(
+                self.inner.identity.session(),
+                self.inner.options.generation,
+                facts.identity,
+            ),
+            Some(self.inner.identity),
+            facts.link_count,
+            self.inner.options.trust,
+            self.inner.resolution,
+        ))
     }
 
     fn open_file_with_observer(

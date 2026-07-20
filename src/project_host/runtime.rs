@@ -12,9 +12,9 @@ use nara_app::{
     RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseErrorDisposition,
     RuntimeCloseEvidence, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
     RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
-    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeFault, RuntimeFaultKind,
-    RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger, RuntimePublicationFailure,
-    RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
+    RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket, RuntimeFault,
+    RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger,
+    RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
 };
 use nara_asset::{
     AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, Handle,
@@ -27,7 +27,7 @@ use nara_ecs::{Mut, Resource, World};
 use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
 use nara_image::ImageAsset;
 use nara_reflect::{CatalogFingerprint, ComponentRegistry};
-use nara_scene::spawn_scene;
+use nara_scene::{SceneDocument, spawn_scene};
 
 use super::{
     CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
@@ -38,9 +38,14 @@ const PROJECT_MANIFEST: &str = "nara.toml";
 
 mod action;
 
+#[cfg(feature = "tooling")]
+mod editor;
+
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use action::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunReport};
 pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
+#[cfg(feature = "tooling")]
+pub use editor::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
 
 struct RuntimeStartAttempt {
     owner: Arc<HostStartClaim>,
@@ -52,6 +57,7 @@ struct RuntimeStartAttempt {
 struct RuntimeStartInputs {
     snapshot: ProjectContentSnapshot,
     plan: RuntimePlan,
+    startup_scene: Option<Arc<SceneDocument>>,
     commands: Vec<GameplayCommandSubmission>,
     obligations: RuntimeObligationLedger,
 }
@@ -334,7 +340,6 @@ impl ProjectHost {
         }
     }
 
-    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
     fn running_runtime_mut(&mut self) -> Option<&mut RuntimeInstance> {
         match &mut self.slot {
             ProjectHostSlot::Running(published) => Some(published.runtime_mut()),
@@ -342,7 +347,6 @@ impl ProjectHost {
         }
     }
 
-    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
     fn running_runtime_state(&self) -> Option<RuntimeState> {
         match &self.slot {
             ProjectHostSlot::Running(published) => Some(published.runtime().state()),
@@ -360,10 +364,100 @@ impl ProjectHost {
         }
     }
 
+    fn running_runtime_generation(&self) -> Option<u64> {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => Some(published.runtime().generation().get()),
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
+    fn with_running_world<R>(&self, operation: impl FnOnce(&World) -> R) -> Result<R, HostFault> {
+        let ProjectHostSlot::Running(published) = &self.slot else {
+            return Err(HostFault::new(single_error(
+                "project.run.runtime-unavailable",
+                "Project runtime is unavailable for observation",
+            )));
+        };
+        Ok(operation(published.runtime().world()))
+    }
+
+    fn request_runtime_control(
+        &mut self,
+        control: RuntimeControl,
+    ) -> Result<RuntimeControlTicket, HostFault> {
+        let runtime = self.running_runtime_mut().ok_or_else(|| {
+            HostFault::new(single_error(
+                "project.run.runtime-unavailable",
+                "Project runtime is unavailable for control",
+            ))
+        })?;
+        match runtime.request_control(control) {
+            RuntimeControlRequestResult::Accepted(ticket) => Ok(ticket),
+            RuntimeControlRequestResult::Rejected(_) => Err(HostFault::new(single_error(
+                "project.run.control-rejected",
+                "Project runtime rejected the control request",
+            ))),
+        }
+    }
+
+    fn runtime_control_status(&self, ticket: RuntimeControlTicket) -> Option<RuntimeControlStatus> {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => published.runtime().control_status(ticket),
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
+    fn drive_running_runtime(&mut self, real_delta: Duration) -> Result<(), HostFault> {
+        let runtime = self.running_runtime_mut().ok_or_else(|| {
+            HostFault::new(single_error(
+                "project.run.runtime-unavailable",
+                "Project runtime is unavailable for driving",
+            ))
+        })?;
+        runtime.drive(real_delta).map(|_| ()).map_err(|_| {
+            HostFault::new(single_error(
+                "project.run.drive-failed",
+                "Project runtime drive failed",
+            ))
+        })
+    }
+
+    fn release_stopped_runtime(&mut self) -> bool {
+        if self.running_runtime_state() != Some(RuntimeState::Stopped) {
+            return false;
+        }
+        let slot = std::mem::replace(&mut self.slot, ProjectHostSlot::Empty);
+        let ProjectHostSlot::Running(mut published) = slot else {
+            unreachable!("a stopped runtime remains in the running Host slot");
+        };
+        drop(published.take_runtime());
+        true
+    }
+
     fn begin_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Result<RuntimeStartAttempt, HostFault> {
+        self.begin_start_with_scene(snapshot, plan, None, commands)
+    }
+
+    fn begin_editor_start(
+        &mut self,
+        snapshot: ProjectContentSnapshot,
+        plan: RuntimePlan,
+        startup_scene: SceneDocument,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Result<RuntimeStartAttempt, HostFault> {
+        self.begin_start_with_scene(snapshot, plan, Some(Arc::new(startup_scene)), commands)
+    }
+
+    fn begin_start_with_scene(
+        &mut self,
+        snapshot: ProjectContentSnapshot,
+        plan: RuntimePlan,
+        startup_scene: Option<Arc<SceneDocument>>,
         commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
         if !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active() {
@@ -405,6 +499,7 @@ impl ProjectHost {
             inputs: Some(RuntimeStartInputs {
                 snapshot,
                 plan,
+                startup_scene,
                 commands,
                 obligations: RuntimeObligationLedger::new(),
             }),
@@ -421,6 +516,7 @@ impl ProjectHost {
         let RuntimeStartInputs {
             snapshot,
             plan,
+            startup_scene,
             commands,
             obligations,
         } = inputs;
@@ -447,6 +543,7 @@ impl ProjectHost {
                     world,
                     &admission_plan,
                     &admission_snapshot,
+                    startup_scene.as_deref(),
                     commands,
                 );
                 assert!(
@@ -807,6 +904,7 @@ fn materialize_project_runtime(
     world: &mut World,
     plan: &RuntimePlan,
     snapshot: &ProjectContentSnapshot,
+    startup_scene: Option<&SceneDocument>,
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<DiagnosticReport, HostFault> {
     verify_runtime_registry(world, plan)?;
@@ -822,7 +920,7 @@ fn materialize_project_runtime(
     let scene = spawn_scene(
         world,
         plan.schema_validation().registry(),
-        snapshot.expanded_startup_scene(),
+        startup_scene.unwrap_or_else(|| snapshot.expanded_startup_scene()),
     );
     if scene.diagnostics.has_errors() || scene.instance.is_none() {
         return Err(HostFault::new(scene.diagnostics));

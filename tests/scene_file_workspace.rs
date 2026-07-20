@@ -9,7 +9,6 @@ use nara::{
     },
     scene::SceneDocumentCandidate,
     tooling::EditorWorkspace,
-    tooling_prelude::EditorWorkspaceCommand,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
@@ -55,7 +54,7 @@ fn canonical_scene_file_publishes_through_a_validated_workspace_session() {
 }
 
 #[test]
-fn migrated_scene_file_stays_dirty_until_the_upgraded_source_is_saved() {
+fn migrated_scene_file_stays_dirty_until_a_persistence_host_accepts_the_upgrade() {
     let registry = migrating_text_registry();
     let scene = SceneDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
         migrating_text_id(),
@@ -79,17 +78,6 @@ fn migrated_scene_file_stays_dirty_until_the_upgraded_source_is_saved() {
     let slot = workspace.scene(document).unwrap();
     assert!(slot.is_dirty());
     assert!(slot.session().source_upgrade_required());
-
-    let saved = workspace.apply_command(
-        &registry,
-        EditorWorkspaceCommand::MarkSaved {
-            document: Some(document),
-        },
-    );
-    assert!(saved.applied);
-    let slot = workspace.scene(document).unwrap();
-    assert!(!slot.is_dirty());
-    assert!(!slot.session().source_upgrade_required());
 }
 
 fn migrating_text_registry() -> ComponentRegistry {

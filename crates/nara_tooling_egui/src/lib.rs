@@ -5,7 +5,10 @@
 
 use std::collections::BTreeMap;
 
-use egui::{Button, CollapsingHeader, RichText, ScrollArea, TextEdit, Ui};
+#[cfg(test)]
+use std::cell::RefCell;
+
+use egui::{Button, CollapsingHeader, RichText, ScrollArea, TextEdit, Ui, Vec2, Window};
 use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
@@ -13,10 +16,20 @@ use nara_reflect::{
 };
 use nara_scene::SceneEntityId;
 use nara_tooling::{
-    EditorWorkspaceCommand, SceneEditorMode, SceneEditorModel, SceneInspectorCommand,
+    EditorApplyChangesResult, EditorCloseDecision, EditorPersistenceCommand,
+    EditorPersistenceOperation, EditorPersistenceResult, EditorPlayCommand,
+    EditorPlayOperationResult, EditorPlayState, EditorProjectView, EditorRuntimeEditRequest,
+    EditorRuntimeEditResult, EditorSceneModel, EditorWorkspaceCommand, EditorWorkspaceIntent,
+    EditorWorkspaceIntentPhase, SceneApplyChangesRequest, SceneInspectorCommand,
     SceneInspectorComponentView, SceneInspectorFieldState, SceneInspectorFieldView,
     SceneInspectorModel,
 };
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CONTROL_RECTS: RefCell<BTreeMap<&'static str, egui::Rect>> =
+        RefCell::new(BTreeMap::new());
+}
 
 #[derive(Debug, Default)]
 pub struct EguiSceneEditorPanel {
@@ -39,15 +52,36 @@ impl EguiSceneEditorPanel {
         &mut self.inspector
     }
 
-    pub fn show(&mut self, ui: &mut Ui, model: &SceneEditorModel) -> EguiSceneEditorPanelResponse {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        scene: Option<&EditorSceneModel>,
+        project: &EditorProjectView,
+    ) -> EguiSceneEditorPanelResponse {
+        #[cfg(test)]
+        TEST_CONTROL_RECTS.with(|rects| rects.borrow_mut().clear());
         let mut response = EguiSceneEditorPanelResponse::default();
-        render_editor_toolbar(ui, model.mode, &mut response);
+        render_editor_toolbar(ui, scene, project, &mut response);
         ui.separator();
 
-        let inspector_response = self
-            .inspector
-            .show(ui, &model.inspector, model.mode.is_edit());
-        response.extend_inspector(inspector_response);
+        if let Some(scene) = scene {
+            let play = project.play();
+            let workspace_pending = project.workspace_intent().intent().is_some();
+            let authoring_edit = play.state() == EditorPlayState::Empty && !workspace_pending;
+            let runtime_edit = matches!(
+                play.state(),
+                EditorPlayState::Running | EditorPlayState::Paused
+            ) && !workspace_pending
+                && project.runtime_edit_result().is_none();
+            let inspector_response =
+                self.inspector
+                    .show(ui, &scene.editor.inspector, authoring_edit || runtime_edit);
+            response.extend_inspector(inspector_response, play, runtime_edit);
+        } else {
+            ui.label(RichText::new("No active scene").weak());
+        }
+
+        render_dirty_close_dialog(ui, project, &mut response);
 
         response
     }
@@ -56,20 +90,80 @@ impl EguiSceneEditorPanel {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EguiSceneEditorPanelResponse {
     pub workspace_commands: Vec<EditorWorkspaceCommand>,
+    pub play_commands: Vec<EditorPlayCommand>,
+    pub persistence_commands: Vec<EditorPersistenceCommand>,
+    pub workspace_intents: Vec<EditorWorkspaceIntent>,
+    pub close_decisions: Vec<EditorCloseDecision>,
+    pub runtime_edits: Vec<EditorRuntimeEditRequest>,
+    pub apply_changes: Vec<SceneApplyChangesRequest>,
+    pub acknowledge_runtime_edit_result: bool,
+    pub acknowledge_apply_changes_result: bool,
 }
 
 impl EguiSceneEditorPanelResponse {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.workspace_commands.is_empty()
+            && self.play_commands.is_empty()
+            && self.persistence_commands.is_empty()
+            && self.workspace_intents.is_empty()
+            && self.close_decisions.is_empty()
+            && self.runtime_edits.is_empty()
+            && self.apply_changes.is_empty()
+            && !self.acknowledge_runtime_edit_result
+            && !self.acknowledge_apply_changes_result
     }
 
-    fn push_workspace_command(&mut self, command: EditorWorkspaceCommand) {
-        self.workspace_commands.push(command);
-    }
-
-    fn extend_inspector(&mut self, response: EguiSceneInspectorPanelResponse) {
-        self.workspace_commands.extend(response.workspace_commands);
+    fn extend_inspector(
+        &mut self,
+        response: EguiSceneInspectorPanelResponse,
+        play: nara_tooling::EditorPlayView,
+        runtime_edit: bool,
+    ) {
+        for command in response.workspace_commands {
+            let EditorWorkspaceCommand::ApplyInspectorCommand {
+                command:
+                    SceneInspectorCommand::SetField {
+                        entity,
+                        component,
+                        component_version,
+                        field,
+                        value,
+                    },
+                ..
+            } = command
+            else {
+                self.workspace_commands.push(command);
+                continue;
+            };
+            if runtime_edit {
+                if let (Some(generation), Some(document_revision)) =
+                    (play.generation(), play.current_revision())
+                {
+                    self.runtime_edits.push(EditorRuntimeEditRequest {
+                        generation,
+                        document_revision,
+                        entity,
+                        component,
+                        component_version,
+                        field,
+                        value,
+                    });
+                }
+            } else {
+                self.workspace_commands
+                    .push(EditorWorkspaceCommand::ApplyInspectorCommand {
+                        document: None,
+                        command: SceneInspectorCommand::SetField {
+                            entity,
+                            component,
+                            component_version,
+                            field,
+                            value,
+                        },
+                    });
+            }
+        }
     }
 }
 
@@ -422,52 +516,371 @@ struct FieldEditBuffer {
 
 fn render_editor_toolbar(
     ui: &mut Ui,
-    mode: SceneEditorMode,
+    scene: Option<&EditorSceneModel>,
+    project: &EditorProjectView,
     response: &mut EguiSceneEditorPanelResponse,
 ) {
-    ui.horizontal(|ui| {
-        ui.label(format!("Mode: {}", editor_mode_label(mode)));
+    let play = project.play();
+    let persistence = project.persistence();
+    let workspace_intent = project.workspace_intent();
+    let state = play.state();
+    let workspace_pending = workspace_intent.intent().is_some();
+    let persistence_idle = persistence.operation() == EditorPersistenceOperation::Idle;
+    let persistence_result_clear = persistence.result().is_none();
+    let has_scene = scene.is_some();
+    let play_controls_available = !workspace_pending;
 
-        if ui
-            .add_enabled(mode.is_edit(), Button::new("Start"))
-            .clicked()
-        {
-            response.push_workspace_command(EditorWorkspaceCommand::StartPlay { document: None });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(play_state_label(state)).strong());
+        if play.is_out_of_date() {
+            ui.label(RichText::new("Out of date").color(ui.visuals().warn_fg_color));
         }
-        if ui
-            .add_enabled(mode.is_play(), Button::new("Pause"))
-            .clicked()
-        {
-            response.push_workspace_command(EditorWorkspaceCommand::PausePlay { document: None });
-        }
-        if ui
-            .add_enabled(mode.is_paused(), Button::new("Resume"))
-            .clicked()
-        {
-            response.push_workspace_command(EditorWorkspaceCommand::ResumePlay { document: None });
-        }
-        if ui
-            .add_enabled(!mode.is_edit(), Button::new("Stop"))
-            .clicked()
-        {
-            response.push_workspace_command(EditorWorkspaceCommand::StopPlay { document: None });
-        }
-        if ui
-            .add_enabled(!mode.is_edit(), Button::new("Apply Changes"))
-            .clicked()
-        {
-            response.push_workspace_command(EditorWorkspaceCommand::ApplyChangesStatus {
-                document: None,
-            });
+        if let Some(result) = play.result() {
+            ui.label(RichText::new(play_result_label(result)).weak());
         }
     });
+
+    ui.horizontal_wrapped(|ui| {
+        if toolbar_button(
+            ui,
+            state == EditorPlayState::Empty
+                && has_scene
+                && play_controls_available
+                && persistence_idle,
+            "Play",
+        ) {
+            response.play_commands.push(EditorPlayCommand::Play);
+        }
+        if toolbar_button(
+            ui,
+            matches!(
+                state,
+                EditorPlayState::PreparingPlay | EditorPlayState::Starting
+            ) && play_controls_available,
+            "Cancel",
+        ) {
+            response.play_commands.push(EditorPlayCommand::Cancel);
+        }
+        if toolbar_button(
+            ui,
+            state == EditorPlayState::Running && play_controls_available,
+            "Pause",
+        ) {
+            response.play_commands.push(EditorPlayCommand::Pause);
+        }
+        if toolbar_button(
+            ui,
+            state == EditorPlayState::Paused && play_controls_available,
+            "Resume",
+        ) {
+            response.play_commands.push(EditorPlayCommand::Resume);
+        }
+        if toolbar_button(
+            ui,
+            state == EditorPlayState::Paused && play_controls_available,
+            "Step",
+        ) {
+            response
+                .play_commands
+                .push(EditorPlayCommand::StepFixedTick);
+        }
+        if toolbar_button(
+            ui,
+            matches!(
+                state,
+                EditorPlayState::Running | EditorPlayState::Paused | EditorPlayState::Faulted
+            ) && play_controls_available,
+            "Stop",
+        ) {
+            response.play_commands.push(EditorPlayCommand::Stop);
+        }
+        if toolbar_button(
+            ui,
+            matches!(
+                state,
+                EditorPlayState::Running | EditorPlayState::Paused | EditorPlayState::Faulted
+            ) && play_controls_available,
+            "Restart",
+        ) {
+            response.play_commands.push(EditorPlayCommand::Restart);
+        }
+        if toolbar_button(
+            ui,
+            state == EditorPlayState::RetirementIncomplete
+                && workspace_intent
+                    .phase()
+                    .is_none_or(|phase| phase == EditorWorkspaceIntentPhase::RetiringRuntime),
+            "Retry retire",
+        ) {
+            response
+                .play_commands
+                .push(EditorPlayCommand::RetryRetirement);
+        }
+        if toolbar_button(
+            ui,
+            state == EditorPlayState::CloseIncomplete
+                && workspace_intent
+                    .phase()
+                    .is_none_or(|phase| phase == EditorWorkspaceIntentPhase::RetiringRuntime),
+            "Retry close",
+        ) {
+            response.play_commands.push(EditorPlayCommand::RetryClose);
+        }
+    });
+
+    ui.horizontal_wrapped(|ui| {
+        let save_enabled = scene.is_some_and(|scene| scene.dirty)
+            && persistence_idle
+            && persistence_result_clear
+            && !workspace_pending;
+        if toolbar_button(ui, save_enabled, "Save") {
+            response
+                .persistence_commands
+                .push(EditorPersistenceCommand::Save {
+                    document: scene.map(|scene| scene.document),
+                });
+        }
+        let reconcile = matches!(
+            persistence.result(),
+            Some(EditorPersistenceResult::PersistenceUncertain { .. })
+        );
+        let reopen_enabled = state == EditorPlayState::Empty
+            && persistence_idle
+            && !workspace_pending
+            && (persistence_result_clear || reconcile);
+        if toolbar_button(ui, reopen_enabled, "Reopen") {
+            response
+                .persistence_commands
+                .push(EditorPersistenceCommand::Reopen {
+                    document: scene.map(|scene| scene.document),
+                });
+        }
+        if toolbar_button(
+            ui,
+            persistence.result().is_some() && persistence_idle,
+            "Dismiss result",
+        ) {
+            response
+                .persistence_commands
+                .push(EditorPersistenceCommand::AcknowledgeResult);
+        }
+        if toolbar_button(
+            ui,
+            has_scene && persistence_idle && persistence_result_clear && !workspace_pending,
+            "Close",
+        ) {
+            if let Some(scene) = scene {
+                response
+                    .workspace_intents
+                    .push(EditorWorkspaceIntent::CloseScene {
+                        document: scene.document,
+                    });
+            }
+        }
+        if toolbar_button(
+            ui,
+            persistence_idle && persistence_result_clear && !workspace_pending,
+            "Exit",
+        ) {
+            response.workspace_intents.push(EditorWorkspaceIntent::Exit);
+        }
+        if toolbar_button(ui, play.result().is_some(), "Dismiss Play") {
+            response
+                .play_commands
+                .push(EditorPlayCommand::AcknowledgeResult);
+        }
+    });
+
+    let apply_request = scene.and_then(apply_changes_request);
+    let apply_enabled = matches!(state, EditorPlayState::Running | EditorPlayState::Paused)
+        && !play.is_out_of_date()
+        && !workspace_pending
+        && project.apply_changes_result().is_none()
+        && apply_request.is_some();
+    let apply_response = ui
+        .add_enabled(
+            apply_enabled,
+            Button::new("Apply Changes").min_size(Vec2::new(112.0, 24.0)),
+        )
+        .on_hover_text("Persist the selected runtime values into the edit document");
+    #[cfg(test)]
+    TEST_CONTROL_RECTS.with(|rects| {
+        rects
+            .borrow_mut()
+            .insert("Apply Changes", apply_response.rect);
+    });
+    if apply_response.clicked() {
+        if let Some(request) = apply_request {
+            response.apply_changes.push(request);
+        }
+    }
+
+    if let Some(result) = project.runtime_edit_result() {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(runtime_edit_result_label(result)).weak());
+            let can_acknowledge = !matches!(result, EditorRuntimeEditResult::Pending(_));
+            if toolbar_button(ui, can_acknowledge, "Dismiss edit") {
+                response.acknowledge_runtime_edit_result = true;
+            }
+        });
+    }
+    if let Some(result) = project.apply_changes_result() {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(apply_changes_result_label(result)).weak());
+            let can_acknowledge = !matches!(result, EditorApplyChangesResult::Pending { .. });
+            if toolbar_button(ui, can_acknowledge, "Dismiss apply") {
+                response.acknowledge_apply_changes_result = true;
+            }
+        });
+    }
+
+    if let Some(operation) = persistence_operation_label(persistence.operation()) {
+        ui.label(RichText::new(operation).weak());
+    }
+    if let Some(result) = persistence.result() {
+        ui.label(RichText::new(persistence_result_label(result)).weak());
+    }
+    if let (Some(intent), Some(phase)) = (workspace_intent.intent(), workspace_intent.phase()) {
+        ui.label(RichText::new(workspace_intent_label(intent, phase)).weak());
+    }
 }
 
-fn editor_mode_label(mode: SceneEditorMode) -> &'static str {
-    match mode {
-        SceneEditorMode::Edit => "Edit",
-        SceneEditorMode::Play { .. } => "Play",
-        SceneEditorMode::Paused { .. } => "Paused",
+fn toolbar_button(ui: &mut Ui, enabled: bool, label: &'static str) -> bool {
+    let response = ui.add_enabled(enabled, Button::new(label).min_size(Vec2::new(80.0, 24.0)));
+    #[cfg(test)]
+    TEST_CONTROL_RECTS.with(|rects| {
+        rects.borrow_mut().insert(label, response.rect);
+    });
+    response.clicked()
+}
+
+fn render_dirty_close_dialog(
+    ui: &mut Ui,
+    project: &EditorProjectView,
+    response: &mut EguiSceneEditorPanelResponse,
+) {
+    let workspace = project.workspace_intent();
+    if workspace.phase() != Some(EditorWorkspaceIntentPhase::AwaitingDecision) {
+        return;
+    }
+    let persistence = project.persistence();
+    let save_enabled = persistence.operation() == EditorPersistenceOperation::Idle
+        && persistence.result().is_none();
+    Window::new("Unsaved changes")
+        .collapsible(false)
+        .resizable(false)
+        .show(ui.ctx(), |ui| {
+            ui.label("Save changes before closing?");
+            ui.horizontal(|ui| {
+                if dialog_button(ui, save_enabled, "Save", "Close Save") {
+                    response.close_decisions.push(EditorCloseDecision::Save);
+                }
+                if dialog_button(ui, true, "Discard", "Close Discard") {
+                    response.close_decisions.push(EditorCloseDecision::Discard);
+                }
+                if dialog_button(ui, true, "Cancel", "Close Cancel") {
+                    response.close_decisions.push(EditorCloseDecision::Cancel);
+                }
+            });
+        });
+}
+
+fn dialog_button(ui: &mut Ui, enabled: bool, label: &'static str, _test_id: &'static str) -> bool {
+    let response = ui.add_enabled(enabled, Button::new(label).min_size(Vec2::new(80.0, 24.0)));
+    #[cfg(test)]
+    TEST_CONTROL_RECTS.with(|rects| {
+        rects.borrow_mut().insert(_test_id, response.rect);
+    });
+    response.clicked()
+}
+
+fn apply_changes_request(scene: &EditorSceneModel) -> Option<SceneApplyChangesRequest> {
+    let selected = scene.editor.inspector.selected_entity_view.as_ref()?;
+    let components = selected
+        .components
+        .iter()
+        .filter(|component| {
+            component.capabilities.contains(&ComponentCapability::Scene)
+                && component.capabilities.contains(&ComponentCapability::Edit)
+        })
+        .map(|component| component.component.clone())
+        .collect::<Vec<_>>();
+    (!components.is_empty()).then(|| SceneApplyChangesRequest::new(selected.id.clone(), components))
+}
+
+fn play_state_label(state: EditorPlayState) -> &'static str {
+    match state {
+        EditorPlayState::Empty => "Edit",
+        EditorPlayState::PreparingPlay => "Preparing Play",
+        EditorPlayState::Starting => "Starting",
+        EditorPlayState::RetiringPlay => "Retiring Play",
+        EditorPlayState::Running => "Running",
+        EditorPlayState::Paused => "Paused",
+        EditorPlayState::Stepping => "Stepping",
+        EditorPlayState::Stopping => "Stopping",
+        EditorPlayState::Faulted => "Faulted",
+        EditorPlayState::RetirementIncomplete => "Retirement incomplete",
+        EditorPlayState::CloseIncomplete => "Close incomplete",
+    }
+}
+
+fn play_result_label(result: EditorPlayOperationResult) -> &'static str {
+    match result {
+        EditorPlayOperationResult::Pending { .. } => "Pending",
+        EditorPlayOperationResult::Applied { .. } => "Applied",
+        EditorPlayOperationResult::Rejected { .. } => "Rejected",
+        EditorPlayOperationResult::Failed { .. } => "Failed",
+        EditorPlayOperationResult::Cancelled { .. } => "Cancelled",
+    }
+}
+
+fn persistence_operation_label(operation: EditorPersistenceOperation) -> Option<&'static str> {
+    match operation {
+        EditorPersistenceOperation::Idle => None,
+        EditorPersistenceOperation::Saving { .. } => Some("Saving"),
+        EditorPersistenceOperation::Opening { .. } => Some("Opening"),
+    }
+}
+
+fn persistence_result_label(result: EditorPersistenceResult) -> &'static str {
+    match result {
+        EditorPersistenceResult::Saved { .. } => "Saved",
+        EditorPersistenceResult::Opened { .. } => "Opened",
+        EditorPersistenceResult::Rejected { .. } => "Persistence rejected",
+        EditorPersistenceResult::Failed { .. } => "Persistence failed",
+        EditorPersistenceResult::PersistenceUncertain { .. } => "Persistence uncertain",
+    }
+}
+
+fn runtime_edit_result_label(result: &EditorRuntimeEditResult) -> &'static str {
+    match result {
+        EditorRuntimeEditResult::Pending(_) => "Runtime edit pending",
+        EditorRuntimeEditResult::Applied(_) => "Runtime edit applied",
+        EditorRuntimeEditResult::Rejected { .. } => "Runtime edit rejected",
+        EditorRuntimeEditResult::Cancelled(_) => "Runtime edit cancelled",
+    }
+}
+
+fn apply_changes_result_label(result: &EditorApplyChangesResult) -> &'static str {
+    match result {
+        EditorApplyChangesResult::Pending { .. } => "Apply Changes pending",
+        EditorApplyChangesResult::Applied(_) => "Apply Changes applied",
+        EditorApplyChangesResult::Rejected { .. } => "Apply Changes rejected",
+        EditorApplyChangesResult::Cancelled(_) => "Apply Changes cancelled",
+    }
+}
+
+fn workspace_intent_label(
+    intent: EditorWorkspaceIntent,
+    phase: EditorWorkspaceIntentPhase,
+) -> &'static str {
+    match (intent, phase) {
+        (_, EditorWorkspaceIntentPhase::AwaitingDecision) => "Awaiting close decision",
+        (_, EditorWorkspaceIntentPhase::Saving) => "Saving before close",
+        (EditorWorkspaceIntent::CloseScene { .. }, EditorWorkspaceIntentPhase::RetiringRuntime) => {
+            "Closing scene"
+        }
+        (EditorWorkspaceIntent::Exit, EditorWorkspaceIntentPhase::RetiringRuntime) => "Exiting",
     }
 }
 
@@ -622,7 +1035,12 @@ mod tests {
     use super::*;
 
     use nara_diagnostic::DiagnosticReport;
-    use nara_scene::SceneAuthoringHistoryStatus;
+    use nara_scene::{SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneDocument};
+    use nara_tooling::{
+        EditorDocumentId, EditorExternalReloadState, EditorPersistenceView, EditorPlayOperation,
+        EditorPlayView, EditorSceneModel, EditorSelectionSet, EditorWorkspaceIntentView,
+        SceneEditorModel, SceneInspectorEntityView,
+    };
 
     #[test]
     fn parses_editable_scalar_values() {
@@ -706,26 +1124,448 @@ mod tests {
     fn renders_empty_editor_model_without_window_backend() {
         let mut panel = EguiSceneEditorPanel::new();
         let ctx = egui::Context::default();
-        let model = SceneEditorModel {
-            mode: SceneEditorMode::Edit,
-            inspector: SceneInspectorModel {
-                selected_entity: None,
-                entities: Vec::new(),
-                selected_entity_view: None,
-                world_snapshot: None,
-                history: SceneAuthoringHistoryStatus::default(),
-                live_dirty: false,
-                diagnostics: DiagnosticReport::default(),
-            },
-            play_world_snapshot: None,
-            diagnostics: DiagnosticReport::default(),
-        };
 
         let mut response = None;
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            response = Some(panel.show(ui, &model));
+            response = Some(panel.show(ui, None, &empty_project_view(None)));
         });
 
         assert!(response.unwrap().is_empty());
+    }
+
+    #[test]
+    fn play_controls_emit_only_commands_valid_for_each_visible_state() {
+        let scene = scene_model(false, false);
+        let cases = [
+            (
+                EditorPlayState::Empty,
+                "Play",
+                Some(EditorPlayCommand::Play),
+            ),
+            (
+                EditorPlayState::PreparingPlay,
+                "Cancel",
+                Some(EditorPlayCommand::Cancel),
+            ),
+            (
+                EditorPlayState::Starting,
+                "Cancel",
+                Some(EditorPlayCommand::Cancel),
+            ),
+            (EditorPlayState::RetiringPlay, "Play", None),
+            (
+                EditorPlayState::Running,
+                "Pause",
+                Some(EditorPlayCommand::Pause),
+            ),
+            (
+                EditorPlayState::Running,
+                "Stop",
+                Some(EditorPlayCommand::Stop),
+            ),
+            (
+                EditorPlayState::Running,
+                "Restart",
+                Some(EditorPlayCommand::Restart),
+            ),
+            (
+                EditorPlayState::Paused,
+                "Resume",
+                Some(EditorPlayCommand::Resume),
+            ),
+            (
+                EditorPlayState::Paused,
+                "Step",
+                Some(EditorPlayCommand::StepFixedTick),
+            ),
+            (EditorPlayState::Stepping, "Stop", None),
+            (EditorPlayState::Stopping, "Restart", None),
+            (
+                EditorPlayState::Faulted,
+                "Stop",
+                Some(EditorPlayCommand::Stop),
+            ),
+            (
+                EditorPlayState::Faulted,
+                "Restart",
+                Some(EditorPlayCommand::Restart),
+            ),
+            (
+                EditorPlayState::RetirementIncomplete,
+                "Retry retire",
+                Some(EditorPlayCommand::RetryRetirement),
+            ),
+            (
+                EditorPlayState::CloseIncomplete,
+                "Retry close",
+                Some(EditorPlayCommand::RetryClose),
+            ),
+        ];
+
+        for (state, control, expected) in cases {
+            let response = click_control(Some(&scene), project_view(&scene, state), control);
+            assert_eq!(
+                response.play_commands.first().copied(),
+                expected,
+                "unexpected command for {state:?} / {control}"
+            );
+        }
+    }
+
+    #[test]
+    fn persistence_and_dirty_close_controls_emit_host_commands() {
+        let dirty = scene_model(true, false);
+        for (state, out_of_date) in [
+            (EditorPlayState::Running, false),
+            (EditorPlayState::Paused, false),
+            (EditorPlayState::Running, true),
+        ] {
+            let project = EditorProjectView::new(
+                play_view(&dirty, state, out_of_date, None),
+                EditorPersistenceView::default(),
+                EditorWorkspaceIntentView::default(),
+            );
+            let save = click_control(Some(&dirty), project, "Save");
+            assert_eq!(
+                save.persistence_commands,
+                [EditorPersistenceCommand::Save {
+                    document: Some(dirty.document),
+                }]
+            );
+        }
+
+        let clean = scene_model(false, false);
+        assert_eq!(
+            click_control(
+                Some(&clean),
+                project_view(&clean, EditorPlayState::Empty),
+                "Close",
+            )
+            .workspace_intents,
+            [EditorWorkspaceIntent::CloseScene {
+                document: clean.document,
+            }]
+        );
+        assert_eq!(
+            click_control(
+                Some(&clean),
+                project_view(&clean, EditorPlayState::Empty),
+                "Exit",
+            )
+            .workspace_intents,
+            [EditorWorkspaceIntent::Exit]
+        );
+
+        let awaiting = EditorProjectView::new(
+            play_view(&dirty, EditorPlayState::Running, false, None),
+            EditorPersistenceView::default(),
+            EditorWorkspaceIntentView::new(
+                Some(EditorWorkspaceIntent::CloseScene {
+                    document: dirty.document,
+                }),
+                Some(EditorWorkspaceIntentPhase::AwaitingDecision),
+                None,
+            ),
+        );
+        for (control, decision) in [
+            ("Close Save", EditorCloseDecision::Save),
+            ("Close Discard", EditorCloseDecision::Discard),
+            ("Close Cancel", EditorCloseDecision::Cancel),
+        ] {
+            let response = click_control(Some(&dirty), awaiting.clone(), control);
+            assert_eq!(response.close_decisions, [decision]);
+            assert!(response.play_commands.is_empty());
+        }
+    }
+
+    #[test]
+    fn retained_results_and_reconcile_have_explicit_clicks() {
+        let scene = scene_model(true, false);
+        let play_result = EditorProjectView::new(
+            play_view(
+                &scene,
+                EditorPlayState::Running,
+                false,
+                Some(EditorPlayOperationResult::Applied {
+                    operation: EditorPlayOperation::Pause,
+                    generation: Some(7),
+                }),
+            ),
+            EditorPersistenceView::default(),
+            EditorWorkspaceIntentView::default(),
+        );
+        assert_eq!(
+            click_control(Some(&scene), play_result, "Dismiss Play").play_commands,
+            [EditorPlayCommand::AcknowledgeResult]
+        );
+
+        let uncertain = EditorProjectView::new(
+            play_view(&scene, EditorPlayState::Empty, false, None),
+            EditorPersistenceView::new(
+                EditorPersistenceOperation::Idle,
+                Some(EditorPersistenceResult::PersistenceUncertain {
+                    document: scene.document,
+                    revision: scene.revision,
+                    digest: nara_tooling::EditorDocumentDigest::new(0, [0; 32]),
+                }),
+            ),
+            EditorWorkspaceIntentView::default(),
+        );
+        assert_eq!(
+            click_control(Some(&scene), uncertain, "Reopen").persistence_commands,
+            [EditorPersistenceCommand::Reopen {
+                document: Some(scene.document),
+            }]
+        );
+
+        let runtime_request = EditorRuntimeEditRequest {
+            generation: 7,
+            document_revision: scene.revision,
+            entity: SceneEntityId::new("player").unwrap(),
+            component: ComponentTypeId::new("nara.test.Transform"),
+            component_version: ComponentSchemaVersion(1),
+            field: ComponentFieldId::new("x"),
+            value: ComponentValue::I64(2),
+        };
+        let runtime_result = project_view(&scene, EditorPlayState::Running).with_inspector_results(
+            Some(EditorRuntimeEditResult::Cancelled(runtime_request.clone())),
+            None,
+        );
+        assert!(
+            click_control(Some(&scene), runtime_result, "Dismiss edit")
+                .acknowledge_runtime_edit_result
+        );
+        let runtime_pending = project_view(&scene, EditorPlayState::Running)
+            .with_inspector_results(
+                Some(EditorRuntimeEditResult::Pending(runtime_request)),
+                None,
+            );
+        assert!(
+            !click_control(Some(&scene), runtime_pending, "Dismiss edit")
+                .acknowledge_runtime_edit_result
+        );
+
+        let apply_request = SceneApplyChangesRequest::new(
+            SceneEntityId::new("player").unwrap(),
+            [ComponentTypeId::new("nara.test.Transform")],
+        );
+        let apply_result = project_view(&scene, EditorPlayState::Running).with_inspector_results(
+            None,
+            Some(EditorApplyChangesResult::Cancelled(apply_request)),
+        );
+        assert!(
+            click_control(Some(&scene), apply_result, "Dismiss apply")
+                .acknowledge_apply_changes_result
+        );
+    }
+
+    #[test]
+    fn apply_changes_is_selection_bound_and_disabled_when_runtime_is_stale() {
+        let scene = scene_model(false, true);
+        let current = click_control(
+            Some(&scene),
+            project_view(&scene, EditorPlayState::Paused),
+            "Apply Changes",
+        );
+        assert_eq!(current.apply_changes.len(), 1);
+        assert_eq!(
+            current.apply_changes[0].entity,
+            SceneEntityId::new("player").unwrap()
+        );
+
+        let stale = EditorProjectView::new(
+            play_view(&scene, EditorPlayState::Paused, true, None),
+            EditorPersistenceView::default(),
+            EditorWorkspaceIntentView::default(),
+        );
+        assert!(
+            click_control(Some(&scene), stale, "Apply Changes")
+                .apply_changes
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn runtime_inspector_edits_are_generation_and_revision_stamped() {
+        let scene = scene_model(false, false);
+        let play = play_view(&scene, EditorPlayState::Running, false, None);
+        let command = SceneInspectorCommand::SetField {
+            entity: SceneEntityId::new("player").unwrap(),
+            component: ComponentTypeId::new("nara.test.Transform"),
+            component_version: ComponentSchemaVersion(1),
+            field: ComponentFieldId::new("x"),
+            value: ComponentValue::I64(4),
+        };
+        let mut response = EguiSceneEditorPanelResponse::default();
+        response.extend_inspector(
+            EguiSceneInspectorPanelResponse {
+                workspace_commands: vec![EditorWorkspaceCommand::ApplyInspectorCommand {
+                    document: Some(scene.document),
+                    command,
+                }],
+            },
+            play,
+            true,
+        );
+
+        assert_eq!(response.runtime_edits.len(), 1);
+        assert_eq!(response.runtime_edits[0].generation, 7);
+        assert_eq!(response.runtime_edits[0].document_revision, scene.revision);
+        assert!(response.workspace_commands.is_empty());
+    }
+
+    fn scene_model(dirty: bool, selected_component: bool) -> EditorSceneModel {
+        let session = SceneAuthoringSession::new(SceneDocument::default());
+        let revision = session.revision();
+        let selected_entity = SceneEntityId::new("player").unwrap();
+        let selected_entity_view = selected_component.then(|| SceneInspectorEntityView {
+            id: selected_entity.clone(),
+            parent: None,
+            has_prefab: false,
+            components: vec![SceneInspectorComponentView {
+                component: ComponentTypeId::new("nara.test.Transform"),
+                document_version: ComponentSchemaVersion(1),
+                schema_version: ComponentSchemaVersion(1),
+                capabilities: [ComponentCapability::Scene, ComponentCapability::Edit]
+                    .into_iter()
+                    .collect(),
+                fields: Vec::new(),
+            }],
+        });
+        EditorSceneModel {
+            document: EditorDocumentId::from_raw(1),
+            title: "Scene".to_owned(),
+            dirty,
+            revision,
+            saved_revision: revision,
+            external_reload: EditorExternalReloadState::Clean,
+            selection: EditorSelectionSet::default(),
+            editor: SceneEditorModel {
+                inspector: SceneInspectorModel {
+                    selected_entity: selected_component.then_some(selected_entity),
+                    entities: Vec::new(),
+                    selected_entity_view,
+                    world_snapshot: None,
+                    history: SceneAuthoringHistoryStatus::default(),
+                    live_dirty: false,
+                    diagnostics: DiagnosticReport::default(),
+                },
+                diagnostics: DiagnosticReport::default(),
+            },
+        }
+    }
+
+    fn empty_project_view(scene: Option<&EditorSceneModel>) -> EditorProjectView {
+        let current = scene.map(|scene| scene.revision);
+        EditorProjectView::new(
+            EditorPlayView::new(EditorPlayState::Empty, None, None, current, false, None),
+            EditorPersistenceView::default(),
+            EditorWorkspaceIntentView::default(),
+        )
+    }
+
+    fn project_view(scene: &EditorSceneModel, state: EditorPlayState) -> EditorProjectView {
+        EditorProjectView::new(
+            play_view(scene, state, false, None),
+            EditorPersistenceView::default(),
+            EditorWorkspaceIntentView::default(),
+        )
+    }
+
+    fn play_view(
+        scene: &EditorSceneModel,
+        state: EditorPlayState,
+        out_of_date: bool,
+        result: Option<EditorPlayOperationResult>,
+    ) -> EditorPlayView {
+        let active = state != EditorPlayState::Empty;
+        let generation = matches!(
+            state,
+            EditorPlayState::Running
+                | EditorPlayState::Paused
+                | EditorPlayState::Stepping
+                | EditorPlayState::Stopping
+                | EditorPlayState::Faulted
+                | EditorPlayState::CloseIncomplete
+        )
+        .then_some(7);
+        EditorPlayView::new(
+            state,
+            generation,
+            active.then_some(scene.revision),
+            Some(scene.revision),
+            out_of_date,
+            result,
+        )
+    }
+
+    fn click_control(
+        scene: Option<&EditorSceneModel>,
+        project: EditorProjectView,
+        label: &'static str,
+    ) -> EguiSceneEditorPanelResponse {
+        let mut panel = EguiSceneEditorPanel::new();
+        let context = egui::Context::default();
+        let _ = render_editor_frame(
+            &context,
+            &mut panel,
+            scene,
+            &project,
+            egui::RawInput::default(),
+        );
+        let _ = render_editor_frame(
+            &context,
+            &mut panel,
+            scene,
+            &project,
+            egui::RawInput::default(),
+        );
+        let position = TEST_CONTROL_RECTS.with(|rects| {
+            rects
+                .borrow()
+                .get(label)
+                .unwrap_or_else(|| panic!("control {label} was not rendered"))
+                .center()
+        });
+
+        let mut pressed = egui::RawInput::default();
+        pressed.events = vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            },
+        ];
+        let _ = render_editor_frame(&context, &mut panel, scene, &project, pressed);
+
+        let mut released = egui::RawInput::default();
+        released.events = vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            },
+        ];
+        render_editor_frame(&context, &mut panel, scene, &project, released)
+    }
+
+    fn render_editor_frame(
+        context: &egui::Context,
+        panel: &mut EguiSceneEditorPanel,
+        scene: Option<&EditorSceneModel>,
+        project: &EditorProjectView,
+        input: egui::RawInput,
+    ) -> EguiSceneEditorPanelResponse {
+        let mut response = None;
+        let _ = context.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                response = Some(panel.show(ui, scene, project));
+            });
+        });
+        response.expect("the editor frame should render the panel")
     }
 }
