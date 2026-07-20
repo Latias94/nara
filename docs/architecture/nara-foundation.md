@@ -662,8 +662,9 @@ second real adapter or stronger isolation pressure.
 - GPU uploads and dynamic buffers need backend-owned budgets, staging/ring-buffer reuse, deferred
   upload stats, and diagnostics. See ADR
   [0054](adr/0054-gpu-upload-budget-and-buffer-allocation-policy.md).
-- CI can stay deferred, but the local verification matrix, boundary checks, and persistent-format
-  golden fixtures are a policy contract that future CI must mirror. See ADR
+- The minimum CI definition mirrors the locked root, reference-game, and direct module-consumer
+  boundaries on disposable Windows/Linux runners. Its first hosted green run is still pending;
+  broader feature, packaging, and artifact-consumer gates remain evidence-triggered. See ADR
   [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md).
 
 ## Non-Authoritative Trigger Index
