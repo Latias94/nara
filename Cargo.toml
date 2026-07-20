@@ -106,6 +106,7 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "visit"] }
 trybuild = "1.0.118"
+yaml-rust2 = { version = "0.11.0", default-features = false }
 wgpu = "=30.0.0"
 rustix = "1.1.4"
 windows-sys = "0.61.2"
@@ -152,6 +153,7 @@ syn.workspace = true
 toml.workspace = true
 tracing.workspace = true
 trybuild.workspace = true
+yaml-rust2.workspace = true
 
 [features]
 default = ["runtime-core"]

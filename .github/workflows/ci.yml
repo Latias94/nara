@@ -1,0 +1,109 @@
+name: CI
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
+env:
+  CARGO_BUILD_JOBS: "1"
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  root:
+    name: "Root (${{ matrix.os }})"
+    runs-on: "${{ matrix.os }}"
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup default 1.95.0
+      - name: Install nextest
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: nextest@0.9.138
+          fallback: none
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check root workspace
+        run: cargo check --workspace --locked
+      - name: Test CI and public dependency boundaries
+        run: cargo nextest run --locked -p nara --test ci_policy --test reference_game_contract --test module_consumer_boundary --test-threads=1
+
+  reference-game:
+    name: "Reference game (${{ matrix.os }})"
+    runs-on: "${{ matrix.os }}"
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+      - name: Install nextest
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: nextest@0.9.138
+          fallback: none
+      - name: Check reference game
+        run: cargo check --manifest-path reference-game/Cargo.toml --locked --all-targets
+      - name: Test public reference-game surface
+        run: cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test authoring --test public_surface --test project_manifest_ingest --test-threads=1
+
+  module-consumer:
+    name: "Module consumer (${{ matrix.os }})"
+    runs-on: "${{ matrix.os }}"
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+      - name: Install nextest
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: nextest@0.9.138
+          fallback: none
+      - name: Check module consumer
+        run: cargo check --manifest-path module-consumer/Cargo.toml --locked --all-targets
+      - name: Test direct scene-module surface
+        run: cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --test-threads=1
