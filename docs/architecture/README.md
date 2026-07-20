@@ -27,7 +27,7 @@ an index, not another source of architecture decisions.
 | [Asset Import Host Interface Design](asset-import-host-interface-design.md) | Import specialization appendix | Dormant until ADR 0087 or an Accepted successor admits a concrete importer workflow. |
 | [Extension Package Concept Guide](extension-package-concept-guide.md) | Explanatory guide | Explains vocabulary only and never adds decisions. |
 | [Render Capability Demand and Pressure Matrix](render-capability-pressure-matrix.md) | Render evidence/admission appendix | Evaluates whether a capability deserves a tracer; it is not a renderer roadmap. |
-| [Render Extension Capability Interface Design](render-extension-capability-interface-design.md) | Future render canonical harness | Inactive and needs rebaseline after the reference-game release or explicit handoff. |
+| [Render Extension Capability Interface Design](render-extension-capability-interface-design.md) | Future render canonical harness | Inactive and needs rebaseline; the RGF closure architecture handoff owns activation against the landed render owners and evidence. |
 | [UI Product Boundaries, Editor Dogfooding, and Porting Strategy](ui-product-boundaries-editor-dogfood-and-porting-strategy.md) | UI boundary canonical draft | Evidence-gated; it does not select a final editor toolkit or a shared game/editor widget core. |
 
 `Canonical harness` means the primary non-normative scenario workbench for one subject. `Appendix`

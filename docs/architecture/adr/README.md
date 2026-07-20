@@ -41,6 +41,12 @@ The implementation ledger uses these states:
 
 Each implementation unit updates its ADR and ledger row before code, then records final code and verification anchors after the unit passes. Historical classification outside an active implementation slice is non-blocking and belongs to the final integration unit.
 
+The focused architecture-document gate derives ADR, catalogue, and ledger membership from the
+repository and requires exact equality. It also checks the active plan's reciprocal supersession,
+relations and symbol anchors touched by the RGF successor, and the canonical-v1 capability
+vocabulary shared by ADRs 0045 and 0081. It does not turn unrelated historical prose into an
+implementation or release prerequisite.
+
 ## Pre-1.0 Replacement Policy
 
 nara is unreleased. When a contract is wrong, remove it and make the corrected design canonical:
