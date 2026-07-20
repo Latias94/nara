@@ -18,6 +18,7 @@ use nara::{
 use crate::{
     Enemy, Player, Projectile, ReferenceWaveCaptureSet, WaveOutcome, WaveSnapshot, WaveSpawn,
     input::install_desktop_input,
+    resources::{DesktopInputGate, WaveState},
 };
 
 pub const REFERENCE_DESKTOP_PLUGIN_ID: PluginId =
@@ -57,6 +58,14 @@ impl Plugin for ReferenceDesktopPlugin {
 
     fn build(&self, app: &mut nara::prelude::App) -> Result<(), PluginError> {
         install_desktop_input(app)?;
+        {
+            let world = app.world_mut()?;
+            world.insert_resource(DesktopInputGate);
+            world
+                .get_resource_mut::<WaveState>()
+                .ok_or_else(|| setup_error("wave state is unavailable"))?
+                .wait_for_input();
+        }
         let player_texture = {
             let world = app.world_mut()?;
             let Some(mut server) = world.get_resource_mut::<AssetServer>() else {

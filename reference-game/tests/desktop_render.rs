@@ -12,8 +12,13 @@ use std::{
 };
 
 use nara::{
-    app::RuntimeCandidate, prelude::FixedTime, project_host::ProjectContentLoader,
-    scene::spawn_scene, sprite_render::ExtractedSprites, ui_render::UiBatches,
+    app::RuntimeCandidate,
+    input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
+    prelude::FixedTime,
+    project_host::ProjectContentLoader,
+    scene::spawn_scene,
+    sprite_render::ExtractedSprites,
+    ui_render::UiBatches,
 };
 use nara_reference_game::{Enemy, Player, ReferenceHudProjection, WaveOutcome};
 use project_content_fixture::{desktop_candidate_plan_and_root, stop_runtime};
@@ -205,6 +210,13 @@ fn render_terminal(
         })
         .unwrap();
     let mut runtime = candidate.complete_startup().unwrap().promote();
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Character('a')))
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
     let timestep = runtime.world().resource::<FixedTime>().timestep();
     runtime.drive(timestep).unwrap();
 

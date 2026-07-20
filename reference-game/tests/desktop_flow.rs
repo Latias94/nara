@@ -20,6 +20,41 @@ use nara_reference_game::{
 };
 use project_content_fixture::{desktop_candidate_plan_and_root, stop_runtime};
 
+const MINIMUM_DESKTOP_INPUT_WINDOW_TICKS: usize = 250;
+
+#[test]
+fn desktop_wave_leaves_an_input_window_and_applies_wasd_movement() {
+    let mut runtime = desktop_runtime();
+
+    for _ in 0..MINIMUM_DESKTOP_INPUT_WINDOW_TICKS {
+        drive_fixed(&mut runtime);
+    }
+    let waiting = runtime.world().resource::<WaveSnapshot>();
+    assert_eq!(
+        waiting.outcome,
+        WaveOutcome::Running,
+        "the desktop wave must remain interactive for at least five seconds"
+    );
+    assert_eq!(waiting.tick, 0, "waiting must not advance the wave clock");
+    assert!(waiting.enemies.iter().all(|enemy| !enemy.active));
+
+    let before = player_position(&runtime);
+    keyboard(
+        &mut runtime,
+        ButtonDriverInput::Press(KeyCode::Character('w')),
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    drive_fixed(&mut runtime);
+    let after = player_position(&runtime);
+    assert_eq!(runtime.world().resource::<WaveSnapshot>().tick, 1);
+
+    assert!(
+        after.y > before.y,
+        "W must move the player upward: before={before:?}, after={after:?}"
+    );
+    stop_runtime(runtime);
+}
+
 #[test]
 fn wasd_edges_lower_to_semantic_commands_and_focus_release_stops() {
     let mut runtime = desktop_runtime();
@@ -61,6 +96,7 @@ fn enter_is_terminal_only_and_admits_at_most_one_pending_retry() {
     stop_runtime(running);
 
     let mut terminal = desktop_runtime();
+    start_desktop_wave(&mut terminal);
     drive_to_terminal(&mut terminal);
     let runtime_generation = terminal.generation();
     let run_generation = terminal.world().resource::<WaveRunGeneration>().get();
@@ -105,7 +141,7 @@ fn enter_is_terminal_only_and_admits_at_most_one_pending_retry() {
     let snapshot = terminal.world().resource::<WaveSnapshot>();
     assert_eq!(terminal.generation(), runtime_generation);
     assert_eq!(snapshot.run_generation, run_generation + 1);
-    assert_eq!(snapshot.tick, 1);
+    assert_eq!(snapshot.tick, 0);
     assert_eq!(snapshot.outcome, WaveOutcome::Running);
     assert_eq!(snapshot.player.hit_points, 20);
     assert_eq!(snapshot.enemies.len(), 3);
@@ -129,6 +165,7 @@ fn repeated_retry_keeps_one_runtime_generation() {
     let runtime_generation = runtime.generation();
 
     for expected_generation in 2..=3 {
+        start_desktop_wave(&mut runtime);
         drive_to_terminal(&mut runtime);
         keyboard(&mut runtime, ButtonDriverInput::Press(KeyCode::Enter));
         runtime.drive(Duration::ZERO).unwrap();
@@ -224,6 +261,13 @@ fn drive_to_terminal(runtime: &mut RuntimeInstance) {
     panic!("reference wave did not reach a terminal state");
 }
 
+fn start_desktop_wave(runtime: &mut RuntimeInstance) {
+    keyboard(runtime, ButtonDriverInput::Release(KeyCode::Character('a')));
+    runtime.drive(Duration::ZERO).unwrap();
+    keyboard(runtime, ButtonDriverInput::Press(KeyCode::Character('a')));
+    runtime.drive(Duration::ZERO).unwrap();
+}
+
 fn drive_fixed(runtime: &mut RuntimeInstance) {
     let timestep = runtime.world().resource::<FixedTime>().timestep();
     runtime.drive(timestep).unwrap();
@@ -234,4 +278,13 @@ fn keyboard(runtime: &mut RuntimeInstance, input: ButtonDriverInput<KeyCode>) {
         .with_driver_scope(|scope| apply_keyboard_driver_input(scope, input))
         .unwrap()
         .unwrap();
+}
+
+fn player_position(runtime: &RuntimeInstance) -> nara::prelude::Vec2 {
+    runtime
+        .world()
+        .iter_entities()
+        .find_map(|entity| entity.get::<nara_reference_game::Player>())
+        .map(|player| player.position)
+        .expect("desktop fixture must contain one player")
 }

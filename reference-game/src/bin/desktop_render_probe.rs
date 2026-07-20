@@ -27,8 +27,8 @@ use nara::{
     },
 };
 use nara_reference_game::{
-    REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, WaveRunGeneration, WaveSnapshot,
-    retry_command, wave_desktop_intent,
+    MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, WaveRunGeneration,
+    WaveSnapshot, movement_command, retry_command, wave_desktop_intent,
 };
 
 mod support;
@@ -221,6 +221,18 @@ fn observe_product_render(
     match probe.phase {
         ProductProbePhase::InitialFrame if product_frame_ready => {
             if let Some(continuity) = capture_continuity(&inputs) {
+                let Some(tick) = inputs.fixed_time.tick().checked_add(1) else {
+                    probe.evidence.timed_out.store(true, Ordering::SeqCst);
+                    exit.request_exit();
+                    return;
+                };
+                let submission = movement_command(tick, 9_000, MovementDirection::Left)
+                    .expect("the engine-owned product movement command is valid");
+                if commands.submit(submission).is_err() {
+                    probe.evidence.timed_out.store(true, Ordering::SeqCst);
+                    exit.request_exit();
+                    return;
+                }
                 probe.baseline = Some(continuity);
                 probe.phase = ProductProbePhase::Terminal;
             }
