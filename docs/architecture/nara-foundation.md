@@ -64,9 +64,13 @@ gates accept them; this map must not be used to infer a shared public Host trait
 ```mermaid
 flowchart TD
     User[Game code / AI agent] --> Facade[nara facade crate]
+    DirectSceneConsumer[Locked direct scene-module consumer] --> Scene
+    DirectSceneConsumer --> Reflect
+    DirectSceneConsumer --> BevyEcs[bevy_ecs: caller-owned World]
     Facade --> App[nara_app: App + Plugin + stages]
     Facade --> Project[nara_project: nara.toml validation + settings lowering]
     App --> ECS[nara_ecs: bevy_ecs substrate]
+    ECS --> BevyEcs
     App --> Tasks[nara_tasks: task pools + handles]
     Facade --> Core[nara_core: color + math primitives]
     Facade --> FS[nara_fs: host-issued filesystem capabilities]
@@ -117,7 +121,7 @@ flowchart TD
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, O(1) state and persistent slot revisions, hot reload scheduling, dependency graph, reload generations |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, bounded semantic watch event queue, runtime status/diagnostics, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
-| `nara_scene` | `Name`, `Parent`, `Children`, bounded `SceneDocument`/`PrefabDocument` candidates, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation |
+| `nara_scene` | `Name`, `Parent`, `Children`, bounded `SceneDocument`/`PrefabDocument` candidates, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export; documented direct parse/validate/spawn use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation; direct-module evidence does not promise arbitrary module or cross-engine compatibility |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, owned `RenderFramePacket`, `RenderFrame`, `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data and the admitted generation-stamped one-window/one-target/one-view topology; explicit pass planning, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary |
 | `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, async image reload jobs, candidate-owned publication, last-good reload preservation, and backend-neutral image content preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, `Material2dKey` | Backend-neutral 2D material intent shared by sprites, tilemaps, runtime UI images, and future material assets |
@@ -453,6 +457,11 @@ second real adapter or stronger isolation pressure.
   path.
 - `WgpuRenderBackend` is registered through the ECS resource derive rather than a hand-written
   marker, so the backend and its render resources are queryable before the first native frame.
+- A locked independent `module-consumer` workspace depends directly on `nara_scene`,
+  `nara_reflect`, and `bevy_ecs`, with no root facade, workspace inheritance, patch override, or
+  private Nara crate. It parses, publishes, validates, and spawns a committed canonical-v1 scene
+  while preserving stable `SceneEntityId` values and component data. This proves only the
+  documented direct scene-module slice, not arbitrary Nara-module or cross-engine composition.
 - `nara_scene` edits authoring documents through atomic `ScenePatchDocument` transactions with operation-indexed diagnostics and inverse patches.
 - `SceneAuthoringSession` owns the first editor/AI authoring boundary: document-as-truth patch application, undo/redo stacks, source revision stamps, dirty tracking, and rebuild-style live `World` projection that only replaces entities it owns.
 - `nara_tooling::SceneInspectorState` builds UI-agnostic inspector models from
