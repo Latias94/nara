@@ -4,14 +4,15 @@
 **Date**: 2026-07-13
 **Last Revised**: 2026-07-21
 **Owner**: Product composition and executable hosts
-**Admission Trigger**: RGF-U3, RGF-U4, and RGF-U12 prove bounded settings, pure profile planning,
-and immutable startup content; RGF-U26 freezes the task-equivalent manual counterfactual and
-RGF-U24 supplies concrete headless Host and U26 reversal evidence before RGF-U17/RGF-U13 diffuse it
-into Editor and desktop Hosts, and RGF-U23 decides this ADR independently
-before checking compatibility with the executable-runtime decision
+**Admission Trigger**: RGF-U23 found the Host success metrics supported at `f7e5ee2` but retained
+this proposal because no compatible Accepted executable-runtime decision exists. Reconsider only
+after ADR 0084 or an explicit successor is Accepted and a fresh compatibility review preserves the
+already-compiled, Host-trusted code scope without admitting a speculative universal Host Interface
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
 **Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079, ADR 0084, ADR 0094
+**Decision Evidence**:
+[RGF-U23 independent decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-a5b3266847924dfc93667c72c8929550.md)
 
 ## Context
 
@@ -49,9 +50,15 @@ counterfactual without exposing a universal Host/factory Interface or moving pro
 
 RGF-U13 adds the desktop parent/child path and RGF-U17 adds the Editor path: concrete Hosts own
 runtime construction, parent lifetime, control, and finite retirement while gameplay/tooling do not
-receive process or native authority. This evidence still does not establish a shared process
-service scope, multi-runtime sharing, package/build Host topology, or final public placement of
-advanced types. The independent U23 decision remains required, so this ADR stays Proposed.
+receive process or native authority. RGF-U23 independently found every Host success metric
+supported in the currently admitted concrete-authority scope. It nevertheless retained this ADR as
+Proposed because ADR 0084 remains Proposed, so the required Accepted executable-runtime dependency
+and final pair compatibility do not exist. Shared process services, multi-runtime sharing,
+package/build Host topology, and final public placement remain deliberately unfrozen.
+
+The U23 verdict applies only to already-compiled, Host-trusted code-first and RGF paths. Project
+data does not authorize Cargo resolution, build scripts, proc macros, native packages/importers, or
+in-process Play; broader activation remains owned by OQ-031 or an Accepted successor.
 
 ## Decision
 
@@ -365,17 +372,14 @@ If accepted:
 
 ## Admission Evidence
 
-Acceptance requires all Host-authority success metrics owned by RGF-U3/U4/U12/U24, U26's pre-Host
-manual baseline and U24 reversal verdict, plus the Editor/desktop outer-host subsets of
-RGF-U17/RGF-U13. RGF-U23
-reviews this topology on its own metrics and records an independent merits verdict. A would-accept
-verdict remains conditional until the compatibility review shows that Hosts delegate executable
-lifecycle to an Accepted ADR 0084 or explicit Accepted successor and that no public universal
-Host/service Interface was admitted without a second concrete consumer. Only then may this ADR be
-promoted to Accepted for product use. ADR 0084 may be accepted or rejected independently; a
-rejected or still-Proposed executable-runtime dependency blocks product use of this topology until
-an Accepted compatible successor exists, rather than forcing both ADRs to share one decision
-status.
+RGF-U23 completed the independent merits review at `f7e5ee2`: the Host-authority metrics owned by
+RGF-U3/U4/U12/U24, U26's manual baseline and U24 reversal, and the RGF-U17/RGF-U13 Editor/desktop
+subsets pass in the current concrete-authority scope. The ADR remains Proposed because ADR 0084 is
+not Accepted. Promotion requires an Accepted ADR 0084 or explicit successor, a fresh compatible
+pair review, the trust limitation above, and continued evidence that no public universal
+Host/service Interface was admitted without a second concrete consumer. A rejected or
+still-Proposed executable-runtime dependency blocks product use until an Accepted compatible
+successor exists; it does not force both ADRs to share one decision status.
 
 ## Citations
 

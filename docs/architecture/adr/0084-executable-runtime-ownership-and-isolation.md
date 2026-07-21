@@ -4,15 +4,16 @@
 **Date**: 2026-07-13
 **Last Revised**: 2026-07-21
 **Owner**: `nara_app` and concrete executable hosts
-**Admission Trigger**: RGF-U5 proves the code-first runtime core; RGF-U26 freezes the task-equivalent
-manual counterfactual and RGF-U24 proves unpublished candidate construction, headless Host
-publication, and the reversal matrix before RGF-U17 replaces the bare Play `World`
-and RGF-U13 proves desktop drive/close parity; RGF-U23 then decides this ADR independently before
-checking compatibility with the outer-Host decision
+**Admission Trigger**: RGF-U23 retained this proposal at `f7e5ee2`. Reconsider after one exact
+binding/codec/migration authority replaces the plan/World registry split, runtime contention no
+longer sticky-faults an independent healthy runtime, and the missing external Runner, three-Host
+command parity, and complete reconstruction evidence pass under the explicit Host-trusted scope
 **Revisit Trigger**: A concrete embedded or multi-runtime workflow proves that a thin lifecycle owner
 cannot preserve `App` as the sole schedule/world authority
 **Related**: ADR 0003, ADR 0008, ADR 0034, ADR 0039, ADR 0042, ADR 0052, ADR 0057, ADR 0058,
 ADR 0076, ADR 0081, ADR 0082
+**Decision Evidence**:
+[RGF-U23 independent decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-a5b3266847924dfc93667c72c8929550.md)
 
 ## Context
 
@@ -63,9 +64,20 @@ published runtime generations, controls, close evidence, and retirement while `n
 egui retain only UI-neutral commands/views/results. Cancel during Starting retains the attempt until
 retirement, normal cleanup continues across frames, close failure prevents false-success Restart,
 and runtime edit/Apply Changes execute at generation-stamped safe points. Together with U13 this
-completes the named product-path evidence input, but it does not decide process-global execution
-exclusion, plan-versus-World registry authority, overlapping runtimes, or the final Host/runtime
-combination. RGF-U23 remains the sole decision gate, so this ADR remains Proposed.
+completes the named product-path evidence input.
+
+RGF-U23 independently reviewed all success metrics at `f7e5ee2` and retained this ADR as Proposed.
+Startup publication, ownership handoff, App admission, Play execution, exact step, fault closure,
+finite close, stop-first workspace, API authority, and early ownership value pass. Driver parity,
+external driver authority, and complete runtime isolation remain insufficient. Two current
+behaviors also prevent acceptance: process-global reporter/schedule contention sticky-faults an
+independent runtime, and the plan plus World registries can carry different codec/binding/migration
+behavior despite the same catalog fingerprint. The Host/runtime pair remains conceptually
+compatible as a bounded Trial but cannot unblock U20.
+
+The U23 verdict applies only to already-compiled, Host-trusted code-first and RGF paths. Project
+data does not authorize Cargo resolution, build scripts, proc macros, native packages/importers, or
+in-process Play; broader activation remains owned by OQ-031 or an Accepted successor.
 
 ## Decision
 
@@ -452,15 +464,14 @@ must add reciprocal refinement metadata and update implementation evidence.
 
 ## Admission Evidence
 
-RGF-U5 has implemented the code-first candidate/runtime trial; RGF-U24 implements the concrete
-headless Host/candidate trial and its U26 reversal matrix. Acceptance still requires
-RGF-U17's Editor command/view ownership, RGF-U13's desktop Adapter evidence, and every success metric
-above through the independent RGF-U23 review; the existence of a wrapper does not make the ADR
-authoritative. A wrapper type, state enum, or bare-world adapter without scheduled execution, fault
-propagation, explicit obligation ownership, and finite shutdown is insufficient. ADR 0082 may be
-accepted or rejected independently. Product use with an outer Host requires an Accepted ADR 0082 or
-explicit Accepted successor plus compatibility evidence; a failure there does not erase otherwise
-valid code-first runtime evidence.
+RGF-U5 implemented the code-first candidate/runtime trial; RGF-U24 added the concrete headless
+Host/candidate trial and U26 reversal matrix; RGF-U17 and RGF-U13 added Editor and desktop evidence.
+RGF-U23 completed the independent review at `f7e5ee2` and found the failed metrics and implementation
+conflicts recorded above. Acceptance now requires those gaps to be repaired without shrinking the
+metrics or introducing a universal Host/Runner SPI, followed by a new independent Runtime review.
+A wrapper type or accumulated test volume is not authority by itself. ADR 0082 remains independently
+decidable, but product use with an outer Host requires an Accepted ADR 0082 or explicit successor
+plus compatible pair evidence.
 
 ## Citations
 

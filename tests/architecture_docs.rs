@@ -74,6 +74,31 @@ fn section<'a>(document: &'a str, heading: &str) -> Option<&'a str> {
     Some(&after_heading[..end])
 }
 
+fn table_key_values(document: &str, heading: &str) -> BTreeMap<String, String> {
+    let mut values = BTreeMap::new();
+    for row in section(document, heading)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.starts_with('|'))
+        .skip(2)
+    {
+        let mut columns = row.trim_matches('|').split('|').map(str::trim);
+        let key = columns.next().unwrap().to_owned();
+        let value = columns.next().unwrap().to_owned();
+        assert!(
+            values.insert(key.clone(), value).is_none(),
+            "{heading} contains duplicate row {key}"
+        );
+    }
+    values
+}
+
+fn expected_table<const N: usize>(rows: [(&str, &str); N]) -> BTreeMap<String, String> {
+    rows.into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect()
+}
+
 fn frontmatter(document: &str) -> BTreeMap<String, String> {
     let mut lines = document.lines();
     if lines.next() != Some("---") {
@@ -843,6 +868,145 @@ fn adr_files_have_unique_ids_and_required_sections() {
 #[test]
 fn governance_snapshot_is_complete_and_consistent() {
     GovernanceSnapshot::load().validate().unwrap();
+}
+
+#[test]
+fn u23_decision_matrix_preserves_independent_and_combined_verdicts() {
+    const MATRIX_PATH: &str = "docs/knowledge/engineering/decisions/2026-07/\
+2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-\
+a5b3266847924dfc93667c72c8929550.md";
+
+    let matrix = read(&repository_root().join(MATRIX_PATH));
+    for required in [
+        "| ADR 0084 executable Runtime | **Remain Proposed** |",
+        "| ADR 0082 outer Host | **Remain Proposed** |",
+        "| Combined topology | **Compatible bounded Trial** |",
+        "| U20 admission | **Blocked** |",
+        "already-compiled, Host-trusted",
+        "universal Host, service registry, factory, or Runner SPI",
+    ] {
+        assert!(
+            matrix.contains(required),
+            "RGF-U23 decision matrix must retain `{required}`"
+        );
+    }
+
+    assert_eq!(
+        table_key_values(&matrix, "## Evidence Revisions"),
+        expected_table([
+            ("RGF-U3", "`4709689d50e1e5b4af41d062f7c308ef5bd6f377`"),
+            ("RGF-U4", "`b6537579b3e48b11f36dca94fa28eb61b8262a3e`"),
+            (
+                "RGF-U5 corrected runtime",
+                "`ff2e02a9ea087e32a00d90cde3b9e883dbc20c68`",
+            ),
+            ("RGF-U12", "`f341255559e201f32dbcb09888b16cd50fecdd85`"),
+            ("RGF-U26", "`a2d695d6c58b8f8f21bb33aaf18fa27e18661a79`"),
+            ("RGF-U24", "`5ddbf186712b6c829dc0134a9f41a0ac8250fa3e`"),
+            ("RGF-U6", "`db511a780ad04e73940b72e6a4c3f0a48dbec70d`"),
+            (
+                "RGF-U13 final",
+                "`5bc321d41aba59072a1f97ccc0473f91e0b2c161`",
+            ),
+            (
+                "RGF-U17 final",
+                "`0a87503b43e1d6abc8b23404789dafc1a7cfe22b`",
+            ),
+            ("RGF-U19", "`347015e8d9fd5d529b9dd5482ceaa02086f4615a`"),
+            (
+                "U23 review baseline",
+                "`f7e5ee283e06ff156224b0f11fcc1df0c31284a3`",
+            ),
+        ])
+    );
+    assert_eq!(
+        table_key_values(&matrix, "## ADR 0084 Runtime Metrics"),
+        expected_table([
+            ("Startup publication", "Pass"),
+            ("Ownership handoff", "Pass"),
+            ("App admission", "Pass"),
+            ("Play execution", "Pass"),
+            ("Driver parity", "Insufficient"),
+            ("Driver authority", "Insufficient"),
+            ("Exact step", "Pass"),
+            ("Fault closure", "Pass"),
+            ("Runtime isolation", "Insufficient"),
+            ("Finite close", "Pass"),
+            ("Stop-first workspace", "Pass"),
+            ("API authority", "Pass"),
+            ("Early ownership value", "Pass"),
+        ])
+    );
+    assert_eq!(
+        table_key_values(&matrix, "## ADR 0082 Host Metrics"),
+        expected_table([
+            ("Pre-mutation project rejection", "Pass"),
+            ("Recipe coherence", "Pass"),
+            ("Fresh plugin preparation", "Pass"),
+            ("Early topology value", "Pass"),
+            ("Runtime delegation", "Pass"),
+            ("Parent lifetime", "Pass"),
+            ("Cross-host parity", "Pass for Host merits"),
+            ("Least privilege", "Pass"),
+            ("Embedded path", "Pass"),
+            (
+                "Admitted external authority parity",
+                "Pass in current scope",
+            ),
+        ])
+    );
+    assert_eq!(
+        table_key_values(&matrix, "## Combined Runtime/Host Scenarios"),
+        expected_table([
+            ("Sequential RuntimeInstances", "Partial pass"),
+            ("Overlapping RuntimeInstances", "Fail for drive semantics"),
+            ("Process-global authority contention", "Fail"),
+            ("Fresh-runtime reconstruction", "Partial pass"),
+            ("Plan/World registry divergence", "Fail"),
+        ])
+    );
+
+    let matrix_filename = Path::new(MATRIX_PATH)
+        .file_name()
+        .unwrap()
+        .to_string_lossy();
+    let snapshot = GovernanceSnapshot::load();
+    let catalogue = read(&adr_directory().join("README.md"));
+    for (id, adr) in [
+        (
+            "0082",
+            "0082-process-host-authority-and-runtime-construction-topology.md",
+        ),
+        ("0084", "0084-executable-runtime-ownership-and-isolation.md"),
+    ] {
+        assert!(
+            read(&adr_directory().join(adr)).contains(matrix_filename.as_ref()),
+            "{adr} must cite the immutable RGF-U23 decision matrix"
+        );
+        assert_eq!(snapshot.adrs[id].status, "Proposed");
+        let ledger = snapshot.ledger.iter().find(|row| row.id == id).unwrap();
+        assert_eq!(ledger.decision, "proposed");
+        assert!(ledger.last_verified.contains("RGF-U23"));
+        assert!(
+            ledger
+                .verification_anchors
+                .contains(matrix_filename.as_ref())
+        );
+
+        let prefix = format!("- [ADR {id}]({adr}):");
+        let catalogue_entry = catalogue
+            .lines()
+            .find(|line| line.starts_with(&prefix))
+            .unwrap();
+        assert!(
+            catalogue_entry.ends_with("(Proposed)"),
+            "ADR {id} catalogue entry must remain Proposed"
+        );
+    }
+
+    let foundation = read(&repository_root().join("docs/architecture/nara-foundation.md"));
+    assert!(foundation.contains("RGF-U23 independently retained Proposed"));
+    assert!(foundation.contains("compatible bounded Trial"));
 }
 
 #[test]
