@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-14
+**Last Revised**: 2026-07-21
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0058: Stable Runtime
 Identity and Entity References; ADR 0076: Play Runtime Debug Control and Observation
 **Proposed Refinement Under Evaluation**: ADR 0082 and ADR 0084 jointly propose concrete Host-owned
@@ -41,8 +41,9 @@ The editor has three distinct state categories:
 2. **Edit preview world**: a live projection owned by `SceneAuthoringSession` for inspection,
    gizmos, preview rendering, and debug tooling.
 3. **Play world**: a separate runtime `World` projection spawned from the current validated
-   document snapshot. The joint ADR 0082/0084 proposal would wrap this projection in a concrete
-   Editor Host-owned `RuntimeInstance` around one `App`.
+   document snapshot. RGF-U17 runs this projection in a concrete Editor Host-owned
+   `RuntimeInstance` around one `App`; ADR 0082/0084 still decide whether that placement becomes
+   durable architecture authority.
 
 Rules:
 
@@ -51,15 +52,14 @@ Rules:
 - The Play world is isolated from the edit preview world and must not share runtime `Entity`
   identities with it.
 - Pressing Play snapshots the current edit document, validates it, expands prefab sources, then
-  spawns a fresh Play world. Under the joint proposal, the concrete Host would perform this through
-  an exact `RuntimeRecipe` and a fresh runtime generation.
-- If ADRs 0082/0084 are accepted, the concrete Editor Host would own the unpublished start attempt,
-  published runtime, platform/process authority, and stop-first replacement intent.
-  `nara_tooling` would retain only UI-neutral commands, views, observations, and Apply Changes
-  models; neither tooling nor UI adapters would retain the live runtime owner or unrestricted
-  `World` access.
-- Pressing Stop discards the isolated Play world and runtime changes by default. The joint proposal
-  strengthens this into finite shutdown with retained incomplete-shutdown ownership.
+  spawns a fresh Play world through an exact runtime recipe and fresh runtime generation.
+- The concrete root Editor Host owns the unpublished start attempt, published runtime, and
+  stop-first replacement intent. `nara_tooling` retains only UI-neutral commands, views,
+  observations, and Apply Changes models; neither tooling nor UI adapters retain the live runtime
+  owner or unrestricted `World` access. Whether this ownership placement becomes durable authority
+  remains the ADR 0082/0084 question.
+- Pressing Stop discards the isolated Play world and runtime changes by default through finite
+  shutdown with retained incomplete-shutdown ownership.
 - Runtime changes write back to the edit document only through an explicit **Apply Changes**
   operation that produces `ScenePatchDocument` values and runs the normal patch validation/undo
   path.
@@ -70,8 +70,9 @@ Rules:
 - Save games remain separate from scene authoring data. Play Mode runtime state should not silently
   become scene data.
 
-The following diagram shows the proposed ADR 0082/0084 ownership refinement, not the currently
-accepted implementation authority:
+The following diagram shows the implemented RGF-U17 product flow. The isolated Play and explicit
+write-back behavior are accepted here; the named Host/runtime placement remains ADR 0082/0084 Trial
+evidence until RGF-U23 decides it.
 
 ```mermaid
 flowchart TD
@@ -105,17 +106,17 @@ EditorMode
 
 The exact Rust names can evolve, but these semantics should remain stable.
 
-Current transitional implementation:
+Current implementation:
 
 - `nara_scene::SceneAuthoringRevision` is the source revision stamp.
-- `nara_tooling::SceneEditorMode` represents `Edit`, `Play`, and `Paused`.
-- `nara_tooling::SceneEditorState` owns the first UI-agnostic lifecycle controller.
-- `nara_tooling::ScenePlaySession` stores the isolated runtime `World`, `SceneEntityMap`, and
-  source revision.
+- `nara_tooling::EditorPlayCommand` and `EditorPlayView` expose UI-neutral lifecycle control/status.
+- Root `EditorProjectSession` owns preparation, the unpublished start attempt, published runtime,
+  controls, close evidence, and retirement for the concrete product path.
+- Runtime generation plus source revision bind runtime edit and Apply Changes requests without
+  exposing runtime `Entity` values or a mutable `World` command surface.
 
-These ownership bullets are current evidence. RGF-U17 is the evidence trial for the non-authoritative
-ADR 0082/0084 refinement: concrete Editor Host ownership with tooling commands/views and stable
-document/runtime identity.
+These ownership bullets are implementation evidence for the non-authoritative ADR 0082/0084
+refinement; they do not pre-accept the final Host topology.
 
 Important invariants:
 
@@ -127,10 +128,10 @@ Important invariants:
 - Persistent scene IDs (`SceneEntityId`) are the only durable bridge for deriving apply-back
   patches; runtime `Entity` values never cross the persistence boundary.
 
-## Proposed Host-Owned Start Flow
+## Host-Owned Start Flow
 
-This flow is conditional on joint ADR 0082/0084 acceptance. The accepted invariant today is the
-fresh isolated Play world and unchanged authoring state on failure.
+RGF-U17 implements this flow. Its behavior is accepted here; its owner placement remains
+conditional on the independent ADR 0082/0084 decisions.
 
 ```mermaid
 sequenceDiagram
@@ -185,9 +186,9 @@ Default Stop never writes runtime state back to the edit document.
 
 Apply Changes is explicit and conservative:
 
-The Host transport in this diagram is the proposed ADR 0082/0084 path. The accepted contract is
-the explicit bounded export, `ScenePatchDocument` validation, and undo path; the current
-`SceneEditorState`/`ScenePlaySession` controller performs it locally.
+The Host transport in this diagram is the implemented RGF-U17 path and remains ADR 0082/0084 Trial
+evidence. The accepted contract here is the explicit bounded export, `ScenePatchDocument`
+validation, and undo path.
 
 ```mermaid
 sequenceDiagram

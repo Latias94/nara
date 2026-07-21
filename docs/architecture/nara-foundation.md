@@ -135,7 +135,7 @@ flowchart TD
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
 | `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver over `RuntimeInstance` that owns native windows, updates normalized input/window state through short driver scopes, invokes scoped renderer retirement only for its targets, joins registered runtime close with provider/native teardown, and preserves distinct primary-runner and teardown failures |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, `WgpuFrameTransactionStats`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, owned topology and sprite/UI batch capture, pre-acquire generation/topology rejection, at-most-once acquire/submit/present, clamped UI scissor, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, and `RenderBackendStatus` updates |
-| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `WorldIdentitySnapshot`, `SceneInspectorState`, transitional `SceneEditorState`/`ScenePlaySession`, `SceneInspectorCommand`, `SceneApplyChangesRequest`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command models, stable identity-only snapshots, open scene document slots, active document, selection sets, dirty/saved/conflict document state, and selected-component Apply Changes patch export/apply consumed by egui, dear-imgui, future nara UI, and AI agents; the bare-World Play owner remains transitional while RGF-U17 tests a concrete Editor Host under the still-Proposed ADR 0082/0084 topology |
+| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `EditorPlayCommand`, `EditorPlayView`, `EditorRuntimeEditRequest`, `SceneApplyChangesRequest`, `WorldIdentitySnapshot`, `SceneInspectorState`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command/view models, stable identity-only snapshots, open scene document slots, selection and dirty/saved/conflict state, and generation/revision-stamped runtime edit plus selected-component Apply Changes requests; no runtime, start-attempt, filesystem capability, or native authority ownership |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
 ## Accepted Runtime Debugging Direction
@@ -469,15 +469,18 @@ second real adapter or stronger isolation pressure.
   `WorldIdentitySnapshot`. Its local projection includes only component and field values eligible
   for `inspect`; it does not implement remote disclosure, logging, persistence, or host redaction.
   Authoring commands still apply through validated scene patches.
-- `nara_tooling::SceneEditorState` owns the transitional UI-agnostic, World-only Play Mode model. It
-  starts plain, prefab-resolved, asset-aware, and combined Play sessions by spawning a fresh
-  isolated runtime `World` through `SceneSpawner`, exposes Play/Paused/Edit mode state, and rejects
-  persistent inspector edits while Play or Paused is active. This is not the final runtime owner:
-  RGF-U17 is intended to test moving Start Attempt and Runtime Instance ownership into a concrete
-  Editor Host while tooling and egui retain only commands, status, observations, and Apply Changes
-  models. That placement remains candidate evidence until ADR 0082/0084 or explicit successors are
-  Accepted.
-- Stop Play drops the runtime `World` and discards runtime changes by default. Apply Changes now supports a narrow selected-entity / explicit-component subset: it encodes registered scene/edit-capable Play world components into `ScenePatchDocument` operations, applies them through `SceneAuthoringSession`, records undo, and rejects stale revisions, runtime-only components, prefab-expanded entities, and failed patch validation with diagnostics.
+- Root `EditorProjectSession` is the concrete RGF-U17 product Host for one known-schema workspace and
+  one Play owner. It owns receipt-backed Save/Reopen, dirty-close intent, recipe preparation,
+  `RuntimeStartAttempt`, `RuntimeInstance`, control tickets, close evidence, and retirement.
+  `nara_tooling` and egui retain only commands, views, observations, and Apply Changes models. This
+  is implementation evidence for still-Proposed ADR 0082/0084, not acceptance of a universal Host
+  topology.
+- Stop Play discards runtime changes by default. Apply Changes supports a narrow selected-entity /
+  explicit-component subset at a generation-stamped safe point: it encodes registered scene/edit-
+  capable runtime components into `ScenePatchDocument` operations, applies them through
+  `SceneAuthoringSession`, records undo, and rejects stale revisions, runtime-only components,
+  prefab-expanded entities, and failed patch validation. One-shot runtime edits never become
+  persistent unless this explicit flow succeeds.
 - `nara_tooling::EditorWorkspace` is the UI-agnostic editor document authority. It owns open scene slots, active document, selection sets, dirty/saved revisions, external reload pending/conflict state, per-document undo/redo, and workspace command reports.
 - `nara_tooling_egui` is the first concrete debug/editor UI adapter. It renders `SceneEditorModel` and `SceneInspectorModel`, returns `EditorWorkspaceCommand` values, and keeps egui out of `nara_tooling` and runtime-facing crates.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.

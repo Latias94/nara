@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-07-21
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 
 ## Context
@@ -134,6 +135,20 @@ surface as editor UI, and keeps save/reload/conflict semantics centralized.
 - `ToolingPlugin` should install meaningful tooling resources/systems when workspace state lands.
 - Save/reload/dirty/conflict behavior should be tested at the tooling layer before a visual editor
   depends on it.
+
+## Implemented Slice: RGF-U17 Known-Schema Product Loop
+
+`EditorWorkspace` now remains the UI-neutral authority for document slots, selection, dirty/saved
+revision, source digest, undo, and external-conflict state. The concrete root `EditorProjectSession`
+owns filesystem capability, persistence receipts, and the single Play lifecycle; tooling and egui
+hold no `World`, `RuntimeStartAttempt`, or `RuntimeInstance`.
+
+Known-schema Save advances a checkpoint only after the concrete Host accepts a document/revision/
+digest-bound atomic replacement receipt. Dirty Close and Exit require Save, Discard, or Cancel and
+retain the document until the selected persistence action plus runtime retirement complete.
+Explicit Reopen may replace a dirty authoring session only after bytes decode and validate; failed
+open, read, decode, validation, or workspace publication preserves the prior slot. This does not
+admit unavailable-schema authoring, recovery journals, or multi-document atomic publication.
 
 ## Open Questions
 

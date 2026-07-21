@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-07-21
 **Owner**: Product composition and executable hosts
 **Admission Trigger**: RGF-U3, RGF-U4, and RGF-U12 prove bounded settings, pure profile planning,
 and immutable startup content; RGF-U26 freezes the task-equivalent manual counterfactual and
@@ -47,10 +47,11 @@ driving, and retryable cleanup. The same committed task and three failure cuts m
 counterfactual without exposing a universal Host/factory Interface or moving project authority into
 `nara_app`.
 
-This evidence proves only the headless construction/lifetime slice. It does not establish a shared
-process service scope, Editor or desktop parent/child ownership, multi-runtime sharing, package or
-build Host topology, or the final public placement of advanced types. RGF-U17/U13 and the
-independent U23 decision remain required, so this ADR stays Proposed.
+RGF-U13 adds the desktop parent/child path and RGF-U17 adds the Editor path: concrete Hosts own
+runtime construction, parent lifetime, control, and finite retirement while gameplay/tooling do not
+receive process or native authority. This evidence still does not establish a shared process
+service scope, multi-runtime sharing, package/build Host topology, or final public placement of
+advanced types. The independent U23 decision remains required, so this ADR stays Proposed.
 
 ## Decision
 

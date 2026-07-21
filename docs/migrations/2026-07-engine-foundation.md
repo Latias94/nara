@@ -1967,6 +1967,31 @@ or continue incremental watching after an observed event loss.
 stale retirement, bounded non-blocking watcher admission, observable loss, ownership, and public
 last-good reload behavior.
 
+## Receipt-Backed Editor Save and Host-Owned Play
+
+The public `MarkSaved` authoring command and tooling-owned `ScenePlaySession` bare-World path are
+removed. File-backed known-schema editor workflows now use root `EditorProjectSession`: Save returns
+retained typed persistence results, Reopen is the explicit reconciliation path, and Play lifecycle
+commands drive a concrete scheduled runtime owned outside `nara_tooling`.
+
+**User action**: UI adapters must render `EditorProjectView`, submit `EditorPersistenceCommand`,
+`EditorPlayCommand`, runtime-edit, Apply Changes, and workspace-intent requests, then acknowledge
+retained terminal results. They must not clear dirty state directly or retain a runtime owner.
+
+**Source action**: `none`; canonical scene bytes and schema versions are unchanged. A successful
+Save advances only the captured authoring revision. `PersistenceUncertain` requires explicit
+Reopen/Reconcile before another Save.
+
+**Cache action**: `keep`; runtime generations are reconstructed from the current validated editor
+document and authorized project content rather than restored from cache.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No `MarkSaved` alias or bare-World
+Play owner remains.
+
+**Verification anchors**: `tests/editor_persistence.rs`, `tests/workspace_play_runtime.rs`,
+`tests/scene_play_mode.rs`, and `crates/nara_tooling_egui/src/lib.rs#tests` prove the receipt,
+dirty-close/reopen, scheduled lifecycle, safe-point edit/export, and adapter command/view contracts.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

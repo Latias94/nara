@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-07-21
 **Owner**: `nara_tooling`, persistent document owners, `nara_fs`, and editor hosts
 **Admission Trigger**: Editor workspace fixtures prove receipt-backed save, external conflict,
 read-only second writer, bounded journal recovery, and old-or-new multi-document transaction
@@ -20,11 +20,12 @@ temporary-file, replacement, synchronization, and guarantee receipts. The missin
 is how the editor turns an in-memory revision into durable authored files without lying about
 success or losing concurrent changes.
 
-A command named `MarkSaved` can currently clear dirty state without proving which bytes reached
-which file or durability tier. Atomic rename alone does not prove compare-and-swap, directory
-durability, multi-file publication, or protection from another editor/Git/IDE writer. Conversely,
-making an editor database the only source of truth would break code-first generation and normal
-version-control workflows.
+Before RGF-U17, a command named `MarkSaved` could clear dirty state without proving which bytes
+reached which file or durability tier. RGF-U17 removes that command and implements a bounded typed-
+receipt single-document trial. Atomic rename alone still does not prove compare-and-swap,
+directory durability, multi-file publication, or protection from another editor/Git/IDE writer.
+Conversely, making an editor database the only source of truth would break code-first generation
+and normal version-control workflows.
 
 ## Decision
 
@@ -303,6 +304,21 @@ Acceptance requires real filesystem integration tests for every supported guaran
 single/multi-file fault injection, second-writer and non-cooperating external-write cases, bounded
 journal corruption/rebinding cases, receipt-backed dirty state, snapshot publication/watcher fences,
 and close/runtime failure behavior. An atomic rename helper or autosave timer alone is insufficient.
+
+### RGF-U17 Trial Evidence
+
+RGF-U17 implements only the bounded known-schema single-document subset. A concrete persistence Host
+captures canonical scene bytes, document ID, source revision, semantic digest, observed content
+digest, and scoped file identity; it accepts Saved only from a matching atomic name-switch receipt
+with required file synchronization, publication, and candidate identity evidence. External change,
+target deletion, lost cooperative lock, pre-publication failure, or mismatched evidence preserves
+dirty state. A post-name-switch evidence failure becomes `PersistenceUncertain`, blocks blind Save,
+and clears only after explicit Reopen bytes are decoded, validated, published into the workspace,
+and committed as the observed baseline.
+
+This trial deliberately does not implement a recovery journal, committed project snapshot,
+multi-document old-or-new publication, general concurrent-writer policy, or crash-point matrix.
+Those missing admission metrics keep this ADR Proposed.
 
 ## Citations
 

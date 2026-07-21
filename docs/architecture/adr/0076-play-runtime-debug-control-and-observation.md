@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-17
+**Last Revised**: 2026-07-21
 **Refines**: [ADR 0024](0024-determinism-fixed-update-and-replay-policy.md),
 [ADR 0034](0034-editor-play-mode-world-boundary.md),
 [ADR 0039](0039-main-loop-time-pause-and-runtime-state.md),
@@ -24,14 +24,15 @@ nara already has several foundations for a high-quality runtime debugging experi
 - isolated Play Mode world creation, stable scene authoring IDs, reflected component schemas,
   structured diagnostics, and bounded background work;
 - the implemented RGF-U5 code-first runtime trial, whose paused single-step contract is exactly one
-  complete fixed tick, plus RGF-U24's still-future unpublished start-attempt/Host evidence.
+  complete fixed tick, plus RGF-U24's unpublished start-attempt/Host evidence and RGF-U17's
+  concrete Editor product trial.
 
-The legacy U8 identity slice removed allocator-local entity observations: `ScenePlaySession` now retains a
-stable scene-instance handle and tooling captures a bounded `WorldIdentitySnapshot`. The Play
-session still owns a bare `World` rather than a scheduled, closeable `App`, and the identity-only
-snapshot intentionally contains no component payload. There is no stable system execution trace,
-component-state diff, checkpoint contract, or domain-neutral representation of an interpreted
-AI/script instruction cursor.
+The legacy U8 identity slice removed allocator-local entity observations. RGF-U17 subsequently
+removed `ScenePlaySession`; tooling captures a bounded `WorldIdentitySnapshot` while root
+`EditorProjectSession` owns the scheduled, closeable runtime. The identity-only snapshot
+intentionally contains no component payload. There is no stable system execution trace, component-
+state diff, checkpoint contract, or domain-neutral representation of an interpreted AI/script
+instruction cursor.
 
 These gaps can easily produce misleading APIs. A Rust ECS entity has no intrinsic "current source
 line". A Bevy schedule node is not a durable system identity. A component diff observed after a
@@ -108,13 +109,11 @@ policy. Exact protocol and credential technology remain a separate deployment de
 ### Runtime control
 
 `nara_app` owns the accepted execution semantics and now implements the code-first
-`RuntimeCandidate -> RuntimeInstance` control path. The current Editor Play implementation still
-keeps its local controller in `nara_tooling` over a bare World. Under the joint ADR 0082/0084
-proposal, a concrete
-Editor/headless/remote Host would instead own the live runtime and any unpublished start attempt,
-while `nara_tooling` would own UI-neutral lifecycle commands, views, observation policy, and
-projections. Tooling data would contain no `RuntimeInstance`, start-attempt owner, native lease, or
-process handle. RGF-U17 must prove this split before it can replace the current authority.
+`RuntimeCandidate -> RuntimeInstance` control path. RGF-U17 proves the Editor product split: root
+`EditorProjectSession` owns the live runtime and unpublished start attempt, while `nara_tooling`
+owns UI-neutral lifecycle commands, views, observation policy, and projections. Tooling data
+contains no `RuntimeInstance`, start-attempt owner, native lease, or process handle. This is
+implementation evidence for the joint ADR 0082/0084 proposal, not acceptance of that Host topology.
 
 The stable semantic operations are:
 
@@ -361,8 +360,8 @@ versioned state extraction/migration, two-phase publication, and failure rollbac
 
 ### Proposed Ownership Refinement
 
-The first row below is accepted. The concrete Host/tooling split is the non-authoritative ADR
-0082/0084 target that RGF-U17 must prove before it replaces the current local tooling controller.
+The first row below is accepted. RGF-U17 implements the concrete Host/tooling split as Trial
+evidence, while its architectural placement remains the non-authoritative ADR 0082/0084 target.
 
 | Owner | Owns | Must not own |
 |---|---|---|
@@ -456,9 +455,8 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
 - RGF-U5 provides the sealed-App runtime, exact single-fixed-tick execution independent of existing
   debt, always-on real-time work, sticky fault propagation, and finite retryable published close.
   This is implementation evidence for Proposed ADR 0084, not acceptance of its full ownership
-  topology. RGF-U24 must prove unpublished startup and atomic publication. RGF-U17 must replace the
-  tooling bare Play `World` through the concrete Editor Host without moving runtime authority into
-  tooling.
+  topology. RGF-U24 proves unpublished startup and atomic publication; RGF-U17 replaces the tooling
+  bare Play `World` through the concrete Editor Host without moving runtime authority into tooling.
 - `WorldSnapshot` is removed. `WorldIdentitySnapshot` is the bounded identity-only base; a future
   host-owned observation slice may add disclosure-filtered schema-aware component values rather
   than restoring a raw-entity view.
@@ -467,3 +465,19 @@ migration protocol. Fast compilation evidence does not solve runtime replacement
   separate ABI and migration ADR.
 - UI adapters may reproduce the valuable synchronized code/world experience of interpreter-driven
   games only when a domain supplies explicit cursor and source-map data.
+
+## Implemented Slice: RGF-U17 Editor Play and Safe-Point Edits
+
+RGF-U17 replaces the tooling-owned bare Play `World` with `EditorPlayCommand`, `EditorPlayView`, and
+retained typed operation results driven by root `EditorProjectSession`. The concrete Host owns
+preparation, `RuntimeStartAttempt`, publication, `RuntimeInstance`, retirement, and fresh Restart.
+Normal nonterminal cleanup remains visible as `RetiringPlay`; only timeout/failure becomes
+`RetirementIncomplete`, and terminal runtime close failure remains a failed result.
+
+Running and Paused accept generation/revision-stamped one-shot runtime field edits only when both
+component and field declare `Edit`. Apply Changes exports only the captured stable scene entity and
+explicit scene/edit-capable components, applies the patch through normal authoring validation/undo,
+and marks the live runtime out of date. Pending runtime edit and Apply Changes are mutually
+exclusive; Stop, Restart, Close, Reopen, and Exit cancel pending export before retirement. This
+slice does not implement schema-aware component observation, remote transport, system stepping,
+execution cursors, checkpoint/replay, or native hot patching.

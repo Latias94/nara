@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-07-21
 **Owner**: `nara_app` and concrete executable hosts
 **Admission Trigger**: RGF-U5 proves the code-first runtime core; RGF-U26 freezes the task-equivalent
 manual counterfactual and RGF-U24 proves unpublished candidate construction, headless Host
@@ -17,9 +17,10 @@ ADR 0076, ADR 0081, ADR 0082
 ## Context
 
 `nara_app::App` already owns the simulation `World`, plugin lifecycle, schedules, runner contract,
-startup state, and time transaction. `ScenePlaySession`, however, currently owns only a bare
-`World`; tooling pause is an enum rather than execution control, and Stop can remove that world
-without proving that tasks or native services closed.
+startup state, and time transaction. Before RGF-U17, `ScenePlaySession` owned only a bare `World`;
+tooling pause was an enum rather than execution control, and Stop could remove that world without
+proving that tasks or native services closed. RGF-U17 removes that baseline through a concrete
+Editor trial while this ADR's final decision remains pending RGF-U23.
 
 A `World` is an ECS state container, not an executable game instance. A complete runtime boundary
 also needs:
@@ -52,10 +53,19 @@ fresh generations, and retains incomplete cleanup for later bounded drives. Prod
 paths prove the same plan, command, authoritative first tick, pre-owner rejection, late-hook
 rejection, and incomplete-retirement custody semantics.
 
-This evidence is intentionally incomplete. It does not provide U17
-Editor ownership, U13 desktop product parity, or U23 independent decision. The ADR therefore
-remains Proposed; landed type names and tests are Trial evidence, not authority for an unproven
-universal topology or final public API.
+This evidence is intentionally incomplete. U13 now provides desktop product parity and U17 provides
+Editor ownership, but U23 has not independently decided the runtime and Host proposals or their
+compatibility. The ADR therefore remains Proposed; landed type names and tests are Trial evidence,
+not authority for an unproven universal topology or final public API.
+
+RGF-U17 adds the Editor trial: root `EditorProjectSession` owns preparation, start attempts,
+published runtime generations, controls, close evidence, and retirement while `nara_tooling` and
+egui retain only UI-neutral commands/views/results. Cancel during Starting retains the attempt until
+retirement, normal cleanup continues across frames, close failure prevents false-success Restart,
+and runtime edit/Apply Changes execute at generation-stamped safe points. Together with U13 this
+completes the named product-path evidence input, but it does not decide process-global execution
+exclusion, plan-versus-World registry authority, overlapping runtimes, or the final Host/runtime
+combination. RGF-U23 remains the sole decision gate, so this ADR remains Proposed.
 
 ## Decision
 

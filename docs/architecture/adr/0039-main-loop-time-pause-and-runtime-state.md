@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-17
+**Last Revised**: 2026-07-21
 **Refines**: ADR 0013, ADR 0018, ADR 0024, ADR 0035, ADR 0036
 **Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0057:
 Authoritative Fixed-Tick and Command Ingress; ADR 0076: Play Runtime Debug Control and Observation
@@ -184,6 +184,15 @@ remains compatible with headless tests and platform adapters.
   selected product plugin bundle is installed.
 - `RuntimeInstance` contributes lifecycle/control state but does not duplicate any time resource or
   frame schedule owned by `App`.
+
+## Implemented Slice: RGF-U17 Editor Control
+
+RGF-U17 routes Editor Pause, Resume, exact fixed-tick Step, Stop, and fresh Restart through the same
+`RuntimeInstance` control contract used by headless and desktop hosts. A paused editor frame may
+apply a generation-stamped tooling edit or export selected Apply Changes state at its safe point
+without advancing a fixed tick. Terminal close failure stays observable and cannot be reported as a
+successful Stop or followed by Restart. This slice does not implement the ordinary typed gameplay-
+state transition schedules still required by this ADR.
 
 ## Open Questions
 
