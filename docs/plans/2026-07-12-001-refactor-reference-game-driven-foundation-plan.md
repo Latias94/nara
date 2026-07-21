@@ -5,10 +5,11 @@ date: 2026-07-12
 deepened: 2026-07-17
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
-execution_state: active
+execution_state: superseded
 product_contract_source: strategy-and-legacy-plan
 execution: code
 supersedes: docs/plans/2026-07-10-001-refactor-engine-foundation-contracts-plan.md
+superseded_by: docs/plans/2026-07-21-001-refactor-runtime-authority-product-delivery-plan.md
 plan_id: reference-game-foundation-2026-07
 unit_namespace: RGF
 ---

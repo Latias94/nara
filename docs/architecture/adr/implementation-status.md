@@ -3,7 +3,7 @@
 **Status**: Active
 **Last Verified**: 2026-07-20
 
-This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole active execution contract is the [reference-game-driven foundation plan](../../plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md), which supersedes the engine-foundation completion sequence without erasing its audit evidence. Active successor units use `RGF-U<N>`; `legacy U<N>` names preserved evidence or trigger backlog from the superseded plan and is not active unless an `RGF-U<N>` entry trigger admits the work.
+This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole active execution contract is the [reference-game runtime authority and product delivery plan](../../plans/2026-07-21-001-refactor-runtime-authority-product-delivery-plan.md), which preserves completed `RGF-U<N>` evidence while carrying the unfinished delivery contract under `RGD-U<N>`. The superseded foundation and engine-completion plans remain audit evidence and trigger backlog, not active implementation authority.
 
 ## Schema
 

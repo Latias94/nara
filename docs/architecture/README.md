@@ -8,8 +8,8 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The active [reference-game-driven foundation
-   plan](../plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md) owns current
+3. The active [reference-game runtime authority and product delivery
+   plan](../plans/2026-07-21-001-refactor-runtime-authority-product-delivery-plan.md) owns current
    execution order.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and

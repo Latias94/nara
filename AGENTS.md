@@ -16,7 +16,7 @@ order:
    for what is actually implemented and what remains open.
 5. Execute only a plan whose frontmatter says `execution_state: active` and whose registration is
    active in engineering memory. The current execution contract is
-   [`docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md`](docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md).
+   [`docs/plans/2026-07-21-001-refactor-runtime-authority-product-delivery-plan.md`](docs/plans/2026-07-21-001-refactor-runtime-authority-product-delivery-plan.md).
 6. Treat [`docs/architecture/open-questions.md`](docs/architecture/open-questions.md), Proposed ADRs,
    design harnesses, appendices, and inactive plans as evidence or candidate input, never as
    implementation authority.
