@@ -13,7 +13,13 @@ fn adr_directory() -> PathBuf {
 }
 
 fn read(path: &Path) -> String {
-    fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+    normalize_newlines(
+        fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+    )
+}
+
+fn normalize_newlines(document: String) -> String {
+    document.replace("\r\n", "\n")
 }
 
 fn repository_relative(path: &Path) -> String {
@@ -837,6 +843,14 @@ fn adr_files_have_unique_ids_and_required_sections() {
 #[test]
 fn governance_snapshot_is_complete_and_consistent() {
     GovernanceSnapshot::load().validate().unwrap();
+}
+
+#[test]
+fn governance_parser_normalizes_windows_line_endings() {
+    assert_eq!(
+        normalize_newlines("first\r\n\r\nsecond\r\n".to_owned()),
+        "first\n\nsecond\n"
+    );
 }
 
 #[test]
