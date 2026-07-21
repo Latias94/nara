@@ -14,9 +14,9 @@ use std::{
 use nara::{
     app::{
         App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-        PluginError, PluginId, PluginShutdownObligationId, RuntimeCloseContext,
-        RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
-        RuntimeCloseProgress,
+        PluginError, PluginId, PluginShutdownContext, PluginShutdownObligationId,
+        RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
+        RuntimeCloseParticipantId, RuntimeCloseProgress,
     },
     gameplay::GameplayCommandPlugin,
     project_host::{EditorProjectIntent, EditorProjectSession},
@@ -26,8 +26,8 @@ use nara::{
         ScenePatchOperation,
     },
     tooling::{
-        EditorPlayCommand, EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection,
-        EditorPlayRequestResult, EditorPlayState, EditorWorkspaceIntent,
+        EditorPlayCommand, EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult,
+        EditorPlayRejection, EditorPlayRequestResult, EditorPlayState, EditorWorkspaceIntent,
         EditorWorkspaceIntentRequestResult,
     },
 };
@@ -49,6 +49,11 @@ const BUILD_FAILURE_DEFINITION_ID: PluginDefinitionId =
 const BUILD_FAILURE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(BUILD_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[DELAYED_CLOSE_PLUGIN_ID]);
+const SHUTDOWN_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.editor-shutdown-failure");
+const SHUTDOWN_FAILURE_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.editor-shutdown-failure", 1);
+const SHUTDOWN_FAILURE_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(SHUTDOWN_FAILURE_PLUGIN_ID, PluginCategory::Runtime);
 
 #[derive(Debug)]
 struct DelayedClosePlugin {
@@ -118,6 +123,26 @@ impl Plugin for BuildFailurePlugin {
     }
 }
 
+#[derive(Debug, Default)]
+struct ShutdownFailurePlugin;
+
+impl Plugin for ShutdownFailurePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &SHUTDOWN_FAILURE_DECLARATION
+    }
+
+    fn build(&self, _app: &mut App) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        Err(PluginError::SetupFailed {
+            plugin: SHUTDOWN_FAILURE_PLUGIN_ID,
+            message: "editor shutdown failure probe".to_owned(),
+        })
+    }
+}
+
 fn delayed_close_definition(release: Arc<AtomicBool>) -> PluginDefinition {
     PluginDefinition::infallible::<DelayedClosePlugin, _>(
         DELAYED_CLOSE_DEFINITION_ID,
@@ -133,6 +158,14 @@ fn build_failure_definition() -> PluginDefinition {
         BUILD_FAILURE_DEFINITION_ID,
         b"editor-build-failure-v1",
         BuildFailurePlugin::default,
+    )
+}
+
+fn shutdown_failure_definition() -> PluginDefinition {
+    PluginDefinition::infallible::<ShutdownFailurePlugin, _>(
+        SHUTDOWN_FAILURE_DEFINITION_ID,
+        b"editor-shutdown-failure-v1",
+        ShutdownFailurePlugin::default,
     )
 }
 
@@ -317,6 +350,7 @@ fn runtime_edit_is_generation_and_safe_point_bound() {
         editor.runtime_edit_result(),
         Some(nara::tooling::EditorRuntimeEditResult::Pending(_))
     ));
+    assert!(!editor.acknowledge_runtime_edit_result());
     editor.drive_editor_frame(Duration::ZERO);
     assert!(matches!(
         editor.runtime_edit_result(),
@@ -383,6 +417,16 @@ fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() 
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
 
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Pause),
+        EditorPlayRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+
+    let request =
+        nara::tooling::SceneApplyChangesRequest::new(entity_id.clone(), [transform_id.clone()]);
+
     editor
         .request_runtime_edit(
             entity_id.clone(),
@@ -392,13 +436,35 @@ fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() 
             ComponentValue::f64(42.0).unwrap(),
         )
         .unwrap();
+    assert_eq!(
+        editor.request_apply_changes(request.clone()),
+        Err(nara::tooling::EditorApplyChangesRejection::Busy)
+    );
     editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
     assert!(editor.acknowledge_runtime_edit_result());
 
-    let request =
-        nara::tooling::SceneApplyChangesRequest::new(entity_id.clone(), [transform_id.clone()]);
     editor.request_apply_changes(request.clone()).unwrap();
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Resume),
+        EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy)
+    );
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::StepFixedTick),
+        EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy)
+    );
+    assert_eq!(
+        editor.request_runtime_edit(
+            entity_id.clone(),
+            transform_id.clone(),
+            ComponentSchemaVersion::ONE,
+            ComponentFieldId::new("translation.x"),
+            ComponentValue::f64(43.0).unwrap(),
+        ),
+        Err(nara::tooling::EditorRuntimeEditRejection::Busy)
+    );
     editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
     let Some(nara::tooling::EditorApplyChangesResult::Applied(report)) =
         editor.apply_changes_result()
     else {
@@ -498,6 +564,77 @@ fn workspace_close_retains_document_through_close_incomplete_and_retry() {
     drive_until(&mut editor, EditorPlayState::Empty, 32);
     assert!(editor.workspace().is_empty());
     assert!(editor.workspace_intent_view().intent().is_none());
+}
+
+#[test]
+fn direct_stop_retains_close_incomplete_until_retry() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let release = Arc::new(AtomicBool::new(false));
+    let intent = EditorProjectIntent::new()
+        .with_cleanup_timeout(Duration::ZERO)
+        .insert_after::<GameplayCommandPlugin>(delayed_close_definition(Arc::clone(&release)));
+    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    let document = editor.workspace().active_document().unwrap();
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Play),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::Running, 32);
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Stop),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::CloseIncomplete, 32);
+    assert!(editor.workspace().scene(document).is_some());
+    assert!(editor.play_view().generation().is_some());
+    assert!(matches!(
+        editor.play_view().result(),
+        Some(EditorPlayOperationResult::Failed {
+            operation: EditorPlayOperation::Stop,
+            failure: EditorPlayFailure::Close,
+        })
+    ));
+
+    release.store(true, Ordering::Release);
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::RetryClose),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::Empty, 32);
+    assert!(editor.workspace().scene(document).is_some());
+    assert_eq!(editor.play_view().generation(), None);
+}
+
+#[test]
+fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let intent = EditorProjectIntent::new()
+        .insert_after::<GameplayCommandPlugin>(shutdown_failure_definition());
+    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Play),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::Running, 32);
+    let first_generation = editor.play_view().generation();
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Restart),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::Empty, 32);
+    assert_eq!(editor.play_view().generation(), None);
+    assert_ne!(first_generation, editor.play_view().generation());
+    assert!(matches!(
+        editor.play_view().result(),
+        Some(EditorPlayOperationResult::Failed {
+            operation: EditorPlayOperation::Restart,
+            failure: EditorPlayFailure::Close,
+        })
+    ));
 }
 
 #[test]
@@ -601,6 +738,40 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
     );
     drive_until(&mut editor, EditorPlayState::Empty, 32);
     assert!(editor.workspace().scene(document).is_some());
+    assert!(matches!(
+        editor.play_view().result(),
+        Some(EditorPlayOperationResult::Failed {
+            operation: EditorPlayOperation::Play,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn failed_start_remains_retiring_while_cleanup_is_still_pending() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let release = Arc::new(AtomicBool::new(false));
+    let intent = EditorProjectIntent::new()
+        .insert_after::<GameplayCommandPlugin>(delayed_close_definition(Arc::clone(&release)))
+        .insert_after::<DelayedClosePlugin>(build_failure_definition());
+    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Play),
+        EditorPlayRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.play_view().state(), EditorPlayState::Starting);
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.play_view().state(), EditorPlayState::RetiringPlay);
+
+    for _ in 0..2 {
+        editor.drive_editor_frame(Duration::ZERO);
+        assert_eq!(editor.play_view().state(), EditorPlayState::RetiringPlay);
+    }
+
+    release.store(true, Ordering::Release);
+    drive_until(&mut editor, EditorPlayState::Empty, 32);
     assert!(matches!(
         editor.play_view().result(),
         Some(EditorPlayOperationResult::Failed {

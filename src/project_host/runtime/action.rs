@@ -353,7 +353,9 @@ impl DesktopRun {
                     cleanup_failed |= failed;
                     self.diagnostics.extend(diagnostics);
                 }
-                CleanupDriveOutcome::Incomplete => incomplete.push(host),
+                CleanupDriveOutcome::Retiring | CleanupDriveOutcome::RetirementIncomplete => {
+                    incomplete.push(host);
+                }
             }
         }
         if !incomplete.is_empty() {
@@ -879,7 +881,9 @@ where
                     self.diagnostics.extend(diagnostics);
                     HeadlessRunState::Failed
                 }
-                CleanupDriveOutcome::Incomplete => HeadlessRunState::Cleaning { host, terminal },
+                CleanupDriveOutcome::Retiring | CleanupDriveOutcome::RetirementIncomplete => {
+                    HeadlessRunState::Cleaning { host, terminal }
+                }
             },
             HeadlessRunState::Completed(outcome) => HeadlessRunState::Completed(outcome),
             HeadlessRunState::Failed => HeadlessRunState::Failed,

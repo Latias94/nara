@@ -142,6 +142,7 @@ pub enum EditorRuntimeEditRejection {
     UnknownComponent,
     MissingComponent,
     UnknownField,
+    NotEditable,
     SchemaVersionMismatch,
     InvalidValue,
     ApplyRejected,

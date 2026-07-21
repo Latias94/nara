@@ -281,7 +281,8 @@ enum CleanupOwner {
 }
 
 enum CleanupDriveOutcome {
-    Incomplete,
+    Retiring,
+    RetirementIncomplete,
     Complete {
         failed: bool,
         diagnostics: DiagnosticReport,
@@ -354,7 +355,6 @@ impl ProjectHost {
         }
     }
 
-    #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
     fn running_runtime_close_evidence(&self) -> Option<RuntimeCloseEvidence> {
         match &self.slot {
             ProjectHostSlot::Running(published) => {
@@ -886,16 +886,23 @@ impl ProjectHost {
                 diagnostics: DiagnosticReport::default(),
             };
         };
-        owner.drive();
-        if owner.state() == RuntimeCandidateRetirementState::Retired {
-            let diagnostics = owner.completion_failure_report();
-            CleanupDriveOutcome::Complete {
-                failed: diagnostics.has_errors(),
-                diagnostics,
+        let state = owner.drive();
+        match state {
+            RuntimeCandidateRetirementState::Retired => {
+                let diagnostics = owner.completion_failure_report();
+                CleanupDriveOutcome::Complete {
+                    failed: diagnostics.has_errors(),
+                    diagnostics,
+                }
             }
-        } else {
-            self.slot = ProjectHostSlot::Cleaning { epoch, owner };
-            CleanupDriveOutcome::Incomplete
+            RuntimeCandidateRetirementState::Retiring => {
+                self.slot = ProjectHostSlot::Cleaning { epoch, owner };
+                CleanupDriveOutcome::Retiring
+            }
+            RuntimeCandidateRetirementState::RetirementIncomplete => {
+                self.slot = ProjectHostSlot::Cleaning { epoch, owner };
+                CleanupDriveOutcome::RetirementIncomplete
+            }
         }
     }
 }

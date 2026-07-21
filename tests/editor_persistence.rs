@@ -191,6 +191,206 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
 }
 
 #[test]
+fn explicit_reopen_reconciles_a_dirty_document_from_persisted_bytes() {
+    let project = TestProject::new("dirty-reopen");
+    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
+        .expect("the editor project should open");
+    let document = editor.workspace().active_document().unwrap();
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
+                document: Some(document),
+                patch: add_entity_patch("local-only"),
+            })
+            .applied
+    );
+    assert!(editor.workspace().scene(document).unwrap().is_dirty());
+
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document),
+        }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    let reopened = editor
+        .drive_editor_frame(std::time::Duration::ZERO)
+        .persistence();
+    assert!(matches!(
+        reopened.result(),
+        Some(EditorPersistenceResult::Opened {
+            document: reopened_document,
+            ..
+        }) if reopened_document == document
+    ));
+    let slot = editor.workspace().scene(document).unwrap();
+    assert!(slot.session().document().entities.is_empty());
+    assert!(!slot.is_dirty());
+    assert!(slot.saved_digest().is_some());
+}
+
+#[test]
+fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
+    let project = TestProject::new("failed-reopen");
+    let original_bytes = fs::read(project.scene_path()).unwrap();
+    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
+        .expect("the editor project should open");
+    let document = editor.workspace().active_document().unwrap();
+    let local = scene_id("local");
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
+                document: Some(document),
+                patch: add_entity_patch(local.as_str()),
+            })
+            .applied
+    );
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::SelectEntity {
+                document: Some(document),
+                entity: Some(local.clone()),
+            })
+            .applied
+    );
+    let before = editor.workspace().scene(document).unwrap();
+    let before_document = before.session().document().clone();
+    let before_revision = before.revision();
+    let before_saved_revision = before.saved_revision();
+    let before_saved_digest = before.saved_digest();
+    let assert_preserved = |editor: &EditorProjectSession| {
+        let slot = editor.workspace().scene(document).unwrap();
+        assert_eq!(slot.session().document(), &before_document);
+        assert_eq!(slot.revision(), before_revision);
+        assert_eq!(slot.saved_revision(), before_saved_revision);
+        assert_eq!(slot.saved_digest(), before_saved_digest);
+        assert_eq!(slot.selection().top_entity(), Some(&local));
+        assert!(slot.is_dirty());
+    };
+
+    fs::write(project.scene_path(), b"{ malformed").unwrap();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document),
+        }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert_eq!(
+        editor
+            .drive_editor_frame(std::time::Duration::ZERO)
+            .persistence()
+            .result(),
+        Some(EditorPersistenceResult::Failed {
+            document: Some(document),
+            stage: nara::tooling::EditorPersistenceFailureStage::Decode,
+        })
+    );
+    assert_preserved(&editor);
+
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        EditorPersistenceRequestResult::Accepted
+    );
+    let duplicate = scene_id("duplicate");
+    fs::write(
+        project.scene_path(),
+        SceneDocument::new([
+            SceneEntityRecord::new(duplicate.clone()),
+            SceneEntityRecord::new(duplicate),
+        ])
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document),
+        }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert_eq!(
+        editor
+            .drive_editor_frame(std::time::Duration::ZERO)
+            .persistence()
+            .result(),
+        Some(EditorPersistenceResult::Failed {
+            document: Some(document),
+            stage: nara::tooling::EditorPersistenceFailureStage::Validate,
+        })
+    );
+    assert_preserved(&editor);
+
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        EditorPersistenceRequestResult::Accepted
+    );
+    fs::remove_file(project.scene_path()).unwrap();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document),
+        }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert_eq!(
+        editor
+            .drive_editor_frame(std::time::Duration::ZERO)
+            .persistence()
+            .result(),
+        Some(EditorPersistenceResult::Rejected {
+            document: Some(document),
+            reason: EditorPersistenceRejection::TargetDeleted,
+        })
+    );
+    assert_preserved(&editor);
+
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        EditorPersistenceRequestResult::Accepted
+    );
+    fs::create_dir(project.scene_path()).unwrap();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document),
+        }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert!(matches!(
+        editor
+            .drive_editor_frame(std::time::Duration::ZERO)
+            .persistence()
+            .result(),
+        Some(EditorPersistenceResult::Failed {
+            document: Some(failed_document),
+            stage: nara::tooling::EditorPersistenceFailureStage::OpenTarget
+                | nara::tooling::EditorPersistenceFailureStage::ReadTarget,
+        }) if failed_document == document
+    ));
+    assert_preserved(&editor);
+
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        EditorPersistenceRequestResult::Accepted
+    );
+    fs::remove_dir(project.scene_path()).unwrap();
+    fs::write(project.scene_path(), original_bytes).unwrap();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document),
+        }),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert!(matches!(
+        editor
+            .drive_editor_frame(std::time::Duration::ZERO)
+            .persistence()
+            .result(),
+        Some(EditorPersistenceResult::Opened {
+            document: reopened_document,
+            ..
+        }) if reopened_document == document
+    ));
+}
+
+#[test]
 fn dirty_close_cancel_preserves_the_running_owner_and_document() {
     let project = TestProject::new("dirty-close-cancel");
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())

@@ -35,6 +35,8 @@ pub(super) struct ScenePersistenceHost {
     observed_identity: FileIdentity,
     observed_digest: ContentDigest,
     uncertain: bool,
+    #[cfg(test)]
+    reject_next_valid_receipt: bool,
 }
 
 pub(super) struct OpenedScenePersistence {
@@ -60,12 +62,16 @@ pub(super) enum SceneSaveOutcome {
 }
 
 pub(super) enum SceneReopenOutcome {
-    Opened {
-        session: SceneAuthoringSession,
-        digest: EditorDocumentDigest,
-    },
+    Opened(Box<OpenedSceneReopen>),
     Rejected(EditorPersistenceRejection),
     Failed(EditorPersistenceFailureStage),
+}
+
+pub(super) struct OpenedSceneReopen {
+    pub(super) session: SceneAuthoringSession,
+    pub(super) digest: EditorDocumentDigest,
+    pub(super) identity: FileIdentity,
+    pub(super) content_digest: ContentDigest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +180,8 @@ impl ScenePersistenceHost {
                 observed_identity: identity,
                 observed_digest: digest,
                 uncertain: false,
+                #[cfg(test)]
+                reject_next_valid_receipt: false,
             },
             session,
             digest: editor_digest(digest),
@@ -278,7 +286,11 @@ impl ScenePersistenceHost {
             parent_directory_sync,
         };
 
-        if !receipt_matches_required_evidence(receipt, self.observed_identity) {
+        let evidence_accepted = receipt_matches_required_evidence(receipt, self.observed_identity);
+        #[cfg(test)]
+        let evidence_accepted =
+            evidence_accepted && !std::mem::take(&mut self.reject_next_valid_receipt);
+        if !evidence_accepted {
             self.uncertain = true;
             return SceneSaveOutcome::PersistenceUncertain {
                 checkpoint,
@@ -291,7 +303,7 @@ impl ScenePersistenceHost {
         SceneSaveOutcome::Saved(evidence)
     }
 
-    pub(super) fn reopen(&mut self, registry: &ComponentRegistry) -> SceneReopenOutcome {
+    pub(super) fn reopen(&self, registry: &ComponentRegistry) -> SceneReopenOutcome {
         let file = match self.parent.open_child_file(&self.target) {
             Ok(file) => file,
             Err(error) => {
@@ -315,13 +327,18 @@ impl ScenePersistenceHost {
             Err(stage) => return SceneReopenOutcome::Failed(stage),
         };
         let digest = ContentDigest::of_bytes(&bytes);
-        self.observed_identity = file.identity();
-        self.observed_digest = digest;
-        self.uncertain = false;
-        SceneReopenOutcome::Opened {
+        SceneReopenOutcome::Opened(Box::new(OpenedSceneReopen {
             session,
             digest: editor_digest(digest),
-        }
+            identity: file.identity(),
+            content_digest: digest,
+        }))
+    }
+
+    pub(super) fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
+        self.observed_identity = identity;
+        self.observed_digest = digest;
+        self.uncertain = false;
     }
 }
 
@@ -414,4 +431,170 @@ fn editor_digest(digest: ContentDigest) -> EditorDocumentDigest {
 
 fn file_byte_limit(limits: SceneFileLimits) -> u64 {
     u64::try_from(limits.encoded_bytes().get()).unwrap_or(u64::MAX)
+}
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod tests {
+    use super::*;
+
+    use std::{
+        fs::{self, File},
+        path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    #[cfg(windows)]
+    use std::fs::OpenOptions;
+
+    use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
+    use nara_scene::{SceneEntityId, SceneEntityRecord};
+
+    static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
+
+    #[test]
+    fn uncertain_receipt_blocks_save_until_reopen_is_committed() {
+        let root = TestRoot::new();
+        let scenes = root.capability();
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let opened = ScenePersistenceHost::open(&scenes, "startup.scene.json", &registry).unwrap();
+        let document = EditorDocumentId::from_raw(1);
+        let revision = opened.session.revision();
+        let mut host = opened.host;
+        let first = scene_with_entity("first");
+
+        host.reject_next_valid_receipt = true;
+        let SceneSaveOutcome::PersistenceUncertain {
+            checkpoint,
+            evidence,
+        } = host.save(SceneSaveCandidate {
+            document,
+            revision,
+            scene: first.clone(),
+        })
+        else {
+            panic!("a rejected post-publication receipt must be uncertain");
+        };
+        assert_eq!(checkpoint.document, document);
+        assert_eq!(checkpoint.revision, revision);
+        assert_eq!(
+            evidence.publication_atomicity(),
+            PublicationAtomicity::AtomicNameSwitch
+        );
+        assert_eq!(
+            evidence.published_identity(),
+            Some(evidence.candidate_identity())
+        );
+        assert!(host.uncertain);
+        let first_bytes = fs::read(root.scene_path()).unwrap();
+
+        assert!(matches!(
+            host.save(SceneSaveCandidate {
+                document,
+                revision,
+                scene: scene_with_entity("blind-retry"),
+            }),
+            SceneSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile)
+        ));
+        assert_eq!(fs::read(root.scene_path()).unwrap(), first_bytes);
+
+        let SceneReopenOutcome::Opened(opened) = host.reopen(&registry) else {
+            panic!("the published candidate must reopen");
+        };
+        let OpenedSceneReopen {
+            session,
+            identity,
+            content_digest,
+            ..
+        } = *opened;
+        assert_eq!(session.document(), &first);
+        assert!(host.uncertain);
+
+        host.commit_reopen(identity, content_digest);
+        assert!(!host.uncertain);
+        assert!(matches!(
+            host.save(SceneSaveCandidate {
+                document,
+                revision,
+                scene: scene_with_entity("after-reconcile"),
+            }),
+            SceneSaveOutcome::Saved(_)
+        ));
+    }
+
+    fn scene_with_entity(id: &str) -> SceneDocument {
+        SceneDocument::new([SceneEntityRecord::new(SceneEntityId::new(id).unwrap())])
+    }
+
+    struct TestRoot {
+        path: PathBuf,
+    }
+
+    impl TestRoot {
+        fn new() -> Self {
+            let sequence = NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "nara_persistence_uncertain_{}_{}",
+                std::process::id(),
+                sequence
+            ));
+            fs::create_dir_all(&path).unwrap();
+            fs::write(
+                path.join("startup.scene.json"),
+                SceneDocument::default().to_json_string().unwrap(),
+            )
+            .unwrap();
+            Self { path }
+        }
+
+        fn capability(&self) -> DirectoryCapability {
+            DirectoryCapability::from_host_handle(
+                host_directory(&self.path),
+                HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
+            )
+            .unwrap()
+        }
+
+        fn scene_path(&self) -> PathBuf {
+            self.path.join("startup.scene.json")
+        }
+    }
+
+    impl Drop for TestRoot {
+        fn drop(&mut self) {
+            let temporary_root = std::env::temp_dir().canonicalize().unwrap();
+            let test_root = self.path.canonicalize().unwrap();
+            assert!(test_root.starts_with(&temporary_root));
+            assert!(
+                test_root
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("nara_persistence_uncertain_"))
+            );
+            fs::remove_dir_all(test_root).unwrap();
+        }
+    }
+
+    fn host_directory(path: &Path) -> File {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+
+            const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x1 | 0x2 | 0x4;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+            OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ_WRITE_DELETE)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(path)
+                .unwrap()
+        }
+
+        #[cfg(unix)]
+        {
+            File::open(path).unwrap()
+        }
+    }
 }

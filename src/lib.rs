@@ -308,13 +308,13 @@ pub mod tooling_prelude {
         EditorSceneModel, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
         EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
         EditorWorkspaceIntent, EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
-        EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
-        EditorWorkspaceIntentView, EditorWorkspaceModel, SceneApplyChangesComponentReport,
-        SceneApplyChangesComponentStatus, SceneApplyChangesReport, SceneApplyChangesRequest,
-        SceneEditorModel, SceneEditorState, SceneInspectorCommand, SceneInspectorCommandReport,
-        SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
-        SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
-        SceneInspectorState, ToolingPlugin, WorldIdentitySnapshot,
+        EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
+        EditorWorkspaceModel, SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus,
+        SceneApplyChangesReport, SceneApplyChangesRequest, SceneEditorModel, SceneEditorState,
+        SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
+        SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
+        SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, ToolingPlugin,
+        WorldIdentitySnapshot,
     };
     #[cfg(feature = "tooling-egui")]
     pub use nara_tooling_egui::{

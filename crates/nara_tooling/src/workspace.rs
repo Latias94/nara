@@ -533,6 +533,56 @@ impl EditorWorkspace {
         Ok(report_for_slot(document, active_document, slot))
     }
 
+    /// Publishes bytes explicitly reopened by the concrete persistence Host.
+    ///
+    /// Unlike an unsolicited external reload, an explicit Reopen/Reconcile command is allowed to
+    /// replace a dirty authoring session. The Host has already read and validated the candidate;
+    /// this method only performs the workspace publication and resets authoring-local state.
+    #[doc(hidden)]
+    pub fn __publish_reopened_session(
+        &mut self,
+        document: Option<EditorDocumentId>,
+        session: SceneAuthoringSession,
+        digest: EditorDocumentDigest,
+    ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, document);
+        let Some((document, slot)) = self.resolve_scene_mut(document) else {
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_resolution_error_report(context),
+                session,
+            ));
+        };
+        if slot.session.live_instance().is_some() {
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-current-session-attached",
+                    "reopen requires the current authoring session to detach first",
+                ),
+                session,
+            ));
+        }
+        if session.live_instance().is_some() {
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-session-attached",
+                    "workspace publication requires a detached reopened session",
+                ),
+                session,
+            ));
+        }
+
+        slot.session = session;
+        slot.selection.clear();
+        slot.editor = SceneEditorState::new();
+        slot.saved_revision = slot.session.revision();
+        slot.saved_digest = Some(digest);
+        slot.external_reload = EditorExternalReloadState::Clean;
+        Ok(report_for_slot(document, active_document, slot))
+    }
+
     fn allocate_document_id(&mut self) -> EditorDocumentId {
         self.next_document_id = self.next_document_id.saturating_add(1);
         EditorDocumentId::from_raw(self.next_document_id)

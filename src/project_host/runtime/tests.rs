@@ -737,7 +737,9 @@ fn close_time_runtime_fault_cannot_complete_the_product_run() {
     while host.has_cleanup_owner() && std::time::Instant::now() < deadline {
         match host.drive_cleanup_once() {
             CleanupDriveOutcome::Complete { failed, .. } => cleanup_failed = failed,
-            CleanupDriveOutcome::Incomplete => std::thread::yield_now(),
+            CleanupDriveOutcome::Retiring | CleanupDriveOutcome::RetirementIncomplete => {
+                std::thread::yield_now();
+            }
         }
     }
     if had_cleanup {

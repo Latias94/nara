@@ -153,7 +153,13 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
     assert_eq!(targets["scene_authoring_session"], ["runtime-core"]);
     assert_eq!(targets["scene_inspector"], ["tooling"]);
     assert_eq!(targets["scene_patch_transactions"], ["runtime-core"]);
-    assert_eq!(targets["scene_play_mode"], ["tooling", "runtime-2d"]);
+    for target in [
+        "editor_persistence",
+        "scene_play_mode",
+        "workspace_play_runtime",
+    ] {
+        assert_eq!(targets[target], ["tooling", "runtime-2d", "serde"]);
+    }
     assert_eq!(targets["scene_sprite_serialization"], ["runtime-2d"]);
     assert_eq!(targets["stable_runtime_identity"], ["tooling"]);
 }
