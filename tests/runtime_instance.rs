@@ -37,6 +37,7 @@ use nara::{
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
         GameplayCommandTypeId, submit_gameplay_driver_command,
     },
+    reflect::{ComponentRegistry, ComponentRegistryPlugin},
     tasks::{
         TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
         TaskPools, TaskShutdownPolicy, TaskSpawnRequest, TaskTerminal,
@@ -2431,7 +2432,7 @@ fn exact_step_rejects_a_temporarily_replaced_error_handler() {
 }
 
 #[derive(Resource)]
-struct RetirementMarker(bool);
+struct RetirementMarker(usize);
 
 impl __RuntimeDriverPort for RetirementMarker {
     type Input = ();
@@ -2449,14 +2450,22 @@ impl __RuntimeDriverPort for RetirementMarker {
     }
 
     fn apply_driver_input(&mut self, (): Self::Input) {
-        self.0 = true;
+        self.0 += 1;
     }
+}
+
+fn rewrap_component_registry(world: &mut World) {
+    let snapshot = world
+        .resource::<ComponentRegistry>()
+        .snapshot()
+        .expect("component registry freezes before runtime frame execution");
+    world.insert_resource(ComponentRegistry::from_snapshot(snapshot));
 }
 
 #[test]
 fn faulted_runtime_keeps_typed_retirement_ports_available() {
     let mut app = configured_app(FixedTime::default());
-    app.insert_resource(RetirementMarker(false)).unwrap();
+    app.insert_resource(RetirementMarker(0)).unwrap();
     let mut runtime = start_runtime(app);
     runtime.fault_reporter().report(RuntimeFault::engine(
         RuntimeFaultKind::RequiredService,
@@ -2470,16 +2479,46 @@ fn faulted_runtime_keeps_typed_retirement_ports_available() {
         })
         .unwrap();
 
-    assert!(runtime.world().resource::<RetirementMarker>().0);
+    assert_eq!(runtime.world().resource::<RetirementMarker>().0, 1);
     accepted_ticket(runtime.request_control(RuntimeControl::Stop));
     assert_eq!(
         runtime.drive(Duration::ZERO).unwrap().state(),
         RuntimeState::Stopping
     );
+    runtime
+        .with_driver_scope(|scope| {
+            scope.__apply_port::<RetirementMarker>(()).unwrap();
+        })
+        .unwrap();
+    assert_eq!(runtime.world().resource::<RetirementMarker>().0, 2);
     assert_eq!(
         runtime.drive(Duration::ZERO).unwrap().state(),
         RuntimeState::Stopped
     );
+}
+
+#[test]
+fn registry_authority_fault_does_not_block_typed_retirement_ports() {
+    let mut app = configured_app(FixedTime::default());
+    app.add_plugin(ComponentRegistryPlugin)
+        .unwrap()
+        .insert_resource(RetirementMarker(0))
+        .unwrap()
+        .add_systems(CoreStage::Last, rewrap_component_registry)
+        .unwrap();
+    let mut runtime = start_runtime(app);
+
+    let failure = runtime.drive(Duration::ZERO).unwrap_err();
+
+    assert_eq!(failure.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
+    assert_eq!(runtime.state(), RuntimeState::Faulted);
+    runtime
+        .with_driver_scope(|scope| {
+            scope.__apply_port::<RetirementMarker>(()).unwrap();
+        })
+        .unwrap();
+    assert_eq!(runtime.world().resource::<RetirementMarker>().0, 1);
+    finish_runtime(runtime);
 }
 
 #[test]

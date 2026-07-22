@@ -26,7 +26,10 @@ use nara_diagnostic::{
 use nara_ecs::{Mut, Resource, World};
 use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
 use nara_image::ImageAsset;
-use nara_reflect::{CatalogFingerprint, ComponentRegistry};
+use nara_reflect::{
+    CatalogFingerprint, ComponentRegistry, ComponentRegistrySnapshot,
+    validate_component_registry_authority,
+};
 use nara_scene::{SceneDocument, spawn_scene};
 
 use super::{
@@ -378,7 +381,12 @@ impl ProjectHost {
                 "Project runtime is unavailable for observation",
             )));
         };
-        Ok(operation(published.runtime().world()))
+        let world = published.runtime().world();
+        let expected = published._plan.schema_validation().snapshot();
+        verify_published_runtime_registry(world, expected)?;
+        let output = operation(world);
+        verify_published_runtime_registry(world, expected)?;
+        Ok(output)
     }
 
     fn request_runtime_control(
@@ -408,13 +416,17 @@ impl ProjectHost {
     }
 
     fn drive_running_runtime(&mut self, real_delta: Duration) -> Result<(), HostFault> {
-        let runtime = self.running_runtime_mut().ok_or_else(|| {
-            HostFault::new(single_error(
+        let ProjectHostSlot::Running(published) = &mut self.slot else {
+            return Err(HostFault::new(single_error(
                 "project.run.runtime-unavailable",
                 "Project runtime is unavailable for driving",
-            ))
-        })?;
-        runtime.drive(real_delta).map(|_| ()).map_err(|_| {
+            )));
+        };
+        let expected = published._plan.schema_validation().snapshot().clone();
+        verify_published_runtime_registry(published.runtime().world(), &expected)?;
+        let drive = published.runtime_mut().drive(real_delta);
+        verify_published_runtime_registry(published.runtime().world(), &expected)?;
+        drive.map(|_| ()).map_err(|_| {
             HostFault::new(single_error(
                 "project.run.drive-failed",
                 "Project runtime drive failed",
@@ -560,18 +572,12 @@ impl ProjectHost {
                 epoch,
                 CleanupOwner::Candidate(candidate.begin_retirement()),
             );
-            let diagnostics = if admission
-                .as_ref()
-                .err()
-                .and_then(|error| error.fault())
-                .is_some()
-            {
-                runtime_faulted_report()
-            } else {
-                single_error(
+            let diagnostics = match admission.as_ref().err().and_then(|error| error.fault()) {
+                Some(fault) => runtime_scope_failure_report(fault),
+                None => single_error(
                     "project.run.candidate-scope-failed",
                     "Project runtime candidate admission failed",
-                )
+                ),
             };
             return Err(HostFault::new(diagnostics));
         };
@@ -601,11 +607,9 @@ impl ProjectHost {
         let ready = match candidate.complete_startup() {
             Ok(ready) => ready,
             Err(owner) => {
+                let diagnostics = runtime_startup_failure_report(owner.fault());
                 self.install_start_cleanup(epoch, CleanupOwner::Startup(owner));
-                return Err(HostFault::new(single_error(
-                    "project.run.startup-failed",
-                    "Project runtime startup failed",
-                )));
+                return Err(HostFault::new(diagnostics));
             }
         };
         // `complete_start` has exclusive access to the Host, so a validated empty publication slot
@@ -643,6 +647,8 @@ impl ProjectHost {
             )));
         };
 
+        let expected = published._plan.schema_validation().snapshot().clone();
+        verify_published_runtime_registry(published.runtime().world(), &expected)?;
         let runtime = published.runtime_mut();
         if runtime.state() == RuntimeState::Running {
             let RuntimeControlRequestResult::Accepted(pause) =
@@ -701,7 +707,9 @@ impl ProjectHost {
                 u64::from(actual),
             )));
         }
-        Ok(outcome.frame().and_then(|frame| frame.exit))
+        let exit = outcome.frame().and_then(|frame| frame.exit);
+        verify_published_runtime_registry(published.runtime().world(), &expected)?;
+        Ok(exit)
     }
 
     fn capture_outcome<O>(&self) -> Result<O, HostFault>
@@ -958,6 +966,8 @@ fn materialize_project_runtime(
             ))
         })?;
     }
+    drop(queue);
+    verify_runtime_registry(world, plan)?;
     Ok(diagnostics)
 }
 
@@ -1040,25 +1050,48 @@ fn publish_snapshot_images(
 }
 
 fn verify_runtime_registry(world: &World, plan: &RuntimePlan) -> Result<(), HostFault> {
+    verify_runtime_registry_snapshot(world, plan.schema_validation().snapshot())
+}
+
+fn verify_runtime_registry_snapshot(
+    world: &World,
+    expected: &ComponentRegistrySnapshot,
+) -> Result<(), HostFault> {
     let registry = world.get_resource::<ComponentRegistry>().ok_or_else(|| {
         HostFault::new(single_error(
             "project.run.registry-missing",
             "Project runtime component registry is missing",
         ))
     })?;
-    let fingerprint = registry.catalog().map_err(|_| {
-        HostFault::new(single_error(
-            "project.run.registry-unavailable",
-            "Project runtime component registry is unavailable",
-        ))
-    })?;
-    if fingerprint.fingerprint() != plan.schema_validation().fingerprint() {
+    if !registry.shares_snapshot(expected) {
         return Err(HostFault::new(single_error(
             "project.run.registry-mismatch",
-            "Project runtime component registry changed before scene admission",
+            "Project runtime component registry does not match its admitted behavior snapshot",
         )));
     }
+    validate_component_registry_authority(world).map_err(|_| {
+        HostFault::new(single_error(
+            "project.run.registry-authority-invalid",
+            "Project runtime component registry authority is invalid",
+        ))
+    })?;
     Ok(())
+}
+
+fn verify_published_runtime_registry(
+    world: &World,
+    expected: &ComponentRegistrySnapshot,
+) -> Result<(), HostFault> {
+    let result = verify_runtime_registry_snapshot(world, expected);
+    if result.is_err()
+        && let Some(reporter) = world.get_resource::<RuntimeFaultReporter>()
+    {
+        reporter.report(RuntimeFault::engine(
+            RuntimeFaultKind::RuntimeAuthority,
+            "nara.project-host.component-registry-authority",
+        ));
+    }
+    result
 }
 
 #[derive(Debug)]
@@ -1091,6 +1124,7 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         CompositionError::SchemaProviderRejected { .. } => "schema-provider-rejected",
         CompositionError::SchemaProviderPanicked { .. } => "schema-provider-panicked",
         CompositionError::SchemaFreezeRejected { .. } => "schema-freeze-rejected",
+        CompositionError::SchemaAuthorityPublicationFailed => "schema-authority-conflict",
     };
     let mut diagnostic = failure_diagnostic(
         "project.run.composition-invalid",
@@ -1115,7 +1149,8 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
             diagnostic = attach_identifier(diagnostic, "provider", provider.as_str());
         }
         CompositionError::ProjectLineageMismatch
-        | CompositionError::SchemaFreezeRejected { .. } => {}
+        | CompositionError::SchemaFreezeRejected { .. }
+        | CompositionError::SchemaAuthorityPublicationFailed => {}
     }
     single_diagnostic(diagnostic)
 }
@@ -1363,6 +1398,30 @@ fn runtime_faulted_report() -> DiagnosticReport {
     single_error(
         "project.run.runtime-faulted",
         "Project runtime reported a fault before product completion",
+    )
+}
+
+fn runtime_scope_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
+    if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
+        return runtime_authority_invalid_report();
+    }
+    runtime_faulted_report()
+}
+
+fn runtime_startup_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
+    if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
+        return runtime_authority_invalid_report();
+    }
+    single_error(
+        "project.run.startup-failed",
+        "Project runtime startup failed",
+    )
+}
+
+fn runtime_authority_invalid_report() -> DiagnosticReport {
+    single_error(
+        "project.run.runtime-authority-invalid",
+        "Project runtime authority is invalid",
     )
 }
 

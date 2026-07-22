@@ -12,6 +12,7 @@ use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandPlugin};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentRegistry, ComponentSchemaProviderDefinition,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    report_component_registry_authority_fault,
 };
 use nara_scene::{SceneEntityId, SceneEntitySource};
 use nara_tooling::{
@@ -82,6 +83,39 @@ struct EditorRuntimeBridge {
     result: Option<EditorRuntimeEditResult>,
 }
 
+struct PendingEditorRuntimeEdit<'bridge> {
+    bridge: &'bridge mut EditorRuntimeBridge,
+    request: Option<EditorRuntimeEditRequest>,
+}
+
+impl<'bridge> PendingEditorRuntimeEdit<'bridge> {
+    fn take(bridge: &'bridge mut EditorRuntimeBridge) -> Option<Self> {
+        bridge.pending.take().map(|request| Self {
+            bridge,
+            request: Some(request),
+        })
+    }
+
+    fn request(&self) -> &EditorRuntimeEditRequest {
+        self.request
+            .as_ref()
+            .expect("pending editor runtime edit always retains its request until completion")
+    }
+
+    fn complete(mut self, result: EditorRuntimeEditResult) {
+        self.request.take();
+        self.bridge.result = Some(result);
+    }
+}
+
+impl Drop for PendingEditorRuntimeEdit<'_> {
+    fn drop(&mut self) {
+        if let Some(request) = self.request.take() {
+            self.bridge.pending = Some(request);
+        }
+    }
+}
+
 enum EditorRuntimeBridgeInput {
     Submit(EditorRuntimeEditRequest),
     TakeResult,
@@ -124,18 +158,40 @@ impl __RuntimeDriverPort for EditorRuntimeBridge {
 }
 
 fn apply_editor_runtime_edit(world: &mut World) {
-    let Some(mut bridge) = world.remove_resource::<EditorRuntimeBridge>() else {
+    if !world.contains_resource::<EditorRuntimeBridge>() {
         return;
-    };
-    let Some(request) = bridge.pending.take() else {
-        world.insert_resource(bridge);
-        return;
-    };
-    let result = world.resource_scope(|world, registry: Mut<'_, ComponentRegistry>| {
-        apply_runtime_edit(world, &registry, &request)
+    }
+    world.resource_scope(|world, mut bridge: Mut<EditorRuntimeBridge>| {
+        let Some(pending) = PendingEditorRuntimeEdit::take(&mut bridge) else {
+            return;
+        };
+        if report_component_registry_authority_fault(world).is_err() {
+            let request = pending.request().clone();
+            pending.complete(EditorRuntimeEditResult::Rejected {
+                request,
+                reason: EditorRuntimeEditRejection::ApplyRejected,
+            });
+            return;
+        }
+        let registry = world
+            .resource::<ComponentRegistry>()
+            .snapshot()
+            .map(ComponentRegistry::from_snapshot);
+        let mut result = match registry {
+            Ok(registry) => apply_runtime_edit(world, &registry, pending.request()),
+            Err(_) => EditorRuntimeEditResult::Rejected {
+                request: pending.request().clone(),
+                reason: EditorRuntimeEditRejection::ApplyRejected,
+            },
+        };
+        if report_component_registry_authority_fault(world).is_err() {
+            result = EditorRuntimeEditResult::Rejected {
+                request: pending.request().clone(),
+                reason: EditorRuntimeEditRejection::ApplyRejected,
+            };
+        }
+        pending.complete(result);
     });
-    bridge.result = Some(result);
-    world.insert_resource(bridge);
 }
 
 fn apply_runtime_edit(
@@ -541,6 +597,15 @@ impl EditorProjectSession {
     pub fn workspace_model(&mut self) -> nara_tooling::EditorWorkspaceModel {
         self.workspace
             .model(self.plan.schema_validation().registry(), None)
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_schema_snapshot(&self) -> nara_reflect::ComponentRegistrySnapshot {
+        self.plan
+            .schema_validation()
+            .registry()
+            .snapshot()
+            .expect("the Editor plan registry is frozen")
     }
 
     #[must_use]
@@ -1982,6 +2047,8 @@ fn editor_workspace_command_rejected(
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use super::*;
 
     use nara_ecs::Component;
@@ -1998,6 +2065,40 @@ mod tests {
     #[derive(Debug, Component)]
     struct FieldReadOnlyProbe {
         value: i64,
+    }
+
+    #[test]
+    fn editor_runtime_bridge_restores_a_pending_edit_after_unwind() {
+        let request = EditorRuntimeEditRequest {
+            generation: 1,
+            document_revision: nara_scene::SceneAuthoringSession::new(
+                nara_scene::SceneDocument::default(),
+            )
+            .revision(),
+            entity: SceneEntityId::new("panic-recovery").unwrap(),
+            component: ComponentTypeId::new("nara.test.PanicRecovery"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("value"),
+            value: ComponentValue::I64(1),
+        };
+        let mut world = World::new();
+        world.insert_resource(EditorRuntimeBridge {
+            pending: Some(request.clone()),
+            result: None,
+        });
+
+        let unwind = catch_unwind(AssertUnwindSafe(|| {
+            world.resource_scope(|_world, mut bridge: Mut<EditorRuntimeBridge>| {
+                let _pending = PendingEditorRuntimeEdit::take(&mut bridge)
+                    .expect("test bridge starts with a pending edit");
+                panic!("injected runtime edit codec panic");
+            });
+        }));
+
+        assert!(unwind.is_err());
+        let bridge = world.resource::<EditorRuntimeBridge>();
+        assert_eq!(bridge.pending.as_ref(), Some(&request));
+        assert!(bridge.result.is_none());
     }
 
     #[test]

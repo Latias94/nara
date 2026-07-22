@@ -109,7 +109,8 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
         .resource::<ComponentRegistry>()
         .snapshot()
         .unwrap();
-    assert!(!first_registry.ptr_eq(&second_registry));
+    assert!(first_registry.ptr_eq(&second_registry));
+    assert!(first_registry.ptr_eq(first.schema_validation().snapshot()));
     assert_eq!(
         first_registry.catalog().fingerprint(),
         first.schema_validation().fingerprint()

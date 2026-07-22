@@ -1,9 +1,11 @@
+use nara_app::PluginSchemaProviderId;
 use nara_ecs::{Component, World};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentProjectionError, ComponentRegistry, ComponentRegistryError,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind,
+    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaProviderBindingId,
+    ComponentSchemaProviderDefinition, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind,
 };
 
 #[derive(Clone, Component)]
@@ -19,6 +21,29 @@ struct Velocity {
 
 #[derive(Clone, Component)]
 struct CoverageProbe;
+
+const TEST_PROVIDER_ID: PluginSchemaProviderId =
+    PluginSchemaProviderId::new("nara.test.registry-provider");
+const TEST_PROVIDER_BINDING: ComponentSchemaProviderBindingId =
+    ComponentSchemaProviderBindingId::new("nara.test.registry-provider.native", 1);
+
+fn register_empty_provider(
+    _registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    Ok(())
+}
+
+fn panic_if_provider_callback_runs(
+    _registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    panic!("a frozen registry must validate receipts without invoking provider code")
+}
+
+fn reject_provider_callback(
+    _registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    Err(ComponentRegistryError::Frozen)
+}
 
 fn authoring_capabilities() -> [ComponentCapability; 3] {
     [
@@ -130,6 +155,80 @@ fn freeze_is_atomic_and_missing_binding_can_be_repaired() {
     registry.freeze().unwrap();
     let second = registry.snapshot().unwrap();
     assert!(first.ptr_eq(&second));
+}
+
+#[test]
+fn frozen_snapshots_share_provider_behavior_receipts_without_replaying_callbacks() {
+    let provider = ComponentSchemaProviderDefinition::new(
+        TEST_PROVIDER_ID,
+        TEST_PROVIDER_BINDING,
+        register_empty_provider,
+    );
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_or_validate_schema_provider(provider)
+        .unwrap();
+    registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
+    let receipt = snapshot.provider_receipt(TEST_PROVIDER_ID).unwrap();
+    assert_eq!(receipt.binding(), TEST_PROVIDER_BINDING);
+    assert_eq!(snapshot.provider_receipts().count(), 1);
+
+    let mut shared = ComponentRegistry::from_snapshot(snapshot.clone());
+    assert!(shared.shares_snapshot(&snapshot));
+    shared
+        .register_or_validate_schema_provider(ComponentSchemaProviderDefinition::new(
+            TEST_PROVIDER_ID,
+            TEST_PROVIDER_BINDING,
+            panic_if_provider_callback_runs,
+        ))
+        .unwrap();
+    assert!(shared.shares_snapshot(&snapshot));
+
+    for binding in [
+        ComponentSchemaProviderBindingId::new("nara.test.registry-provider.native", 2),
+        TEST_PROVIDER_BINDING.with_codec_version(2),
+        TEST_PROVIDER_BINDING.with_migration_version(2),
+    ] {
+        assert!(matches!(
+            shared.validate_schema_provider(ComponentSchemaProviderDefinition::new(
+                TEST_PROVIDER_ID,
+                binding,
+                register_empty_provider,
+            )),
+            Err(ComponentRegistryError::DivergentSchemaProviderReceipt { provider })
+                if provider == TEST_PROVIDER_ID
+        ));
+    }
+
+    assert!(matches!(
+        shared.validate_schema_provider(ComponentSchemaProviderDefinition::new(
+            PluginSchemaProviderId::new("nara.test.missing-provider"),
+            ComponentSchemaProviderBindingId::new("nara.test.missing-provider.native", 1),
+            register_empty_provider,
+        )),
+        Err(ComponentRegistryError::MissingSchemaProviderReceipt { .. })
+    ));
+}
+
+#[test]
+fn failed_provider_registration_publishes_no_behavior_receipt() {
+    let mut registry = ComponentRegistry::new();
+    let Err(error) =
+        registry.register_or_validate_schema_provider(ComponentSchemaProviderDefinition::new(
+            TEST_PROVIDER_ID,
+            TEST_PROVIDER_BINDING,
+            reject_provider_callback,
+        ))
+    else {
+        panic!("the rejected provider unexpectedly registered");
+    };
+    assert_eq!(error, ComponentRegistryError::Frozen);
+
+    registry.freeze().unwrap();
+    let snapshot = registry.snapshot().unwrap();
+    assert_eq!(snapshot.provider_receipt(TEST_PROVIDER_ID), None);
+    assert_eq!(snapshot.provider_receipts().count(), 0);
 }
 
 #[test]

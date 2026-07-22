@@ -15,6 +15,7 @@ use nara::{
     identity::EntityLookup,
     image::ImageImportLimits,
     prelude::{App, FixedTime, Resource, Vec2, World},
+    reflect::{COMPONENT_REGISTRY_PLUGIN_ID, ComponentRegistry},
     scene::{SceneSpawnReport, SpawnedSceneInstance, spawn_scene},
     sprite::Sprite,
     tasks::{
@@ -203,6 +204,7 @@ pub struct ManualRawAppIncompleteRetirementReport {
 
 pub fn run_manual_raw_app_boot() -> Result<ManualRawAppBootReport, ManualRawAppFailure> {
     let (mut app, loaded) = prepare_manual_raw_app()?;
+    let plugin_plan_fingerprint = app.configuration_fingerprint();
     let operation = execute_manual_first_tick(&mut app, &loaded);
     let retirement = shutdown_manual_raw_app(&mut app);
     drop(app);
@@ -234,7 +236,7 @@ pub fn run_manual_raw_app_boot() -> Result<ManualRawAppBootReport, ManualRawAppF
         first_tick,
         command_stats,
         command_queue_idle,
-        plugin_plan_fingerprint: digest_hex(loaded.plan.plugin_plan().fingerprint().as_bytes()),
+        plugin_plan_fingerprint: digest_hex(plugin_plan_fingerprint.as_bytes()),
         schema_fingerprint: loaded.snapshot.schema_fingerprint().to_hex(),
         content_revision: loaded.snapshot.revision().to_hex(),
         content_digest: digest_hex(*loaded.snapshot.content_digest().as_bytes()),
@@ -488,7 +490,17 @@ fn prepare_manual_raw_app() -> Result<(App, LoadedProjectContent), ManualRawAppF
                 .into_app_plugins(),
         )
         .map_err(|_| ManualRawAppBootError::PluginCommit)?;
-        if app.configuration_fingerprint() != loaded.plan.plugin_plan().fingerprint() {
+        let installed = app.installed_plugin_entries().collect::<Vec<_>>();
+        let planned = loaded.plan.plugin_plan().entries();
+        let same_recipe = installed.len() == planned.len()
+            && installed.iter().zip(planned).all(|(installed, planned)| {
+                installed == &planned
+                    || (installed.plugin_id() == COMPONENT_REGISTRY_PLUGIN_ID
+                        && planned.plugin_id() == COMPONENT_REGISTRY_PLUGIN_ID
+                        && installed.slot() == planned.slot()
+                        && installed.group_provenance() == planned.group_provenance())
+            });
+        if !same_recipe {
             return Err(ManualRawAppBootError::PluginPlanDrift);
         }
         app.insert_resource(loaded.plan.settings().runtime.runtime_time_settings())
@@ -500,6 +512,18 @@ fn prepare_manual_raw_app() -> Result<(App, LoadedProjectContent), ManualRawAppF
             .map_err(|_| ManualRawAppBootError::Startup)?;
         if startup.status.fixed_steps != 0 {
             return Err(ManualRawAppBootError::UnexpectedStartupTick);
+        }
+        let raw_snapshot = app
+            .world()
+            .get_resource::<ComponentRegistry>()
+            .ok_or(ManualRawAppBootError::PluginPlanDrift)?
+            .snapshot()
+            .map_err(|_| ManualRawAppBootError::PluginPlanDrift)?;
+        if raw_snapshot.catalog().fingerprint() != loaded.plan.schema_validation().fingerprint()
+            || raw_snapshot.provider_receipts().collect::<Vec<_>>()
+                != loaded.plan.schema_validation().provider_receipts()
+        {
+            return Err(ManualRawAppBootError::PluginPlanDrift);
         }
         Ok(())
     })();
@@ -543,10 +567,17 @@ fn spawn_snapshot_scene(
     app: &mut App,
     loaded: &LoadedProjectContent,
 ) -> Result<SceneSpawnReport, ManualRawAppBootError> {
+    let registry = app
+        .world()
+        .get_resource::<nara::reflect::ComponentRegistry>()
+        .ok_or(ManualRawAppBootError::SceneSpawn)?
+        .snapshot()
+        .map(nara::reflect::ComponentRegistry::from_snapshot)
+        .map_err(|_| ManualRawAppBootError::SceneSpawn)?;
     Ok(spawn_scene(
         app.world_mut()
             .map_err(|_| ManualRawAppBootError::SceneSpawn)?,
-        loaded.plan.schema_validation().registry(),
+        &registry,
         loaded.snapshot.expanded_startup_scene(),
     ))
 }

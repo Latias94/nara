@@ -27,6 +27,7 @@ use crate::{
     },
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
     persistent_apply::{PreparedComponent, PreparedComponentCandidate},
+    provider::{ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt},
     schema::{
         AliasError, CatalogFingerprint, ComponentCapability, ComponentFieldId,
         ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
@@ -38,6 +39,12 @@ use crate::{
 pub enum ComponentRegistryError {
     Frozen,
     NotFrozen,
+    MissingSchemaProviderReceipt {
+        provider: nara_app::PluginSchemaProviderId,
+    },
+    DivergentSchemaProviderReceipt {
+        provider: nara_app::PluginSchemaProviderId,
+    },
     DuplicateComponentId(ComponentTypeId),
     DuplicateNativeBinding(ComponentTypeId),
     DuplicateComponentRustType {
@@ -170,6 +177,14 @@ impl Display for ComponentRegistryError {
         match self {
             Self::Frozen => formatter.write_str("component registry is frozen"),
             Self::NotFrozen => formatter.write_str("component registry is not frozen"),
+            Self::MissingSchemaProviderReceipt { provider } => write!(
+                formatter,
+                "component schema provider '{provider}' has no executable behavior receipt"
+            ),
+            Self::DivergentSchemaProviderReceipt { provider } => write!(
+                formatter,
+                "component schema provider '{provider}' has a different executable behavior receipt"
+            ),
             Self::DuplicateComponentId(id) => {
                 write!(formatter, "component ID '{id}' is already registered")
             }
@@ -448,6 +463,7 @@ struct NativeComponentBinding {
 struct RegistryData {
     catalog: ComponentSchemaCatalog,
     previous_catalog: Option<ComponentSchemaCatalog>,
+    provider_receipts: BTreeMap<nara_app::PluginSchemaProviderId, ComponentSchemaProviderReceipt>,
     type_registry: TypeRegistry,
     rust_type_ids: HashMap<TypeId, ComponentTypeId>,
     bindings: BTreeMap<ComponentTypeId, NativeComponentBinding>,
@@ -481,6 +497,7 @@ impl RegistryData {
         Self {
             catalog,
             previous_catalog,
+            provider_receipts: BTreeMap::new(),
             type_registry: TypeRegistry::default(),
             rust_type_ids: HashMap::new(),
             bindings: BTreeMap::new(),
@@ -501,6 +518,7 @@ enum RegistryState {
 #[derive(Resource)]
 pub struct ComponentRegistry {
     state: RegistryState,
+    instance_token: Arc<()>,
 }
 
 impl Default for ComponentRegistry {
@@ -522,6 +540,20 @@ impl ComponentRegistrySnapshot {
     pub fn catalog(&self) -> &ComponentSchemaCatalog {
         &self.0.catalog
     }
+
+    pub fn provider_receipts(
+        &self,
+    ) -> impl ExactSizeIterator<Item = ComponentSchemaProviderReceipt> + '_ {
+        self.0.provider_receipts.values().copied()
+    }
+
+    #[must_use]
+    pub fn provider_receipt(
+        &self,
+        provider: nara_app::PluginSchemaProviderId,
+    ) -> Option<ComponentSchemaProviderReceipt> {
+        self.0.provider_receipts.get(&provider).copied()
+    }
 }
 
 impl ComponentRegistry {
@@ -529,6 +561,7 @@ impl ComponentRegistry {
     pub fn new() -> Self {
         Self {
             state: RegistryState::Building(Box::new(RegistryData::first_generation())),
+            instance_token: Arc::new(()),
         }
     }
 
@@ -538,6 +571,7 @@ impl ComponentRegistry {
     ) -> Result<Self, ComponentRegistryError> {
         Ok(Self {
             state: RegistryState::Building(Box::new(RegistryData::successor_of(previous_catalog)?)),
+            instance_token: Arc::new(()),
         })
     }
 
@@ -555,7 +589,17 @@ impl ComponentRegistry {
                 catalog,
                 previous_catalog,
             ))),
+            instance_token: Arc::new(()),
         })
+    }
+
+    /// Constructs another frozen registry view over the exact same executable behavior snapshot.
+    #[must_use]
+    pub fn from_snapshot(snapshot: ComponentRegistrySnapshot) -> Self {
+        Self {
+            state: RegistryState::Frozen(snapshot.0),
+            instance_token: Arc::new(()),
+        }
     }
 
     #[must_use]
@@ -593,6 +637,74 @@ impl ComponentRegistry {
                 unreachable!("component registry transition is synchronous")
             }
         }
+    }
+
+    #[must_use]
+    pub fn shares_snapshot(&self, snapshot: &ComponentRegistrySnapshot) -> bool {
+        matches!(
+            &self.state,
+            RegistryState::Frozen(current) if Arc::ptr_eq(current, &snapshot.0)
+        )
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub(crate) fn shares_instance_token(&self, token: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.instance_token, token)
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub(crate) fn instance_token(&self) -> &Arc<()> {
+        &self.instance_token
+    }
+
+    /// Registers a provider into a building registry or validates its stable behavior receipt
+    /// against an already frozen snapshot.
+    pub fn register_or_validate_schema_provider(
+        &mut self,
+        provider: ComponentSchemaProviderDefinition,
+    ) -> Result<&mut Self, ComponentRegistryError> {
+        let receipt = provider.receipt();
+        if self.is_frozen() {
+            self.validate_schema_provider(provider)?;
+            return Ok(self);
+        }
+        if let Some(existing) = self.data().provider_receipts.get(&provider.id()) {
+            if *existing == receipt {
+                return Ok(self);
+            }
+            return Err(ComponentRegistryError::DivergentSchemaProviderReceipt {
+                provider: provider.id(),
+            });
+        }
+
+        provider.register_into(self)?;
+        self.building_mut()?
+            .provider_receipts
+            .insert(provider.id(), receipt);
+        Ok(self)
+    }
+
+    pub fn validate_schema_provider(
+        &self,
+        provider: ComponentSchemaProviderDefinition,
+    ) -> Result<(), ComponentRegistryError> {
+        let Some(existing) = self.data().provider_receipts.get(&provider.id()) else {
+            return if self.is_frozen() {
+                Err(ComponentRegistryError::MissingSchemaProviderReceipt {
+                    provider: provider.id(),
+                })
+            } else {
+                Ok(())
+            };
+        };
+        if *existing != provider.receipt() {
+            return Err(ComponentRegistryError::DivergentSchemaProviderReceipt {
+                provider: provider.id(),
+            });
+        }
+        Ok(())
     }
 
     #[must_use]

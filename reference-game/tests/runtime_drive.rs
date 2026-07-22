@@ -256,9 +256,10 @@ fn product_action_matches_the_manual_first_tick_without_rust_seed_content() {
     assert_eq!(manual.command_stats.accepted, 1);
     assert_eq!(manual.command_stats.acknowledged, 1);
     assert!(manual.command_queue_idle);
-    assert_eq!(
+    assert_ne!(
         selected_plugin_plan_fingerprint(report.diagnostics()),
-        manual.plugin_plan_fingerprint
+        manual.plugin_plan_fingerprint,
+        "the code-first baseline and file-backed product recipe have distinct registry definitions"
     );
     assert!(!report.diagnostics().has_errors());
 }

@@ -58,9 +58,10 @@ pub const TRANSFORM_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nar
 pub const TRANSFORM_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.transform.components");
 pub const TRANSFORM_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
-    nara_reflect::ComponentSchemaProviderDefinition::new(
+    nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         TRANSFORM_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.transform.components.native", 1),
+        validate_transform_components,
         register_transform_components,
     );
 pub const TRANSFORM_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
@@ -80,14 +81,21 @@ impl Plugin for TransformPlugin {
             TRANSFORM_PLUGIN_ID,
             component_id.as_str(),
         )?;
-        validate_transform_components(registry).map_err(|error| {
-            PluginError::component_registration(TRANSFORM_PLUGIN_ID, component_id.as_str(), error)
-        })
+        TRANSFORM_SCHEMA_PROVIDER
+            .preflight(registry)
+            .map_err(|error| {
+                PluginError::component_registration(
+                    TRANSFORM_PLUGIN_ID,
+                    component_id.as_str(),
+                    error,
+                )
+            })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.transform.Transform2d");
-        register_transform_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+        TRANSFORM_SCHEMA_PROVIDER
+            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
                 PluginError::component_registration(
                     TRANSFORM_PLUGIN_ID,

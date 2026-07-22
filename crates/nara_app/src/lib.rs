@@ -1079,6 +1079,7 @@ pub struct App {
     runtime_obligations: RuntimeObligationLedger,
     runtime_fault_reporter: RuntimeFaultReporter,
     managed_runtime_generation: Option<RuntimeGeneration>,
+    managed_runtime_authority_validator: Option<Arc<runtime::__ManagedRuntimeAuthorityValidator>>,
     plugin_lifecycle: PluginLifecycleState,
     plugin_failure_report: Option<PluginFailureReport>,
     active_plugin_hook: Option<(PluginId, PluginHook)>,
@@ -1148,6 +1149,7 @@ impl App {
             runtime_obligations: RuntimeObligationLedger::new(),
             runtime_fault_reporter,
             managed_runtime_generation: None,
+            managed_runtime_authority_validator: None,
             plugin_lifecycle: PluginLifecycleState::Configuring,
             plugin_failure_report: None,
             active_plugin_hook: None,
@@ -1181,6 +1183,28 @@ impl App {
     pub fn world_mut(&mut self) -> Result<&mut World, PluginError> {
         self.ensure_mutation_allowed()?;
         Ok(&mut self.world)
+    }
+
+    /// Installs the one hidden managed-runtime authority validator owned by a domain plugin.
+    ///
+    /// This is product plumbing rather than a public extension bus. The callback is invoked at
+    /// managed schedule boundaries and receives the immutable World view plus the admitted
+    /// runtime generation. Domain state and fault ownership remain inside the registering crate.
+    #[doc(hidden)]
+    pub fn __install_managed_runtime_authority_validator(
+        &mut self,
+        plugin: PluginId,
+        validator: Arc<runtime::__ManagedRuntimeAuthorityValidator>,
+    ) -> Result<&mut Self, PluginError> {
+        self.ensure_mutation_allowed()?;
+        if self.managed_runtime_authority_validator.is_some() {
+            return Err(PluginError::SetupFailed {
+                plugin,
+                message: "a managed runtime authority validator is already installed".to_owned(),
+            });
+        }
+        self.managed_runtime_authority_validator = Some(validator);
+        Ok(self)
     }
 
     pub fn insert_resource<R: Resource>(&mut self, resource: R) -> Result<&mut Self, PluginError> {
@@ -1851,6 +1875,7 @@ impl App {
                 &self.world,
                 &self.runtime_fault_reporter,
                 generation,
+                self.managed_runtime_authority_validator.as_ref(),
             )?;
         }
         if let Some(schedule) = self.schedules.get_mut(schedule) {
@@ -1861,9 +1886,22 @@ impl App {
                 &self.world,
                 &self.runtime_fault_reporter,
                 generation,
+                self.managed_runtime_authority_validator.as_ref(),
             )?;
         }
         Ok(())
+    }
+
+    pub(crate) fn validate_managed_runtime_authority(&self) -> Result<(), runtime::RuntimeFault> {
+        let Some(generation) = self.managed_runtime_generation else {
+            return Ok(());
+        };
+        runtime::validate_managed_runtime_authority(
+            &self.world,
+            &self.runtime_fault_reporter,
+            generation,
+            self.managed_runtime_authority_validator.as_ref(),
+        )
     }
 
     pub(crate) fn run_managed_frame(

@@ -531,9 +531,10 @@ pub const RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.r
 pub const RENDER_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.render.components");
 pub const RENDER_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
-    nara_reflect::ComponentSchemaProviderDefinition::new(
+    nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         RENDER_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.render.components.native", 1),
+        validate_render_components,
         register_render_components,
     );
 pub const RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
@@ -553,14 +554,15 @@ impl Plugin for RenderPlugin {
             RENDER_PLUGIN_ID,
             component_id.as_str(),
         )?;
-        validate_render_components(registry).map_err(|error| {
+        RENDER_SCHEMA_PROVIDER.preflight(registry).map_err(|error| {
             PluginError::component_registration(RENDER_PLUGIN_ID, component_id.as_str(), error)
         })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.render.Camera2d");
-        register_render_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+        RENDER_SCHEMA_PROVIDER
+            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
                 PluginError::component_registration(RENDER_PLUGIN_ID, component_id.as_str(), error)
             })?;

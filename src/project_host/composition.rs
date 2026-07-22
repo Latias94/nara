@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, btree_map::Entry},
     fmt,
     panic::{AssertUnwindSafe, catch_unwind},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use nara_app::{
@@ -12,8 +12,9 @@ use nara_app::{
 use nara_fs::FileIdentity;
 use nara_project::{EffectiveProjectSettings, ProductCapability, ProductCapabilitySet};
 use nara_reflect::{
-    CatalogFingerprint, ComponentRegistry, ComponentRegistryError,
-    ComponentSchemaProviderDefinition,
+    CatalogFingerprint, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
+    ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
+    preloaded_component_registry_plugin,
 };
 
 /// The product capabilities compiled into this root package instance.
@@ -195,11 +196,12 @@ impl ProjectRuntimePlugins {
         }
     }
 
-    /// Returns this pure project request as ordinary `App::add_plugins` input.
+    /// Returns this project recipe as ordinary `App::add_plugins` input.
     ///
-    /// This lower-level embedding path does not perform project capability, schema-provider, or
-    /// lineage admission. Callers that also resolve a [`RuntimePlan`] must compare the committed
-    /// App fingerprint with that plan before running it.
+    /// This lower-level embedding path does not perform project capability, schema-provider,
+    /// snapshot, or lineage admission. A file-backed [`RuntimePlan`] deliberately configures a
+    /// plan-local frozen registry definition, so callers must not compare this raw recipe's
+    /// configuration fingerprint with an admitted plan and treat them as interchangeable.
     #[must_use]
     pub fn into_app_plugins(self) -> impl Plugins<EditedPluginGroupMarker> {
         self.plugins
@@ -209,6 +211,8 @@ impl ProjectRuntimePlugins {
 #[derive(Clone)]
 pub struct SchemaValidationInput {
     provider_ids: Arc<[PluginSchemaProviderId]>,
+    provider_receipts: Arc<[ComponentSchemaProviderReceipt]>,
+    snapshot: ComponentRegistrySnapshot,
     registry: Arc<ComponentRegistry>,
     fingerprint: CatalogFingerprint,
 }
@@ -218,6 +222,7 @@ impl fmt::Debug for SchemaValidationInput {
         formatter
             .debug_struct("SchemaValidationInput")
             .field("provider_ids", &self.provider_ids)
+            .field("provider_receipts", &self.provider_receipts)
             .field("fingerprint", &self.fingerprint)
             .finish_non_exhaustive()
     }
@@ -227,6 +232,16 @@ impl SchemaValidationInput {
     #[must_use]
     pub fn provider_ids(&self) -> &[PluginSchemaProviderId] {
         &self.provider_ids
+    }
+
+    #[must_use]
+    pub fn provider_receipts(&self) -> &[ComponentSchemaProviderReceipt] {
+        &self.provider_receipts
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> &ComponentRegistrySnapshot {
+        &self.snapshot
     }
 
     #[must_use]
@@ -343,6 +358,7 @@ pub enum CompositionError {
     SchemaFreezeRejected {
         source: Box<ComponentRegistryError>,
     },
+    SchemaAuthorityPublicationFailed,
 }
 
 impl fmt::Display for CompositionError {
@@ -372,6 +388,9 @@ impl fmt::Display for CompositionError {
             Self::SchemaProviderRejected { .. } => "component schema provider was rejected",
             Self::SchemaProviderPanicked { .. } => "component schema provider panicked",
             Self::SchemaFreezeRejected { .. } => "component schema catalog freeze was rejected",
+            Self::SchemaAuthorityPublicationFailed => {
+                "component registry snapshot authority was published more than once"
+            }
         })
     }
 }
@@ -470,9 +489,16 @@ pub fn resolve_runtime_plan(
         return Err(CompositionError::ProjectLineageMismatch.into());
     }
 
+    let snapshot_cell = Arc::new(OnceLock::new());
+    let request = request.configure(preloaded_component_registry_plugin(Arc::clone(
+        &snapshot_cell,
+    )));
     let plugin_plan = PluginPlan::resolve(request.plugins)?;
     let required = resolve_product_requirements(candidate, &plugin_plan)?;
     let schema_validation = resolve_schema_validation(&plugin_plan, providers)?;
+    snapshot_cell
+        .set(schema_validation.snapshot().clone())
+        .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
 
     Ok(RuntimePlan {
         lineage: candidate.lineage,
@@ -562,29 +588,36 @@ fn resolve_schema_validation(
                 provider: *provider_id,
             },
         )?;
-        catch_unwind(AssertUnwindSafe(|| provider.register_into(&mut registry)))
-            .map_err(|_| CompositionError::SchemaProviderPanicked {
-                provider: *provider_id,
-            })?
-            .map_err(|source| CompositionError::SchemaProviderRejected {
-                provider: *provider_id,
-                source: Box::new(source),
-            })?;
+        catch_unwind(AssertUnwindSafe(|| {
+            provider.register_or_validate_into(&mut registry)
+        }))
+        .map_err(|_| CompositionError::SchemaProviderPanicked {
+            provider: *provider_id,
+        })?
+        .map_err(|source| CompositionError::SchemaProviderRejected {
+            provider: *provider_id,
+            source: Box::new(source),
+        })?;
     }
     registry
         .freeze()
         .map_err(|source| CompositionError::SchemaFreezeRejected {
             source: Box::new(source),
         })?;
-    let fingerprint = registry
-        .catalog()
-        .map_err(|source| CompositionError::SchemaFreezeRejected {
-            source: Box::new(source),
-        })?
-        .fingerprint();
+    let snapshot =
+        registry
+            .snapshot()
+            .map_err(|source| CompositionError::SchemaFreezeRejected {
+                source: Box::new(source),
+            })?;
+    let fingerprint = snapshot.catalog().fingerprint();
+    let provider_receipts = snapshot.provider_receipts().collect::<Vec<_>>();
+    let registry = ComponentRegistry::from_snapshot(snapshot.clone());
 
     Ok(SchemaValidationInput {
         provider_ids: owners.into_keys().collect::<Vec<_>>().into(),
+        provider_receipts: provider_receipts.into(),
+        snapshot,
         registry: Arc::new(registry),
         fingerprint,
     })

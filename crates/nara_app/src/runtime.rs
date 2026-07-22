@@ -37,6 +37,12 @@ static TOTAL_REAPED_RUNTIME_OWNERS: AtomicU64 = AtomicU64::new(0);
 static RUNTIME_SCHEDULE_AUTHORITY: Mutex<()> = Mutex::new(());
 static ACTIVE_RUNTIME_REPORTER: Mutex<Option<RuntimeFaultReporter>> = Mutex::new(None);
 
+/// Hidden product plumbing for an engine-owned authority that must be checked at managed
+/// runtime safe points. This is intentionally one callback rather than a public event bus or a
+/// general extension registry; the owning domain keeps the identity and fault reporter it needs.
+pub type __ManagedRuntimeAuthorityValidator =
+    dyn Fn(&World, RuntimeGeneration) -> Result<(), RuntimeFault> + Send + Sync;
+
 #[derive(Debug, Default, Resource)]
 struct RuntimeFaultBridgeRevision(u64);
 
@@ -91,19 +97,30 @@ pub(crate) fn validate_managed_fault_boundary(
     world: &World,
     reporter: &RuntimeFaultReporter,
     generation: RuntimeGeneration,
+    authority: Option<&Arc<__ManagedRuntimeAuthorityValidator>>,
 ) -> Result<(), AppRunError> {
-    let fault = reporter
-        .fault()
-        .or_else(|| {
-            (world.get_resource::<RuntimeGeneration>() != Some(&generation))
-                .then(runtime_fault_bridge_authority_fault)
-        })
+    validate_managed_runtime_authority(world, reporter, generation, authority)
+        .map_err(|fault| AppRunError::managed_runtime(fault.kind(), fault.source()))
+}
+
+pub(crate) fn validate_managed_runtime_authority(
+    world: &World,
+    reporter: &RuntimeFaultReporter,
+    generation: RuntimeGeneration,
+    authority: Option<&Arc<__ManagedRuntimeAuthorityValidator>>,
+) -> Result<(), RuntimeFault> {
+    if let Some(fault) = reporter.fault() {
+        return Err(fault);
+    }
+    let fault = (world.get_resource::<RuntimeGeneration>() != Some(&generation))
+        .then(runtime_fault_bridge_authority_fault)
+        .or_else(|| authority.and_then(|validator| validator(world, generation).err()))
         .or_else(|| validate_runtime_fault_bridge_authority(world, reporter).err());
     let Some(fault) = fault else {
         return Ok(());
     };
-    let fault = reporter.record_canonical(fault);
-    Err(AppRunError::managed_runtime(fault.kind(), fault.source()))
+    let canonical = reporter.record_canonical(fault.clone());
+    Err(canonical)
 }
 
 fn validate_runtime_fault_bridge_authority(
@@ -172,6 +189,7 @@ impl RuntimeFrameMode {
 pub enum RuntimeFaultKind {
     AppFrame,
     FaultReporterAuthority,
+    RuntimeAuthority,
     ScheduleAuthority,
     System,
     RunCondition,
@@ -466,6 +484,12 @@ pub struct RuntimeCloseContext<'world> {
 pub struct RuntimeDriverScope<'world> {
     world: &'world mut World,
     state: RuntimeState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DriverScopeAuthorityPolicy {
+    Full,
+    FaultRetirement,
 }
 
 /// First-party workspace plumbing for a typed managed-runtime operation.
@@ -1215,7 +1239,7 @@ impl RuntimeCandidate {
         operation: impl FnOnce(&mut RuntimeCandidateScope<'_>) -> R,
     ) -> Result<R, RuntimeScopeError> {
         self.owner
-            .capture_driver_scope(|world| {
+            .capture_driver_scope(DriverScopeAuthorityPolicy::Full, |world| {
                 let mut scope = RuntimeCandidateScope { world };
                 operation(&mut scope)
             })
@@ -1261,6 +1285,7 @@ impl RuntimeCandidate {
                 .err()
                 .map(RuntimeFault::app)
         })
+        .or_else(|| self.owner.app.validate_managed_runtime_authority().err())
         .or_else(|| self.owner.validate_fault_bridge_epoch(bridge_epoch).err());
 
         if let Some(fault) = fault {
@@ -1512,7 +1537,14 @@ impl ReadyRuntimeCandidate {
 
     #[must_use]
     pub fn promote(self) -> RuntimeInstance {
-        let fault = self.owner.reporter().publish();
+        let fault = self
+            .owner
+            .app
+            .validate_managed_runtime_authority()
+            .err()
+            .or_else(|| self.owner.reporter().fault())
+            .map(|fault| self.owner.reporter().record_canonical(fault))
+            .or_else(|| self.owner.reporter().publish());
         RuntimeInstance::from_promotion(self.owner, self.generation, fault)
     }
 
@@ -1534,6 +1566,10 @@ impl ReadyRuntimeCandidate {
         }
 
         let Self { owner, generation } = self;
+        if let Err(error) = owner.app.validate_managed_runtime_authority() {
+            let fault = owner.reporter().record_canonical(error);
+            return Err(RuntimePublicationFailure::faulted(owner, generation, fault));
+        }
         let reporter = owner.reporter().clone();
         let mut state = lock_unpoisoned(&reporter.cell.state);
         if state.publication != RuntimePublicationPhase::Candidate {
@@ -1881,9 +1917,12 @@ impl RuntimeInstance {
     /// Grants a platform or Host one short-lived managed runtime scope.
     ///
     /// The scope admits only typed, resource-local driver ports and applies each port's runtime
-    /// state gate. It exposes neither the `World` nor generic resource access. A previously faulted
-    /// runtime still permits ports that explicitly accept that state so the driver can retire
-    /// surfaces and other owned services; the existing fault remains sticky and observable. The
+    /// state gate. It exposes neither the `World` nor generic resource access. A runtime carrying
+    /// a prior fault still permits ports that explicitly accept its current state so the driver can
+    /// retire surfaces and other owned services; the existing fault remains sticky and observable.
+    /// This fault-retirement path deliberately does not revalidate the general runtime authority:
+    /// that authority may be the reason the runtime was isolated, while the typed port remains the
+    /// only operation available to release its owned native state. The
     /// hidden cross-crate carrier is pre-1.0 plumbing, not the shared Adapter contract tracked by
     /// OQ-038.
     ///
@@ -1900,8 +1939,17 @@ impl RuntimeInstance {
         if matches!(state, RuntimeState::Stepping | RuntimeState::Stopped) {
             return Err(RuntimeScopeError::Unavailable { state });
         }
+        let authority_policy = if self.fault().is_some()
+            && matches!(
+                state,
+                RuntimeState::Faulted | RuntimeState::Stopping | RuntimeState::CloseIncomplete
+            ) {
+            DriverScopeAuthorityPolicy::FaultRetirement
+        } else {
+            DriverScopeAuthorityPolicy::Full
+        };
         self.owner
-            .capture_driver_scope(|world| {
+            .capture_driver_scope(authority_policy, |world| {
                 let mut scope = RuntimeDriverScope { world, state };
                 operation(&mut scope)
             })
@@ -2484,12 +2532,19 @@ impl RuntimeOwnerState {
 
     fn capture_driver_scope<R>(
         &mut self,
+        authority_policy: DriverScopeAuthorityPolicy,
         operation: impl FnOnce(&mut World) -> R,
     ) -> Result<R, RuntimeFault> {
         let reporter = self.reporter.clone();
         let fault_before = reporter.fault();
-        let bridge_epoch = self
-            .begin_fault_bridge_epoch()
+        if authority_policy == DriverScopeAuthorityPolicy::Full {
+            self.app
+                .validate_managed_runtime_authority()
+                .map_err(|fault| reporter.record_canonical(fault))?;
+        }
+        let bridge_epoch = (authority_policy == DriverScopeAuthorityPolicy::Full)
+            .then(|| self.begin_fault_bridge_epoch())
+            .transpose()
             .map_err(|fault| reporter.record_canonical(fault))?;
 
         let result =
@@ -2498,7 +2553,14 @@ impl RuntimeOwnerState {
                 Err(fault) => return Err(reporter.record_canonical(fault)),
             };
 
-        if let Err(fault) = self.validate_fault_bridge_epoch(bridge_epoch) {
+        if let Some(bridge_epoch) = bridge_epoch
+            && let Err(fault) = self.validate_fault_bridge_epoch(bridge_epoch)
+        {
+            return Err(reporter.record_canonical(fault));
+        }
+        if authority_policy == DriverScopeAuthorityPolicy::Full
+            && let Err(fault) = self.app.validate_managed_runtime_authority()
+        {
             return Err(reporter.record_canonical(fault));
         }
         if fault_before.is_none() {

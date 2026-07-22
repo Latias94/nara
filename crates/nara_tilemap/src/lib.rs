@@ -464,9 +464,10 @@ pub const TILEMAP_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.
 pub const TILEMAP_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.tilemap.components");
 pub const TILEMAP_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
-    nara_reflect::ComponentSchemaProviderDefinition::new(
+    nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         TILEMAP_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.tilemap.components.native", 1),
+        validate_tilemap_components,
         register_tilemap_components,
     );
 const TILEMAP_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
@@ -489,15 +490,18 @@ impl Plugin for TilemapPlugin {
             TILEMAP_PLUGIN_ID,
             component_id.as_str(),
         )?;
-        validate_tilemap_components(registry).map_err(|error| {
-            PluginError::component_registration(TILEMAP_PLUGIN_ID, component_id.as_str(), error)
-        })
+        TILEMAP_SCHEMA_PROVIDER
+            .preflight(registry)
+            .map_err(|error| {
+                PluginError::component_registration(TILEMAP_PLUGIN_ID, component_id.as_str(), error)
+            })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<Assets<TileSet>>()?;
         let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
-        register_tilemap_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+        TILEMAP_SCHEMA_PROVIDER
+            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
                 PluginError::component_registration(TILEMAP_PLUGIN_ID, component_id.as_str(), error)
             })?;

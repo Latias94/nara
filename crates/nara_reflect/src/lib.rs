@@ -43,10 +43,15 @@ pub use persistent_apply::{
     PersistentObserverScope, PreparedComponent, PreparedComponentCandidate,
 };
 pub use plugin::{
-    COMPONENT_REGISTRY_PLUGIN_ID, COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentRegistryPlugin,
-    registry_for_plugin_preflight,
+    COMPONENT_REGISTRY_PLUGIN_ID, COMPONENT_REGISTRY_PLUGIN_REQUIREMENT,
+    ComponentRegistryAuthorityError, ComponentRegistryPlugin, preloaded_component_registry_plugin,
+    registry_for_plugin_preflight, report_component_registry_authority_fault,
+    validate_component_registry_authority,
 };
-pub use provider::{ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition};
+pub use provider::{
+    ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
+    ComponentSchemaProviderReceipt,
+};
 pub use registry::{
     ComponentProjectionError, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
 };

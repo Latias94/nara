@@ -63,9 +63,10 @@ pub const REFERENCE_PROJECT_OUTCOME_PLUGIN_ID: PluginId =
 pub const REFERENCE_GAME_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
     PluginSchemaProviderId::new("reference-game.components");
 pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
-    ComponentSchemaProviderDefinition::new(
+    ComponentSchemaProviderDefinition::with_validation(
         REFERENCE_GAME_SCHEMA_PROVIDER_ID,
         nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 2),
+        validate_reference_game_components,
         register_reference_game_components,
     );
 pub const REFERENCE_GAME_PLUGIN_DECLARATION: PluginDeclaration =
@@ -105,7 +106,7 @@ impl Plugin for ReferenceGamePlugin {
         let registry = context
             .get_structural_resource::<ComponentRegistry>()
             .ok_or_else(component_registry_unavailable)?;
-        validate_reference_game_components(registry).map_err(|error| {
+        REFERENCE_GAME_SCHEMA_PROVIDER.preflight(registry).map_err(|error| {
             PluginError::component_registration(
                 REFERENCE_GAME_PLUGIN_ID,
                 REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
@@ -120,7 +121,9 @@ impl Plugin for ReferenceGamePlugin {
             let mut registry = world
                 .get_resource_mut::<ComponentRegistry>()
                 .ok_or_else(component_registry_unavailable)?;
-            register_reference_game_components(&mut registry).map_err(|error| {
+            REFERENCE_GAME_SCHEMA_PROVIDER
+                .register_or_validate_into(&mut registry)
+                .map_err(|error| {
                 PluginError::component_registration(
                     REFERENCE_GAME_PLUGIN_ID,
                     REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),

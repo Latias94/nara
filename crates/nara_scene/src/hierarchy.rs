@@ -101,12 +101,13 @@ pub const HIERARCHY_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nar
 pub const HIERARCHY_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.scene.hierarchy.components");
 pub const HIERARCHY_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
-    nara_reflect::ComponentSchemaProviderDefinition::new(
+    nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         HIERARCHY_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new(
             "nara.scene.hierarchy.components.native",
             1,
         ),
+        validate_scene_components,
         register_scene_components,
     );
 pub const HIERARCHY_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
@@ -125,17 +126,20 @@ impl Plugin for HierarchyPlugin {
             HIERARCHY_PLUGIN_ID,
             HIERARCHY_SCHEMA_PROVIDER_ID.as_str(),
         )?;
-        validate_scene_components(registry).map_err(|error| {
-            PluginError::component_registration(
-                HIERARCHY_PLUGIN_ID,
-                HIERARCHY_SCHEMA_PROVIDER_ID.as_str(),
-                error,
-            )
-        })
+        HIERARCHY_SCHEMA_PROVIDER
+            .preflight(registry)
+            .map_err(|error| {
+                PluginError::component_registration(
+                    HIERARCHY_PLUGIN_ID,
+                    HIERARCHY_SCHEMA_PROVIDER_ID.as_str(),
+                    error,
+                )
+            })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        register_scene_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+        HIERARCHY_SCHEMA_PROVIDER
+            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
                 PluginError::component_registration(
                     HIERARCHY_PLUGIN_ID,

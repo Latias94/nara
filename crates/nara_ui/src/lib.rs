@@ -217,9 +217,10 @@ pub const UI_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.ui");
 pub const UI_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.ui.components");
 pub const UI_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
-    nara_reflect::ComponentSchemaProviderDefinition::new(
+    nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         UI_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 1),
+        crate::codec::validate_ui_components,
         register_ui_components,
     );
 const UI_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
@@ -247,21 +248,21 @@ impl Plugin for UiPlugin {
             UI_PLUGIN_ID,
             UI_SCHEMA_PROVIDER_ID.as_str(),
         )?;
-        crate::codec::validate_ui_components(registry).map_err(|error| {
+        UI_SCHEMA_PROVIDER.preflight(registry).map_err(|error| {
             PluginError::component_registration(UI_PLUGIN_ID, UI_SCHEMA_PROVIDER_ID.as_str(), error)
         })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        register_ui_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>()).map_err(
-            |error| {
+        UI_SCHEMA_PROVIDER
+            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+            .map_err(|error| {
                 PluginError::component_registration(
                     UI_PLUGIN_ID,
                     UI_SCHEMA_PROVIDER_ID.as_str(),
                     error,
                 )
-            },
-        )?;
+            })?;
         app.init_resource::<ComputedUiLayouts>()?;
         app.init_resource::<UiInteractionState>()?;
         app.add_systems(

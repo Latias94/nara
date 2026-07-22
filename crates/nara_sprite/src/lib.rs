@@ -219,9 +219,10 @@ pub const SPRITE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.s
 pub const SPRITE_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.sprite.components");
 pub const SPRITE_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
-    nara_reflect::ComponentSchemaProviderDefinition::new(
+    nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         SPRITE_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.sprite.components.native", 1),
+        validate_sprite_components,
         register_sprite_components,
     );
 const SPRITE_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
@@ -244,14 +245,15 @@ impl Plugin for SpritePlugin {
             SPRITE_PLUGIN_ID,
             component_id.as_str(),
         )?;
-        validate_sprite_components(registry).map_err(|error| {
+        SPRITE_SCHEMA_PROVIDER.preflight(registry).map_err(|error| {
             PluginError::component_registration(SPRITE_PLUGIN_ID, component_id.as_str(), error)
         })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.sprite.Sprite");
-        register_sprite_components(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+        SPRITE_SCHEMA_PROVIDER
+            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
             .map_err(|error| {
                 PluginError::component_registration(SPRITE_PLUGIN_ID, component_id.as_str(), error)
             })?;

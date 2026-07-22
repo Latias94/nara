@@ -2,14 +2,17 @@ use std::{
     fs::{self, File},
     sync::{
         Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
 use nara::{
     app::{
-        AddPluginsError, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError,
-        PluginHook, PluginHookMutation, PluginId, PluginProductCapability, PluginSchemaProviderId,
+        AddPluginsError, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+        PluginError, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
+        PluginProductCapability, PluginSchemaProviderId, RuntimeCandidate,
+        RuntimeCandidateRetirementState, RuntimeFaultKind,
     },
     fs::{FileCapability, TrustMode},
     project::ProductCapability,
@@ -93,6 +96,18 @@ const TEST_SCHEMA_PROVIDER_BINDING_ID: ComponentSchemaProviderBindingId =
     ComponentSchemaProviderBindingId::new("test.schema-provider.components.native", 1);
 const TEST_SCHEMA_PROVIDER_SECOND_BINDING_ID: ComponentSchemaProviderBindingId =
     ComponentSchemaProviderBindingId::new("test.schema-provider.components.alternate", 1);
+const TEST_COUNTED_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.counted-schema-provider");
+const TEST_COUNTED_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
+    PluginSchemaProviderId::new("test.counted-schema-provider.components");
+const TEST_COUNTED_SCHEMA_PROVIDER_BINDING_ID: ComponentSchemaProviderBindingId =
+    ComponentSchemaProviderBindingId::new("test.counted-schema-provider.components.native", 1);
+const TEST_COUNTED_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TEST_COUNTED_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
+        .provides_schema(&[TEST_COUNTED_SCHEMA_PROVIDER_ID]);
+
+static COUNTED_PROVIDER_VALIDATIONS: AtomicUsize = AtomicUsize::new(0);
+static COUNTED_PROVIDER_REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
 const TEST_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(TEST_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
         .provides_schema(&[TEST_SCHEMA_PROVIDER_ID]);
@@ -210,6 +225,96 @@ impl Plugin for SecondSchemaProviderPlugin {
     }
 }
 
+#[derive(Default)]
+struct CountedSchemaProviderPlugin;
+
+impl Plugin for CountedSchemaProviderPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_COUNTED_SCHEMA_PLUGIN_DECLARATION
+    }
+
+    fn preflight(
+        &self,
+        context: &nara::app::PluginPreflightContext<'_>,
+    ) -> Result<(), PluginError> {
+        let registry = context
+            .get_structural_resource::<ComponentRegistry>()
+            .ok_or_else(|| {
+                PluginError::component_registration(
+                    TEST_COUNTED_SCHEMA_PLUGIN_ID,
+                    TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+                    "component registry unavailable",
+                )
+            })?;
+        counted_schema_provider()
+            .preflight(registry)
+            .map_err(|error| {
+                PluginError::component_registration(
+                    TEST_COUNTED_SCHEMA_PLUGIN_ID,
+                    TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+                    error,
+                )
+            })
+    }
+
+    fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
+        let mut registry = app.world_mut()?.resource_mut::<ComponentRegistry>();
+        counted_schema_provider()
+            .register_or_validate_into(&mut registry)
+            .map_err(|error| {
+                PluginError::component_registration(
+                    TEST_COUNTED_SCHEMA_PLUGIN_ID,
+                    TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+                    error,
+                )
+            })
+    }
+}
+
+struct ReceiptValidatingSchemaProviderPlugin {
+    provider: ComponentSchemaProviderDefinition,
+}
+
+impl Plugin for ReceiptValidatingSchemaProviderPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_SCHEMA_PLUGIN_DECLARATION
+    }
+
+    fn preflight(
+        &self,
+        context: &nara::app::PluginPreflightContext<'_>,
+    ) -> Result<(), PluginError> {
+        let registry = context
+            .get_structural_resource::<ComponentRegistry>()
+            .ok_or_else(|| {
+                PluginError::component_registration(
+                    TEST_SCHEMA_PLUGIN_ID,
+                    TEST_SCHEMA_PROVIDER_ID.as_str(),
+                    "component registry unavailable",
+                )
+            })?;
+        self.provider.preflight(registry).map_err(|error| {
+            PluginError::component_registration(
+                TEST_SCHEMA_PLUGIN_ID,
+                TEST_SCHEMA_PROVIDER_ID.as_str(),
+                error,
+            )
+        })
+    }
+
+    fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
+        self.provider
+            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
+            .map_err(|error| {
+                PluginError::component_registration(
+                    TEST_SCHEMA_PLUGIN_ID,
+                    TEST_SCHEMA_PROVIDER_ID.as_str(),
+                    error,
+                )
+            })
+    }
+}
+
 struct ReentrantProjectRequestPlugin(Mutex<Option<ProjectRuntimePlugins>>);
 
 impl Plugin for ReentrantProjectRequestPlugin {
@@ -282,22 +387,151 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
     );
 
     let app = first.plugin_plan().instantiate().unwrap();
-    let runtime_fingerprint = app
-        .world()
-        .resource::<ComponentRegistry>()
-        .catalog()
-        .unwrap()
-        .fingerprint();
+    let runtime_registry = app.world().resource::<ComponentRegistry>();
+    let runtime_fingerprint = runtime_registry.catalog().unwrap().fingerprint();
     assert_eq!(runtime_fingerprint, first.schema_validation().fingerprint());
+    assert!(
+        runtime_registry.shares_snapshot(first.schema_validation().snapshot()),
+        "the plan and instantiated World must share one executable behavior snapshot"
+    );
 
     let mut raw_app = nara::app::App::new();
     raw_app
         .add_plugins(project_runtime_plugins(&candidate).into_app_plugins())
         .unwrap();
-    assert_eq!(
+    assert_ne!(
         raw_app.configuration_fingerprint(),
-        first.plugin_plan().fingerprint()
+        first.plugin_plan().fingerprint(),
+        "the code-first registry recipe must not impersonate a snapshot-bound runtime plan"
     );
+}
+
+#[test]
+fn file_backed_schema_provider_registration_is_not_replayed_in_the_candidate() {
+    COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
+    COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        PluginDefinition::for_default::<CountedSchemaProviderPlugin>(),
+    );
+    let mut providers = built_in_schema_providers();
+    providers.push(counted_schema_provider());
+    let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        plan.schema_validation()
+            .provider_receipts()
+            .iter()
+            .map(|receipt| receipt.provider())
+            .collect::<Vec<_>>(),
+        plan.schema_validation().provider_ids()
+    );
+
+    let app = plan.plugin_plan().instantiate().unwrap();
+    let registry = app.world().resource::<ComponentRegistry>();
+    assert!(registry.shares_snapshot(plan.schema_validation().snapshot()));
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+    assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn code_first_schema_provider_builds_and_freezes_once_without_a_host() {
+    COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
+    COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
+    let mut app = nara::app::App::new();
+    app.add_plugins((
+        nara::reflect::ComponentRegistryPlugin,
+        CountedSchemaProviderPlugin,
+    ))
+    .unwrap();
+    assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+
+    let app = app.seal().unwrap();
+    let registry = app.world().resource::<ComponentRegistry>();
+    assert!(registry.is_frozen());
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+    nara::reflect::validate_component_registry_authority(app.world()).unwrap();
+}
+
+#[test]
+fn code_first_runtime_faults_when_the_registry_is_rewrapped_with_its_same_snapshot() {
+    let mut app = nara::app::App::new();
+    app.add_plugins(nara::reflect::ComponentRegistryPlugin)
+        .unwrap();
+    app.add_systems(CoreStage::Last, rewrap_code_first_registry)
+        .unwrap();
+    let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+    let mut runtime = candidate.complete_startup().unwrap().promote();
+
+    let error = runtime.drive(Duration::ZERO).unwrap_err();
+
+    assert_eq!(error.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
+    assert_eq!(runtime.state(), nara::app::RuntimeState::Faulted);
+}
+
+#[test]
+fn file_backed_candidate_rejects_divergent_binding_codec_and_migration_receipts() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let admitted = ComponentSchemaProviderDefinition::new(
+        TEST_SCHEMA_PROVIDER_ID,
+        TEST_SCHEMA_PROVIDER_BINDING_ID,
+        register_empty_schema_provider,
+    );
+
+    for (configuration, divergent) in [
+        (
+            b"binding".as_slice(),
+            TEST_SCHEMA_PROVIDER_SECOND_BINDING_ID,
+        ),
+        (
+            b"codec".as_slice(),
+            TEST_SCHEMA_PROVIDER_BINDING_ID.with_codec_version(2),
+        ),
+        (
+            b"migration".as_slice(),
+            TEST_SCHEMA_PROVIDER_BINDING_ID.with_migration_version(2),
+        ),
+    ] {
+        let candidate_provider = ComponentSchemaProviderDefinition::new(
+            TEST_SCHEMA_PROVIDER_ID,
+            divergent,
+            panic_schema_provider,
+        );
+        let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::infallible::<ReceiptValidatingSchemaProviderPlugin, _>(
+                nara::app::PluginDefinitionId::new("test.schema-provider.receipt-check", 1),
+                configuration,
+                move || ReceiptValidatingSchemaProviderPlugin {
+                    provider: candidate_provider,
+                },
+            ),
+        );
+        let mut providers = built_in_schema_providers();
+        providers.push(admitted);
+        let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
+        assert_eq!(
+            plan.schema_validation()
+                .provider_receipts()
+                .iter()
+                .find(|receipt| receipt.provider() == TEST_SCHEMA_PROVIDER_ID)
+                .unwrap()
+                .binding(),
+            TEST_SCHEMA_PROVIDER_BINDING_ID
+        );
+
+        let mut failure = plan.plugin_plan().instantiate_retained().unwrap_err();
+        let error = failure.error().clone();
+        while failure.retirement_state() != RuntimeCandidateRetirementState::Retired {
+            failure.drive_retirement();
+        }
+        let PluginInstantiationError::Plugin(error) = error else {
+            panic!("receipt mismatch failed in the wrong phase: {error:?}");
+        };
+        assert!(plugin_error_contains_receipt_rejection(&error));
+    }
 }
 
 #[test]
@@ -809,6 +1043,52 @@ fn register_empty_schema_provider(
     _registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     Ok(())
+}
+
+fn rewrap_code_first_registry(world: &mut nara::ecs::World) {
+    let snapshot = world
+        .resource::<ComponentRegistry>()
+        .snapshot()
+        .expect("the code-first registry is frozen before runtime execution");
+    world.insert_resource(ComponentRegistry::from_snapshot(snapshot));
+}
+
+fn counted_schema_provider() -> ComponentSchemaProviderDefinition {
+    ComponentSchemaProviderDefinition::with_validation(
+        TEST_COUNTED_SCHEMA_PROVIDER_ID,
+        TEST_COUNTED_SCHEMA_PROVIDER_BINDING_ID,
+        counted_schema_provider_validation,
+        counted_schema_provider_registration,
+    )
+}
+
+fn counted_schema_provider_validation(
+    _registry: &ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    COUNTED_PROVIDER_VALIDATIONS.fetch_add(1, Ordering::SeqCst);
+    Ok(())
+}
+
+fn counted_schema_provider_registration(
+    _registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    COUNTED_PROVIDER_REGISTRATIONS.fetch_add(1, Ordering::SeqCst);
+    Ok(())
+}
+
+fn plugin_error_contains_receipt_rejection(error: &PluginError) -> bool {
+    match error {
+        PluginError::ComponentRegistrationFailed {
+            plugin, message, ..
+        } => {
+            *plugin == TEST_SCHEMA_PLUGIN_ID
+                && message.contains("different executable behavior receipt")
+        }
+        PluginError::CommittedPreflightRejected { source, .. } => {
+            plugin_error_contains_receipt_rejection(source)
+        }
+        _ => false,
+    }
 }
 
 fn register_second_empty_schema_provider(

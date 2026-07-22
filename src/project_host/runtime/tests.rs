@@ -17,28 +17,36 @@ use std::{
 use std::fs::OpenOptions;
 
 use nara_app::{
-    App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-    PluginError, PluginId, PluginPrepareFailure, PluginShutdownContext, PluginShutdownObligationId,
-    RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-    RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeFault, RuntimeFaultKind,
-    RuntimeFaultReporter, StartupStage, drive_runtime_quarantine, runtime_quarantine_status,
+    App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+    PluginDefinitionId, PluginError, PluginId, PluginPrepareFailure, PluginShutdownContext,
+    PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
+    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeFault,
+    RuntimeFaultKind, RuntimeFaultReporter, StartupStage, drive_runtime_quarantine,
+    runtime_quarantine_status,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_app::{RuntimeControl, RuntimeControlRequestResult};
 use nara_asset::{AssetMeta, AssetPath, AssetRef, StableAssetId};
 use nara_diagnostic::DiagnosticValueRef;
-use nara_ecs::{Resource, error::BevyError};
+use nara_ecs::{Res, Resource, error::BevyError};
 use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
 use nara_image::PreparedImageResource;
-use nara_reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+use nara_reflect::{
+    ComponentRegistry, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue,
+};
 use nara_render::PreparedRenderResources;
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
+#[cfg(feature = "tooling")]
+use nara_scene::{ScenePatchDocument, ScenePatchOperation};
 use nara_tasks::{
     TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
 };
+#[cfg(feature = "tooling")]
+use nara_tooling::{EditorPersistenceCommand, EditorPersistenceResult, EditorWorkspaceCommand};
 
 use crate::project_content::ProjectContentLoader;
 use crate::project_host::{
@@ -126,7 +134,12 @@ const PANIC_STARTUP_DEFINITION_ID: PluginDefinitionId =
 const PANIC_STARTUP_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(PANIC_STARTUP_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[CLOSE_PROBE_PLUGIN_ID]);
-
+const REGISTRY_REPLACEMENT_PLUGIN_ID: PluginId =
+    PluginId::new("nara.test.project-registry-replacement");
+const REGISTRY_REPLACEMENT_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.project-registry-replacement", 1);
+const REGISTRY_REPLACEMENT_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(REGISTRY_REPLACEMENT_PLUGIN_ID, PluginCategory::Runtime);
 #[derive(Debug)]
 struct CloseProbePlugin {
     builds: Arc<AtomicUsize>,
@@ -267,6 +280,137 @@ impl Plugin for AdmissionScopeFailurePlugin {
         app.world_mut()?.remove_resource::<RuntimeFaultReporter>();
         Ok(())
     }
+}
+
+#[derive(Clone, Copy)]
+enum RegistryReplacementTiming {
+    Finish,
+    StartupReplace,
+    FrameReplace,
+    FrameRewrap,
+    FrameReinsert,
+    FrameRemove,
+}
+
+struct RegistryReplacementPlugin {
+    snapshot: ComponentRegistrySnapshot,
+    timing: RegistryReplacementTiming,
+    startup_later_stage_runs: Option<Arc<AtomicUsize>>,
+}
+
+impl Plugin for RegistryReplacementPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &REGISTRY_REPLACEMENT_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        if let Some(runs) = &self.startup_later_stage_runs {
+            app.insert_resource(StartupRegistryReplacementSentinel(Arc::clone(runs)))?
+                .add_systems(
+                    StartupStage::Scene,
+                    record_startup_registry_replacement_sentinel,
+                )?;
+        }
+        if matches!(
+            self.timing,
+            RegistryReplacementTiming::StartupReplace
+                | RegistryReplacementTiming::FrameReplace
+                | RegistryReplacementTiming::FrameRemove
+        ) {
+            let snapshot = match self.timing {
+                RegistryReplacementTiming::StartupReplace
+                | RegistryReplacementTiming::FrameReplace => Some(self.snapshot.clone()),
+                RegistryReplacementTiming::FrameRemove => None,
+                RegistryReplacementTiming::Finish
+                | RegistryReplacementTiming::FrameRewrap
+                | RegistryReplacementTiming::FrameReinsert => {
+                    unreachable!("the deferred replacement timings were matched above")
+                }
+            };
+            app.insert_resource(DeferredRegistryReplacement { snapshot })?;
+            if matches!(self.timing, RegistryReplacementTiming::StartupReplace) {
+                app.add_systems(StartupStage::Runtime, replace_registry_at_frame_end)?;
+            } else {
+                app.add_systems(CoreStage::Last, replace_registry_at_frame_end)?;
+            }
+        }
+        if matches!(self.timing, RegistryReplacementTiming::FrameRewrap) {
+            app.add_systems(CoreStage::Last, rewrap_registry_at_frame_end)?;
+        }
+        if matches!(self.timing, RegistryReplacementTiming::FrameReinsert) {
+            app.add_systems(CoreStage::Last, reinsert_registry_at_frame_end)?;
+        }
+        Ok(())
+    }
+
+    fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+        if matches!(self.timing, RegistryReplacementTiming::Finish) {
+            app.insert_resource(ComponentRegistry::from_snapshot(self.snapshot.clone()))?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(nara_ecs::Resource)]
+struct DeferredRegistryReplacement {
+    snapshot: Option<ComponentRegistrySnapshot>,
+}
+
+#[derive(nara_ecs::Resource)]
+struct StartupRegistryReplacementSentinel(Arc<AtomicUsize>);
+
+fn record_startup_registry_replacement_sentinel(probe: Res<StartupRegistryReplacementSentinel>) {
+    probe.0.fetch_add(1, Ordering::SeqCst);
+}
+
+fn replace_registry_at_frame_end(world: &mut nara_ecs::World) {
+    let Some(replacement) = world.remove_resource::<DeferredRegistryReplacement>() else {
+        return;
+    };
+    if let Some(snapshot) = replacement.snapshot {
+        world.insert_resource(ComponentRegistry::from_snapshot(snapshot));
+    } else {
+        world.remove_resource::<ComponentRegistry>();
+    }
+}
+
+fn rewrap_registry_at_frame_end(world: &mut nara_ecs::World) {
+    let snapshot = world
+        .resource::<ComponentRegistry>()
+        .snapshot()
+        .expect("the runtime registry is frozen before frame execution");
+    world.insert_resource(ComponentRegistry::from_snapshot(snapshot));
+}
+
+fn reinsert_registry_at_frame_end(world: &mut nara_ecs::World) {
+    let registry = world
+        .remove_resource::<ComponentRegistry>()
+        .expect("the runtime registry exists before frame execution");
+    world.insert_resource(registry);
+}
+
+fn registry_replacement_definition(
+    snapshot: ComponentRegistrySnapshot,
+    timing: RegistryReplacementTiming,
+    startup_later_stage_runs: Option<Arc<AtomicUsize>>,
+) -> PluginDefinition {
+    let configuration = match timing {
+        RegistryReplacementTiming::Finish => b"registry-replacement-finish-v1".as_slice(),
+        RegistryReplacementTiming::StartupReplace => b"registry-replacement-startup-v1".as_slice(),
+        RegistryReplacementTiming::FrameReplace => b"registry-replacement-frame-v1".as_slice(),
+        RegistryReplacementTiming::FrameRewrap => b"registry-rewrap-frame-v1".as_slice(),
+        RegistryReplacementTiming::FrameReinsert => b"registry-reinsert-frame-v1".as_slice(),
+        RegistryReplacementTiming::FrameRemove => b"registry-removal-frame-v1".as_slice(),
+    };
+    PluginDefinition::infallible::<RegistryReplacementPlugin, _>(
+        REGISTRY_REPLACEMENT_DEFINITION_ID,
+        configuration,
+        move || RegistryReplacementPlugin {
+            snapshot: snapshot.clone(),
+            timing,
+            startup_later_stage_runs: startup_later_stage_runs.clone(),
+        },
+    )
 }
 
 #[derive(Debug, Default)]
@@ -513,6 +657,202 @@ fn project_host_rejects_a_different_schema_plan_from_the_same_lineage() {
         "project.run.schema-mismatch"
     );
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
+}
+
+#[test]
+fn prepublication_registry_replacement_rejects_before_scene_allocation() {
+    let project = TestProject::new("prepublication-registry-replacement");
+    let (_base_snapshot, base_plan) = project.snapshot_and_plan(false);
+    let replacement_snapshot = base_plan.schema_validation().snapshot().clone();
+    let injected_snapshot = replacement_snapshot.clone();
+    let (snapshot, plan) = project.snapshot_and_registry_replacement_plan(
+        replacement_snapshot,
+        RegistryReplacementTiming::Finish,
+    );
+    assert!(!injected_snapshot.ptr_eq(plan.schema_validation().snapshot()));
+    assert_eq!(
+        injected_snapshot.catalog().fingerprint(),
+        plan.schema_validation().snapshot().catalog().fingerprint()
+    );
+    assert_eq!(
+        injected_snapshot.provider_receipts().collect::<Vec<_>>(),
+        plan.schema_validation()
+            .snapshot()
+            .provider_receipts()
+            .collect::<Vec<_>>()
+    );
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+
+    let error = host.complete_start(&mut attempt).unwrap_err();
+
+    assert_eq!(
+        first_code(&error.diagnostics),
+        "project.run.runtime-authority-invalid"
+    );
+    assert!(!matches!(host.slot, ProjectHostSlot::Running(_)));
+    drain_host_cleanup(&mut host);
+}
+
+#[test]
+fn startup_registry_replacement_rejects_before_publication() {
+    let project = TestProject::new("startup-registry-replacement");
+    let (_base_snapshot, base_plan) = project.snapshot_and_plan(false);
+    let replacement_snapshot = base_plan.schema_validation().snapshot().clone();
+    let later_stage_runs = Arc::new(AtomicUsize::new(0));
+    let (snapshot, plan) = project.snapshot_and_registry_replacement_plan_with_startup_sentinel(
+        replacement_snapshot,
+        RegistryReplacementTiming::StartupReplace,
+        Some(Arc::clone(&later_stage_runs)),
+    );
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+
+    let error = host.complete_start(&mut attempt).unwrap_err();
+
+    assert_eq!(
+        first_code(&error.diagnostics),
+        "project.run.runtime-authority-invalid"
+    );
+    assert_eq!(later_stage_runs.load(Ordering::SeqCst), 0);
+    assert!(!matches!(host.slot, ProjectHostSlot::Running(_)));
+    drain_host_cleanup(&mut host);
+}
+
+#[test]
+fn postpublication_registry_replacement_faults_only_the_owning_runtime() {
+    let project = TestProject::new("postpublication-registry-replacement");
+    let (_base_snapshot, base_plan) = project.snapshot_and_plan(false);
+    let replacement_snapshot = base_plan.schema_validation().snapshot().clone();
+    let (snapshot, plan) = project.snapshot_and_registry_replacement_plan(
+        replacement_snapshot,
+        RegistryReplacementTiming::FrameReplace,
+    );
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    host.complete_start(&mut attempt).unwrap();
+
+    let error = host.drive_running_runtime(Duration::ZERO).unwrap_err();
+
+    assert_eq!(
+        first_code(&error.diagnostics),
+        "project.run.registry-mismatch"
+    );
+    assert_eq!(
+        host.running_runtime_mut()
+            .and_then(|runtime| runtime.fault().map(|fault| fault.kind())),
+        Some(RuntimeFaultKind::RuntimeAuthority)
+    );
+    close_host(&mut host);
+}
+
+#[test]
+fn postpublication_same_snapshot_rewrap_and_reinsert_fault_the_owning_runtime() {
+    for (name, timing) in [
+        (
+            "postpublication-registry-rewrap",
+            RegistryReplacementTiming::FrameRewrap,
+        ),
+        (
+            "postpublication-registry-reinsert",
+            RegistryReplacementTiming::FrameReinsert,
+        ),
+    ] {
+        let project = TestProject::new(name);
+        let (_base_snapshot, base_plan) = project.snapshot_and_plan(false);
+        let replacement_snapshot = base_plan.schema_validation().snapshot().clone();
+        let (snapshot, plan) =
+            project.snapshot_and_registry_replacement_plan(replacement_snapshot, timing);
+        let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+        let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+        host.complete_start(&mut attempt).unwrap();
+
+        let error = host.drive_running_runtime(Duration::ZERO).unwrap_err();
+
+        assert_eq!(
+            first_code(&error.diagnostics),
+            "project.run.registry-authority-invalid"
+        );
+        assert_eq!(
+            host.running_runtime_mut()
+                .and_then(|runtime| runtime.fault().map(|fault| fault.kind())),
+            Some(RuntimeFaultKind::RuntimeAuthority)
+        );
+        close_host(&mut host);
+    }
+}
+
+#[test]
+fn postpublication_registry_removal_faults_the_owning_runtime() {
+    let project = TestProject::new("postpublication-registry-removal");
+    let (_base_snapshot, base_plan) = project.snapshot_and_plan(false);
+    let replacement_snapshot = base_plan.schema_validation().snapshot().clone();
+    let (snapshot, plan) = project.snapshot_and_registry_replacement_plan(
+        replacement_snapshot,
+        RegistryReplacementTiming::FrameRemove,
+    );
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    host.complete_start(&mut attempt).unwrap();
+
+    let error = host.drive_running_runtime(Duration::ZERO).unwrap_err();
+
+    assert_eq!(
+        first_code(&error.diagnostics),
+        "project.run.registry-missing"
+    );
+    assert_eq!(
+        host.running_runtime_mut()
+            .and_then(|runtime| runtime.fault().map(|fault| fault.kind())),
+        Some(RuntimeFaultKind::RuntimeAuthority)
+    );
+    close_host(&mut host);
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
+    let project = TestProject::new("editor-schema-snapshot");
+    let mut editor = super::editor::EditorProjectSession::open(
+        project.capability(),
+        super::editor::EditorProjectIntent::new(),
+    )
+    .unwrap();
+    let expected = editor.test_schema_snapshot();
+    assert_eq!(
+        editor.play_view().state(),
+        nara_tooling::EditorPlayState::Empty
+    );
+
+    let _ = editor.workspace_model();
+    assert!(expected.ptr_eq(&editor.test_schema_snapshot()));
+    let document = editor.workspace().active_document().unwrap();
+    let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
+        document: Some(document),
+        patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(nara_identity::SceneEntityId::new("edited").unwrap()),
+        }]),
+    });
+    assert!(report.applied);
+    assert!(expected.ptr_eq(&editor.test_schema_snapshot()));
+
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document),
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.persistence_view().result(),
+        Some(EditorPersistenceResult::Opened { .. })
+    ));
+    assert!(expected.ptr_eq(&editor.test_schema_snapshot()));
+    assert_eq!(
+        editor.play_view().state(),
+        nara_tooling::EditorPlayState::Empty
+    );
+    assert_eq!(editor.play_view().generation(), None);
 }
 
 #[test]
@@ -944,7 +1284,7 @@ fn every_start_phase_failure_keeps_runtime_invisible_and_closes_acquired_owners_
             b"project-registry-failure-v1",
             RegistryFailurePlugin::default,
         ),
-        "project.run.registry-missing",
+        "project.run.runtime-authority-invalid",
         1,
     );
     assert_start_phase_failure(
@@ -1165,6 +1505,7 @@ fn assert_start_phase_failure(
     expected_code: &str,
     expected_probe_builds: usize,
 ) {
+    let retained_before = runtime_quarantine_status().process_retained();
     let builds = Arc::new(AtomicUsize::new(0));
     let closes = Arc::new(AtomicUsize::new(0));
     let (snapshot, plan) =
@@ -1185,6 +1526,11 @@ fn assert_start_phase_failure(
         CleanupDriveOutcome::Complete { failed: false, .. }
     ));
     assert_eq!(closes.load(Ordering::SeqCst), expected_probe_builds);
+    assert_eq!(
+        runtime_quarantine_status().process_retained(),
+        retained_before,
+        "a start-phase failure retained a runtime owner after Host cleanup"
+    );
 }
 
 fn close_probe_definition(
@@ -1504,6 +1850,39 @@ requested = ["runtime-2d"]
         let loader = ProjectContentLoader::new(root).unwrap();
         let snapshot = loader.load(&candidate, &default_plan).unwrap();
         (snapshot, default_plan, reduced_plan)
+    }
+
+    fn snapshot_and_registry_replacement_plan(
+        &self,
+        replacement_snapshot: ComponentRegistrySnapshot,
+        timing: RegistryReplacementTiming,
+    ) -> (ProjectContentSnapshot, RuntimePlan) {
+        self.snapshot_and_registry_replacement_plan_with_startup_sentinel(
+            replacement_snapshot,
+            timing,
+            None,
+        )
+    }
+
+    fn snapshot_and_registry_replacement_plan_with_startup_sentinel(
+        &self,
+        replacement_snapshot: ComponentRegistrySnapshot,
+        timing: RegistryReplacementTiming,
+        startup_later_stage_runs: Option<Arc<AtomicUsize>>,
+    ) -> (ProjectContentSnapshot, RuntimePlan) {
+        let root = self.capability();
+        let manifest = root
+            .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
+            .unwrap();
+        let candidate = ingest_project_manifest(&manifest, None).unwrap();
+        drop(manifest);
+        let request = project_runtime_plugins(&candidate).insert_after::<GameplayCommandPlugin>(
+            registry_replacement_definition(replacement_snapshot, timing, startup_later_stage_runs),
+        );
+        let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
+        let loader = ProjectContentLoader::new(root).unwrap();
+        let snapshot = loader.load(&candidate, &plan).unwrap();
+        (snapshot, plan)
     }
 
     fn capability(&self) -> DirectoryCapability {
