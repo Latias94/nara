@@ -426,12 +426,9 @@ impl ProjectHost {
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
         let drive = published.runtime_mut().drive(real_delta);
         verify_published_runtime_registry(published.runtime().world(), &expected)?;
-        drive.map(|_| ()).map_err(|_| {
-            HostFault::new(single_error(
-                "project.run.drive-failed",
-                "Project runtime drive failed",
-            ))
-        })
+        drive
+            .map(|_| ())
+            .map_err(|error| HostFault::new(runtime_scope_failure_report(error.fault())))
     }
 
     fn release_stopped_runtime(&mut self) -> bool {
@@ -666,12 +663,9 @@ impl ProjectHost {
                     "Project runtime rejected exact-step preparation",
                 )));
             };
-            runtime.drive(Duration::ZERO).map_err(|_| {
-                HostFault::new(single_error(
-                    "project.run.pause-failed",
-                    "Project runtime could not enter exact-step mode",
-                ))
-            })?;
+            runtime
+                .drive(Duration::ZERO)
+                .map_err(|error| HostFault::new(runtime_scope_failure_report(error.fault())))?;
             if runtime.state() != RuntimeState::Paused
                 || runtime.control_status(pause) != Some(RuntimeControlStatus::Applied)
             {
@@ -696,12 +690,9 @@ impl ProjectHost {
                 "Project runtime rejected an exact fixed step",
             )));
         };
-        let outcome = runtime.drive(Duration::ZERO).map_err(|_| {
-            HostFault::new(single_error(
-                "project.run.drive-failed",
-                "Project runtime fixed tick failed",
-            ))
-        })?;
+        let outcome = runtime
+            .drive(Duration::ZERO)
+            .map_err(|error| HostFault::new(runtime_scope_failure_report(error.fault())))?;
         let actual = outcome.frame().map_or(0, |frame| frame.status.fixed_steps);
         if actual != 1
             || runtime.state() != RuntimeState::Paused
@@ -1409,10 +1400,40 @@ fn runtime_faulted_report() -> DiagnosticReport {
 }
 
 fn runtime_scope_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
-    if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
-        return runtime_authority_invalid_report();
+    let diagnostic = if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
+        Diagnostic::error(
+            diagnostic_code("project.run.runtime-authority-invalid"),
+            safe_summary("Project runtime authority is invalid"),
+        )
+    } else {
+        Diagnostic::error(
+            diagnostic_code("project.run.runtime-faulted"),
+            safe_summary("Project runtime reported a fault before product completion"),
+        )
+    };
+    let diagnostic = attach_identifier(
+        diagnostic,
+        "fault-kind",
+        runtime_fault_kind_id(fault.kind()),
+    );
+    let diagnostic = attach_identifier(diagnostic, "fault-source", fault.source());
+    single_diagnostic(diagnostic)
+}
+
+pub(super) const fn runtime_fault_kind_id(kind: RuntimeFaultKind) -> &'static str {
+    match kind {
+        RuntimeFaultKind::AppFrame => "app-frame",
+        RuntimeFaultKind::FaultReporterAuthority => "fault-reporter-authority",
+        RuntimeFaultKind::RuntimeAuthority => "runtime-authority",
+        RuntimeFaultKind::System => "system",
+        RuntimeFaultKind::RunCondition => "run-condition",
+        RuntimeFaultKind::Command => "command",
+        RuntimeFaultKind::Observer => "observer",
+        RuntimeFaultKind::GameplayLifecycle => "gameplay-lifecycle",
+        RuntimeFaultKind::LocalIntentLoss => "local-intent-loss",
+        RuntimeFaultKind::RequiredTask => "required-task",
+        RuntimeFaultKind::RequiredService => "required-service",
     }
-    runtime_faulted_report()
 }
 
 fn runtime_startup_failure_report(fault: &RuntimeFault) -> DiagnosticReport {

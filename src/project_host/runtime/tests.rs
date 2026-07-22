@@ -1403,6 +1403,24 @@ fn every_start_phase_failure_keeps_runtime_invisible_and_closes_acquired_owners_
 }
 
 #[test]
+fn runtime_scope_failure_report_preserves_fault_identity() {
+    let report = runtime_scope_failure_report(&RuntimeFault::engine(
+        RuntimeFaultKind::System,
+        "nara.ecs.fallible-execution",
+    ));
+
+    assert_eq!(first_code(&report), "project.run.runtime-faulted");
+    assert_eq!(
+        identifier_field(&report, "project.run.runtime-faulted", "fault-kind"),
+        Some("system")
+    );
+    assert_eq!(
+        identifier_field(&report, "project.run.runtime-faulted", "fault-source"),
+        Some("nara.ecs.fallible-execution")
+    );
+}
+
+#[test]
 fn public_failure_diagnostics_preserve_safe_phase_and_owner_identity() {
     let composition = runtime_plan_failure_report(&RuntimePlanError::Composition(
         CompositionError::UnrequestedProductCapability {

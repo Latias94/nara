@@ -42,6 +42,8 @@ use nara::{
 
 #[cfg(feature = "desktop")]
 use nara::project_host::{DesktopRun, DesktopRunIntent};
+#[cfg(feature = "editor")]
+use nara::project_host::EditorProjectIntent;
 
 pub use components::{Enemy, Player, Projectile, RuntimeOnlyTag, WaveSpawn, Weapon};
 pub use resources::{
@@ -311,6 +313,18 @@ pub fn wave_desktop_intent() -> DesktopRunIntent {
         .insert_after::<GameplayCommandPlugin>(plugin())
         .insert_after::<ReferenceGamePlugin>(wave_plugin())
         .insert_after::<ReferenceWavePlugin>(desktop_plugin())
+        .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
+}
+
+/// Creates the Editor Play intent over the same committed wave content closure.
+#[cfg(feature = "editor")]
+#[must_use]
+pub fn wave_editor_intent() -> EditorProjectIntent {
+    EditorProjectIntent::new()
+        .configure(nara::image::plugin(ImageImportLimits::default()))
+        .disable::<TilemapPlugin>()
+        .insert_after::<GameplayCommandPlugin>(plugin())
+        .insert_after::<ReferenceGamePlugin>(wave_plugin())
         .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
 }
 

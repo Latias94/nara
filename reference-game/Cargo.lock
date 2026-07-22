@@ -1273,6 +1273,7 @@ dependencies = [
  "nara_sprite_render",
  "nara_tasks",
  "nara_tilemap",
+ "nara_tooling",
  "nara_transform",
  "nara_ui",
  "nara_ui_render",
@@ -1583,6 +1584,21 @@ dependencies = [
  "nara_material",
  "nara_reflect",
  "serde",
+]
+
+[[package]]
+name = "nara_tooling"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "nara_app",
+ "nara_asset",
+ "nara_core",
+ "nara_diagnostic",
+ "nara_ecs",
+ "nara_identity",
+ "nara_reflect",
+ "nara_scene",
 ]
 
 [[package]]

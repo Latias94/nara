@@ -1,7 +1,9 @@
 use std::{fmt, num::NonZeroU32, time::Duration};
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use nara_app::{AppExit, AppRunError, RuntimeCloseCause, RuntimeCloseEvidence, RuntimeState};
+use nara_app::{
+    AppExit, AppRunError, RuntimeCloseCause, RuntimeCloseEvidence, RuntimeFaultKind, RuntimeState,
+};
 use nara_app::{Plugin, PluginDefinition, RuntimeClosePolicy};
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
@@ -20,7 +22,7 @@ use super::{
     runtime_plan_failure_report, runtime_plan_selected_report, single_error,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use super::{failure_diagnostic, single_diagnostic};
+use super::{attach_identifier, failure_diagnostic, runtime_fault_kind_id, single_diagnostic};
 
 type RuntimePluginEdit =
     Box<dyn FnOnce(ProjectRuntimePlugins) -> ProjectRuntimePlugins + Send + 'static>;
@@ -579,7 +581,27 @@ fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
         "Desktop project runner failed",
         reason,
     );
+    let diagnostic = match managed_runtime_fault(error) {
+        Some((kind, source)) => {
+            let diagnostic =
+                attach_identifier(diagnostic, "fault-kind", runtime_fault_kind_id(kind));
+            attach_identifier(diagnostic, "fault-source", source)
+        }
+        None => diagnostic,
+    };
     single_diagnostic(diagnostic)
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+fn managed_runtime_fault(error: &AppRunError) -> Option<(RuntimeFaultKind, &'static str)> {
+    match error {
+        AppRunError::ManagedRuntime { kind, fault_source } => Some((*kind, *fault_source)),
+        AppRunError::RunnerTeardown { prior, teardown } => {
+            managed_runtime_fault(prior).or_else(|| managed_runtime_fault(teardown))
+        }
+        AppRunError::Shutdown { prior, .. } => prior.as_deref().and_then(managed_runtime_fault),
+        AppRunError::Plugin { .. } | AppRunError::Runner { .. } | AppRunError::Time { .. } => None,
+    }
 }
 
 #[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
@@ -641,6 +663,19 @@ mod desktop_terminal_tests {
         report
             .iter()
             .any(|diagnostic| diagnostic.code().as_str() == code)
+    }
+
+    fn diagnostic_field(report: &DiagnosticReport, code: &str, key: &str) -> Option<String> {
+        report
+            .iter()
+            .find(|diagnostic| diagnostic.code().as_str() == code)
+            .and_then(|diagnostic| {
+                diagnostic
+                    .fields()
+                    .iter()
+                    .find(|field| field.key().as_str() == key)
+            })
+            .map(|field| field.display_value().into_owned())
     }
 
     fn actual_close_evidence(mode: CloseFailureMode) -> RuntimeCloseEvidence {
@@ -816,6 +851,36 @@ mod desktop_terminal_tests {
             &running_diagnostics,
             "project.desktop.runtime-not-stopped"
         ));
+    }
+
+    #[test]
+    fn desktop_runner_failure_preserves_managed_runtime_fault_identity() {
+        let managed =
+            AppRunError::managed_runtime(RuntimeFaultKind::System, "nara.ecs.fallible-execution");
+        let report = desktop_runner_failure_report(&managed);
+        assert_eq!(
+            diagnostic_field(&report, "project.desktop.runner-failed", "reason").as_deref(),
+            Some("managed-runtime")
+        );
+        assert_eq!(
+            diagnostic_field(&report, "project.desktop.runner-failed", "fault-kind").as_deref(),
+            Some("system")
+        );
+        assert_eq!(
+            diagnostic_field(&report, "project.desktop.runner-failed", "fault-source").as_deref(),
+            Some("nara.ecs.fallible-execution")
+        );
+
+        let wrapped = AppRunError::runner_teardown(managed, AppRunError::runner("teardown"));
+        let report = desktop_runner_failure_report(&wrapped);
+        assert_eq!(
+            diagnostic_field(&report, "project.desktop.runner-failed", "reason").as_deref(),
+            Some("runner-teardown")
+        );
+        assert_eq!(
+            diagnostic_field(&report, "project.desktop.runner-failed", "fault-kind").as_deref(),
+            Some("system")
+        );
     }
 }
 
