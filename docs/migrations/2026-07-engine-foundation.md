@@ -1454,7 +1454,12 @@ let report = pools.shutdown();
 ```rust
 let mut app = App::new();
 app.add_plugins((MinimalPlugins, WindowPlugin::default(), WgpuBackendPlugins))?;
-let candidate = RuntimeCandidate::admit(app.seal()?)?;
+let reservation = RuntimeAdmissionReservation::try_acquire()?;
+let candidate = reservation.admit(
+    app.seal()?,
+    RuntimeObligationLedger::new(),
+    RuntimeClosePolicy::default(),
+)?;
 let mut runtime = candidate.complete_startup()?.promote();
 WinitRunner::default().run(&mut runtime)?;
 
@@ -1493,6 +1498,22 @@ that needs retryable close must retain the runtime and handle
 terminal teardown failure. Do not rely on destructor completion. Keep arbitrary external resources outside
 `Stopped` claims unless their owner is explicitly registered. Rename direct task-pool shutdown calls
 to `shutdown_blocking` and retain the same `TaskPools` value when retrying an incomplete report.
+
+`RuntimeCandidate::admit` and `RuntimeCandidate::admit_with` were removed before 1.0. Acquire
+`RuntimeAdmissionReservation` before sealing or transferring the App and obligation ledger. A
+capacity error leaves those inputs with the caller. Once `reservation.admit(...)` begins, any later
+admission failure owns the App, obligations, and reserved fault route; drive its explicit retirement
+path instead of attempting to recover the transferred inputs.
+
+`RuntimeFaultKind::ScheduleAuthority` was also removed. Independent managed runtimes may execute
+overlapping Bevy schedules; fallible systems, conditions, commands, and observers now report only
+through the route reserved for their owning runtime.
+
+`App::add_observer` now records configuration that becomes active at the first raw execution or
+managed-runtime admission boundary. Events triggered while the App is still being configured are
+not replayed to those observers. Once any raw schedule has begun execution, the App cannot later be
+admitted as a managed runtime; construct a fresh App so every observer and fallback handler is bound
+to one execution authority from the start.
 
 **Source action**: `none`; no persistent project file changes.
 
