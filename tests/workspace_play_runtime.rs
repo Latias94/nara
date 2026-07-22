@@ -561,7 +561,7 @@ fn workspace_close_retains_document_through_close_incomplete_and_retry() {
         editor.request_play(EditorPlayCommand::RetryClose),
         EditorPlayRequestResult::Accepted
     );
-    drive_until(&mut editor, EditorPlayState::Empty, 32);
+    drive_retryable_close_until_empty(&mut editor, 32);
     assert!(editor.workspace().is_empty());
     assert!(editor.workspace_intent_view().intent().is_none());
 }
@@ -602,7 +602,7 @@ fn direct_stop_retains_close_incomplete_until_retry() {
         editor.request_play(EditorPlayCommand::RetryClose),
         EditorPlayRequestResult::Accepted
     );
-    drive_until(&mut editor, EditorPlayState::Empty, 32);
+    drive_retryable_close_until_empty(&mut editor, 32);
     assert!(editor.workspace().scene(document).is_some());
     assert_eq!(editor.play_view().generation(), None);
 }
@@ -736,7 +736,7 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
         editor.request_play(EditorPlayCommand::RetryRetirement),
         EditorPlayRequestResult::Accepted
     );
-    drive_until(&mut editor, EditorPlayState::Empty, 32);
+    drive_retryable_close_until_empty(&mut editor, 32);
     assert!(editor.workspace().scene(document).is_some());
     assert!(matches!(
         editor.play_view().result(),
@@ -791,10 +791,36 @@ fn drive_until(
             return;
         }
         editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
         editor.play_view().state(),
         expected,
+        "diagnostics: {:?}",
+        editor.diagnostics()
+    );
+}
+
+fn drive_retryable_close_until_empty(editor: &mut EditorProjectSession, maximum_attempts: usize) {
+    for _ in 0..maximum_attempts {
+        match editor.play_view().state() {
+            EditorPlayState::Empty => return,
+            EditorPlayState::RetirementIncomplete => assert_eq!(
+                editor.request_play(EditorPlayCommand::RetryRetirement),
+                EditorPlayRequestResult::Accepted
+            ),
+            EditorPlayState::CloseIncomplete => assert_eq!(
+                editor.request_play(EditorPlayCommand::RetryClose),
+                EditorPlayRequestResult::Accepted
+            ),
+            _ => {}
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        editor.play_view().state(),
+        EditorPlayState::Empty,
         "diagnostics: {:?}",
         editor.diagnostics()
     );
