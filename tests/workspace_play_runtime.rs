@@ -6,7 +6,8 @@ mod project_content_fixture;
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc,
     },
     time::Duration,
 };
@@ -16,8 +17,9 @@ use nara::{
         App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
         PluginError, PluginId, PluginShutdownContext, PluginShutdownObligationId,
         RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-        RuntimeCloseParticipantId, RuntimeCloseProgress,
+        RuntimeCloseParticipantId, RuntimeCloseProgress, StartupStage,
     },
+    ecs::Resource,
     gameplay::GameplayCommandPlugin,
     project_host::{EditorProjectIntent, EditorProjectSession},
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
@@ -54,6 +56,63 @@ const SHUTDOWN_FAILURE_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.editor-shutdown-failure", 1);
 const SHUTDOWN_FAILURE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(SHUTDOWN_FAILURE_PLUGIN_ID, PluginCategory::Runtime);
+const RUNTIME_SERVICE_SESSION_PLUGIN_ID: PluginId =
+    PluginId::new("nara.test.editor-runtime-service-session");
+const RUNTIME_SERVICE_SESSION_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.editor-runtime-service-session", 1);
+const RUNTIME_SERVICE_SESSION_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(RUNTIME_SERVICE_SESSION_PLUGIN_ID, PluginCategory::Service);
+
+static NEXT_RUNTIME_SERVICE_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug)]
+struct RuntimeServiceSessionPlugin {
+    observations: mpsc::SyncSender<u64>,
+}
+
+impl Plugin for RuntimeServiceSessionPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &RUNTIME_SERVICE_SESSION_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.insert_resource(RuntimeServiceSessionObservations(self.observations.clone()))?
+            .add_systems(StartupStage::Runtime, publish_runtime_service_session_id)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Resource)]
+struct RuntimeServiceSessionObservations(mpsc::SyncSender<u64>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
+struct RuntimeServiceSessionId {
+    _id: u64,
+}
+
+fn publish_runtime_service_session_id(world: &mut nara::ecs::World) {
+    let id = NEXT_RUNTIME_SERVICE_SESSION_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .expect("test runtime service-session identities are exhausted");
+    world
+        .resource::<RuntimeServiceSessionObservations>()
+        .0
+        .try_send(id)
+        .expect("the bounded test service-session observer remains available and within budget");
+    world.insert_resource(RuntimeServiceSessionId { _id: id });
+}
+
+fn runtime_service_session_definition(observations: mpsc::SyncSender<u64>) -> PluginDefinition {
+    PluginDefinition::infallible::<RuntimeServiceSessionPlugin, _>(
+        RUNTIME_SERVICE_SESSION_DEFINITION_ID,
+        b"editor-runtime-service-session-v1",
+        move || RuntimeServiceSessionPlugin {
+            observations: observations.clone(),
+        },
+    )
+}
 
 #[derive(Debug)]
 struct DelayedClosePlugin {
@@ -173,8 +232,11 @@ fn shutdown_failure_definition() -> PluginDefinition {
 fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let (service_sessions, service_session_observations) = mpsc::sync_channel(2);
+    let intent = EditorProjectIntent::new().insert_after::<GameplayCommandPlugin>(
+        runtime_service_session_definition(service_sessions),
+    );
+    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
 
     assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
     assert_eq!(
@@ -197,6 +259,10 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
             operation: EditorPlayOperation::Play,
         })
     );
+    assert!(matches!(
+        service_session_observations.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 
     assert_eq!(
         editor.request_play(EditorPlayCommand::Play),
@@ -223,6 +289,10 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
             operation: EditorPlayOperation::Play,
         })
     );
+    assert!(matches!(
+        service_session_observations.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 
     assert_eq!(
         editor.request_play(EditorPlayCommand::Play),
@@ -230,6 +300,13 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
     let first_generation = editor.play_view().generation().unwrap();
+    let first_service_session = service_session_observations
+        .recv_timeout(Duration::from_secs(1))
+        .expect("the first Editor runtime publishes one service session");
+    assert!(matches!(
+        service_session_observations.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 
     assert_eq!(
         editor.request_play(EditorPlayCommand::Pause),
@@ -267,7 +344,15 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     assert_eq!(editor.play_view().state(), EditorPlayState::Stopping);
     drive_until(&mut editor, EditorPlayState::Running, 32);
     let second_generation = editor.play_view().generation().unwrap();
+    let second_service_session = service_session_observations
+        .recv_timeout(Duration::from_secs(1))
+        .expect("the restarted Editor runtime publishes one service session");
+    assert!(matches!(
+        service_session_observations.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
     assert_ne!(second_generation, first_generation);
+    assert_ne!(second_service_session, first_service_session);
     assert!(matches!(
         editor.play_view().result(),
         Some(EditorPlayOperationResult::Applied {

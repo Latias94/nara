@@ -586,6 +586,22 @@ mod tests {
     }
 
     #[test]
+    fn plugin_installation_reconstructs_the_backend_instance_for_each_app() {
+        fn backend_instance_id() -> u64 {
+            let mut app = App::new();
+            app.add_plugins((
+                nara_reflect::ComponentRegistryPlugin,
+                nara_render::RenderPlugin,
+                WgpuRenderPlugin,
+            ))
+            .unwrap();
+            app.world().resource::<WgpuRenderBackend>().instance_id()
+        }
+
+        assert_ne!(backend_instance_id(), backend_instance_id());
+    }
+
+    #[test]
     fn managed_frame_keeps_the_backend_terminal_state_after_render_schedule_completion() {
         let mut app = App::new();
         app.add_plugins((

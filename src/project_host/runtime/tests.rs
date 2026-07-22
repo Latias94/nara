@@ -33,6 +33,7 @@ use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
+use nara_identity::WorldIdentityDomain;
 use nara_image::PreparedImageResource;
 use nara_reflect::{
     ComponentRegistry, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
@@ -140,6 +141,49 @@ const REGISTRY_REPLACEMENT_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.project-registry-replacement", 1);
 const REGISTRY_REPLACEMENT_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REGISTRY_REPLACEMENT_PLUGIN_ID, PluginCategory::Runtime);
+const RUNTIME_SERVICE_SESSION_PLUGIN_ID: PluginId =
+    PluginId::new("nara.test.runtime-service-session");
+const RUNTIME_SERVICE_SESSION_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.runtime-service-session", 1);
+const RUNTIME_SERVICE_SESSION_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(RUNTIME_SERVICE_SESSION_PLUGIN_ID, PluginCategory::Service);
+
+static NEXT_RUNTIME_SERVICE_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Default)]
+struct RuntimeServiceSessionPlugin;
+
+impl Plugin for RuntimeServiceSessionPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &RUNTIME_SERVICE_SESSION_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(StartupStage::Runtime, publish_runtime_service_session_id)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
+struct RuntimeServiceSessionId(u64);
+
+fn publish_runtime_service_session_id(world: &mut nara_ecs::World) {
+    let id = NEXT_RUNTIME_SERVICE_SESSION_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .expect("test runtime service-session identities are exhausted");
+    world.insert_resource(RuntimeServiceSessionId(id));
+}
+
+fn runtime_service_session_definition() -> PluginDefinition {
+    PluginDefinition::infallible::<RuntimeServiceSessionPlugin, _>(
+        RUNTIME_SERVICE_SESSION_DEFINITION_ID,
+        b"runtime-service-session-v1",
+        RuntimeServiceSessionPlugin::default,
+    )
+}
+
 #[derive(Debug)]
 struct CloseProbePlugin {
     builds: Arc<AtomicUsize>,
@@ -856,9 +900,12 @@ fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
 }
 
 #[test]
-fn publication_is_one_visibility_cut_and_repeated_starts_use_fresh_generations() {
+fn sequential_starts_share_immutable_authority_and_rebuild_runtime_sessions() {
     let project = TestProject::new("publication-cut");
-    let (snapshot, plan) = project.snapshot_and_plan(false);
+    let (snapshot, plan) = project.snapshot_and_session_plan();
+    let shared_scene = snapshot.expanded_startup_scene() as *const SceneDocument as usize;
+    let shared_registry = plan.schema_validation().snapshot().clone();
+    let stable_plan = plan.plugin_plan().fingerprint();
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
     let mut first_attempt = host
@@ -868,7 +915,7 @@ fn publication_is_one_visibility_cut_and_repeated_starts_use_fresh_generations()
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
     let diagnostics = host.complete_start(&mut first_attempt).unwrap();
     assert!(!diagnostics.has_errors());
-    let first_generation = running_generation(&host);
+    let first = running_owner_identity(&host);
     close_host(&mut host);
 
     let mut second_attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
@@ -876,9 +923,17 @@ fn publication_is_one_visibility_cut_and_repeated_starts_use_fresh_generations()
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
     let diagnostics = host.complete_start(&mut second_attempt).unwrap();
     assert!(!diagnostics.has_errors());
-    let second_generation = running_generation(&host);
+    let second = running_owner_identity(&host);
 
-    assert_ne!(first_generation, second_generation);
+    assert_ne!(first.generation, second.generation);
+    assert_ne!(first.service_session, second.service_session);
+    assert_ne!(first.identity_domain, second.identity_domain);
+    assert_eq!(first.snapshot_scene, shared_scene);
+    assert_eq!(second.snapshot_scene, shared_scene);
+    assert!(first.registry_snapshot.ptr_eq(&shared_registry));
+    assert!(second.registry_snapshot.ptr_eq(&shared_registry));
+    assert_eq!(first.plan_fingerprint, stable_plan);
+    assert_eq!(second.plan_fingerprint, stable_plan);
     close_host(&mut host);
 }
 
@@ -963,8 +1018,9 @@ fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() 
 #[test]
 fn concurrent_starts_share_immutable_content_but_isolate_every_runtime_owner() {
     let project = TestProject::new("runtime-owner-isolation");
-    let (snapshot, plan) = project.snapshot_and_plan(false);
+    let (snapshot, plan) = project.snapshot_and_session_plan();
     let shared_scene = snapshot.expanded_startup_scene() as *const SceneDocument as usize;
+    let shared_registry = plan.schema_validation().snapshot().clone();
     let stable_plan = plan.plugin_plan().fingerprint();
     let mut first_host = ProjectHost::new(RuntimeClosePolicy::default());
     let mut second_host = ProjectHost::new(RuntimeClosePolicy::default());
@@ -983,8 +1039,12 @@ fn concurrent_starts_share_immutable_content_but_isolate_every_runtime_owner() {
     assert_ne!(first.command_queue, second.command_queue);
     assert_ne!(first.fixed_time, second.fixed_time);
     assert_ne!(first.task_pools, second.task_pools);
+    assert_ne!(first.service_session, second.service_session);
+    assert_ne!(first.identity_domain, second.identity_domain);
     assert_eq!(first.snapshot_scene, shared_scene);
     assert_eq!(second.snapshot_scene, shared_scene);
+    assert!(first.registry_snapshot.ptr_eq(&shared_registry));
+    assert!(second.registry_snapshot.ptr_eq(&shared_registry));
     assert_eq!(first.plan_fingerprint, stable_plan);
     assert_eq!(second.plan_fingerprint, stable_plan);
     close_host(&mut first_host);
@@ -1493,10 +1553,13 @@ fn real_task_shutdown_retains_the_host_epoch_and_owner_until_later_drives_comple
         },
     );
     let (snapshot, plan) = project.snapshot_and_plan_with_plugin(blocking_task);
+    let replacement_snapshot = snapshot.clone();
+    let replacement_plan = plan.clone();
     let mut host = ProjectHost::new(RuntimeClosePolicy::new(Duration::ZERO));
     let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
     let epoch = attempt.epoch;
     host.complete_start(&mut attempt).unwrap();
+    let first_generation = running_generation(&host);
     assert_eq!(host.drive_one_fixed_tick().unwrap(), None);
 
     let stop_started = std::time::Instant::now();
@@ -1525,11 +1588,35 @@ fn real_task_shutdown_retains_the_host_epoch_and_owner_until_later_drives_comple
     );
     assert_eq!(control.instances.load(Ordering::SeqCst), 1);
 
+    let replacement_error = match host.begin_start(
+        replacement_snapshot.clone(),
+        replacement_plan.clone(),
+        Vec::new(),
+    ) {
+        Ok(_) => panic!("a Host with an incomplete retirement must reject replacement"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        first_code(&replacement_error.diagnostics),
+        "project.run.busy"
+    );
+    assert_eq!(control.instances.load(Ordering::SeqCst), 1);
+
     control.release();
     drain_host_cleanup(&mut host);
 
     assert_eq!(control.instances.load(Ordering::SeqCst), 1);
     assert!(!host.start_claim.any_active());
+
+    let mut replacement = host
+        .begin_start(replacement_snapshot, replacement_plan, Vec::new())
+        .unwrap();
+    host.complete_start(&mut replacement).unwrap();
+    assert_ne!(running_generation(&host), first_generation);
+    assert_eq!(control.instances.load(Ordering::SeqCst), 2);
+    control.release();
+    close_host(&mut host);
+    assert_eq!(control.instances.load(Ordering::SeqCst), 2);
 }
 
 fn assert_start_phase_failure(
@@ -1649,7 +1736,10 @@ struct RunningOwnerIdentity {
     command_queue: usize,
     fixed_time: usize,
     task_pools: usize,
+    service_session: u64,
+    identity_domain: u64,
     snapshot_scene: usize,
+    registry_snapshot: ComponentRegistrySnapshot,
     plan_fingerprint: nara_app::PluginPlanFingerprint,
 }
 
@@ -1665,8 +1755,14 @@ fn running_owner_identity(host: &ProjectHost) -> RunningOwnerIdentity {
             as usize,
         fixed_time: world.resource::<nara_app::FixedTime>() as *const nara_app::FixedTime as usize,
         task_pools: world.resource::<TaskPools>() as *const TaskPools as usize,
+        service_session: world.resource::<RuntimeServiceSessionId>().0,
+        identity_domain: world.resource::<WorldIdentityDomain>().id().get(),
         snapshot_scene: published._snapshot.expanded_startup_scene() as *const SceneDocument
             as usize,
+        registry_snapshot: world
+            .resource::<ComponentRegistry>()
+            .snapshot()
+            .expect("the published runtime registry remains frozen"),
         plan_fingerprint: published._plan.plugin_plan().fingerprint(),
     }
 }
@@ -1839,6 +1935,10 @@ requested = ["runtime-2d"]
         let loader = ProjectContentLoader::new(root).unwrap();
         let snapshot = loader.load(&candidate, &plan).unwrap();
         (snapshot, plan)
+    }
+
+    fn snapshot_and_session_plan(&self) -> (ProjectContentSnapshot, RuntimePlan) {
+        self.snapshot_and_plan_with_plugin(runtime_service_session_definition())
     }
 
     fn snapshot_and_fault_plan(

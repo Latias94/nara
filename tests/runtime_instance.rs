@@ -2256,8 +2256,33 @@ fn control_tickets_are_scoped_to_their_runtime_generation() {
 #[derive(Debug, Resource)]
 struct FirstRuntimeOnly;
 
+fn submit_runtime_isolation_command(
+    runtime: &mut RuntimeInstance,
+    tick: u64,
+    source: &str,
+    sequence: u64,
+) {
+    runtime
+        .with_driver_scope(|scope| {
+            submit_gameplay_driver_command(
+                scope,
+                GameplayCommandSubmission::new(
+                    GameplayCommandTick::new(tick).unwrap(),
+                    GameplayCommandIngressSource::test(source).unwrap(),
+                    GameplayCommandSourceSequence::new(sequence).unwrap(),
+                    GameplayCommandDraft::new(
+                        GameplayCommandTypeId::new("runtime.isolation").unwrap(),
+                    ),
+                ),
+            )
+            .unwrap()
+            .unwrap();
+        })
+        .unwrap();
+}
+
 #[test]
-fn runtime_generations_do_not_share_world_time_or_gameplay_queue_state() {
+fn alternating_runtime_drives_do_not_share_world_time_or_gameplay_queue_state() {
     let mut first_app = configured_app(FixedTime::default());
     first_app
         .add_plugin(GameplayCommandPlugin::default())
@@ -2268,38 +2293,34 @@ fn runtime_generations_do_not_share_world_time_or_gameplay_queue_state() {
         .add_plugin(GameplayCommandPlugin::default())
         .unwrap();
     let mut first = start_runtime(first_app);
-    let second = start_runtime(second_app);
+    let mut second = start_runtime(second_app);
 
-    first
-        .with_driver_scope(|scope| {
-            submit_gameplay_driver_command(
-                scope,
-                GameplayCommandSubmission::new(
-                    GameplayCommandTick::new(1).unwrap(),
-                    GameplayCommandIngressSource::test("first-runtime").unwrap(),
-                    GameplayCommandSourceSequence::new(1).unwrap(),
-                    GameplayCommandDraft::new(
-                        GameplayCommandTypeId::new("runtime.isolation").unwrap(),
-                    ),
-                ),
-            )
-            .unwrap()
-            .unwrap();
-        })
-        .unwrap();
+    submit_runtime_isolation_command(&mut first, 1, "first-runtime", 1);
+    first.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    submit_runtime_isolation_command(&mut second, 1, "second-runtime", 1);
+    second.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    submit_runtime_isolation_command(&mut first, 2, "first-runtime", 2);
     first.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
-    assert_eq!(first.world().resource::<FixedTime>().tick(), 1);
-    assert_eq!(second.world().resource::<FixedTime>().tick(), 0);
+    assert_eq!(first.world().resource::<FixedTime>().tick(), 2);
+    assert_eq!(second.world().resource::<FixedTime>().tick(), 1);
     assert!(first.world().contains_resource::<FirstRuntimeOnly>());
     assert!(!second.world().contains_resource::<FirstRuntimeOnly>());
+    assert_eq!(
+        first
+            .world()
+            .resource::<GameplayCommandQueue>()
+            .stats()
+            .accepted,
+        2
+    );
     assert_eq!(
         second
             .world()
             .resource::<GameplayCommandQueue>()
             .stats()
             .accepted,
-        0
+        1
     );
 }
 

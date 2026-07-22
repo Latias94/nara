@@ -157,6 +157,9 @@ pub struct WgpuRenderBackend {
 
 impl WgpuRenderBackend {
     /// Process-local non-reused identity of this backend owner.
+    ///
+    /// Together with [`Self::device_epoch`], this identifies one device namespace. The value is
+    /// diagnostic runtime state and must not be persisted or used as backend-neutral identity.
     #[must_use]
     pub const fn instance_id(&self) -> u64 {
         self.instance_id.0
@@ -192,8 +195,9 @@ impl WgpuRenderBackend {
 
     /// Monotonic identity of the currently initialized device within this backend instance.
     ///
-    /// Zero means no device has been initialized. Clearing or losing a device never rewinds the
-    /// epoch; a later device receives a strictly newer value.
+    /// Zero means no device has been initialized. The value is meaningful only with
+    /// [`Self::instance_id`]. Clearing or losing a device never rewinds the epoch; a later device
+    /// receives a strictly newer value.
     #[must_use]
     pub const fn device_epoch(&self) -> u64 {
         self.device_epoch
@@ -871,6 +875,77 @@ mod tests {
         assert_ne!(first.instance_id(), 0);
         assert_ne!(second.instance_id(), 0);
         assert_ne!(first.instance_id(), second.instance_id());
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    fn replacement_backend_renews_device_namespace_and_starts_with_an_empty_texture_cache() {
+        use crate::quad::WgpuQuadMaterialKey;
+        use nara_material::SamplerDescriptor;
+
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+            ..Default::default()
+        }))
+        .or_else(|_| {
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter: true,
+                ..Default::default()
+            }))
+        })
+        .expect("texture-cache isolation requires a wgpu adapter");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+                .expect("texture-cache isolation requires a wgpu device");
+        let layout = create_quad_texture_bind_group_layout(&device);
+        let predecessor_key = WgpuQuadMaterialKey {
+            image: None,
+            sampler: SamplerDescriptor::default(),
+            alpha_mode: AlphaMode2d::Opaque,
+        };
+
+        let predecessor_namespace;
+        {
+            let mut predecessor = WgpuRenderBackend {
+                device_epoch: 1,
+                ..WgpuRenderBackend::default()
+            };
+            let _binding = predecessor.quad_textures.fallback_bind_group(
+                &device,
+                &queue,
+                &layout,
+                predecessor_key,
+                7,
+            );
+            predecessor_namespace = (predecessor.instance_id(), predecessor.device_epoch());
+            assert_eq!(
+                predecessor.texture_stats(),
+                crate::WgpuRenderTextureCacheStats {
+                    fallback_bindings: 1,
+                    has_fallback_texture: true,
+                    ..crate::WgpuRenderTextureCacheStats::default()
+                }
+            );
+        }
+
+        // The test-owned Device is deliberately shared. Runtime-local backend identity and cache
+        // ownership must remain fresh even when a process parent outlives the predecessor.
+        let replacement = WgpuRenderBackend {
+            device_epoch: 1,
+            ..WgpuRenderBackend::default()
+        };
+        let replacement_namespace = (replacement.instance_id(), replacement.device_epoch());
+        assert_ne!(replacement_namespace, predecessor_namespace);
+        assert_eq!(
+            replacement.texture_stats(),
+            crate::WgpuRenderTextureCacheStats::default(),
+            "the replacement cache must not contain the predecessor material key or statistics",
+        );
     }
 
     fn test_runtime_generation() -> RuntimeGeneration {
