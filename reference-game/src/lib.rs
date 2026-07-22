@@ -106,13 +106,15 @@ impl Plugin for ReferenceGamePlugin {
         let registry = context
             .get_structural_resource::<ComponentRegistry>()
             .ok_or_else(component_registry_unavailable)?;
-        REFERENCE_GAME_SCHEMA_PROVIDER.preflight(registry).map_err(|error| {
-            PluginError::component_registration(
-                REFERENCE_GAME_PLUGIN_ID,
-                REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
-                error,
-            )
-        })
+        REFERENCE_GAME_SCHEMA_PROVIDER
+            .preflight(registry)
+            .map_err(|error| {
+                PluginError::component_registration(
+                    REFERENCE_GAME_PLUGIN_ID,
+                    REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
+                    error,
+                )
+            })
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -124,12 +126,12 @@ impl Plugin for ReferenceGamePlugin {
             REFERENCE_GAME_SCHEMA_PROVIDER
                 .register_or_validate_into(&mut registry)
                 .map_err(|error| {
-                PluginError::component_registration(
-                    REFERENCE_GAME_PLUGIN_ID,
-                    REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })?;
+                    PluginError::component_registration(
+                        REFERENCE_GAME_PLUGIN_ID,
+                        REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
+                        error,
+                    )
+                })?;
         }
 
         Ok(())

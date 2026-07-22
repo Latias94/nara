@@ -510,9 +510,8 @@ fn movement_intent(
             ReferenceSimulationError::InvalidMovementCommand,
         ));
     };
-    let direction = MovementDirection::from_velocity(*x, *y).ok_or_else(|| {
-        BevyError::error(ReferenceSimulationError::InvalidMovementCommand)
-    })?;
+    let direction = MovementDirection::from_velocity(*x, *y)
+        .ok_or_else(|| BevyError::error(ReferenceSimulationError::InvalidMovementCommand))?;
     Ok(MovementIntentCommand {
         direction,
         pressed: *pressed,

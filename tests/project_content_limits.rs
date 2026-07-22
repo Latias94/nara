@@ -11,7 +11,7 @@ use nara::{
     },
     scene::{PrefabDocument, PrefabInstance, SceneDocument, SceneEntityRecord, ScenePatchDocument},
 };
-use project_content_fixture::{scene_id, TestProject};
+use project_content_fixture::{TestProject, scene_id};
 
 const PORTABLE_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 10] = [
     (ProjectContentBudgetKind::DirectoryDepth, 2),

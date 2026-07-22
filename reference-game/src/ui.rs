@@ -238,7 +238,7 @@ fn project_desktop_sprites(
                     Vec2::splat(1.8),
                     Color::rgba(0.58, 0.84, 1.0, 1.0),
                 )
-                    .with_sort_key(20),
+                .with_sort_key(20),
             ))
         } else if let Some(enemy) = enemy {
             let active =
@@ -263,11 +263,8 @@ fn project_desktop_sprites(
                 (
                     projectile.position,
                     projectile.velocity.y.atan2(projectile.velocity.x),
-                    Sprite::from_color(
-                        Vec2::new(0.62, 0.24),
-                        Color::rgba(1.0, 0.86, 0.2, 1.0),
-                    )
-                    .with_sort_key(30),
+                    Sprite::from_color(Vec2::new(0.62, 0.24), Color::rgba(1.0, 0.86, 0.2, 1.0))
+                        .with_sort_key(30),
                 )
             })
         };
@@ -285,12 +282,7 @@ fn project_desktop_sprites(
     }
 }
 
-fn atlas_sprite(
-    atlas_texture: Handle<ImageAsset>,
-    tile: u32,
-    size: Vec2,
-    tint: Color,
-) -> Sprite {
+fn atlas_sprite(atlas_texture: Handle<ImageAsset>, tile: u32, size: Vec2, tint: Color) -> Sprite {
     Sprite::from_texture(atlas_texture, size)
         .with_texture_region(atlas_region(tile))
         .with_sampler(SamplerDescriptor::NEAREST_CLAMP)

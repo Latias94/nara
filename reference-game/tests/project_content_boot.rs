@@ -69,10 +69,7 @@ fn assert_committed_content() {
     );
     assert_eq!(snapshot.images()[0].image().extent().width, 192);
     assert_eq!(snapshot.images()[0].image().extent().height, 176);
-    assert_eq!(
-        snapshot.images()[0].image().pixels().len(),
-        192 * 176 * 4
-    );
+    assert_eq!(snapshot.images()[0].image().pixels().len(), 192 * 176 * 4);
     assert_eq!(
         &snapshot.images()[0].image().pixels()[..4],
         &[118, 59, 54, 255],
