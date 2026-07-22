@@ -2,7 +2,7 @@ use std::{
     cell::RefCell,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
-        Arc, Mutex,
+        Arc, Barrier, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc,
     },
@@ -15,7 +15,8 @@ use nara::{
     app::{
         __RuntimeDriverPort, App, CoreStage, FixedCatchUpPolicy, FixedTime, FixedUpdateSet, Plugin,
         PluginCategory, PluginDeclaration, PluginError, PluginId, PluginShutdownContext,
-        PluginShutdownObligationId, RealTime, RenderTime, RuntimeAdmissionError, RuntimeCandidate,
+        PluginShutdownObligationId, RealTime, RenderTime, RuntimeAdmissionError,
+        RuntimeAdmissionFailure, RuntimeAdmissionReservation, RuntimeCandidate,
         RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
         RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
         RuntimeCloseParticipantPhase, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl,
@@ -23,13 +24,14 @@ use nara::{
         RuntimeControlStatus, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
         RuntimeInstance, RuntimeObligationLedger, RuntimePublicationError,
         RuntimePublicationFailure, RuntimePublicationSlot, RuntimeScopeError, RuntimeState,
-        RuntimeTimeSettings, RuntimeWorldAccessError, StartupStage, VirtualTime,
+        RuntimeTimeSettings, RuntimeWorldAccessError, SealedApp, StartupStage, VirtualTime,
         drive_runtime_quarantine, runtime_quarantine_status,
     },
     core::{ItemLimit, TimeLimit},
     ecs::{
-        Commands, Event, On, Res, ResMut, Resource, World, change_detection::DetectChangesMut,
-        schedule::IntoScheduleConfigs,
+        Commands, Event, On, Res, ResMut, Resource, World,
+        change_detection::DetectChangesMut,
+        schedule::{IntoScheduleConfigs, ScheduleLabel},
     },
     gameplay::{
         GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
@@ -73,13 +75,31 @@ fn configured_app(fixed_time: FixedTime) -> App {
 
 fn start_runtime(app: App) -> RuntimeInstance {
     let sealed = app.seal().unwrap();
-    let candidate = RuntimeCandidate::admit(sealed).unwrap();
+    let candidate = admit_candidate(sealed).unwrap();
     match candidate.complete_startup() {
         Ok(ready) => ready.promote(),
         Err(failure) => {
             panic!("candidate startup failed: {:?}", failure.fault())
         }
     }
+}
+
+fn admit_candidate(sealed: SealedApp) -> Result<RuntimeCandidate, RuntimeAdmissionFailure> {
+    admit_candidate_with(
+        sealed,
+        RuntimeObligationLedger::new(),
+        RuntimeClosePolicy::default(),
+    )
+}
+
+fn admit_candidate_with(
+    sealed: SealedApp,
+    obligations: RuntimeObligationLedger,
+    close_policy: RuntimeClosePolicy,
+) -> Result<RuntimeCandidate, RuntimeAdmissionFailure> {
+    RuntimeAdmissionReservation::try_acquire()
+        .expect("the test process has runtime route capacity")
+        .admit(sealed, obligations, close_policy)
 }
 
 fn accepted_ticket(result: RuntimeControlRequestResult) -> nara::app::RuntimeControlTicket {
@@ -292,7 +312,7 @@ fn runtime_with_failed_service(required: bool) -> RuntimeInstance {
             },
         )
         .unwrap();
-    RuntimeCandidate::admit_with(
+    admit_candidate_with(
         app.seal().unwrap(),
         obligations,
         RuntimeClosePolicy::default(),
@@ -813,7 +833,7 @@ fn duplicate_obligation_registration_returns_the_unconsumed_owner() {
         )
         .unwrap();
 
-    let candidate = RuntimeCandidate::admit_with(
+    let candidate = admit_candidate_with(
         configured_app(FixedTime::default()).seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -844,7 +864,7 @@ fn stop_is_observable_as_stopping_before_close_work_runs() {
             },
         )
         .unwrap();
-    let mut runtime = RuntimeCandidate::admit_with(
+    let mut runtime = admit_candidate_with(
         configured_app(FixedTime::default()).seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -926,7 +946,7 @@ fn close_participant_panics_unwind_out_of_runtime_drive() {
                 },
             )
             .unwrap();
-        let candidate = RuntimeCandidate::admit_with(
+        let candidate = admit_candidate_with(
             configured_app(FixedTime::default()).seal().unwrap(),
             obligations,
             RuntimeClosePolicy::new(Duration::ZERO),
@@ -980,7 +1000,7 @@ fn close_participant_panic_during_drop_retains_the_owner_for_retry() {
                 },
             )
             .unwrap();
-        let runtime = RuntimeCandidate::admit_with(
+        let runtime = admit_candidate_with(
             configured_app(FixedTime::default()).seal().unwrap(),
             obligations,
             RuntimeClosePolicy::new(Duration::ZERO),
@@ -1047,7 +1067,7 @@ fn consuming_retirement_retries_only_unfinished_owners_and_preserves_evidence() 
             },
         )
         .unwrap();
-    let candidate = RuntimeCandidate::admit_with(
+    let candidate = admit_candidate_with(
         configured_app(FixedTime::default()).seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -1109,7 +1129,7 @@ fn dropping_an_incomplete_runtime_does_not_destroy_its_close_owner() {
             },
         )
         .unwrap();
-    let runtime = RuntimeCandidate::admit_with(
+    let runtime = admit_candidate_with(
         configured_app(FixedTime::default()).seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -1170,7 +1190,7 @@ fn quarantine_is_process_observable_and_driven_on_the_owner_thread() {
                 },
             )
             .unwrap();
-        let runtime = RuntimeCandidate::admit_with(
+        let runtime = admit_candidate_with(
             configured_app(FixedTime::default()).seal().unwrap(),
             obligations,
             RuntimeClosePolicy::new(Duration::ZERO),
@@ -1253,7 +1273,7 @@ fn dropping_multiple_runtimes_with_blocked_task_owners_is_bounded_and_reapable()
             .expect("blocked task did not start before the deadline");
         drop(handle);
 
-        let runtime = RuntimeCandidate::admit_with(
+        let runtime = admit_candidate_with(
             app.seal().unwrap(),
             RuntimeObligationLedger::new(),
             RuntimeClosePolicy::new(Duration::ZERO),
@@ -1400,7 +1420,7 @@ fn close_time_fault_remains_visible_after_runtime_stops() {
             },
         )
         .unwrap();
-    let candidate = RuntimeCandidate::admit_with(
+    let candidate = admit_candidate_with(
         app.seal().unwrap(),
         obligations,
         RuntimeClosePolicy::default(),
@@ -1428,7 +1448,7 @@ fn close_scope_protects_the_runtime_error_handler() {
             },
         )
         .unwrap();
-    let mut runtime = RuntimeCandidate::admit_with(
+    let mut runtime = admit_candidate_with(
         configured_app(FixedTime::default()).seal().unwrap(),
         obligations,
         RuntimeClosePolicy::default(),
@@ -1475,8 +1495,7 @@ fn close_is_retryable_and_proves_only_explicitly_transferred_owners() {
         )
         .unwrap();
     let candidate =
-        RuntimeCandidate::admit_with(sealed, obligations, RuntimeClosePolicy::new(Duration::ZERO))
-            .unwrap();
+        admit_candidate_with(sealed, obligations, RuntimeClosePolicy::new(Duration::ZERO)).unwrap();
     let mut runtime = match candidate.complete_startup() {
         Ok(ready) => ready.promote(),
         Err(failure) => {
@@ -1550,6 +1569,9 @@ fn close_is_retryable_and_proves_only_explicitly_transferred_owners() {
 #[test]
 fn dropping_a_live_runtime_begins_best_effort_close_once() {
     let quarantine_before = runtime_quarantine_status();
+    let baseline_reservations = reserve_remaining_runtime_routes();
+    let baseline_available = baseline_reservations.len();
+    drop(baseline_reservations);
     let released = Arc::new(AtomicBool::new(false));
     let begins = Arc::new(AtomicUsize::new(0));
     let polls = Arc::new(AtomicUsize::new(0));
@@ -1570,7 +1592,7 @@ fn dropping_a_live_runtime_begins_best_effort_close_once() {
             },
         )
         .unwrap();
-    let candidate = RuntimeCandidate::admit_with(
+    let candidate = admit_candidate_with(
         app.seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -1587,6 +1609,12 @@ fn dropping_a_live_runtime_begins_best_effort_close_once() {
         runtime_quarantine_status().process_retained(),
         quarantine_before.process_retained() + 1
     );
+    let reservations = reserve_remaining_runtime_routes();
+    assert_eq!(
+        reservations.len() + 1,
+        baseline_available,
+        "a quarantined managed owner must retain its route"
+    );
 
     released.store(true, Ordering::SeqCst);
     let reaped = drive_runtime_quarantine();
@@ -1594,6 +1622,10 @@ fn dropping_a_live_runtime_begins_best_effort_close_once() {
         reaped.process_retained(),
         quarantine_before.process_retained()
     );
+    let released_route = RuntimeAdmissionReservation::try_acquire()
+        .expect("reaping the quarantined owner releases its route");
+    drop(released_route);
+    drop(reservations);
 }
 
 #[test]
@@ -1696,6 +1728,9 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
         }
     }
 
+    let baseline_reservations = reserve_remaining_runtime_routes();
+    let route_capacity = baseline_reservations.len();
+    drop(baseline_reservations);
     let log = Arc::new(Mutex::new(Vec::new()));
     let released = Arc::new(AtomicBool::new(false));
     let plugin_begins = Arc::new(AtomicUsize::new(0));
@@ -1721,7 +1756,7 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
     .unwrap();
     app.set_runner(|_| Ok(nara::app::AppExit::Success)).unwrap();
 
-    let failure = RuntimeCandidate::admit_with(
+    let failure = admit_candidate_with(
         app.seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -1729,6 +1764,8 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
     .unwrap_err();
 
     assert_eq!(failure.error(), RuntimeAdmissionError::RawRunnerInstalled);
+    let retained_route_reservations = reserve_remaining_runtime_routes();
+    assert_eq!(retained_route_reservations.len() + 1, route_capacity);
     assert_eq!(plugin_begins.load(Ordering::SeqCst), 0);
     assert_eq!(host_begins.load(Ordering::SeqCst), 0);
     let mut retirement = failure.begin_retirement();
@@ -1760,6 +1797,132 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
         *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         ["plugin", "host"]
     );
+    let released_route = RuntimeAdmissionReservation::try_acquire()
+        .expect("truthful admission-failure retirement releases its route");
+    drop(released_route);
+    drop(retained_route_reservations);
+}
+
+#[test]
+fn reservation_saturation_precedes_app_and_obligation_transfer() {
+    let mut reservations = reserve_remaining_runtime_routes();
+    let capacity = reservations.len();
+    assert!(capacity >= 131);
+    assert_eq!(reservations.len(), capacity);
+
+    let sealed = configured_app(FixedTime::default()).seal().unwrap();
+    let obligations = RuntimeObligationLedger::new();
+    drop(
+        reservations
+            .pop()
+            .expect("saturated capacity contains one releasable reservation"),
+    );
+    let candidate = RuntimeAdmissionReservation::try_acquire()
+        .expect("releasing one reservation restores capacity")
+        .admit(sealed, obligations, RuntimeClosePolicy::default())
+        .expect("inputs remain owned by the caller until explicit admission");
+    let runtime = candidate.complete_startup().unwrap().promote();
+    finish_runtime(runtime);
+    drop(reservations);
+}
+
+fn reserve_remaining_runtime_routes() -> Vec<RuntimeAdmissionReservation> {
+    let mut reservations = Vec::new();
+    while let Ok(reservation) = RuntimeAdmissionReservation::try_acquire() {
+        reservations.push(reservation);
+    }
+    reservations
+}
+
+#[test]
+fn close_incomplete_retains_its_fault_route_until_truthful_retirement() {
+    let baseline_reservations = reserve_remaining_runtime_routes();
+    let capacity = baseline_reservations.len();
+    drop(baseline_reservations);
+    let released = Arc::new(AtomicBool::new(false));
+    let mut obligations = RuntimeObligationLedger::new();
+    obligations
+        .register(
+            RuntimeCloseParticipantId::new("nara.test.route-retention"),
+            TestCloseParticipant {
+                released: Arc::clone(&released),
+                begins: Arc::new(AtomicUsize::new(0)),
+                polls: Arc::new(AtomicUsize::new(0)),
+            },
+        )
+        .unwrap();
+    let runtime = admit_candidate_with(
+        configured_app(FixedTime::default()).seal().unwrap(),
+        obligations,
+        RuntimeClosePolicy::new(Duration::ZERO),
+    )
+    .unwrap()
+    .complete_startup()
+    .unwrap()
+    .promote();
+    let mut retirement = runtime.begin_retirement();
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::RetirementIncomplete
+    );
+
+    let reservations = reserve_remaining_runtime_routes();
+    assert_eq!(reservations.len() + 1, capacity);
+
+    released.store(true, Ordering::SeqCst);
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    let released_route = RuntimeAdmissionReservation::try_acquire()
+        .expect("truthful retirement releases exactly one route");
+    drop(released_route);
+    drop(reservations);
+}
+
+#[test]
+fn admission_panic_retains_its_owner_and_route_in_process_quarantine() {
+    let quarantine_before = runtime_quarantine_status();
+    let baseline_reservations = reserve_remaining_runtime_routes();
+    let route_capacity = baseline_reservations.len();
+    drop(baseline_reservations);
+
+    let mut app = configured_app(FixedTime::default());
+    app.world_mut().unwrap().add_observer(
+        |_: On<nara::ecs::lifecycle::Add, nara::ecs::observer::Observer>| {
+            panic!("injected observer materialization panic");
+        },
+    );
+    app.add_observer(count_raw_observer).unwrap();
+    let sealed = app.seal().unwrap();
+
+    let admission = catch_unwind(AssertUnwindSafe(|| {
+        RuntimeAdmissionReservation::try_acquire()
+            .expect("the panic test has one runtime route")
+            .admit(
+                sealed,
+                RuntimeObligationLedger::new(),
+                RuntimeClosePolicy::default(),
+            )
+    }));
+
+    assert!(admission.is_err());
+    assert_eq!(
+        runtime_quarantine_status().process_retained(),
+        quarantine_before.process_retained() + 1
+    );
+    let retained_route_reservations = reserve_remaining_runtime_routes();
+    assert_eq!(retained_route_reservations.len() + 1, route_capacity);
+
+    let reaped = drive_runtime_quarantine();
+    assert_eq!(
+        reaped.process_retained(),
+        quarantine_before.process_retained()
+    );
+    let released_route = RuntimeAdmissionReservation::try_acquire()
+        .expect("reaping the admission panic owner releases its route");
+    drop(released_route);
+    drop(retained_route_reservations);
 }
 
 #[test]
@@ -1781,7 +1944,7 @@ fn dropping_an_admission_failure_transfers_its_owner_to_quarantine() {
         .unwrap();
     let mut app = configured_app(FixedTime::default());
     app.set_runner(|_| Ok(nara::app::AppExit::Success)).unwrap();
-    let failure = RuntimeCandidate::admit_with(
+    let failure = admit_candidate_with(
         app.seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -1808,7 +1971,7 @@ fn dropping_an_admission_failure_transfers_its_owner_to_quarantine() {
 fn already_started_app_admission_returns_an_owned_retirement_path() {
     let mut app = configured_app(FixedTime::default());
     app.run_once(Duration::ZERO).unwrap();
-    let failure = RuntimeCandidate::admit(app.seal().unwrap()).unwrap_err();
+    let failure = admit_candidate(app.seal().unwrap()).unwrap_err();
 
     assert_eq!(failure.error(), RuntimeAdmissionError::AppStarted);
     let mut retirement = failure.begin_retirement();
@@ -1820,6 +1983,9 @@ fn already_started_app_admission_returns_an_owned_retirement_path() {
 
 #[test]
 fn startup_failure_retains_pending_owners_until_explicit_retry() {
+    let baseline_reservations = reserve_remaining_runtime_routes();
+    let route_capacity = baseline_reservations.len();
+    drop(baseline_reservations);
     let released = Arc::new(AtomicBool::new(false));
     let begins = Arc::new(AtomicUsize::new(0));
     let polls = Arc::new(AtomicUsize::new(0));
@@ -1836,7 +2002,7 @@ fn startup_failure_retains_pending_owners_until_explicit_retry() {
         .unwrap();
     let mut app = configured_app(FixedTime::default());
     app.add_systems(StartupStage::Core, fail_system).unwrap();
-    let candidate = RuntimeCandidate::admit_with(
+    let candidate = admit_candidate_with(
         app.seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -1850,6 +2016,8 @@ fn startup_failure_retains_pending_owners_until_explicit_retry() {
         failure.retirement_state(),
         RuntimeCandidateRetirementState::Retiring
     );
+    let retained_route_reservations = reserve_remaining_runtime_routes();
+    assert_eq!(retained_route_reservations.len() + 1, route_capacity);
     assert_eq!(
         failure.drive_retirement(),
         RuntimeCandidateRetirementState::RetirementIncomplete
@@ -1864,6 +2032,10 @@ fn startup_failure_retains_pending_owners_until_explicit_retry() {
     );
     assert_eq!(begins.load(Ordering::SeqCst), 1);
     assert_eq!(polls.load(Ordering::SeqCst), 2);
+    let released_route = RuntimeAdmissionReservation::try_acquire()
+        .expect("truthful startup-failure retirement releases its route");
+    drop(released_route);
+    drop(retained_route_reservations);
 }
 
 #[test]
@@ -1885,7 +2057,7 @@ fn dropping_a_startup_failure_transfers_its_owner_to_quarantine() {
         .unwrap();
     let mut app = configured_app(FixedTime::default());
     app.add_systems(StartupStage::Core, fail_system).unwrap();
-    let candidate = RuntimeCandidate::admit_with(
+    let candidate = admit_candidate_with(
         app.seal().unwrap(),
         obligations,
         RuntimeClosePolicy::new(Duration::ZERO),
@@ -1957,7 +2129,7 @@ fn candidate_rejects_shared_world_reporter_authority_before_startup() {
     let mut second_app = configured_app(FixedTime::default());
     second_app.insert_resource(shared).unwrap();
     for app in [first_app, second_app] {
-        let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let candidate = admit_candidate(app.seal().unwrap()).unwrap();
         let mut failure = candidate.complete_startup().unwrap_err();
 
         assert_eq!(
@@ -1980,7 +2152,7 @@ fn missing_or_replaced_candidate_fault_reporter_prevents_startup() {
         if replace {
             world.insert_resource(RuntimeFaultReporter::new());
         }
-        let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let candidate = admit_candidate(app.seal().unwrap()).unwrap();
 
         let mut failure = candidate.complete_startup().unwrap_err();
 
@@ -1996,7 +2168,7 @@ fn missing_or_replaced_candidate_fault_reporter_prevents_startup() {
 }
 
 #[test]
-fn missing_or_replaced_candidate_error_handler_prevents_startup() {
+fn admission_rebinds_missing_or_replaced_error_handler_before_startup() {
     for replace in [false, true] {
         let mut app = app_with_runtime_scope_observer();
         let world = app.world_mut().unwrap();
@@ -2006,7 +2178,7 @@ fn missing_or_replaced_candidate_error_handler_prevents_startup() {
         }
         app.add_systems(StartupStage::Runtime, trigger_runtime_scope_error)
             .unwrap();
-        let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let candidate = admit_candidate(app.seal().unwrap()).unwrap();
 
         let mut failure = candidate.complete_startup().unwrap_err();
 
@@ -2024,7 +2196,7 @@ struct CandidateAdmissionProbe(u64);
 #[test]
 fn unpublished_candidate_scope_materializes_host_state_before_startup() {
     let app = configured_app(FixedTime::default());
-    let mut candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+    let mut candidate = admit_candidate(app.seal().unwrap()).unwrap();
 
     candidate
         .with_admission_scope(|scope| {
@@ -2042,7 +2214,7 @@ fn unpublished_candidate_scope_materializes_host_state_before_startup() {
 #[test]
 fn unpublished_candidate_scope_rejects_replaced_fault_authority() {
     let app = configured_app(FixedTime::default());
-    let mut candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+    let mut candidate = admit_candidate(app.seal().unwrap()).unwrap();
 
     let error = candidate
         .with_admission_scope(|scope| {
@@ -2179,6 +2351,18 @@ struct TestSystemError;
 #[derive(Event)]
 struct RuntimeScopeFaultEvent;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
+struct RawAdmissionSchedule;
+
+#[derive(Default, Resource)]
+struct RawObserverCount(usize);
+
+#[derive(Resource)]
+struct RuntimeOverlapGate {
+    entered: mpsc::SyncSender<()>,
+    release: Arc<Barrier>,
+}
+
 impl std::fmt::Display for TestSystemError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("injected system failure")
@@ -2186,6 +2370,24 @@ impl std::fmt::Display for TestSystemError {
 }
 
 impl std::error::Error for TestSystemError {}
+
+fn overlap_gate(world: &mut World) {
+    let gate = world.resource::<RuntimeOverlapGate>();
+    gate.entered.send(()).unwrap();
+    gate.release.wait();
+}
+
+fn overlap_fail_system() -> Result<(), BevyError> {
+    Err(BevyError::error(TestSystemError))
+}
+
+fn overlap_fail_condition() -> Result<bool, BevyError> {
+    Err(BevyError::error(TestSystemError))
+}
+
+fn overlap_condition_target() {}
+
+fn overlap_healthy_system() {}
 
 fn ignore_bevy_error(_error: BevyError, _context: ErrorContext) {}
 
@@ -2266,6 +2468,21 @@ fn queue_failing_default_command(mut commands: Commands) {
     });
 }
 
+static EXPLICIT_COMMAND_ERROR_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+fn count_explicit_command_error(_error: BevyError, _context: ErrorContext) {
+    EXPLICIT_COMMAND_ERROR_COUNT.fetch_add(1, Ordering::SeqCst);
+}
+
+fn queue_failing_handled_command(mut commands: Commands) {
+    commands.queue_handled(
+        |_: &mut nara::ecs::World| -> Result<(), BevyError> {
+            Err(BevyError::error(TestSystemError))
+        },
+        count_explicit_command_error,
+    );
+}
+
 fn fail_system() -> Result<(), BevyError> {
     Err(BevyError::error(TestSystemError))
 }
@@ -2278,6 +2495,10 @@ fn fail_runtime_scope_observer(_: On<RuntimeScopeFaultEvent>) -> Result<(), Bevy
     Err(BevyError::error(TestSystemError))
 }
 
+fn count_raw_observer(_: On<RuntimeScopeFaultEvent>, mut count: ResMut<RawObserverCount>) {
+    count.0 += 1;
+}
+
 fn trigger_runtime_scope_error(world: &mut nara::ecs::World) {
     world.trigger(RuntimeScopeFaultEvent);
 }
@@ -2286,6 +2507,45 @@ fn app_with_runtime_scope_observer() -> App {
     let mut app = configured_app(FixedTime::default());
     app.add_observer(fail_runtime_scope_observer).unwrap();
     app
+}
+
+#[test]
+fn app_observers_begin_at_the_first_execution_boundary() {
+    let mut app = App::new();
+    app.insert_resource(RawObserverCount::default())
+        .unwrap()
+        .add_observer(count_raw_observer)
+        .unwrap()
+        .add_systems(StartupStage::Core, trigger_runtime_scope_error)
+        .unwrap();
+
+    app.world_mut().unwrap().trigger(RuntimeScopeFaultEvent);
+    assert_eq!(app.world().resource::<RawObserverCount>().0, 0);
+
+    app.run_once(Duration::ZERO).unwrap();
+
+    assert_eq!(app.world().resource::<RawObserverCount>().0, 1);
+}
+
+#[test]
+fn raw_schedule_execution_prevents_later_managed_admission() {
+    let mut app = App::new();
+    app.insert_resource(RawObserverCount::default())
+        .unwrap()
+        .add_observer(count_raw_observer)
+        .unwrap()
+        .init_schedule(RawAdmissionSchedule)
+        .unwrap();
+
+    app.run_schedule(RawAdmissionSchedule).unwrap();
+    let failure = admit_candidate(app.seal().unwrap()).unwrap_err();
+
+    assert_eq!(failure.error(), RuntimeAdmissionError::AppStarted);
+    let mut retirement = failure.begin_retirement();
+    assert_eq!(
+        retirement.drive_retirement(),
+        RuntimeCandidateRetirementState::Retired
+    );
 }
 
 fn panic_system() {
@@ -2303,15 +2563,12 @@ struct NestedRuntimeDriveObservation {
 
 fn drive_nested_runtime(mut observation: ResMut<NestedRuntimeDriveObservation>) {
     observation.fault = NESTED_RUNTIME.with(|slot| {
-        Some(
-            slot.borrow_mut()
-                .as_mut()
-                .expect("nested runtime remains present until the test reclaims it")
-                .drive(Duration::ZERO)
-                .unwrap_err()
-                .fault()
-                .kind(),
-        )
+        slot.borrow_mut()
+            .as_mut()
+            .expect("nested runtime remains present until the test reclaims it")
+            .drive(Duration::ZERO)
+            .err()
+            .map(|error| error.fault().kind())
     });
 }
 
@@ -2331,7 +2588,7 @@ fn fallible_system_and_startup_failures_are_typed_and_unpublished() {
     startup_app
         .add_systems(StartupStage::Core, fail_system)
         .unwrap();
-    let candidate = RuntimeCandidate::admit(startup_app.seal().unwrap()).unwrap();
+    let candidate = admit_candidate(startup_app.seal().unwrap()).unwrap();
     let Err(mut failure) = candidate.complete_startup() else {
         panic!("fallible startup unexpectedly published a ready candidate");
     };
@@ -2340,6 +2597,144 @@ fn fallible_system_and_startup_failures_are_typed_and_unpublished() {
         failure.drive_retirement(),
         RuntimeCandidateRetirementState::Retired
     );
+}
+
+#[test]
+fn overlapping_runtime_schedules_route_failures_to_their_own_reporters() {
+    for _ in 0..8 {
+        run_overlapping_runtime_schedule_round();
+    }
+}
+
+fn run_overlapping_runtime_schedule_round() {
+    let (entered_sender, entered_receiver) = mpsc::sync_channel(5);
+    let release = Arc::new(Barrier::new(6));
+    let system_sender = entered_sender.clone();
+    let system_release = Arc::clone(&release);
+    let system_thread = std::thread::spawn(move || {
+        let mut app = configured_app(FixedTime::default());
+        app.insert_resource(RuntimeOverlapGate {
+            entered: system_sender,
+            release: system_release,
+        })
+        .unwrap()
+        .add_systems(
+            CoreStage::Update,
+            (overlap_gate, overlap_fail_system).chain(),
+        )
+        .unwrap();
+        let mut runtime = start_runtime(app);
+        let fault = runtime.drive(Duration::ZERO).unwrap_err().fault().kind();
+        let state = runtime.state();
+        finish_runtime(runtime);
+        (fault, state)
+    });
+    let condition_sender = entered_sender.clone();
+    let condition_release = Arc::clone(&release);
+    let condition_thread = std::thread::spawn(move || {
+        let mut app = configured_app(FixedTime::default());
+        app.insert_resource(RuntimeOverlapGate {
+            entered: condition_sender,
+            release: condition_release,
+        })
+        .unwrap()
+        .add_systems(
+            CoreStage::Update,
+            (
+                overlap_gate,
+                overlap_condition_target.run_if(overlap_fail_condition),
+            )
+                .chain(),
+        )
+        .unwrap();
+        let mut runtime = start_runtime(app);
+        let fault = runtime.drive(Duration::ZERO).unwrap_err().fault().kind();
+        let state = runtime.state();
+        finish_runtime(runtime);
+        (fault, state)
+    });
+    let command_sender = entered_sender.clone();
+    let command_release = Arc::clone(&release);
+    let command_thread = std::thread::spawn(move || {
+        let mut app = configured_app(FixedTime::default());
+        app.insert_resource(RuntimeOverlapGate {
+            entered: command_sender,
+            release: command_release,
+        })
+        .unwrap()
+        .add_systems(
+            CoreStage::Update,
+            (overlap_gate, queue_failing_default_command).chain(),
+        )
+        .unwrap();
+        let mut runtime = start_runtime(app);
+        let fault = runtime.drive(Duration::ZERO).unwrap_err().fault().kind();
+        let state = runtime.state();
+        finish_runtime(runtime);
+        (fault, state)
+    });
+    let observer_sender = entered_sender.clone();
+    let observer_release = Arc::clone(&release);
+    let observer_thread = std::thread::spawn(move || {
+        let mut app = app_with_runtime_scope_observer();
+        app.insert_resource(RuntimeOverlapGate {
+            entered: observer_sender,
+            release: observer_release,
+        })
+        .unwrap()
+        .add_systems(
+            CoreStage::Update,
+            (overlap_gate, trigger_runtime_scope_error).chain(),
+        )
+        .unwrap();
+        let mut runtime = start_runtime(app);
+        let fault = runtime.drive(Duration::ZERO).unwrap_err().fault().kind();
+        let state = runtime.state();
+        finish_runtime(runtime);
+        (fault, state)
+    });
+    let healthy_release = Arc::clone(&release);
+    let healthy_thread = std::thread::spawn(move || {
+        let mut app = configured_app(FixedTime::default());
+        app.insert_resource(RuntimeOverlapGate {
+            entered: entered_sender,
+            release: healthy_release,
+        })
+        .unwrap()
+        .add_systems(
+            CoreStage::Update,
+            (overlap_gate, overlap_healthy_system).chain(),
+        )
+        .unwrap();
+        let mut runtime = start_runtime(app);
+        let outcome = runtime.drive(Duration::ZERO).unwrap().state();
+        let state = runtime.state();
+        finish_runtime(runtime);
+        (outcome, state)
+    });
+
+    for _ in 0..5 {
+        entered_receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("every runtime entered its overlapping schedule");
+    }
+    release.wait();
+
+    let (system_fault, system_state) = system_thread.join().unwrap();
+    let (condition_fault, condition_state) = condition_thread.join().unwrap();
+    let (command_fault, command_state) = command_thread.join().unwrap();
+    let (observer_fault, observer_state) = observer_thread.join().unwrap();
+    let (healthy_outcome, healthy_state) = healthy_thread.join().unwrap();
+    assert_eq!(system_fault, RuntimeFaultKind::System);
+    assert_eq!(condition_fault, RuntimeFaultKind::RunCondition);
+    assert_eq!(command_fault, RuntimeFaultKind::Command);
+    assert_eq!(observer_fault, RuntimeFaultKind::Observer);
+    assert_eq!(system_state, RuntimeState::Faulted);
+    assert_eq!(condition_state, RuntimeState::Faulted);
+    assert_eq!(command_state, RuntimeState::Faulted);
+    assert_eq!(observer_state, RuntimeState::Faulted);
+    assert_eq!(healthy_outcome, RuntimeState::Running);
+    assert_eq!(healthy_state, RuntimeState::Running);
 }
 
 #[test]
@@ -2356,11 +2751,28 @@ fn default_command_failures_enter_the_runtime_fault_channel() {
 }
 
 #[test]
+fn explicit_command_error_handlers_remain_caller_owned() {
+    EXPLICIT_COMMAND_ERROR_COUNT.store(0, Ordering::SeqCst);
+    let mut app = configured_app(FixedTime::default());
+    app.add_systems(CoreStage::Update, queue_failing_handled_command)
+        .unwrap();
+    let mut runtime = start_runtime(app);
+
+    let outcome = runtime.drive(Duration::ZERO).unwrap();
+
+    assert_eq!(outcome.state(), RuntimeState::Running);
+    assert_eq!(runtime.state(), RuntimeState::Running);
+    assert!(runtime.fault().is_none());
+    assert_eq!(EXPLICIT_COMMAND_ERROR_COUNT.load(Ordering::SeqCst), 1);
+    finish_runtime(runtime);
+}
+
+#[test]
 fn startup_rejects_a_temporarily_replaced_error_handler() {
     let mut app = app_with_runtime_scope_observer();
     app.add_systems(StartupStage::Core, temporarily_ignore_runtime_scope_error)
         .unwrap();
-    let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+    let candidate = admit_candidate(app.seal().unwrap()).unwrap();
 
     let mut failure = candidate.complete_startup().unwrap_err();
 
@@ -2536,7 +2948,7 @@ fn a_preexisting_candidate_fault_prevents_startup_side_effects() {
         .unwrap()
         .add_systems(StartupStage::Core, record_side_effect)
         .unwrap();
-    let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+    let candidate = admit_candidate(app.seal().unwrap()).unwrap();
     candidate.fault_reporter().report(RuntimeFault::engine(
         RuntimeFaultKind::RequiredService,
         "nara.test.pre-start-service",
@@ -2552,8 +2964,7 @@ fn a_preexisting_candidate_fault_prevents_startup_side_effects() {
 
 #[test]
 fn a_fault_after_readiness_is_not_published_as_running() {
-    let candidate =
-        RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
+    let candidate = admit_candidate(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
     let reporter = candidate.fault_reporter();
     let ready = candidate.complete_startup().unwrap();
     let fault = RuntimeFault::engine(
@@ -2570,8 +2981,7 @@ fn a_fault_after_readiness_is_not_published_as_running() {
 
 #[test]
 fn atomic_publication_rejects_a_fault_that_wins_the_reporter_lock() {
-    let candidate =
-        RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
+    let candidate = admit_candidate(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
     let reporter = candidate.fault_reporter();
     let ready = candidate.complete_startup().unwrap();
     let fault = RuntimeFault::engine(
@@ -2595,8 +3005,7 @@ fn atomic_publication_rejects_a_fault_that_wins_the_reporter_lock() {
 
 #[test]
 fn atomic_publication_installs_the_owner_before_a_later_reported_fault() {
-    let candidate =
-        RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
+    let candidate = admit_candidate(configured_app(FixedTime::default()).seal().unwrap()).unwrap();
     let reporter = candidate.fault_reporter();
     let ready = candidate.complete_startup().unwrap();
     let mut slot = RuntimePublicationSlot::new();
@@ -2623,11 +3032,14 @@ fn atomic_publication_installs_the_owner_before_a_later_reported_fault() {
 
 #[test]
 fn atomic_publication_preserves_an_occupied_slot_and_retires_the_rejected_owner() {
-    let first = RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap())
+    let baseline_reservations = reserve_remaining_runtime_routes();
+    let route_capacity = baseline_reservations.len();
+    drop(baseline_reservations);
+    let first = admit_candidate(configured_app(FixedTime::default()).seal().unwrap())
         .unwrap()
         .complete_startup()
         .unwrap();
-    let second = RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap())
+    let second = admit_candidate(configured_app(FixedTime::default()).seal().unwrap())
         .unwrap()
         .complete_startup()
         .unwrap();
@@ -2642,17 +3054,26 @@ fn atomic_publication_preserves_an_occupied_slot_and_retires_the_rejected_owner(
         &RuntimePublicationError::DestinationOccupied
     );
     assert_eq!(slot.runtime().unwrap().generation(), first_generation);
+    let retained_route_reservations = reserve_remaining_runtime_routes();
+    assert_eq!(retained_route_reservations.len() + 2, route_capacity);
     finish_publication_failure(failure);
+    let rejected_route = RuntimeAdmissionReservation::try_acquire()
+        .expect("retiring the rejected publication owner releases one route");
     finish_runtime(slot.take().unwrap());
+    let published_route = RuntimeAdmissionReservation::try_acquire()
+        .expect("retiring the published runtime releases its distinct route");
+    drop(published_route);
+    drop(rejected_route);
+    drop(retained_route_reservations);
 }
 
 #[test]
 fn a_consumed_publication_slot_cannot_publish_another_generation() {
-    let first = RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap())
+    let first = admit_candidate(configured_app(FixedTime::default()).seal().unwrap())
         .unwrap()
         .complete_startup()
         .unwrap();
-    let second = RuntimeCandidate::admit(configured_app(FixedTime::default()).seal().unwrap())
+    let second = admit_candidate(configured_app(FixedTime::default()).seal().unwrap())
         .unwrap()
         .complete_startup()
         .unwrap();
@@ -2713,7 +3134,7 @@ fn rust_system_panics_unwind_from_variable_and_every_fixed_set() {
 }
 
 #[test]
-fn nested_runtime_drive_is_typed_instead_of_deadlocking() {
+fn nested_runtime_drive_keeps_both_runtime_routes_independent() {
     let inner = start_runtime(configured_app(FixedTime::default()));
     NESTED_RUNTIME.with(|slot| {
         assert!(slot.replace(Some(inner)).is_none());
@@ -2735,18 +3156,17 @@ fn nested_runtime_drive_is_typed_instead_of_deadlocking() {
             .world()
             .resource::<NestedRuntimeDriveObservation>()
             .fault,
-        Some(RuntimeFaultKind::ScheduleAuthority)
+        None
     );
-    let mut inner = NESTED_RUNTIME.with(|slot| {
+    let inner = NESTED_RUNTIME.with(|slot| {
         slot.borrow_mut()
             .take()
             .expect("nested runtime is reclaimed exactly once")
     });
-    assert_eq!(inner.state(), RuntimeState::Faulted);
-    accepted_ticket(inner.request_control(RuntimeControl::Stop));
-    inner.drive(Duration::ZERO).unwrap();
-    accepted_ticket(outer.request_control(RuntimeControl::Stop));
-    outer.drive(Duration::ZERO).unwrap();
+    assert_eq!(inner.state(), RuntimeState::Running);
+    assert_eq!(outer.state(), RuntimeState::Running);
+    finish_runtime(inner);
+    finish_runtime(outer);
 }
 
 fn replace_queue_before_acknowledge(mut queue: ResMut<GameplayCommandQueue>) {

@@ -9,8 +9,9 @@ use std::{
 use nara::{
     app::{
         CoreStage, FixedUpdateSet, PluginCategory, PluginDeclaration, PluginDefinition, PluginId,
-        RuntimeCandidate, RuntimeControl, RuntimeControlRequestResult, RuntimeFault,
-        RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance, RuntimeState,
+        RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeControl,
+        RuntimeControlRequestResult, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
+        RuntimeInstance, RuntimeObligationLedger, RuntimeState,
     },
     ecs::{
         Entity, Resource, With,
@@ -904,7 +905,14 @@ fn build_adapter_retry_runtime(
     let snapshot = loader.load(&project, &plan).unwrap();
     let scene = snapshot.expanded_startup_scene().clone();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeCandidate::admit(sealed).unwrap();
+    let mut candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            sealed,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut World| {

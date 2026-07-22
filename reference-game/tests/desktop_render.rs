@@ -12,7 +12,9 @@ use std::{
 };
 
 use nara::{
-    app::{RuntimeCandidate, RuntimeInstance},
+    app::{
+        RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
+    },
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     material::SamplerDescriptor,
     prelude::{FixedTime, Vec2},
@@ -281,9 +283,8 @@ fn render_terminal(
         player_sprite.material.image.is_some()
             && player_sprite.material.image == enemy_sprite.material.image
     });
-    let player_and_enemy_regions_are_distinct = enemy_sprite.is_some_and(|enemy_sprite| {
-        player_sprite.texture_region != enemy_sprite.texture_region
-    });
+    let player_and_enemy_regions_are_distinct = enemy_sprite
+        .is_some_and(|enemy_sprite| player_sprite.texture_region != enemy_sprite.texture_region);
     let atlas_sprites_use_nearest_sampling = extracted
         .as_slice()
         .iter()
@@ -323,7 +324,14 @@ fn render_runtime(hit_points: Option<i64>, defeated_enemies: u64) -> RuntimeInst
     let content = loader.load(&project, &plan).unwrap();
     let scene = content.expanded_startup_scene().clone();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeCandidate::admit(sealed).unwrap();
+    let mut candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            sealed,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {

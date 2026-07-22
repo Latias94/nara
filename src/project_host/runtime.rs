@@ -8,10 +8,10 @@ use std::{
 
 use nara_app::{
     AppExit, PluginError, PluginHook, PluginHookMutation, PluginInstantiationError,
-    PluginPlanError, PluginPrepareError, RuntimeAdmissionError, RuntimeCandidateFailure,
-    RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseErrorDisposition,
-    RuntimeCloseEvidence, RuntimeCloseParticipantPhase, RuntimeClosePolicy,
-    RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
+    PluginPlanError, PluginPrepareError, RuntimeAdmissionError, RuntimeAdmissionReservation,
+    RuntimeCandidateFailure, RuntimeCandidateRetirementState, RuntimeCloseCause,
+    RuntimeCloseErrorDisposition, RuntimeCloseEvidence, RuntimeCloseParticipantPhase,
+    RuntimeClosePolicy, RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
     RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket, RuntimeFault,
     RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger,
     RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
@@ -523,6 +523,12 @@ impl ProjectHost {
         attempt: &mut RuntimeStartAttempt,
     ) -> Result<DiagnosticReport, HostFault> {
         let epoch = attempt.epoch;
+        let reservation = RuntimeAdmissionReservation::try_acquire().map_err(|_| {
+            HostFault::new(single_error(
+                "project.run.runtime-capacity-exhausted",
+                "Managed runtime capacity is exhausted",
+            ))
+        })?;
         let inputs = attempt.take_for(self)?;
         let claim = ActiveStartClaim::new(Arc::clone(&self.start_claim), epoch);
         let RuntimeStartInputs {
@@ -533,10 +539,11 @@ impl ProjectHost {
             obligations,
         } = inputs;
 
-        let mut candidate = match plan
-            .plugin_plan()
-            .instantiate_runtime_candidate(obligations, self.cleanup_policy)
-        {
+        let mut candidate = match plan.plugin_plan().instantiate_runtime_candidate(
+            reservation,
+            obligations,
+            self.cleanup_policy,
+        ) {
             Ok(candidate) => candidate,
             Err(owner) => {
                 let diagnostics = runtime_construction_failure_report(owner.error());

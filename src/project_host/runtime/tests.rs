@@ -19,10 +19,10 @@ use std::fs::OpenOptions;
 use nara_app::{
     App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
     PluginDefinitionId, PluginError, PluginId, PluginPrepareFailure, PluginShutdownContext,
-    PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
-    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeFault,
-    RuntimeFaultKind, RuntimeFaultReporter, StartupStage, drive_runtime_quarantine,
-    runtime_quarantine_status,
+    PluginShutdownObligationId, RuntimeAdmissionReservation, RuntimeCloseContext,
+    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
+    RuntimeCloseProgress, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, StartupStage,
+    drive_runtime_quarantine, runtime_quarantine_status,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_app::{RuntimeControl, RuntimeControlRequestResult};
@@ -880,6 +880,39 @@ fn publication_is_one_visibility_cut_and_repeated_starts_use_fresh_generations()
 
     assert_ne!(first_generation, second_generation);
     close_host(&mut host);
+}
+
+#[test]
+fn route_capacity_rejection_keeps_the_same_project_start_attempt_retryable() {
+    let mut reservations = Vec::new();
+    while let Ok(reservation) = RuntimeAdmissionReservation::try_acquire() {
+        reservations.push(reservation);
+    }
+    assert!(reservations.len() >= 131);
+
+    let project = TestProject::new("runtime-route-capacity");
+    let (snapshot, plan) = project.snapshot_and_plan(false);
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+
+    let error = host.complete_start(&mut attempt).unwrap_err();
+    assert_eq!(
+        first_code(&error.diagnostics),
+        "project.run.runtime-capacity-exhausted"
+    );
+    assert!(attempt.inputs.is_some());
+    assert!(host.start_claim.is_active(attempt.epoch));
+    assert!(matches!(host.slot, ProjectHostSlot::Empty));
+
+    drop(
+        reservations
+            .pop()
+            .expect("saturated route capacity has one releasable reservation"),
+    );
+    let diagnostics = host.complete_start(&mut attempt).unwrap();
+    assert!(!diagnostics.has_errors());
+    close_host(&mut host);
+    drop(reservations);
 }
 
 #[test]

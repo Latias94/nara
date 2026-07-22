@@ -9,8 +9,8 @@ use nara_ecs::World;
 use thiserror::Error;
 
 use crate::{
-    App, RuntimeAdmissionError, RuntimeAdmissionRetirement, RuntimeCandidate,
-    RuntimeCandidateRetirementState, RuntimeCloseEvidence, RuntimeClosePolicy,
+    App, RuntimeAdmissionError, RuntimeAdmissionReservation, RuntimeAdmissionRetirement,
+    RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeCloseEvidence, RuntimeClosePolicy,
     RuntimeObligationLedger, RuntimePreparationRetirement,
 };
 
@@ -359,30 +359,42 @@ impl PluginPlan {
     /// owner.
     pub fn instantiate_runtime_candidate(
         &self,
+        reservation: RuntimeAdmissionReservation,
         obligations: RuntimeObligationLedger,
         close_policy: RuntimeClosePolicy,
     ) -> Result<RuntimeCandidate, RuntimeConstructionFailure> {
-        let app = App::new_with_runtime_obligations(obligations);
+        let mut app = App::new_with_runtime_obligations(obligations);
         let prepared = match self.prepare_definitions() {
             Ok(prepared) => prepared,
             Err(error) => {
                 return Err(RuntimeConstructionFailure::plugin(
                     error.into(),
-                    RuntimePreparationRetirement::from_app(app, close_policy),
+                    RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
                 ));
             }
         };
-        let sealed = self
-            .commit_and_seal(app, prepared, close_policy)
+        if let Err(error) = app.commit_plugin_batch(self.commit_batch(prepared)) {
+            return Err(RuntimeConstructionFailure::plugin(
+                error.into(),
+                RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
+            ));
+        }
+        if let Err(error) = app.seal_internal() {
+            return Err(RuntimeConstructionFailure::plugin(
+                error.into(),
+                RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
+            ));
+        }
+        reservation
+            .admit(
+                SealedApp { app },
+                RuntimeObligationLedger::new(),
+                close_policy,
+            )
             .map_err(|failure| {
-                RuntimeConstructionFailure::plugin(failure.error.into(), failure.retirement)
-            })?;
-        RuntimeCandidate::admit_with(sealed, RuntimeObligationLedger::new(), close_policy).map_err(
-            |failure| {
                 let error = failure.error();
                 RuntimeConstructionFailure::admission(error, failure.begin_retirement())
-            },
-        )
+            })
     }
 
     fn prepare_definitions(&self) -> Result<Vec<Arc<dyn Plugin>>, PluginPrepareError> {

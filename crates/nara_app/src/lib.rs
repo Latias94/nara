@@ -11,7 +11,8 @@ use std::{
 
 use nara_ecs::{
     Resource, World,
-    observer::IntoObserver,
+    error::{ErrorHandler, FallbackErrorHandler},
+    observer::{IntoObserver, Observer},
     schedule::{
         InternedScheduleLabel, InternedSystemSet, IntoScheduleConfigs, Schedule,
         ScheduleBuildSettings, ScheduleLabel, Schedules, SystemSet,
@@ -1079,10 +1080,13 @@ pub struct App {
     runtime_obligations: RuntimeObligationLedger,
     runtime_fault_reporter: RuntimeFaultReporter,
     managed_runtime_generation: Option<RuntimeGeneration>,
+    managed_runtime_error_handler: Option<ErrorHandler>,
     managed_runtime_authority_validator: Option<Arc<runtime::__ManagedRuntimeAuthorityValidator>>,
+    pending_observers: Vec<Observer>,
     plugin_lifecycle: PluginLifecycleState,
     plugin_failure_report: Option<PluginFailureReport>,
     active_plugin_hook: Option<(PluginId, PluginHook)>,
+    execution_started: bool,
     started: bool,
 }
 
@@ -1149,10 +1153,13 @@ impl App {
             runtime_obligations: RuntimeObligationLedger::new(),
             runtime_fault_reporter,
             managed_runtime_generation: None,
+            managed_runtime_error_handler: None,
             managed_runtime_authority_validator: None,
+            pending_observers: Vec::new(),
             plugin_lifecycle: PluginLifecycleState::Configuring,
             plugin_failure_report: None,
             active_plugin_hook: None,
+            execution_started: false,
             started: false,
         }
     }
@@ -1240,22 +1247,38 @@ impl App {
 
     /// Registers an observer whose unhandled failures enter the managed runtime fault channel.
     ///
-    /// Nara installs its canonical error handler explicitly on the observer, so supported observer
-    /// failures do not depend on the mutable Bevy fallback handler stored in the [`World`]. Callers
-    /// that need a different error policy should build and drive that observer outside Nara's
-    /// managed fault contract.
+    /// Nara materializes registered observers after the App's final error authority is known. A raw
+    /// App uses its current fallback handler; a managed runtime binds the observer to its reserved
+    /// runtime route before startup and project-content admission. Registered observers become
+    /// active only at that first execution or admission boundary, so they do not observe events
+    /// triggered while the App is still being configured. Callers that need a different error
+    /// policy should build and drive that observer outside Nara's managed fault contract.
     pub fn add_observer<M>(
         &mut self,
         observer: impl IntoObserver<M>,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
-        self.world.spawn(
-            observer
-                .into_observer()
-                .with_error_handler(runtime::runtime_system_error_handler),
-        );
-        self.world.flush();
+        self.pending_observers.push(observer.into_observer());
         Ok(self)
+    }
+
+    fn materialize_pending_observers(&mut self, error_handler: ErrorHandler) {
+        for observer in std::mem::take(&mut self.pending_observers) {
+            self.world.spawn(observer.with_error_handler(error_handler));
+        }
+        self.world.flush();
+    }
+
+    fn materialize_pending_observers_with_current_handler(&mut self) {
+        let error_handler = self.world.fallback_error_handler();
+        self.materialize_pending_observers(error_handler);
+    }
+
+    pub(crate) fn bind_managed_runtime_error_handler(&mut self, error_handler: ErrorHandler) {
+        self.managed_runtime_error_handler = Some(error_handler);
+        self.world
+            .insert_resource(FallbackErrorHandler(error_handler));
+        self.materialize_pending_observers(error_handler);
     }
 
     pub fn configure_sets<M>(
@@ -1347,6 +1370,8 @@ impl App {
             return Err(AppScheduleRunError::MissingSchedule);
         }
         self.seal_internal().map_err(AppScheduleRunError::Plugin)?;
+        self.execution_started = true;
+        self.materialize_pending_observers_with_current_handler();
         let Some(schedule) = self.schedules.get_mut(schedule) else {
             return Err(AppScheduleRunError::MissingSchedule);
         };
@@ -1423,6 +1448,11 @@ impl App {
     #[must_use]
     pub const fn started(&self) -> bool {
         self.started
+    }
+
+    #[must_use]
+    pub(crate) const fn execution_started(&self) -> bool {
+        self.execution_started
     }
 
     pub fn register_plugin_shutdown_obligation(
@@ -1816,6 +1846,8 @@ impl App {
                 self.plugin_failure_report.clone(),
             ));
         }
+        self.execution_started = true;
+        self.materialize_pending_observers_with_current_handler();
         let runner = self
             .runner
             .take()
@@ -1843,6 +1875,8 @@ impl App {
                 self.plugin_failure_report.clone(),
             ));
         }
+        self.execution_started = true;
+        self.materialize_pending_observers_with_current_handler();
 
         if !self.started {
             for stage in StartupStage::ALL {
@@ -1874,6 +1908,7 @@ impl App {
             runtime::validate_managed_fault_boundary(
                 &self.world,
                 &self.runtime_fault_reporter,
+                self.managed_runtime_error_handler,
                 generation,
                 self.managed_runtime_authority_validator.as_ref(),
             )?;
@@ -1885,6 +1920,7 @@ impl App {
             runtime::validate_managed_fault_boundary(
                 &self.world,
                 &self.runtime_fault_reporter,
+                self.managed_runtime_error_handler,
                 generation,
                 self.managed_runtime_authority_validator.as_ref(),
             )?;
@@ -1899,6 +1935,7 @@ impl App {
         runtime::validate_managed_runtime_authority(
             &self.world,
             &self.runtime_fault_reporter,
+            self.managed_runtime_error_handler,
             generation,
             self.managed_runtime_authority_validator.as_ref(),
         )
@@ -2570,7 +2607,14 @@ mod tests {
             .unwrap();
         app.add_systems(CoreStage::FixedUpdate, observe_exact_step_trackers)
             .unwrap();
-        let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let candidate = RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                app.seal().unwrap(),
+                RuntimeObligationLedger::new(),
+                RuntimeClosePolicy::default(),
+            )
+            .unwrap();
         let mut runtime = candidate.complete_startup().unwrap().promote();
         assert!(matches!(
             runtime.request_control(RuntimeControl::Pause),

@@ -533,6 +533,17 @@ mod tests {
         system::{IntoSystem, System},
     };
 
+    fn admit_runtime(app: App) -> nara_app::RuntimeCandidate {
+        nara_app::RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                app.seal().unwrap(),
+                nara_app::RuntimeObligationLedger::new(),
+                nara_app::RuntimeClosePolicy::default(),
+            )
+            .unwrap()
+    }
+
     #[derive(Debug, Default, Resource)]
     struct SecondCameraInjection(bool);
 
@@ -583,7 +594,7 @@ mod tests {
             WgpuRenderPlugin,
         ))
         .unwrap();
-        let candidate = nara_app::RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let candidate = admit_runtime(app);
         let mut runtime = candidate.complete_startup().unwrap().promote();
 
         runtime.drive(std::time::Duration::ZERO).unwrap();
@@ -617,7 +628,7 @@ mod tests {
                 .before(render_wgpu_surfaces),
         )
         .unwrap();
-        let candidate = nara_app::RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let candidate = admit_runtime(app);
         let mut runtime = candidate.complete_startup().unwrap().promote();
 
         runtime.drive(std::time::Duration::ZERO).unwrap();
@@ -667,7 +678,7 @@ mod tests {
                 .remove_resource::<WgpuRenderBackend>()
                 .is_some()
         );
-        let candidate = nara_app::RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let candidate = admit_runtime(app);
         let mut runtime = candidate.complete_startup().unwrap().promote();
 
         runtime

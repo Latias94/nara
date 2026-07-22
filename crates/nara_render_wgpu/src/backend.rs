@@ -798,7 +798,10 @@ fn render_backend_state(state: WgpuBackendState) -> RenderBackendState {
 mod tests {
     use std::sync::Arc;
 
-    use nara_app::{App, RuntimeCandidate, RuntimeCandidateRetirementState, RuntimeGeneration};
+    use nara_app::{
+        App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+        RuntimeGeneration, RuntimeObligationLedger,
+    };
     use nara_ecs::Entity;
     use nara_render::{
         ExtractedView, ExtractedViews, RenderTarget, ViewportRect, build_render_frame_packet,
@@ -871,7 +874,14 @@ mod tests {
     }
 
     fn test_runtime_generation() -> RuntimeGeneration {
-        let candidate = RuntimeCandidate::admit(App::new().seal().unwrap()).unwrap();
+        let candidate = RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                App::new().seal().unwrap(),
+                RuntimeObligationLedger::new(),
+                RuntimeClosePolicy::default(),
+            )
+            .unwrap();
         let ready = candidate.complete_startup().unwrap();
         let runtime = ready.promote();
         let generation = runtime.generation();

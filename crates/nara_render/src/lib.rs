@@ -845,7 +845,10 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use nara_app::{App, RuntimeCandidate, RuntimeCandidateRetirementState};
+    use nara_app::{
+        App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
+        RuntimeObligationLedger,
+    };
     use nara_asset::AssetId;
     use nara_reflect::ComponentRegistryPlugin;
     use nara_window::WindowPlugin;
@@ -1027,7 +1030,14 @@ mod tests {
     }
 
     fn test_runtime_generation() -> RuntimeGeneration {
-        let candidate = RuntimeCandidate::admit(App::new().seal().unwrap()).unwrap();
+        let candidate = RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                App::new().seal().unwrap(),
+                RuntimeObligationLedger::new(),
+                RuntimeClosePolicy::default(),
+            )
+            .unwrap();
         let ready = candidate.complete_startup().unwrap();
         let runtime = ready.promote();
         let generation = runtime.generation();

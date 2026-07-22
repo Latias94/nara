@@ -6,7 +6,10 @@ mod project_content_fixture;
 use std::{num::NonZeroU64, time::Duration};
 
 use nara::{
-    app::{RuntimeCandidate, RuntimeFaultKind, RuntimeInstance, RuntimeState},
+    app::{
+        RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeFaultKind, RuntimeInstance,
+        RuntimeObligationLedger, RuntimeState,
+    },
     core::ItemLimit,
     gameplay::{GameplayCommandQueue, GameplayCommandQueueSettings},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
@@ -295,7 +298,14 @@ fn repeated_retry_keeps_one_runtime_generation() {
 fn rejected_physical_local_command_faults_the_managed_runtime() {
     let (_candidate, plan, _root) = desktop_candidate_plan_and_root();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeCandidate::admit(sealed).unwrap();
+    let mut candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            sealed,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
     candidate
         .with_admission_scope(|scope| {
             scope.apply_command(|world: &mut nara::prelude::World| {
@@ -340,7 +350,14 @@ fn desktop_runtime() -> RuntimeInstance {
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut candidate = RuntimeCandidate::admit(sealed).unwrap();
+    let mut candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            sealed,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {

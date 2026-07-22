@@ -5,14 +5,24 @@ use std::{
     process::Command,
 };
 
-use nara::app::{App, RuntimeAdmissionError, RuntimeCandidate, RuntimeInstance};
+use nara::app::{
+    App, RuntimeAdmissionError, RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance,
+    RuntimeObligationLedger,
+};
 use serde_json::Value;
 use syn::{Fields, ImplItem, Item, Signature, TraitItem, Type, Visibility, visit::Visit};
 
 const NARA_APP_DEPENDENCY_ALLOWLIST: [&str; 4] = ["bevy_ecs", "blake3", "nara_ecs", "thiserror"];
 
 fn start_runtime(app: App) -> RuntimeInstance {
-    let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+    let candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
     match candidate.complete_startup() {
         Ok(ready) => ready.promote(),
         Err(failure) => {
@@ -338,8 +348,34 @@ fn managed_runtime_rejects_the_raw_app_runner_path() {
     app.set_runner(|_| Ok(nara::app::AppExit::Success)).unwrap();
     let sealed = app.seal().unwrap();
 
-    let failure = RuntimeCandidate::admit(sealed).unwrap_err();
+    let failure = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            sealed,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap_err();
     assert_eq!(failure.error(), RuntimeAdmissionError::RawRunnerInstalled);
+}
+
+#[test]
+fn managed_runtime_has_no_process_global_schedule_or_reporter_authority() {
+    let runtime = fs::read_to_string(workspace_root().join("crates/nara_app/src/runtime.rs"))
+        .expect("runtime source must be readable");
+    let identifiers = rust_identifiers(&runtime);
+
+    for forbidden in [
+        "RUNTIME_SCHEDULE_AUTHORITY",
+        "ACTIVE_RUNTIME_REPORTER",
+        "ScheduleAuthority",
+        "ActiveRuntimeReporterGuard",
+    ] {
+        assert!(
+            !identifiers.contains(forbidden),
+            "managed runtime must not restore process-global authority `{forbidden}`"
+        );
+    }
 }
 
 #[test]

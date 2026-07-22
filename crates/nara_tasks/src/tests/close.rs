@@ -10,7 +10,7 @@ use std::{
 
 use nara_app::{
     AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-    PluginLifecycleState, PluginPlan, RuntimeCandidate, RuntimeCandidateRetirementState,
+    PluginLifecycleState, PluginPlan, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
     RuntimeClosePolicy, RuntimeControl, RuntimeControlRequestResult, RuntimeInstance,
     RuntimeObligationLedger, RuntimeState,
 };
@@ -60,12 +60,14 @@ impl Drop for SlowPendingDropThread {
 
 fn start_runtime(app: App, close_timeout: Duration) -> RuntimeInstance {
     let sealed = app.seal().unwrap();
-    let candidate = RuntimeCandidate::admit_with(
-        sealed,
-        nara_app::RuntimeObligationLedger::new(),
-        RuntimeClosePolicy::new(close_timeout),
-    )
-    .unwrap();
+    let candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            sealed,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(close_timeout),
+        )
+        .unwrap();
     match candidate.complete_startup() {
         Ok(ready) => ready.promote(),
         Err(failure) => {
@@ -412,9 +414,11 @@ fn task_plugin_construction_failure_keeps_partial_workers_in_the_runtime_ledger(
         )
         .unwrap();
     let plan = PluginPlan::resolve(plugin(config)).unwrap();
+    let reservation = RuntimeAdmissionReservation::try_acquire().unwrap();
     let (result, probe) =
         TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, 1, || {
             plan.instantiate_runtime_candidate(
+                reservation,
                 RuntimeObligationLedger::new(),
                 RuntimeClosePolicy::default(),
             )

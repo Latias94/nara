@@ -1,10 +1,10 @@
 use super::*;
 use nara_app::{
     __RuntimeDriverPort, App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-    PluginShutdownContext, RuntimeCandidateRetirementState, RuntimeCloseCause, RuntimeCloseContext,
-    RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
-    RuntimeClosePolicy, RuntimeCloseProgress, RuntimeDriverScope, RuntimeFaultKind,
-    RuntimeObligationLedger,
+    PluginShutdownContext, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
+    RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
+    RuntimeCloseParticipantId, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeDriverScope,
+    RuntimeFaultKind, RuntimeObligationLedger,
 };
 use nara_ecs::Resource;
 use nara_gameplay::{
@@ -156,7 +156,14 @@ impl Plugin for FailingShutdownPlugin {
 }
 
 fn start_runtime(app: App) -> RuntimeInstance {
-    let candidate = nara_app::RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+    let candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
     match candidate.complete_startup() {
         Ok(ready) => ready.promote(),
         Err(failure) => {
@@ -217,12 +224,14 @@ fn start_runtime_with_counted_pending_close(
             PendingCloseParticipant { released, polls },
         )
         .unwrap();
-    let candidate = nara_app::RuntimeCandidate::admit_with(
-        app.seal().unwrap(),
-        obligations,
-        RuntimeClosePolicy::new(close_timeout),
-    )
-    .unwrap();
+    let candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            obligations,
+            RuntimeClosePolicy::new(close_timeout),
+        )
+        .unwrap();
     candidate.complete_startup().unwrap().promote()
 }
 

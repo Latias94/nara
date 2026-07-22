@@ -591,7 +591,7 @@ mod desktop_terminal_tests {
     };
 
     use nara_app::{
-        App, RuntimeCandidate, RuntimeCloseParticipant, RuntimeCloseParticipantError,
+        App, RuntimeAdmissionReservation, RuntimeCloseParticipant, RuntimeCloseParticipantError,
         RuntimeCloseParticipantId, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl,
         RuntimeControlRequestResult, RuntimeInstance, RuntimeObligationLedger,
     };
@@ -659,12 +659,13 @@ mod desktop_terminal_tests {
             CloseFailureMode::Pending => RuntimeClosePolicy::new(Duration::ZERO),
             CloseFailureMode::RetryableParticipant => RuntimeClosePolicy::default(),
         };
-        let mut runtime =
-            RuntimeCandidate::admit_with(App::new().seal().unwrap(), obligations, policy)
-                .unwrap()
-                .complete_startup()
-                .unwrap()
-                .promote();
+        let mut runtime = RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(App::new().seal().unwrap(), obligations, policy)
+            .unwrap()
+            .complete_startup()
+            .unwrap()
+            .promote();
         assert!(matches!(
             runtime.request_control(RuntimeControl::Stop),
             RuntimeControlRequestResult::Accepted(_)

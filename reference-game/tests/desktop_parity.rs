@@ -6,7 +6,9 @@ mod project_content_fixture;
 use std::time::Duration;
 
 use nara::{
-    app::{RuntimeCandidate, RuntimeInstance},
+    app::{
+        RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
+    },
     gameplay::{GameplayCommandQueue, GameplayCommandSubmission},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     project_host::{ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan},
@@ -73,7 +75,14 @@ fn runtime_with_scene(
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let scene = snapshot.expanded_startup_scene().clone();
     let sealed = plan.plugin_plan().instantiate().unwrap();
-    let mut runtime = RuntimeCandidate::admit(sealed).unwrap();
+    let mut runtime = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            sealed,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
     runtime
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {

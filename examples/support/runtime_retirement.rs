@@ -99,10 +99,10 @@ fn finish_runtime_after_winit_with_timeout(
 mod tests {
     use super::*;
     use nara::app::{
-        App, RuntimeCandidate, RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseParticipant,
-        RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
-        RuntimeCloseProgress, RuntimeControl, RuntimeControlRequestResult, RuntimeObligationLedger,
-        RuntimeState,
+        App, RuntimeAdmissionReservation, RuntimeCloseCause, RuntimeCloseContext,
+        RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
+        RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeControlRequestResult,
+        RuntimeObligationLedger, RuntimeState,
     };
     use std::sync::{
         Arc,
@@ -139,9 +139,10 @@ mod tests {
         obligations: RuntimeObligationLedger,
         close_policy: RuntimeClosePolicy,
     ) -> nara::app::RuntimeInstance {
-        let candidate =
-            RuntimeCandidate::admit_with(App::new().seal().unwrap(), obligations, close_policy)
-                .unwrap();
+        let candidate = RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(App::new().seal().unwrap(), obligations, close_policy)
+            .unwrap();
         candidate.complete_startup().unwrap().promote()
     }
 

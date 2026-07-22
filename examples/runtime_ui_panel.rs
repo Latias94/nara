@@ -23,7 +23,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
     app.world_mut()?.insert_resource(AssetServer::new());
-    let candidate = nara::app::RuntimeCandidate::admit(app.seal()?)?;
+    let candidate = nara::app::RuntimeAdmissionReservation::try_acquire()?.admit(
+        app.seal()?,
+        nara::app::RuntimeObligationLedger::new(),
+        nara::app::RuntimeClosePolicy::default(),
+    )?;
     let mut runtime = candidate.complete_startup()?.promote();
     let run_result = WinitRunner::default().run(&mut runtime);
     finish_runtime_after_winit(run_result, runtime)

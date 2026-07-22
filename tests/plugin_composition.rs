@@ -11,8 +11,9 @@ use nara::{
     app::{
         AddPluginsError, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
         PluginError, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
-        PluginProductCapability, PluginSchemaProviderId, RuntimeCandidate,
-        RuntimeCandidateRetirementState, RuntimeFaultKind,
+        PluginProductCapability, PluginSchemaProviderId, RuntimeAdmissionReservation,
+        RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeFaultKind,
+        RuntimeObligationLedger,
     },
     fs::{FileCapability, TrustMode},
     project::ProductCapability,
@@ -462,7 +463,14 @@ fn code_first_runtime_faults_when_the_registry_is_rewrapped_with_its_same_snapsh
         .unwrap();
     app.add_systems(CoreStage::Last, rewrap_code_first_registry)
         .unwrap();
-    let candidate = RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+    let candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
     let mut runtime = candidate.complete_startup().unwrap().promote();
 
     let error = runtime.drive(Duration::ZERO).unwrap_err();

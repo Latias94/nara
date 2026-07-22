@@ -5,15 +5,13 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
     ops::{Deref, DerefMut},
     sync::{
-        Arc, Mutex, MutexGuard, OnceLock, TryLockError,
+        Arc, Mutex, MutexGuard, OnceLock,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 
-use bevy_ecs::error::{
-    BevyError, ErrorContext, ErrorHandler, FallbackErrorHandler, Severity, match_severity,
-};
+use bevy_ecs::error::{ErrorHandler, FallbackErrorHandler};
 use nara_ecs::{
     Command, Mut, Resource, World, change_detection::Tick, component::Mutable,
     lifecycle::HookContext, world::DeferredWorld,
@@ -25,6 +23,10 @@ use crate::{
     RuntimeTimeSettings, SealedApp,
 };
 
+mod fault_route;
+
+use fault_route::{FaultRouteLease, FaultRouteReservation, FaultRouteToken};
+
 const MAX_RETAINED_CONTROL_RESULTS: usize = 32;
 const MAX_QUARANTINED_RUNTIME_OWNERS_PER_THREAD: usize = 32;
 const MAX_QUARANTINED_RUNTIME_OWNERS_PER_PROCESS: usize = 128;
@@ -34,8 +36,6 @@ static NEXT_RUNTIME_GENERATION: AtomicU64 = AtomicU64::new(1);
 static QUARANTINED_RUNTIME_OWNER_COUNT: AtomicUsize = AtomicUsize::new(0);
 static TOTAL_QUARANTINED_RUNTIME_OWNERS: AtomicU64 = AtomicU64::new(0);
 static TOTAL_REAPED_RUNTIME_OWNERS: AtomicU64 = AtomicU64::new(0);
-static RUNTIME_SCHEDULE_AUTHORITY: Mutex<()> = Mutex::new(());
-static ACTIVE_RUNTIME_REPORTER: Mutex<Option<RuntimeFaultReporter>> = Mutex::new(None);
 
 /// Hidden product plumbing for an engine-owned authority that must be checked at managed
 /// runtime safe points. This is intentionally one callback rather than a public event bus or a
@@ -96,16 +96,18 @@ pub(crate) fn initialize_runtime_fault_bridge(world: &mut World, reporter: Runti
 pub(crate) fn validate_managed_fault_boundary(
     world: &World,
     reporter: &RuntimeFaultReporter,
+    expected_handler: Option<ErrorHandler>,
     generation: RuntimeGeneration,
     authority: Option<&Arc<__ManagedRuntimeAuthorityValidator>>,
 ) -> Result<(), AppRunError> {
-    validate_managed_runtime_authority(world, reporter, generation, authority)
+    validate_managed_runtime_authority(world, reporter, expected_handler, generation, authority)
         .map_err(|fault| AppRunError::managed_runtime(fault.kind(), fault.source()))
 }
 
 pub(crate) fn validate_managed_runtime_authority(
     world: &World,
     reporter: &RuntimeFaultReporter,
+    expected_handler: Option<ErrorHandler>,
     generation: RuntimeGeneration,
     authority: Option<&Arc<__ManagedRuntimeAuthorityValidator>>,
 ) -> Result<(), RuntimeFault> {
@@ -115,7 +117,9 @@ pub(crate) fn validate_managed_runtime_authority(
     let fault = (world.get_resource::<RuntimeGeneration>() != Some(&generation))
         .then(runtime_fault_bridge_authority_fault)
         .or_else(|| authority.and_then(|validator| validator(world, generation).err()))
-        .or_else(|| validate_runtime_fault_bridge_authority(world, reporter).err());
+        .or_else(|| {
+            validate_runtime_fault_bridge_authority(world, reporter, expected_handler).err()
+        });
     let Some(fault) = fault else {
         return Ok(());
     };
@@ -126,15 +130,15 @@ pub(crate) fn validate_managed_runtime_authority(
 fn validate_runtime_fault_bridge_authority(
     world: &World,
     reporter: &RuntimeFaultReporter,
+    expected_handler: Option<ErrorHandler>,
 ) -> Result<(), RuntimeFault> {
     let reporter_valid = world
         .get_resource::<RuntimeFaultReporter>()
         .is_some_and(|world_reporter| world_reporter.has_authority(reporter));
     let handler_valid = world
         .get_resource::<FallbackErrorHandler>()
-        .is_some_and(|handler| {
-            std::ptr::fn_addr_eq(handler.0, runtime_system_error_handler as ErrorHandler)
-        });
+        .zip(expected_handler)
+        .is_some_and(|(handler, expected)| std::ptr::fn_addr_eq(handler.0, expected));
     let revision_valid = world.contains_resource::<RuntimeFaultBridgeRevision>();
     if reporter_valid && handler_valid && revision_valid {
         Ok(())
@@ -190,7 +194,6 @@ pub enum RuntimeFaultKind {
     AppFrame,
     FaultReporterAuthority,
     RuntimeAuthority,
-    ScheduleAuthority,
     System,
     RunCondition,
     Command,
@@ -960,6 +963,53 @@ pub fn drive_runtime_quarantine() -> RuntimeQuarantineStatus {
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeAdmissionReservationError {
+    #[error("managed runtime fault-route capacity is exhausted")]
+    CapacityExhausted,
+}
+
+/// Move-only capacity reservation for one managed runtime fault route.
+///
+/// Acquire this value before transferring a sealed App or close obligations. Once admission starts,
+/// every failure retains the route together with the runtime owner until retirement completes.
+#[must_use = "a runtime admission reservation must be admitted or released"]
+pub struct RuntimeAdmissionReservation {
+    route: Option<FaultRouteReservation>,
+}
+
+impl Debug for RuntimeAdmissionReservation {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeAdmissionReservation")
+            .field("active", &self.route.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl RuntimeAdmissionReservation {
+    pub fn try_acquire() -> Result<Self, RuntimeAdmissionReservationError> {
+        let route = FaultRouteReservation::try_acquire()
+            .ok_or(RuntimeAdmissionReservationError::CapacityExhausted)?;
+        Ok(Self { route: Some(route) })
+    }
+
+    pub fn admit(
+        mut self,
+        sealed: SealedApp,
+        obligations: RuntimeObligationLedger,
+        close_policy: RuntimeClosePolicy,
+    ) -> Result<RuntimeCandidate, RuntimeAdmissionFailure> {
+        RuntimeCandidate::admit_reserved(self.take_route(), sealed, obligations, close_policy)
+    }
+
+    fn take_route(&mut self) -> FaultRouteReservation {
+        self.route
+            .take()
+            .expect("runtime admission reservation transfers its route once")
+    }
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeAdmissionError {
     #[error("a managed runtime requires an unstarted app")]
     AppStarted,
@@ -975,9 +1025,7 @@ pub enum RuntimeAdmissionError {
 
 pub struct RuntimeAdmissionFailure {
     error: RuntimeAdmissionError,
-    sealed: Option<Box<SealedApp>>,
-    obligations: Option<RuntimeObligationLedger>,
-    close_policy: RuntimeClosePolicy,
+    owner: Option<RuntimeOwner>,
 }
 
 impl Debug for RuntimeAdmissionFailure {
@@ -985,7 +1033,10 @@ impl Debug for RuntimeAdmissionFailure {
         formatter
             .debug_struct("RuntimeAdmissionFailure")
             .field("error", &self.error)
-            .field("obligations", &self.obligations)
+            .field(
+                "retirement_state",
+                &self.owner.as_ref().map(|owner| owner.close_state()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -1003,17 +1054,10 @@ impl std::error::Error for RuntimeAdmissionFailure {
 }
 
 impl RuntimeAdmissionFailure {
-    fn new(
-        error: RuntimeAdmissionError,
-        sealed: SealedApp,
-        obligations: RuntimeObligationLedger,
-        close_policy: RuntimeClosePolicy,
-    ) -> Self {
+    fn new(error: RuntimeAdmissionError, owner: RuntimeOwner) -> Self {
         Self {
             error,
-            sealed: Some(Box::new(sealed)),
-            obligations: Some(obligations),
-            close_policy,
+            owner: Some(owner),
         }
     }
 
@@ -1030,39 +1074,17 @@ impl RuntimeAdmissionFailure {
         RuntimeAdmissionRetirement { error, owner }
     }
 
-    #[must_use]
-    pub fn into_inputs(mut self) -> (SealedApp, RuntimeObligationLedger, RuntimeClosePolicy) {
-        let sealed = *self
-            .sealed
-            .take()
-            .expect("admission failure retains its sealed app until consumed");
-        let obligations = self
-            .obligations
-            .take()
-            .expect("admission failure retains its obligation ledger until consumed");
-        (sealed, obligations, self.close_policy)
-    }
-
     fn take_owner(&mut self) -> RuntimeOwner {
-        let sealed = self
-            .sealed
+        self.owner
             .take()
-            .expect("admission failure transfers its sealed app once");
-        let mut obligations = self
-            .obligations
-            .take()
-            .expect("admission failure transfers its obligation ledger once");
-        let mut app = sealed.app;
-        let reporter = app.runtime_fault_reporter.clone();
-        obligations.append_for_retirement(app.take_runtime_obligations());
-        RuntimeOwner::new(app, obligations, reporter, self.close_policy)
+            .expect("admission failure transfers its runtime owner once")
     }
 }
 
 impl Drop for RuntimeAdmissionFailure {
     fn drop(&mut self) {
-        if self.sealed.is_some() {
-            drop(self.take_owner());
+        if let Some(owner) = self.owner.take() {
+            drop(owner);
         }
     }
 }
@@ -1140,79 +1162,62 @@ impl Debug for RuntimeCandidate {
 }
 
 impl RuntimeCandidate {
-    pub fn admit(sealed: SealedApp) -> Result<Self, RuntimeAdmissionFailure> {
-        Self::admit_with(
-            sealed,
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-    }
-
-    pub fn admit_with(
+    fn admit_reserved(
+        reservation: FaultRouteReservation,
         sealed: SealedApp,
-        mut obligations: RuntimeObligationLedger,
+        obligations: RuntimeObligationLedger,
         close_policy: RuntimeClosePolicy,
     ) -> Result<Self, RuntimeAdmissionFailure> {
-        if sealed.app.started() {
-            return Err(RuntimeAdmissionFailure::new(
-                RuntimeAdmissionError::AppStarted,
-                sealed,
-                obligations,
-                close_policy,
-            ));
-        }
-        if sealed.app.has_raw_runner() {
-            return Err(RuntimeAdmissionFailure::new(
-                RuntimeAdmissionError::RawRunnerInstalled,
-                sealed,
-                obligations,
-                close_policy,
-            ));
-        }
-        if sealed.app.plugin_lifecycle_state() != PluginLifecycleState::Ready {
-            return Err(RuntimeAdmissionFailure::new(
-                RuntimeAdmissionError::AppNotReady {
-                    state: sealed.app.plugin_lifecycle_state(),
-                },
-                sealed,
-                obligations,
-                close_policy,
-            ));
-        }
-        if let Err(error) = obligations.preflight_append(&sealed.app.runtime_obligations) {
-            return Err(RuntimeAdmissionFailure::new(
-                error.into(),
-                sealed,
-                obligations,
-                close_policy,
-            ));
+        let app = sealed.app;
+        let reporter = app.runtime_fault_reporter.clone();
+        let route = reservation.activate(reporter.clone());
+        let mut owner = RuntimeOwner::new(app, obligations, reporter, close_policy, Some(route));
+        let route_handler = owner
+            .fault_route
+            .as_ref()
+            .expect("an admitted runtime owner retains its activated fault route")
+            .handler();
+        owner.app.bind_managed_runtime_error_handler(route_handler);
+
+        let admission_error = if owner.app.execution_started() {
+            Some(RuntimeAdmissionError::AppStarted)
+        } else if owner.app.has_raw_runner() {
+            Some(RuntimeAdmissionError::RawRunnerInstalled)
+        } else if owner.app.plugin_lifecycle_state() != PluginLifecycleState::Ready {
+            Some(RuntimeAdmissionError::AppNotReady {
+                state: owner.app.plugin_lifecycle_state(),
+            })
+        } else {
+            owner
+                .obligations
+                .preflight_append(&owner.app.runtime_obligations)
+                .err()
+                .map(Into::into)
+        };
+
+        if let Some(error) = admission_error {
+            let app_obligations = owner.app.take_runtime_obligations();
+            owner.obligations.append_for_retirement(app_obligations);
+            return Err(RuntimeAdmissionFailure::new(error, owner));
         }
 
         let generation = match allocate_generation() {
             Ok(generation) => generation,
             Err(error) => {
-                return Err(RuntimeAdmissionFailure::new(
-                    error,
-                    sealed,
-                    obligations,
-                    close_policy,
-                ));
+                let app_obligations = owner.app.take_runtime_obligations();
+                owner.obligations.append_for_retirement(app_obligations);
+                return Err(RuntimeAdmissionFailure::new(error, owner));
             }
         };
-        let mut app = sealed.app;
-        obligations
-            .append(app.take_runtime_obligations())
+        let app_obligations = owner.app.take_runtime_obligations();
+        owner
+            .obligations
+            .append(app_obligations)
             .expect("runtime obligation conflicts were preflighted");
-        let reporter = app.runtime_fault_reporter.clone();
-        app.managed_runtime_generation = Some(generation);
-        app.world.insert_resource(generation);
-        app.world
-            .insert_resource(FallbackErrorHandler(runtime_system_error_handler));
+        owner.app.managed_runtime_generation = Some(generation);
+        owner.app.world.insert_resource(generation);
 
-        Ok(Self {
-            owner: RuntimeOwner::new(app, obligations, reporter, close_policy),
-            generation,
-        })
+        Ok(Self { owner, generation })
     }
 
     #[must_use]
@@ -1270,8 +1275,10 @@ impl RuntimeCandidate {
                 fault,
             ));
         }
-        let startup =
-            with_runtime_system_fault_capture(&reporter, || self.owner.app.complete_startup_once());
+        let fault_route = self.owner.fault_route_token();
+        let startup = with_runtime_system_fault_capture(fault_route, || {
+            self.owner.app.complete_startup_once()
+        });
         let fault = match startup {
             Ok(Ok(())) => None,
             Ok(Err(error)) => Some(RuntimeFault::app(error)),
@@ -1339,7 +1346,26 @@ impl RuntimePreparationRetirement {
     ) -> Self {
         obligations.append_for_retirement(app.take_runtime_obligations());
         let reporter = app.runtime_fault_reporter.clone();
-        let mut owner = RuntimeOwner::new(app, obligations, reporter, close_policy);
+        let mut owner = RuntimeOwner::new(app, obligations, reporter, close_policy, None);
+        owner.begin_close();
+        Self { owner: Some(owner) }
+    }
+
+    pub(crate) fn from_reserved_app(
+        mut app: App,
+        mut reservation: RuntimeAdmissionReservation,
+        close_policy: RuntimeClosePolicy,
+    ) -> Self {
+        let obligations = app.take_runtime_obligations();
+        let reporter = app.runtime_fault_reporter.clone();
+        let route = reservation.take_route().activate(reporter.clone());
+        let mut owner = RuntimeOwner::new(app, obligations, reporter, close_policy, Some(route));
+        let route_handler = owner
+            .fault_route
+            .as_ref()
+            .expect("a reserved preparation owner retains its activated fault route")
+            .handler();
+        owner.app.bind_managed_runtime_error_handler(route_handler);
         owner.begin_close();
         Self { owner: Some(owner) }
     }
@@ -2197,8 +2223,8 @@ impl RuntimeInstance {
             Ok(epoch) => epoch,
             Err(fault) => return Err(self.enter_fault(fault)),
         };
-        let reporter = self.owner.reporter().clone();
-        let result = with_runtime_system_fault_capture(&reporter, || match mode {
+        let fault_route = self.owner.fault_route_token();
+        let result = with_runtime_system_fault_capture(fault_route, || match mode {
             RuntimeFrameMode::Running => self.owner.app.run_managed_frame(real_delta),
             RuntimeFrameMode::Paused => self.owner.app.run_paused_frame(real_delta),
         });
@@ -2216,8 +2242,8 @@ impl RuntimeInstance {
             Ok(epoch) => epoch,
             Err(fault) => return Err(self.enter_fault(fault)),
         };
-        let reporter = self.owner.reporter().clone();
-        let result = with_runtime_system_fault_capture(&reporter, || {
+        let fault_route = self.owner.fault_route_token();
+        let result = with_runtime_system_fault_capture(fault_route, || {
             self.owner.app.run_exact_fixed_tick(real_delta)
         });
         match result {
@@ -2344,6 +2370,7 @@ struct RuntimeOwnerState {
     app: RuntimeOwnedValue<App>,
     obligations: RuntimeOwnedValue<RuntimeObligationLedger>,
     reporter: RuntimeFaultReporter,
+    fault_route: Option<FaultRouteLease>,
     close_policy: RuntimeClosePolicy,
     close_evidence: RuntimeCloseEvidence,
     close_state: OwnerCloseState,
@@ -2355,12 +2382,14 @@ impl RuntimeOwner {
         obligations: RuntimeObligationLedger,
         reporter: RuntimeFaultReporter,
         close_policy: RuntimeClosePolicy,
+        fault_route: Option<FaultRouteLease>,
     ) -> Self {
         Self {
             state: Some(RuntimeOwnerState {
                 app: RuntimeOwnedValue::new(app),
                 obligations: RuntimeOwnedValue::new(obligations),
                 reporter,
+                fault_route,
                 close_policy,
                 close_evidence: RuntimeCloseEvidence::default(),
                 close_state: OwnerCloseState::Open,
@@ -2431,15 +2460,20 @@ impl RuntimeOwnerState {
             return;
         };
 
-        let bridge_epoch = match self.begin_fault_bridge_epoch() {
-            Ok(epoch) => Some(epoch),
-            Err(fault) => {
-                self.reporter.record_canonical(fault);
-                None
+        let bridge_epoch = if self.fault_route.is_some() {
+            match self.begin_fault_bridge_epoch() {
+                Ok(epoch) => Some(epoch),
+                Err(fault) => {
+                    self.reporter.record_canonical(fault);
+                    None
+                }
             }
+        } else {
+            None
         };
         let reporter = self.reporter.clone();
-        let close_pass = with_runtime_system_fault_capture(&reporter, || {
+        let fault_route = self.fault_route_token();
+        let close_pass = with_runtime_system_fault_capture(fault_route, || {
             if attempt.plugin_shutdown == PluginShutdownState::Pending {
                 attempt.plugin_shutdown = match self.app.shutdown_plugins() {
                     Ok(()) => PluginShutdownState::Complete,
@@ -2474,6 +2508,7 @@ impl RuntimeOwnerState {
         let all_complete = self.obligations.is_close_complete();
         if all_complete && attempt.plugin_shutdown == PluginShutdownState::Complete {
             self.reporter.mark_closed();
+            drop(self.fault_route.take());
             self.close_state = OwnerCloseState::Complete;
         } else if participant_failed || Instant::now() >= attempt.deadline {
             if !all_complete && Instant::now() >= attempt.deadline {
@@ -2497,7 +2532,8 @@ impl RuntimeOwnerState {
         let revision = self.app.world.resource::<RuntimeFaultBridgeRevision>().0;
         let reporter = self.reporter.clone();
         let fault_before = reporter.fault();
-        with_runtime_system_fault_capture(&reporter, || {
+        let fault_route = self.fault_route_token();
+        with_runtime_system_fault_capture(fault_route, || {
             self.app.world.increment_change_tick();
             self.app.world.check_change_ticks();
         })?;
@@ -2527,7 +2563,21 @@ impl RuntimeOwnerState {
     }
 
     fn validate_fault_bridge_authority(&self) -> Result<(), RuntimeFault> {
-        validate_runtime_fault_bridge_authority(&self.app.world, &self.reporter)
+        let Some(fault_route) = &self.fault_route else {
+            return Err(runtime_fault_bridge_authority_fault());
+        };
+        if !fault_route.validate(&self.reporter) {
+            return Err(runtime_fault_bridge_authority_fault());
+        }
+        validate_runtime_fault_bridge_authority(
+            &self.app.world,
+            &self.reporter,
+            Some(fault_route.handler()),
+        )
+    }
+
+    fn fault_route_token(&self) -> Option<FaultRouteToken> {
+        self.fault_route.as_ref().map(FaultRouteLease::token)
     }
 
     fn capture_driver_scope<R>(
@@ -2547,8 +2597,10 @@ impl RuntimeOwnerState {
             .transpose()
             .map_err(|fault| reporter.record_canonical(fault))?;
 
+        let fault_route = self.fault_route_token();
         let result =
-            match with_runtime_system_fault_capture(&reporter, || operation(&mut self.app.world)) {
+            match with_runtime_system_fault_capture(fault_route, || operation(&mut self.app.world))
+            {
                 Ok(result) => result,
                 Err(fault) => return Err(reporter.record_canonical(fault)),
             };
@@ -2857,50 +2909,10 @@ fn runtime_fault_bridge_authority_fault() -> RuntimeFault {
     )
 }
 
-struct ActiveRuntimeReporterGuard<'lock> {
-    _schedule_authority: MutexGuard<'lock, ()>,
-}
-
-impl Drop for ActiveRuntimeReporterGuard<'_> {
-    fn drop(&mut self) {
-        *lock_unpoisoned(&ACTIVE_RUNTIME_REPORTER) = None;
-    }
-}
-
 fn with_runtime_system_fault_capture<R>(
-    reporter: &RuntimeFaultReporter,
+    fault_route: Option<FaultRouteToken>,
     operation: impl FnOnce() -> R,
 ) -> Result<R, RuntimeFault> {
-    let schedule_authority = match RUNTIME_SCHEDULE_AUTHORITY.try_lock() {
-        Ok(authority) => authority,
-        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-        Err(TryLockError::WouldBlock) => {
-            return Err(RuntimeFault::engine(
-                RuntimeFaultKind::ScheduleAuthority,
-                "nara.app.runtime-schedule-authority",
-            ));
-        }
-    };
-    *lock_unpoisoned(&ACTIVE_RUNTIME_REPORTER) = Some(reporter.clone());
-    let _guard = ActiveRuntimeReporterGuard {
-        _schedule_authority: schedule_authority,
-    };
+    let _execution = fault_route.map(FaultRouteToken::enter).transpose()?;
     Ok(operation())
-}
-
-pub(crate) fn runtime_system_error_handler(error: BevyError, context: ErrorContext) {
-    let severity = error.severity();
-    if severity == Severity::Error {
-        let kind = match &context {
-            ErrorContext::System { .. } => RuntimeFaultKind::System,
-            ErrorContext::RunCondition { .. } => RuntimeFaultKind::RunCondition,
-            ErrorContext::Command { .. } => RuntimeFaultKind::Command,
-            ErrorContext::Observer { .. } => RuntimeFaultKind::Observer,
-        };
-        if let Some(reporter) = lock_unpoisoned(&ACTIVE_RUNTIME_REPORTER).as_ref() {
-            reporter.report(RuntimeFault::engine(kind, "nara.ecs.fallible-execution"));
-            return;
-        }
-    }
-    match_severity(error, context);
 }

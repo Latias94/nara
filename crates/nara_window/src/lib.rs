@@ -731,7 +731,14 @@ mod tests {
         app.insert_resource(ChangedWindowIds::default()).unwrap();
         app.add_systems(CoreStage::Update, record_changed_windows)
             .unwrap();
-        let candidate = nara_app::RuntimeCandidate::admit(app.seal().unwrap()).unwrap();
+        let candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                app.seal().unwrap(),
+                nara_app::RuntimeObligationLedger::new(),
+                nara_app::RuntimeClosePolicy::default(),
+            )
+            .unwrap();
         let mut runtime = candidate.complete_startup().unwrap().promote();
         runtime.drive(Duration::ZERO).unwrap();
         runtime
