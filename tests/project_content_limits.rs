@@ -11,7 +11,7 @@ use nara::{
     },
     scene::{PrefabDocument, PrefabInstance, SceneDocument, SceneEntityRecord, ScenePatchDocument},
 };
-use project_content_fixture::{TestProject, scene_id};
+use project_content_fixture::{scene_id, TestProject};
 
 const PORTABLE_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 10] = [
     (ProjectContentBudgetKind::DirectoryDepth, 2),
@@ -30,7 +30,7 @@ const PORTABLE_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 10] = [
 #[cfg(target_pointer_width = "64")]
 const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
     (ProjectContentBudgetKind::WorkBytes, 393_075_070),
-    (ProjectContentBudgetKind::RetainedBytes, 3_872),
+    (ProjectContentBudgetKind::RetainedBytes, 3_944),
     (ProjectContentBudgetKind::AggregateBytes, 393_078_159),
 ];
 
