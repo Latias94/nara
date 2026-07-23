@@ -31,7 +31,11 @@ use nara_reference_game::{
     WaveSnapshot, movement_command, retry_command, wave_desktop_intent,
 };
 
+#[path = "support/startup_marker.rs"]
+mod startup_marker;
 mod support;
+
+use startup_marker::StartupMarker;
 use support::project_root::open_project_root;
 
 const PRODUCT_RENDER_PROBE_PLUGIN_ID: PluginId =
@@ -49,13 +53,19 @@ fn main() -> ExitCode {
         Ok(root) => root,
         Err(_) => return fail("desktop_render_probe.root_failed"),
     };
+    let marker = match StartupMarker::from_environment("desktop_first_playable_present") {
+        Ok(marker) => Arc::new(marker),
+        Err(error) => return fail(error.code()),
+    };
     let evidence = Arc::new(ProductRenderEvidence::default());
     let plugin_evidence = Arc::clone(&evidence);
+    let plugin_marker = Arc::clone(&marker);
     let probe = PluginDefinition::infallible::<ProductRenderProbePlugin, _>(
         PRODUCT_RENDER_PROBE_DEFINITION_ID,
         b"reference-game-product-render-probe-v1",
         move || ProductRenderProbePlugin {
             evidence: Arc::clone(&plugin_evidence),
+            marker: Arc::clone(&plugin_marker),
         },
     );
     let intent = wave_desktop_intent().insert_after::<ReferenceDesktopPlugin>(probe);
@@ -85,6 +95,9 @@ fn main() -> ExitCode {
     {
         return fail("desktop_render_probe.product_path_failed");
     }
+    if let Err(error) = marker.verify_success() {
+        return fail(error.code());
+    }
 
     println!("desktop_render_probe: ok");
     ExitCode::SUCCESS
@@ -107,6 +120,7 @@ struct ProductRenderEvidence {
 #[derive(Debug)]
 struct ProductRenderProbePlugin {
     evidence: Arc<ProductRenderEvidence>,
+    marker: Arc<StartupMarker>,
 }
 
 impl Plugin for ProductRenderProbePlugin {
@@ -117,6 +131,7 @@ impl Plugin for ProductRenderProbePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(ProductRenderProbe {
             evidence: Arc::clone(&self.evidence),
+            marker: Arc::clone(&self.marker),
             deadline: Instant::now() + PRODUCT_RENDER_EVIDENCE_TIMEOUT,
             phase: ProductProbePhase::InitialFrame,
             baseline: None,
@@ -129,7 +144,8 @@ impl Plugin for ProductRenderProbePlugin {
         .add_systems(
             CoreStage::FixedUpdate,
             observe_product_render.in_set(GameplayCommandSet::Capture),
-        )?;
+        )?
+        .add_systems(CoreStage::Cleanup, observe_startup_present)?;
         Ok(())
     }
 }
@@ -137,6 +153,7 @@ impl Plugin for ProductRenderProbePlugin {
 #[derive(Debug, Resource)]
 struct ProductRenderProbe {
     evidence: Arc<ProductRenderEvidence>,
+    marker: Arc<StartupMarker>,
     deadline: Instant,
     phase: ProductProbePhase,
     baseline: Option<ProductContinuity>,
@@ -197,6 +214,14 @@ struct ProductRenderInputs<'w, 's> {
     windows: Query<'w, 's, Entity, With<Window>>,
 }
 
+#[derive(SystemParam)]
+struct StartupPresentInputs<'w> {
+    prepared: Res<'w, PreparedRenderResources<PreparedImageResource>>,
+    batches: Res<'w, SpriteBatches>,
+    frame: Res<'w, RenderFrame>,
+    backend: Res<'w, WgpuRenderBackend>,
+}
+
 fn observe_product_render(
     inputs: ProductRenderInputs<'_, '_>,
     mut probe: ResMut<ProductRenderProbe>,
@@ -209,15 +234,7 @@ fn observe_product_render(
         .as_slice()
         .iter()
         .any(|batch| batch.material.image.is_some());
-    let transaction = inputs.backend.frame_transaction_stats();
-    let submitted_frame = inputs.frame.state == RenderFrameState::Submitted
-        && transaction.frame_index() == Some(inputs.frame.index)
-        && transaction.packet_admissions() == 1
-        && transaction.packet_rejections() == 0
-        && transaction.surface_acquire_attempts() == 1
-        && transaction.surface_acquires() == 1
-        && transaction.queue_submissions() == 1
-        && transaction.presents() == 1;
+    let submitted_frame = submitted_product_frame(&inputs.frame, &inputs.backend);
     let product_frame_ready = prepared_image && textured_batch && submitted_frame;
     match probe.phase {
         ProductProbePhase::InitialFrame if product_frame_ready => {
@@ -287,6 +304,42 @@ fn observe_product_render(
         probe.evidence.timed_out.store(true, Ordering::SeqCst);
         exit.request_exit();
     }
+}
+
+/// Emits the measurement marker after the complete Render stage has submitted and presented the
+/// same frame. The gameplay probe remains in FixedUpdate because it drives command semantics;
+/// startup timing must not wait for the next fixed tick merely to observe a prior present.
+fn observe_startup_present(
+    inputs: StartupPresentInputs<'_>,
+    probe: Res<ProductRenderProbe>,
+    mut exit: ResMut<AppExitRequests>,
+) {
+    let prepared_image = !inputs.prepared.is_empty();
+    let textured_batch = inputs
+        .batches
+        .as_slice()
+        .iter()
+        .any(|batch| batch.material.image.is_some());
+    if prepared_image
+        && textured_batch
+        && submitted_product_frame(&inputs.frame, &inputs.backend)
+        && probe.marker.emit().is_err()
+    {
+        probe.evidence.timed_out.store(true, Ordering::SeqCst);
+        exit.request_exit();
+    }
+}
+
+fn submitted_product_frame(frame: &RenderFrame, backend: &WgpuRenderBackend) -> bool {
+    let transaction = backend.frame_transaction_stats();
+    frame.state == RenderFrameState::Submitted
+        && transaction.frame_index() == Some(frame.index)
+        && transaction.packet_admissions() == 1
+        && transaction.packet_rejections() == 0
+        && transaction.surface_acquire_attempts() == 1
+        && transaction.surface_acquires() == 1
+        && transaction.queue_submissions() == 1
+        && transaction.presents() == 1
 }
 
 fn capture_continuity(inputs: &ProductRenderInputs<'_, '_>) -> Option<ProductContinuity> {

@@ -40,10 +40,10 @@ use nara::{
     tilemap::TilemapPlugin,
 };
 
-#[cfg(feature = "desktop")]
-use nara::project_host::{DesktopRun, DesktopRunIntent};
 #[cfg(feature = "editor")]
 use nara::project_host::EditorProjectIntent;
+#[cfg(feature = "desktop")]
+use nara::project_host::{DesktopRun, DesktopRunIntent};
 
 pub use components::{Enemy, Player, Projectile, RuntimeOnlyTag, WaveSpawn, Weapon};
 pub use resources::{
@@ -281,6 +281,27 @@ pub fn bundled_wave_run(
     wave_headless_run(project_root, maximum_fixed_ticks, bundled_wave_commands())
 }
 
+/// Runs the bundled deterministic wave and observes completed ticks considered by its terminal
+/// predicate.
+///
+/// This remains a reference-game-only measurement hook. The observer runs only after the Host has
+/// completed the fixed tick and captured the wave snapshot, before the terminal predicate decides
+/// whether to stop the run. An early App exit intentionally does not invoke this observer.
+#[doc(hidden)]
+#[must_use]
+pub fn bundled_wave_run_with_completed_tick_observer(
+    project_root: DirectoryCapability,
+    maximum_fixed_ticks: NonZeroU32,
+    observer: impl Fn(&WaveSnapshot) + Send + 'static,
+) -> HeadlessRun<WaveSnapshot> {
+    wave_headless_run_with_completed_tick_observer(
+        project_root,
+        maximum_fixed_ticks,
+        bundled_wave_commands(),
+        observer,
+    )
+}
+
 /// Runs one owned typed semantic-command buffer until the wave terminates or reaches its tick limit.
 #[must_use]
 pub fn wave_headless_run(
@@ -291,6 +312,19 @@ pub fn wave_headless_run(
     HeadlessRun::new(
         project_root,
         wave_headless_intent(maximum_fixed_ticks),
+        commands,
+    )
+}
+
+fn wave_headless_run_with_completed_tick_observer(
+    project_root: DirectoryCapability,
+    maximum_fixed_ticks: NonZeroU32,
+    commands: Vec<GameplayCommandSubmission>,
+    observer: impl Fn(&WaveSnapshot) + Send + 'static,
+) -> HeadlessRun<WaveSnapshot> {
+    HeadlessRun::new(
+        project_root,
+        wave_headless_intent_with_completed_tick_observer(maximum_fixed_ticks, observer),
         commands,
     )
 }
@@ -331,8 +365,21 @@ pub fn wave_editor_intent() -> EditorProjectIntent {
 /// Creates the complete wave run intent over the committed project content.
 #[must_use]
 pub fn wave_headless_intent(maximum_fixed_ticks: NonZeroU32) -> HeadlessRunIntent<WaveSnapshot> {
+    base_wave_headless_intent(maximum_fixed_ticks).stop_when(WaveSnapshot::is_terminal)
+}
+
+fn wave_headless_intent_with_completed_tick_observer(
+    maximum_fixed_ticks: NonZeroU32,
+    observer: impl Fn(&WaveSnapshot) + Send + 'static,
+) -> HeadlessRunIntent<WaveSnapshot> {
+    base_wave_headless_intent(maximum_fixed_ticks).stop_when(move |snapshot| {
+        observer(snapshot);
+        snapshot.is_terminal()
+    })
+}
+
+fn base_wave_headless_intent(maximum_fixed_ticks: NonZeroU32) -> HeadlessRunIntent<WaveSnapshot> {
     HeadlessRunIntent::new(maximum_fixed_ticks)
-        .stop_when(WaveSnapshot::is_terminal)
         .configure(nara::image::plugin(ImageImportLimits::default()))
         .disable::<TilemapPlugin>()
         .insert_after::<GameplayCommandPlugin>(plugin())

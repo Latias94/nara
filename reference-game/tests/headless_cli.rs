@@ -25,6 +25,32 @@ fn bundled_cli_emits_one_stable_json_summary() {
 }
 
 #[test]
+fn opt_in_startup_marker_precedes_the_terminal_summary() {
+    let output = Command::new(env!("CARGO_BIN_EXE_headless"))
+        .env("NARA_REFERENCE_GAME_STARTUP_MARKER", "1")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        concat!(
+            "{\"schema\":\"nara-reference-game.startup-marker-v1\",",
+            "\"event\":\"headless_first_authoritative_tick\"}\n",
+            "{\"schema\":\"nara-reference-game.wave-summary-v1\",",
+            "\"outcome\":\"completed\",\"tick\":49,\"score\":300,",
+            "\"player_hit_points\":20,\"enemies_remaining\":0,",
+            "\"projectiles_remaining\":4}\n"
+        )
+    );
+}
+
+#[test]
 fn tick_limit_is_a_failure_without_a_success_snapshot() {
     let output = Command::new(env!("CARGO_BIN_EXE_headless"))
         .args(["--max-ticks", "1"])

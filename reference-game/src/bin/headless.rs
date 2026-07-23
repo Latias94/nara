@@ -11,9 +11,13 @@ use nara::{
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
     project_host::{HeadlessRunOutcome, HeadlessRunReport},
 };
-use nara_reference_game::{WaveSnapshot, bundled_wave_run};
+use nara_reference_game::{WaveSnapshot, bundled_wave_run_with_completed_tick_observer};
 
+#[path = "support/startup_marker.rs"]
+mod startup_marker;
 mod support;
+
+use startup_marker::StartupMarker;
 use support::project_root::open_project_root;
 
 const DEFAULT_MAXIMUM_TICKS: u32 = 96;
@@ -38,20 +42,37 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut run = bundled_wave_run(root, maximum_ticks);
+    let marker = match StartupMarker::from_environment("headless_first_authoritative_tick") {
+        Ok(marker) => std::sync::Arc::new(marker),
+        Err(error) => {
+            let summary = error.to_string();
+            emit_static_error(error.code(), &summary);
+            return ExitCode::FAILURE;
+        }
+    };
+    let observer = std::sync::Arc::clone(&marker);
+    let mut run = bundled_wave_run_with_completed_tick_observer(root, maximum_ticks, move |_| {
+        let _ = observer.emit();
+    });
     let deadline = Instant::now() + Duration::from_secs(5);
-    let stdout = io::stdout();
-    let mut stdout = stdout.lock();
-    let stderr = io::stderr();
-    let mut stderr = stderr.lock();
-    drive_to_exit(
+    let terminal = drive_to_terminal(
         || classify_run_report(run.execute_bounded()),
         deadline,
         Instant::now,
         || std::thread::park_timeout(Duration::from_millis(1)),
-        &mut stdout,
-        &mut stderr,
-    )
+    );
+    if matches!(&terminal, CliRunTerminal::Completed(_)) {
+        if let Err(error) = marker.verify_success() {
+            let summary = error.to_string();
+            emit_static_error(error.code(), &summary);
+            return ExitCode::FAILURE;
+        }
+    }
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    let stderr = io::stderr();
+    let mut stderr = stderr.lock();
+    write_terminal(terminal, &mut stdout, &mut stderr)
 }
 
 fn parse_maximum_ticks(arguments: impl IntoIterator<Item = OsString>) -> Option<NonZeroU32> {
@@ -73,45 +94,61 @@ fn parse_maximum_ticks(arguments: impl IntoIterator<Item = OsString>) -> Option<
         .and_then(NonZeroU32::new)
 }
 
-enum CliRunStep {
+enum CliRunProgress {
     Completed(WaveSnapshot),
     Failed(DiagnosticReport),
     CleanupIncomplete(DiagnosticReport),
 }
 
-fn classify_run_report(report: HeadlessRunReport<WaveSnapshot>) -> CliRunStep {
+enum CliRunTerminal {
+    Completed(WaveSnapshot),
+    Failed(DiagnosticReport),
+    CleanupTimedOut(DiagnosticReport),
+}
+
+fn classify_run_report(report: HeadlessRunReport<WaveSnapshot>) -> CliRunProgress {
     match report.outcome() {
-        HeadlessRunOutcome::Completed(snapshot) => CliRunStep::Completed(snapshot.clone()),
-        HeadlessRunOutcome::Failed => CliRunStep::Failed(report.diagnostics().clone()),
+        HeadlessRunOutcome::Completed(snapshot) => CliRunProgress::Completed(snapshot.clone()),
+        HeadlessRunOutcome::Failed => CliRunProgress::Failed(report.diagnostics().clone()),
         HeadlessRunOutcome::CleanupIncomplete => {
-            CliRunStep::CleanupIncomplete(report.diagnostics().clone())
+            CliRunProgress::CleanupIncomplete(report.diagnostics().clone())
         }
     }
 }
 
-fn drive_to_exit(
-    mut step: impl FnMut() -> CliRunStep,
+fn drive_to_terminal(
+    mut step: impl FnMut() -> CliRunProgress,
     deadline: Instant,
     mut now: impl FnMut() -> Instant,
     mut wait: impl FnMut(),
+) -> CliRunTerminal {
+    loop {
+        match step() {
+            CliRunProgress::Completed(snapshot) => return CliRunTerminal::Completed(snapshot),
+            CliRunProgress::Failed(report) => return CliRunTerminal::Failed(report),
+            CliRunProgress::CleanupIncomplete(_) if now() < deadline => wait(),
+            CliRunProgress::CleanupIncomplete(report) => {
+                return CliRunTerminal::CleanupTimedOut(report);
+            }
+        }
+    }
+}
+
+fn write_terminal(
+    terminal: CliRunTerminal,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> ExitCode {
-    loop {
-        match step() {
-            CliRunStep::Completed(snapshot) => {
-                return write_terminal_success(stdout, stderr, &snapshot);
-            }
-            CliRunStep::Failed(report) => {
-                let _ = write_diagnostics(stderr, &report);
-                return ExitCode::FAILURE;
-            }
-            CliRunStep::CleanupIncomplete(_) if now() < deadline => wait(),
-            CliRunStep::CleanupIncomplete(report) => {
-                let _ = write_diagnostics(stderr, &report);
-                let _ = write_static_error(stderr, CLEANUP_TIMEOUT_CODE, CLEANUP_TIMEOUT_SUMMARY);
-                return ExitCode::FAILURE;
-            }
+    match terminal {
+        CliRunTerminal::Completed(snapshot) => write_terminal_success(stdout, stderr, &snapshot),
+        CliRunTerminal::Failed(report) => {
+            let _ = write_diagnostics(stderr, &report);
+            ExitCode::FAILURE
+        }
+        CliRunTerminal::CleanupTimedOut(report) => {
+            let _ = write_diagnostics(stderr, &report);
+            let _ = write_static_error(stderr, CLEANUP_TIMEOUT_CODE, CLEANUP_TIMEOUT_SUMMARY);
+            ExitCode::FAILURE
         }
     }
 }
@@ -158,7 +195,7 @@ fn write_success(writer: &mut impl Write, snapshot: &WaveSnapshot) -> io::Result
     )
 }
 
-fn emit_static_error(code: &'static str, summary: &'static str) {
+fn emit_static_error(code: &'static str, summary: &str) {
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
     let _ = write_static_error(&mut stderr, code, summary);
@@ -167,7 +204,7 @@ fn emit_static_error(code: &'static str, summary: &'static str) {
 fn write_static_error(
     writer: &mut impl Write,
     code: &'static str,
-    summary: &'static str,
+    summary: &str,
 ) -> io::Result<()> {
     writeln!(writer, "{code}: {summary}")
 }
@@ -263,10 +300,10 @@ mod tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
 
-        let exit = drive_to_exit(
+        let terminal = drive_to_terminal(
             || {
                 steps.set(steps.get() + 1);
-                CliRunStep::CleanupIncomplete(DiagnosticReport::default())
+                CliRunProgress::CleanupIncomplete(DiagnosticReport::default())
             },
             deadline,
             || {
@@ -275,9 +312,8 @@ mod tests {
                 if read == 0 { start } else { deadline }
             },
             || waits.set(waits.get() + 1),
-            &mut stdout,
-            &mut stderr,
         );
+        let exit = write_terminal(terminal, &mut stdout, &mut stderr);
 
         assert_eq!(exit, ExitCode::FAILURE);
         assert_eq!(steps.get(), 2);

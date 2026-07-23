@@ -1,7 +1,11 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use std::{num::NonZeroU32, time::Duration};
+use std::{
+    num::NonZeroU32,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use nara::{
     app::{AddPluginsError, PluginLifecycleState, PluginPlanError},
@@ -10,6 +14,7 @@ use nara::{
 };
 use nara_reference_game::{
     REFERENCE_GAME_PLUGIN_ID, ReferenceGamePlugin, WaveOutcome, bundled_wave_run,
+    bundled_wave_run_with_completed_tick_observer,
 };
 use project_content_fixture::project_root_capability;
 
@@ -41,6 +46,40 @@ fn typed_headless_run_returns_the_terminal_wave_snapshot() {
     assert_eq!(snapshot.tick, 49);
     assert_eq!(snapshot.score, 300);
     assert!(snapshot.enemies.is_empty());
+}
+
+#[test]
+fn completed_tick_observer_receives_captured_wave_snapshots() {
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let observer = Arc::clone(&observations);
+    let mut run = bundled_wave_run_with_completed_tick_observer(
+        project_root_capability(),
+        NonZeroU32::new(96).expect("the maximum tick count is non-zero"),
+        move |snapshot| observer.lock().unwrap().push(snapshot.clone()),
+    );
+
+    let mut terminal_snapshot = None;
+    for _ in 0..64 {
+        let report = run.execute_bounded();
+        match report.outcome() {
+            HeadlessRunOutcome::Completed(snapshot) => {
+                assert!(!report.diagnostics().has_errors(), "{report:#?}");
+                terminal_snapshot = Some(snapshot.clone());
+                break;
+            }
+            HeadlessRunOutcome::CleanupIncomplete => {
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+            HeadlessRunOutcome::Failed => panic!("typed reference-game run failed: {report:#?}"),
+        }
+    }
+    let terminal_snapshot =
+        terminal_snapshot.expect("typed reference-game cleanup should be bounded");
+    let observations = observations.lock().unwrap();
+
+    assert_eq!(observations.first().map(|snapshot| snapshot.tick), Some(1));
+    assert_eq!(observations.last(), Some(&terminal_snapshot));
+    assert!(terminal_snapshot.is_terminal());
 }
 
 #[test]
