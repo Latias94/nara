@@ -119,6 +119,8 @@ def mutate(mode: str, envelope_path: Path, expected_path: Path, schema_path: Pat
         expected["envelope"]["environment"][0]["value"]["value"] = "drifted_environment_v1"
         write_json(expected_path, expected)
         return
+    elif mode == "payload-digest-mismatch":
+        envelope["payload_digest"]["blake3"] = "0" * 64
     else:
         raise ValueError(f"unsupported fixture mutation: {mode}")
     write_json(envelope_path, envelope)
@@ -141,6 +143,7 @@ def main() -> int:
             "unknown-field",
             "candidate-source-mismatch",
             "expected-environment-drift",
+            "payload-digest-mismatch",
         ),
     )
     mutate_parser.add_argument("envelope", type=Path)

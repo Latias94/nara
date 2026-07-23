@@ -1,3 +1,10 @@
+#[path = "support/first_playable_evidence.rs"]
+mod evidence;
+
+use evidence::{
+    EnvelopeLimits, EvidenceEnvelope, EvidenceError, calibration_expected_identity,
+    canonical_json_bytes, decode_evidence, expected_transfer, load_protocol_fixture,
+};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -151,6 +158,29 @@ fn read_json(path: &Path) -> Value {
         .expect("output must be valid JSON")
 }
 
+fn validate_normalized_evidence_semantics(
+    normalized: &Value,
+    raw_envelope: &[u8],
+) -> Result<(), EvidenceError> {
+    let protocol = load_protocol_fixture().map_err(|_| EvidenceError::Decode)?;
+    let envelope = serde_json::from_value::<EvidenceEnvelope>(normalized["evidence"].clone())
+        .map_err(|_| EvidenceError::Decode)?;
+    if canonical_json_bytes(&envelope) != raw_envelope {
+        return Err(EvidenceError::NonCanonical);
+    }
+    let expected_transfer = expected_transfer(evidence::EVIDENCE_TRANSFER_PATH, raw_envelope);
+    let expected_identity = calibration_expected_identity(&protocol);
+
+    decode_evidence(
+        raw_envelope,
+        EnvelopeLimits::from(&protocol.evidence),
+        &expected_transfer,
+        &expected_identity,
+        &protocol,
+    )
+    .map(|_| ())
+}
+
 #[test]
 fn committed_normalized_outer_schema_is_closed_and_versioned() {
     let schema = read_json(&schema_path());
@@ -207,6 +237,54 @@ fn valid_envelope_normalizes_without_candidate_execution_or_repository_mutation(
         normalized["input"]["candidate"]["receipt"]["source_revision"],
         normalized["evidence"]["identity"]["source_revision"],
         "the candidate receipt and evidence identity must bind one reviewed source revision"
+    );
+}
+
+#[test]
+fn normalized_evidence_passes_the_existing_u22_semantic_oracle() {
+    let temporary = TemporaryDirectory::new("semantic-valid");
+    let (envelope, expected) = prepare_fixture(temporary.path());
+    let output_root = temporary.path().join("output");
+    fs::create_dir(&output_root).expect("fixture output directory must be creatable");
+    let output = output_root.join("normalized.json");
+
+    let result = normalize(&envelope, &expected, &output, &[]);
+    assert!(
+        result.status.success(),
+        "normalization failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let raw_envelope = fs::read(&envelope).expect("fixture envelope must be readable");
+    validate_normalized_evidence_semantics(&read_json(&output), &raw_envelope)
+        .expect("outer-normalized evidence must still satisfy the complete U22 semantic oracle");
+}
+
+#[test]
+fn outer_normalization_cannot_promote_a_bad_payload_digest_to_approval() {
+    let temporary = TemporaryDirectory::new("payload-digest");
+    let (envelope, expected) = prepare_fixture(temporary.path());
+    mutate("payload-digest-mismatch", &envelope, &expected);
+    let output_root = temporary.path().join("output");
+    fs::create_dir(&output_root).expect("fixture output directory must be creatable");
+    let output = output_root.join("normalized.json");
+
+    let result = normalize(&envelope, &expected, &output, &[]);
+    assert!(
+        result.status.success(),
+        "outer normalization should accept a shape-valid envelope whose raw transfer was independently rebound"
+    );
+    let normalized = read_json(&output);
+    assert_eq!(
+        normalized["normalizer"]["validation_scope"], OUTER_VALIDATION_SCOPE,
+        "the artifact must not claim that outer normalization completed semantic validation"
+    );
+    assert_eq!(
+        validate_normalized_evidence_semantics(
+            &normalized,
+            &fs::read(&envelope).expect("fixture envelope must be readable"),
+        ),
+        Err(EvidenceError::PayloadDigest),
+        "a payload-digest mismatch may not become approval evidence after outer normalization"
     );
 }
 
