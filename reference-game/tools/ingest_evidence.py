@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Normalize one bounded reference-game evidence transfer without executing candidate content.
 
-This helper establishes the trusted outer transfer, identity, and candidate-receipt boundary.
-The Rust evidence-policy oracle remains responsible for complete U22 payload semantics before
-any approval record can be accepted.
+The caller supplies a canonical trusted-input record for identity and candidate provenance;
+build-expectation reads untrusted envelope bytes only to bind their length and SHA-256. The Rust
+evidence-policy oracle remains responsible for complete U22 payload semantics before any approval
+record can be accepted.
 """
 
 from __future__ import annotations
@@ -22,12 +23,14 @@ from typing import Any, NoReturn, Sequence
 
 
 EXPECTED_SCHEMA = "nara.reference-game.evidence-expectations-v1"
+TRUSTED_INPUT_SCHEMA = "nara.reference-game.evidence-trusted-input-v1"
 NORMALIZED_SCHEMA = "nara.reference-game.normalized-evidence-v1"
 NORMALIZER_ID = "nara_reference_game_ingest_v1"
 OUTER_VALIDATION_SCOPE = "outer_transfer_and_structure_v1"
 CANDIDATE_PACKAGE_SCHEMA = "nara.reference-game.candidate-package-v1"
 MAX_SCHEMA_BYTES = 128 * 1024
 MAX_EXPECTED_BYTES = 64 * 1024
+MAX_TRUSTED_INPUT_BYTES = 64 * 1024
 DEFAULT_MAX_ENVELOPE_BYTES = 512 * 1024
 MAX_ENVELOPE_BYTES = 512 * 1024
 MAX_NORMALIZED_BYTES = 1024 * 1024
@@ -593,6 +596,34 @@ def validate_candidate(value: Any, identity: dict[str, Any]) -> dict[str, Any]:
     return candidate
 
 
+def validate_trusted_input(value: Any) -> dict[str, Any]:
+    trusted_input = mapping(value)
+    exact_keys(trusted_input, ("schema", "format_version", "envelope", "candidate"))
+    if (
+        trusted_input["schema"] != TRUSTED_INPUT_SCHEMA
+        or trusted_input["format_version"] != 1
+    ):
+        reject()
+    envelope = mapping(trusted_input["envelope"])
+    exact_keys(
+        envelope,
+        (
+            "generator",
+            "identity",
+            "environment",
+            "context_receipts",
+            "restricted_raw_logs",
+        ),
+    )
+    safe_identifier(envelope["generator"])
+    identity = evidence_identity(envelope["identity"])
+    validate_environment(envelope["environment"])
+    validate_context_receipts(envelope["context_receipts"])
+    validate_raw_log_refs(envelope["restricted_raw_logs"])
+    validate_candidate(trusted_input["candidate"], identity)
+    return trusted_input
+
+
 def validate_expectation(value: Any, schema_bytes: bytes) -> dict[str, Any]:
     expectation = mapping(value)
     exact_keys(expectation, ("schema", "format_version", "normalizer", "envelope", "candidate"))
@@ -747,6 +778,53 @@ def normalize(options: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def build_expectation(options: argparse.Namespace) -> dict[str, object]:
+    envelope_path = resolve_regular_file(options.envelope)
+    trusted_input_path = resolve_regular_file(options.trusted_input)
+    schema_path = resolve_regular_file(options.schema)
+    destination = output_path(
+        options.output,
+        (envelope_path, trusted_input_path, schema_path),
+    )
+    schema_bytes = read_bounded(schema_path, MAX_SCHEMA_BYTES)
+    trusted_input_bytes = read_bounded(trusted_input_path, MAX_TRUSTED_INPUT_BYTES)
+    envelope_bytes = read_bounded(envelope_path, options.max_envelope_bytes)
+    validate_schema(parse_json(schema_bytes))
+    trusted_input = validate_trusted_input(parse_json(trusted_input_bytes))
+    if canonical_json_bytes(trusted_input) != trusted_input_bytes:
+        reject()
+    trusted_envelope = mapping(trusted_input["envelope"])
+    expectation: dict[str, object] = {
+        "schema": EXPECTED_SCHEMA,
+        "format_version": 1,
+        "normalizer": {
+            "id": NORMALIZER_ID,
+            "schema_sha256": sha256(schema_bytes),
+            "validation_scope": OUTER_VALIDATION_SCOPE,
+        },
+        "envelope": {
+            "path": "evidence/envelope.json",
+            "sha256": sha256(envelope_bytes),
+            "bytes": len(envelope_bytes),
+            "generator": trusted_envelope["generator"],
+            "identity": trusted_envelope["identity"],
+            "environment": trusted_envelope["environment"],
+            "context_receipts": trusted_envelope["context_receipts"],
+            "restricted_raw_logs": trusted_envelope["restricted_raw_logs"],
+        },
+        "candidate": trusted_input["candidate"],
+    }
+    encoded = canonical_json_bytes(expectation)
+    if len(encoded) > MAX_EXPECTED_BYTES:
+        reject()
+    publish_new_file(destination, encoded)
+    return {
+        "schema": EXPECTED_SCHEMA,
+        "expected_sha256": sha256(encoded),
+        "expected_bytes": len(encoded),
+    }
+
+
 def verify_policy(options: argparse.Namespace) -> dict[str, object]:
     schema_path = resolve_regular_file(options.schema)
     schema_bytes = read_bounded(schema_path, MAX_SCHEMA_BYTES)
@@ -774,6 +852,19 @@ def parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     verify = commands.add_parser("verify-policy", help="validate the pinned normalized-evidence schema")
     verify.add_argument("--schema", type=Path, required=True)
+    expectation_parser = commands.add_parser(
+        "build-expectation",
+        help="bind trusted identity input to one untrusted transfer without accepting its contents",
+    )
+    expectation_parser.add_argument("--envelope", type=Path, required=True)
+    expectation_parser.add_argument("--trusted-input", type=Path, required=True)
+    expectation_parser.add_argument("--schema", type=Path, required=True)
+    expectation_parser.add_argument("--output", type=Path, required=True)
+    expectation_parser.add_argument(
+        "--max-envelope-bytes",
+        type=positive_envelope_limit,
+        default=DEFAULT_MAX_ENVELOPE_BYTES,
+    )
     normalize_parser = commands.add_parser(
         "normalize",
         help="validate one trusted outer transfer without executing candidate code",
@@ -795,6 +886,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     try:
         if options.command == "verify-policy":
             result = verify_policy(options)
+        elif options.command == "build-expectation":
+            result = build_expectation(options)
         elif options.command == "normalize":
             result = normalize(options)
         else:

@@ -18,6 +18,7 @@ use serde_json::Value;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const NORMALIZED_SCHEMA: &str = "nara.reference-game.normalized-evidence-v1";
+const TRUSTED_INPUT_SCHEMA: &str = "nara.reference-game.evidence-trusted-input-v1";
 const NORMALIZER_ID: &str = "nara_reference_game_ingest_v1";
 const OUTER_VALIDATION_SCOPE: &str = "outer_transfer_and_structure_v1";
 const CANARY: &str = "nara_evidence_canary_7f2b";
@@ -94,27 +95,51 @@ fn run(command: &mut Command) -> Output {
         .expect("test command must start successfully")
 }
 
-fn prepare_fixture(root: &Path) -> (PathBuf, PathBuf) {
+fn build_expectation(envelope: &Path, trusted_input: &Path, expected: &Path) -> Output {
+    run(Command::new("python").arg("-B").arg(ingest_script()).args([
+        "build-expectation",
+        "--envelope",
+        envelope.to_str().expect("fixture path must be UTF-8"),
+        "--trusted-input",
+        trusted_input.to_str().expect("fixture path must be UTF-8"),
+        "--schema",
+        schema_path().to_str().expect("schema path must be UTF-8"),
+        "--output",
+        expected.to_str().expect("fixture path must be UTF-8"),
+    ]))
+}
+
+fn prepare_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let input = root.join("input");
     fs::create_dir(&input).expect("fixture input directory must be creatable");
     let envelope = input.join("envelope.json");
-    let expected = input.join("expected.json");
+    let trusted_root = root.join("trusted");
+    fs::create_dir(&trusted_root).expect("trusted fixture directory must be creatable");
+    let trusted_input = trusted_root.join("trusted-input.json");
+    let expected_root = root.join("expected");
+    fs::create_dir(&expected_root).expect("expected fixture directory must be creatable");
+    let expected = expected_root.join("expected.json");
     fs::copy(calibration_envelope(), &envelope).expect("calibration envelope must copy");
     let result = run(Command::new("python")
         .arg("-B")
         .arg(fixture_script())
         .args([
-            "prepare",
+            "trusted-input",
             envelope.to_str().expect("fixture path must be UTF-8"),
-            expected.to_str().expect("fixture path must be UTF-8"),
-            schema_path().to_str().expect("schema path must be UTF-8"),
+            trusted_input.to_str().expect("fixture path must be UTF-8"),
         ]));
     assert!(
         result.status.success(),
         "fixture preparation failed: {}",
         String::from_utf8_lossy(&result.stderr)
     );
-    (envelope, expected)
+    let result = build_expectation(&envelope, &trusted_input, &expected);
+    assert!(
+        result.status.success(),
+        "trusted expectation construction failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    (envelope, trusted_input, expected)
 }
 
 fn normalize(envelope: &Path, expected: &Path, output: &Path, extra: &[&str]) -> Output {
@@ -134,7 +159,7 @@ fn normalize(envelope: &Path, expected: &Path, output: &Path, extra: &[&str]) ->
     run(&mut command)
 }
 
-fn mutate(mode: &str, envelope: &Path, expected: &Path) {
+fn mutate(mode: &str, envelope: &Path, trusted_input: &Path, expected: &Path) {
     let result = run(Command::new("python")
         .arg("-B")
         .arg(fixture_script())
@@ -142,8 +167,8 @@ fn mutate(mode: &str, envelope: &Path, expected: &Path) {
             "mutate",
             mode,
             envelope.to_str().expect("fixture path must be UTF-8"),
+            trusted_input.to_str().expect("fixture path must be UTF-8"),
             expected.to_str().expect("fixture path must be UTF-8"),
-            schema_path().to_str().expect("schema path must be UTF-8"),
             CANARY,
         ]));
     assert!(
@@ -151,6 +176,18 @@ fn mutate(mode: &str, envelope: &Path, expected: &Path) {
         "fixture mutation failed: {}",
         String::from_utf8_lossy(&result.stderr)
     );
+    if matches!(
+        mode,
+        "unsafe-identifier" | "unknown-field" | "payload-digest-mismatch"
+    ) {
+        fs::remove_file(expected).expect("test may discard its own generated expectation");
+        let rebuilt = build_expectation(envelope, trusted_input, expected);
+        assert!(
+            rebuilt.status.success(),
+            "trusted expectation rebuild failed: {}",
+            String::from_utf8_lossy(&rebuilt.stderr)
+        );
+    }
 }
 
 fn read_json(path: &Path) -> Value {
@@ -201,7 +238,7 @@ fn committed_normalized_outer_schema_is_closed_and_versioned() {
 #[test]
 fn valid_envelope_normalizes_without_candidate_execution_or_repository_mutation() {
     let temporary = TemporaryDirectory::new("valid");
-    let (envelope, expected) = prepare_fixture(temporary.path());
+    let (envelope, trusted_input, expected) = prepare_fixture(temporary.path());
     let output_root = temporary.path().join("output");
     fs::create_dir(&output_root).expect("fixture output directory must be creatable");
     let output = output_root.join("normalized.json");
@@ -238,12 +275,17 @@ fn valid_envelope_normalizes_without_candidate_execution_or_repository_mutation(
         normalized["evidence"]["identity"]["source_revision"],
         "the candidate receipt and evidence identity must bind one reviewed source revision"
     );
+    assert_eq!(
+        read_json(&trusted_input)["schema"],
+        TRUSTED_INPUT_SCHEMA,
+        "the production builder must receive independently structured trusted input"
+    );
 }
 
 #[test]
 fn normalized_evidence_passes_the_existing_u22_semantic_oracle() {
     let temporary = TemporaryDirectory::new("semantic-valid");
-    let (envelope, expected) = prepare_fixture(temporary.path());
+    let (envelope, _trusted_input, expected) = prepare_fixture(temporary.path());
     let output_root = temporary.path().join("output");
     fs::create_dir(&output_root).expect("fixture output directory must be creatable");
     let output = output_root.join("normalized.json");
@@ -260,10 +302,58 @@ fn normalized_evidence_passes_the_existing_u22_semantic_oracle() {
 }
 
 #[test]
+fn trusted_input_cannot_bind_a_candidate_to_a_different_source_revision() {
+    let temporary = TemporaryDirectory::new("trusted-source-mismatch");
+    let (envelope, trusted_input, expected) = prepare_fixture(temporary.path());
+    mutate(
+        "trusted-candidate-source-mismatch",
+        &envelope,
+        &trusted_input,
+        &expected,
+    );
+    fs::remove_file(&expected).expect("test may discard its own generated expectation");
+
+    let result = build_expectation(&envelope, &trusted_input, &expected);
+    assert!(
+        !result.status.success(),
+        "trusted input must not bind a candidate receipt to another source revision"
+    );
+    assert!(
+        !expected.exists(),
+        "a rejected trusted input must not publish an expectation record"
+    );
+}
+
+#[test]
+fn trusted_input_must_be_canonical_before_it_binds_untrusted_bytes() {
+    let temporary = TemporaryDirectory::new("noncanonical-trusted-input");
+    let (envelope, trusted_input, expected) = prepare_fixture(temporary.path());
+    let mut noncanonical = fs::read(&trusted_input).expect("trusted input must be readable");
+    noncanonical.push(b' ');
+    fs::write(&trusted_input, noncanonical).expect("test trusted input must be writable");
+    fs::remove_file(&expected).expect("test may discard its own generated expectation");
+
+    let result = build_expectation(&envelope, &trusted_input, &expected);
+    assert!(
+        !result.status.success(),
+        "a noncanonical trusted input must not become an expectation record"
+    );
+    assert!(
+        !expected.exists(),
+        "a rejected trusted input must leave no expectation record"
+    );
+}
+
+#[test]
 fn outer_normalization_cannot_promote_a_bad_payload_digest_to_approval() {
     let temporary = TemporaryDirectory::new("payload-digest");
-    let (envelope, expected) = prepare_fixture(temporary.path());
-    mutate("payload-digest-mismatch", &envelope, &expected);
+    let (envelope, trusted_input, expected) = prepare_fixture(temporary.path());
+    mutate(
+        "payload-digest-mismatch",
+        &envelope,
+        &trusted_input,
+        &expected,
+    );
     let output_root = temporary.path().join("output");
     fs::create_dir(&output_root).expect("fixture output directory must be creatable");
     let output = output_root.join("normalized.json");
@@ -298,8 +388,8 @@ fn tampered_or_unsafe_envelopes_reject_without_publication_or_canary_echo() {
         "expected-environment-drift",
     ] {
         let temporary = TemporaryDirectory::new(mode);
-        let (envelope, expected) = prepare_fixture(temporary.path());
-        mutate(mode, &envelope, &expected);
+        let (envelope, trusted_input, expected) = prepare_fixture(temporary.path());
+        mutate(mode, &envelope, &trusted_input, &expected);
         let output_root = temporary.path().join("output");
         fs::create_dir(&output_root).expect("fixture output directory must be creatable");
         let output = output_root.join("normalized.json");
@@ -323,7 +413,7 @@ fn tampered_or_unsafe_envelopes_reject_without_publication_or_canary_echo() {
 #[test]
 fn normalizer_refuses_existing_or_source_adjacent_outputs_and_encoded_budget_excess() {
     let temporary = TemporaryDirectory::new("destinations");
-    let (envelope, expected) = prepare_fixture(temporary.path());
+    let (envelope, _trusted_input, expected) = prepare_fixture(temporary.path());
     let existing = temporary.path().join("existing.json");
     fs::write(&existing, b"prior bytes").expect("existing output must be writable");
 
@@ -367,12 +457,18 @@ fn normalizer_refuses_existing_or_source_adjacent_outputs_and_encoded_budget_exc
 #[test]
 fn normalizer_refuses_aliased_input_paths_before_reading_evidence() {
     let temporary = TemporaryDirectory::new("aliased-input");
-    let (envelope, expected) = prepare_fixture(temporary.path());
+    let (envelope, _trusted_input, expected) = prepare_fixture(temporary.path());
     let input_root = envelope
         .parent()
         .expect("fixture envelope must have a parent");
     let aliased_envelope = input_root.join("..").join("input").join("envelope.json");
-    let aliased_expected = input_root.join("..").join("input").join("expected.json");
+    let expected_root = expected
+        .parent()
+        .expect("fixture expected record must have a parent");
+    let aliased_expected = expected_root
+        .join("..")
+        .join("expected")
+        .join("expected.json");
     let output_root = temporary.path().join("output");
     fs::create_dir(&output_root).expect("fixture output directory must be creatable");
     let output = output_root.join("normalized.json");
@@ -395,7 +491,7 @@ fn normalizer_refuses_input_reached_through_a_linked_parent_directory() {
     use std::os::unix::fs::symlink;
 
     let temporary = TemporaryDirectory::new("linked-parent");
-    let (envelope, expected) = prepare_fixture(temporary.path());
+    let (envelope, _trusted_input, expected) = prepare_fixture(temporary.path());
     let linked_input = temporary.path().join("linked-input");
     symlink(
         envelope
@@ -408,12 +504,7 @@ fn normalizer_refuses_input_reached_through_a_linked_parent_directory() {
     fs::create_dir(&output_root).expect("fixture output directory must be creatable");
     let output = output_root.join("normalized.json");
 
-    let result = normalize(
-        &linked_input.join("envelope.json"),
-        &linked_input.join("expected.json"),
-        &output,
-        &[],
-    );
+    let result = normalize(&linked_input.join("envelope.json"), &expected, &output, &[]);
     assert!(
         !result.status.success(),
         "a linked parent directory must reject before evidence bytes are read"

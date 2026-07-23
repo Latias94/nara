@@ -4,23 +4,17 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import time
 from typing import Any
 
 
-EXPECTATION_SCHEMA = "nara.reference-game.evidence-expectations-v1"
-NORMALIZER_ID = "nara_reference_game_ingest_v1"
+TRUSTED_INPUT_SCHEMA = "nara.reference-game.evidence-trusted-input-v1"
 
 
 def canonical_json(value: object) -> bytes:
     return (json.dumps(value, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
-
-
-def sha256(bytes_value: bytes) -> str:
-    return hashlib.sha256(bytes_value).hexdigest()
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -34,25 +28,16 @@ def write_json(path: Path, value: object) -> None:
     path.write_bytes(canonical_json(value))
 
 
-def expectation(envelope_path: Path, schema_path: Path) -> dict[str, Any]:
-    encoded = envelope_path.read_bytes()
+def trusted_input(envelope_path: Path) -> dict[str, Any]:
     envelope = read_json(envelope_path)
     identity = envelope.get("identity")
     generator = envelope.get("generator")
     if not isinstance(identity, dict) or not isinstance(generator, str):
         raise ValueError("fixture envelope lacks a generator or identity")
     return {
-        "schema": EXPECTATION_SCHEMA,
+        "schema": TRUSTED_INPUT_SCHEMA,
         "format_version": 1,
-        "normalizer": {
-            "id": NORMALIZER_ID,
-            "schema_sha256": sha256(schema_path.read_bytes()),
-            "validation_scope": "outer_transfer_and_structure_v1",
-        },
         "envelope": {
-            "path": "evidence/envelope.json",
-            "sha256": sha256(encoded),
-            "bytes": len(encoded),
             "generator": generator,
             "identity": identity,
             "environment": envelope.get("payload", {}).get("environment"),
@@ -88,11 +73,17 @@ def expectation(envelope_path: Path, schema_path: Path) -> dict[str, Any]:
     }
 
 
-def prepare(envelope_path: Path, expected_path: Path, schema_path: Path) -> None:
-    write_json(expected_path, expectation(envelope_path, schema_path))
+def prepare_trusted_input(envelope_path: Path, trusted_input_path: Path) -> None:
+    write_json(trusted_input_path, trusted_input(envelope_path))
 
 
-def mutate(mode: str, envelope_path: Path, expected_path: Path, schema_path: Path, canary: str) -> None:
+def mutate(
+    mode: str,
+    envelope_path: Path,
+    trusted_input_path: Path,
+    expected_path: Path,
+    canary: str,
+) -> None:
     if mode == "tamper-after-expectation":
         encoded = bytearray(envelope_path.read_bytes())
         if not encoded:
@@ -119,21 +110,24 @@ def mutate(mode: str, envelope_path: Path, expected_path: Path, schema_path: Pat
         expected["envelope"]["environment"][0]["value"]["value"] = "drifted_environment_v1"
         write_json(expected_path, expected)
         return
+    elif mode == "trusted-candidate-source-mismatch":
+        trusted = read_json(trusted_input_path)
+        trusted["candidate"]["receipt"]["source_revision"] = "0" * 40
+        write_json(trusted_input_path, trusted)
+        return
     elif mode == "payload-digest-mismatch":
         envelope["payload_digest"]["blake3"] = "0" * 64
     else:
         raise ValueError(f"unsupported fixture mutation: {mode}")
     write_json(envelope_path, envelope)
-    prepare(envelope_path, expected_path, schema_path)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    prepare_parser = commands.add_parser("prepare")
+    prepare_parser = commands.add_parser("trusted-input")
     prepare_parser.add_argument("envelope", type=Path)
-    prepare_parser.add_argument("expected", type=Path)
-    prepare_parser.add_argument("schema", type=Path)
+    prepare_parser.add_argument("trusted_input", type=Path)
     mutate_parser = commands.add_parser("mutate")
     mutate_parser.add_argument(
         "mode",
@@ -143,18 +137,25 @@ def main() -> int:
             "unknown-field",
             "candidate-source-mismatch",
             "expected-environment-drift",
+            "trusted-candidate-source-mismatch",
             "payload-digest-mismatch",
         ),
     )
     mutate_parser.add_argument("envelope", type=Path)
+    mutate_parser.add_argument("trusted_input", type=Path)
     mutate_parser.add_argument("expected", type=Path)
-    mutate_parser.add_argument("schema", type=Path)
     mutate_parser.add_argument("canary")
     options = parser.parse_args()
-    if options.command == "prepare":
-        prepare(options.envelope, options.expected, options.schema)
+    if options.command == "trusted-input":
+        prepare_trusted_input(options.envelope, options.trusted_input)
     else:
-        mutate(options.mode, options.envelope, options.expected, options.schema, options.canary)
+        mutate(
+            options.mode,
+            options.envelope,
+            options.trusted_input,
+            options.expected,
+            options.canary,
+        )
     return 0
 
 
