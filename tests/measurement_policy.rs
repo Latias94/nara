@@ -856,3 +856,53 @@ fn ancestry_policy_freezes_u22_before_target_work_and_u26_before_host_join() {
         .collect::<Vec<_>>();
     assert!(!ancestry_allows(&invalid));
 }
+
+#[test]
+fn local_u9_measurement_plan_remains_non_decisive_preparation() {
+    let root = evidence::repository_root();
+    let helper =
+        std::fs::read_to_string(root.join("reference-game/tools/measure_first_playable.py"))
+            .expect("U9 measurement helper must be readable");
+    let baseline = std::fs::read_to_string(
+        root.join("docs/benchmarks/reference-game-first-playable-baseline.md"),
+    )
+    .expect("U9 baseline document must be readable");
+    let protocol = std::fs::read_to_string(
+        root.join("docs/benchmarks/reference-game-first-playable-protocol.md"),
+    )
+    .expect("first-playable protocol must be readable");
+
+    for required in [
+        "prepared_not_executed",
+        "not_evaluated",
+        "frame.p99_ns",
+        "runtime.memory_bytes",
+        "render.packet.instance_count",
+        "render.packet.clone_bytes",
+        "minimum_samples",
+    ] {
+        assert!(
+            helper.contains(required),
+            "the U9 helper must retain the honest preparation boundary `{required}`"
+        );
+    }
+    assert!(
+        !helper.contains("decide_suite("),
+        "the U9 helper must not reimplement the Rust evidence decision oracle"
+    );
+    assert!(
+        !helper.contains("--samples"),
+        "the U9 plan must not replace canonical per-metric sample floors with one global CLI value"
+    );
+    assert!(
+        baseline.contains("No first-playable baseline or product decision has been recorded yet.")
+    );
+    assert!(baseline.contains("These gaps are named bottlenecks"));
+    assert!(protocol.contains("RGD-U9's `reference-game/tools/measure_first_playable.py plan`"));
+    assert!(protocol.contains("It writes no evidence envelope and makes no protocol decision"));
+    assert!(protocol.contains("reads the committed U14 per-metric sample requirements"));
+    assert!(
+        !protocol.contains("U14/RGD-U9 and U20 collection helpers"),
+        "the protocol must not mischaracterize the U9 plan as a raw-record collector"
+    );
+}
