@@ -2,3 +2,4 @@ target/
 repo-ref/
 .worktrees/
 .nara/import-cache/
+__pycache__/
