@@ -112,8 +112,9 @@ policy. Exact protocol and credential technology remain a separate deployment de
 `RuntimeCandidate -> RuntimeInstance` control path. RGF-U17 proves the Editor product split: root
 `EditorProjectSession` owns the live runtime and unpublished start attempt, while `nara_tooling`
 owns UI-neutral lifecycle commands, views, observation policy, and projections. Tooling data
-contains no `RuntimeInstance`, start-attempt owner, native lease, or process handle. This is
-implementation evidence for the joint ADR 0082/0084 proposal, not acceptance of that Host topology.
+contains no `RuntimeInstance`, start-attempt owner, native lease, or process handle. RGD-U7 accepts
+the joint ADR 0082/0084 Host topology for the bounded Host-trusted scope; this does not admit a
+universal Host API, package/native-code activation path, or broader observation topology.
 
 The stable semantic operations are:
 

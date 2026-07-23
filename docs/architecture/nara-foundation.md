@@ -57,10 +57,11 @@ dear-imgui-rs reinforces backend split. The workspace separates core context fro
 
 ## Accepted Boundary Map
 
-The crate/module edges below summarize current ownership. RGF-U23 independently retained Proposed
-ADR 0082 Host scopes and ADR 0084 managed-runtime topology as a compatible bounded Trial. They
-remain intentionally absent from this Accepted map; the Trial must not be used to infer a shared
-public Host trait or to treat process-global runtime exclusion as product authority.
+The crate/module edges below summarize current ownership. RGD-U7 independently accepted ADR 0082
+Host scopes and ADR 0084 managed-runtime topology as a compatible bounded authority for
+already-compiled, Host-trusted paths. The accepted pair must not be used to infer a shared public
+Host trait, a universal Runner/service Interface, or product authority for package/native-code
+activation beyond its stated scope.
 
 ```mermaid
 flowchart TD
@@ -108,7 +109,7 @@ flowchart TD
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
 | `nara` | Facade, layered preludes, authorized project ingest/composition, immutable startup-content publication, and concrete `HeadlessRun`/`DesktopRun` product actions | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs; root-owned content loading plus a private `ProjectHost` start/publication/retirement state machine over opaque filesystem authority; Winit remains the selected desktop parent rather than a universal Host Interface |
-| `nara_app` | Gameplay authoring through `App`, Plugin declarations/definitions/plans, schedules, time, and frame outcomes; module-specific advanced U5 trial through `SealedApp`, `RuntimeCandidate`, `RuntimeInstance`, and typed control/fault/close values | Data-only group/slot resolution, private preparation, closed hook commit, explicit move-only shutdown obligations, reverse once-only shutdown, raw-runner versus managed-runtime exclusion, safe-point driving, exact fixed-tick execution, sticky fault authority, retryable finite close, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary; ADR 0084 still owns acceptance and final public placement |
+| `nara_app` | Gameplay authoring through `App`, Plugin declarations/definitions/plans, schedules, time, and frame outcomes; advanced `SealedApp`, `RuntimeCandidate`, `RuntimeInstance`, and typed control/fault/close values | Data-only group/slot resolution, private preparation, closed hook commit, explicit move-only shutdown obligations, reverse once-only shutdown, raw-runner versus managed-runtime exclusion, safe-point driving, exact fixed-tick execution, sticky fault authority, retryable finite close, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary; ADR 0084 accepts thin lifecycle ownership but not a universal Runner API |
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
@@ -148,9 +149,10 @@ flowchart TD
   truthful `Stopping -> CloseIncomplete -> RetryClose -> Stopped` behavior around one App. A
   once-only plugin shutdown failure may terminate ownership at `Stopped`, but it leaves
   `RuntimeCloseEvidence`, a failed `CloseFailed` control result, and a Winit teardown error; an
-  unfinished registered owner remains `CloseIncomplete`. RGF-U23 retained ADR 0084 as Proposed:
-  plan/World behavior authority, process-global drive contention, external Runner, three-Host
-  command parity, and complete reconstruction evidence remain open.
+  unfinished registered owner remains `CloseIncomplete`. RGD-U7 accepted ADR 0084 after one
+  frozen behavior authority, per-runtime fault routes, external Runner, three-Host command parity,
+  and complete reconstruction evidence closed the U23 blockers. This still does not accept a
+  universal Runner/Host SPI, replay, or checkpoint topology.
 - `nara_tooling` owns bounded, UI-agnostic observation, diff, timeline, and lifecycle models. It
   consumes the implemented legacy U8 stable identity and `nara_reflect` codecs; it does not serialize arbitrary worlds,
   store allocator-local `Entity` values, or use `RuntimeDiagnostics` as a high-frequency trace.
@@ -177,10 +179,9 @@ flowchart TD
 
 This sequence begins after a code-first caller or concrete product action has produced the
 executable owner. It describes work inside a published frame; it is not the project-ingest,
-Host-start, candidate-publication, driver-selection, or close protocol. Those proposed ownership
-flows remain in ADRs 0082/0084 and the runtime-composition harness until their RGF evidence gates
-complete. Editor and platform integrations must not infer permission to drive a raw `App` from this
-abbreviated frame view.
+Host-start, candidate-publication, driver-selection, or close protocol. ADRs 0082/0084 own those
+accepted bounded flows; Editor and platform integrations must not infer permission to drive a raw
+`App` from this abbreviated frame view.
 
 ```mermaid
 sequenceDiagram
@@ -328,8 +329,8 @@ second real adapter or stronger isolation pressure.
   never `Stopped` evidence.
   This is module-specific advanced U5 trial evidence, not the ordinary project or Editor entry.
   RGF-U24 now hides candidate/ready/retirement choreography behind the concrete headless product
-  action. RGF-U23 retained ADR 0084 as Proposed while allowing this already-compiled,
-  Host-trusted path to continue as bounded Trial evidence.
+  action. RGD-U7 accepted ADR 0084 for this already-compiled, Host-trusted path while retaining
+  its explicit limits on universal Host/Runner abstractions and project-data activation.
 - File-backed projects use `nara.toml` as their settings authority. Code-first embedding stays supported through explicit resources and plugin configuration, but engine domains should not invent separate persistent project config files for asset roots, startup scenes, task pools, window defaults, or input-map sources.
 - `nara_project` validates quantized durations, fixed debt policy, per-kind/aggregate worker and queue
   limits, shutdown timeouts, runtime presets, and coarse capability requests before lowering. It
@@ -355,17 +356,17 @@ second real adapter or stronger isolation pressure.
   Failed preparation, admission, startup, publication, runtime drive, or close retains the same
   owner through bounded retirement; incomplete cleanup blocks replacement and is retried by later
   calls without reopening project source or resubmitting commands. RGF-U6 now proves this U24
-  headless Trial through a complete game loop and CLI. RGF-U23 found the Host/runtime pair
-  conceptually compatible but retained both ADR 0082 and ADR 0084 as Proposed; this evidence does
-  not freeze a universal Host/factory Interface or authorize native code from project data.
+  headless path through a complete game loop and CLI. RGD-U7 accepted the compatible ADR 0082/0084
+  pair for concrete Hosts; this evidence still does not freeze a universal Host/factory Interface
+  or authorize native code from project data.
 - The root `DesktopRun` action reuses that private start/publication/retirement owner with a
   desktop-profile plan and an independently retained content lease. Winit owns the native parent
   loop, drives only a published `RuntimeInstance`, applies platform work through typed resource-local
   ports rather than ambient `World` access, propagates App exit requests, retires every registered
   surface before releasing its provider/window, and joins runtime close with native teardown. The
   first workspace binary still resolves project content from the source checkout; executable-relative
-  packaging belongs to RGF-U7. This concrete desktop path is ADR 0082/0084 Trial evidence, not a
-  public universal process Host or Platform Adapter trait.
+  packaging belongs to RGF-U7. This concrete desktop path is accepted ADR 0082/0084 evidence, not
+  a public universal process Host or Platform Adapter trait.
 - Transient event/message/resource queues are classified by lifecycle. Frame events, fixed events, request queues, runtime state projections, diagnostics, and authoring patches must declare producer, consumer, retention, cleanup stage, and replay/diagnostic role.
 - `nara_app` plans Real/Virtual/Fixed time atomically after the once-only committed Startup phase, advances fixed time before each tick, publishes debt/remainder status before presentation, and clears ECS trackers once after each successful frame.
 - `nara_tasks` owns bounded threaded pools, typed terminals, ordered-prefix helpers, physical age
@@ -475,9 +476,9 @@ second real adapter or stronger isolation pressure.
 - Root `EditorProjectSession` is the concrete RGF-U17 product Host for one known-schema workspace and
   one Play owner. It owns receipt-backed Save/Reopen, dirty-close intent, recipe preparation,
   `RuntimeStartAttempt`, `RuntimeInstance`, control tickets, close evidence, and retirement.
-  `nara_tooling` and egui retain only commands, views, observations, and Apply Changes models. RGF-U23
-  keeps this as implementation evidence for Proposed ADR 0082/0084 and a bounded Host-trusted Trial,
-  not acceptance of a universal Host topology.
+  `nara_tooling` and egui retain only commands, views, observations, and Apply Changes models.
+  RGD-U7 accepts this as implementation evidence for ADR 0082/0084 in the bounded Host-trusted
+  scope, not as acceptance of a universal Host topology.
 - Stop Play discards runtime changes by default. Apply Changes supports a narrow selected-entity /
   explicit-component subset at a generation-stamped safe point: it encodes registered scene/edit-
   capable runtime components into `ScenePatchDocument` operations, applies them through

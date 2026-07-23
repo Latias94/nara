@@ -215,8 +215,9 @@ visibility.
 - First-party platform adapters drive `RuntimeInstance` rather than retaining raw `&mut App`
   authority. Short-lived driver scopes may project normalized platform state into the enclosed
   world without exposing the `App` or its schedules.
-- ADR 0084 remains Proposed: the landed code-first candidate/runtime slice is evidence for that
-  decision, not acceptance of its future product Host and reconstruction topology.
+- ADR 0084 accepts the thin candidate/runtime lifecycle owner for its bounded Host-trusted scope.
+  It does not accept a universal Runner/Host SPI, package/native-code activation topology, or a
+  replacement Render Host role.
 
 ## Success Metrics
 

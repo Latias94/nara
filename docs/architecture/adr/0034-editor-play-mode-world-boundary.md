@@ -71,8 +71,8 @@ Rules:
   become scene data.
 
 The following diagram shows the implemented RGF-U17 product flow. The isolated Play and explicit
-write-back behavior are accepted here; the named Host/runtime placement remains ADR 0082/0084 Trial
-evidence until RGF-U23 decides it.
+write-back behavior are accepted here; RGD-U7 subsequently accepted the named Host/runtime
+placement in ADR 0082/0084 for the bounded Host-trusted scope.
 
 ```mermaid
 flowchart TD
@@ -186,9 +186,9 @@ Default Stop never writes runtime state back to the edit document.
 
 Apply Changes is explicit and conservative:
 
-The Host transport in this diagram is the implemented RGF-U17 path and remains ADR 0082/0084 Trial
-evidence. The accepted contract here is the explicit bounded export, `ScenePatchDocument`
-validation, and undo path.
+The Host transport in this diagram is the implemented RGF-U17 path and is accepted by ADR
+0082/0084 for the bounded Host-trusted scope. The accepted contract here is the explicit bounded
+export, `ScenePatchDocument` validation, and undo path.
 
 ```mermaid
 sequenceDiagram

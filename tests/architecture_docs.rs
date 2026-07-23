@@ -871,51 +871,43 @@ fn governance_snapshot_is_complete_and_consistent() {
 }
 
 #[test]
-fn u23_decision_matrix_preserves_independent_and_combined_verdicts() {
+fn u7_decision_matrix_preserves_independent_and_combined_verdicts() {
     const MATRIX_PATH: &str = "docs/knowledge/engineering/decisions/2026-07/\
-2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-\
-a5b3266847924dfc93667c72c8929550.md";
+2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-\
+e2e5ea1ed4cf4e28860cedb32f0e7e48.md";
 
     let matrix = read(&repository_root().join(MATRIX_PATH));
     for required in [
-        "| ADR 0084 executable Runtime | **Remain Proposed** |",
-        "| ADR 0082 outer Host | **Remain Proposed** |",
-        "| Combined topology | **Compatible bounded Trial** |",
-        "| U20 admission | **Blocked** |",
+        "| ADR 0084 executable Runtime | **Accepted** |",
+        "| ADR 0082 outer Host | **Accepted** |",
+        "| Combined topology | **Compatible Accepted Pair** |",
+        "| U11 admission | **Runtime/Host gate passed** |",
         "already-compiled, Host-trusted",
-        "universal Host, service registry, factory, or Runner SPI",
+        "universal `EngineHost`",
     ] {
         assert!(
             matrix.contains(required),
-            "RGF-U23 decision matrix must retain `{required}`"
+            "RGD-U7 decision matrix must retain `{required}`"
         );
     }
 
     assert_eq!(
         table_key_values(&matrix, "## Evidence Revisions"),
         expected_table([
-            ("RGF-U3", "`4709689d50e1e5b4af41d062f7c308ef5bd6f377`"),
-            ("RGF-U4", "`b6537579b3e48b11f36dca94fa28eb61b8262a3e`"),
             (
-                "RGF-U5 corrected runtime",
-                "`ff2e02a9ea087e32a00d90cde3b9e883dbc20c68`",
-            ),
-            ("RGF-U12", "`f341255559e201f32dbcb09888b16cd50fecdd85`"),
-            ("RGF-U26", "`a2d695d6c58b8f8f21bb33aaf18fa27e18661a79`"),
-            ("RGF-U24", "`5ddbf186712b6c829dc0134a9f41a0ac8250fa3e`"),
-            ("RGF-U6", "`db511a780ad04e73940b72e6a4c3f0a48dbec70d`"),
-            (
-                "RGF-U13 final",
-                "`5bc321d41aba59072a1f97ccc0473f91e0b2c161`",
-            ),
-            (
-                "RGF-U17 final",
-                "`0a87503b43e1d6abc8b23404789dafc1a7cfe22b`",
-            ),
-            ("RGF-U19", "`347015e8d9fd5d529b9dd5482ceaa02086f4615a`"),
-            (
-                "U23 review baseline",
+                "RGF-U23 historical matrix",
                 "`f7e5ee283e06ff156224b0f11fcc1df0c31284a3`",
+            ),
+            ("RGF-U24", "`5ddbf186712b6c829dc0134a9f41a0ac8250fa3e`"),
+            ("RGF-U26", "`a2d695d6c58b8f8f21bb33aaf18fa27e18661a79`"),
+            ("RGD-U2", "`5c06cdeb015612bfbe0feb93f21d8fe3e7603116`"),
+            ("RGD-U3", "`6c6813848ea6335ef0a3eb40c16a9e6bbfa9ce39`"),
+            ("RGD-U4", "`549d5c25a4091585c8cca3dc51e1f7748fd2cd9d`"),
+            ("RGD-U5", "`0c2dadd849e08d5b3f22dcedac963bbfccf08595`"),
+            ("RGD-U6", "`12696d45b167cb4b8f0cb9ed61060f8b9cda7dae`"),
+            (
+                "U7 review baseline",
+                "`5ebc45e287c94dac99f194aa921adaf5086cc8a2`",
             ),
         ])
     );
@@ -926,11 +918,11 @@ a5b3266847924dfc93667c72c8929550.md";
             ("Ownership handoff", "Pass"),
             ("App admission", "Pass"),
             ("Play execution", "Pass"),
-            ("Driver parity", "Insufficient"),
-            ("Driver authority", "Insufficient"),
+            ("Driver parity", "Pass"),
+            ("Driver authority", "Pass"),
             ("Exact step", "Pass"),
             ("Fault closure", "Pass"),
-            ("Runtime isolation", "Insufficient"),
+            ("Runtime isolation", "Pass"),
             ("Finite close", "Pass"),
             ("Stop-first workspace", "Pass"),
             ("API authority", "Pass"),
@@ -946,23 +938,20 @@ a5b3266847924dfc93667c72c8929550.md";
             ("Early topology value", "Pass"),
             ("Runtime delegation", "Pass"),
             ("Parent lifetime", "Pass"),
-            ("Cross-host parity", "Pass for Host merits"),
+            ("Cross-host parity", "Pass"),
             ("Least privilege", "Pass"),
             ("Embedded path", "Pass"),
-            (
-                "Admitted external authority parity",
-                "Pass in current scope",
-            ),
+            ("Admitted external authority parity", "Pass"),
         ])
     );
     assert_eq!(
         table_key_values(&matrix, "## Combined Runtime/Host Scenarios"),
         expected_table([
-            ("Sequential RuntimeInstances", "Partial pass"),
-            ("Overlapping RuntimeInstances", "Fail for drive semantics"),
-            ("Process-global authority contention", "Fail"),
-            ("Fresh-runtime reconstruction", "Partial pass"),
-            ("Plan/World registry divergence", "Fail"),
+            ("Sequential RuntimeInstances", "Pass"),
+            ("Overlapping RuntimeInstances", "Pass"),
+            ("Process-global authority contention", "Pass"),
+            ("Fresh-runtime reconstruction", "Pass"),
+            ("Plan/World registry divergence", "Pass"),
         ])
     );
 
@@ -981,12 +970,12 @@ a5b3266847924dfc93667c72c8929550.md";
     ] {
         assert!(
             read(&adr_directory().join(adr)).contains(matrix_filename.as_ref()),
-            "{adr} must cite the immutable RGF-U23 decision matrix"
+            "{adr} must cite the immutable RGD-U7 decision matrix"
         );
-        assert_eq!(snapshot.adrs[id].status, "Proposed");
+        assert_eq!(snapshot.adrs[id].status, "Accepted");
         let ledger = snapshot.ledger.iter().find(|row| row.id == id).unwrap();
-        assert_eq!(ledger.decision, "proposed");
-        assert!(ledger.last_verified.contains("RGF-U23"));
+        assert_eq!(ledger.decision, "accepted");
+        assert!(ledger.last_verified.contains("RGD-U7"));
         assert!(
             ledger
                 .verification_anchors
@@ -999,14 +988,14 @@ a5b3266847924dfc93667c72c8929550.md";
             .find(|line| line.starts_with(&prefix))
             .unwrap();
         assert!(
-            catalogue_entry.ends_with("(Proposed)"),
-            "ADR {id} catalogue entry must remain Proposed"
+            !catalogue_entry.ends_with("(Proposed)"),
+            "ADR {id} catalogue entry must reflect the Accepted decision"
         );
     }
 
     let foundation = read(&repository_root().join("docs/architecture/nara-foundation.md"));
-    assert!(foundation.contains("RGF-U23 independently retained Proposed"));
-    assert!(foundation.contains("compatible bounded Trial"));
+    assert!(foundation.contains("RGD-U7 independently accepted ADR 0082"));
+    assert!(foundation.contains("accepted bounded flows"));
 }
 
 #[test]
@@ -1145,7 +1134,7 @@ fn governance_validator_rejects_evidence_and_authority_drift() {
             .unwrap()
             .implementation,
         "partial",
-        "a Proposed ADR may retain bounded implementation evidence"
+        "an Accepted ADR may retain partial implementation evidence"
     );
 }
 

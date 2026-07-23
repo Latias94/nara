@@ -1,18 +1,18 @@
 # ADR 0082: Process Host Authority and Runtime Construction Topology
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-21
+**Last Revised**: 2026-07-23
 **Owner**: Product composition and executable hosts
-**Admission Trigger**: RGF-U23 found the Host success metrics supported at `f7e5ee2` but retained
-this proposal because no compatible Accepted executable-runtime decision exists. Reconsider only
-after ADR 0084 or an explicit successor is Accepted and a fresh compatibility review preserves the
-already-compiled, Host-trusted code scope without admitting a speculative universal Host Interface
+**Admission Trigger**: RGD-U7 accepted ADR 0084 and independently confirmed this Host topology and
+the compatible pair at `5ebc45e`, preserving the already-compiled, Host-trusted scope without
+admitting a universal Host or service Interface.
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
 **Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079, ADR 0084, ADR 0094
 **Decision Evidence**:
-[RGF-U23 independent decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-a5b3266847924dfc93667c72c8929550.md)
+[RGD-U7 Runtime and Host decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md)
+and the historical [RGF-U23 independent decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-a5b3266847924dfc93667c72c8929550.md)
 
 ## Context
 
@@ -50,19 +50,20 @@ counterfactual without exposing a universal Host/factory Interface or moving pro
 
 RGF-U13 adds the desktop parent/child path and RGF-U17 adds the Editor path: concrete Hosts own
 runtime construction, parent lifetime, control, and finite retirement while gameplay/tooling do not
-receive process or native authority. RGF-U23 independently found every Host success metric
-supported in the currently admitted concrete-authority scope. It nevertheless retained this ADR as
-Proposed because ADR 0084 remains Proposed, so the required Accepted executable-runtime dependency
-and final pair compatibility do not exist. Shared process services, multi-runtime sharing,
-package/build Host topology, and final public placement remain deliberately unfrozen.
+receive process or native authority. RGF-U23 found every Host success metric supported in the
+currently admitted concrete-authority scope, but historically retained this ADR because ADR 0084
+was still Proposed. RGD-U2 through RGD-U6 then repaired the Runtime blockers and supplied the
+refreshed registry, route, reconstruction, parity, and external-Runner evidence that RGD-U7 used
+to accept the compatible pair. Shared process services, package/build Host topology, replacement
+Render Hosts, and final public API placement remain deliberately unfrozen.
 
-The U23 verdict applies only to already-compiled, Host-trusted code-first and RGF paths. Project
+The accepted scope remains only already-compiled, Host-trusted code-first and RGF paths. Project
 data does not authorize Cargo resolution, build scripts, proc macros, native packages/importers, or
 in-process Play; broader activation remains owned by OQ-031 or an Accepted successor.
 
 ## Decision
 
-If accepted, nara will use an explicit authority and lifetime scope graph for product hosts. This
+Nara uses an explicit authority and lifetime scope graph for product hosts. This
 ADR selects process/project authority placement, service-authority placement, and parent/child
 lifetime rules. ADR 0084 exclusively owns the executable-runtime candidate's internal startup,
 publication, fault, and close state machine. This ADR does not require public Rust types with the
@@ -127,7 +128,7 @@ it starts a runtime:
 - one selected Platform/Runner Adapter drives each admitted process/runtime-driver scope and
   supplies platform events, elapsed time, wake/close behavior, and process-affine target authority;
 - the stock render execution authority owns each selected GPU device domain under ADR 0078 and ADR
-  0094; this proposal does not admit a replacement Render Host role;
+  0094; this decision does not admit a replacement Render Host role;
 - zero or more domain service Adapters own separately declared service authorities.
 
 Those cardinalities belong to their domain contracts, not ordinary plugin replacement slots. For
@@ -263,7 +264,7 @@ stop runtime admission
 
 ### Deliberately Unfrozen
 
-This proposal does not select:
+This decision does not select:
 
 - a public `EngineHost`, `ProjectContext`, `ServiceHub`, or universal host trait;
 - a new host crate or object-safe service registry;
@@ -274,7 +275,7 @@ This proposal does not select:
 - a dynamic plugin ABI, script VM, physics API, or audio backend API.
 
 It also does not freeze one universal `PlatformRunnerAdapter` or `RenderHostAdapter` Rust trait.
-This proposal may admit Platform/Runner selection and conformance after its alternate-runner
+This decision may admit Platform/Runner selection and conformance after its alternate-runner
 evidence. It does not fix external replacement Render Host availability, selection, or cardinality;
 ADR 0094 owns that separate admission. The first independent clean-room implementations of an
 admitted role choose its smallest concrete API.
@@ -310,7 +311,7 @@ failure publication explicit, and permits later service sharing without requirin
 
 **Cons**: Requires typed leases, explicit close dependencies, and more lifecycle tests.
 
-**Decision**: Proposed.
+**Decision**: Accepted.
 
 ### Option D: Run Every Play Runtime in a Child Process
 
@@ -352,7 +353,7 @@ justified.
 
 ## Consequences
 
-If accepted:
+With this decision:
 
 - ADR 0035 remains the project parsing and settings authority but participates in one explicit host
   construction sequence.
@@ -367,19 +368,25 @@ If accepted:
 - ADR 0084 exclusively owns candidate-internal construction order, atomic publish-and-promote,
   runtime-scoped session retirement, the runtime state machine, exact step, faults, close, and
   restart semantics.
-- Foundation documentation may show this scope graph only after the proposal is accepted; until
-  then the existing Accepted ADRs remain authoritative.
+- Foundation documentation may show this accepted scope graph while retaining the explicit limits
+  on universal Host, service, and render-replacement abstractions.
 
 ## Admission Evidence
 
-RGF-U23 completed the independent merits review at `f7e5ee2`: the Host-authority metrics owned by
+RGF-U23 completed the initial merits review at `f7e5ee2`: the Host-authority metrics owned by
 RGF-U3/U4/U12/U24, U26's manual baseline and U24 reversal, and the RGF-U17/RGF-U13 Editor/desktop
-subsets pass in the current concrete-authority scope. The ADR remains Proposed because ADR 0084 is
-not Accepted. Promotion requires an Accepted ADR 0084 or explicit successor, a fresh compatible
-pair review, the trust limitation above, and continued evidence that no public universal
-Host/service Interface was admitted without a second concrete consumer. A rejected or
-still-Proposed executable-runtime dependency blocks product use until an Accepted compatible
-successor exists; it does not force both ADRs to share one decision status.
+subsets passed in the current concrete-authority scope. Its only dependency blocker was a still-
+Proposed ADR 0084. RGD-U2 through RGD-U6 repaired the named Runtime evidence gaps, and RGD-U7
+independently accepted ADR 0084, this Host topology, and the compatible pair at their refreshed
+revisions.
+
+The accepted external Runner evidence proves public managed-runtime embedding, not a public Host
+factory or universal Platform/Runner Adapter. A code-first owner may promote its own managed
+candidate; a concrete product Host must publish only through its owned publication slot and must
+never expose a raw `App` publication path. A `CloseIncomplete` child retains its concrete Host
+parent authority; direct embedding owns no implied `ProjectHost` parent and remains responsible for
+its own bounded close driving. Future replacement Platform/Runner or Render Host roles require
+their own clean-room selection, sole-authority, close-order, and conformance evidence.
 
 ## Citations
 

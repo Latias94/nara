@@ -1,27 +1,27 @@
 # ADR 0084: Executable Runtime Ownership and Isolation
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-21
+**Last Revised**: 2026-07-23
 **Owner**: `nara_app` and concrete executable hosts
-**Admission Trigger**: RGF-U23 retained this proposal at `f7e5ee2`. Reconsider after one exact
-binding/codec/migration authority replaces the plan/World registry split, runtime contention no
-longer sticky-faults an independent healthy runtime, and the missing external Runner, three-Host
-command parity, and complete reconstruction evidence pass under the explicit Host-trusted scope
+**Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
+process-global runtime contention, and proved three-Host parity, external Runner authority, and
+fresh session reconstruction. RGD-U7 independently accepted this bounded authority at `5ebc45e`.
 **Revisit Trigger**: A concrete embedded or multi-runtime workflow proves that a thin lifecycle owner
 cannot preserve `App` as the sole schedule/world authority
 **Related**: ADR 0003, ADR 0008, ADR 0034, ADR 0039, ADR 0042, ADR 0052, ADR 0057, ADR 0058,
 ADR 0076, ADR 0081, ADR 0082
 **Decision Evidence**:
-[RGF-U23 independent decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-a5b3266847924dfc93667c72c8929550.md)
+[RGD-U7 Runtime and Host decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md)
+and the historical [RGF-U23 independent decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-a5b3266847924dfc93667c72c8929550.md)
 
 ## Context
 
 `nara_app::App` already owns the simulation `World`, plugin lifecycle, schedules, runner contract,
 startup state, and time transaction. Before RGF-U17, `ScenePlaySession` owned only a bare `World`;
 tooling pause was an enum rather than execution control, and Stop could remove that world without
-proving that tasks or native services closed. RGF-U17 removes that baseline through a concrete
-Editor trial while this ADR's final decision remains pending RGF-U23.
+proving that tasks or native services closed. RGF-U17 removed that baseline through a concrete
+Editor trial before RGF-U23's historical Proposed verdict and the later RGD-U7 decision.
 
 A `World` is an ECS state container, not an executable game instance. A complete runtime boundary
 also needs:
@@ -35,7 +35,7 @@ also needs:
 - identical behavior when driven by editor, desktop, or headless hosts.
 
 ADR 0076 contains runtime control as one part of a much larger observation/debug/replay direction.
-This proposal isolates the executable lifecycle contract without selecting system stepping,
+This decision isolates the executable lifecycle contract without selecting system stepping,
 checkpoint formats, replay persistence, or native code hot patching.
 
 ## Trial Evidence
@@ -54,10 +54,9 @@ fresh generations, and retains incomplete cleanup for later bounded drives. Prod
 paths prove the same plan, command, authoritative first tick, pre-owner rejection, late-hook
 rejection, and incomplete-retirement custody semantics.
 
-This evidence is intentionally incomplete. U13 now provides desktop product parity and U17 provides
-Editor ownership, but U23 has not independently decided the runtime and Host proposals or their
-compatibility. The ADR therefore remains Proposed; landed type names and tests are Trial evidence,
-not authority for an unproven universal topology or final public API.
+At the U23 review point this evidence was intentionally incomplete. U13 supplied desktop product
+parity and U17 supplied Editor ownership, but U23 had not accepted the runtime and Host proposals
+or their compatibility. Its Proposed verdict is historical evidence, not current authority.
 
 RGF-U17 adds the Editor trial: root `EditorProjectSession` owns preparation, start attempts,
 published runtime generations, controls, close evidence, and retirement while `nara_tooling` and
@@ -66,23 +65,21 @@ retirement, normal cleanup continues across frames, close failure prevents false
 and runtime edit/Apply Changes execute at generation-stamped safe points. Together with U13 this
 completes the named product-path evidence input.
 
-RGF-U23 independently reviewed all success metrics at `f7e5ee2` and retained this ADR as Proposed.
-Startup publication, ownership handoff, App admission, Play execution, exact step, fault closure,
-finite close, stop-first workspace, API authority, and early ownership value pass. Driver parity,
-external driver authority, and complete runtime isolation remain insufficient. Two current
-behaviors also prevent acceptance: process-global reporter/schedule contention sticky-faults an
-independent runtime, and the plan plus World registries can carry different codec/binding/migration
-behavior despite the same catalog fingerprint. The Host/runtime pair remains conceptually
-compatible as a bounded Trial but cannot unblock U20.
+RGF-U23 independently reviewed the earlier revision at `f7e5ee2` and retained this ADR as
+Proposed. RGD-U2 then bound composition, candidate, and runtime safe points to one exact frozen
+behavior snapshot. RGD-U3 replaced process-global reporter/schedule contention with bounded
+per-runtime routes. RGD-U4, U5, and U6 supplied the missing reconstruction, three-Host, and
+renamed-dependency external-Runner evidence. RGD-U7 independently re-reviewed all metrics and
+accepted this bounded Runtime authority without admitting a universal topology or public Runner
+SPI.
 
-The U23 verdict applies only to already-compiled, Host-trusted code-first and RGF paths. Project
+The accepted scope remains only already-compiled, Host-trusted code-first and RGF paths. Project
 data does not authorize Cargo resolution, build scripts, proc macros, native packages/importers, or
 in-process Play; broader activation remains owned by OQ-031 or an Accepted successor.
 
 ## Decision
 
-If accepted, one executable runtime will be a thin lifecycle owner around exactly one
-`nara_app::App`.
+One executable runtime is a thin lifecycle owner around exactly one `nara_app::App`.
 
 ```mermaid
 flowchart TD
@@ -148,6 +145,10 @@ need it.
   publish-and-promote move makes the same owner the Host-visible executable runtime. No
   promoted-but-unpublished owner or fallible hook exists across that boundary. `App` remains the
   only owner of schedules, plugin lifecycle, time domains, and simulation-`World` mutation.
+  This no-runnable-session assertion applies to a concrete Host publication slot. Advanced
+  code-first use of `ReadyRuntimeCandidate::promote()` may instead receive an already faulted
+  `RuntimeInstance` when a fault wins its final race; that owner remains observable and closeable,
+  but it is not a Host-published runnable session.
 - The executable runtime does not register systems or plugins, expose a second scheduler, or keep a
   second time model. It delegates frame/fixed execution to its `App`.
 - The host owns project/edit documents, validated settings, the runtime recipe, and reconstruction
@@ -324,7 +325,7 @@ operation result: Pending | Applied | Failed
   runtime to `Faulted`; they are not discarded or represented only by logs.
 - A system or service fault may occur after partial runtime mutation. Nara does not claim in-place
   rollback. The failed generation is observed and discarded through normal close.
-- Panic recovery is not part of this proposal. A future panic-containment contract must state
+- Panic recovery is not part of this decision. A future panic-containment contract must state
   unwind, process-abort, thread, native callback, and invariant consequences explicitly.
 - Logs and tracing may mirror runtime faults but are not the queryable source of truth.
 
@@ -350,7 +351,7 @@ operation result: Pending | Applied | Failed
 
 ### Deliberately Deferred
 
-This proposal does not define:
+This decision does not define:
 
 - system-by-system stepping or schedule topology exposure;
 - persistent checkpoints, replay artifacts, or backward debugging;
@@ -385,7 +386,7 @@ generation, fault, control, close, and fresh reconstruction explicit.
 
 **Cons**: The wrapper can drift into a second `App` if its scope is not constrained.
 
-**Decision**: Proposed.
+**Decision**: Accepted.
 
 ### Option C: Let Each Host Own `App`, Services, and Control Independently
 
@@ -442,7 +443,7 @@ an equivalent private optimization later.
 
 ## Consequences
 
-If accepted:
+With this decision:
 
 - ADR 0003 remains authoritative for `App`, plugin, schedule, and world ownership;
 - ADR 0034's isolated Play decision remains, but its bare `World` session becomes an obsolete
@@ -454,24 +455,28 @@ If accepted:
   this ADR becomes the canonical runtime lifecycle subset;
 - ADR 0081 structural catalog replacement uses a fresh runtime recipe/generation rather than
   unfreezing an active registry;
-- an Accepted ADR 0082 or explicit successor remains the authority for outer process/project scopes,
-  service-authority placement, and parent/child lifetimes. This ADR is independently authoritative
-  for its executable-runtime node: candidate stages, publication, runtime-scoped session retirement,
-  fault, close, and restart.
+- ADR 0082 owns the accepted outer process/project scope, service-authority placement, and
+  parent/child lifetime rules. This ADR independently owns the executable-runtime node: candidate
+  stages, publication, runtime-scoped session retirement, fault, close, and restart.
 
-No existing ADR is marked superseded while this proposal remains non-authoritative. Acceptance
-must add reciprocal refinement metadata and update implementation evidence.
+No existing ADR is superseded by this decision. It accepts no universal Host/Runner SPI, script
+runtime, or replacement Render Host role.
 
 ## Admission Evidence
 
 RGF-U5 implemented the code-first candidate/runtime trial; RGF-U24 added the concrete headless
 Host/candidate trial and U26 reversal matrix; RGF-U17 and RGF-U13 added Editor and desktop evidence.
-RGF-U23 completed the independent review at `f7e5ee2` and found the failed metrics and implementation
-conflicts recorded above. Acceptance now requires those gaps to be repaired without shrinking the
-metrics or introducing a universal Host/Runner SPI, followed by a new independent Runtime review.
-A wrapper type or accumulated test volume is not authority by itself. ADR 0082 remains independently
-decidable, but product use with an outer Host requires an Accepted ADR 0082 or explicit successor
-plus compatible pair evidence.
+RGF-U23 reviewed that revision at `f7e5ee2` and retained this proposal because its behavior
+registry, fault route, parity/Runner, and reconstruction evidence was incomplete.
+
+RGD-U2 through RGD-U6 repaired those named gaps without shrinking the metrics: one frozen
+behavior snapshot now binds composition, candidates, and managed safe points; fallible Bevy
+execution uses per-runtime routes; fresh sessions include service/backend/identity state; public
+Headless/Desktop/Editor paths share one semantic command oracle; and a renamed-dependency external
+package drives one concrete managed runtime without a Runner SPI. RGD-U7 recorded independent
+Runtime, Host, and compatible-pair reviews at the exact refreshed revisions. The accepted scope is
+only already-compiled, Host-trusted code. Project data still does not authorize Cargo resolution,
+build scripts, proc macros, native packages/importers, or in-process Play.
 
 ## Citations
 
