@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nara.reference-game.normalized-evidence-v1",
+  "title": "Nara Reference-Game Normalized Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "format_version",
+    "normalizer",
+    "input",
+    "evidence"
+  ],
+  "properties": {
+    "schema": {
+      "const": "nara.reference-game.normalized-evidence-v1"
+    },
+    "format_version": {
+      "const": 1
+    },
+    "normalizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "schema_sha256",
+        "validation_scope"
+      ],
+      "properties": {
+        "id": {
+          "const": "nara_reference_game_ingest_v1"
+        },
+        "schema_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "validation_scope": {
+          "const": "outer_transfer_and_structure_v1"
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "envelope",
+        "candidate"
+      ],
+      "properties": {
+        "envelope": {
+          "type": "object"
+        },
+        "candidate": {
+          "type": "object"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object"
+    }
+  }
+}
