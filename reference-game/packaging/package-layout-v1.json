@@ -1,0 +1,41 @@
+{
+  "schema": "nara.reference-game.package-layout-v1",
+  "package_root": "nara-reference-game",
+  "documentation": [
+    {
+      "source": "reference-game/README.md",
+      "destination": "README.md"
+    },
+    {
+      "source": "reference-game/CONTROLS.md",
+      "destination": "CONTROLS.md"
+    },
+    {
+      "source": "LICENSE-MIT",
+      "destination": "LICENSE-MIT"
+    },
+    {
+      "source": "LICENSE-APACHE",
+      "destination": "LICENSE-APACHE"
+    }
+  ],
+  "project_files": [
+    "nara.toml",
+    "assets/kenney-tiny-dungeon.LICENSE.txt",
+    "assets/textures/player.png",
+    "assets/textures/player.png.meta",
+    "assets/textures/tiny-dungeon.png",
+    "assets/textures/tiny-dungeon.png.meta",
+    "prefabs/enemy.prefab.json",
+    "scenes/startup.scene.json",
+    "schema/component-schema-v1.json",
+    "schema/component-schema-v2.json"
+  ],
+  "limits": {
+    "max_file_count": 32,
+    "max_file_bytes": 33554432,
+    "max_expanded_bytes": 67108864,
+    "max_encoded_bytes": 33554432,
+    "max_manifest_bytes": 65536
+  }
+}

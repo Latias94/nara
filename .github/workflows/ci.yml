@@ -48,7 +48,7 @@ jobs:
       - name: Check root workspace
         run: cargo check --workspace --locked
       - name: Test CI and public dependency boundaries
-        run: cargo nextest run --locked -p nara --test ci_policy --test reference_game_contract --test module_consumer_boundary --test-threads=1
+        run: cargo nextest run --locked -p nara --test ci_policy --test artifact_package_policy --test reference_game_contract --test module_consumer_boundary --test-threads=1
 
   reference-game:
     name: "Reference game (${{ matrix.os }})"

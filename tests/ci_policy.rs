@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeSet,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -7,6 +8,7 @@ use toml::Value as TomlValue;
 use yaml_rust2::{Yaml, YamlLoader};
 
 const WORKFLOW_PATH: &str = ".github/workflows/ci.yml";
+const CANDIDATE_WORKFLOW_PATH: &str = ".github/workflows/reference-game-candidate.yml";
 const REQUIRED_LOCKFILES: [&str; 3] = [
     "Cargo.lock",
     "reference-game/Cargo.lock",
@@ -17,8 +19,19 @@ const ALLOWED_RUNNERS: [&str; 2] = ["ubuntu-latest", "windows-latest"];
 const MAX_TIMEOUT_MINUTES: i64 = 45;
 const CHECKOUT_ACTION: &str = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
 const INSTALL_ACTION: &str = "taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853";
+const SETUP_PYTHON_ACTION: &str = "actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548";
+const UPLOAD_ARTIFACT_ACTION: &str =
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
+const DOWNLOAD_ARTIFACT_ACTION: &str =
+    "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
 const CONCURRENCY_GROUP: &str =
     "ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}";
+const CANDIDATE_CONCURRENCY_GROUP: &str =
+    "reference-game-candidate-${{ github.workflow }}-${{ github.ref }}";
+const CANDIDATE_JOB_GUARD: &str =
+    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}";
+const LINUX_STEP_GUARD: &str = "${{ runner.os == 'Linux' }}";
+const WINDOWS_STEP_GUARD: &str = "${{ runner.os == 'Windows' }}";
 
 #[test]
 fn committed_ci_is_bounded_read_only_and_covers_three_locked_workspaces() {
@@ -31,6 +44,84 @@ fn committed_ci_is_bounded_read_only_and_covers_three_locked_workspaces() {
         );
     }
     assert_policy_accepts(&fixture);
+}
+
+#[test]
+fn committed_candidate_workflow_is_manual_read_only_and_has_a_no_checkout_consumer() {
+    let fixture = CandidatePolicyFixture::committed();
+    assert!(
+        repository_root().join(CANDIDATE_WORKFLOW_PATH).is_file(),
+        "candidate workflow is missing"
+    );
+    assert_candidate_policy_accepts(&fixture);
+}
+
+#[test]
+fn candidate_policy_rejects_untrusted_triggers_permissions_and_mutable_actions() {
+    let mut untrusted_trigger = CandidatePolicyFixture::committed();
+    replace_first(
+        &mut untrusted_trigger.workflow,
+        "  workflow_dispatch:\n",
+        "  pull_request_target:\n",
+    );
+    assert_candidate_policy_rejects(&untrusted_trigger, "workflow_dispatch");
+
+    let mut write_permission = CandidatePolicyFixture::committed();
+    replace_first(
+        &mut write_permission.workflow,
+        "contents: read",
+        "contents: write",
+    );
+    assert_candidate_policy_rejects(&write_permission, "contents: read");
+
+    let mut mutable_action = CandidatePolicyFixture::committed();
+    replace_first(
+        &mut mutable_action.workflow,
+        UPLOAD_ARTIFACT_ACTION,
+        "actions/upload-artifact@v4",
+    );
+    assert_candidate_policy_rejects(&mutable_action, "exact reviewed action");
+
+    let mut secret = CandidatePolicyFixture::committed();
+    replace_first(
+        &mut secret.workflow,
+        "  CARGO_INCREMENTAL: \"0\"",
+        "  CARGO_INCREMENTAL: \"0\"\n  TOKEN: \"${{ secrets.RELEASE_TOKEN }}\"",
+    );
+    assert_candidate_policy_rejects(&secret, "secret context");
+}
+
+#[test]
+fn candidate_policy_rejects_checkout_in_consumer_and_missing_software_profile() {
+    let mut consumer_checkout = CandidatePolicyFixture::committed();
+    replace_first(
+        &mut consumer_checkout.workflow,
+        "      - name: Set up Python consumer",
+        concat!(
+            "      - name: Checkout consumer\n",
+            "        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\n",
+            "        with:\n",
+            "          persist-credentials: false\n",
+            "      - name: Set up Python consumer"
+        ),
+    );
+    assert_candidate_policy_rejects(&consumer_checkout, "exact ordered candidate pipeline");
+
+    let mut missing_linux_profile = CandidatePolicyFixture::committed();
+    replace_first(
+        &mut missing_linux_profile.workflow,
+        " --desktop-environment NARA_WGPU_FORCE_FALLBACK=1",
+        "",
+    );
+    assert_candidate_policy_rejects(&missing_linux_profile, "exact ordered candidate pipeline");
+
+    let mut missing_guard = CandidatePolicyFixture::committed();
+    replace_first(
+        &mut missing_guard.workflow,
+        &format!("    if: \"{CANDIDATE_JOB_GUARD}\"\n"),
+        "",
+    );
+    assert_candidate_policy_rejects(&missing_guard, "protected main dispatch");
 }
 
 #[test]
@@ -314,6 +405,523 @@ impl PolicyFixture {
         violations.sort();
         violations.dedup();
         violations
+    }
+}
+
+#[derive(Clone)]
+struct CandidatePolicyFixture {
+    workflow: String,
+}
+
+impl CandidatePolicyFixture {
+    fn committed() -> Self {
+        Self {
+            workflow: fs::read_to_string(repository_root().join(CANDIDATE_WORKFLOW_PATH))
+                .expect("candidate workflow must be readable"),
+        }
+    }
+
+    fn violations(&self) -> Vec<String> {
+        let mut violations = Vec::new();
+        validate_candidate_workflow(&self.workflow, &mut violations);
+        violations.sort();
+        violations.dedup();
+        violations
+    }
+}
+
+fn validate_candidate_workflow(source: &str, violations: &mut Vec<String>) {
+    let documents = match YamlLoader::load_from_str(source) {
+        Ok(documents) => documents,
+        Err(error) => {
+            violations.push(format!("candidate workflow is not valid YAML: {error}"));
+            return;
+        }
+    };
+    if documents.len() != 1 {
+        violations.push("candidate workflow must contain exactly one YAML document".to_owned());
+        return;
+    }
+    let workflow = &documents[0];
+    let Some(root) = workflow.as_hash() else {
+        violations.push("candidate workflow root must be a mapping".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        root,
+        "candidate workflow",
+        &["name", "on", "permissions", "concurrency", "env", "jobs"],
+        violations,
+    );
+    if scalar_str(field(root, "name")) != Some("Reference Game Candidate") {
+        violations
+            .push("candidate workflow name must be exactly Reference Game Candidate".to_owned());
+    }
+    validate_candidate_trigger(field(root, "on"), violations);
+    validate_permissions(field(root, "permissions"), violations);
+    validate_candidate_concurrency(field(root, "concurrency"), violations);
+    validate_environment(field(root, "env"), violations);
+    validate_candidate_jobs(field(root, "jobs"), violations);
+    scan_candidate_forbidden_features(workflow, "candidate workflow", violations);
+}
+
+fn validate_candidate_trigger(trigger: Option<&Yaml>, violations: &mut Vec<String>) {
+    let Some(trigger) = trigger.and_then(Yaml::as_hash) else {
+        violations.push("candidate workflow must declare workflow_dispatch only".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        trigger,
+        "candidate workflow.on",
+        &["workflow_dispatch"],
+        violations,
+    );
+    if !matches!(field(trigger, "workflow_dispatch"), Some(Yaml::Null)) {
+        violations.push("candidate workflow_dispatch trigger must be unconfigured".to_owned());
+    }
+}
+
+fn validate_candidate_concurrency(concurrency: Option<&Yaml>, violations: &mut Vec<String>) {
+    let Some(concurrency) = concurrency.and_then(Yaml::as_hash) else {
+        violations.push("candidate workflow concurrency is required".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        concurrency,
+        "candidate workflow.concurrency",
+        &["group", "cancel-in-progress"],
+        violations,
+    );
+    if scalar_str(field(concurrency, "group")) != Some(CANDIDATE_CONCURRENCY_GROUP) {
+        violations.push("candidate concurrency must be workflow- and ref-scoped".to_owned());
+    }
+    if field(concurrency, "cancel-in-progress").and_then(Yaml::as_bool) != Some(true) {
+        violations.push("candidate concurrency must be cancellable".to_owned());
+    }
+}
+
+fn validate_candidate_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
+    let Some(jobs) = jobs.and_then(Yaml::as_hash) else {
+        violations.push("candidate workflow jobs must be a mapping".to_owned());
+        return;
+    };
+    let expected = ["candidate-build", "candidate-consumer"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    if string_keys(jobs, "candidate workflow.jobs", violations) != expected {
+        violations
+            .push("candidate workflow must contain exactly build and consumer jobs".to_owned());
+    }
+    for job_name in ["candidate-build", "candidate-consumer"] {
+        let Some(job) = field(jobs, job_name).and_then(Yaml::as_hash) else {
+            continue;
+        };
+        validate_candidate_job(job_name, job, violations);
+    }
+}
+
+fn validate_candidate_job(
+    job_name: &str,
+    job: &yaml_rust2::yaml::Hash,
+    violations: &mut Vec<String>,
+) {
+    let expected_keys = if job_name == "candidate-build" {
+        vec![
+            "name",
+            "if",
+            "runs-on",
+            "timeout-minutes",
+            "strategy",
+            "steps",
+        ]
+    } else {
+        vec![
+            "name",
+            "if",
+            "needs",
+            "runs-on",
+            "timeout-minutes",
+            "strategy",
+            "steps",
+        ]
+    };
+    validate_exact_keys(
+        job,
+        &format!("candidate workflow.jobs.{job_name}"),
+        &expected_keys,
+        violations,
+    );
+    let expected_name = if job_name == "candidate-build" {
+        "Candidate build (${{ matrix.platform }})"
+    } else {
+        "Candidate consumer (${{ matrix.platform }})"
+    };
+    if scalar_str(field(job, "name")) != Some(expected_name) {
+        violations.push(format!(
+            "candidate job {job_name} has the wrong display name"
+        ));
+    }
+    if scalar_str(field(job, "if")) != Some(CANDIDATE_JOB_GUARD) {
+        violations.push(format!(
+            "candidate job {job_name} must require a protected main dispatch"
+        ));
+    }
+    if scalar_str(field(job, "runs-on")) != Some("${{ matrix.os }}") {
+        violations.push(format!(
+            "candidate job {job_name} must use its fixed runner matrix"
+        ));
+    }
+    if field(job, "timeout-minutes").and_then(Yaml::as_i64) != Some(60) {
+        violations.push(format!(
+            "candidate job {job_name} must have a 60 minute timeout"
+        ));
+    }
+    if job_name == "candidate-consumer"
+        && scalar_str(field(job, "needs")) != Some("candidate-build")
+    {
+        violations.push("candidate consumer must depend on candidate-build".to_owned());
+    }
+    validate_candidate_matrix(job_name, field(job, "strategy"), violations);
+    let Some(steps) = field(job, "steps").and_then(Yaml::as_vec) else {
+        violations.push(format!("candidate job {job_name} must declare steps"));
+        return;
+    };
+    validate_candidate_steps(job_name, steps, violations);
+}
+
+fn validate_candidate_matrix(
+    job_name: &str,
+    strategy: Option<&Yaml>,
+    violations: &mut Vec<String>,
+) {
+    let Some(strategy) = strategy.and_then(Yaml::as_hash) else {
+        violations.push(format!("candidate job {job_name} must declare a strategy"));
+        return;
+    };
+    validate_exact_keys(
+        strategy,
+        &format!("candidate workflow.jobs.{job_name}.strategy"),
+        &["fail-fast", "matrix"],
+        violations,
+    );
+    if field(strategy, "fail-fast").and_then(Yaml::as_bool) != Some(false) {
+        violations.push(format!(
+            "candidate job {job_name} must set fail-fast: false"
+        ));
+    }
+    let Some(matrix) = field(strategy, "matrix").and_then(Yaml::as_hash) else {
+        violations.push(format!("candidate job {job_name} must declare a matrix"));
+        return;
+    };
+    validate_exact_keys(
+        matrix,
+        &format!("candidate workflow.jobs.{job_name}.strategy.matrix"),
+        &["include"],
+        violations,
+    );
+    let observed = field(matrix, "include")
+        .and_then(Yaml::as_vec)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let entry = entry.as_hash()?;
+                    if string_keys(entry, "candidate matrix entry", violations)
+                        != ["os", "platform", "binary_suffix"]
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect()
+                    {
+                        violations.push("candidate matrix entry has unexpected keys".to_owned());
+                    }
+                    Some((
+                        scalar_str(field(entry, "os"))?.to_owned(),
+                        scalar_str(field(entry, "platform"))?.to_owned(),
+                        scalar_str(field(entry, "binary_suffix"))?.to_owned(),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        });
+    let expected = vec![
+        (
+            "ubuntu-latest".to_owned(),
+            "linux-x86_64".to_owned(),
+            String::new(),
+        ),
+        (
+            "windows-latest".to_owned(),
+            "windows-x86_64".to_owned(),
+            ".exe".to_owned(),
+        ),
+    ];
+    if observed != Some(expected) {
+        violations.push(format!(
+            "candidate job {job_name} has the wrong platform matrix"
+        ));
+    }
+}
+
+fn validate_candidate_steps(job_name: &str, steps: &[Yaml], violations: &mut Vec<String>) {
+    let mut pipeline = Vec::new();
+    for (index, step) in steps.iter().enumerate() {
+        let Some(step) = step.as_hash() else {
+            violations.push(format!("candidate job {job_name} has a non-mapping step"));
+            continue;
+        };
+        let path = format!("candidate workflow.jobs.{job_name}.steps[{index}]");
+        let name = scalar_str(field(step, "name")).unwrap_or("");
+        match (
+            scalar_str(field(step, "uses")),
+            scalar_str(field(step, "run")),
+        ) {
+            (Some(action), None) => {
+                validate_exact_keys(step, &path, &["name", "uses", "with"], violations);
+                validate_candidate_action(action, field(step, "with"), &path, violations);
+                pipeline.push(format!("{name}|uses:{action}|if:"));
+            }
+            (None, Some(command)) => {
+                let step_condition = scalar_str(field(step, "if")).unwrap_or("");
+                let keys = if step_condition.is_empty() {
+                    vec!["name", "run"]
+                } else {
+                    vec!["name", "if", "run"]
+                };
+                validate_exact_keys(step, &path, &keys, violations);
+                pipeline.push(format!(
+                    "{name}|run:{}|if:{step_condition}",
+                    normalize_run_script(command)
+                ));
+            }
+            _ => violations.push(format!(
+                "candidate job {job_name} step {index} must declare exactly one of uses or run"
+            )),
+        }
+    }
+    let expected_pipeline = expected_candidate_pipeline(job_name);
+    if pipeline != expected_pipeline {
+        violations.push(format!(
+            "candidate job {job_name} must use the exact ordered candidate pipeline; \
+             observed {pipeline:#?}; expected {expected_pipeline:#?}"
+        ));
+    }
+}
+
+fn validate_candidate_action(
+    action: &str,
+    with: Option<&Yaml>,
+    path: &str,
+    violations: &mut Vec<String>,
+) {
+    if !matches!(
+        action,
+        CHECKOUT_ACTION | SETUP_PYTHON_ACTION | UPLOAD_ARTIFACT_ACTION | DOWNLOAD_ARTIFACT_ACTION
+    ) {
+        violations.push(format!("{path} must use an exact reviewed action"));
+        return;
+    }
+    let Some(with) = with.and_then(Yaml::as_hash) else {
+        violations.push(format!("{path} action must declare with"));
+        return;
+    };
+    match action {
+        CHECKOUT_ACTION => {
+            validate_exact_keys(
+                with,
+                &format!("{path}.with"),
+                &["persist-credentials"],
+                violations,
+            );
+            if field(with, "persist-credentials").and_then(Yaml::as_bool) != Some(false) {
+                violations.push(format!(
+                    "{path} checkout must disable persisted credentials"
+                ));
+            }
+        }
+        SETUP_PYTHON_ACTION => {
+            validate_exact_keys(
+                with,
+                &format!("{path}.with"),
+                &["python-version"],
+                violations,
+            );
+            if scalar_str(field(with, "python-version")) != Some("3.13.5") {
+                violations.push(format!("{path} must pin Python 3.13.5"));
+            }
+        }
+        UPLOAD_ARTIFACT_ACTION => {
+            validate_exact_keys(
+                with,
+                &format!("{path}.with"),
+                &[
+                    "name",
+                    "path",
+                    "if-no-files-found",
+                    "retention-days",
+                    "compression-level",
+                    "include-hidden-files",
+                ],
+                violations,
+            );
+            for (key, expected) in [
+                (
+                    "name",
+                    "nara-reference-game-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}",
+                ),
+                (
+                    "path",
+                    "${{ runner.temp }}/candidate-bundle-${{ matrix.platform }}",
+                ),
+                ("if-no-files-found", "error"),
+                ("retention-days", "14"),
+                ("compression-level", "0"),
+                ("include-hidden-files", "false"),
+            ] {
+                if scalar_str(field(with, key)) != Some(expected) {
+                    violations.push(format!("{path} upload field {key} is invalid"));
+                }
+            }
+        }
+        DOWNLOAD_ARTIFACT_ACTION => {
+            validate_exact_keys(with, &format!("{path}.with"), &["name", "path"], violations);
+            for (key, expected) in [
+                (
+                    "name",
+                    "nara-reference-game-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}",
+                ),
+                ("path", "${{ runner.temp }}/candidate-bundle"),
+            ] {
+                if scalar_str(field(with, key)) != Some(expected) {
+                    violations.push(format!("{path} download field {key} is invalid"));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn expected_candidate_pipeline(job_name: &str) -> Vec<String> {
+    match job_name {
+        "candidate-build" => vec![
+            format!("Checkout source|uses:{CHECKOUT_ACTION}|if:"),
+            format!("Set up Python packager|uses:{SETUP_PYTHON_ACTION}|if:"),
+            "Install Rust|run:rustup toolchain install 1.95.0 --profile minimal\nrustup default 1.95.0|if:".to_owned(),
+            "Build headless product|run:cargo build --manifest-path reference-game/Cargo.toml --locked --release --bin headless|if:".to_owned(),
+            "Build desktop product and probe|run:cargo build --manifest-path reference-game/Cargo.toml --locked --release --features desktop --bin desktop --bin desktop_render_probe|if:".to_owned(),
+            concat!(
+                "Create bounded candidate|run:python -B reference-game/tools/package.py create --repository-root . ",
+                "--platform \"${{ matrix.platform }}\" --version 0.1.0 --source-revision \"${{ github.sha }}\" ",
+                "--headless-binary \"reference-game/target/release/headless${{ matrix.binary_suffix }}\" ",
+                "--desktop-binary \"reference-game/target/release/desktop${{ matrix.binary_suffix }}\" ",
+                "--desktop-probe-binary \"reference-game/target/release/desktop_render_probe${{ matrix.binary_suffix }}\" ",
+                "--output \"${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.zip\" ",
+                "--receipt \"${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.json\"|if:"
+            )
+            .to_owned(),
+            concat!(
+                "Create no-checkout transport|run:python -B reference-game/tools/package.py bundle --repository-root . ",
+                "--archive \"${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.zip\" ",
+                "--receipt \"${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.json\" ",
+                "--output \"${{ runner.temp }}/candidate-bundle-${{ matrix.platform }}\"|if:"
+            )
+            .to_owned(),
+            format!("Upload candidate transport|uses:{UPLOAD_ARTIFACT_ACTION}|if:"),
+        ],
+        "candidate-consumer" => vec![
+            format!("Set up Python consumer|uses:{SETUP_PYTHON_ACTION}|if:"),
+            format!("Download exact candidate transport|uses:{DOWNLOAD_ARTIFACT_ACTION}|if:"),
+            concat!(
+                "Verify candidate transport before extraction|run:python -B ",
+                "\"${{ runner.temp }}/candidate-bundle/verification/reference-game/tools/smoke_artifact.py\" ",
+                "bundle-verify --bundle \"${{ runner.temp }}/candidate-bundle\" ",
+                "--expected-platform \"${{ matrix.platform }}\" --expected-source-revision \"${{ github.sha }}\"|if:"
+            )
+            .to_owned(),
+            format!(
+                "Install Linux software display and Vulkan fallback|run:sudo apt-get update\nsudo apt-get install --yes xvfb mesa-vulkan-drivers vulkan-tools|if:{LINUX_STEP_GUARD}"
+            ),
+            format!(
+                "{}|if:{LINUX_STEP_GUARD}",
+                concat!(
+                    "Smoke Linux candidate|run:python -B ",
+                    "\"${{ runner.temp }}/candidate-bundle/verification/reference-game/tools/smoke_artifact.py\" ",
+                    "bundle-smoke --bundle \"${{ runner.temp }}/candidate-bundle\" --work-root \"${{ runner.temp }}\" ",
+                    "--expected-platform \"${{ matrix.platform }}\" --expected-source-revision \"${{ github.sha }}\" ",
+                    "--desktop-launcher-json '[\"xvfb-run\",\"--auto-servernum\",\"--server-args=-screen 0 1280x720x24\"]' ",
+                    "--desktop-environment NARA_WGPU_FORCE_FALLBACK=1"
+                )
+            ),
+            format!(
+                "{}|if:{WINDOWS_STEP_GUARD}",
+                concat!(
+                    "Smoke Windows candidate|run:python -B ",
+                    "\"${{ runner.temp }}/candidate-bundle/verification/reference-game/tools/smoke_artifact.py\" ",
+                    "bundle-smoke --bundle \"${{ runner.temp }}/candidate-bundle\" --work-root \"${{ runner.temp }}\" ",
+                    "--expected-platform \"${{ matrix.platform }}\" --expected-source-revision \"${{ github.sha }}\" ",
+                    "--desktop-environment NARA_WGPU_FORCE_FALLBACK=1"
+                )
+            ),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn scan_candidate_forbidden_features(node: &Yaml, path: &str, violations: &mut Vec<String>) {
+    match node {
+        Yaml::Hash(mapping) => {
+            for (key, value) in mapping {
+                let Some(key) = key.as_str() else {
+                    violations.push(format!("{path} contains a non-string key"));
+                    continue;
+                };
+                let child_path = format!("{path}.{key}");
+                let normalized = key.to_ascii_lowercase();
+                if matches!(normalized.as_str(), "cache" | "cache-dependency-path") {
+                    violations.push(format!("{child_path} introduces a shared cache"));
+                }
+                if normalized == "id-token" && scalar_str(Some(value)) != Some("none") {
+                    violations.push(format!("{child_path} requests OIDC authority"));
+                }
+                if normalized == "continue-on-error" {
+                    violations.push(format!("{child_path} masks failure"));
+                }
+                if normalized == "permissions" && path != "candidate workflow" {
+                    violations.push(format!("{child_path} overrides workflow permissions"));
+                }
+                scan_candidate_forbidden_features(value, &child_path, violations);
+            }
+        }
+        Yaml::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                scan_candidate_forbidden_features(value, &format!("{path}[{index}]"), violations);
+            }
+        }
+        Yaml::String(value) => {
+            let normalized = value.to_ascii_lowercase();
+            if contains_ascii_identifier(&normalized, "secrets") {
+                violations.push(format!("{path} references a secret context"));
+            }
+            if normalized.contains("github.token") {
+                violations.push(format!("{path} references github.token"));
+            }
+            if normalized.contains("actions_id_token_request") {
+                violations.push(format!("{path} requests OIDC environment state"));
+            }
+            if normalized.contains("pull_request_target") || normalized.contains("workflow_run") {
+                violations.push(format!("{path} permits an untrusted trigger chain"));
+            }
+            if normalized.contains("actions/cache@")
+                || normalized.contains("rust-cache")
+                || normalized.contains("sccache")
+            {
+                violations.push(format!("{path} introduces a shared cache"));
+            }
+            if normalized == "self-hosted" {
+                violations.push(format!("{path} uses a persistent self-hosted runner"));
+            }
+        }
+        Yaml::Alias(_) => violations.push(format!("{path} uses an uninspectable YAML alias")),
+        _ => {}
     }
 }
 
@@ -621,7 +1229,7 @@ fn required_step_pipeline(job_name: &str) -> &'static [&'static str] {
             "uses:taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853",
             "run:cargo fmt --all -- --check",
             "run:cargo check --workspace --locked",
-            "run:cargo nextest run --locked -p nara --test ci_policy --test reference_game_contract --test module_consumer_boundary --test-threads=1",
+            "run:cargo nextest run --locked -p nara --test ci_policy --test artifact_package_policy --test reference_game_contract --test module_consumer_boundary --test-threads=1",
         ],
         "reference-game" => &[
             "uses:actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
@@ -886,6 +1494,24 @@ fn assert_policy_rejects(fixture: &PolicyFixture, expected: &str) {
             .iter()
             .any(|violation| violation.contains(expected)),
         "expected violation containing {expected:?}, got:\n{violations:#?}"
+    );
+}
+
+fn assert_candidate_policy_accepts(fixture: &CandidatePolicyFixture) {
+    let violations = fixture.violations();
+    assert!(
+        violations.is_empty(),
+        "candidate CI policy violations:\n{violations:#?}"
+    );
+}
+
+fn assert_candidate_policy_rejects(fixture: &CandidatePolicyFixture, expected: &str) {
+    let violations = fixture.violations();
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.contains(expected)),
+        "expected candidate violation containing {expected:?}, got:\n{violations:#?}"
     );
 }
 

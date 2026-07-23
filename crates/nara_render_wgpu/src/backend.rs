@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -35,6 +36,22 @@ use crate::{
 };
 
 static NEXT_WGPU_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
+const WGPU_FORCE_FALLBACK_ADAPTER_ENV: &str = "NARA_WGPU_FORCE_FALLBACK";
+const INVALID_FALLBACK_ADAPTER_ENV: &str = "NARA_WGPU_FORCE_FALLBACK must be either 0 or 1";
+
+fn force_fallback_adapter_from_value(value: Option<&OsStr>) -> Result<bool, &'static str> {
+    match value {
+        None => Ok(false),
+        Some(value) if value == OsStr::new("0") => Ok(false),
+        Some(value) if value == OsStr::new("1") => Ok(true),
+        Some(_) => Err(INVALID_FALLBACK_ADAPTER_ENV),
+    }
+}
+
+fn force_fallback_adapter_from_environment() -> Result<bool, &'static str> {
+    let value = std::env::var_os(WGPU_FORCE_FALLBACK_ADAPTER_ENV);
+    force_fallback_adapter_from_value(value.as_deref())
+}
 
 #[derive(Debug)]
 struct WgpuBackendInstanceId(u64);
@@ -416,8 +433,15 @@ impl WgpuRenderBackend {
             .get(&window_id)
             .ok_or(WgpuRenderError::SurfaceMissing { window_id })?
             .surface(window_id)?;
+        let force_fallback_adapter =
+            force_fallback_adapter_from_environment().map_err(|message| {
+                WgpuRenderError::AdapterUnavailable {
+                    message: message.to_owned(),
+                }
+            })?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             compatible_surface: Some(surface),
+            force_fallback_adapter,
             ..Default::default()
         }))
         .map_err(|error| WgpuRenderError::AdapterUnavailable {
@@ -800,7 +824,7 @@ fn render_backend_state(state: WgpuBackendState) -> RenderBackendState {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{ffi::OsStr, sync::Arc};
 
     use nara_app::{
         App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
@@ -817,6 +841,27 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn fallback_adapter_environment_is_absent_or_explicitly_boolean() {
+        assert_eq!(force_fallback_adapter_from_value(None), Ok(false));
+        assert_eq!(
+            force_fallback_adapter_from_value(Some(OsStr::new("0"))),
+            Ok(false)
+        );
+        assert_eq!(
+            force_fallback_adapter_from_value(Some(OsStr::new("1"))),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn fallback_adapter_environment_rejects_ambiguous_values() {
+        assert_eq!(
+            force_fallback_adapter_from_value(Some(OsStr::new("true"))),
+            Err(INVALID_FALLBACK_ADAPTER_ENV)
+        );
+    }
 
     #[derive(Debug)]
     struct TestWindowSource;
