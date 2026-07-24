@@ -30,6 +30,23 @@ const CANDIDATE_CONCURRENCY_GROUP: &str =
     "reference-game-candidate-${{ github.workflow }}-${{ github.ref }}";
 const CANDIDATE_JOB_GUARD: &str =
     "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}";
+const EVIDENCE_INGEST_WORKFLOW_PATH: &str = ".github/workflows/reference-game-evidence-ingest.yml";
+const EVIDENCE_INGEST_CONCURRENCY_GROUP: &str =
+    "reference-game-evidence-ingest-${{ github.workflow }}-${{ github.ref }}";
+const EVIDENCE_INGEST_JOB_GUARD: &str =
+    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}";
+const GITHUB_SCRIPT_ACTION: &str = "actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71";
+const REVIEWED_EVIDENCE_SOURCE_REVISION: &str = "0c23f48d93ebb66c46377db30ce889943c0d2d63";
+const EVIDENCE_INGEST_HELPER_PATH: &str = "reference-game/tools/ingest_evidence.py";
+const EVIDENCE_INGEST_HELPER_BLOB: &str = "49a8604b4466c38d13884e67131198e744323150";
+const EVIDENCE_INGEST_HELPER_SHA256: &str =
+    "8fac0fbb409b622e0695e26e42fdc0db9698956881abc72805049068f16ae1f2";
+const EVIDENCE_INGEST_SCHEMA_PATH: &str =
+    "docs/benchmarks/data/envelope/v1/normalized-evidence.schema.json";
+const EVIDENCE_INGEST_SCHEMA_BLOB: &str = "e6b22a9d818a3b7445396da5e8ea05a33348de06";
+const EVIDENCE_INGEST_SCHEMA_SHA256: &str =
+    "5ce8ff142febef0d8d844617622ff6ee9f6de4efc5718c2007b260786b17ee28";
+const EVIDENCE_INGEST_POLICY_ROOT: &str = "${{ runner.temp }}/nara-evidence-ingest-policy";
 const LINUX_STEP_GUARD: &str = "${{ runner.os == 'Linux' }}";
 const WINDOWS_STEP_GUARD: &str = "${{ runner.os == 'Windows' }}";
 
@@ -54,6 +71,102 @@ fn committed_candidate_workflow_is_manual_read_only_and_has_a_no_checkout_consum
         "candidate workflow is missing"
     );
     assert_candidate_policy_accepts(&fixture);
+}
+
+#[test]
+fn committed_evidence_ingest_workflow_only_verifies_pinned_policy_material() {
+    let fixture = EvidenceIngestPolicyFixture::committed();
+    assert!(
+        repository_root()
+            .join(EVIDENCE_INGEST_WORKFLOW_PATH)
+            .is_file(),
+        "evidence-ingest workflow is missing"
+    );
+    assert_evidence_ingest_policy_accepts(&fixture);
+}
+
+#[test]
+fn evidence_ingest_policy_rejects_untrusted_permissions_mutable_actions_and_execution() {
+    let mut untrusted_trigger = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut untrusted_trigger.workflow,
+        "  workflow_dispatch:\n",
+        "  pull_request_target:\n",
+    );
+    assert_evidence_ingest_policy_rejects(&untrusted_trigger, "workflow_dispatch");
+
+    let mut write_permission = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut write_permission.workflow,
+        "contents: read",
+        "contents: write",
+    );
+    assert_evidence_ingest_policy_rejects(&write_permission, "contents: read");
+
+    let mut mutable_action = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut mutable_action.workflow,
+        GITHUB_SCRIPT_ACTION,
+        "actions/github-script@v9",
+    );
+    assert_evidence_ingest_policy_rejects(&mutable_action, "exact reviewed action");
+
+    let mut checkout = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut checkout.workflow,
+        "      - name: Fetch pinned helper and schema\n",
+        concat!(
+            "      - name: Checkout source\n",
+            "        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0\n",
+            "      - name: Fetch pinned helper and schema\n",
+        ),
+    );
+    assert_evidence_ingest_policy_rejects(&checkout, "exact three-step policy pipeline");
+
+    let mut executes_candidate = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut executes_candidate.workflow,
+        "verify-policy --schema",
+        "normalize --schema",
+    );
+    assert_evidence_ingest_policy_rejects(&executes_candidate, "verify-policy");
+
+    let mut leaks_token = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut leaks_token.workflow,
+        &format!("          POLICY_ROOT: \"{EVIDENCE_INGEST_POLICY_ROOT}\""),
+        &format!(
+            "          POLICY_ROOT: \"{EVIDENCE_INGEST_POLICY_ROOT}\"\n          TOKEN: \"${{ github.token }}\""
+        ),
+    );
+    assert_evidence_ingest_policy_rejects(&leaks_token, "github.token");
+
+    let mut oidc = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut oidc.workflow,
+        "  contents: read\n",
+        "  contents: read\n  id-token: write\n",
+    );
+    assert_evidence_ingest_policy_rejects(&oidc, "OIDC");
+
+    let mut repository_mutation = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut repository_mutation.workflow,
+        "              fs.writeFileSync(path.join(policyRoot, file.output), bytes, { flag: \"wx\" });",
+        "              exec(\"git push\");",
+    );
+    assert_evidence_ingest_policy_rejects(
+        &repository_mutation,
+        "executes or mutates outside policy verification",
+    );
+
+    let mut missing_guard = EvidenceIngestPolicyFixture::committed();
+    replace_first(
+        &mut missing_guard.workflow,
+        &format!("    if: \"{EVIDENCE_INGEST_JOB_GUARD}\"\n"),
+        "",
+    );
+    assert_evidence_ingest_policy_rejects(&missing_guard, "protected main dispatch");
 }
 
 #[test]
@@ -429,6 +542,459 @@ impl CandidatePolicyFixture {
         violations
     }
 }
+
+#[derive(Clone)]
+struct EvidenceIngestPolicyFixture {
+    workflow: String,
+}
+
+impl EvidenceIngestPolicyFixture {
+    fn committed() -> Self {
+        Self {
+            workflow: fs::read_to_string(repository_root().join(EVIDENCE_INGEST_WORKFLOW_PATH))
+                .expect("evidence-ingest workflow must be readable"),
+        }
+    }
+
+    fn violations(&self) -> Vec<String> {
+        let mut violations = Vec::new();
+        validate_evidence_ingest_workflow(&self.workflow, &mut violations);
+        violations.sort();
+        violations.dedup();
+        violations
+    }
+}
+
+fn validate_evidence_ingest_workflow(source: &str, violations: &mut Vec<String>) {
+    let documents = match YamlLoader::load_from_str(source) {
+        Ok(documents) => documents,
+        Err(error) => {
+            violations.push(format!(
+                "evidence-ingest workflow is not valid YAML: {error}"
+            ));
+            return;
+        }
+    };
+    if documents.len() != 1 {
+        violations
+            .push("evidence-ingest workflow must contain exactly one YAML document".to_owned());
+        return;
+    }
+    let workflow = &documents[0];
+    let Some(root) = workflow.as_hash() else {
+        violations.push("evidence-ingest workflow root must be a mapping".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        root,
+        "evidence-ingest workflow",
+        &["name", "on", "permissions", "concurrency", "jobs"],
+        violations,
+    );
+    if scalar_str(field(root, "name")) != Some("Reference Game Evidence Ingest Preparation") {
+        violations.push(
+            "evidence-ingest workflow name must be exactly Reference Game Evidence Ingest Preparation"
+                .to_owned(),
+        );
+    }
+    validate_evidence_ingest_trigger(field(root, "on"), violations);
+    validate_permissions(field(root, "permissions"), violations);
+    validate_evidence_ingest_concurrency(field(root, "concurrency"), violations);
+    validate_evidence_ingest_jobs(field(root, "jobs"), violations);
+    scan_evidence_ingest_forbidden_features(workflow, "evidence-ingest workflow", violations);
+}
+
+fn validate_evidence_ingest_trigger(trigger: Option<&Yaml>, violations: &mut Vec<String>) {
+    let Some(trigger) = trigger.and_then(Yaml::as_hash) else {
+        violations.push("evidence-ingest workflow must declare workflow_dispatch only".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        trigger,
+        "evidence-ingest workflow.on",
+        &["workflow_dispatch"],
+        violations,
+    );
+    if !matches!(field(trigger, "workflow_dispatch"), Some(Yaml::Null)) {
+        violations
+            .push("evidence-ingest workflow_dispatch trigger must be unconfigured".to_owned());
+    }
+}
+
+fn validate_evidence_ingest_concurrency(concurrency: Option<&Yaml>, violations: &mut Vec<String>) {
+    let Some(concurrency) = concurrency.and_then(Yaml::as_hash) else {
+        violations.push("evidence-ingest workflow concurrency is required".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        concurrency,
+        "evidence-ingest workflow.concurrency",
+        &["group", "cancel-in-progress"],
+        violations,
+    );
+    if scalar_str(field(concurrency, "group")) != Some(EVIDENCE_INGEST_CONCURRENCY_GROUP) {
+        violations.push("evidence-ingest concurrency must be workflow- and ref-scoped".to_owned());
+    }
+    if field(concurrency, "cancel-in-progress").and_then(Yaml::as_bool) != Some(true) {
+        violations.push("evidence-ingest concurrency must be cancellable".to_owned());
+    }
+}
+
+fn validate_evidence_ingest_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
+    let Some(jobs) = jobs.and_then(Yaml::as_hash) else {
+        violations.push("evidence-ingest workflow jobs must be a mapping".to_owned());
+        return;
+    };
+    let expected = ["policy"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    if string_keys(jobs, "evidence-ingest workflow.jobs", violations) != expected {
+        violations.push("evidence-ingest workflow must contain exactly one policy job".to_owned());
+        return;
+    }
+    let Some(job) = field(jobs, "policy").and_then(Yaml::as_hash) else {
+        return;
+    };
+    validate_exact_keys(
+        job,
+        "evidence-ingest workflow.jobs.policy",
+        &["name", "if", "runs-on", "timeout-minutes", "steps"],
+        violations,
+    );
+    if scalar_str(field(job, "name")) != Some("Verify pinned evidence-ingest policy") {
+        violations.push("evidence-ingest policy job has the wrong display name".to_owned());
+    }
+    if scalar_str(field(job, "if")) != Some(EVIDENCE_INGEST_JOB_GUARD) {
+        violations
+            .push("evidence-ingest policy job must require a protected main dispatch".to_owned());
+    }
+    if scalar_str(field(job, "runs-on")) != Some("ubuntu-latest") {
+        violations.push("evidence-ingest policy job must use ubuntu-latest".to_owned());
+    }
+    if field(job, "timeout-minutes").and_then(Yaml::as_i64) != Some(15) {
+        violations.push("evidence-ingest policy job must have a 15 minute timeout".to_owned());
+    }
+    let Some(steps) = field(job, "steps").and_then(Yaml::as_vec) else {
+        violations.push("evidence-ingest policy job must declare steps".to_owned());
+        return;
+    };
+    validate_evidence_ingest_steps(steps, violations);
+}
+
+fn validate_evidence_ingest_steps(steps: &[Yaml], violations: &mut Vec<String>) {
+    if steps.len() != 3 {
+        violations.push(
+            "evidence-ingest workflow must use an exact three-step policy pipeline".to_owned(),
+        );
+        return;
+    }
+    let Some(fetch_step) = steps[0].as_hash() else {
+        violations.push("evidence-ingest fetch step must be a mapping".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        fetch_step,
+        "evidence-ingest workflow.jobs.policy.steps[0]",
+        &["name", "uses", "env", "with"],
+        violations,
+    );
+    if scalar_str(field(fetch_step, "name")) != Some("Fetch pinned helper and schema") {
+        violations.push("evidence-ingest fetch step has the wrong name".to_owned());
+    }
+    if scalar_str(field(fetch_step, "uses")) != Some(GITHUB_SCRIPT_ACTION) {
+        violations.push("evidence-ingest fetch step must use an exact reviewed action".to_owned());
+    }
+    validate_evidence_ingest_fetch_environment(field(fetch_step, "env"), violations);
+    validate_evidence_ingest_fetch_script(field(fetch_step, "with"), violations);
+
+    let Some(python_step) = steps[1].as_hash() else {
+        violations.push("evidence-ingest Python setup step must be a mapping".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        python_step,
+        "evidence-ingest workflow.jobs.policy.steps[1]",
+        &["name", "uses", "with"],
+        violations,
+    );
+    if scalar_str(field(python_step, "name")) != Some("Set up Python") {
+        violations.push("evidence-ingest Python setup step has the wrong name".to_owned());
+    }
+    if scalar_str(field(python_step, "uses")) != Some(SETUP_PYTHON_ACTION) {
+        violations
+            .push("evidence-ingest Python setup must use an exact reviewed action".to_owned());
+    }
+    validate_evidence_ingest_python_version(field(python_step, "with"), violations);
+
+    let Some(verify_step) = steps[2].as_hash() else {
+        violations.push("evidence-ingest verification step must be a mapping".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        verify_step,
+        "evidence-ingest workflow.jobs.policy.steps[2]",
+        &["name", "run"],
+        violations,
+    );
+    if scalar_str(field(verify_step, "name")) != Some("Verify pinned normalization policy") {
+        violations.push("evidence-ingest verification step has the wrong name".to_owned());
+    }
+    let expected = format!(
+        "python -B \"{EVIDENCE_INGEST_POLICY_ROOT}/ingest_evidence.py\" verify-policy \
+         --schema \"{EVIDENCE_INGEST_POLICY_ROOT}/normalized-evidence.schema.json\""
+    );
+    if field(verify_step, "run")
+        .and_then(Yaml::as_str)
+        .map(normalize_run_script)
+        .as_deref()
+        != Some(expected.as_str())
+    {
+        violations.push(
+            "evidence-ingest verification must run only the pinned verify-policy command"
+                .to_owned(),
+        );
+    }
+}
+
+fn validate_evidence_ingest_fetch_environment(
+    environment: Option<&Yaml>,
+    violations: &mut Vec<String>,
+) {
+    let Some(environment) = environment.and_then(Yaml::as_hash) else {
+        violations
+            .push("evidence-ingest fetch step must declare its pinned environment".to_owned());
+        return;
+    };
+    let expected = [
+        "REVIEWED_SOURCE_REVISION",
+        "HELPER_PATH",
+        "HELPER_BLOB",
+        "HELPER_SHA256",
+        "SCHEMA_PATH",
+        "SCHEMA_BLOB",
+        "SCHEMA_SHA256",
+        "POLICY_ROOT",
+    ];
+    validate_exact_keys(
+        environment,
+        "evidence-ingest workflow.jobs.policy.steps[0].env",
+        &expected,
+        violations,
+    );
+    for (key, expected) in [
+        (
+            "REVIEWED_SOURCE_REVISION",
+            REVIEWED_EVIDENCE_SOURCE_REVISION,
+        ),
+        ("HELPER_PATH", EVIDENCE_INGEST_HELPER_PATH),
+        ("HELPER_BLOB", EVIDENCE_INGEST_HELPER_BLOB),
+        ("HELPER_SHA256", EVIDENCE_INGEST_HELPER_SHA256),
+        ("SCHEMA_PATH", EVIDENCE_INGEST_SCHEMA_PATH),
+        ("SCHEMA_BLOB", EVIDENCE_INGEST_SCHEMA_BLOB),
+        ("SCHEMA_SHA256", EVIDENCE_INGEST_SCHEMA_SHA256),
+        ("POLICY_ROOT", EVIDENCE_INGEST_POLICY_ROOT),
+    ] {
+        if scalar_str(field(environment, key)) != Some(expected) {
+            violations.push(format!(
+                "evidence-ingest fetch environment {key} is invalid"
+            ));
+        }
+    }
+}
+
+fn validate_evidence_ingest_fetch_script(with: Option<&Yaml>, violations: &mut Vec<String>) {
+    let Some(with) = with.and_then(Yaml::as_hash) else {
+        violations.push("evidence-ingest fetch step must configure github-script".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        with,
+        "evidence-ingest workflow.jobs.policy.steps[0].with",
+        &["script"],
+        violations,
+    );
+    if field(with, "script")
+        .and_then(Yaml::as_str)
+        .map(normalize_run_script)
+        .as_deref()
+        != Some(normalize_run_script(EVIDENCE_INGEST_FETCH_SCRIPT).as_str())
+    {
+        violations.push(
+            "evidence-ingest fetch step must use the exact reviewed read-only fetch script"
+                .to_owned(),
+        );
+    }
+}
+
+fn validate_evidence_ingest_python_version(with: Option<&Yaml>, violations: &mut Vec<String>) {
+    let Some(with) = with.and_then(Yaml::as_hash) else {
+        violations.push("evidence-ingest Python setup must declare a version".to_owned());
+        return;
+    };
+    validate_exact_keys(
+        with,
+        "evidence-ingest workflow.jobs.policy.steps[1].with",
+        &["python-version"],
+        violations,
+    );
+    if scalar_str(field(with, "python-version")) != Some("3.13.5") {
+        violations.push("evidence-ingest Python setup must pin Python 3.13.5".to_owned());
+    }
+}
+
+fn scan_evidence_ingest_forbidden_features(node: &Yaml, path: &str, violations: &mut Vec<String>) {
+    match node {
+        Yaml::Hash(mapping) => {
+            for (key, value) in mapping {
+                let Some(key) = key.as_str() else {
+                    violations.push(format!("{path} contains a non-string key"));
+                    continue;
+                };
+                let child_path = format!("{path}.{key}");
+                let normalized = key.to_ascii_lowercase();
+                if matches!(normalized.as_str(), "cache" | "cache-dependency-path") {
+                    violations.push(format!("{child_path} introduces a shared cache"));
+                }
+                if normalized == "id-token" && scalar_str(Some(value)) != Some("none") {
+                    violations.push(format!("{child_path} requests OIDC authority"));
+                }
+                if normalized == "continue-on-error" {
+                    violations.push(format!("{child_path} masks failure"));
+                }
+                if normalized == "permissions" && path != "evidence-ingest workflow" {
+                    violations.push(format!("{child_path} overrides workflow permissions"));
+                }
+                scan_evidence_ingest_forbidden_features(value, &child_path, violations);
+            }
+        }
+        Yaml::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                scan_evidence_ingest_forbidden_features(
+                    value,
+                    &format!("{path}[{index}]"),
+                    violations,
+                );
+            }
+        }
+        Yaml::String(value) => {
+            let normalized = value.to_ascii_lowercase();
+            if contains_ascii_identifier(&normalized, "secrets") {
+                violations.push(format!("{path} references a secret context"));
+            }
+            if normalized.contains("github.token") {
+                violations.push(format!("{path} references github.token"));
+            }
+            if normalized.contains("actions_id_token_request") {
+                violations.push(format!("{path} requests OIDC environment state"));
+            }
+            if normalized.contains("pull_request_target") || normalized.contains("workflow_run") {
+                violations.push(format!("{path} permits an untrusted trigger chain"));
+            }
+            if normalized.contains("actions/checkout@")
+                || normalized.contains("actions/download-artifact@")
+                || normalized.contains("actions/upload-artifact@")
+            {
+                violations.push(format!("{path} accesses a checkout or candidate artifact"));
+            }
+            if normalized.contains("actions/cache@")
+                || normalized.contains("rust-cache")
+                || normalized.contains("sccache")
+            {
+                violations.push(format!("{path} introduces a shared cache"));
+            }
+            if normalized == "self-hosted" {
+                violations.push(format!("{path} uses a persistent self-hosted runner"));
+            }
+            if normalized.contains("cargo ")
+                || normalized.contains("git checkout")
+                || normalized.contains("git clone")
+                || normalized.contains("git add")
+                || normalized.contains("git commit")
+                || normalized.contains("git push")
+                || normalized.contains("child_process")
+                || normalized.contains("exec(")
+                || normalized.contains("spawn(")
+                || normalized.contains("build-expectation")
+                || normalized.contains(" normalize ")
+            {
+                violations.push(format!(
+                    "{path} executes or mutates outside policy verification"
+                ));
+            }
+        }
+        Yaml::Alias(_) => violations.push(format!("{path} uses an uninspectable YAML alias")),
+        _ => {}
+    }
+}
+
+const EVIDENCE_INGEST_FETCH_SCRIPT: &str = r#"const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
+const owner = context.repo.owner;
+const repo = context.repo.repo;
+const reviewedRevision = process.env.REVIEWED_SOURCE_REVISION;
+const policyRoot = process.env.POLICY_ROOT;
+const files = [
+  {
+    path: process.env.HELPER_PATH,
+    blob: process.env.HELPER_BLOB,
+    sha256: process.env.HELPER_SHA256,
+    output: "ingest_evidence.py",
+  },
+  {
+    path: process.env.SCHEMA_PATH,
+    blob: process.env.SCHEMA_BLOB,
+    sha256: process.env.SCHEMA_SHA256,
+    output: "normalized-evidence.schema.json",
+  },
+];
+
+const branch = await github.rest.repos.getBranch({
+  owner,
+  repo,
+  branch: "main",
+});
+if (!branch.data.protected || branch.data.commit.sha !== context.sha) {
+  throw new Error("policy preparation requires the current protected main revision");
+}
+
+const comparison = await github.rest.repos.compareCommits({
+  owner,
+  repo,
+  base: reviewedRevision,
+  head: context.sha,
+});
+if (!["ahead", "identical"].includes(comparison.data.status)) {
+  throw new Error("reviewed helper revision is not an ancestor of the dispatch revision");
+}
+
+fs.mkdirSync(policyRoot, { recursive: false });
+for (const file of files) {
+  const response = await github.rest.repos.getContent({
+    owner,
+    repo,
+    path: file.path,
+    ref: reviewedRevision,
+  });
+  if (
+    Array.isArray(response.data) ||
+    response.data.type !== "file" ||
+    response.data.sha !== file.blob ||
+    response.data.encoding !== "base64" ||
+    typeof response.data.content !== "string"
+  ) {
+    throw new Error("reviewed policy source did not match its pinned blob");
+  }
+
+  const bytes = Buffer.from(response.data.content.replace(/\n/g, ""), "base64");
+  const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+  if (sha256 !== file.sha256) {
+    throw new Error("reviewed policy source did not match its pinned digest");
+  }
+  fs.writeFileSync(path.join(policyRoot, file.output), bytes, { flag: "wx" });
+}"#;
 
 fn validate_candidate_workflow(source: &str, violations: &mut Vec<String>) {
     let documents = match YamlLoader::load_from_str(source) {
@@ -1512,6 +2078,24 @@ fn assert_candidate_policy_rejects(fixture: &CandidatePolicyFixture, expected: &
             .iter()
             .any(|violation| violation.contains(expected)),
         "expected candidate violation containing {expected:?}, got:\n{violations:#?}"
+    );
+}
+
+fn assert_evidence_ingest_policy_accepts(fixture: &EvidenceIngestPolicyFixture) {
+    let violations = fixture.violations();
+    assert!(
+        violations.is_empty(),
+        "evidence-ingest CI policy violations:\n{violations:#?}"
+    );
+}
+
+fn assert_evidence_ingest_policy_rejects(fixture: &EvidenceIngestPolicyFixture, expected: &str) {
+    let violations = fixture.violations();
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.contains(expected)),
+        "expected evidence-ingest violation containing {expected:?}, got:\n{violations:#?}"
     );
 }
 

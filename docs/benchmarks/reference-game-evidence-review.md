@@ -58,13 +58,35 @@ bindings, take the slower component for each pair, admit at least ten warm pairs
 frozen population P95, and evaluate `candidate.startup_p95_ns`. Collector success is not metric
 success.
 
-## Ingestion Constraints
+## Committed Workflow Preparation
 
-The future `reference-game-evidence-ingest.yml` workflow is one bounded, cancellable,
-protected-main `workflow_dispatch` path. It has no checkout, no repository or Release mutation, no
-OIDC, no user or environment secret, and no candidate/product execution. If private-repository
-access is required, its ephemeral job token is restricted to Actions/Contents read only and is not
-persisted or passed to a child process.
+`.github/workflows/reference-game-evidence-ingest.yml` is deliberately a preparation-only
+workflow. It runs only from a protected `main` manual dispatch, fetches the reviewed
+`ingest_evidence.py` helper and normalized schema by exact source revision, blob ID, and SHA-256
+into the runner temporary directory, then runs `verify-policy` against those bytes.
+
+It does not checkout the repository, obtain a candidate or evidence artifact, construct a
+`trusted-input` record, normalize an envelope, publish an Actions artifact, or make an approval
+decision. This avoids treating a workflow dispatch identity or an untrusted envelope as the
+missing independent source of candidate, environment, context-receipt, and restricted raw-log
+facts.
+
+The workflow may be extended into a real ingest execution only after U8, U9, and U10 have supplied
+the final candidate evidence and a separately reviewed, read-only producer contract can construct
+all required trusted-input fields. That extension must preserve the constraints below and receive
+its own policy review before an authorized evidence-ingest dispatch.
+
+The reviewed source revision must remain an ancestor of the protected dispatch revision. If
+integration rewrites that identity, for example through a squash, the workflow fails closed until
+the commit/blob/SHA-256 pins are refreshed against the resulting `main` history and reviewed again.
+
+## Future Evidence Ingestion Constraints
+
+The future execution path remains one bounded, cancellable, protected-main `workflow_dispatch`
+path. It has no checkout, no repository or Release mutation, no OIDC, no user or environment
+secret, and no candidate/product execution. If private-repository access is required, its ephemeral
+job token is restricted to Actions/Contents read only and is not persisted or passed to a child
+process.
 
 The workflow must reject before parsing evidence when any of these is true:
 
