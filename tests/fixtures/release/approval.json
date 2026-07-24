@@ -1,0 +1,99 @@
+{
+  "schema": "nara.reference-game.pre-release-approval-v1",
+  "format_version": 1,
+  "decision": "Publish",
+  "version": "0.1.0-pre.1",
+  "repository": "acme/nara",
+  "source_revision": "1111111111111111111111111111111111111111",
+  "protocol_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "normalized_evidence": {
+    "path": "docs/benchmarks/data/normalized/v1/reference-game.json",
+    "size_bytes": 4096,
+    "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "journey": {
+    "id": "journey-20260724-001",
+    "runner_class": "coding-agent",
+    "result": "passed",
+    "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "review": {
+    "id": "review-20260724-001",
+    "result": "cleared",
+    "unresolved_p0": 0,
+    "unresolved_p1": 0,
+    "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "next_slice": {
+    "decision": "deferred",
+    "rule": "No follow-up capability is activated by this release.",
+    "sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+  },
+  "release_notes": {
+    "title": "Nara reference game evidence build",
+    "audience": "Early adopters evaluating the Rust-native 2D workflow.",
+    "supported_slice": [
+      "Rust code-first reference game",
+      "Headless and desktop candidate smoke"
+    ],
+    "deferred_capabilities": [
+      "Stable compatibility guarantees",
+      "General-purpose editor workflow"
+    ],
+    "breaking_change_policy": "Pre-1.0 contracts may change between reviewed evidence builds."
+  },
+  "candidates": [
+    {
+      "platform": "linux-x86_64",
+      "artifact": {
+        "id": "101",
+        "name": "nara-reference-game-linux-x86_64-700-1",
+        "size_bytes": 8192,
+        "sha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+        "expires_at_unix_seconds": 1790000000
+      },
+      "archive": {
+        "path": "candidate/nara-reference-game-linux-x86_64.zip",
+        "filename": "nara-reference-game-linux-x86_64.zip",
+        "size_bytes": 2048,
+        "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+      },
+      "workflow": {
+        "repository": "acme/nara",
+        "path": ".github/workflows/reference-game-candidate.yml",
+        "definition_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "event": "workflow_dispatch",
+        "ref": "refs/heads/main",
+        "source_revision": "1111111111111111111111111111111111111111",
+        "run_id": "700",
+        "run_attempt": 1
+      }
+    },
+    {
+      "platform": "windows-x86_64",
+      "artifact": {
+        "id": "102",
+        "name": "nara-reference-game-windows-x86_64-700-1",
+        "size_bytes": 12288,
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expires_at_unix_seconds": 1790000000
+      },
+      "archive": {
+        "path": "candidate/nara-reference-game-windows-x86_64.zip",
+        "filename": "nara-reference-game-windows-x86_64.zip",
+        "size_bytes": 3072,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "workflow": {
+        "repository": "acme/nara",
+        "path": ".github/workflows/reference-game-candidate.yml",
+        "definition_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+        "event": "workflow_dispatch",
+        "ref": "refs/heads/main",
+        "source_revision": "1111111111111111111111111111111111111111",
+        "run_id": "700",
+        "run_attempt": 1
+      }
+    }
+  ]
+}

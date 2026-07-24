@@ -1,0 +1,92 @@
+{
+  "schema": "nara.reference-game.release-trusted-input-v1",
+  "format_version": 1,
+  "now_unix_seconds": 1785000000,
+  "approval": {
+    "path": "docs/benchmarks/data/approvals/v1/reference-game-pre-release.json",
+    "commit": "cccccccccccccccccccccccccccccccccccccccc",
+    "blob": "dddddddddddddddddddddddddddddddddddddddd",
+    "sha256": "0728fd79ca318930cc95734bbec8ec73e388d31f5e6e5dbc80211686d97691c3"
+  },
+  "repository": {
+    "full_name": "acme/nara",
+    "default_branch": "main",
+    "protected_default_branch": true,
+    "immutable_releases_enabled": true
+  },
+  "publisher": {
+    "workflow_path": ".github/workflows/reference-game-release.yml",
+    "definition_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "event": "workflow_dispatch",
+    "ref": "refs/heads/main",
+    "source_revision": "abababababababababababababababababababab",
+    "run_id": "800",
+    "run_attempt": 1
+  },
+  "tag": {
+    "name": "v0.1.0-pre.1",
+    "ref": "refs/tags/v0.1.0-pre.1",
+    "annotated": true,
+    "protected": true,
+    "object_type": "tag",
+    "object_sha": "1212121212121212121212121212121212121212",
+    "target_type": "commit",
+    "target_sha": "1111111111111111111111111111111111111111"
+  },
+  "candidates": [
+    {
+      "platform": "linux-x86_64",
+      "artifact": {
+        "id": "101",
+        "name": "nara-reference-game-linux-x86_64-700-1",
+        "size_bytes": 8192,
+        "sha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+        "expires_at_unix_seconds": 1790000000,
+        "expired": false,
+        "workflow_run": {
+          "id": "700",
+          "repository": "acme/nara",
+          "path": ".github/workflows/reference-game-candidate.yml",
+          "definition_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "event": "workflow_dispatch",
+          "ref": "refs/heads/main",
+          "source_revision": "1111111111111111111111111111111111111111",
+          "run_attempt": 1
+        }
+      },
+      "archive": {
+        "path": "candidate/nara-reference-game-linux-x86_64.zip",
+        "filename": "nara-reference-game-linux-x86_64.zip",
+        "size_bytes": 2048,
+        "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+      }
+    },
+    {
+      "platform": "windows-x86_64",
+      "artifact": {
+        "id": "102",
+        "name": "nara-reference-game-windows-x86_64-700-1",
+        "size_bytes": 12288,
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expires_at_unix_seconds": 1790000000,
+        "expired": false,
+        "workflow_run": {
+          "id": "700",
+          "repository": "acme/nara",
+          "path": ".github/workflows/reference-game-candidate.yml",
+          "definition_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "event": "workflow_dispatch",
+          "ref": "refs/heads/main",
+          "source_revision": "1111111111111111111111111111111111111111",
+          "run_attempt": 1
+        }
+      },
+      "archive": {
+        "path": "candidate/nara-reference-game-windows-x86_64.zip",
+        "filename": "nara-reference-game-windows-x86_64.zip",
+        "size_bytes": 3072,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  ]
+}
