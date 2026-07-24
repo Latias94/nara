@@ -28,6 +28,36 @@ review-owned context. Dispatch inputs may select an already immutable candidate 
 artifact identity, but may not override the pinned helper/schema identity or fabricate the
 candidate workflow, source revision, environment, or raw-log facts.
 
+## Candidate Startup Collection
+
+The local `measure_headless_iteration.py` and `measure_desktop_product.py` helpers prepare one raw
+component observation at a time. Each invocation requires an expected platform, expected source
+revision, positive sample index, fresh empty work root, and new output destination. It validates
+and extracts the fixed candidate archive, replaces the candidate home, working directory, and
+temporary directory with clean-room paths, and enables the opt-in startup marker.
+
+Each helper runs one unmeasured warmup process followed by one measured process. A failed warmup is
+preserved and prevents the measured process from starting; a failed measured process is also
+preserved. Candidate output has a shared 64 KiB limit, a finite process deadline, empty-stderr
+requirement, and an exact success shape:
+
+- Headless accepts one `headless_first_authoritative_tick` marker followed by the canonical,
+  terminal wave summary.
+- Desktop accepts one `desktop_first_playable_present` marker followed by the render-probe success
+  line. The packaged probe traverses the product render and present path, but it is not evidence of
+  manual desktop playability or input ergonomics.
+
+The output directory contains one canonical observation plus four bounded raw stream files for the
+warmup and sample. The observation records only the stream byte counts and SHA-256 digests; raw
+process output remains a restricted transfer outside repository evidence. It declares
+`decision: not_evaluated` and never emits a U22 envelope.
+
+Headless and desktop durations with the same sample index are still independent raw components.
+Only the Rust semantic gate may verify their candidate, environment, context-receipt, and index
+bindings, take the slower component for each pair, admit at least ten warm pairs, calculate the
+frozen population P95, and evaluate `candidate.startup_p95_ns`. Collector success is not metric
+success.
+
 ## Ingestion Constraints
 
 The future `reference-game-evidence-ingest.yml` workflow is one bounded, cancellable,

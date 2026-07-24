@@ -640,8 +640,13 @@ def safe_remove_temporary(path: Path, parent: Path) -> None:
         shutil.rmtree(resolved_path, ignore_errors=True)
 
 
-def extract_archive(archive_path: Path, destination: Path) -> ValidatedArchive:
-    validated = validate_archive(archive_path)
+def extract_archive(
+    archive_path: Path,
+    destination: Path,
+    expected_platform: str | None = None,
+    expected_revision: str | None = None,
+) -> ValidatedArchive:
+    validated = validate_archive(archive_path, expected_platform, expected_revision)
     archive_path = require_regular_archive(archive_path, validated.layout.limits)
     destination = require_new_destination(destination)
     temporary = Path(tempfile.mkdtemp(prefix=".nara-artifact-", dir=destination.parent))
