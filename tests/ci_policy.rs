@@ -86,6 +86,15 @@ fn committed_evidence_ingest_workflow_only_verifies_pinned_policy_material() {
 }
 
 #[test]
+fn policy_mutation_helper_accepts_crlf_sources() {
+    let mut source = "[package]\r\n\r\n[dev-dependencies]\r\n".to_owned();
+
+    replace_first(&mut source, "\n[dev-dependencies]\n", "\n[dependencies]\n");
+
+    assert_eq!(source, "[package]\n\n[dependencies]\n");
+}
+
+#[test]
 fn evidence_ingest_policy_rejects_untrusted_permissions_mutable_actions_and_execution() {
     let mut untrusted_trigger = EvidenceIngestPolicyFixture::committed();
     replace_first(
@@ -2100,6 +2109,9 @@ fn assert_evidence_ingest_policy_rejects(fixture: &EvidenceIngestPolicyFixture, 
 }
 
 fn replace_first(source: &mut String, from: &str, to: &str) {
+    if source.contains("\r\n") {
+        *source = source.replace("\r\n", "\n");
+    }
     assert!(
         source.contains(from),
         "mutation source does not contain {from:?}"
