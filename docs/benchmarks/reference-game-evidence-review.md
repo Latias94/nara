@@ -140,6 +140,10 @@ Changing any bound field allocates a new versioned record and reruns its affecte
 outer-only normalized artifact, a reused authorization, an expired candidate, or any non-Accepted
 authority is not a valid approval input.
 
+The later immutable pre-release preparation is documented in
+[`reference-game-release-preparation.md`](reference-game-release-preparation.md). Its local workflow
+preparation cannot replace this U11 decision or any hosted evidence gate.
+
 ## Non-Claims
 
 - Local helper and policy-test preparation do not prove hosted candidate execution, a clean-room

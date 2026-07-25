@@ -1795,7 +1795,7 @@ fn required_step_pipeline(job_name: &str) -> &'static [&'static str] {
             "uses:taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853",
             "run:cargo fmt --all -- --check",
             "run:cargo check --workspace --locked",
-            "run:cargo nextest run --locked -p nara --test ci_policy --test artifact_package_policy --test release_verification --test reference_game_contract --test module_consumer_boundary --test-threads=1",
+            "run:cargo nextest run --locked -p nara --test ci_policy --test artifact_package_policy --test release_verification --test release_workflow_policy --test reference_game_contract --test module_consumer_boundary --test-threads=1",
         ],
         "reference-game" => &[
             "uses:actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",

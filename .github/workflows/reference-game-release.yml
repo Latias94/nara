@@ -1,0 +1,2072 @@
+name: Reference Game Immutable Pre-release
+
+run-name: "Reference Game Release ${{ inputs.tag }}"
+
+"on":
+  workflow_dispatch:
+    inputs:
+      approval_path:
+        description: "Canonical U11 Publish approval path"
+        required: true
+        type: string
+      approval_commit:
+        description: "Protected-main commit containing the approval"
+        required: true
+        type: string
+      approval_blob:
+        description: "Git blob ID for the canonical approval"
+        required: true
+        type: string
+      approval_sha256:
+        description: "SHA-256 of the canonical approval bytes"
+        required: true
+        type: string
+      publisher_definition_sha256:
+        description: "SHA-256 of the independently reviewed publisher workflow bytes"
+        required: true
+        type: string
+      tag:
+        description: "Existing protected annotated vX.Y.Z tag"
+        required: true
+        type: string
+      candidate_run_id:
+        description: "Approved Reference Game Candidate workflow run ID"
+        required: true
+        type: string
+      linux_artifact_id:
+        description: "Approved Linux candidate Actions artifact ID"
+        required: true
+        type: string
+      windows_artifact_id:
+        description: "Approved Windows candidate Actions artifact ID"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: "reference-game-release-${{ github.repository }}-${{ inputs.tag }}"
+  cancel-in-progress: false
+
+jobs:
+  immutable-policy:
+    name: Verify immutable release policy
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: reference-game-immutable-policy
+    permissions: {}
+    outputs:
+      enabled: "${{ steps.policy.outputs.enabled }}"
+    steps:
+      - name: Check immutable releases with the policy-only token
+        id: policy
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        with:
+          github-token: "${{ secrets.NARA_RELEASE_POLICY_TOKEN }}"
+          script: |
+            const response = await github.request("GET /repos/{owner}/{repo}/immutable-releases", {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            if (response.data?.enabled !== true) {
+              throw new Error("repository immutable releases are not enabled");
+            }
+            core.setOutput("enabled", "true");
+
+  candidate-fetch:
+    name: Fetch approved candidate transports
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+    steps:
+      - name: Download approved Linux candidate transport
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          github-token: "${{ github.token }}"
+          repository: "${{ github.repository }}"
+          run-id: "${{ inputs.candidate_run_id }}"
+          artifact-ids: "${{ inputs.linux_artifact_id }}"
+          path: "${{ runner.temp }}/nara-release-candidate-transport/linux-x86_64"
+      - name: Download approved Windows candidate transport
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          github-token: "${{ github.token }}"
+          repository: "${{ github.repository }}"
+          run-id: "${{ inputs.candidate_run_id }}"
+          artifact-ids: "${{ inputs.windows_artifact_id }}"
+          path: "${{ runner.temp }}/nara-release-candidate-transport/windows-x86_64"
+      - name: Stage Linux candidate transport without executing it
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-candidate-transport-linux-x86_64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-candidate-transport/linux-x86_64"
+          if-no-files-found: error
+          retention-days: "1"
+          compression-level: "0"
+          include-hidden-files: "false"
+      - name: Stage Windows candidate transport without executing it
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-candidate-transport-windows-x86_64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-candidate-transport/windows-x86_64"
+          if-no-files-found: error
+          retention-days: "1"
+          compression-level: "0"
+          include-hidden-files: "false"
+
+  verify:
+    name: Verify pinned approval and stage bound bytes
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    needs:
+      - immutable-policy
+      - candidate-fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: {}
+    steps:
+      - name: Download Linux transport into the credential-free verifier
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-candidate-transport-linux-x86_64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-candidate-transport/linux-x86_64"
+      - name: Download Windows transport into the credential-free verifier
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-candidate-transport-windows-x86_64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-candidate-transport/windows-x86_64"
+      - name: Fetch pinned verifier, schemas, and public GitHub facts
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          REVIEWED_SOURCE_REVISION: 0d70fcf0b86e241bebb54c22a55350d5bf824680
+          VERIFIER_PATH: reference-game/tools/verify_release.py
+          VERIFIER_BLOB: 3ef54305cb68f5b4076a37366dbd1a857d3d02e3
+          VERIFIER_SHA256: 7421e9e0449802b580465f36dd9c002d776ec0adc10006154080db532b7f45bd
+          APPROVAL_SCHEMA_PATH: docs/benchmarks/data/approvals/v1/reference-game-pre-release.schema.json
+          APPROVAL_SCHEMA_BLOB: a24c17607b56de3d58aa9e2379b13c8c299cc991
+          APPROVAL_SCHEMA_SHA256: bd34ed827657042757aa03c1151c720d6384ee74c3cf597d906b55a778544716
+          TRUSTED_SCHEMA_PATH: docs/benchmarks/data/approvals/v1/release-trusted-input.schema.json
+          TRUSTED_SCHEMA_BLOB: 10885ac3f368ba3e130cd18609088f63bdc037a4
+          TRUSTED_SCHEMA_SHA256: 170abfae5e326bf65633b496cd5a9a7912481c6607ecf7e45917110fce233cc6
+          MANIFEST_SCHEMA_PATH: docs/benchmarks/data/approvals/v1/publication-manifest.schema.json
+          MANIFEST_SCHEMA_BLOB: 0fdecefca8055e063459f7983815ad21ea1cebc3
+          MANIFEST_SCHEMA_SHA256: 4cbc4066ed031170a57068b15971b75ad76a372590b1485865ddb3109489596f
+          SMOKE_HELPER_PATH: reference-game/tools/smoke_artifact.py
+          SMOKE_HELPER_BLOB: 4fd54ea6aa5876c87b36c77faad68af3b2ebeb24
+          SMOKE_HELPER_SHA256: d2423e607db6b25b9231861edb9171191d30fbe04091b928299f96310bc596c2
+          PACKAGE_HELPER_PATH: reference-game/tools/package.py
+          PACKAGE_HELPER_BLOB: 880913955155865026afa107df6f73a9b9d09719
+          PACKAGE_HELPER_SHA256: 905b1ff3e3080f5b09fcbf1bb506712a6cefc8e799098836739cf4ef7b187498
+          PACKAGE_LAYOUT_PATH: reference-game/packaging/package-layout-v1.json
+          PACKAGE_LAYOUT_BLOB: 53cbf9128c0112950b2d2888048a328c53cef3c6
+          PACKAGE_LAYOUT_SHA256: 62e043eb77464e35ecb49c0e31174d3a7a890f5dde5b7df5252e5b880806da85
+          APPROVAL_PATH: "${{ inputs.approval_path }}"
+          APPROVAL_COMMIT: "${{ inputs.approval_commit }}"
+          APPROVAL_BLOB: "${{ inputs.approval_blob }}"
+          APPROVAL_SHA256: "${{ inputs.approval_sha256 }}"
+          PUBLISHER_DEFINITION_SHA256: "${{ inputs.publisher_definition_sha256 }}"
+          TAG_NAME: "${{ inputs.tag }}"
+          CANDIDATE_RUN_ID: "${{ inputs.candidate_run_id }}"
+          LINUX_ARTIFACT_ID: "${{ inputs.linux_artifact_id }}"
+          WINDOWS_ARTIFACT_ID: "${{ inputs.windows_artifact_id }}"
+          IMMUTABLE_RELEASES_ENABLED: "${{ needs.immutable-policy.outputs.enabled }}"
+          POLICY_ROOT: "${{ runner.temp }}/nara-release-verifier"
+          TRANSPORT_ROOT: "${{ runner.temp }}/nara-release-candidate-transport"
+        with:
+          github-token: ""
+          script: |
+            const crypto = require("crypto");
+            const fs = require("fs");
+            const path = require("path");
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const repository = `${owner}/${repo}`;
+            const apiBase = "https://api.github.com";
+            const policyRoot = process.env.POLICY_ROOT;
+            const reviewedRevision = process.env.REVIEWED_SOURCE_REVISION;
+            const maxApiBytes = 1024 * 1024;
+            const revisionPattern = /^[0-9a-f]{40}$/;
+            const sha256Pattern = /^[0-9a-f]{64}$/;
+            const decimalPattern = /^[1-9][0-9]*$/;
+
+            function fail(message) {
+              throw new Error(`release verifier input rejected: ${message}`);
+            }
+
+            function required(value, subject) {
+              if (typeof value !== "string" || value.length === 0) {
+                fail(`${subject} is missing`);
+              }
+              return value;
+            }
+
+            function revision(value, subject) {
+              const rendered = required(value, subject);
+              if (!revisionPattern.test(rendered)) {
+                fail(`${subject} is not a revision`);
+              }
+              return rendered;
+            }
+
+            function sha256(value, subject) {
+              const rendered = required(value, subject);
+              if (!sha256Pattern.test(rendered)) {
+                fail(`${subject} is not a SHA-256 digest`);
+              }
+              return rendered;
+            }
+
+            function decimal(value, subject) {
+              const rendered = required(value, subject);
+              if (!decimalPattern.test(rendered)) {
+                fail(`${subject} is not a positive decimal identifier`);
+              }
+              return rendered;
+            }
+
+            function safePath(value, subject) {
+              const rendered = required(value, subject);
+              if (
+                !/^[A-Za-z0-9._/-]+$/.test(rendered) ||
+                rendered.startsWith("/") ||
+                rendered.endsWith("/") ||
+                rendered.includes("//") ||
+                rendered.split("/").some((part) => part === "." || part === "..")
+              ) {
+                fail(`${subject} is not a safe repository path`);
+              }
+              return rendered;
+            }
+
+            function encodePath(value) {
+              return value.split("/").map(encodeURIComponent).join("/");
+            }
+
+            function canonical(value) {
+              return `${JSON.stringify(value, null, 2)}\n`;
+            }
+
+            function digest(bytes) {
+              return crypto.createHash("sha256").update(bytes).digest("hex");
+            }
+
+            async function requestJson(relative) {
+              const response = await fetch(`${apiBase}${relative}`, {
+                headers: {
+                  Accept: "application/vnd.github+json",
+                  "User-Agent": "nara-release-verifier",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                },
+              });
+              const bytes = Buffer.from(await response.arrayBuffer());
+              if (!response.ok || bytes.length > maxApiBytes) {
+                fail(`public GitHub API request failed for ${relative}`);
+              }
+              try {
+                return JSON.parse(bytes.toString("utf8"));
+              } catch {
+                fail(`public GitHub API returned invalid JSON for ${relative}`);
+              }
+            }
+
+            async function fileAt(revisionValue, filePath, expectedBlob, expectedSha256) {
+              const response = await requestJson(
+                `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(filePath)}?ref=${encodeURIComponent(revisionValue)}`
+              );
+              if (
+                Array.isArray(response) ||
+                response.type !== "file" ||
+                response.sha !== expectedBlob ||
+                response.encoding !== "base64" ||
+                typeof response.content !== "string"
+              ) {
+                fail(`pinned file ${filePath} did not match its blob`);
+              }
+              const bytes = Buffer.from(response.content.replace(/\n/g, ""), "base64");
+              if (bytes.length === 0 || digest(bytes) !== expectedSha256) {
+                fail(`pinned file ${filePath} did not match its digest`);
+              }
+              return bytes;
+            }
+
+            async function contentDigestAt(revisionValue, filePath) {
+              const response = await requestJson(
+                `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(filePath)}?ref=${encodeURIComponent(revisionValue)}`
+              );
+              if (
+                Array.isArray(response) ||
+                response.type !== "file" ||
+                !revisionPattern.test(String(response.sha)) ||
+                response.encoding !== "base64" ||
+                typeof response.content !== "string"
+              ) {
+                fail(`workflow file ${filePath} is not a bounded file`);
+              }
+              const bytes = Buffer.from(response.content.replace(/\n/g, ""), "base64");
+              if (bytes.length === 0 || bytes.length > maxApiBytes) {
+                fail(`workflow file ${filePath} is not bounded`);
+              }
+              return { blob: response.sha, sha256: digest(bytes) };
+            }
+
+            async function requireAncestor(base, head, subject) {
+              const comparison = await requestJson(
+                `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`
+              );
+              if (!["ahead", "identical"].includes(comparison.status)) {
+                fail(`${subject} is not reachable from protected main`);
+              }
+            }
+
+            function globMatches(pattern, tag) {
+              if (pattern === "~ALL") {
+                return true;
+              }
+              const normalized = pattern.replace(/^refs\/tags\//, "");
+              const expression = `^${normalized.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`;
+              return new RegExp(expression).test(tag);
+            }
+
+            async function hasProtectedTagRule(tag) {
+              const summary = await requestJson(
+                `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/rulesets?targets=tag&includes_parents=true&per_page=100`
+              );
+              if (!Array.isArray(summary) || summary.length > 100) {
+                fail("tag rulesets response is not bounded");
+              }
+              for (const entry of summary) {
+                if (
+                  !entry ||
+                  typeof entry.id !== "number" ||
+                  !["active", "enabled"].includes(entry.enforcement)
+                ) {
+                  continue;
+                }
+                const ruleset = await requestJson(
+                  `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/rulesets/${entry.id}`
+                );
+                const includes = ruleset?.conditions?.ref_name?.include;
+                const ruleTypes = new Set(
+                  Array.isArray(ruleset?.rules)
+                    ? ruleset.rules.map((rule) => rule?.type)
+                    : []
+                );
+                if (
+                  ruleset?.target === "tag" &&
+                  Array.isArray(includes) &&
+                  includes.some((pattern) => typeof pattern === "string" && globMatches(pattern, tag)) &&
+                  ["creation", "update", "deletion"].every((kind) => ruleTypes.has(kind))
+                ) {
+                  return true;
+                }
+              }
+              return false;
+            }
+
+            function archiveFromTransport(platform) {
+              const bundlePath = path.join(
+                required(process.env.TRANSPORT_ROOT, "transport root"),
+                platform,
+                "bundle-manifest.json"
+              );
+              const metadata = fs.lstatSync(bundlePath);
+              if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size <= 0 || metadata.size > 64 * 1024) {
+                fail(`${platform} transport manifest is not a bounded regular file`);
+              }
+              let bundle;
+              try {
+                bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+              } catch {
+                fail(`${platform} transport manifest is not JSON`);
+              }
+              const archive = bundle?.archive;
+              if (
+                bundle?.schema !== "nara.reference-game.candidate-transport-bundle-v1" ||
+                bundle?.format_version !== 1 ||
+                bundle?.platform !== platform ||
+                !revisionPattern.test(String(bundle?.source_revision)) ||
+                !archive ||
+                archive.path !== `candidate/nara-reference-game-${platform}.zip` ||
+                archive.filename !== `nara-reference-game-${platform}.zip` ||
+                !Number.isSafeInteger(archive.size_bytes) ||
+                archive.size_bytes <= 0 ||
+                archive.size_bytes > 33_554_432 ||
+                typeof archive.sha256 !== "string" ||
+                !sha256Pattern.test(archive.sha256)
+              ) {
+                fail(`${platform} transport archive identity is invalid`);
+              }
+              return {
+                source_revision: bundle.source_revision,
+                path: archive.path,
+                filename: archive.filename,
+                size_bytes: archive.size_bytes,
+                sha256: archive.sha256,
+              };
+            }
+
+            async function candidateFacts(platform, artifactId) {
+              const artifact = await requestJson(
+                `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/artifacts/${encodeURIComponent(artifactId)}`
+              );
+              if (
+                String(artifact.id) !== artifactId ||
+                artifact.expired !== false ||
+                typeof artifact.name !== "string" ||
+                typeof artifact.size_in_bytes !== "number" ||
+                !Number.isSafeInteger(artifact.size_in_bytes) ||
+                artifact.size_in_bytes <= 0 ||
+                typeof artifact.digest !== "string" ||
+                !/^sha256:[0-9a-f]{64}$/.test(artifact.digest) ||
+                !artifact.workflow_run ||
+                !Number.isSafeInteger(artifact.workflow_run.id)
+              ) {
+                fail(`${platform} artifact metadata is incomplete`);
+              }
+              const expiresAt = Math.floor(Date.parse(artifact.expires_at) / 1000);
+              if (!Number.isSafeInteger(expiresAt) || expiresAt <= 0) {
+                fail(`${platform} artifact expiration is invalid`);
+              }
+              const workflowRun = await requestJson(
+                `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${artifact.workflow_run.id}`
+              );
+              if (
+                String(workflowRun.id) !== String(artifact.workflow_run.id) ||
+                String(workflowRun.id) !== process.env.CANDIDATE_RUN_ID ||
+                workflowRun.status !== "completed" ||
+                workflowRun.conclusion !== "success" ||
+                workflowRun.event !== "workflow_dispatch" ||
+                workflowRun.path !== ".github/workflows/reference-game-candidate.yml@refs/heads/main" ||
+                workflowRun.head_branch !== "main" ||
+                !revisionPattern.test(String(workflowRun.head_sha)) ||
+                workflowRun.repository?.full_name !== repository ||
+                workflowRun.head_repository?.full_name !== repository ||
+                !Number.isSafeInteger(workflowRun.run_attempt) ||
+                workflowRun.run_attempt <= 0
+              ) {
+                fail(`${platform} candidate workflow run is not trusted`);
+              }
+              const definition = await contentDigestAt(
+                workflowRun.head_sha,
+                ".github/workflows/reference-game-candidate.yml"
+              );
+              const transportArchive = archiveFromTransport(platform);
+              if (transportArchive.source_revision !== workflowRun.head_sha) {
+                fail(`${platform} transport source does not match its candidate workflow run`);
+              }
+              return {
+                platform,
+                artifact: {
+                  id: artifactId,
+                  name: artifact.name,
+                  size_bytes: artifact.size_in_bytes,
+                  sha256: artifact.digest,
+                  expires_at_unix_seconds: expiresAt,
+                  expired: false,
+                  workflow_run: {
+                    id: String(workflowRun.id),
+                    repository,
+                    path: ".github/workflows/reference-game-candidate.yml",
+                    definition_sha256: definition.sha256,
+                    event: "workflow_dispatch",
+                    ref: "refs/heads/main",
+                    source_revision: workflowRun.head_sha,
+                    run_attempt: workflowRun.run_attempt,
+                  },
+                },
+                archive: {
+                  path: transportArchive.path,
+                  filename: transportArchive.filename,
+                  size_bytes: transportArchive.size_bytes,
+                  sha256: transportArchive.sha256,
+                },
+              };
+            }
+
+            const approvalPath = safePath(process.env.APPROVAL_PATH, "approval path");
+            const approvalCommit = revision(process.env.APPROVAL_COMMIT, "approval commit");
+            const approvalBlob = revision(process.env.APPROVAL_BLOB, "approval blob");
+            const approvalSha256 = sha256(process.env.APPROVAL_SHA256, "approval digest");
+            const publisherDefinitionSha256 = sha256(
+              process.env.PUBLISHER_DEFINITION_SHA256,
+              "publisher workflow digest"
+            );
+            const tagName = required(process.env.TAG_NAME, "tag");
+            const candidateRunId = decimal(process.env.CANDIDATE_RUN_ID, "candidate run ID");
+            const linuxArtifactId = decimal(process.env.LINUX_ARTIFACT_ID, "Linux artifact ID");
+            const windowsArtifactId = decimal(process.env.WINDOWS_ARTIFACT_ID, "Windows artifact ID");
+            const publisherRevision = revision(context.sha, "publisher revision");
+            revision(reviewedRevision, "reviewed verifier revision");
+            if (
+              !approvalPath.startsWith("docs/benchmarks/data/approvals/v1/") ||
+              !approvalPath.endsWith(".json") ||
+              !/^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(tagName) ||
+              process.env.IMMUTABLE_RELEASES_ENABLED !== "true"
+            ) {
+              fail("approval path, tag, or immutable policy is invalid");
+            }
+            if (candidateRunId !== process.env.CANDIDATE_RUN_ID) {
+              fail("candidate run ID was not canonical");
+            }
+
+            const branch = await requestJson(
+              `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/main`
+            );
+            if (branch.protected !== true || branch.commit?.sha !== publisherRevision) {
+              fail("release workflow is not running at the current protected main revision");
+            }
+            await requireAncestor(reviewedRevision, publisherRevision, "reviewed verifier revision");
+            await requireAncestor(approvalCommit, publisherRevision, "approval commit");
+
+            const priorRuns = await requestJson(
+              `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/reference-game-release.yml/runs?event=workflow_dispatch&per_page=100`
+            );
+            if (
+              !Array.isArray(priorRuns.workflow_runs) ||
+              !Number.isSafeInteger(priorRuns.total_count) ||
+              priorRuns.total_count > priorRuns.workflow_runs.length
+            ) {
+              fail("release run history is incomplete");
+            }
+            if (
+              priorRuns.workflow_runs.some(
+                (run) =>
+                  String(run.id) !== String(context.runId) &&
+                  run.display_title === `Reference Game Release ${tagName}`
+              )
+            ) {
+              fail("this tag already consumed a release workflow authorization");
+            }
+
+            const tagRef = await requestJson(
+              `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/tags/${encodeURIComponent(tagName)}`
+            );
+            if (
+              tagRef.ref !== `refs/tags/${tagName}` ||
+              tagRef.object?.type !== "tag" ||
+              !revisionPattern.test(String(tagRef.object?.sha))
+            ) {
+              fail("tag is not an annotated tag");
+            }
+            const tagObject = await requestJson(
+              `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/tags/${tagRef.object.sha}`
+            );
+            if (tagObject.object?.type !== "commit" || !revisionPattern.test(String(tagObject.object?.sha))) {
+              fail("annotated tag does not target a commit");
+            }
+            await requireAncestor(tagObject.object.sha, publisherRevision, "tag target");
+            if (!(await hasProtectedTagRule(tagName))) {
+              fail("tag is not protected by an active creation/update/deletion ruleset");
+            }
+
+            fs.mkdirSync(policyRoot, { recursive: false });
+            const pinnedFiles = [
+              {
+                path: process.env.VERIFIER_PATH,
+                blob: process.env.VERIFIER_BLOB,
+                sha256: process.env.VERIFIER_SHA256,
+                output: "verifier/verify_release.py",
+              },
+              {
+                path: process.env.APPROVAL_SCHEMA_PATH,
+                blob: process.env.APPROVAL_SCHEMA_BLOB,
+                sha256: process.env.APPROVAL_SCHEMA_SHA256,
+                output: "schema/reference-game-pre-release.schema.json",
+              },
+              {
+                path: process.env.TRUSTED_SCHEMA_PATH,
+                blob: process.env.TRUSTED_SCHEMA_BLOB,
+                sha256: process.env.TRUSTED_SCHEMA_SHA256,
+                output: "schema/release-trusted-input.schema.json",
+              },
+              {
+                path: process.env.MANIFEST_SCHEMA_PATH,
+                blob: process.env.MANIFEST_SCHEMA_BLOB,
+                sha256: process.env.MANIFEST_SCHEMA_SHA256,
+                output: "schema/publication-manifest.schema.json",
+              },
+              {
+                path: process.env.SMOKE_HELPER_PATH,
+                blob: process.env.SMOKE_HELPER_BLOB,
+                sha256: process.env.SMOKE_HELPER_SHA256,
+                output: "smoke/reference-game/tools/smoke_artifact.py",
+              },
+              {
+                path: process.env.PACKAGE_HELPER_PATH,
+                blob: process.env.PACKAGE_HELPER_BLOB,
+                sha256: process.env.PACKAGE_HELPER_SHA256,
+                output: "smoke/reference-game/tools/package.py",
+              },
+              {
+                path: process.env.PACKAGE_LAYOUT_PATH,
+                blob: process.env.PACKAGE_LAYOUT_BLOB,
+                sha256: process.env.PACKAGE_LAYOUT_SHA256,
+                output: "smoke/reference-game/packaging/package-layout-v1.json",
+              },
+            ];
+            for (const file of pinnedFiles) {
+              const source = await fileAt(reviewedRevision, file.path, file.blob, file.sha256);
+              const output = path.join(policyRoot, file.output);
+              fs.mkdirSync(path.dirname(output), { recursive: true });
+              fs.writeFileSync(output, source, { flag: "wx" });
+            }
+
+            const approvalBytes = await fileAt(
+              approvalCommit,
+              approvalPath,
+              approvalBlob,
+              approvalSha256
+            );
+            fs.writeFileSync(path.join(policyRoot, "approval.json"), approvalBytes, { flag: "wx" });
+
+            const publisherDefinition = await contentDigestAt(
+              publisherRevision,
+              ".github/workflows/reference-game-release.yml"
+            );
+            if (publisherDefinition.sha256 !== publisherDefinitionSha256) {
+              fail("publisher workflow does not match the reviewed definition digest");
+            }
+            const linux = await candidateFacts("linux-x86_64", linuxArtifactId);
+            const windows = await candidateFacts("windows-x86_64", windowsArtifactId);
+            const trusted = {
+              schema: "nara.reference-game.release-trusted-input-v1",
+              format_version: 1,
+              now_unix_seconds: Math.floor(Date.now() / 1000),
+              approval: {
+                path: approvalPath,
+                commit: approvalCommit,
+                blob: approvalBlob,
+                sha256: approvalSha256,
+              },
+              repository: {
+                full_name: repository,
+                default_branch: "main",
+                protected_default_branch: true,
+                immutable_releases_enabled: true,
+              },
+              publisher: {
+                workflow_path: ".github/workflows/reference-game-release.yml",
+                definition_sha256: publisherDefinition.sha256,
+                event: "workflow_dispatch",
+                ref: "refs/heads/main",
+                source_revision: publisherRevision,
+                run_id: String(context.runId),
+                run_attempt: Number(context.runAttempt),
+              },
+              tag: {
+                name: tagName,
+                ref: `refs/tags/${tagName}`,
+                annotated: true,
+                protected: true,
+                object_type: "tag",
+                object_sha: tagRef.object.sha,
+                target_type: "commit",
+                target_sha: tagObject.object.sha,
+              },
+              candidates: [linux, windows],
+            };
+            fs.writeFileSync(
+              path.join(policyRoot, "trusted-input.json"),
+              canonical(trusted),
+              { flag: "wx" }
+            );
+      - name: Set up credential-free Python verifier
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: 3.13.5
+      - name: Verify pinned release policy without credentials
+        run: |
+          mkdir -p "${{ runner.temp }}/nara-release-verifier/home" "${{ runner.temp }}/nara-release-verifier/tmp"
+          env -i PATH="$PATH" HOME="${{ runner.temp }}/nara-release-verifier/home" USERPROFILE="${{ runner.temp }}/nara-release-verifier/home" TMPDIR="${{ runner.temp }}/nara-release-verifier/tmp" LANG=C.UTF-8 PYTHONNOUSERSITE=1 python -B "${{ runner.temp }}/nara-release-verifier/verifier/verify_release.py" verify-policy --approval-schema "${{ runner.temp }}/nara-release-verifier/schema/reference-game-pre-release.schema.json" --manifest-schema "${{ runner.temp }}/nara-release-verifier/schema/publication-manifest.schema.json" --trusted-input-schema "${{ runner.temp }}/nara-release-verifier/schema/release-trusted-input.schema.json" > "${{ runner.temp }}/nara-release-verifier/policy-verification.json"
+      - name: Verify Linux transport without extraction or execution
+        run: |
+          env -i PATH="$PATH" HOME="${{ runner.temp }}/nara-release-verifier/home" USERPROFILE="${{ runner.temp }}/nara-release-verifier/home" TMPDIR="${{ runner.temp }}/nara-release-verifier/tmp" LANG=C.UTF-8 PYTHONNOUSERSITE=1 python -B "${{ runner.temp }}/nara-release-verifier/smoke/reference-game/tools/smoke_artifact.py" bundle-verify --bundle "${{ runner.temp }}/nara-release-candidate-transport/linux-x86_64" --expected-platform linux-x86_64
+      - name: Verify Windows transport without extraction or execution
+        run: |
+          env -i PATH="$PATH" HOME="${{ runner.temp }}/nara-release-verifier/home" USERPROFILE="${{ runner.temp }}/nara-release-verifier/home" TMPDIR="${{ runner.temp }}/nara-release-verifier/tmp" LANG=C.UTF-8 PYTHONNOUSERSITE=1 python -B "${{ runner.temp }}/nara-release-verifier/smoke/reference-game/tools/smoke_artifact.py" bundle-verify --bundle "${{ runner.temp }}/nara-release-candidate-transport/windows-x86_64" --expected-platform windows-x86_64
+      - name: Build one bounded publication manifest without credentials
+        run: |
+          env -i PATH="$PATH" HOME="${{ runner.temp }}/nara-release-verifier/home" USERPROFILE="${{ runner.temp }}/nara-release-verifier/home" TMPDIR="${{ runner.temp }}/nara-release-verifier/tmp" LANG=C.UTF-8 PYTHONNOUSERSITE=1 python -B "${{ runner.temp }}/nara-release-verifier/verifier/verify_release.py" build-manifest --approval "${{ runner.temp }}/nara-release-verifier/approval.json" --trusted-input "${{ runner.temp }}/nara-release-verifier/trusted-input.json" --output "${{ runner.temp }}/nara-release-verifier/publication-manifest.json" > "${{ runner.temp }}/nara-release-verifier/manifest-build.json"
+      - name: Stage manifest-bound candidate bytes and smoke helpers
+        run: |
+          env -i PATH="$PATH" HOME="${{ runner.temp }}/nara-release-verifier/home" USERPROFILE="${{ runner.temp }}/nara-release-verifier/home" TMPDIR="${{ runner.temp }}/nara-release-verifier/tmp" LANG=C.UTF-8 PYTHONNOUSERSITE=1 NARA_RELEASE_ROOT="${{ runner.temp }}/nara-release-verifier" NARA_TRANSPORT_ROOT="${{ runner.temp }}/nara-release-candidate-transport" python -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import stat
+
+          root = Path(os.environ["NARA_RELEASE_ROOT"])
+          transport_root = Path(os.environ["NARA_TRANSPORT_ROOT"])
+          manifest_path = root / "publication-manifest.json"
+          raw_manifest = manifest_path.read_bytes()
+          if len(raw_manifest) > 64 * 1024:
+              raise SystemExit("publication manifest exceeds its byte limit")
+          manifest = json.loads(raw_manifest)
+          if (
+              not isinstance(manifest, dict)
+              or manifest.get("schema") != "nara.reference-game.publication-manifest-v1"
+              or manifest.get("format_version") != 1
+              or not isinstance(manifest.get("candidates"), list)
+              or len(manifest["candidates"]) != 2
+          ):
+              raise SystemExit("publication manifest shape is invalid")
+
+          stage = root / "stage"
+          publisher = stage / "publisher-inputs"
+          release_manifest = stage / "release-manifest"
+          smoke_tools = stage / "smoke-tools"
+          verification = stage / "verification-record"
+          for directory in (publisher, release_manifest, smoke_tools, verification):
+              directory.mkdir(parents=True, exist_ok=False)
+
+          def copy_exact(source: Path, destination: Path, maximum: int) -> None:
+              metadata = source.lstat()
+              if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+                  raise SystemExit("release input is not a regular file")
+              if metadata.st_size > maximum:
+                  raise SystemExit("release input exceeds a byte limit")
+              digest = hashlib.sha256()
+              copied = 0
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              with source.open("rb") as input_file, destination.open("xb") as output_file:
+                  while chunk := input_file.read(64 * 1024):
+                      copied += len(chunk)
+                      if copied > maximum:
+                          raise SystemExit("release input exceeds a byte limit")
+                      digest.update(chunk)
+                      output_file.write(chunk)
+              return digest.hexdigest(), copied
+
+          for candidate in manifest["candidates"]:
+              if not isinstance(candidate, dict):
+                  raise SystemExit("publication candidate is invalid")
+              platform = candidate.get("platform")
+              archive = candidate.get("archive")
+              if (
+                  platform not in ("linux-x86_64", "windows-x86_64")
+                  or not isinstance(archive, dict)
+                  or set(archive) != {"path", "filename", "size_bytes", "sha256"}
+                  or archive["path"] != f"candidate/nara-reference-game-{platform}.zip"
+                  or archive["filename"] != f"nara-reference-game-{platform}.zip"
+                  or not isinstance(archive["size_bytes"], int)
+                  or archive["size_bytes"] <= 0
+                  or archive["size_bytes"] > 33_554_432
+                  or not isinstance(archive["sha256"], str)
+                  or len(archive["sha256"]) != 64
+              ):
+                  raise SystemExit("publication candidate identity is invalid")
+              source = transport_root / platform / archive["path"]
+              destination = publisher / "candidate" / archive["filename"]
+              digest, size = copy_exact(source, destination, 33_554_432)
+              if digest != archive["sha256"] or size != archive["size_bytes"]:
+                  raise SystemExit("transport candidate differs from publication manifest")
+
+          copy_exact(manifest_path, publisher / "manifest.json", 64 * 1024)
+          copy_exact(manifest_path, release_manifest / "manifest.json", 64 * 1024)
+          for source, destination, maximum in (
+              (
+                  root / "smoke/reference-game/tools/smoke_artifact.py",
+                  smoke_tools / "reference-game/tools/smoke_artifact.py",
+                  512 * 1024,
+              ),
+              (
+                  root / "smoke/reference-game/tools/package.py",
+                  smoke_tools / "reference-game/tools/package.py",
+                  512 * 1024,
+              ),
+              (
+                  root / "smoke/reference-game/packaging/package-layout-v1.json",
+                  smoke_tools / "reference-game/packaging/package-layout-v1.json",
+                  64 * 1024,
+              ),
+              (root / "approval.json", verification / "approval.json", 128 * 1024),
+              (root / "trusted-input.json", verification / "trusted-input.json", 128 * 1024),
+              (
+                  root / "publication-manifest.json",
+                  verification / "publication-manifest.json",
+                  64 * 1024,
+              ),
+              (
+                  root / "policy-verification.json",
+                  verification / "policy-verification.json",
+                  64 * 1024,
+              ),
+              (root / "manifest-build.json", verification / "manifest-build.json", 64 * 1024),
+          ):
+              copy_exact(source, destination, maximum)
+          PY
+      - name: Upload bounded publisher inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-publisher-inputs-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-verifier/stage/publisher-inputs"
+          if-no-files-found: error
+          retention-days: "1"
+          compression-level: "0"
+          include-hidden-files: "false"
+      - name: Upload bounded publication manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-manifest-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-verifier/stage/release-manifest"
+          if-no-files-found: error
+          retention-days: "1"
+          compression-level: "0"
+          include-hidden-files: "false"
+      - name: Upload pinned smoke helpers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-smoke-tools-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-verifier/stage/smoke-tools"
+          if-no-files-found: error
+          retention-days: "1"
+          compression-level: "0"
+          include-hidden-files: "false"
+      - name: Upload credential-free verification record
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-verification-record-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-verifier/stage/verification-record"
+          if-no-files-found: error
+          retention-days: "14"
+          compression-level: "0"
+          include-hidden-files: "false"
+
+  draft-upload:
+    name: Create immutable pre-release draft and upload bound bytes
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: reference-game-draft-upload
+    permissions:
+      contents: write
+    outputs:
+      release_id: "${{ steps.publish.outputs.release_id }}"
+      receipt_sha256: "${{ steps.publish.outputs.receipt_sha256 }}"
+    steps:
+      - name: Download only manifest-bound publisher inputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-publisher-inputs-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-publisher-inputs"
+      - name: Create draft and upload exact candidate bytes
+        id: publish
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          PUBLISHER_INPUT_ROOT: "${{ runner.temp }}/nara-release-publisher-inputs"
+          DRAFT_RECEIPT: "${{ runner.temp }}/nara-release-draft-receipt/draft-receipt.json"
+        with:
+          github-token: "${{ github.token }}"
+          script: |
+            const crypto = require("crypto");
+            const fs = require("fs");
+            const path = require("path");
+
+            const inputRoot = process.env.PUBLISHER_INPUT_ROOT;
+            const receiptPath = process.env.DRAFT_RECEIPT;
+            const maxManifestBytes = 64 * 1024;
+            const maxCandidateBytes = 33_554_432;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const repository = `${owner}/${repo}`;
+
+            function fail(message) {
+              throw new Error(`draft upload rejected: ${message}`);
+            }
+
+            function readBounded(file, maximum) {
+              const bytes = fs.readFileSync(file);
+              if (bytes.length === 0 || bytes.length > maximum) {
+                fail("release input exceeds its byte limit");
+              }
+              return bytes;
+            }
+
+            function canonical(value) {
+              return `${JSON.stringify(value, null, 2)}\n`;
+            }
+
+            function digest(bytes) {
+              return crypto.createHash("sha256").update(bytes).digest("hex");
+            }
+
+            const manifestBytes = readBounded(path.join(inputRoot, "manifest.json"), maxManifestBytes);
+            const manifest = JSON.parse(manifestBytes.toString("utf8"));
+            if (
+              !manifest ||
+              manifest.schema !== "nara.reference-game.publication-manifest-v1" ||
+              manifest.format_version !== 1 ||
+              manifest.repository !== repository ||
+              manifest.publisher?.workflow_path !== ".github/workflows/reference-game-release.yml" ||
+              manifest.publisher?.event !== "workflow_dispatch" ||
+              manifest.publisher?.ref !== "refs/heads/main" ||
+              manifest.publisher?.source_revision !== context.sha ||
+              manifest.publisher?.run_id !== String(context.runId) ||
+              manifest.publisher?.run_attempt !== Number(context.runAttempt) ||
+              manifest.tag?.name !== `v${manifest.version}` ||
+              manifest.tag?.ref !== `refs/tags/${manifest.tag?.name}` ||
+              manifest.tag?.target_type !== "commit" ||
+              manifest.tag?.target_sha !== manifest.source_revision ||
+              manifest.release?.draft !== true ||
+              manifest.release?.prerelease !== true ||
+              manifest.release?.make_latest !== false ||
+              !Array.isArray(manifest.candidates) ||
+              manifest.candidates.length !== 2
+            ) {
+              fail("publication manifest is not bound to this protected publisher run");
+            }
+            const observedPlatforms = manifest.candidates.map((candidate) => candidate?.platform);
+            if (observedPlatforms.join(",") !== "linux-x86_64,windows-x86_64") {
+              fail("publication manifest does not contain the fixed platforms");
+            }
+
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: manifest.tag.name,
+              });
+              fail("the tag already has a release");
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
+            const release = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: manifest.tag.name,
+              target_commitish: manifest.source_revision,
+              name: manifest.release.name,
+              body: manifest.release.body,
+              draft: true,
+              prerelease: true,
+              make_latest: "false",
+              generate_release_notes: false,
+            });
+            if (
+              release.data.draft !== true ||
+              release.data.prerelease !== true ||
+              release.data.tag_name !== manifest.tag.name
+            ) {
+              fail("draft release identity is invalid");
+            }
+
+            async function uploadAsset(name, bytes, contentType, expectedDigest) {
+              const uploadUrl = new URL(release.data.upload_url.replace("{?name,label}", ""));
+              uploadUrl.searchParams.set("name", name);
+              const uploaded = await github.request({
+                method: "POST",
+                url: uploadUrl.toString(),
+                headers: {
+                  "content-length": String(bytes.length),
+                  "content-type": contentType,
+                },
+                data: bytes,
+              });
+              if (
+                uploaded.data?.name !== name ||
+                uploaded.data?.size !== bytes.length ||
+                uploaded.data?.digest !== `sha256:${expectedDigest}`
+              ) {
+                fail("uploaded asset did not retain its bound identity");
+              }
+              return {
+                id: String(uploaded.data.id),
+                name: uploaded.data.name,
+                size_bytes: uploaded.data.size,
+                sha256: expectedDigest,
+              };
+            }
+
+            const uploadedCandidates = [];
+            for (const candidate of manifest.candidates) {
+              const archive = candidate?.archive;
+              if (
+                !archive ||
+                archive.path !== `candidate/${archive.filename}` ||
+                archive.filename !== `nara-reference-game-${candidate.platform}.zip` ||
+                !Number.isSafeInteger(archive.size_bytes) ||
+                archive.size_bytes <= 0 ||
+                archive.size_bytes > maxCandidateBytes ||
+                typeof archive.sha256 !== "string" ||
+                !/^[0-9a-f]{64}$/.test(archive.sha256)
+              ) {
+                fail("candidate archive descriptor is invalid");
+              }
+              const bytes = readBounded(
+                path.join(inputRoot, "candidate", archive.filename),
+                maxCandidateBytes
+              );
+              if (bytes.length !== archive.size_bytes || digest(bytes) !== archive.sha256) {
+                fail("candidate archive differs from the publication manifest");
+              }
+              uploadedCandidates.push({
+                platform: candidate.platform,
+                archive: await uploadAsset(
+                  archive.filename,
+                  bytes,
+                  "application/zip",
+                  archive.sha256
+                ),
+              });
+            }
+
+            const checksum = manifest.checksum_file;
+            if (
+              !checksum ||
+              checksum.name !== "SHA256SUMS" ||
+              typeof checksum.content !== "string" ||
+              !Number.isSafeInteger(checksum.size_bytes) ||
+              typeof checksum.sha256 !== "string" ||
+              !/^[0-9a-f]{64}$/.test(checksum.sha256)
+            ) {
+              fail("checksum descriptor is invalid");
+            }
+            const checksumBytes = Buffer.from(checksum.content, "ascii");
+            if (
+              checksumBytes.length !== checksum.size_bytes ||
+              digest(checksumBytes) !== checksum.sha256
+            ) {
+              fail("checksum content differs from the publication manifest");
+            }
+            const uploadedChecksum = await uploadAsset(
+              checksum.name,
+              checksumBytes,
+              "text/plain; charset=us-ascii",
+              checksum.sha256
+            );
+            const receipt = {
+              schema: "nara.reference-game.draft-release-receipt-v1",
+              format_version: 1,
+              manifest_sha256: digest(manifestBytes),
+              repository,
+              source_revision: manifest.source_revision,
+              tag: manifest.tag.name,
+              publisher: manifest.publisher,
+              release: {
+                id: String(release.data.id),
+                draft: true,
+                prerelease: true,
+              },
+              candidates: uploadedCandidates,
+              checksum_file: uploadedChecksum,
+            };
+            fs.mkdirSync(path.dirname(receiptPath), { recursive: false });
+            const receiptBytes = Buffer.from(canonical(receipt), "utf8");
+            fs.writeFileSync(receiptPath, receiptBytes, { flag: "wx" });
+            core.setOutput("release_id", String(release.data.id));
+            core.setOutput("receipt_sha256", digest(receiptBytes));
+      - name: Upload immutable draft receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-draft-receipt-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-draft-receipt"
+          if-no-files-found: error
+          retention-days: "14"
+          compression-level: "0"
+          include-hidden-files: "false"
+
+  draft-smoke:
+    name: "Smoke exact draft asset (${{ matrix.platform }})"
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    needs: draft-upload
+    runs-on: "${{ matrix.os }}"
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+    steps:
+      - name: Download bounded publication manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-manifest-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-manifest"
+      - name: Download draft receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-draft-receipt-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-draft-receipt"
+      - name: Download pinned smoke helpers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-smoke-tools-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-smoke-tools"
+      - name: Set up Python for smoke
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: 3.13.5
+      - name: Download exact draft asset before candidate execution
+        env:
+          RELEASE_READ_TOKEN: "${{ github.token }}"
+          NARA_PLATFORM: "${{ matrix.platform }}"
+          NARA_MANIFEST: "${{ runner.temp }}/nara-release-manifest/manifest.json"
+          NARA_DRAFT_RECEIPT: "${{ runner.temp }}/nara-release-draft-receipt/draft-receipt.json"
+          NARA_DRAFT_ASSET_ROOT: "${{ runner.temp }}/nara-release-draft-assets"
+        run: |
+          python -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import urllib.parse
+          import urllib.request
+
+          maximum = 33_554_432
+          platform = os.environ["NARA_PLATFORM"]
+          token = os.environ["RELEASE_READ_TOKEN"]
+          if not token:
+              raise SystemExit("draft asset reader did not receive a token")
+
+          def load(path: Path, maximum_bytes: int):
+              raw = path.read_bytes()
+              if len(raw) == 0 or len(raw) > maximum_bytes:
+                  raise SystemExit("release record exceeds its byte limit")
+              return json.loads(raw), raw
+
+          manifest, manifest_bytes = load(Path(os.environ["NARA_MANIFEST"]), 64 * 1024)
+          receipt, _ = load(Path(os.environ["NARA_DRAFT_RECEIPT"]), 64 * 1024)
+          if (
+              manifest.get("schema") != "nara.reference-game.publication-manifest-v1"
+              or receipt.get("schema") != "nara.reference-game.draft-release-receipt-v1"
+              or receipt.get("manifest_sha256") != hashlib.sha256(manifest_bytes).hexdigest()
+              or receipt.get("repository") != manifest.get("repository")
+              or receipt.get("source_revision") != manifest.get("source_revision")
+              or receipt.get("tag") != manifest.get("tag", {}).get("name")
+          ):
+              raise SystemExit("draft receipt is not bound to the publication manifest")
+          candidates = [
+              candidate for candidate in manifest.get("candidates", [])
+              if candidate.get("platform") == platform
+          ]
+          uploaded = [
+              candidate for candidate in receipt.get("candidates", [])
+              if candidate.get("platform") == platform
+          ]
+          if len(candidates) != 1 or len(uploaded) != 1:
+              raise SystemExit("draft candidate identity is ambiguous")
+          archive = candidates[0].get("archive")
+          asset = uploaded[0].get("archive")
+          if (
+              not isinstance(archive, dict)
+              or not isinstance(asset, dict)
+              or archive.get("filename") != asset.get("name")
+              or archive.get("size_bytes") != asset.get("size_bytes")
+              or archive.get("sha256") != asset.get("sha256")
+              or not isinstance(asset.get("id"), str)
+              or not asset["id"].isdecimal()
+              or archive["size_bytes"] <= 0
+              or archive["size_bytes"] > maximum
+          ):
+              raise SystemExit("draft asset identity is invalid")
+
+          api = (
+              f"https://api.github.com/repos/{receipt['repository']}/releases/assets/{asset['id']}"
+          )
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "User-Agent": "nara-reference-game-draft-smoke",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          with urllib.request.urlopen(urllib.request.Request(api, headers=headers), timeout=30) as response:
+              metadata_bytes = response.read(64 * 1024 + 1)
+          if len(metadata_bytes) > 64 * 1024:
+              raise SystemExit("draft release asset metadata exceeds its byte limit")
+          metadata = json.loads(metadata_bytes)
+          if (
+              metadata.get("id") != int(asset["id"])
+              or metadata.get("name") != asset["name"]
+              or metadata.get("size") != asset["size_bytes"]
+              or metadata.get("digest") != f"sha256:{asset['sha256']}"
+          ):
+              raise SystemExit("draft release asset metadata differs from the receipt")
+
+          class RedirectWithoutAuthorization(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, file_pointer, code, message, headers, target):
+                  redirected = super().redirect_request(
+                      request, file_pointer, code, message, headers, target
+                  )
+                  if redirected is not None:
+                      old_host = urllib.parse.urlparse(request.full_url).netloc
+                      new_host = urllib.parse.urlparse(target).netloc
+                      if old_host != new_host:
+                          redirected.remove_header("Authorization")
+                  return redirected
+
+          download_headers = {
+              "Accept": "application/octet-stream",
+              "Authorization": f"Bearer {token}",
+              "User-Agent": "nara-reference-game-draft-smoke",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          output_root = Path(os.environ["NARA_DRAFT_ASSET_ROOT"])
+          output_root.mkdir(parents=True, exist_ok=False)
+          output = output_root / asset["name"]
+          opener = urllib.request.build_opener(RedirectWithoutAuthorization())
+          request = urllib.request.Request(metadata["url"], headers=download_headers)
+          digest = hashlib.sha256()
+          received = 0
+          with opener.open(request, timeout=60) as source, output.open("xb") as destination:
+              while chunk := source.read(64 * 1024):
+                  received += len(chunk)
+                  if received > archive["size_bytes"] or received > maximum:
+                      raise SystemExit("draft asset exceeds its approved byte count")
+                  digest.update(chunk)
+                  destination.write(chunk)
+          if received != archive["size_bytes"] or digest.hexdigest() != archive["sha256"]:
+              raise SystemExit("draft asset bytes differ from the publication manifest")
+          PY
+      - name: Install Linux software display and Vulkan fallback
+        if: "${{ runner.os == 'Linux' }}"
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb mesa-vulkan-drivers vulkan-tools
+      - name: Smoke Linux draft candidate without credentials
+        if: "${{ runner.os == 'Linux' }}"
+        run: |
+          mkdir -p "${{ runner.temp }}/nara-release-draft-smoke/home" "${{ runner.temp }}/nara-release-draft-smoke/tmp" "${{ runner.temp }}/nara-release-draft-smoke/work"
+          env -i PATH="$PATH" HOME="${{ runner.temp }}/nara-release-draft-smoke/home" USERPROFILE="${{ runner.temp }}/nara-release-draft-smoke/home" TMPDIR="${{ runner.temp }}/nara-release-draft-smoke/tmp" LANG=C.UTF-8 PYTHONNOUSERSITE=1 python -B "${{ runner.temp }}/nara-release-smoke-tools/reference-game/tools/smoke_artifact.py" smoke --archive "${{ runner.temp }}/nara-release-draft-assets/nara-reference-game-${{ matrix.platform }}.zip" --work-root "${{ runner.temp }}/nara-release-draft-smoke/work" --expected-platform "${{ matrix.platform }}" --desktop-launcher-json '["xvfb-run","--auto-servernum","--server-args=-screen 0 1280x720x24"]' --desktop-environment NARA_WGPU_FORCE_FALLBACK=1 > "${{ runner.temp }}/nara-release-draft-smoke/candidate-result.json"
+      - name: Smoke Windows draft candidate without credentials
+        if: "${{ runner.os == 'Windows' }}"
+        shell: pwsh
+        run: |
+          Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_ID_TOKEN_REQUEST_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_ID_TOKEN_REQUEST_URL -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_RUNTIME_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_RUNTIME_URL -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_RESULTS_URL -ErrorAction SilentlyContinue
+          Remove-Item Env:SSH_AUTH_SOCK -ErrorAction SilentlyContinue
+          Remove-Item Env:GIT_ASKPASS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue
+          Remove-Item Env:RUSTUP_HOME -ErrorAction SilentlyContinue
+          Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
+          Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+          Remove-Item Env:ALL_PROXY -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/nara-release-draft-smoke/home", "${{ runner.temp }}/nara-release-draft-smoke/tmp", "${{ runner.temp }}/nara-release-draft-smoke/work" | Out-Null
+          python -B "${{ runner.temp }}/nara-release-smoke-tools/reference-game/tools/smoke_artifact.py" smoke --archive "${{ runner.temp }}/nara-release-draft-assets/nara-reference-game-${{ matrix.platform }}.zip" --work-root "${{ runner.temp }}/nara-release-draft-smoke/work" --expected-platform "${{ matrix.platform }}" --desktop-environment NARA_WGPU_FORCE_FALLBACK=1 | Out-File -Encoding ascii -NoNewline "${{ runner.temp }}/nara-release-draft-smoke/candidate-result.json"
+      - name: Record bound draft smoke result
+        env:
+          NARA_PLATFORM: "${{ matrix.platform }}"
+          NARA_MANIFEST: "${{ runner.temp }}/nara-release-manifest/manifest.json"
+          NARA_DRAFT_RECEIPT: "${{ runner.temp }}/nara-release-draft-receipt/draft-receipt.json"
+          NARA_RESULT: "${{ runner.temp }}/nara-release-draft-smoke/candidate-result.json"
+          NARA_RECEIPT: "${{ runner.temp }}/nara-release-draft-smoke/draft-smoke-receipt.json"
+          NARA_RUN_ID: "${{ github.run_id }}"
+          NARA_RUN_ATTEMPT: "${{ github.run_attempt }}"
+        run: |
+          python -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def load(path: Path, maximum: int):
+              raw = path.read_bytes()
+              if len(raw) == 0 or len(raw) > maximum:
+                  raise SystemExit("release receipt input exceeds its byte limit")
+              return json.loads(raw), raw
+
+          manifest, manifest_raw = load(Path(os.environ["NARA_MANIFEST"]), 64 * 1024)
+          draft, _ = load(Path(os.environ["NARA_DRAFT_RECEIPT"]), 64 * 1024)
+          result, _ = load(Path(os.environ["NARA_RESULT"]), 64 * 1024)
+          platform = os.environ["NARA_PLATFORM"]
+          candidates = [item for item in manifest["candidates"] if item["platform"] == platform]
+          uploaded = [item for item in draft["candidates"] if item["platform"] == platform]
+          if len(candidates) != 1 or len(uploaded) != 1:
+              raise SystemExit("draft smoke candidate is ambiguous")
+          archive = candidates[0]["archive"]
+          if (
+              result.get("archive_sha256") != archive["sha256"]
+              or result.get("archive_size_bytes") != archive["size_bytes"]
+              or uploaded[0]["archive"]["sha256"] != archive["sha256"]
+          ):
+              raise SystemExit("draft smoke result is not bound to the approved archive")
+          receipt = {
+              "schema": "nara.reference-game.draft-smoke-receipt-v1",
+              "format_version": 1,
+              "publisher_run": {
+                  "id": os.environ["NARA_RUN_ID"],
+                  "attempt": int(os.environ["NARA_RUN_ATTEMPT"]),
+              },
+              "manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
+              "platform": platform,
+              "draft_release_id": draft["release"]["id"],
+              "archive": archive,
+              "candidate_result_sha256": hashlib.sha256(
+                  json.dumps(result, sort_keys=True, separators=(",", ":")).encode("utf-8")
+              ).hexdigest(),
+          }
+          Path(os.environ["NARA_RECEIPT"]).write_text(
+              json.dumps(receipt, indent=2, ensure_ascii=True) + "\n",
+              encoding="utf-8",
+              newline="\n",
+          )
+          PY
+      - name: Upload bound draft smoke receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-draft-smoke-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-draft-smoke/draft-smoke-receipt.json"
+          if-no-files-found: error
+          retention-days: "14"
+          compression-level: "0"
+          include-hidden-files: "false"
+
+  finalize-approval:
+    name: Approve exact draft-smoke evidence for finalization
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    needs:
+      - verify
+      - draft-upload
+      - draft-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: reference-game-release-finalize
+    permissions: {}
+    steps:
+      - name: Download bounded publication manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-manifest-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalize-input/manifest"
+      - name: Download immutable draft receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-draft-receipt-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalize-input/draft"
+      - name: Download Linux draft smoke receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-draft-smoke-linux-x86_64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalize-input/linux"
+      - name: Download Windows draft smoke receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-draft-smoke-windows-x86_64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalize-input/windows"
+      - name: Bind exact draft smoke receipts to finalization approval
+        env:
+          NARA_INPUT_ROOT: "${{ runner.temp }}/nara-release-finalize-input"
+          NARA_OUTPUT: "${{ runner.temp }}/nara-release-finalize-authorization/finalize-authorization.json"
+          NARA_RUN_ID: "${{ github.run_id }}"
+          NARA_RUN_ATTEMPT: "${{ github.run_attempt }}"
+        run: |
+          python -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["NARA_INPUT_ROOT"])
+
+          def load(path: Path, maximum: int):
+              raw = path.read_bytes()
+              if len(raw) == 0 or len(raw) > maximum:
+                  raise SystemExit("release finalization input exceeds its byte limit")
+              return json.loads(raw), raw
+
+          manifest, manifest_raw = load(root / "manifest/manifest.json", 64 * 1024)
+          draft, _ = load(root / "draft/draft-receipt.json", 64 * 1024)
+          if (
+              manifest.get("schema") != "nara.reference-game.publication-manifest-v1"
+              or draft.get("schema") != "nara.reference-game.draft-release-receipt-v1"
+              or draft.get("manifest_sha256") != hashlib.sha256(manifest_raw).hexdigest()
+              or draft.get("repository") != manifest.get("repository")
+              or draft.get("source_revision") != manifest.get("source_revision")
+              or draft.get("tag") != manifest.get("tag", {}).get("name")
+          ):
+              raise SystemExit("draft receipt is not bound to the publication manifest")
+          receipts = []
+          for platform in ("linux-x86_64", "windows-x86_64"):
+              receipt, _ = load(root / f"{platform.split('-', 1)[0]}/draft-smoke-receipt.json", 64 * 1024)
+              expected = [item for item in manifest["candidates"] if item["platform"] == platform]
+              if (
+                  receipt.get("schema") != "nara.reference-game.draft-smoke-receipt-v1"
+                  or receipt.get("publisher_run", {}).get("id") != os.environ["NARA_RUN_ID"]
+                  or receipt.get("publisher_run", {}).get("attempt") != int(os.environ["NARA_RUN_ATTEMPT"])
+                  or receipt.get("manifest_sha256") != hashlib.sha256(manifest_raw).hexdigest()
+                  or receipt.get("platform") != platform
+                  or receipt.get("draft_release_id") != draft.get("release", {}).get("id")
+                  or len(expected) != 1
+                  or receipt.get("archive") != expected[0].get("archive")
+              ):
+                  raise SystemExit("draft smoke receipt is not bound to finalization")
+              receipts.append(receipt)
+          authorization = {
+              "schema": "nara.reference-game.finalize-authorization-v1",
+              "format_version": 1,
+              "publisher_run": {
+                  "id": os.environ["NARA_RUN_ID"],
+                  "attempt": int(os.environ["NARA_RUN_ATTEMPT"]),
+              },
+              "manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
+              "repository": manifest["repository"],
+              "source_revision": manifest["source_revision"],
+              "tag": manifest["tag"]["name"],
+              "draft_release_id": draft["release"]["id"],
+              "draft_smokes": receipts,
+          }
+          output = Path(os.environ["NARA_OUTPUT"])
+          output.parent.mkdir(parents=True, exist_ok=False)
+          output.write_text(
+              json.dumps(authorization, indent=2, ensure_ascii=True) + "\n",
+              encoding="utf-8",
+              newline="\n",
+          )
+          PY
+      - name: Upload finalization authorization record
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-finalize-authorization-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalize-authorization/finalize-authorization.json"
+          if-no-files-found: error
+          retention-days: "14"
+          compression-level: "0"
+          include-hidden-files: "false"
+
+  release-finalize:
+    name: Publish the exact immutable pre-release
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    needs: finalize-approval
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: reference-game-release-mutation
+    permissions:
+      contents: write
+    outputs:
+      release_id: "${{ steps.publish.outputs.release_id }}"
+      receipt_sha256: "${{ steps.publish.outputs.receipt_sha256 }}"
+    steps:
+      - name: Download bounded publication manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-manifest-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalize-input/manifest"
+      - name: Download immutable draft receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-draft-receipt-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalize-input/draft"
+      - name: Download finalization authorization record
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-finalize-authorization-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalize-input/authorization"
+      - name: Recheck immutable policy and publish draft exactly once
+        id: publish
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        env:
+          FINALIZE_INPUT_ROOT: "${{ runner.temp }}/nara-release-finalize-input"
+          FINALIZATION_RECEIPT: "${{ runner.temp }}/nara-release-finalization/finalization-receipt.json"
+          RELEASE_POLICY_TOKEN: "${{ secrets.NARA_RELEASE_POLICY_TOKEN }}"
+        with:
+          github-token: "${{ github.token }}"
+          script: |
+            const crypto = require("crypto");
+            const fs = require("fs");
+            const path = require("path");
+
+            const root = process.env.FINALIZE_INPUT_ROOT;
+            const output = process.env.FINALIZATION_RECEIPT;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const repository = `${owner}/${repo}`;
+            const policyToken = process.env.RELEASE_POLICY_TOKEN;
+            const maxRecordBytes = 64 * 1024;
+
+            function fail(message) {
+              throw new Error(`release finalization rejected: ${message}`);
+            }
+
+            function readRecord(file) {
+              const bytes = fs.readFileSync(file);
+              if (bytes.length === 0 || bytes.length > maxRecordBytes) {
+                fail("release finalization record exceeds its byte limit");
+              }
+              return { value: JSON.parse(bytes.toString("utf8")), bytes };
+            }
+
+            function digest(bytes) {
+              return crypto.createHash("sha256").update(bytes).digest("hex");
+            }
+
+            function canonical(value) {
+              return `${JSON.stringify(value, null, 2)}\n`;
+            }
+
+            if (!policyToken) {
+              fail("immutable release policy token is unavailable");
+            }
+            const policy = await fetch(
+              `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/immutable-releases`,
+              {
+                headers: {
+                  Accept: "application/vnd.github+json",
+                  Authorization: `Bearer ${policyToken}`,
+                  "User-Agent": "nara-release-finalize",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                },
+              }
+            );
+            const policyBody = await policy.json();
+            if (!policy.ok || policyBody?.enabled !== true) {
+              fail("immutable releases are not enabled at finalization time");
+            }
+
+            const { value: manifest, bytes: manifestBytes } = readRecord(
+              path.join(root, "manifest/manifest.json")
+            );
+            const { value: draft } = readRecord(path.join(root, "draft/draft-receipt.json"));
+            const { value: authorization } = readRecord(
+              path.join(root, "authorization/finalize-authorization.json")
+            );
+            const manifestSha256 = digest(manifestBytes);
+            if (
+              manifest?.schema !== "nara.reference-game.publication-manifest-v1" ||
+              manifest.repository !== repository ||
+              manifest.publisher?.workflow_path !== ".github/workflows/reference-game-release.yml" ||
+              manifest.publisher?.event !== "workflow_dispatch" ||
+              manifest.publisher?.ref !== "refs/heads/main" ||
+              manifest.publisher?.source_revision !== context.sha ||
+              manifest.publisher?.run_id !== String(context.runId) ||
+              manifest.publisher?.run_attempt !== Number(context.runAttempt) ||
+              manifest.tag?.name !== `v${manifest.version}` ||
+              manifest.tag?.target_type !== "commit" ||
+              manifest.tag?.target_sha !== manifest.source_revision ||
+              manifest.release?.draft !== true ||
+              manifest.release?.prerelease !== true ||
+              manifest.release?.make_latest !== false ||
+              draft?.schema !== "nara.reference-game.draft-release-receipt-v1" ||
+              draft?.manifest_sha256 !== manifestSha256 ||
+              draft?.repository !== repository ||
+              draft?.source_revision !== manifest.source_revision ||
+              draft?.tag !== manifest.tag.name ||
+              JSON.stringify(draft?.publisher) !== JSON.stringify(manifest.publisher) ||
+              authorization?.schema !== "nara.reference-game.finalize-authorization-v1" ||
+              authorization?.manifest_sha256 !== manifestSha256 ||
+              authorization?.repository !== repository ||
+              authorization?.source_revision !== manifest.source_revision ||
+              authorization?.tag !== manifest.tag.name ||
+              authorization?.draft_release_id !== draft?.release?.id ||
+              authorization?.publisher_run?.id !== String(context.runId) ||
+              authorization?.publisher_run?.attempt !== Number(context.runAttempt) ||
+              !Array.isArray(authorization?.draft_smokes) ||
+              authorization.draft_smokes.length !== 2
+            ) {
+              fail("finalization inputs are not bound to this publisher run");
+            }
+            const expectedPlatforms = ["linux-x86_64", "windows-x86_64"];
+            if (
+              !Array.isArray(manifest.candidates) ||
+              manifest.candidates.length !== expectedPlatforms.length ||
+              manifest.candidates.map((candidate) => candidate?.platform).join(",") !==
+                expectedPlatforms.join(",")
+            ) {
+              fail("publication manifest candidates are not the fixed platform set");
+            }
+            for (const candidate of manifest.candidates) {
+              const smoke = authorization.draft_smokes.find(
+                (receipt) => receipt?.platform === candidate.platform
+              );
+              if (
+                !smoke ||
+                smoke.draft_release_id !== draft.release.id ||
+                smoke.archive?.path !== candidate.archive?.path ||
+                smoke.archive?.filename !== candidate.archive?.filename ||
+                smoke.archive?.size_bytes !== candidate.archive?.size_bytes ||
+                smoke.archive?.sha256 !== candidate.archive?.sha256 ||
+                typeof smoke.candidate_result_sha256 !== "string" ||
+                !/^[0-9a-f]{64}$/.test(smoke.candidate_result_sha256)
+              ) {
+                fail("draft smoke receipt does not match its approved candidate");
+              }
+            }
+
+            const tagRef = await github.request("GET /repos/{owner}/{repo}/git/ref/{ref}", {
+              owner,
+              repo,
+              ref: `tags/${manifest.tag.name}`,
+            });
+            if (
+              tagRef.data.ref !== manifest.tag.ref ||
+              tagRef.data.object?.type !== "tag" ||
+              tagRef.data.object?.sha !== manifest.tag.object_sha
+            ) {
+              fail("protected annotated tag changed before finalization");
+            }
+            const tagObject = await github.request("GET /repos/{owner}/{repo}/git/tags/{tag_sha}", {
+              owner,
+              repo,
+              tag_sha: manifest.tag.object_sha,
+            });
+            if (
+              tagObject.data.object?.type !== "commit" ||
+              tagObject.data.object?.sha !== manifest.source_revision
+            ) {
+              fail("protected annotated tag target changed before finalization");
+            }
+
+            const release = await github.rest.repos.getRelease({
+              owner,
+              repo,
+              release_id: Number(draft.release.id),
+            });
+            if (
+              release.data.id !== Number(draft.release.id) ||
+              release.data.tag_name !== manifest.tag.name ||
+              release.data.draft !== true ||
+              release.data.prerelease !== true ||
+              release.data.immutable === true ||
+              !Array.isArray(release.data.assets)
+            ) {
+              fail("draft release is not in the expected mutable draft state");
+            }
+            const expectedAssets = [
+              ...manifest.candidates.map((candidate) => ({
+                name: candidate.archive.filename,
+                size_bytes: candidate.archive.size_bytes,
+                sha256: candidate.archive.sha256,
+              })),
+              {
+                name: manifest.checksum_file.name,
+                size_bytes: manifest.checksum_file.size_bytes,
+                sha256: manifest.checksum_file.sha256,
+              },
+            ];
+            if (release.data.assets.length !== expectedAssets.length) {
+              fail("draft release asset count changed before finalization");
+            }
+            const finalAssets = [];
+            for (const expected of expectedAssets) {
+              const asset = release.data.assets.find((candidate) => candidate.name === expected.name);
+              if (
+                !asset ||
+                asset.size !== expected.size_bytes ||
+                asset.digest !== `sha256:${expected.sha256}` ||
+                !Number.isSafeInteger(asset.id) ||
+                typeof asset.browser_download_url !== "string"
+              ) {
+                fail("draft release asset changed before finalization");
+              }
+              finalAssets.push({
+                id: String(asset.id),
+                name: asset.name,
+                size_bytes: asset.size,
+                sha256: expected.sha256,
+                browser_download_url: asset.browser_download_url,
+              });
+            }
+            const published = await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: release.data.id,
+              tag_name: manifest.tag.name,
+              target_commitish: manifest.source_revision,
+              name: manifest.release.name,
+              body: manifest.release.body,
+              draft: false,
+              prerelease: true,
+              make_latest: "false",
+            });
+            if (
+              published.data.draft !== false ||
+              published.data.prerelease !== true ||
+              published.data.immutable !== true ||
+              published.data.tag_name !== manifest.tag.name
+            ) {
+              fail("published release is not an immutable pre-release");
+            }
+            const receipt = {
+              schema: "nara.reference-game.finalization-receipt-v1",
+              format_version: 1,
+              manifest_sha256: manifestSha256,
+              repository,
+              source_revision: manifest.source_revision,
+              tag: manifest.tag.name,
+              release: {
+                id: String(published.data.id),
+                draft: false,
+                prerelease: true,
+                immutable: true,
+                html_url: published.data.html_url,
+              },
+              assets: finalAssets,
+            };
+            fs.mkdirSync(path.dirname(output), { recursive: false });
+            const receiptBytes = Buffer.from(canonical(receipt), "utf8");
+            fs.writeFileSync(output, receiptBytes, { flag: "wx" });
+            core.setOutput("release_id", String(published.data.id));
+            core.setOutput("receipt_sha256", digest(receiptBytes));
+      - name: Upload immutable finalization receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-finalization-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalization/finalization-receipt.json"
+          if-no-files-found: error
+          retention-days: "14"
+          compression-level: "0"
+          include-hidden-files: "false"
+
+  public-smoke:
+    name: "Smoke anonymous public asset (${{ matrix.platform }})"
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    needs: release-finalize
+    runs-on: "${{ matrix.os }}"
+    timeout-minutes: 45
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+    steps:
+      - name: Download bounded publication manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-manifest-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-manifest"
+      - name: Download immutable finalization receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-finalization-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-finalization"
+      - name: Download pinned smoke helpers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-smoke-tools-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-smoke-tools"
+      - name: Set up Python for anonymous smoke
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: 3.13.5
+      - name: Download exact public asset anonymously
+        env:
+          NARA_PLATFORM: "${{ matrix.platform }}"
+          NARA_MANIFEST: "${{ runner.temp }}/nara-release-manifest/manifest.json"
+          NARA_FINALIZATION: "${{ runner.temp }}/nara-release-finalization/finalization-receipt.json"
+          NARA_PUBLIC_ASSET_ROOT: "${{ runner.temp }}/nara-release-public-assets"
+        run: |
+          python -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import urllib.request
+
+          maximum = 33_554_432
+          platform = os.environ["NARA_PLATFORM"]
+
+          def load(path: Path, maximum_bytes: int):
+              raw = path.read_bytes()
+              if len(raw) == 0 or len(raw) > maximum_bytes:
+                  raise SystemExit("release record exceeds its byte limit")
+              return json.loads(raw), raw
+
+          manifest, manifest_raw = load(Path(os.environ["NARA_MANIFEST"]), 64 * 1024)
+          finalization, _ = load(Path(os.environ["NARA_FINALIZATION"]), 64 * 1024)
+          if (
+              manifest.get("schema") != "nara.reference-game.publication-manifest-v1"
+              or finalization.get("schema") != "nara.reference-game.finalization-receipt-v1"
+              or finalization.get("manifest_sha256") != hashlib.sha256(manifest_raw).hexdigest()
+              or finalization.get("repository") != manifest.get("repository")
+              or finalization.get("source_revision") != manifest.get("source_revision")
+              or finalization.get("tag") != manifest.get("tag", {}).get("name")
+              or finalization.get("release", {}).get("draft") is not False
+              or finalization.get("release", {}).get("prerelease") is not True
+              or finalization.get("release", {}).get("immutable") is not True
+          ):
+              raise SystemExit("finalization receipt is not bound to the immutable release")
+          with urllib.request.urlopen(
+              urllib.request.Request(
+                  f"https://api.github.com/repos/{manifest['repository']}/releases/tags/{manifest['tag']['name']}",
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "nara-reference-game-public-smoke",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              ),
+              timeout=30,
+          ) as response:
+              public_release_bytes = response.read(64 * 1024 + 1)
+          if len(public_release_bytes) > 64 * 1024:
+              raise SystemExit("public release metadata exceeds its byte limit")
+          public_release = json.loads(public_release_bytes)
+          if (
+              public_release.get("id") != int(finalization["release"]["id"])
+              or public_release.get("tag_name") != manifest["tag"]["name"]
+              or public_release.get("draft") is not False
+              or public_release.get("prerelease") is not True
+              or public_release.get("immutable") is not True
+          ):
+              raise SystemExit("public release did not retain immutable pre-release state")
+          candidates = [
+              candidate for candidate in manifest.get("candidates", [])
+              if candidate.get("platform") == platform
+          ]
+          finalized = [
+              asset for asset in finalization.get("assets", [])
+              if asset.get("name") == f"nara-reference-game-{platform}.zip"
+          ]
+          if len(candidates) != 1 or len(finalized) != 1:
+              raise SystemExit("public candidate identity is ambiguous")
+          archive = candidates[0]["archive"]
+          asset = finalized[0]
+          public_assets = [
+              item for item in public_release.get("assets", [])
+              if item.get("id") == int(asset["id"])
+          ]
+          if (
+              len(public_assets) != 1
+              or archive["filename"] != asset["name"]
+              or archive["size_bytes"] != asset["size_bytes"]
+              or archive["sha256"] != asset["sha256"]
+              or public_assets[0].get("name") != asset["name"]
+              or public_assets[0].get("size") != asset["size_bytes"]
+              or public_assets[0].get("digest") != f"sha256:{asset['sha256']}"
+              or public_assets[0].get("browser_download_url") != asset["browser_download_url"]
+              or archive["size_bytes"] <= 0
+              or archive["size_bytes"] > maximum
+          ):
+              raise SystemExit("public release asset metadata differs from approved bytes")
+          output_root = Path(os.environ["NARA_PUBLIC_ASSET_ROOT"])
+          output_root.mkdir(parents=True, exist_ok=False)
+          output = output_root / asset["name"]
+          digest = hashlib.sha256()
+          received = 0
+          with urllib.request.urlopen(asset["browser_download_url"], timeout=60) as source, output.open("xb") as destination:
+              while chunk := source.read(64 * 1024):
+                  received += len(chunk)
+                  if received > archive["size_bytes"] or received > maximum:
+                      raise SystemExit("public asset exceeds its approved byte count")
+                  digest.update(chunk)
+                  destination.write(chunk)
+          if received != archive["size_bytes"] or digest.hexdigest() != archive["sha256"]:
+              raise SystemExit("anonymous public bytes differ from the publication manifest")
+          PY
+      - name: Install Linux software display and Vulkan fallback
+        if: "${{ runner.os == 'Linux' }}"
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb mesa-vulkan-drivers vulkan-tools
+      - name: Smoke Linux public candidate without credentials
+        if: "${{ runner.os == 'Linux' }}"
+        run: |
+          mkdir -p "${{ runner.temp }}/nara-release-public-smoke/home" "${{ runner.temp }}/nara-release-public-smoke/tmp" "${{ runner.temp }}/nara-release-public-smoke/work"
+          env -i PATH="$PATH" HOME="${{ runner.temp }}/nara-release-public-smoke/home" USERPROFILE="${{ runner.temp }}/nara-release-public-smoke/home" TMPDIR="${{ runner.temp }}/nara-release-public-smoke/tmp" LANG=C.UTF-8 PYTHONNOUSERSITE=1 python -B "${{ runner.temp }}/nara-release-smoke-tools/reference-game/tools/smoke_artifact.py" smoke --archive "${{ runner.temp }}/nara-release-public-assets/nara-reference-game-${{ matrix.platform }}.zip" --work-root "${{ runner.temp }}/nara-release-public-smoke/work" --expected-platform "${{ matrix.platform }}" --desktop-launcher-json '["xvfb-run","--auto-servernum","--server-args=-screen 0 1280x720x24"]' --desktop-environment NARA_WGPU_FORCE_FALLBACK=1 > "${{ runner.temp }}/nara-release-public-smoke/candidate-result.json"
+      - name: Smoke Windows public candidate without credentials
+        if: "${{ runner.os == 'Windows' }}"
+        shell: pwsh
+        run: |
+          Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_ID_TOKEN_REQUEST_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_ID_TOKEN_REQUEST_URL -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_RUNTIME_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_RUNTIME_URL -ErrorAction SilentlyContinue
+          Remove-Item Env:ACTIONS_RESULTS_URL -ErrorAction SilentlyContinue
+          Remove-Item Env:SSH_AUTH_SOCK -ErrorAction SilentlyContinue
+          Remove-Item Env:GIT_ASKPASS -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_HOME -ErrorAction SilentlyContinue
+          Remove-Item Env:RUSTUP_HOME -ErrorAction SilentlyContinue
+          Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue
+          Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue
+          Remove-Item Env:ALL_PROXY -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/nara-release-public-smoke/home", "${{ runner.temp }}/nara-release-public-smoke/tmp", "${{ runner.temp }}/nara-release-public-smoke/work" | Out-Null
+          python -B "${{ runner.temp }}/nara-release-smoke-tools/reference-game/tools/smoke_artifact.py" smoke --archive "${{ runner.temp }}/nara-release-public-assets/nara-reference-game-${{ matrix.platform }}.zip" --work-root "${{ runner.temp }}/nara-release-public-smoke/work" --expected-platform "${{ matrix.platform }}" --desktop-environment NARA_WGPU_FORCE_FALLBACK=1 | Out-File -Encoding ascii -NoNewline "${{ runner.temp }}/nara-release-public-smoke/candidate-result.json"
+      - name: Record bound anonymous public smoke result
+        env:
+          NARA_PLATFORM: "${{ matrix.platform }}"
+          NARA_MANIFEST: "${{ runner.temp }}/nara-release-manifest/manifest.json"
+          NARA_FINALIZATION: "${{ runner.temp }}/nara-release-finalization/finalization-receipt.json"
+          NARA_RESULT: "${{ runner.temp }}/nara-release-public-smoke/candidate-result.json"
+          NARA_RECEIPT: "${{ runner.temp }}/nara-release-public-smoke/public-smoke-receipt.json"
+          NARA_RUN_ID: "${{ github.run_id }}"
+          NARA_RUN_ATTEMPT: "${{ github.run_attempt }}"
+        run: |
+          python -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def load(path: Path, maximum: int):
+              raw = path.read_bytes()
+              if len(raw) == 0 or len(raw) > maximum:
+                  raise SystemExit("public smoke input exceeds its byte limit")
+              return json.loads(raw), raw
+
+          manifest, manifest_raw = load(Path(os.environ["NARA_MANIFEST"]), 64 * 1024)
+          finalization, _ = load(Path(os.environ["NARA_FINALIZATION"]), 64 * 1024)
+          result, _ = load(Path(os.environ["NARA_RESULT"]), 64 * 1024)
+          platform = os.environ["NARA_PLATFORM"]
+          candidates = [item for item in manifest["candidates"] if item["platform"] == platform]
+          if len(candidates) != 1:
+              raise SystemExit("public smoke candidate is ambiguous")
+          archive = candidates[0]["archive"]
+          if (
+              result.get("archive_sha256") != archive["sha256"]
+              or result.get("archive_size_bytes") != archive["size_bytes"]
+              or finalization.get("manifest_sha256") != hashlib.sha256(manifest_raw).hexdigest()
+          ):
+              raise SystemExit("public smoke result is not bound to the approved archive")
+          receipt = {
+              "schema": "nara.reference-game.public-smoke-receipt-v1",
+              "format_version": 1,
+              "publisher_run": {
+                  "id": os.environ["NARA_RUN_ID"],
+                  "attempt": int(os.environ["NARA_RUN_ATTEMPT"]),
+              },
+              "manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
+              "platform": platform,
+              "release_id": finalization["release"]["id"],
+              "archive": archive,
+              "candidate_result_sha256": hashlib.sha256(
+                  json.dumps(result, sort_keys=True, separators=(",", ":")).encode("utf-8")
+              ).hexdigest(),
+          }
+          Path(os.environ["NARA_RECEIPT"]).write_text(
+              json.dumps(receipt, indent=2, ensure_ascii=True) + "\n",
+              encoding="utf-8",
+              newline="\n",
+          )
+          PY
+      - name: Upload bound anonymous public smoke receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-public-smoke-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-public-smoke/public-smoke-receipt.json"
+          if-no-files-found: error
+          retention-days: "14"
+          compression-level: "0"
+          include-hidden-files: "false"
+
+  public-verdict:
+    name: Record complete anonymous public smoke verdict
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    needs:
+      - verify
+      - release-finalize
+      - public-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - name: Download bounded publication manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-manifest-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-public-verdict/manifest"
+      - name: Download immutable finalization receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-finalization-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-public-verdict/finalization"
+      - name: Download Linux public smoke receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-public-smoke-linux-x86_64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-public-verdict/linux"
+      - name: Download Windows public smoke receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: "nara-release-public-smoke-windows-x86_64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-public-verdict/windows"
+      - name: Record complete public smoke verdict without announcement
+        env:
+          NARA_INPUT_ROOT: "${{ runner.temp }}/nara-release-public-verdict"
+          NARA_OUTPUT: "${{ runner.temp }}/nara-release-public-verdict-output/public-verdict.json"
+          NARA_RUN_ID: "${{ github.run_id }}"
+          NARA_RUN_ATTEMPT: "${{ github.run_attempt }}"
+        run: |
+          python -B - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["NARA_INPUT_ROOT"])
+
+          def load(path: Path, maximum: int):
+              raw = path.read_bytes()
+              if len(raw) == 0 or len(raw) > maximum:
+                  raise SystemExit("public verdict input exceeds its byte limit")
+              return json.loads(raw), raw
+
+          manifest, manifest_raw = load(root / "manifest/manifest.json", 64 * 1024)
+          finalization, _ = load(root / "finalization/finalization-receipt.json", 64 * 1024)
+          manifest_sha256 = hashlib.sha256(manifest_raw).hexdigest()
+          if (
+              manifest.get("schema") != "nara.reference-game.publication-manifest-v1"
+              or finalization.get("schema") != "nara.reference-game.finalization-receipt-v1"
+              or finalization.get("manifest_sha256") != manifest_sha256
+              or finalization.get("release", {}).get("immutable") is not True
+          ):
+              raise SystemExit("immutable finalization receipt is invalid")
+          receipts = []
+          for platform in ("linux-x86_64", "windows-x86_64"):
+              receipt, _ = load(root / f"{platform.split('-', 1)[0]}/public-smoke-receipt.json", 64 * 1024)
+              expected = [item for item in manifest["candidates"] if item["platform"] == platform]
+              if (
+                  receipt.get("schema") != "nara.reference-game.public-smoke-receipt-v1"
+                  or receipt.get("publisher_run", {}).get("id") != os.environ["NARA_RUN_ID"]
+                  or receipt.get("publisher_run", {}).get("attempt") != int(os.environ["NARA_RUN_ATTEMPT"])
+                  or receipt.get("manifest_sha256") != manifest_sha256
+                  or receipt.get("platform") != platform
+                  or receipt.get("release_id") != finalization.get("release", {}).get("id")
+                  or len(expected) != 1
+                  or receipt.get("archive") != expected[0].get("archive")
+              ):
+                  raise SystemExit("anonymous public smoke receipt is invalid")
+              receipts.append(receipt)
+          verdict = {
+              "schema": "nara.reference-game.public-release-verdict-v1",
+              "format_version": 1,
+              "publisher_run": {
+                  "id": os.environ["NARA_RUN_ID"],
+                  "attempt": int(os.environ["NARA_RUN_ATTEMPT"]),
+              },
+              "manifest_sha256": manifest_sha256,
+              "repository": manifest["repository"],
+              "source_revision": manifest["source_revision"],
+              "tag": manifest["tag"]["name"],
+              "release_id": finalization["release"]["id"],
+              "public_smokes": receipts,
+              "announcement": "not-performed",
+          }
+          output = Path(os.environ["NARA_OUTPUT"])
+          output.parent.mkdir(parents=True, exist_ok=False)
+          output.write_text(
+              json.dumps(verdict, indent=2, ensure_ascii=True) + "\n",
+              encoding="utf-8",
+              newline="\n",
+          )
+          PY
+      - name: Upload immutable public verdict
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "nara-release-public-verdict-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/nara-release-public-verdict-output/public-verdict.json"
+          if-no-files-found: error
+          retention-days: "14"
+          compression-level: "0"
+          include-hidden-files: "false"
