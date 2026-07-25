@@ -1,3 +1,6 @@
+# GitHub workflow policy fixtures must be byte-stable across runner platforms.
+.github/workflows/* text eol=lf
+
 # Canonical schema catalogs are byte-for-byte protocol evidence.
 tests/fixtures/schema-catalog/*.json text eol=lf
 reference-game/schema/*.json text eol=lf
