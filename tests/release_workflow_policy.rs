@@ -95,6 +95,39 @@ fn release_policy_rejects_untrusted_triggers_extra_write_authority_and_mutable_a
 
 #[test]
 fn release_policy_rejects_credential_leakage_checkout_and_candidate_execution_across_barriers() {
+    let mut premature_candidate_fetch = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut premature_candidate_fetch.workflow,
+        "    needs: immutable-policy\n",
+        "    needs: []\n",
+    );
+    assert_rejects(
+        &premature_candidate_fetch,
+        "candidate-fetch has an invalid publication dependency graph",
+    );
+
+    let mut non_string_candidate_dependency = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut non_string_candidate_dependency.workflow,
+        "    needs: immutable-policy\n",
+        "    needs: [immutable-policy, 42]\n",
+    );
+    assert_rejects(
+        &non_string_candidate_dependency,
+        "candidate-fetch must use a string list for dependencies",
+    );
+
+    let mut duplicate_candidate_dependency = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut duplicate_candidate_dependency.workflow,
+        "    needs: immutable-policy\n",
+        "    needs: [immutable-policy, immutable-policy]\n",
+    );
+    assert_rejects(
+        &duplicate_candidate_dependency,
+        "candidate-fetch must not contain duplicate dependencies",
+    );
+
     let mut verifier_token = ReleasePolicyFixture::committed();
     replace_once(
         &mut verifier_token.workflow,
@@ -366,6 +399,7 @@ fn validate_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
         &[
             "name",
             "if",
+            "needs",
             "runs-on",
             "timeout-minutes",
             "permissions",
@@ -519,7 +553,12 @@ fn validate_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
     validate_matrix_runner(job("draft-smoke"), "draft-smoke", violations);
     validate_matrix_runner(job("public-smoke"), "public-smoke", violations);
     validate_needs(job("immutable-policy"), "immutable-policy", &[], violations);
-    validate_needs(job("candidate-fetch"), "candidate-fetch", &[], violations);
+    validate_needs(
+        job("candidate-fetch"),
+        "candidate-fetch",
+        &["immutable-policy"],
+        violations,
+    );
     validate_needs(
         job("verify"),
         "verify",
@@ -773,23 +812,30 @@ fn validate_matrix_runner(job: &Hash, name: &str, violations: &mut Vec<String>) 
 
 fn validate_needs(job: &Hash, name: &str, expected: &[&str], violations: &mut Vec<String>) {
     let observed = match field(job, "needs") {
-        None => BTreeSet::new(),
-        Some(Yaml::String(single)) => BTreeSet::from([single.to_owned()]),
-        Some(Yaml::Array(values)) => values
-            .iter()
-            .filter_map(Yaml::as_str)
-            .map(str::to_owned)
-            .collect(),
+        None => Vec::new(),
+        Some(Yaml::String(single)) => vec![single.to_owned()],
+        Some(Yaml::Array(values)) => {
+            let Some(values) = values.iter().map(Yaml::as_str).collect::<Option<Vec<_>>>() else {
+                violations.push(format!("{name} must use a string list for dependencies"));
+                return;
+            };
+            values.into_iter().map(str::to_owned).collect()
+        }
         Some(_) => {
             violations.push(format!("{name} must use a string list for dependencies"));
             return;
         }
     };
+    let observed_set = observed.iter().cloned().collect::<BTreeSet<_>>();
+    if observed_set.len() != observed.len() {
+        violations.push(format!("{name} must not contain duplicate dependencies"));
+        return;
+    }
     let expected = expected
         .iter()
         .map(|value| (*value).to_owned())
         .collect::<BTreeSet<_>>();
-    if observed != expected {
+    if observed_set != expected {
         violations.push(format!(
             "{name} has an invalid publication dependency graph"
         ));

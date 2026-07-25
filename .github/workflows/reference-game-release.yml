@@ -83,6 +83,7 @@ jobs:
   candidate-fetch:
     name: Fetch approved candidate transports
     if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
+    needs: immutable-policy
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
