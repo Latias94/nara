@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-25
+* **Work Registration**: [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md) - Closes carried RGF-U15 with the final six-cell hosted Windows and Linux CI matrix at the integrated executable revision.
+* **Verification Evidence**: [RGD-U8 final hosted three-workspace CI verification](verification/2026-07/2026-07-25T115419Z-rgd-u8-final-hosted-three-workspace-ci-verification-0ee1fb9b871a4716ae3d0c533fbdd044.md) - Records the final user-authorized GitHub Actions matrix for root, reference-game, and module-consumer on Windows and Linux.
 * **Memory Event**: [Governance correction: Reassigned the duplicate RGD-U7 verification record identity; evidence content a](logs/2026-07/2026-07-25T075756Z-governance-correction-reassigned-the-duplicate-rgd-u7-verification-record-identity-evidence-content-a-a4c66611c6154f069b490f57447ecc71.md) - Reassigned the duplicate RGD-U7 verification record identity; evidence content and the U7 registration lineage remain unchanged, restoring d
 * **Work Registration**: [Reference-game runtime authority and delivery: RGD-U12 local security hardening](registry/2026-07/2026-07-25T061347Z-engine-foundation-contract-completion-codex-root-1cc231772b5547e5855c1ba5957106f7.md) - Supersedes the local U12 preparation snapshot after approval binding and immutable publisher workflow hardening; hosted execution and publication remain blocked.
 * **Verification Evidence**: [RGD-U12 release security hardening verification](verification/2026-07/2026-07-25T061212Z-rgd-u12-release-security-hardening-verification-50b3c1491dce415e8f7e0fe508c59276.md) - Records local verification of publisher approval binding and immutable-release workflow hardening without claiming hosted publication.
@@ -143,7 +145,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-07-14
 * **Verification Evidence**: [RGF-U10 bounded PNG ingest verification](verification/2026-07/2026-07-14T174858Z-rgf-u10-bounded-png-ingest-verification-cd08a4898f76409392fbaf093174ea5f.md) - Verified bounded PNG read, decode, publication, last-good reload, review disposition, and focused post-review gates.
-* **Session Handoff**: [RGF-U11 completion and U10 entry handoff](sessions/2026-07/2026-07-14T005902Z-rgf-u11-completion-and-u10-entry-handoff-43ed130b90a44e059f52ae2ccdd2ab4a.md) - Safe native surface retirement is committed and verified; RGF-U10 bounded PNG ingest is next.
-
-## 2026-07-13
-* **Verification Evidence**: [RGF U11 safe surface retirement verification](verification/2026-07/2026-07-13T215323Z-rgf-u11-safe-surface-retirement-verification-7873dc371c574fa3a0330be2b39ca589.md) - Safe owning wgpu surfaces, owner-scoped Winit retirement, device-loss invalidation, and truthful failure aggregation verified.
