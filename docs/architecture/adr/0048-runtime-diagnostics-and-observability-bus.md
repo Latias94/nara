@@ -5,7 +5,7 @@
 **Refines**: ADR 0009, ADR 0036, ADR 0042
 **Refined By**: ADR 0052: Task Backpressure, Cancellation, and Long-Running Diagnostics;
 ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0068: Global Resource Budgets,
-Metrics, and Diagnostic Privacy
+Metrics, and Diagnostic Privacy; ADR 0080: Domain-Owned TaskUpdate Integration Sets
 
 ## Context
 
@@ -81,9 +81,10 @@ Rules:
 - **Replay:** Diagnostics are excluded from the first deterministic gameplay replay contract. An
   explicit tooling capture may serialize bounded snapshots later, but replay behavior cannot depend
   on them.
-- **Producer integration:** Asset, watcher, task, window, render, project, and editor bridges remain
-  legacy U31 trigger backlog. Until admitted successor slices land, this ADR's shared core is
-  intentionally implementation-partial.
+- **Producer integration:** The asset watcher now publishes bounded typed outcomes and pressure into
+  the shared runtime observation resources. Asset, task, window, render, project, and editor bridges
+  remain independently trigger-gated; a domain gains a bridge only when a concrete headless,
+  tooling, or cross-domain consumer needs the shared projection.
 
 ## Alternatives Considered
 
@@ -133,7 +134,7 @@ errors depend upward.
 | Retention | Manual and frame-window behavior is deterministic | Cleanup tests |
 | Headless inspection | Both observation resources work without UI/tracing | Plugin integration test |
 | Logging split | Cursor emission never repeats an unchanged history | Thread-local subscriber test |
-| Producer coverage | Every admitted runtime domain bridges typed outcomes | Focused successor integration tests |
+| Producer coverage | Every producer admitted by a concrete shared consumer bridges the required typed outcomes | Focused successor integration tests |
 
 ## Risks and Mitigations
 

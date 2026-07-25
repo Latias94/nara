@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Refined By**: ADR 0097: Future-Capable 2D and 3D Spatial Transform Model
 
 ## Context
 

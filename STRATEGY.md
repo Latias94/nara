@@ -69,8 +69,9 @@ production rather than engine infrastructure.
 
 Preserve a robust Rust and `bevy_ecs` substrate with explicit ownership, service,
 performance, and headless boundaries. Keep modules independently understandable,
-replaceable where their contracts allow it, and usable without importing the
-entire product, while making the first-party default combination work as one engine.
+replaceable where their contracts allow it, with explicit source/data migration when contracts
+differ, and usable without importing the entire product, while making the first-party default
+combination work as one engine.
 
 _Why it serves the approach:_ Product coherence and ecosystem extensibility share
 the same deliberate boundaries instead of competing architecture goals.

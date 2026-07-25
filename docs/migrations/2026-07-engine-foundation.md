@@ -2013,6 +2013,30 @@ Play owner remains.
 `tests/scene_play_mode.rs`, and `crates/nara_tooling_egui/src/lib.rs#tests` prove the receipt,
 dirty-close/reopen, scheduled lifecycle, safe-point edit/export, and adapter command/view contracts.
 
+## Specialized Plugin Ownership and Render Scaling Decision Reset
+
+ADR 0095 supersedes the unimplemented engine-owned physics/audio provider abstractions in ADR 0019
+and ADR 0030. Specialized plugins now own their semantic APIs and persistent schemas; changing a
+plugin may require an explicit source/configuration/cross-schema migration. `nara.toml` does not
+select an arbitrary provider. ADR 0096 supersedes ADR 0053's unimplemented fixed tile chunk-cache
+topology and makes allocation/cache mechanisms measurement-gated while preserving GPU ownership,
+finite admission, observability, and epoch invalidation.
+
+**User action**: `none` for the current repository. No physics/audio domain, portable provider API,
+tile chunk-cache format, or public upload planner was implemented. Future users replacing one
+specialized plugin with another must follow that plugin pair's explicit migration guide rather than
+changing a provider setting.
+
+**Source action**: `none`; existing scene/prefab/component records are unchanged. A future cross-
+plugin conversion must use new stable IDs and a validated reversible patch rather than rebinding an
+existing component ID.
+
+**Cache action**: `keep`; no current import or GPU cache format changes result from the decision
+correction.
+
+**Compatibility window**: none (pre-1.0). The abandoned portable physics/audio and fixed render-
+cache contracts had no implementation to preserve.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

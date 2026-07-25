@@ -4,7 +4,16 @@
 **Date**: 2026-07-08
 **Last Revised**: 2026-07-16
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0094: Minimal Render Execution
-Boundary and Evidence-Gated Extensions
+Boundary and Evidence-Gated Extensions; ADR 0095: Plugin-Owned Specialized Domains and Project
+Configuration
+
+## ADR 0095 Refinement
+
+An extension seam means that an independently owned plugin can join Nara's public substrate. It
+does not imply that Nara owns portable domain components, scene schemas, or a provider trait.
+Plugin-specific durable schemas are valid when stable and migration-aware; only native/runtime
+handles are categorically excluded. The second-real-implementation rule applies before advertising
+a Nara-owned portable Interface, not before shipping an ordinary plugin-owned integration.
 
 ## Context
 
@@ -20,124 +29,115 @@ Examples:
 
 ## Decision
 
-nara will define **extension seams** around major backend/domain responsibilities, but will not
-freeze a public Adapter Interface until one production-shaped consumer creates real variation
-pressure and an independent implementation challenges the proposed seam. A second real Adapter is
-required before compatibility freeze. Fakes remain useful conformance and fault-injection oracles,
-but do not by themselves prove replaceability.
+nara defines **extension seams** by allowing independently owned plugins to join public product
+substrate. An extension seam does not automatically create an engine-owned domain Interface.
+
+A concrete integration may ship with its own strongly typed components, schema, systems, sets,
+queries, commands, events, and configuration. Nara freezes a portable cross-implementation
+Interface only after one production-shaped consumer creates real portability pressure, an
+independent implementation challenges the proposed seam, and a second real implementation proves
+the common semantics. Fakes remain useful conformance and fault-injection oracles, but do not prove
+ecosystem replaceability.
 
 Core rule:
 
-> Stable user data lives in ECS components/resources. Replaceable behavior lives behind plugin-installed systems, resources, and adapter traits. Backend-specific types must not leak into scene/prefab schemas or gameplay-facing core components.
+> Durable user data belongs to its owning engine or plugin contract and uses stable, bounded,
+> versioned semantics. Native handles and process-local identities remain transient. Replacement
+> across different plugin contracts may require explicit source and data migration.
 
 ```mermaid
 flowchart TD
-    World[bevy_ecs World] --> Components[Stable Components]
-    Plugins[nara Plugins] --> Systems[Systems]
-    Plugins --> Adapters[Backend Adapter Resources]
-    Components --> Extractors[Domain Extractors]
-    Adapters --> Backend[Physics / Render / Audio / Serialization Backend]
-    Scene[Scene / Prefab] --> Components
-    Scene -. no backend types .-> Backend
+    Substrate[Nara App / ECS / schedules / time / schema / assets / diagnostics]
+    Plugins[Independent plugins] --> Physics[Concrete physics API and state]
+    Plugins --> Audio[Concrete audio API and state]
+    Plugins --> Other[Other domain API and state]
+    Substrate --> Physics
+    Substrate --> Audio
+    Substrate --> Other
+    Scene[Scene / Prefab] --> Schema[Plugin-owned stable schema]
+    Schema --> Physics
+    Scene -. no native or process-local identity .-> Physics
 ```
 
 ## Design Rules
 
-### Rule 1: Components are stable data, backends are adapters
+### Rule 1: Specialized plugins own their domain contract
 
-Gameplay-facing components should express engine domain intent:
+Physics, audio, text, animation, input policy, and similar plugins may expose their own semantic
+types. A Rapier integration is not required to pretend that its bodies, queries, contacts, or
+configuration are also Avian or Box2D semantics.
 
-```text
-RigidBody2d
-Collider2d
-Sprite
-Camera2d
-AudioSource
-```
+The owning plugin registers stable component IDs, codecs, migrations, authoring helpers, and
+diagnostics when its data is persistent. Different plugins must not bind one stable component ID to
+different meanings.
 
-They should not expose backend-native handles such as Box2D body pointers, wgpu buffers, or audio device IDs.
+### Rule 2: Plugin-installed systems are the ordinary extension mechanism
 
-Backend state belongs in resources or internal ECS components owned by the plugin.
+A domain normally integrates by installing its own resources and systems into documented public
+schedule anchors or custom schedules. It may keep private native/session state in transient
+resources. Pure ECS plugins do not need a backend trait, Service object, queue, main-thread bridge,
+or Host contribution.
 
-### Rule 2: Plugin-installed systems are the default extension mechanism
+### Rule 3: Persistent safety is not cross-plugin portability
 
-A domain module should usually integrate by installing systems into known stages:
+Persistent records must not contain native handles, pointers, runtime `Entity`/`AssetId`, Rust or
+Bevy runtime IDs, solver/session indices, callbacks, absolute Host authority, or opaque backend
+blobs without a canonical bounded grammar. Plugin-specific semantic configuration is valid when it
+is stable, canonical, versioned, bounded, and migration-aware.
 
-```text
-PreUpdate / FixedUpdate / PostUpdate
-Extract / Prepare / Queue / Render
-```
+Switching implementations may require an explicit cross-schema patch and Rust API migration. Scene
+files are unchanged only when an Accepted portable contract explicitly guarantees that property.
 
-Use traits for backend seams only where behavior truly varies, such as physics backend stepping or
-serialization format adapters. Rendering follows ADR 0094's evidence ladder; this rule does not
-authorize a generic render-backend submission trait or a mirrored Nara RHI.
+### Rule 4: Scarce Host authority is explicit
 
-### Rule 3: Scene and prefab data must stay backend-neutral
+Event loops, native windows, renderer surfaces/devices, filesystem capabilities, and comparable
+process-scoped authority use explicit Host contributions and lifecycle ownership. This is a safety
+property, not a template for ordinary physics/audio/text plugins.
 
-Scene files should serialize stable nara component IDs and data. A project should be able to switch a physics backend without rewriting scene files, assuming the high-level physics component model is supported.
+### Rule 5: Shared traits follow evidence
 
-### Rule 4: Extraction maps stable data to backend data
+Use a public trait only when multiple real participants require the same behavior and the semantics
+are stronger than matching method names. A second implementation is required before compatibility
+freeze for a portable Interface, not before the first concrete plugin can ship. Rendering follows
+ADR 0094's narrower evidence ladder and wgpu-only RHI decision.
 
-Backend plugins translate stable ECS data into backend-native state:
-
-```text
-RigidBody2d + Collider2d -> Box2D bodies/fixtures
-Sprite + Transform2d -> render items/batches
-AudioSource -> backend voice/source state
-```
-
-The translation layer owns synchronization, handles, generation checks, and diagnostics.
-
-### Rule 5: Prefer capability resources over global singletons
-
-Backend capabilities should be represented by resources installed by plugins:
-
-```text
-PhysicsBackend2d
-RenderBackendStatus / backend adapter resource
-AudioBackend
-SceneFormatRegistry
-```
-
-This keeps tests and headless runs replaceable.
+`PluginServiceId` can validate that a declared service is present. It is not a provider registry,
+exclusive owner selector, or runtime dispatch Interface.
 
 ## Alternatives Considered
 
-### Option A: Hardcode first backend directly into core components
+### Option A: Concrete Plugin-Owned Integration First
 
-**Pros**: Fastest MVP.
+**Pros**: Preserves strong typing and full library behavior while reusing Nara's product substrate.
 
-**Cons**: Backend replacement becomes a scene/schema and gameplay API migration.
+**Cons**: Replacement may require explicit source, schema, and configuration migration.
 
-**Decision**: Rejected for mature engine foundations.
+**Decision**: Chosen.
 
-### Option B: Fully abstract every domain from day one
+### Option B: Fully Abstract Every Domain from Day One
 
 **Pros**: Maximum replaceability.
 
 **Cons**: Premature shallow traits, unclear requirements, excessive boilerplate.
 
-**Decision**: Rejected. Add seams where variation is real and costly.
+**Decision**: Rejected.
 
-### Option C: Stable data plus plugin/backend adapter seams (Chosen)
+### Option C: Integrate Raw Libraries Without Plugins
 
-**Pros**: Keeps user data stable while letting implementations mature or swap.
+**Pros**: Maximum expert freedom and no engine integration layer.
 
-**Cons**: Requires careful boundary discipline and adapter synchronization code.
+**Cons**: Every game repeats schedule, persistence, diagnostics, lifecycle, and tooling work.
 
-**Decision**: Chosen.
+**Decision**: Valid for expert embedding, rejected as the first-party default experience.
 
 ## Consequences
 
-- A future `nara_physics2d` crate can define stable components while `nara_physics2d_box2d` provides a concrete backend.
-- Render, audio, serialization, and scripting preserve stable intent outside native implementation,
-  but each domain admits its own smallest sufficient Adapter shape rather than sharing one trait
-  template. Rendering follows ADR 0094.
-- Core ECS data must avoid storing raw backend handles in serializable components.
-- Backend plugins need diagnostics for unsupported component combinations or invalid data.
-- Fake backends may prove deterministic failure handling and conformance, but replaceability claims
-  require production-shaped independent pressure and, before compatibility freeze, a second real
-  Adapter.
+- A first official physics or audio integration is a concrete plugin, not proof of a portable core.
+- Plugin-owned persistent schemas may be product-quality without being shared by competitors.
+- Replacement documentation must state required source/data/configuration migration honestly.
+- Native/process-local state remains private and non-persistent.
+- Fake implementations prove one contract's faults; cross-implementation claims require real
+  variation evidence.
 - Render backend observation currently uses plugin-installed resources and `RenderBackendStatus`;
   ADR 0094 accepts only the stock serialized wgpu execution boundary today. A public feature,
   interop, replacement-Host, or other render-execution seam waits for its own tracer and decision.
@@ -146,27 +146,27 @@ This keeps tests and headless runs replaceable.
 
 | Metric | Target | Measurement |
 |---|---:|---|
-| Backend isolation | Scene schemas do not contain backend-native handles | Schema review |
-| Physics replaceability | A Box2D adapter can be replaced without changing high-level `RigidBody2d` scene data | Future design test |
-| Testability | Headless tests can install fake backends | Future unit tests |
-| Plugin integration | Domain modules enter through documented schedules/resources | Code review |
-| No premature trait soup | A production-shaped consumer and independent implementation pressure select a seam; a second real Adapter exists before compatibility freeze | Design and conformance review |
+| Persistent isolation | Plugin schemas contain no native or process-local identity | Schema/golden review |
+| Plugin integration | An external plugin owns data, systems, sets, diagnostics, and optional schema through public APIs | Clean-room fixture |
+| Honest replacement | Domain replacement documentation names migrations and unsupported equivalence | Documentation review |
+| No premature trait soup | A portable Interface cites real portability pressure and two challenged implementations | ADR/conformance review |
+| Authoring ergonomics | Ordinary plugins do not require provider slots or advanced plan vocabulary | Independent example review |
 
 ## Risks and Mitigations
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| Stable high-level components underspecify backend needs | High | Medium | Start with concrete backend spikes before freezing component schemas |
-| Adapter sync logic becomes complex | Medium | High | Use generation IDs, diagnostics, and clear ownership rules |
-| Trait abstractions become shallow | Medium | Medium | Require production-shaped pressure plus an independent implementation, then a second real Adapter before compatibility freeze; mocks alone do not qualify |
-| Backend replacement promise is overstated | Medium | Medium | Document compatibility levels per domain module |
+| Plugin-specific schemas fragment content | High | Medium | Maintain one strong official default, stable namespaces, migrations, and demand-driven converters |
+| Native state leaks into durable data | Critical | Medium | Enforce schema eligibility, canonical grammars, type audits, and hostile fixtures |
+| Trait abstractions become shallow | Medium | Medium | Require real portability pressure and two challenged implementations before compatibility freeze |
+| Replacement promise is overstated | High | Medium | Treat replacement as explicit migration unless an Accepted portable contract says otherwise |
+| Host-only machinery burdens ordinary plugins | High | Medium | Reserve Host contributions for scarce process/native authority |
 
 ## Follow-Up Questions
 
-- What is the first stable physics component set: `RigidBody2d`, `Collider2d`, `Sensor2d`, `PhysicsMaterial2d`, `CollisionLayers`?
-- Should physics use fixed timestep only, or support variable stepping?
-- How do backend plugins persist backend-created state across hot reload?
-- How are fake/test backends registered?
+- Which concrete physics plugin and workflow should OQ-005 trial first?
+- Which plugin-owned persistent records need conversion tooling for asset-store content?
+- Which real downstream consumer, if any, needs a portable cross-plugin layer?
 
 ## Citations
 

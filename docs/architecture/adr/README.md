@@ -79,7 +79,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md): Extension Seams for Backends and Domain Modules
 - [ADR 0017](0017-render-graph-policy.md): Render Graph Policy
 - [ADR 0018](0018-coordinate-units-and-time.md): Coordinate, Units, and Time
-- [ADR 0019](0019-physics-strategy.md): Physics Strategy
+- [ADR 0019](0019-physics-strategy.md): Physics Strategy (Superseded)
 - [ADR 0020](0020-project-layout-and-package-format.md): Project Source Layout
 - [ADR 0021](0021-scripting-and-wasm-boundary.md): Scripting and WASM Boundary (Superseded)
 - [ADR 0022](0022-3d-coordinate-system.md): 3D Coordinate System
@@ -90,7 +90,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0027](0027-save-game-and-runtime-persistence.md): Save Game and Runtime Persistence
 - [ADR 0028](0028-networking-and-replication-scope.md): Networking and Replication Scope
 - [ADR 0029](0029-animation-strategy.md): Animation Strategy
-- [ADR 0030](0030-audio-strategy.md): Audio Strategy
+- [ADR 0030](0030-audio-strategy.md): Audio Strategy (Superseded)
 - [ADR 0031](0031-text-and-font-strategy.md): Text and Font Strategy
 - [ADR 0032](0032-render-backend-integration-boundary.md): Render Backend Integration Boundary
 - [ADR 0033](0033-asset-import-and-render-resource-preparation-seam.md): Asset Import and Render Resource Preparation Seam
@@ -113,7 +113,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md): Asset Root, Link, Mount, and Package Trust Policy
 - [ADR 0051](0051-persistent-file-envelope-migration-and-golden-fixtures.md): Persistent File Envelope, Migration, and Golden Fixtures
 - [ADR 0052](0052-task-backpressure-cancellation-and-long-running-diagnostics.md): Task Backpressure, Cancellation, and Long-Running Diagnostics
-- [ADR 0053](0053-visibility-culling-and-tilemap-render-cache.md): Visibility, Culling, and Tilemap Render Cache
+- [ADR 0053](0053-visibility-culling-and-tilemap-render-cache.md): Visibility, Culling, and Tilemap Render Cache (Superseded)
 - [ADR 0054](0054-gpu-upload-budget-and-buffer-allocation-policy.md): GPU Upload Budget and Buffer Allocation Policy
 - [ADR 0055](0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md): Feature Matrix, Boundary Checks, and Compatibility Fixtures
 - [ADR 0056](0056-headless-runtime-and-dedicated-server-readiness.md): Headless Runtime and Dedicated Server Readiness
@@ -140,3 +140,6 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0092](0092-sdr-color-space-alpha-and-output-encoding.md): SDR Color Space, Alpha, and Output Encoding
 - [ADR 0093](0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md): Rust Authoring, Hot Iteration, and Optional Scripting Adapters
 - [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md): Minimal Render Execution Boundary and Evidence-Gated Extensions
+- [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md): Plugin-Owned Specialized Domains and Project Configuration
+- [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md): Evidence-Gated Render Scaling and Upload Policy
+- [ADR 0097](0097-future-capable-2d-3d-spatial-transform-model.md): Future-Capable 2D and 3D Spatial Transform Model

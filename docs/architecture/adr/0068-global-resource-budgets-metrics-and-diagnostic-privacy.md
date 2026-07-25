@@ -192,7 +192,9 @@ runtime strings and secrets into dedupe/logging.
 
 **Pros**: Preserves deep domain ownership while giving headless tools consistent bounded data.
 
-**Cons**: Each domain must explicitly publish both typed outcomes and numeric observations.
+**Cons**: Each admitted resource-pressure producer must publish the numeric observations required by
+its concrete shared consumer in addition to preserving typed domain outcomes. Pure synchronous or
+lightweight domains do not manufacture metrics without a consumer.
 
 **Decision**: Chosen.
 

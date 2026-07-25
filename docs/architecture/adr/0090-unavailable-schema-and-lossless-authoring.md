@@ -10,7 +10,7 @@ mutation
 **Revisit Trigger**: A second persistent value grammar, schema-only editor adapter, or concrete need
 for lexical byte/comment preservation proves semantic record preservation insufficient
 **Related**: ADR 0006, ADR 0011, ADR 0026, ADR 0034, ADR 0038, ADR 0043, ADR 0045, ADR 0047,
-ADR 0049, ADR 0051, ADR 0068, ADR 0079, ADR 0081, ADR 0083, ADR 0084, ADR 0093
+ADR 0049, ADR 0051, ADR 0068, ADR 0079, ADR 0081, ADR 0083, ADR 0084, ADR 0093, ADR 0095
 
 ## Context
 
@@ -113,9 +113,17 @@ outside canonical rules, or byte-identical JSON/RON round trips.
 | Edit/add/replace a field inside unavailable record | Reject |
 | Apply Changes or prefab override targeting unavailable record | Reject |
 | Duplicate/remap/merge/convert requiring unknown reference interpretation | Reject unless complete closure is proven |
+| Asset rename/delete/GC/prune or dependency-closure publication | Allow only for `KnownUnbound` under an immutable last-known catalog that fully declares `asset_ref`; reject for `UnknownSchema` |
+| Cook/export/Play/runtime spawn | Reject unless every required record and binding is `Available` |
 
 An allowed unrelated edit must prove that unavailable record semantic digests and references do not
 change. Saving keeps the document `Degraded`; it does not silently declare it valid for runtime.
+
+Unavailable schema is also an asset/entity dependency barrier. `KnownUnbound` may perform schema-
+only reference traversal against an immutable, authenticated last-known owner catalog without
+executing provider code. `UnknownSchema` cannot distinguish ordinary strings/maps from references,
+so asset rename/delete/GC, entity remap, prefab flatten, dependency closure, Cook, and export reject
+rather than guessing.
 
 For prefabs, an unavailable whole record may pass through an untouched source/instance projection.
 Any override, merge, migration, or remap that targets the record rejects atomically. Silent strip is
@@ -201,6 +209,7 @@ prefab/reference handling.
 | Wire strictness | Unknown document version or value tag still rejects rather than degrading | Hostile fixture |
 | Budget/privacy | Oversized record rejects within bounds and diagnostics contain no payload | Budget and snapshot audit |
 | Registry strictness | No placeholder/dynamic component enters the frozen runtime registry | API/source audit |
+| Dependency safety | Unknown schema blocks asset/entity closure operations; known-unbound traversal uses catalog declarations only | Asset/remap/cook integration tests |
 
 ## Risks and Mitigations
 

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "aeedcd7c6e1f5c60c03495f9d364a58336173f6a00300bf15708a067e478f483"
+source_fingerprint: "eb2715a519522200f342cd8c8bbd45d7eac3a6187ff558f35d7477bb68b10614"
 ---
 
 # Current State
@@ -12,18 +12,20 @@ source_fingerprint: "aeedcd7c6e1f5c60c03495f9d364a58336173f6a00300bf15708a067e47
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `aeedcd7c6e1f5c60c03495f9d364a58336173f6a00300bf15708a067e478f483`
-- Immutable records: 166
-- Active lane heads: 1
+- Source fingerprint: `eb2715a519522200f342cd8c8bbd45d7eac3a6187ff558f35d7477bb68b10614`
+- Immutable records: 169
+- Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U13](registry/2026-07/2026-07-19T193816Z-engine-foundation-contract-completion-codex-root-437f122f2a8143f18470951cd1741a80.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Nara deep module architecture exploration: plugin freedom](registry/2026-07/2026-07-19T163055Z-nara-deep-module-architecture-exploration-codex-root-9318026c84f84037b0536dfb5c72e533.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
 - **Verification Evidence**: [RGF-U13 desktop production wave automated verification](verification/2026-07/2026-07-19T192736Z-rgf-u13-desktop-production-wave-automated-verification-9d99f3f9c3c2450ea98dfa0952a1ded3.md) - Commit 198a680 completes the supported desktop product path, ordered input, owned render packet, native surface lifecycle, HUD, and atomic Retry; manual Windows play remains pending.
+- **Engineering Research**: [Plugin freedom and ecosystem UX in real-game-validated engines](2026-07/2026-07-19T162113Z-plugin-freedom-and-ecosystem-ux-in-real-game-validated-engines-e91777acf3b246209026dda460554a91.md) - Primary-source comparison of extension freedom, replacement workflows, tooling UI integration, and store-ready package UX for Nara.
 - **Verification Evidence**: [RGF-U6 deterministic headless wave verification](verification/2026-07/2026-07-19T065918Z-rgf-u6-deterministic-headless-wave-verification-203bdd80f8704a1a8e6440ef7f9069ba.md) - Commit db511a7 closes the authoritative reference-game wave, stable snapshots, terminal outcomes, privacy-safe CLI, and bounded shutdown.
 - **Verification Evidence**: [RGF-U24 concrete project Host verification](verification/2026-07/2026-07-18T225631Z-rgf-u24-concrete-project-host-verification-2471074f91454290a016a1b4f620af34.md) - Commit 5ddbf18 closes the bounded headless product action, atomic runtime publication, and U26 ownership reversal proof.
 - **Verification Evidence**: [RGF-U26 manual ownership counterfactual verification](verification/2026-07/2026-07-18T174414Z-rgf-u26-manual-ownership-counterfactual-verification-9730fc03912d4eaa874e5384771b0fe8.md) - Commit a2d695d freezes the minimal pre-Host success and three-failure ownership baseline without a policy engine.
@@ -34,7 +36,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Engineering Research**: [Godot C# Integration Implications for Nara](godot-csharp-integration-research.md) - Primary-source review of Godot's .NET product stack and the boundaries it suggests for a future, optional Nara C# gameplay Adapter.
 - **Subagent Finding**: [LogLog Rust gamedev critique against an optional C# gameplay Adapter](subagents/2026-07/2026-07-17-loglog-rust-gamedev-csharp-gameplay-research.md) - Primary-source review of which Leaving Rust gamedev pain points an optional first-party C#/CoreCLR gameplay path could relieve, which remain engine-product problems, and which CLR/interop risks it introduces.
 - **Verification Evidence**: [RGF-U28 public schedule compatibility verification](verification/2026-07/2026-07-17T100726Z-rgf-u28-public-schedule-compatibility-verification-55f3d96f00e544dba50a1802e35c3190.md) - Commit c24b38a closes the four public schedule anchors and seal-time deferred compatibility contract.
-- **Verification Evidence**: [RGF-U5 managed runtime correction verification](verification/2026-07/2026-07-17T051052Z-rgf-u5-managed-runtime-correction-verification-5a58cbaf030041fe8ead8cfdf4119c51.md) - Supersedes the first U5 verification after raw managed World access exposed a safe Bevy change-detection bypass; ff2e02a structurally seals the scope and re-verifies the six correction regressions.
 
 # Integration Notes
 

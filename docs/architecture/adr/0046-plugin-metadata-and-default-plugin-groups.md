@@ -5,7 +5,21 @@
 **Last Revised**: 2026-07-16
 **Refines**: ADR 0003, ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
-Capabilities and Placeholder Domain Retirement
+Capabilities and Placeholder Domain Retirement; ADR 0095: Plugin-Owned Specialized Domains and
+Project Configuration
+
+## ADR 0095 Refinement
+
+Stable slots edit known bundle entries; they are not universal provider roles. An ordinary external
+plugin must be appendable through plugin/group/tuple composition without constructing definition
+IDs, fingerprints, or slot anchors. Declaration dimensions beyond stable identity are optional
+composition facts and require a real consumer; empty capability/service/conflict fields must not
+create ecosystem ceremony. Official defaults remain ordinary entries that users can omit or
+disable before adding another plugin.
+
+`PluginServiceId` closes a declared presence requirement only. It does not choose an owner, imply
+exclusivity, or dispatch calls. A shared domain service ID is valid only after an Accepted protocol
+defines its semantics; otherwise plugins use plugin-specific identities and concrete conflicts.
 
 ## Context
 
@@ -44,9 +58,10 @@ The plugin metadata contract is:
   for diagnostics, generated docs, and project inspection. Constructed instances and entry drafts
   records do not provide competing metadata authorities. Rust `TypeId` may support private typed
   erasure, but it is not a public or persistent identity.
-- Plugins declare provided capabilities, required capabilities/plugins, conflicts, and a short
-  category such as core, asset, render, platform, input, tooling, service, or backend. These facts
-  do not vary with instance configuration.
+- A declaration may add provided/required capabilities, concrete plugin requirements, conflicts,
+  services, schema providers, shutdown obligations, and a short category when a real composition or
+  lifecycle consumer uses that fact. Empty dimensions are valid and must not create authoring
+  ceremony. These facts do not vary with instance configuration.
 - Every `PluginId` is unique in a resolved plan. The unused open-ended non-unique flag is removed;
   a future proven multi-instance lifecycle requires explicit stable entry identity.
 - A repeatable `PluginDefinition` combines a stable versioned `PluginDefinitionId`, the canonical
@@ -57,7 +72,8 @@ The plugin metadata contract is:
   fingerprints, canonical bytes, or erased factories.
 - Metadata is declarative and diagnostic first. Composition closes declared capabilities,
   requirements, conflicts, and group membership into one inspectable plan; this is validation, not
-  a general-purpose dependency solver.
+  a general-purpose dependency solver. `PluginServiceId` proves presence only; it neither selects a
+  provider nor supplies runtime dispatch.
 - Plugin groups are data-only ordered product bundles. Their builder records stable slots,
   repeatable definitions, nested groups, disable/configure/relative-order intent, and no `App`
   mutation. One resolved entry collection derives membership, order, slot state, and full
@@ -99,13 +115,14 @@ The plugin metadata contract is:
   `PluginGroup` may aggregate runtime-plugin companions only. A future `PackageDefinition`, product
   preset, or typed root helper may aggregate those plugins with roles that already have their own
   Accepted admission contract so the user still selects one coherent product entry. Render-family,
-  exact-GPU, replacement Render Host, service, or platform/runner examples do not become supported
+  exact-GPU, replacement Render Host, or platform/runner examples do not become supported
   roles merely by being named here. For each admitted exclusive role, root composition chooses its
   owner explicitly and external candidates use the same supported slot/conformance contract as the
   first-party default.
 - Ordinary Rust callers edit groups by plugin type or by a typed definition helper, for example
   `.disable::<TilemapPlugin>()` and `.configure(window::plugin(settings))`. Stable slot IDs remain
-  the durable authority for project data, tooling, and later admitted cross-plugin replacement,
+  the durable identity for editing known bundle entries and inspecting plan provenance, not a
+  manifest provider selector or cross-plugin compatibility promise,
   but common same-plugin configuration and disable flows must not require handwritten slot
   constants. Advanced slot-directed methods remain available outside the gameplay prelude.
 - The ordinary concept budget is `App`, `Plugin`, `PluginGroup`, tuple, `add_plugins`, `seal`, typed
@@ -118,8 +135,9 @@ The plugin metadata contract is:
   plugin, but it does not silently install it unless a chosen group includes it. A Render Host,
   Platform/Runner, or other exclusive Host contribution is registered and selected by product/root
   composition rather than installed through `PluginGroup`.
-- Render submitter ownership follows ADR 0040: device/surface backend plugins are separate from
-  sprite, UI, text, gizmo, and future 3D submitter plugins. Convenience groups may combine them.
+- Render data ownership follows ADR 0040 as refined by ADR 0096: sprite/UI/text/3D domains own their
+  extraction and batches, while stock wgpu may encode those batches through concrete private
+  feature modules. Independent submitter plugins require a separately proven SPI.
 
 ## Default Plugin Groups
 
@@ -138,9 +156,10 @@ Initial group vocabulary:
 
 `MinimalPlugins` should remain small and headless. It should not grow into "everything a sample game
 might want." Examples can use richer groups when they need rendering, windowing, asset import, or UI.
-The fixed `DesktopWgpuPlugins` bundle is removed; project composition combines runtime presets and
-additive product/adapter capabilities after validating the compiled/requested/required product
-subsets and the separate plugin service requirement/conflict closure.
+The old fixed, opaque `DesktopWgpuPlugins` bundle is removed. This does not justify forcing code-
+first users to assemble product internals: OQ-045 must expose one inspectable, editable official
+top-level recipe shared with file-backed composition after validating compiled/requested/required
+product subsets and plugin closure.
 
 ## Alternatives Considered
 
@@ -216,15 +235,15 @@ immediate-install semantics.
 
 ## Consequences
 
-- `Plugin` exposes one static declaration with stable ID, category, capabilities, requirements, and
-  conflicts; group membership is resolved provenance rather than plugin-owned metadata.
+- `Plugin` exposes one static declaration with stable identity and only the composition/lifecycle
+  facts it actually uses; group membership is resolved provenance rather than plugin-owned metadata.
 - `PluginGroupBuilder` is data-only, and `App::add_plugins` lowers plugin/group/tuple inputs through
   the same resolver and closed lifecycle commit.
 - Pre-resolution occurrences use private entry-draft vocabulary; resolved inspection exposes
   `PluginPlanEntry`. `PluginRegistration` is not a public type because no active registration has
   occurred during pure planning.
-- `WgpuRenderPlugin` no longer unconditionally installs or compiles sprite/UI submitters; product
-  capability closure selects the base backend and each submitter independently.
+- `WgpuRenderPlugin` no longer unconditionally installs every render domain. Product capability
+  closure selects concrete compiled batch encoders; this does not imply an independent submitter SPI.
 - Runtime 2D and runtime UI are separate groups, and desktop window plus wgpu composition is
   additive rather than fixed in `DesktopWgpuPlugins`.
 - Root facade/prelude refinement exposes group names deliberately rather than exporting backend/plugin
@@ -238,8 +257,7 @@ immediate-install semantics.
 
 ## Open Questions
 
-- Which canonical configuration encoding/derive gives third-party definition authors deterministic
-  fingerprints with the smallest advanced authoring surface?
-- Which concrete cross-plugin replacement proves the need for a public slot-conformance evidence
-  carrier beyond same-plugin configuration and optional-slot disable?
-- Which named project preset, if any, should examples use for the common 2D desktop capability set?
+- OQ-045 owns the ordinary declaration helper, unanchored append, plugin-plus-schema contribution,
+  and editable official recipe needed by a clean-room external package.
+- Which future scarce Host role, if any, needs a public slot-conformance carrier beyond known bundle
+  editing? Ordinary physics/audio/text replacement does not qualify by category alone.

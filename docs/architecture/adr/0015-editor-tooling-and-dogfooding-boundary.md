@@ -3,9 +3,17 @@
 **Status**: Accepted
 **Date**: 2026-07-08
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
-Capability Metadata; ADR 0047: Editor Workspace and Scene Document State
+Capability Metadata; ADR 0047: Editor Workspace and Scene Document State; ADR 0095: Plugin-Owned
+Specialized Domains and Project Configuration
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
 Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
+
+## ADR 0095 Refinement
+
+Toolkit-neutral tooling models and commands are a product boundary, not proof that complete editor
+toolkits are interchangeable. One panel implemented in a second toolkit proves only that panel's
+model/command separation. A reusable toolkit Adapter or replacement Editor Shell requires a real
+second product workflow and its own admission evidence.
 
 ## Context
 
@@ -30,8 +38,8 @@ Dogfooding policy:
 - The editor should dogfood nara rendering where practical, especially viewport rendering, gizmos, overlays, scene preview, and in-engine debug panels.
 - The editor UI toolkit can be phased. Early editor/debug UI may use egui or dear-imgui-rs for
   productivity. A future nara UI system may gradually take over complete panels when mature enough.
-  Success with one panel proves adapter replaceability, not that the final editor must use the
-  runtime UI toolkit.
+  Success with one panel proves that panel's tooling-model/command separation, not toolkit
+  replaceability and not that the final editor must use the runtime UI toolkit.
 - Docking, panel catalogs, workspace layout, and detached-window intent belong to the Editor Shell.
   Event-loop, native-window, surface, and GPU submission authority remain with the selected
   platform/window and render-execution authorities, never ordinary UI adapters or panel

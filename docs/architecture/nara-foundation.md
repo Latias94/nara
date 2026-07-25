@@ -117,18 +117,18 @@ flowchart TD
 | `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule`, `ScheduleLabel`, and `SystemSet`; advanced lifecycle-free insertion/despawn preparation | Product-facing ECS conventions over `bevy_ecs`, facade-safe derive exports for root-only and renamed dependencies, and private/version-coupled hook/observer probes used only to reject persistent transactions that cannot remain atomic |
 | `nara_ecs_derive` | `Component`, `Resource`, `ScheduleLabel`, and `SystemSet` derives behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, Bevy-compatible expansion, declaration diagnostics, and renamed-package path resolution |
 | `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, and stable non-`Entity` observation vocabulary |
-| `nara_transform` | `Transform2d`, `GlobalTransform2d` | 2D/3D transform propagation and spatial hierarchy integration |
-| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, runtime-independent `ComponentSchemaCatalog`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext`, declared asset-reference traversal | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, atomic Building-to-Frozen publication, asset-aware scene preflight, schema/capability export, and migrations |
+| `nara_transform` | Current: `Transform2d`, `GlobalTransform2d`; accepted ADR 0097 target: separate 2D/3D base TRS, optional typed post-affine residuals, and opaque derived global affines | 2D/3D transform propagation, exact reparent lowering, and spatial hierarchy integration |
+| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, runtime-independent `ComponentSchemaCatalog`, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext`, declared asset-reference traversal | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, atomic Building-to-Frozen publication, asset-aware scene preflight, schema/capability export, migrations, and a future separation between owner lineage and composed-recipe fingerprint |
 | `nara_reflect_derive` | `PersistentComponent` derive and generated native `PersistentComponentProvider` | Proc-macro dependency isolation, schema/codec declaration diagnostics, and direct/renamed dependency resolution |
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, `TypedImporter<T>`, `ImportJobInput`, `AssetSourceChanges`, `AssetReloadRequest` | Import cache records, O(1) state and persistent slot revisions, hot reload scheduling, dependency graph, reload generations |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, bounded semantic watch event queue, runtime status/diagnostics, and source-change translator | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | `Name`, `Parent`, `Children`, bounded `SceneDocument`/`PrefabDocument` candidates, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene spawn/export; documented direct parse/validate/spawn use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware validation, patch transactions, undo/redo, live world projection, field-level prefab overrides, nested prefab expansion, hot reload validation; direct-module evidence does not promise arbitrary module or cross-engine compatibility |
-| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, owned `RenderFramePacket`, `RenderFrame`, `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data and the admitted generation-stamped one-window/one-target/one-view topology; explicit pass planning, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary |
+| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, owned topology-only `RenderFramePacket`, `RenderFrame`, static `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data and the admitted generation-stamped one-window/one-target/one-view topology; stock pass order, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary; no arbitrary external pass/phase promise |
 | `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, async image reload jobs, candidate-owned publication, last-good reload preservation, and backend-neutral image content preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, `Material2dKey` | Backend-neutral 2D material intent shared by sprites, tilemaps, runtime UI images, and future material assets |
 | `nara_sprite` | `Sprite`, `SpriteMaterial`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` material image binding | Sprite authoring component data with material-first image/sampler/alpha/tint; no backend handles |
-| `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileSetMaterial`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data with material-first tilesets that lower into textured quads now and chunked cached render data later |
+| `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileSetMaterial`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data with material-first tilesets that lower into textured quads now; later culling/cache mechanisms remain measurement-gated under ADR 0096 |
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteMaterialKey`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, and material-keyed textured quad batches |
 | `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState`, `UiPointerRoute`, `UiInteractionTarget` | Runtime ECS UI authoring data, layout projection, and target/view-aware pointer hover/capture/focus state; no editor UI toolkit or backend handles |
 | `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, UI-owned material/instance/UV types, image/color material queueing, clipping, sort, and batching for the UI render phase |
@@ -444,6 +444,7 @@ second real adapter or stronger isolation pressure.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`,
   `RenderPassPlan`, and an owned immutable `RenderFramePacket`. The packet freezes one admitted
   runtime generation, frame, window, target, view, viewport, and phase sequence before acquisition.
+  It is a topology packet, not yet a resource-complete gameplay-World-independent frame transfer.
   `nara_render_wgpu` captures owned sprite/UI batches beside that topology, rejects stale,
   repeated, extra, mismatched, or invalid topology before surface work, records at-most-once
   acquire/submit/present counters, and consumes the explicit pass plan for clear/world/UI/gizmo
@@ -531,10 +532,11 @@ second real adapter or stronger isolation pressure.
 
 - Render resource lifetime is a product contract even before a full render graph. Backend caches own
   GPU textures, buffers, samplers, bind groups, pipelines, and intermediate targets; invalidation is
-  generation/device/budget aware; submitters are owned by domain plugins or plugin groups. See ADR
+  generation/device/budget aware. Domains own extraction and batch data, while the stock wgpu
+  integration may encode those concrete batches privately; a submitter SPI remains evidence-gated. See ADR
   [0040](adr/0040-render-resource-lifetime-and-submitter-ownership.md).
-- The accepted render baseline keeps views, targets, phases, static `RenderPassPlan` ordering, and
-  owned frame transfer backend-neutral over one serialized wgpu execution authority. wgpu remains
+- The accepted render baseline keeps views, targets, stock phases, static `RenderPassPlan` ordering,
+  and owned topology transfer backend-neutral over one serialized wgpu execution authority. wgpu remains
   the only RHI; exact limits, handles, allocation, encoding, and submission stay in the backend.
   Pipeline families, recipes, a graph/compiler, retained scene, exact-GPU interop, and replacement
   Host roles remain candidate mechanisms until focused tracers admit them. See ADR
@@ -551,14 +553,17 @@ second real adapter or stronger isolation pressure.
   main-thread execution, owned single-target frame capture, at-most-once acquire/submit/present,
   resize/dirty reconfiguration, device-loss detection with full local invalidation, no implicit
   reinitialization from `Unavailable`, and target retirement. It does not yet isolate submit-time
-  image/prepared-resource lookup from live ECS storage or implement browser placement, device
-  epochs, bounded recovery, or multi-target coordination.
+  image/prepared-resource lookup from live ECS storage or implement browser placement, resource-
+  complete epoch correlation, bounded recovery, or multi-target coordination.
 - Input is layered through normalized events, retained device state, routing decisions, action maps,
   text/IME streams, UI focus/pointer capture, and future accessibility semantics. See ADR
   [0041](adr/0041-input-routing-actions-text-focus-and-accessibility.md).
-- Runtime services use one backend boundary: ECS data expresses stable intent, services own native
-  handles/threads/queues, and results integrate through declared main-thread stages. See ADR
-  [0042](adr/0042-runtime-service-and-backend-boundary.md).
+- Specialized domains are plugin-owned by default. Nara shares persistence/native-ownership,
+  World-integration, finite-shutdown, and diagnostics constraints, but does not require one Service/
+  Command/Result topology or cross-provider schema/API. Concrete plugins choose queues, batches,
+  stages, and close mechanisms according to real ownership; a portable Interface needs independent
+  implementation evidence. See ADR [0042](adr/0042-runtime-service-and-backend-boundary.md) as
+  refined by [0095](adr/0095-plugin-owned-specialized-domains-and-project-configuration.md).
 - Scene, prefab, and patch documents decode a strict document envelope before component-value
   migration and validation. Unreleased draft shapes are deleted in favor of canonical version 1;
   migration chains exist only for ADR-retained compatibility windows. Runtime loading must not
@@ -598,11 +603,14 @@ second real adapter or stronger isolation pressure.
   replication, scripting, diagnostics, and runtime-only state do not reserve speculative wire
   values. Capabilities gate domain participation but do not replace domain policy. See ADR
   [0045](adr/0045-component-schema-capability-metadata.md).
-- The settled RGF-U4 plugin target uses one static declaration with stable ID, capabilities,
-  requirements, and conflicts; stable definition keys carry repeatable construction/config
-  identity. Data-only groups derive inspectable membership/provenance through pure resolution, and
-  hook commit is closed against nested installation/runner selection. Default groups remain
-  explicit product bundles, and `MinimalPlugins` stays headless/minimal. See ADR
+- The implemented RGF-U4 plugin core uses static declarations, repeatable definitions, pure data-
+  only group resolution, inspectable membership/provenance, and a hook commit closed against nested
+  installation/runner selection. Stable slots edit known entries; services prove presence only and
+  do not select providers. The ordinary ecosystem path is not yet complete: the gameplay prelude
+  lacks declaration/group authoring helpers, project recipes cannot append an unanchored external
+  plugin without advanced definition machinery, plugin and schema-provider contribution remain
+  parallel lists, and code-first desktop examples lack one editable top-level official recipe.
+  Default groups remain explicit product bundles, and `MinimalPlugins` stays headless/minimal. See ADR
   [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md).
 - Root Cargo features form coarse compiled product-capability ceilings. The required product
   capabilities of a resolved plugin plan must fit the normalized project request, which must fit
@@ -616,6 +624,9 @@ second real adapter or stronger isolation pressure.
   Host-owned runtime construction/publication actions are also implemented. RGF-U6 completes the
   authoritative headless game/CLI closure, and RGF-U13 supplies the matching Winit/input/render/HUD
   path; the manual Windows play check and Editor Host evidence remain separate closure work.
+  Manifest capabilities that parse but do not install observable behavior remain implementation
+  gaps, and backend-named project requirements are transitional rather than provider-selection
+  precedent.
   See ADR
   [0079](adr/0079-root-product-capabilities-and-placeholder-domain-retirement.md).
 - `CoreStage::TaskUpdate` remains the app-owned main-thread integration point, while each business
@@ -663,12 +674,14 @@ second real adapter or stronger isolation pressure.
   metadata. Import-artifact files remain future format-owner work. Corrected unreleased shapes
   reset to canonical version 1; only ADR-retained versions get migration chains. See ADR
   [0051](adr/0051-persistent-file-envelope-migration-and-golden-fixtures.md).
-- Large 2D maps require visibility, camera culling, and backend-neutral tilemap chunk caches instead
-  of full cell expansion every frame. See ADR
-  [0053](adr/0053-visibility-culling-and-tilemap-render-cache.md).
-- GPU uploads and dynamic buffers need backend-owned budgets, staging/ring-buffer reuse, deferred
-  upload stats, and diagnostics. See ADR
-  [0054](adr/0054-gpu-upload-budget-and-buffer-allocation-policy.md).
+- Large 2D maps require measured scale evidence before a cache topology is accepted. Keep persistent
+  tilemaps GPU-handle-free, avoid known invisible work where correct, and trial the smallest private
+  culling/cache mechanism only after a committed workload exceeds budget. ADR 0053 is superseded by
+  [0096](adr/0096-evidence-gated-render-scaling-and-upload-policy.md).
+- GPU uploads and dynamic buffers remain backend-owned, finitely admitted, observable, and epoch-
+  invalidated. Ring/staging buffers, pending queues, universal deferral, and fairness are candidate
+  mechanisms chosen by measurement. See ADR [0054](adr/0054-gpu-upload-budget-and-buffer-allocation-policy.md)
+  as refined by [0096](adr/0096-evidence-gated-render-scaling-and-upload-policy.md).
 - The minimum CI definition mirrors the locked root, reference-game, and direct module-consumer
   boundaries on disposable Windows/Linux runners. Its first hosted green run is still pending;
   broader feature, packaging, and artifact-consumer gates remain evidence-triggered. See ADR
@@ -691,22 +704,22 @@ security defect, or measured platform/product constraint fires and the owning de
    placement, and make native plus
    `wasm32-unknown-unknown` render checks part of the local feature matrix.
 - Use the first real offscreen or cross-target workflow to reopen OQ-001. Compare independent target
-   transactions, a frame-wide coordinator, a typed provider, a minimal execution kernel, and a
+   transactions, a frame-wide coordinator, a minimal execution kernel, and a
    logical graph; admit only the smallest model that owns acquire/finalization, ordering, resource
    lifetime, and inspection truthfully. Until then, keep the accepted single-target transaction and
    do not preselect global coordination.
-- Harden render resource lifetime beyond texture cache policy: upload budgets, staging/ring
-   buffers, buffer/pipeline stats, device epochs, and loss recovery for every GPU resource class.
-- Mature runtime UI beyond panels: text/font integration through `nara_text`, richer layout,
+- Harden render resource lifetime beyond texture cache policy by measuring upload/allocation
+   pressure, then trial the smallest private allocator/cache mechanism with epoch and loss tests.
+- Mature runtime UI beyond panels: one concrete Unicode-capable text/font integration, richer layout,
    widget state, keyboard/gamepad focus, action-map routing, and a scalable execution projection.
-   Once the runtime model is stable, use one complete editor panel to prove adapter parity; broader
-   editor-toolkit convergence remains an OQ-010 evidence question, not a runtime UI prerequisite.
+   A second editor panel can prove model/command separation only; complete toolkit replacement
+   remains an OQ-010 evidence question, not a runtime UI prerequisite.
    See [UI Product Boundaries, Editor Dogfooding, and Porting
    Strategy](ui-product-boundaries-editor-dogfood-and-porting-strategy.md).
 - Treat post-processing, render-to-texture, editor viewport composition, 3D depth/prepass, and
    transient resource lifetime as OQ-001 evidence only when `RenderPassPlan` cannot express the
    concrete workflow. None of those feature labels selects a full `RenderGraph`; the review still
-   compares static phases, typed providers, a minimal execution kernel, and a logical graph.
+   compares static phases, a minimal execution kernel, and a logical graph.
 - Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
 - Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab

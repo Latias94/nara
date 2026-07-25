@@ -7,7 +7,16 @@
 **Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0041: Input Routing,
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
 Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0070: Capability-Oriented
-Filesystem Substrate; ADR 0079: Root Product Capabilities and Placeholder Domain Retirement
+Filesystem Substrate; ADR 0079: Root Product Capabilities and Placeholder Domain Retirement; ADR
+0095: Plugin-Owned Specialized Domains and Project Configuration
+
+## ADR 0095 Refinement
+
+Settings authority is not code-selection authority. `nara.toml` cannot install a Rust crate or
+choose a physics, audio, text, UI, or other plugin implementation. Cargo and Rust product
+composition select implementations. Plugin settings stay in typed Rust until a concrete file-backed
+consumer separately admits either a plugin-owned versioned asset or a namespaced manifest
+extension; this ADR does not create a generic plugin-settings registry.
 
 ## Context
 

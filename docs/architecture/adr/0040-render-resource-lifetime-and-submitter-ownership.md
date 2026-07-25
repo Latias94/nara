@@ -5,10 +5,19 @@
 **Last Revised**: 2026-07-16
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
-Culling, and Tilemap Render Cache; ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
+Culling, and Tilemap Render Cache (Superseded); ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
 0077: Render Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded); ADR 0078:
 Render Host Affinity, WebGPU Initialization, and Device Recovery; ADR 0094: Minimal Render
-Execution Boundary and Evidence-Gated Extensions
+Execution Boundary and Evidence-Gated Extensions; ADR 0096: Evidence-Gated Render Scaling and
+Upload Policy
+
+## ADR 0096 Refinement
+
+`RenderPassPlan` remains a static engine-owned order. `RenderPassDependency` edge/cycle vocabulary,
+open-ended phase construction, and independently replaceable submitter plugins are not current
+compatibility promises because the stock capture/encode path cannot consume arbitrary external
+passes. Domain plugins own their batch data; a submitter SPI requires a complete external feature
+tracer before admission.
 
 ## Context
 
@@ -68,16 +77,15 @@ Rules:
 - Device loss clears backend-native caches, but prepared backend-neutral resources remain the source
   for rebuilding after recovery. The current native baseline detects device loss and invalidates the
   current backend generation; epoch-correlated bounded recovery remains future work.
-- `RenderPassPlan` remains the static pass-order contract. `RenderPassDependency` is an assertion
-  that required earlier pass inputs exist in the static plan, not a general topological sorter. If
-  nara needs computed ordering, transient graph resources, or pass-produced resource lifetimes, that
-  reopens OQ-001 to compare extended static phases, independent target transactions, a typed
-  provider, a minimal execution kernel, and a logical graph. The pressure does not by itself select
-  `RenderGraph`.
+- `RenderPassPlan` remains the static engine-owned pass-order contract. The unconsumed public
+  `RenderPassDependency` edge/cycle surface should be removed or internalized; stock ordering can
+  validate phase presence/index directly. Computed ordering, transient resources, or pass-produced
+  lifetimes reopen OQ-001 to compare extended static phases, independent target transactions, a
+  minimal execution kernel, and a logical graph. The pressure does not itself select `RenderGraph`.
 - `WgpuRenderPlugin` owns wgpu device/surface/backend resources. Sprite, tilemap, UI, text, gizmo,
-  and future 3D submitters should be installed by their own domain plugins or explicit plugin
-  groups. Backend examples may install convenient default groups, but unconditional long-term
-  submitter coupling is not the contract.
+  and future 3D domains own extraction and batch data. Stock wgpu may encode concrete batches in
+  private feature-gated modules; a separately installable submitter SPI requires a complete external
+  feature tracer rather than being inferred from domain ownership.
 - Internal aliasing such as using sprite-like quad instances for UI is acceptable as a backend
   implementation detail. Public UI render contracts must remain UI-owned (`UiBatches`, UI material
   keys, clip data, text runs later) rather than exposing sprite semantics as UI API.
@@ -118,7 +126,7 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 | Backend isolation | Only backend crates own `wgpu` resources | Dependency boundary search |
 | Cache stability | Unused-for-one-frame resources are not eagerly reuploaded by policy | Unit/smoke tests |
 | Reload behavior | Asset reload invalidates prepared/gpu resources by generation | Reload tests |
-| Plugin decoupling | UI/sprite/text submitters can be enabled independently from device/surface setup | Plugin tests |
+| Feature decoupling | UI/sprite/text batch production and concrete wgpu encoders can be enabled independently from device/surface setup without claiming a submitter SPI | Feature/plugin tests |
 | Surface retirement | Surface loss retains provider ownership; shutdown and backend replacement retire surface ownership before provider/native target ownership | Window/wgpu lifecycle and platform smoke tests |
 | Execution-model trigger clarity | Need for computed ordering or transient resource lifetimes reopens OQ-001 without preselecting its answer | Design review |
 
@@ -136,8 +144,8 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 
 - `nara_render_wgpu` should grow explicit cache lifetime/eviction diagnostics before more resource
   classes are added.
-- `WgpuRenderPlugin` may keep convenience behavior temporarily, but long-term submitter ownership
-  belongs to domain plugins or plugin groups.
+- `WgpuRenderPlugin` may keep concrete feature encoders behind compiled integration flags; domains
+  own batches, while independent submitter plugins remain unadmitted.
 - The full render graph remains deferred, but resource lifetime is no longer deferred.
 
 ## Open Questions

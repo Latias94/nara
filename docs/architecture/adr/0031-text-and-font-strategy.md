@@ -2,7 +2,15 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0042: Runtime Service and Backend Boundary
+**Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0095: Plugin-Owned Specialized
+Domains and Project Configuration
+
+## ADR 0095 Refinement
+
+Unicode-capable text, stable font assets, and non-persistent glyph caches remain product goals. A
+dedicated `nara_text` crate, shared UI/world shaping layer, or replaceable text backend is not
+admitted until a real text workflow proves the consumer boundary. The first text integration may be
+owned end to end by the runtime UI or a concrete text plugin.
 
 ## Context
 
@@ -10,13 +18,17 @@ nara will build its own runtime UI. Text and fonts are one of the hardest parts 
 
 ## Decision
 
-nara treats text as a dedicated engine domain, not a side effect of UI rendering.
+nara treats Unicode-capable text and font handling as an explicit product responsibility, not an
+ASCII-only rendering shortcut. The first concrete owner may be runtime UI or a text plugin; a shared
+domain/crate is extracted only after real UI/world/tooling consumers prove it.
 
 Rules:
 
 - Fonts are typed assets.
-- Text layout/shaping is handled by a dedicated `nara_text` domain.
-- UI and world text share lower-level font/glyph infrastructure where practical.
+- One concrete owner is responsible for shaping, bidi, fallback, layout, rasterization, and cache
+  semantics for its first complete workflow.
+- UI and world text share lower-level font/glyph infrastructure only after both are real consumers
+  with compatible requirements.
 - Glyph atlas/cache management is renderer-facing backend data, not scene data.
 - International text support should not be blocked by early ASCII-only assumptions.
 - Phase 1 may start with simple text, but the architecture must allow shaping and fallback fonts.
@@ -31,19 +43,27 @@ Rules:
 
 **Decision**: Rejected as the architecture.
 
-### Option B: Text buried inside UI crate
+### Option B: First Text Integration Owned by Runtime UI
 
 **Pros**: Fewer crates.
 
-**Cons**: World text, editor text, and glyph cache concerns become tangled.
+**Cons**: World/editor consumers may later require extraction of shared infrastructure.
 
-**Decision**: Rejected long-term.
+**Decision**: Allowed for the first complete workflow if ownership remains explicit.
 
-### Option C: Dedicated text/font domain (Chosen)
+### Option C: Dedicated Shared Text/Font Domain Immediately
 
 **Pros**: Mature UI foundation and reusable rendering infrastructure.
 
 **Cons**: More design and dependencies later.
+
+**Decision**: Deferred until multiple real consumers prove the boundary.
+
+### Option D: Concrete Owner First with Stable Product Constraints (Chosen)
+
+**Pros**: Delivers Unicode-capable text without freezing crate topology or a portable backend API.
+
+**Cons**: A later second consumer may require a deliberate extraction.
 
 **Decision**: Chosen.
 
@@ -52,7 +72,7 @@ Rules:
 | Metric | Target | Measurement |
 |---|---:|---|
 | Font identity | Fonts are typed assets | API review |
-| UI readiness | UI can depend on `nara_text` rather than own shaping | Design review |
+| UI readiness | One concrete UI/text owner completes shaping, layout, fallback, and diagnostics | Product tracer |
 | Render readiness | Glyph atlas is backend/runtime data, not scene data | Code review |
 | I18n readiness | Architecture does not assume ASCII-only text | Review |
 
@@ -60,6 +80,6 @@ Rules:
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| Text shaping scope explodes | High | High | Start simple but isolate text domain |
+| Text shaping scope explodes | High | High | Start with one complete concrete owner and resist shared topology until a second consumer |
 | Font fallback is complex | Medium | High | Add fallback after basic shaping/layout |
 | Glyph atlas backend leaks into UI | Medium | Medium | Keep atlas in render/text backend resources |

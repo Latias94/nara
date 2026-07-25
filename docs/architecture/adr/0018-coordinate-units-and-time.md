@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State
+**Refined By**: ADR 0039: Main Loop, Time Domains, Pause, and Runtime State; ADR 0097:
+Future-Capable 2D and 3D Spatial Transform Model
 
 ## Context
 

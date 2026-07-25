@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility
+**Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0095:
+Plugin-Owned Specialized Domains and Project Configuration
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
 Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
 
@@ -26,11 +27,13 @@ Rules:
 - Persistent UI components live in ECS and are inspectable/serializable where practical. Internal
   runtime projections may use stable logical widget identities, incremental invalidation, spatial
   indexes, measurement caches, and virtualized materialization without becoming project data.
-- UI layout, input routing, focus, text, style, and rendering are nara engine modules.
+- UI layout, interaction/focus, style, and extraction are first-party Nara product responsibilities.
+  Text joins through the first concrete UI/text owner selected by OQ-015; this ADR does not require
+  a dedicated shared text crate or replaceable `UiBackend`.
 - egui/dear-imgui-rs may still be used for early debug/editor tooling, but they are not the foundation of runtime UI.
 - Editor UI may dogfood nara UI gradually once the runtime UI is mature. A first complete panel
-  proves an adapter path; only heterogeneous editor workloads can justify selecting nara UI as the
-  primary editor toolkit.
+  proves that panel's model/command path; only heterogeneous editor workloads can justify selecting
+  nara UI as the primary editor toolkit.
 
 Target domain split:
 
@@ -38,8 +41,8 @@ Target domain split:
 nara_ui
   UI tree/domain components, layout model, style, focus, input routing
 
-nara_text
-  text shaping/cache/render integration
+first concrete text owner (future, OQ-015)
+  font assets, shaping/fallback/layout/cache and glyph output for its proven consumer
 
 nara_ui_render
   UI extraction, batching, clipping, render phases
@@ -61,8 +64,8 @@ Implementation note, 2026-07-09:
   navigation, widgets, and actions remain future work.
 - `nara_ui_render` extracts panels, resolves color/image materials through `nara_image` and
   `nara_material`, clips panels, and emits `UiBatches` for the UI render phase.
-- Text/font work remains delegated to `nara_text`; no placeholder text system is hidden in UI
-  rendering.
+- Text/font work remains unimplemented under OQ-015; no placeholder text system is hidden in UI
+  rendering, and the current panel slice does not preselect crate topology.
 
 ## Alternatives Considered
 

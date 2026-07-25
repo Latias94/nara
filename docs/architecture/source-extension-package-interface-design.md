@@ -2,11 +2,11 @@
 
 **Status**: Design Draft
 **Created**: 2026-07-13
-**Last Updated**: 2026-07-16
+**Last Updated**: 2026-07-20
 **Owner**: Source extension packages, contribution catalogs, product/build hosts, and domain owners
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
 **Document Role**: Canonical source-package harness; tracer-gated and not implementation authority.
-**Related Question**: [OQ-031: Source Extension Package and Trust Topology](open-questions.md#oq-031-source-extension-package-and-trust-topology)
+**Related Question**: [OQ-031: Product Package, Contribution, and Trust Topology](open-questions.md#oq-031-product-package-contribution-and-trust-topology)
 **Validation Harness**: [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 **Focused Interfaces**: [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md)
 **Concept Guide**: [Extension Package Concept Guide](extension-package-concept-guide.md)
@@ -20,7 +20,8 @@
 [ADR 0093](adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md)
 **Runtime Consumer**: [Runtime Composition Interface Design](runtime-composition-interface-design.md)
 **Render Capability Harness**: [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
-**Research Basis**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
+**Research Basis**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md), [Godot and Unity Package/Extension Lifecycle Research](../knowledge/engineering/godot-unity-package-extension-lifecycle-research.md)
+**Product Contract**: [Nara Package and Extension Product Contract](../plans/2026-07-20-001-feat-package-extension-product-contract-plan.md)
 
 ## Purpose
 
@@ -29,6 +30,13 @@ It asks how one installed third-party package can coherently contribute runtime 
 tools, schema, importers, inspectors, cook/export providers, build-tool orchestration, content,
 documentation, and migrations without turning `Plugin` into a universal callback or inventing a
 second Rust package manager.
+
+This harness covers only the source/static Rust form of the broader language-neutral Product
+Package described by OQ-031 and the Product Contract. A Product Package may also carry managed,
+precompiled native, content-only, and target-tool Contributions whose acquisition and activation
+cannot be represented by a Cargo-backed source package alone. Those forms share product identity,
+inspection, ownership, and lifecycle requirements only where evidence admits them; they do not
+inherit the Rust interfaces sketched in this document.
 
 It is deliberately not an Accepted ADR and does not open OQ-031 early:
 
@@ -79,7 +87,7 @@ Each comparison names the closest mature concept and the deliberate Nara differe
 
 | Nara concept | Bevy comparison | Godot comparison | Unity comparison | Unreal comparison | Deliberate Nara difference |
 |---|---|---|---|---|---|
-| Source extension package | Usually a Cargo crate plus community catalog entry | Addon under `res://addons` with `plugin.cfg`; native code may also use GDExtension | UPM package with `package.json` | Plugin described by `.uplugin` | Cargo remains the Rust graph authority; the Nara descriptor adds contribution and product facts without resolving another Rust graph |
+| Source extension package | Usually a Cargo crate plus community catalog entry | Addon under `res://addons` with `plugin.cfg`; native code may also use GDExtension | One source-bearing form inside a UPM package | Source module inside a plugin described by `.uplugin` | This is one Cargo-backed Product Package form; Cargo remains the Rust graph authority while Nara adds contribution and product facts without resolving another Rust graph |
 | Contribution | A crate may expose `Plugin`, `AssetLoader`, reflection type data, or other registrations | `EditorPlugin` registers importer, inspector, export, gizmo, and other child extensions | One package may contain Runtime/Editor assemblies, `ScriptedImporter`, `CustomEditor`, and build callbacks | One plugin may contain Runtime, Editor, Developer, and Program modules | One package contains zero or more role-specific declarations; they do not share a universal executable trait |
 | Contribution contract | Rust trait plus schedule/registry expectations | Engine class contract such as `EditorImportPlugin` or `EditorInspectorPlugin` | Base type, interface, attribute, and assembly constraints | Module type plus engine interface such as `IAssetTools` or Interchange providers | A stable versioned contract ID has one owning domain Module and a typed Rust plan; unknown contracts never self-authorize |
 | Typed plan | `PluginGroupBuilder` holds ordered entries before `finish` mutates `App` | Plugin enablement and registries exist, but not as one pure typed package plan | Package/assembly resolution determines what compiles into Editor or Player | Descriptor and target rules determine which modules build and load | Nara makes pure, deterministic, zero-authority planning an explicit product contract before any Host mutation |
@@ -101,7 +109,7 @@ The comparisons matter because they expose two independent lessons:
 | Term | Meaning | Must not be reused as |
 |---|---|---|
 | Cargo package release | Cargo name, version, source/checksum, targets, features, and dependency provenance in one resolved graph | Stable Nara contribution identity or runtime content package |
-| Source extension package | Product-facing distribution unit anchored to resolved Cargo/content provenance and one data-only contribution declaration | Runtime `Plugin`, cooked package, active process, or security sandbox |
+| Source extension package | Cargo-backed source/build form inside a Product Package, anchored to resolved Cargo provenance and one data-only contribution declaration | The complete language-neutral Product Package, runtime `Plugin`, cooked package, active process, or security sandbox |
 | Contribution | Stable declared capability supplied to one contract and Host role | Rust trait object, arbitrary callback, or implicit permission |
 | Contribution contract | Versioned semantic Interface owned by one domain Module | Cargo semver, engine version, process protocol, or schema version |
 | Execution target | Platform/triple where the contribution implementation runs | Host role, product target, or authority scope |

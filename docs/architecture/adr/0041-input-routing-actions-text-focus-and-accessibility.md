@@ -3,7 +3,15 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0013, ADR 0025, ADR 0035, ADR 0036, ADR 0039
-**Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness
+**Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0095: Plugin-Owned
+Specialized Domains and Project Configuration
+
+## ADR 0095 Refinement
+
+Platform ingress, focus/capture/IME ownership, transient lifetime, and the semantic gameplay-command
+boundary are shared product contracts. Runtime gameplay, runtime UI, and editor/toolkit shortcuts do
+not need one universal action model. Their owning plugins may use different typed policies after the
+Host-level arbitration boundary.
 
 ## Context
 
@@ -124,8 +132,9 @@ AI/editor tooling structured data to inspect.
 - `nara_input` should eventually grow normalized input event buffers, action maps, and routing
   diagnostics in addition to retained button/pointer state.
 - `nara_ui` focus and pointer capture should become engine-level state consumed by the input router.
-- Editor shortcuts and viewport tools should use the same routing/action model as runtime UI, not a
-  private egui-only shortcut path.
+- Editor shortcuts and viewport tools should join the same Host-level focus/capture/IME arbitration
+  boundary, but may use an editor/toolkit-owned typed shortcut policy rather than the runtime
+  gameplay/UI `ActionMap`. Toolkit callbacks must not bypass tooling commands or Host arbitration.
 - Editor adapters remain responsible for accessibility even while the final editor toolkit and
   any shared semantic bridge remain open design questions.
 - Replay, AI-driver, and future server-authoritative boundaries should consume semantic gameplay

@@ -196,6 +196,48 @@ _Avoid_: Semantic plan, running provider, active generation
 A non-authoritative proof that a semantic plan was joined to an exact compiled Adapter and target.
 _Avoid_: Placement receipt, activation receipt, capability
 
+## Runtime Topology and Gameplay State
+
+The terms in this section capture the current OQ-034 product hypothesis. They make the direction
+discussable but do not accept ADR 0084 or ADR 0089, freeze a public state API, or assert that the
+described behavior is implemented.
+
+**Runtime Generation**:
+One lifecycle generation of a Runtime Instance, identified by a non-reused Generation. By default,
+it owns exactly one authoritative Runtime World; a simulation that requires true isolation uses a
+separate Runtime Instance and generation.
+_Avoid_: Frame generation, asset generation, scene-as-World, implicit subworld
+
+**Runtime World**:
+The authoritative ECS `World` driven by one Runtime Generation. Multiple Runtime Scene Instances,
+regions, and Gameplay State Domains may coexist inside it without becoming nested Worlds.
+_Avoid_: Scene document, Runtime Instance, World graph, streaming region
+
+**Runtime Scene Instance**:
+The runtime lifecycle and provenance owner for entities materialized by one scene activation. A
+runtime entity has at most one Scene Instance lifecycle owner; parent/child hierarchy, prefab
+provenance, region residency, and State Scope remain independent relations.
+_Avoid_: Runtime World, hierarchy root, prefab instance, gameplay state
+
+**Gameplay State Domain**:
+A game- or plugin-owned typed state authority within one Runtime Generation. Multiple orthogonal
+domains may be active together, and each domain is flat by default until its owner proves a need
+for hierarchical or stacked semantics.
+_Avoid_: Global state tree, universal state graph, untyped state name
+
+**State Scope**:
+An explicit declaration that an entity, resource, message, or service lifetime belongs to one
+Gameplay State Domain and state. It is never inferred from hierarchy, scene membership, prefab
+provenance, or region residency; each carrier still requires a domain-appropriate cleanup contract.
+_Avoid_: Scene ownership, hierarchy-derived lifetime, universal scoped-storage container
+
+**State Transition Safe Point**:
+An explicit schedule boundary where typed transition requests are resolved and validated before
+transition side effects begin. An accepted transition runs Exit behavior, cleans explicitly scoped
+data, switches the active state, and runs Enter behavior. Validation or conflict failure leaves the
+old state unchanged; Exit, cleanup, and Enter fault semantics remain owned by OQ-034.
+_Avoid_: Immediate mid-system mutation, hidden end-of-frame switch, globally ordered state graph
+
 ## Domain Ownership
 
 **Host**:

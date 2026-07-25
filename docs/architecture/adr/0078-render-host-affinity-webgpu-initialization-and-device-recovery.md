@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-07-20
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
@@ -318,8 +318,10 @@ RGF-U11 implements the first narrow native subset without claiming the complete 
   retry contract is required. This is not the epoch-correlated bounded recovery contract.
 - `WgpuRenderBackend` uses the ECS `Resource` derive so its resource-cache hook is installed; plugin
   tests prove the backend and required render resources are queryable before the first frame.
-- This slice does not implement browser-local storage, async WebGPU initialization, device epochs,
-  bounded device recovery, owned frame packets, generalized target coordination, or a public
+- The native path now carries an owned generation-stamped topology packet and backend
+  instance/device epoch fields. It still does not implement a resource-complete owned frame
+  snapshot, epoch-correlated async-result rejection and bounded recovery, browser-local storage,
+  browser-local asynchronous WebGPU initialization, generalized target coordination, or a public
   `WgpuRenderHost` type.
 
 ### Native parallelism

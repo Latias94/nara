@@ -5,6 +5,15 @@
 **Last Revised**: 2026-07-18
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
+**Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
+
+## ADR 0095 Refinement
+
+Compiled Cargo features may name concrete code because they define the binary ceiling. Project
+requirements must not select or install a Rust plugin/provider. Manifest-visible backend names are
+transitional and must converge on semantic product needs or disappear when the Rust product recipe
+already supplies the complete selection truth. Every accepted capability must map to observable
+composition behavior; parse-only capabilities are invalid product claims.
 
 ## Context
 

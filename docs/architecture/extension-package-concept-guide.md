@@ -5,7 +5,7 @@ types remain proposed
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-16
+**Last Updated**: 2026-07-20
 
 **Audience**: Engine contributors, contract/domain maintainers, product-root maintainers, and
 future Host integrators who need Nara's internal extension architecture vocabulary
@@ -26,10 +26,10 @@ package authors; the first rows below tell those readers where to stop.
 
 | Audience | Normal Interface | Internal model required for normal work? |
 |---|---|---|
-| Project user | `nara.toml`, compiled product/profile selection, Editor/CLI Run and Play, status, and diagnostics; source-package selection remains an OQ-031 target | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
+| Project user | Package Manager, `nara.toml`, compiled product/profile selection, Editor/CLI Run and Play, status, and diagnostics; Product Package selection remains an OQ-031 target | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
 | Game code author | `Plugin`, ECS data/systems, assets, scenes, and optional code-first `App` | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
 | Small runtime plugin/group author | `Plugin`, `PluginGroup`, and domain helpers | No |
-| Reusable package author | Proposed target: one `package()` function returning an opaque definition plus engine-owned domain helpers | No |
+| Reusable package author | Leading OQ-045 trial: one `package(config)` function returning an opaque root contribution; broader multi-role package machinery remains deferred | No |
 | Importer, Inspector, or other provider author | One narrow domain trait/context with typed settings, errors, and outputs | No |
 | Advanced renderer or platform author | Only an admitted domain-specific role and its conformance kit; several render roles remain candidates under ADR 0094 | No package-kernel or unrelated Host internals |
 | Contract/domain maintainer | Versioned declarations, typed plans, resolvers, and conformance | Yes, only for the owned contract |
@@ -46,10 +46,64 @@ typed queues, custom schedules, or runtime-local registrations. Use a `PluginGro
 runtime plugins should be selected and configured together. Neither case requires a package
 definition or any contract-kernel vocabulary.
 
-Use a source extension package only when the distribution unit needs project-visible selection,
-version/provenance inspection, target scoping, or several roles such as runtime, schema, import,
-tooling, build, or a future admitted privileged domain role. A package aggregates those roles; it
-does not grant them additional authority. Each role still receives only its domain Interface.
+A runtime plugin with persistent components has one additional product-composition problem: a
+file-backed Host must validate and freeze its schema before mutating an App, while a direct App can
+register the same schema during normal plugin construction. OQ-045 therefore trials a narrow root
+contribution that binds replayable runtime plugin definitions to schema-provider definitions once.
+That helper is not evidence for the general package architecture described later in this guide.
+
+Use the Product Package concept only when a distribution unit needs project-visible installation,
+version/provenance inspection, update/removal ownership, target scoping, or several independently
+admitted roles such as runtime, schema, import, tooling, build, managed code, native artifacts, or
+content. Package is language-neutral and aggregates those roles without granting extra authority;
+each Contribution still receives only its domain Interface and lifecycle.
+
+A source extension package is one Cargo-backed source/build form inside that product model. Cargo
+remains the Rust graph and compilation authority, while NuGet/MSBuild would remain the authority for
+a future managed graph. The narrow OQ-045 root contribution is neither the Product Package nor a
+downloader, Asset Store, dependency solver, dynamic loader, or global registry.
+
+The leading OQ-031 product hypothesis also separates installation from activation. Content may
+activate immediately; ordinary executable Editor Contributions restart an isolated Extension Host;
+source/static Rust structural changes replace a Runtime generation; and a deep process-level
+Contribution may require an Editor restart. These are user-visible effects of one Package workflow,
+not one universal loader contract.
+
+## Near-Term OQ-045 Slice
+
+The leading trial keeps the direct path recognizable:
+
+```rust
+let mut app = App::new();
+app.add_plugins((Desktop2dPlugins, my_game::package(config)))?;
+app.add_systems(StartupStage::Scene, setup)?;
+nara::desktop::run(app)
+```
+
+The equivalent file-backed path supplies the same package contribution once:
+
+```rust
+let intent = DesktopRunIntent::new()
+    .add(my_game::package(config))
+    .disable::<TilemapPlugin>();
+```
+
+Names in these sketches remain candidates. The contract under evaluation is more important:
+
+- A runtime-only plugin remains `app.add_plugins(MyPlugin)`; package ceremony is opt-in only when
+  root composition needs additional typed contributions.
+- The package author owns the replayable plugin definition and schema binding. Game authors do not
+  construct definition IDs, fingerprints, slots, anchor edits, or parallel schema lists.
+- The root facade may adapt the contribution to `App` without making `nara_app` depend on
+  `nara_reflect`; file-backed composition consumes both halves before App mutation.
+- The top-level desktop recipe is an ordinary editable composition, not an exclusive provider
+  selector. Users can disable a first-party physics or UI entry and append an external plugin, or
+  keep disjoint concrete plugins together when their own contracts allow it.
+- Desktop process authority stays in the root run facade. `PluginGroup` does not acquire native
+  authority and plugin hooks do not choose a runner.
+
+A broad `PackageDefinition`, contract kernel, manifest extension registry, and multi-role atomic
+activation remain later hypotheses. They must not be implemented merely to deliver this slice.
 
 ## Why This Guide Exists
 
@@ -720,6 +774,8 @@ detailed classification lives in [Runtime Composition Interface Design](runtime-
 
 - Importer, Inspector, export, runtime, and native extension roles are genuinely different.
 - The Editor and running project have different lifecycles.
+- Addon installation and EditorPlugin enablement are different states, and native reload may return
+  a restart requirement.
 - A specialized extension Interface is easier to reason about than one universal callback.
 - Compositor effects and editor viewports show that optional depth/motion/debug outputs and picking
   strategies should be declared rather than hard-coded into every renderer.
@@ -729,6 +785,8 @@ or claim that a Rust trait is a stable native extension ABI.
 
 ### What Nara Takes From Unity
 
+- Project manifests, Package manifests, lock state, reverse dependency awareness, and editable
+  embedded Packages form a stronger installation/update/removal baseline than archive extraction.
 - One package can contain separately compiled Runtime and Editor roles.
 - `RenderPipelineAsset` selects a code-provided `RenderPipeline`; Renderer Features and HDRP Custom
   Passes are a lower extension level rather than substitutes for a complete pipeline family.
@@ -762,8 +820,8 @@ external Cargo package uses:
 |---|---|---|---|
 | HDR-like renderer | Candidate Pipeline Family, Feature/Pass, typed packet, interop, and optional replacement-Host roles | If admitted, one project selection hides the internal role graph while the selected Host retains target/Queue authority and editor compatibility stays explicit. | Independent feature, family, device-plan/interop, editor-semantic, and replacement-Host tracers; feature-only evidence cannot claim full renderer parity. |
 | Spine-like skeletal animation | Schema for persistent animator/skeleton references; Import for skeleton, atlas, and animation products; Runtime playback; render-feature extraction/submission; optional preview tooling and native-runtime service Adapter | Scenes store semantic `AssetRef` values; ECS components own inspectable playback intent, time, and state. A native runtime owns only derived poses, constraints, caches, and FFI handles. The Import Host owns tracked reads/staging, `nara_asset` publishes typed products/artifacts, renderer caches own GPU resources, and tooling owns only preview session state and commands. | The sprite-animation tracer covers schema/runtime/import authoring. Multi-product import, render-provider submission, preview clocks, and optional native-runtime placement still need concrete evidence. |
-| Box2D-like 2D physics | `nara_physics2d` schema/runtime domain plus one concrete solver Adapter and optional debug-render/tooling package | ECS stores body/collider/joint intent. A private runtime-generation-scoped service session owns solver/native state, callbacks, mappings, and queues; the enclosing runtime owner retains its close obligation and replacement gate. Fixed stages perform sync-in, step, write-back, and contact publication. | Start with plugin-installed resources/systems and a private session. Extract a public physics-specific Interface only when a fake or second real solver proves the variation. A 3D solver belongs to parallel `nara_physics3d`, not one 2D/3D trait. |
-| Dear ImGui editor tooling | Concrete Editor UI Adapter, platform-input binding, and Nara render-feature provider over UI-neutral `nara_tooling` models/commands | A Host-retained Adapter owns the main-thread ImGui context and CPU font atlas. Input capture, focus, text/IME, cursor, and clipboard feedback are transient Host data; draw data becomes an owned frame packet; backend caches own the GPU font texture, buffers, and pipelines by device epoch. | First tracer is single-viewport and does not expose raw `wgpu` or embed a second renderer. The focus/capture/text/IME/cursor/clipboard bridge is not implemented. A general toolkit seam waits for egui plus a second real Adapter; runtime UI remains Nara-owned. |
+| Concrete 2D physics integration | One solver-specific plugin plus optional debug-render/tooling companions | The plugin owns body/collider/joint schema, fixed-step sets, queries/contacts, solver/native state, mappings, diagnostics, and any real close obligation. Nara supplies App/time/schedule/schema/asset/lifecycle substrate, not a portable physics component layer. | Start with ordinary plugin-installed resources/systems and only the private state/session actually needed. Switching solvers is an explicit source/schema/config migration. Extract a portable Interface only after a real consumer and challenged second solver prove shared semantics. |
+| Dear ImGui editor tooling | Concrete Editor UI plugin/Host contribution and platform-input/render integration over UI-neutral `nara_tooling` models/commands | The concrete integration owns the main-thread ImGui context and CPU font atlas. Input capture, focus, text/IME, cursor, and clipboard feedback are transient Host data; draw data and GPU caches stay within the admitted render path and device epoch. | First tracer is single-viewport and does not expose raw `wgpu` or embed a second renderer. It proves its model/command/input/render path, not toolkit replaceability. A general toolkit seam waits for a second complete product workflow; runtime UI remains Nara-owned. |
 
 These mappings require no universal `ExtensionHost`, `PhysicsBackend`, toolkit trait, or service
 locator. They do require the already named domain seams to become real. A package based on the
@@ -810,8 +868,10 @@ string dispatch.
 ### "Are Runtime, Import, Schema, And Tooling Four Processes?"
 
 No. A Host is an authority/lifecycle role, not necessarily an operating-system process. The first
-implementation may execute several owners in one Editor process while preserving separate state
-and authority. A child-process importer remains a future Adapter with its own protocol.
+implementation may execute several owners in one process while preserving separate state and
+authority. Under OQ-031's leading hypothesis, ordinary executable Editor Contributions use an
+isolated Extension Host by default, but Host grouping and domain placement remain evidence-driven;
+this does not turn every domain owner into its own operating-system process.
 
 ### "Does A Stable Contract ID Dynamically Load Any Package?"
 
@@ -931,6 +991,8 @@ dependencies, conditional import roles, invalid locators, aggregate diagnostics,
 
 - [Nara Engine Architecture Language](../../CONTEXT.md)
 - [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
+- [Godot and Unity Package/Extension Lifecycle Research](../knowledge/engineering/godot-unity-package-extension-lifecycle-research.md)
+- [Nara Package and Extension Product Contract](../plans/2026-07-20-001-feat-package-extension-product-contract-plan.md)
 - [Bevy `Plugin` and sealed `Plugins`](../../repo-ref/bevy/crates/bevy_app/src/plugin.rs)
 - [Bevy `PluginGroupBuilder`](../../repo-ref/bevy/crates/bevy_app/src/plugin_group.rs)
 - [Bevy typed `AssetLoader` and internal erasure](../../repo-ref/bevy/crates/bevy_asset/src/loader.rs)

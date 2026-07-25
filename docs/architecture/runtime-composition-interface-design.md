@@ -925,7 +925,12 @@ The product action name is illustrative and not implemented yet. The current U5 
 last line into the advanced sequence below:
 
 ```rust
-let candidate = RuntimeCandidate::admit(app.seal()?)?;
+let reservation = RuntimeAdmissionReservation::try_acquire()?;
+let candidate = reservation.admit(
+    app.seal()?,
+    RuntimeObligationLedger::new(),
+    RuntimeClosePolicy::default(),
+)?;
 let runtime = candidate.complete_startup()?.promote();
 ```
 

@@ -5,10 +5,17 @@
 **Last Revised**: 2026-07-16
 **Refines**: ADR 0012
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0044: Root Facade
-and Prelude Layering Policy; ADR 0053: Visibility, Culling, and Tilemap Render Cache; ADR 0077:
+and Prelude Layering Policy; ADR 0053: Visibility, Culling, and Tilemap Render Cache (Superseded); ADR 0077:
 Render Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded); ADR 0078: Render
 Host Affinity, WebGPU Initialization, and Device Recovery; ADR 0094: Minimal Render Execution
-Boundary and Evidence-Gated Extensions
+Boundary and Evidence-Gated Extensions; ADR 0096: Evidence-Gated Render Scaling and Upload Policy
+
+## ADR 0096 Refinement
+
+Current extraction names should describe current ownership and data, not mirror a hypothetical
+future render world. Arbitrary phase/pass construction is not an extension promise until an external
+feature can participate through capture, ordering, encoding, target lifetime, and diagnostics using
+only public APIs.
 
 ## Context
 
@@ -68,7 +75,9 @@ The backend should still model `Uninitialized`, `Initializing`, `Ready`, and `Un
 
 **Cons**: Requires sub-app/render-world scheduling before nara has sprite extraction, asset preparation, or multiple render passes. It would add complexity without a second concrete render use case.
 
-**Decision**: Deferred. Extracted data names should mirror future render-world concepts so the later migration is internal to render crates.
+**Decision**: Deferred. Current extracted data names describe current ownership and payloads; they
+must not be shaped around a hypothetical render world. A later migration may rename or replace
+pre-1.0 render-crate types when a real second-world workflow exists.
 
 ### Option B: Let `nara_render_wgpu` depend on `nara_winit`
 

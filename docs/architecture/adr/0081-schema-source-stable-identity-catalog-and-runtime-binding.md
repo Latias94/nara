@@ -8,7 +8,17 @@ native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12
 content/fingerprint handoff on 2026-07-18; RGF-U29 explicit persistent composition and guarded
 target-World eligibility on 2026-07-18
 **Refines**: ADR 0011, ADR 0045, ADR 0051
+**Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
 **Related**: ADR 0034, ADR 0058, ADR 0076
+
+## ADR 0095 Refinement
+
+A schema owner's durable identity/version/tombstone lineage is distinct from one product recipe's
+composed catalog fingerprint. Omitting an optional plugin from a composition does not tombstone its
+types and must not prevent later reactivation of the same compatible owner lineage. Runtime still
+requires a complete frozen native binding registry. Lossless authoring with known-but-unbound or
+unknown schema remains Proposed under ADR 0090; until admitted, missing schema fails closed rather
+than creating placeholders.
 
 ## Context
 

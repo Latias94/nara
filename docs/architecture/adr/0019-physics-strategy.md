@@ -1,9 +1,10 @@
 # ADR 0019: Physics Strategy
 
-**Status**: Accepted
+**Status**: Superseded
 **Date**: 2026-07-08
 **Last Revised**: 2026-07-15
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary
+**Superseded By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
 
 ## Context
 

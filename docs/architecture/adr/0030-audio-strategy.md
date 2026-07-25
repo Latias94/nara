@@ -1,9 +1,10 @@
 # ADR 0030: Audio Strategy
 
-**Status**: Accepted
+**Status**: Superseded
 **Date**: 2026-07-08
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement
+**Superseded By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
 
 ## Context
 

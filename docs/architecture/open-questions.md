@@ -1,7 +1,7 @@
 # nara Architecture Open Questions
 
 **Status**: Living Draft
-**Updated**: 2026-07-16
+**Updated**: 2026-07-22
 
 This document contains undecided architecture questions only. Accepted decisions belong in ADRs; implementation evidence belongs in `adr/implementation-status.md` and engineering memory. Each question remains open until its trigger creates enough concrete pressure for an ADR.
 
@@ -10,9 +10,9 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Status**: open
 - **Owner**: `nara_render`
 - **Trigger**: An intermediate logical resource, retained/history lifetime, or cross-target dependency requires scheduling that `RenderPassPlan` cannot express.
-- **Related ADRs**: 0017, 0032, 0040, 0094
+- **Related ADRs**: 0017, 0032, 0040, 0094, 0096
 - **Question**: What is the smallest execution model that satisfies the first static-plan-breaking workflow:
-  extended static phases, typed pass providers, a minimal execution kernel, or a logical resource
+  extended static phases, a minimal execution kernel, or a logical resource
   graph? Which resource, lifetime, ordering, and inspection semantics does that workflow actually
   require?
 
@@ -42,16 +42,19 @@ This document contains undecided architecture questions only. Accepted decisions
 - **Related ADRs**: 0025, 0041
 - **Question**: How should platform accessibility trees and assistive actions map onto nara focus, navigation, activation, and text semantics?
 
-## OQ-005: Physics Integration Authority and Backend Selection
+## OQ-005: First Concrete Physics Plugin Contract
 
 - **Status**: open
-- **Owner**: future physics domain
+- **Owner**: first official physics integration and its consuming game
 - **Trigger**: The first playable physics vertical slice can name body/control modes, transform
   writers, contact/query freshness, determinism, and deployment requirements.
-- **Related ADRs**: 0016, 0018, 0019, 0039, 0042, 0057, 0085
-- **Question**: Which 2D backend should be adopted first, when is ECS or the solver authoritative for
+- **Related ADRs**: 0016, 0018, 0019 (Superseded), 0039, 0042, 0057, 0085, 0095
+- **Question**: Which concrete 2D library should the first official plugin adopt, when is ECS or the solver authoritative for
   transforms and velocity, and what teleport/kinematic write, query snapshot, contact ordering,
   capability, and event contracts keep backend state coherent without promising solver equivalence?
+- **Boundary**: The first plugin owns its components, schema, queries, contacts, sets, and fault
+  semantics. It needs one complete reference-game tracer, not a second solver. Replacing it is an
+  explicit source/schema/configuration migration unless later evidence admits a portable layer.
 
 ## OQ-006: Save-Game Snapshot and Restore Contract
 
@@ -90,6 +93,14 @@ This document contains undecided architecture questions only. Accepted decisions
   and Godot object models and develops the parameterless Behaviour plus explicit binding
   hypothesis. All three are non-normative research evidence and do not advance this question's
   admission ladder.
+- **Editor extension boundary**: A future Product Package may carry both managed gameplay and
+  managed Editor Contributions, but OQ-007 owns only the gameplay-language Adapter and its Player
+  workflow. A C# Dock, Inspector, importer, or build contribution must use the separately admitted
+  Editor contribution contract and Host lifecycle owned by OQ-031 or an Accepted successor. The
+  current leading placement hypothesis is a replaceable isolated Extension Host; loading trusted
+  managed code into the long-lived Editor with a collectible `AssemblyLoadContext` remains a later
+  latency optimization with Host/Editor restart fallback, not a prerequisite or an implied
+  production capability.
 - **Research admission ladder**:
   1. Read-only precedent research may continue at any time, but it may only refine this question or
      language-independent work already justified by Rust consumers. It cannot add a production
@@ -249,8 +260,8 @@ flowchart LR
 - **Question**: Which complete editor panel should migrate first, what command/undo/usability/
   performance parity constitutes success, and which later heterogeneous workloads (a virtualized
   hierarchy/table, viewport, timeline, or graph) are required before deciding whether nara UI
-  should become the primary editor toolkit? Success with the first panel proves adapter
-  replaceability, not final toolkit convergence.
+  should become the primary editor toolkit? Success with the first panel proves only that panel's
+  tooling-model/command separation, not toolkit replaceability or final toolkit convergence.
 
 ## OQ-011: Platform Export, Signing, and Store Adapter
 
@@ -277,10 +288,12 @@ flowchart LR
 - **Owner**: future audio domain
 - **Trigger**: The first real game or tool schedules an audio slice that needs concurrent voices,
   buses, streaming, spatial playback, or device suspend/reconnect behavior.
-- **Related ADRs**: 0016, 0030, 0042, 0079
+- **Related ADRs**: 0016, 0030 (Superseded), 0042, 0079, 0095
 - **Question**: Which backend, stable voice identity and command model, bus/mix graph, streaming
   ownership, spatial intent, and device-session lifecycle implement the first audio slice without
   placing native handles or callback-thread state in the ECS `World`?
+- **Boundary**: The first concrete audio plugin owns this API end to end. This question does not
+  authorize `AudioBackend`, provider selection, or unchanged-data replacement.
 
 ## OQ-015: Text Shaping and Localization Stack
 
@@ -288,7 +301,7 @@ flowchart LR
 - **Owner**: future text, localization, asset, runtime-UI, and tooling domains
 - **Trigger**: Runtime UI requires multilingual shaped text, deterministic font import, or a real
   game needs localized content with runtime locale switching and authoring diagnostics.
-- **Related ADRs**: 0007, 0025, 0031, 0033, 0049, 0051, 0087
+- **Related ADRs**: 0007, 0025, 0031, 0033, 0049, 0051, 0087, 0095
 - **Question**: Which shaping, bidi, fallback, rasterization, and glyph-cache boundary fits Nara's
   asset/render model, and which separate localization contract owns stable message identity,
   fallback chains, plural/select rules, typed argument formatting, runtime locale changes, package
@@ -297,7 +310,9 @@ flowchart LR
 - **Boundary**: Font/shaping backend selection and localization content/runtime policy are separate
   decisions. Neither a shaping library nor a string-key table may silently become the other
   domain's authority; package precedence and user locale storage also wait for their owning
-  package/settings decisions.
+  package/settings decisions. A dedicated `nara_text` crate or portable `TextBackend` requires a
+  real second consumer or implementation challenge; the first UI/text plugin may own the complete
+  shaping path.
 
 ## OQ-016: GPU Cache Eviction Defaults
 
@@ -473,25 +488,65 @@ flowchart LR
   safe-point model, stable identities, backend seam, and headless/deterministic guarantees satisfy
   that slice without placing a speculative behavior-tree or global navigation server in core ECS?
 
-## OQ-031: Source Extension Package and Trust Topology
+## OQ-031: Product Package, Contribution, and Trust Topology
 
 - **Status**: open
-- **Owner**: package/build hosts, plugin/editor/importer owners, security adapters
+- **Owner**: package/build hosts, plugin/editor/importer owners, Editor Shell, security adapters
 - **Trigger**: An independently versioned module must install a coherent combination of runtime
   plugin, editor tool, importer, content/template, native extension, or user mod; Cargo-only
   transport creates a measured product-workflow gap; or Editor open/build/Play needs to execute
   project Cargo build scripts, proc macros, native dependencies, importers, or game code whose
   trust has not already been established by the Host.
-- **Related ADRs**: 0016, 0042, 0046, 0070, 0079, 0086, 0087, 0088, 0093
-- **Question**: Which source-package unit, resolution/lock/source metadata, declared contributions,
-  provenance and trust tiers, capability grants, target restrictions, lifecycle/update policy, and
-  optional isolation boundary provide one coherent installation experience without inventing a
-  second Rust package manager or treating native code like validated data?
+- **Related ADRs**: 0015, 0016, 0020, 0035, 0042, 0046, 0050, 0070, 0079, 0081,
+  0082, 0084, 0086, 0087, 0088, 0090, 0093
+- **Question**: Which language-neutral Product Package identity, source and artifact forms,
+  resolution/lock metadata, typed Contributions, provenance and trust tiers, target restrictions,
+  lifecycle/update policy, and isolation boundaries provide one coherent installation experience
+  without inventing a second Cargo/NuGet resolver or treating native code like validated data?
+- **Current product hypothesis**:
+  - A Product Package is the Unity-like installable, versioned, updateable, and removable unit. It
+    may carry content, source/static Rust, managed, native, Editor, importer, build/export, sample,
+    documentation, and migration Contributions. No authoring language or loader defines Package.
+  - A source extension package anchored to Cargo is one Package source/build form, not the umbrella
+    product concept. Managed publish graphs, precompiled native artifacts, content-only releases,
+    and future registry releases keep their own provenance and target facts under the same Package
+    identity only when an admitted product workflow binds them coherently.
+  - Package dependency, authored content, derived import artifacts, and cooked delivery are four
+    linked but non-interchangeable graphs. A package may publish a read-only source-content mount
+    into one composed authoring-content generation; it is neither an import-cache entry nor an ADR
+    0088 runtime content package. Stable asset IDs remain globally collision-checked across that
+    generation, so package/project path precedence never rebinds an asset reference.
+  - A copied archive, sample, or template becomes explicit project-owned content after import. It
+    does not retain package-managed update or deletion semantics merely because it originally came
+    from a Product Package.
+  - Installation, enablement, compiled artifact readiness, and active generation are separate
+    states. The ordinary UI presents four effects: immediate activation, Extension Host
+    replacement, Play/Runtime replacement, and Editor restart. Exact enum names remain open.
+  - Ordinary executable Editor Contributions default to a replaceable isolated Extension Host.
+    Same-process managed or native placement is an explicit fully trusted privilege for proven
+    latency or authority needs and may truthfully require Host or Editor restart.
+  - Package dependency and ownership behavior should converge on manifest, lock, reverse-dependency,
+    update, removal, and editable-local semantics comparable to Unity UPM. Cargo and NuGet/MSBuild
+    remain authoritative for their source graphs; a remote Nara registry is not an initial
+    prerequisite.
+  - One Package may aggregate several Contribution kinds, but each Contribution retains its domain
+    Interface, Host, target, candidate/publication, and retirement semantics. Package is not a
+    universal callback, process, or rollback transaction.
 - **Admission constraints**: Project data cannot grant native-code trust or store its own approval.
   Any future approval must be Host-owned outside the project, bind the project-root capability plus
   source/manifest/lock/features or equivalent executable identity, and invalidate on relevant drift.
   In-process Rust, Cargo build scripts, proc macros, and native importers are fully trusted code;
   only a separately proven process or sandbox Adapter may claim isolation.
+- **Protocol and ABI boundary**: The default Extension Host hypothesis permits a versioned semantic
+  protocol, not Rust trait objects across processes. A future in-process Native Extension requires
+  a separately admitted C-compatible ABI, opaque generation handles, explicit allocator/panic/
+  thread/callback/retirement rules, and target-specific conformance. Raw Rust `dyn Plugin`, Bevy
+  `World`/`Entity`, UI toolkit objects, and GPU/window handles are not Package ABI values.
+- **Editor authority boundary**: The long-lived Editor Shell retains workspace, document, undo,
+  selection, window/event-loop, Nara UI, package-transaction, and registry authority. Ordinary
+  extensions contribute versioned panels, commands, inspectors, gizmos, import/build operations,
+  diagnostics, and bounded surface intents. The Widget/custom-surface protocol waits for complete
+  Nara UI and independent tool tracers.
 - **Removal boundary**: Cargo dependency removal, provider deactivation, derived-cache garbage
   collection, mounted package content, copied templates/samples, and missing-schema preservation are
   distinct owner-specific actions. A package directory, current manifest, or original filename
@@ -499,6 +554,12 @@ flowchart LR
   identity/digest or lease evidence may authorize deletion; modified, adopted, or provenance-unknown
   project files are preserved and reported by default. Editor contribution withdrawal is a catalog
   generation operation, not an uninstall-script side effect.
+- **Research basis**: [Package and extension lifecycle research](../knowledge/engineering/godot-unity-package-extension-lifecycle-research.md)
+  verifies Godot's addon/GDExtension/restart behavior and Asset Store limitations against Unity UPM
+  governance. [Content and Product Package Graph Research](../knowledge/engineering/2026-07/2026-07-22T054245Z-content-and-product-package-graph-research-1c0d7699f5024b15a3b5ea43dc6b6ed9.md)
+  records the source/import/cook separation against Unity, Godot, Bevy, and the current Nara
+  prototype. The [Package and Extension Product Contract](../plans/2026-07-20-001-feat-package-extension-product-contract-plan.md)
+  records the user-facing requirements; neither document admits implementation.
 
 ## OQ-032: Incremental Authoring Projection
 
@@ -542,6 +603,18 @@ flowchart LR
   how do schedules and run conditions observe transitions; and which scoped entities, resources,
   messages, services, persistence, and scene ownership clean up deterministically without creating
   a hidden global scene tree?
+- **Current hypothesis**: One Runtime Generation owns exactly one authoritative ECS `World` by
+  default; true simulation isolation creates another Runtime Instance and generation. Runtime Scene
+  Instances, parent/child hierarchy, prefab provenance, region residency, and Gameplay State are
+  orthogonal relations inside that World. A runtime entity has at most one Scene Instance lifecycle
+  owner. Gameplay State consists of multiple game- or plugin-owned typed domains that are flat by
+  default rather than one global hierarchical tree. Typed transition requests are resolved and
+  validated at an explicit safe point before an accepted `Exit -> scoped cleanup -> state switch ->
+  Enter` sequence; validation or conflict failure leaves the old state unchanged.
+- **Still open**: Evidence for hierarchical or stacked topology within a domain, cross-domain
+  transition conflict and ordering policy, Exit/cleanup/Enter fault behavior, and the exact scoped
+  entity/resource/message/service contracts. This hypothesis does not accept ADR 0084 or ADR 0089
+  and does not authorize a state crate or public scheduler API.
 
 ## OQ-035: Spatial World Partition, Streaming, and Origin Policy
 
@@ -692,3 +765,81 @@ flowchart LR
   the catalog fingerprint, and identical across Scene, Prefab, Inspector, migration, and direct
   persistent spawn. Arbitrary hook effects on resources, foreign entities, native services, or
   deferred queues cannot be described as transactionally rolled back without separate evidence.
+
+## OQ-044: Schema Owner Lineage and Composed Catalog Readiness
+
+- **Status**: open
+- **Owner**: `nara_reflect`, product composition, document owners, and authoring hosts
+- **Trigger**: An optional persistent plugin is disabled and later re-enabled, a document opens
+  without one plugin, or a schema-owning package upgrades independently from the product recipe.
+- **Related ADRs**: 0011, 0035, 0045, 0046, 0079, 0081, 0090, 0095
+- **Question**: What minimal records separate each schema owner's version/tombstone lineage from a
+  recipe's composed catalog fingerprint, and how do Complete, KnownUnbound, UnknownSchema,
+  dependency traversal, migration, reactivation, and runtime binding readiness compose?
+- **Boundary**: Omitting a provider from one recipe is not schema deletion and cannot create a
+  permanent tombstone. Runtime/Play/Cook require complete bindings. Degraded documents may preserve
+  bounded generic records only if ADR 0090 is accepted; unknown dependency semantics block asset
+  closure, rename/delete, remap, flatten, cook, and export rather than guessing.
+
+## OQ-045: Plugin Package Contribution and Official Product Recipe Ergonomics
+
+- **Status**: open
+- **Owner**: `nara_app`, root product composition, facade/preludes, schema-owning plugins
+- **Trigger**: A clean-room external plugin with persistent components joins both a direct App and
+  the official code-first/file-backed desktop recipe without private APIs.
+- **Related ADRs**: 0035, 0044, 0046, 0079, 0081, 0095
+- **Question**: What smallest typed helper binds one plugin, its schema providers, immutable Rust
+  config, and any separately admitted package contributions once; how can a user append it to an
+  editable official recipe without definition IDs, fingerprints, slot anchors, or parallel lists?
+  If a real project later needs file-backed plugin settings, should the plugin own a versioned asset
+  or a namespaced manifest extension, and how are missing-plugin round trips and profile overlays
+  defined?
+- **Boundary**: Preserve pure planning, closed commit, stable inspection, and explicit Host
+  authority. This does not authorize dynamic code download, a global package registry, string-based
+  provider selection, hidden dependencies, or plugin hooks that install plugins/runners.
+- **Vocabulary boundary**: The candidate `package(config)` helper is a narrow compiled Rust root
+  contribution for one Plugin plus Schema closure. It is not the OQ-031 Product Package, Package
+  Manager, installation identity, managed/native loader, or multi-role activation contract.
+- **Leading trial hypothesis**:
+  - Keep ordinary runtime-only extension exactly on the `Plugin` / `PluginGroup` / tuple path. A
+    plugin that owns no persistent schema must not learn a package vocabulary.
+  - Trial one narrow root-facade contribution value that pairs replayable typed plugin definitions
+    with their `ComponentSchemaProviderDefinition` values. Keep it outside `nara_app` so the App
+    layer does not depend on reflection, project ingestion, or a universal package model.
+  - Let the same opaque value lower to its runtime plugin definitions when passed to direct
+    `App::add_plugins`, and let an official project recipe consume the complete value through an
+    unordered `.add(...)`. The package author, not the game author, supplies stable definition and
+    schema-binding details.
+  - Make the official desktop combination one normal inspectable/editable recipe assembled from
+    ordinary first-party entries. Code-first and file-backed paths must lower through the same
+    recipe construction; file-backed settings add lineage and semantic capability admission rather
+    than choosing plugin/provider IDs.
+  - Keep process authority out of the recipe. A root desktop-run facade should consume the
+    configured App/recipe and hide candidate admission, winit driving, publication, and truthful
+    retirement from ordinary examples without allowing a plugin hook to select the runner.
+  - Defer a general `PackageDefinition`, multi-role contract kernel, package registry, importer or
+    tooling aggregation, and manifest extension map until a real package needs more than runtime
+    plugins plus persistent schema.
+- **Required tracer**: A renamed-dependency external crate must expose one typed `package(config)`
+  helper and pass four journeys: direct App, code-first desktop, file-backed desktop, and headless.
+  The game-authored call sites may not import the advanced prelude, construct `PluginDefinition`,
+  pass a schema provider separately, name a slot/anchor, or select a provider in `nara.toml`.
+  Runtime-only plugins must remain directly appendable without the helper. Equivalent recipes must
+  resolve the same plugin IDs, exact schema bindings, and catalog fingerprint before this question
+  can graduate.
+
+## OQ-046: Canonical Authoring Serialization Format
+
+- **Status**: open
+- **Owner**: scene/prefab/patch/schema format owners and authoring Hosts
+- **Trigger**: Missing-schema preservation, migration, canonical diffs, package exchange, or editor
+  save/recovery demonstrates material duplicate cost or divergent semantics across JSON and RON.
+- **Related ADRs**: 0006, 0043, 0049, 0051, 0090, 0091
+- **Question**: Should Nara stabilize one canonical source-authoring format and treat the other as an
+  import/export representation? Which choice best supports deterministic canonicalization, human
+  diffs, bounded parsing, unknown-record preservation, migration tooling, asset-store review, and
+  Rust-native ergonomics?
+- **Boundary**: Current JSON/RON readers and fixtures remain implementation evidence until a
+  successor ADR decides the format contract. This question does not authorize dropping a readable
+  format, rewriting project files, or maintaining two permanent canonical writers without measured
+  workflow evidence and a migration plan.

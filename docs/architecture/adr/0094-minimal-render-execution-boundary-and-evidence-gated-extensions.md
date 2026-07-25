@@ -9,6 +9,7 @@
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
 [ADR 0078](0078-render-host-affinity-webgpu-initialization-and-device-recovery.md)
+**Refined By**: [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
 
 ## Context
 
@@ -56,8 +57,8 @@ flowchart LR
 - Domain render crates own extraction, queueing, sorting, and batching. A backend consumes their
   backend-neutral outputs rather than reading gameplay components directly.
 - GPU caches remain backend-owned and are keyed or invalidated by logical resource identity,
-  generation, device epoch, and budget. Device plugins do not permanently own every domain
-  submitter.
+  generation, device epoch, and budget. Device setup does not permanently compile or activate every
+  domain feature; this separation does not imply independently replaceable submitter plugins.
 
 ### wgpu is the only RHI
 
@@ -83,8 +84,8 @@ flowchart LR
 
 ### Static planning and graph admission
 
-- `RenderPassPlan` is the current static phase-order contract. It must not grow into an ad hoc
-  partial resource graph or persistent project recipe.
+- `RenderPassPlan` is the current engine-owned static stock-phase order contract. It must not grow
+  into an ad hoc partial resource graph, persistent project recipe, or arbitrary external-pass API.
 - Views, targets, viewport/scissor semantics, phases, and target-frame lifecycle remain explicit
   and backend-neutral so a future graph can replace static planning without changing gameplay
   authoring data.

@@ -1,8 +1,9 @@
 # ADR 0053: Visibility, Culling, and Tilemap Render Cache
 
-**Status**: Accepted
+**Status**: Superseded
 **Date**: 2026-07-09
 **Refines**: ADR 0005, ADR 0032, ADR 0040
+**Superseded By**: [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
 
 ## Context
 
@@ -91,4 +92,3 @@ Rules:
 - What default tile chunk size should Phase 1 use?
 - Should chunk caches live in `nara_tilemap` or `nara_sprite_render`?
 - Which benchmark or fixture should define the first tilemap scale target?
-

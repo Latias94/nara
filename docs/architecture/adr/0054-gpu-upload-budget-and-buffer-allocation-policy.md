@@ -3,6 +3,14 @@
 **Status**: Accepted
 **Date**: 2026-07-09
 **Refines**: ADR 0033, ADR 0040
+**Refined By**: [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
+
+## ADR 0096 Refinement
+
+Backend ownership, finite admission, pressure statistics, and device-epoch invalidation remain
+Accepted. Ring/staging buffers, a pending upload queue, universal deferral, and submitter priority
+are candidate mechanisms selected only after a measured workload proves the need. Different
+resource classes may require different explicit overload behavior.
 
 ## Context
 
@@ -91,4 +99,3 @@ Rules:
 - Should upload budget live in `nara_render` as backend-neutral settings or in each backend?
 - What units should Phase 1 expose first: bytes, allocations, or both?
 - Should deferred uploads skip a frame or synchronously exceed budget in debug builds?
-
