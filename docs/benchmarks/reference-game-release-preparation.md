@@ -11,16 +11,17 @@ download, or announcement. The workflow has not been dispatched by this preparat
 - protected-`main` approval commit;
 - Git blob object ID;
 - SHA-256 of the exact canonical approval bytes;
-- SHA-256 of the independently reviewed publisher workflow bytes;
 - existing protected annotated `vX.Y.Z` tag;
 - one approved candidate workflow run ID and the exact Linux and Windows Actions artifact IDs.
 
 Dispatch fields can locate records, but cannot replace the reviewed verifier, schemas, smoke helper,
 package helper, package layout, candidate workflow identity, candidate archive identity, protected
-branch state, tag target, or Release policy. The credential-free verifier fetches the reviewed
-release helper and schemas by a fixed commit/blob/SHA-256 triple, derives Actions and Git facts, and
-rejects a changed approval, candidate, tag, tag rule, source revision, workflow definition, retention
-deadline, or pre-release version.
+branch state, tag target, publisher workflow definition, or Release policy. The canonical U11 approval
+binds the publisher workflow path, SHA-256, and source revision; the credential-free verifier derives
+that same definition from the protected-`main` workflow revision. It fetches the reviewed release
+helper and schemas by a fixed commit/blob/SHA-256 triple, derives Actions and Git facts, and rejects a
+changed approval, candidate, tag, tag rule, source revision, workflow definition, retention deadline,
+or pre-release version.
 
 The candidate transport download has the narrow `actions: read` grant required by GitHub's old
 artifact download endpoint. It runs only pinned GitHub artifact actions and no repository helper or
@@ -31,8 +32,9 @@ raw candidate ZIP bytes.
 ## Authorization Boundaries
 
 The workflow is a protected-`main`, manual, first-attempt-only path. Its run name and tag-scoped
-concurrency key make an earlier dispatch for the same tag fail closed. A tag is never created by the
-workflow. The intended one-shot sequence is:
+concurrency key serialize dispatches for the same tag; the verifier rejects any prior authorization
+for that tag and a repeated workflow attempt fails explicitly. A tag is never created by the workflow.
+The intended one-shot sequence is:
 
 1. An authorized maintainer creates the protected annotated version tag after U11 records `Publish`.
 2. The `reference-game-immutable-policy` environment supplies a policy-only token with

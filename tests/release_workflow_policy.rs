@@ -1,19 +1,22 @@
 use std::collections::BTreeSet;
 
-use yaml_rust2::{yaml::Hash, Yaml, YamlLoader};
+use yaml_rust2::{Yaml, YamlLoader, yaml::Hash};
 
 const WORKFLOW_PATH: &str = ".github/workflows/reference-game-release.yml";
-const JOB_GUARD: &str =
-    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}";
+const JOB_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}";
+const RERUN_REJECTION_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt != '1' }}";
 const GITHUB_SCRIPT: &str = "actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71";
 const SETUP_PYTHON: &str = "actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548";
 const DOWNLOAD_ARTIFACT: &str =
     "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
 const UPLOAD_ARTIFACT: &str = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
-const REVIEWED_RELEASE_VERIFIER_REVISION: &str = "0d70fcf0b86e241bebb54c22a55350d5bf824680";
-const RELEASE_VERIFIER_BLOB: &str = "3ef54305cb68f5b4076a37366dbd1a857d3d02e3";
+const REVIEWED_RELEASE_VERIFIER_REVISION: &str = "fee339f11776eb837653bc0ca62e7db7b90eb396";
+const RELEASE_VERIFIER_BLOB: &str = "a778e5eb701ae1354ed188fb7901d29d17f84e81";
 const RELEASE_VERIFIER_SHA256: &str =
-    "7421e9e0449802b580465f36dd9c002d776ec0adc10006154080db532b7f45bd";
+    "708f7995811d4a76215c58f8f6f64190f499720bc1b8c421ce90ded7b681f696";
+const APPROVAL_SCHEMA_BLOB: &str = "ec84b0787434a3e7601d135835ef42d491546f38";
+const APPROVAL_SCHEMA_SHA256: &str =
+    "47aa27863f075aaa40a4d858ac11c5502279a80d2516e34c180f908bac752fb4";
 
 #[derive(Clone)]
 struct ReleasePolicyFixture {
@@ -100,6 +103,17 @@ fn release_policy_rejects_credential_leakage_checkout_and_candidate_execution_ac
     );
     assert_rejects(&verifier_token, "credential-free verifier");
 
+    let mut verifier_environment = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut verifier_environment.workflow,
+        "          TRANSPORT_ROOT: \"${{ runner.temp }}/nara-release-candidate-transport\"\n",
+        "          TRANSPORT_ROOT: \"${{ runner.temp }}/nara-release-candidate-transport\"\n          NARA_LEAK: \"unexpected\"\n",
+    );
+    assert_rejects(
+        &verifier_environment,
+        "Fetch pinned verifier, schemas, and public GitHub facts.env must contain exactly keys",
+    );
+
     let mut write_checkout = ReleasePolicyFixture::committed();
     replace_once(
         &mut write_checkout.workflow,
@@ -134,6 +148,17 @@ fn release_policy_rejects_credential_leakage_checkout_and_candidate_execution_ac
         "              const transportArchive = { path: `candidate/nara-reference-game-${platform}.zip`, filename: `nara-reference-game-${platform}.zip`, size_bytes: 1, sha256: \"0\".repeat(64) };\n",
     );
     assert_rejects(&unbound_archive, "transport-bound archive identity");
+
+    let mut indexed_draft_token = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut indexed_draft_token.workflow,
+        "          RELEASE_READ_TOKEN: \"${{ github.token }}\"\n",
+        "          RELEASE_READ_TOKEN: \"${{ github.token }}\"\n          NARA_LEAK: \"${{ github['token'] }}\"\n",
+    );
+    assert_rejects(
+        &indexed_draft_token,
+        "draft smoke must not use indexed credential expressions",
+    );
 }
 
 fn validate_release_workflow(source: &str, violations: &mut Vec<String>) {
@@ -209,7 +234,6 @@ fn validate_trigger(trigger: Option<&Yaml>, violations: &mut Vec<String>) {
         "approval_commit",
         "approval_blob",
         "approval_sha256",
-        "publisher_definition_sha256",
         "tag",
         "candidate_run_id",
         "linux_artifact_id",
@@ -281,6 +305,7 @@ fn validate_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
         return;
     };
     let expected = [
+        "reject-rerun",
         "immutable-policy",
         "candidate-fetch",
         "verify",
@@ -295,7 +320,7 @@ fn validate_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
     .map(str::to_owned)
     .collect::<BTreeSet<_>>();
     if string_keys(jobs, "release workflow jobs", violations) != expected {
-        violations.push("release workflow must use the exact nine-stage job graph".to_owned());
+        violations.push("release workflow must use the exact publication job graph".to_owned());
         return;
     }
 
@@ -318,6 +343,220 @@ fn validate_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
         validate_common_job(name, job(name), violations);
         validate_action_pins(name, job(name), violations);
     }
+    validate_rerun_rejection(job("reject-rerun"), violations);
+
+    validate_job_shape(
+        job("immutable-policy"),
+        "immutable-policy",
+        &[
+            "name",
+            "if",
+            "runs-on",
+            "timeout-minutes",
+            "environment",
+            "permissions",
+            "outputs",
+            "steps",
+        ],
+        violations,
+    );
+    validate_job_shape(
+        job("candidate-fetch"),
+        "candidate-fetch",
+        &[
+            "name",
+            "if",
+            "runs-on",
+            "timeout-minutes",
+            "permissions",
+            "steps",
+        ],
+        violations,
+    );
+    validate_job_shape(
+        job("verify"),
+        "verify",
+        &[
+            "name",
+            "if",
+            "needs",
+            "runs-on",
+            "timeout-minutes",
+            "permissions",
+            "steps",
+        ],
+        violations,
+    );
+    validate_job_shape(
+        job("draft-upload"),
+        "draft-upload",
+        &[
+            "name",
+            "if",
+            "needs",
+            "runs-on",
+            "timeout-minutes",
+            "environment",
+            "permissions",
+            "outputs",
+            "steps",
+        ],
+        violations,
+    );
+    validate_job_shape(
+        job("draft-smoke"),
+        "draft-smoke",
+        &[
+            "name",
+            "if",
+            "needs",
+            "runs-on",
+            "timeout-minutes",
+            "permissions",
+            "strategy",
+            "steps",
+        ],
+        violations,
+    );
+    validate_job_shape(
+        job("finalize-approval"),
+        "finalize-approval",
+        &[
+            "name",
+            "if",
+            "needs",
+            "runs-on",
+            "timeout-minutes",
+            "environment",
+            "permissions",
+            "steps",
+        ],
+        violations,
+    );
+    validate_job_shape(
+        job("release-finalize"),
+        "release-finalize",
+        &[
+            "name",
+            "if",
+            "needs",
+            "runs-on",
+            "timeout-minutes",
+            "environment",
+            "permissions",
+            "outputs",
+            "steps",
+        ],
+        violations,
+    );
+    validate_job_shape(
+        job("public-smoke"),
+        "public-smoke",
+        &[
+            "name",
+            "if",
+            "needs",
+            "runs-on",
+            "timeout-minutes",
+            "permissions",
+            "strategy",
+            "steps",
+        ],
+        violations,
+    );
+    validate_job_shape(
+        job("public-verdict"),
+        "public-verdict",
+        &[
+            "name",
+            "if",
+            "needs",
+            "runs-on",
+            "timeout-minutes",
+            "permissions",
+            "steps",
+        ],
+        violations,
+    );
+
+    validate_job_runner(
+        job("immutable-policy"),
+        "immutable-policy",
+        "ubuntu-latest",
+        violations,
+    );
+    validate_job_runner(
+        job("candidate-fetch"),
+        "candidate-fetch",
+        "ubuntu-latest",
+        violations,
+    );
+    validate_job_runner(job("verify"), "verify", "ubuntu-latest", violations);
+    validate_job_runner(
+        job("draft-upload"),
+        "draft-upload",
+        "ubuntu-latest",
+        violations,
+    );
+    validate_job_runner(
+        job("finalize-approval"),
+        "finalize-approval",
+        "ubuntu-latest",
+        violations,
+    );
+    validate_job_runner(
+        job("release-finalize"),
+        "release-finalize",
+        "ubuntu-latest",
+        violations,
+    );
+    validate_job_runner(
+        job("public-verdict"),
+        "public-verdict",
+        "ubuntu-latest",
+        violations,
+    );
+    validate_matrix_runner(job("draft-smoke"), "draft-smoke", violations);
+    validate_matrix_runner(job("public-smoke"), "public-smoke", violations);
+    validate_needs(job("immutable-policy"), "immutable-policy", &[], violations);
+    validate_needs(job("candidate-fetch"), "candidate-fetch", &[], violations);
+    validate_needs(
+        job("verify"),
+        "verify",
+        &["immutable-policy", "candidate-fetch"],
+        violations,
+    );
+    validate_needs(job("draft-upload"), "draft-upload", &["verify"], violations);
+    validate_needs(
+        job("draft-smoke"),
+        "draft-smoke",
+        &["draft-upload"],
+        violations,
+    );
+    validate_needs(
+        job("finalize-approval"),
+        "finalize-approval",
+        &["verify", "draft-upload", "draft-smoke"],
+        violations,
+    );
+    validate_needs(
+        job("release-finalize"),
+        "release-finalize",
+        &["finalize-approval"],
+        violations,
+    );
+    validate_needs(
+        job("public-smoke"),
+        "public-smoke",
+        &["release-finalize"],
+        violations,
+    );
+    validate_needs(
+        job("public-verdict"),
+        "public-verdict",
+        &["verify", "release-finalize", "public-smoke"],
+        violations,
+    );
 
     validate_job_permissions(
         job("immutable-policy"),
@@ -381,6 +620,15 @@ fn validate_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
         "draft-upload",
         violations,
     );
+    for name in [
+        "candidate-fetch",
+        "verify",
+        "draft-smoke",
+        "public-smoke",
+        "public-verdict",
+    ] {
+        validate_no_environment(job(name), name, violations);
+    }
     validate_environment(
         job("finalize-approval"),
         "reference-game-release-finalize",
@@ -425,6 +673,129 @@ fn validate_common_job(name: &str, job: &Hash, violations: &mut Vec<String>) {
     }
 }
 
+fn validate_rerun_rejection(job: &Hash, violations: &mut Vec<String>) {
+    validate_job_shape(
+        job,
+        "reject-rerun",
+        &[
+            "name",
+            "if",
+            "runs-on",
+            "timeout-minutes",
+            "permissions",
+            "steps",
+        ],
+        violations,
+    );
+    if scalar_str(field(job, "if")) != Some(RERUN_REJECTION_GUARD)
+        || scalar_str(field(job, "runs-on")) != Some("ubuntu-latest")
+        || field(job, "timeout-minutes").and_then(Yaml::as_i64) != Some(5)
+        || step_count(job) != 1
+        || !has_run_step(job)
+    {
+        violations
+            .push("reruns must fail explicitly before any publication job can skip".to_owned());
+    }
+    validate_job_permissions(job, PermissionShape::Empty, "reject-rerun", violations);
+}
+
+fn validate_job_shape(job: &Hash, name: &str, expected: &[&str], violations: &mut Vec<String>) {
+    validate_exact_keys(job, &format!("{name} job"), expected, violations);
+}
+
+fn validate_job_runner(job: &Hash, name: &str, expected: &str, violations: &mut Vec<String>) {
+    if scalar_str(field(job, "runs-on")) != Some(expected) {
+        violations.push(format!(
+            "{name} must use the fixed disposable runner {expected}"
+        ));
+    }
+}
+
+fn validate_matrix_runner(job: &Hash, name: &str, violations: &mut Vec<String>) {
+    if scalar_str(field(job, "runs-on")) != Some("${{ matrix.os }}") {
+        violations.push(format!(
+            "{name} must select its runner from the fixed platform matrix"
+        ));
+    }
+    let Some(strategy) = field(job, "strategy").and_then(Yaml::as_hash) else {
+        violations.push(format!("{name} must declare the fixed platform matrix"));
+        return;
+    };
+    validate_exact_keys(
+        strategy,
+        &format!("{name}.strategy"),
+        &["fail-fast", "matrix"],
+        violations,
+    );
+    if field(strategy, "fail-fast").and_then(Yaml::as_bool) != Some(false) {
+        violations.push(format!("{name} must retain both platform results"));
+    }
+    let Some(matrix) = field(strategy, "matrix").and_then(Yaml::as_hash) else {
+        violations.push(format!("{name} matrix is missing"));
+        return;
+    };
+    validate_exact_keys(
+        matrix,
+        &format!("{name}.strategy.matrix"),
+        &["include"],
+        violations,
+    );
+    let Some(include) = field(matrix, "include").and_then(Yaml::as_vec) else {
+        violations.push(format!("{name} matrix include list is missing"));
+        return;
+    };
+    let expected = [
+        ("ubuntu-latest", "linux-x86_64"),
+        ("windows-latest", "windows-x86_64"),
+    ];
+    if include.len() != expected.len() {
+        violations.push(format!("{name} matrix must contain both fixed platforms"));
+        return;
+    }
+    for (entry, (os, platform)) in include.iter().zip(expected) {
+        let Some(entry) = entry.as_hash() else {
+            violations.push(format!("{name} matrix entry must be a mapping"));
+            continue;
+        };
+        validate_exact_keys(
+            entry,
+            &format!("{name} matrix entry"),
+            &["os", "platform"],
+            violations,
+        );
+        if scalar_str(field(entry, "os")) != Some(os)
+            || scalar_str(field(entry, "platform")) != Some(platform)
+        {
+            violations.push(format!("{name} matrix platform mapping is invalid"));
+        }
+    }
+}
+
+fn validate_needs(job: &Hash, name: &str, expected: &[&str], violations: &mut Vec<String>) {
+    let observed = match field(job, "needs") {
+        None => BTreeSet::new(),
+        Some(Yaml::String(single)) => BTreeSet::from([single.to_owned()]),
+        Some(Yaml::Array(values)) => values
+            .iter()
+            .filter_map(Yaml::as_str)
+            .map(str::to_owned)
+            .collect(),
+        Some(_) => {
+            violations.push(format!("{name} must use a string list for dependencies"));
+            return;
+        }
+    };
+    let expected = expected
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect::<BTreeSet<_>>();
+    if observed != expected {
+        violations.push(format!(
+            "{name} has an invalid publication dependency graph"
+        ));
+    }
+}
+
 enum PermissionShape {
     Empty,
     ActionsRead,
@@ -462,6 +833,14 @@ fn validate_job_permissions(
 fn validate_environment(job: &Hash, expected: &str, name: &str, violations: &mut Vec<String>) {
     if scalar_str(field(job, "environment")) != Some(expected) {
         violations.push(format!("{name} must use environment {expected}"));
+    }
+}
+
+fn validate_no_environment(job: &Hash, name: &str, violations: &mut Vec<String>) {
+    if field(job, "environment").is_some() {
+        violations.push(format!(
+            "{name} must not receive an environment gate or environment secrets"
+        ));
     }
 }
 
@@ -536,10 +915,21 @@ fn validate_verifier(job: &Hash, violations: &mut Vec<String>) {
         || !content.contains(REVIEWED_RELEASE_VERIFIER_REVISION)
         || !content.contains(RELEASE_VERIFIER_BLOB)
         || !content.contains(RELEASE_VERIFIER_SHA256)
+        || !content.contains(APPROVAL_SCHEMA_BLOB)
+        || !content.contains(APPROVAL_SCHEMA_SHA256)
         || !content.contains("archiveFromTransport")
         || !content.contains("TRANSPORT_ROOT")
-        || !content.contains("PUBLISHER_DEFINITION_SHA256")
-        || !content.contains("publisher workflow does not match the reviewed definition digest")
+        || !content.contains("const publisherDefinition = await contentDigestAt(")
+        || !content.contains("definition_sha256: publisherDefinition.sha256")
+        || content.contains("PUBLISHER_DEFINITION_SHA256")
+        || content.contains("inputs.publisher_definition_sha256")
+        || !content.contains("const excludes =")
+        || !content.contains("bypass_actors")
+        || !content.contains("ruleset?.enforcement !== \"active\"")
+        || !content.contains("tag rulesets exceed its bounded pagination budget")
+        || !content
+            .contains("rulesets?targets=tag&includes_parents=true&per_page=${perPage}&page=${page}")
+        || !content.contains("runs?event=workflow_dispatch&per_page=100&page=")
         || content.contains("size_bytes: 0")
         || content.contains("\"0\".repeat(64)")
         || count_occurrences(&content, "env -i") < 5
@@ -563,12 +953,102 @@ fn validate_verifier(job: &Hash, violations: &mut Vec<String>) {
             "credential-free verifier must pass an empty github-token to github-script".to_owned(),
         );
     }
+    validate_step_keys(
+        job,
+        "Fetch pinned verifier, schemas, and public GitHub facts",
+        &["name", "uses", "env", "with"],
+        violations,
+    );
+    validate_step_environment(
+        job,
+        "Fetch pinned verifier, schemas, and public GitHub facts",
+        &[
+            "REVIEWED_SOURCE_REVISION",
+            "VERIFIER_PATH",
+            "VERIFIER_BLOB",
+            "VERIFIER_SHA256",
+            "APPROVAL_SCHEMA_PATH",
+            "APPROVAL_SCHEMA_BLOB",
+            "APPROVAL_SCHEMA_SHA256",
+            "TRUSTED_SCHEMA_PATH",
+            "TRUSTED_SCHEMA_BLOB",
+            "TRUSTED_SCHEMA_SHA256",
+            "MANIFEST_SCHEMA_PATH",
+            "MANIFEST_SCHEMA_BLOB",
+            "MANIFEST_SCHEMA_SHA256",
+            "SMOKE_HELPER_PATH",
+            "SMOKE_HELPER_BLOB",
+            "SMOKE_HELPER_SHA256",
+            "PACKAGE_HELPER_PATH",
+            "PACKAGE_HELPER_BLOB",
+            "PACKAGE_HELPER_SHA256",
+            "PACKAGE_LAYOUT_PATH",
+            "PACKAGE_LAYOUT_BLOB",
+            "PACKAGE_LAYOUT_SHA256",
+            "APPROVAL_PATH",
+            "APPROVAL_COMMIT",
+            "APPROVAL_BLOB",
+            "APPROVAL_SHA256",
+            "TAG_NAME",
+            "CANDIDATE_RUN_ID",
+            "LINUX_ARTIFACT_ID",
+            "WINDOWS_ARTIFACT_ID",
+            "IMMUTABLE_RELEASES_ENABLED",
+            "POLICY_ROOT",
+            "TRANSPORT_ROOT",
+        ],
+        None,
+        violations,
+    );
+    for (key, expected) in [
+        (
+            "REVIEWED_SOURCE_REVISION",
+            REVIEWED_RELEASE_VERIFIER_REVISION,
+        ),
+        ("VERIFIER_BLOB", RELEASE_VERIFIER_BLOB),
+        ("VERIFIER_SHA256", RELEASE_VERIFIER_SHA256),
+        ("APPROVAL_SCHEMA_BLOB", APPROVAL_SCHEMA_BLOB),
+        ("APPROVAL_SCHEMA_SHA256", APPROVAL_SCHEMA_SHA256),
+    ] {
+        validate_step_environment_value(
+            job,
+            "Fetch pinned verifier, schemas, and public GitHub facts",
+            key,
+            expected,
+            violations,
+        );
+    }
     if action_count(job, GITHUB_SCRIPT) != 1
         || action_count(job, SETUP_PYTHON) != 1
         || action_count(job, DOWNLOAD_ARTIFACT) != 2
         || action_count(job, UPLOAD_ARTIFACT) != 4
     {
         violations.push("credential-free verifier has an unexpected action pipeline".to_owned());
+    }
+    for step in [
+        "Upload bounded publisher inputs",
+        "Upload bounded publication manifest",
+        "Upload pinned smoke helpers",
+    ] {
+        validate_upload_retention(job, step, "14", violations);
+    }
+}
+
+fn validate_upload_retention(job: &Hash, name: &str, expected: &str, violations: &mut Vec<String>) {
+    let Some(step) = step_named(job, name) else {
+        violations.push(format!("release workflow is missing upload step {name}"));
+        return;
+    };
+    let Some(with) = field(step, "with").and_then(Yaml::as_hash) else {
+        violations.push(format!(
+            "release upload step {name} has no bounded artifact settings"
+        ));
+        return;
+    };
+    if scalar_str(field(with, "retention-days")) != Some(expected) {
+        violations.push(format!(
+            "release upload step {name} must retain inputs for {expected} days"
+        ));
     }
 }
 
@@ -599,7 +1079,8 @@ fn validate_write_job(job: &Hash, name: &str, violations: &mut Vec<String>) {
     }
     if name == "release-finalize"
         && (!content.contains("draft smoke receipt does not match its approved candidate")
-            || !content.contains("candidate_result_sha256"))
+            || !content.contains("candidate_result_sha256")
+            || !content.contains("published.data.immutable !== true"))
     {
         violations.push(
             "release-finalize must recheck every draft smoke receipt against the manifest"
@@ -610,21 +1091,70 @@ fn validate_write_job(job: &Hash, name: &str, violations: &mut Vec<String>) {
 
 fn validate_draft_smoke(job: &Hash, violations: &mut Vec<String>) {
     let content = strings(job).join("\n");
+    let expressions = compact_expression_source(&content);
     if content.contains("secrets.")
+        || expressions.contains("secrets.")
         || content.contains("actions/checkout@")
-        || count_occurrences(&content, "github.token") != 1
+        || count_occurrences(&expressions, "github.token") != 1
         || !content.contains("RELEASE_READ_TOKEN")
         || !content.contains("RedirectWithoutAuthorization")
         || !content.contains("smoke_artifact.py")
         || !content.contains("env -i")
         || !content.contains("Remove-Item Env:GITHUB_TOKEN")
         || !content.contains("nara-release-draft-assets")
+        || expressions.contains("github[")
+        || expressions.contains("secrets[")
     {
         violations.push(
             "draft smoke must isolate candidate execution after one authenticated asset download"
                 .to_owned(),
         );
     }
+    if expressions.contains("github[") || expressions.contains("secrets[") {
+        violations.push("draft smoke must not use indexed credential expressions".to_owned());
+    }
+    validate_step_keys(
+        job,
+        "Download exact draft asset before candidate execution",
+        &["name", "env", "run"],
+        violations,
+    );
+    validate_step_environment(
+        job,
+        "Download exact draft asset before candidate execution",
+        &[
+            "RELEASE_READ_TOKEN",
+            "NARA_PLATFORM",
+            "NARA_MANIFEST",
+            "NARA_DRAFT_RECEIPT",
+            "NARA_DRAFT_ASSET_ROOT",
+        ],
+        Some(("RELEASE_READ_TOKEN", "${{ github.token }}")),
+        violations,
+    );
+    validate_step_keys(
+        job,
+        "Smoke Linux draft candidate without credentials",
+        &["name", "if", "run"],
+        violations,
+    );
+    validate_step_keys(
+        job,
+        "Smoke Windows draft candidate without credentials",
+        &["name", "if", "shell", "run"],
+        violations,
+    );
+    validate_step_without_environment(
+        job,
+        "Smoke Linux draft candidate without credentials",
+        violations,
+    );
+    validate_step_without_environment(
+        job,
+        "Smoke Windows draft candidate without credentials",
+        violations,
+    );
+    validate_matrix_receipt_shell(job, "Record bound draft smoke result", violations);
 }
 
 fn validate_finalize_approval(job: &Hash, violations: &mut Vec<String>) {
@@ -658,6 +1188,120 @@ fn validate_public_smoke(job: &Hash, violations: &mut Vec<String>) {
     {
         violations
             .push("anonymous public smoke must not receive an authorization credential".to_owned());
+    }
+    validate_step_keys(
+        job,
+        "Smoke Linux public candidate without credentials",
+        &["name", "if", "run"],
+        violations,
+    );
+    validate_step_keys(
+        job,
+        "Smoke Windows public candidate without credentials",
+        &["name", "if", "shell", "run"],
+        violations,
+    );
+    validate_step_without_environment(
+        job,
+        "Smoke Linux public candidate without credentials",
+        violations,
+    );
+    validate_step_without_environment(
+        job,
+        "Smoke Windows public candidate without credentials",
+        violations,
+    );
+    validate_matrix_receipt_shell(
+        job,
+        "Record bound anonymous public smoke result",
+        violations,
+    );
+}
+
+fn validate_step_keys(job: &Hash, name: &str, expected: &[&str], violations: &mut Vec<String>) {
+    let Some(step) = step_named(job, name) else {
+        violations.push(format!("release workflow is missing step {name}"));
+        return;
+    };
+    validate_exact_keys(
+        step,
+        &format!("release workflow step {name}"),
+        expected,
+        violations,
+    );
+}
+
+fn validate_step_environment(
+    job: &Hash,
+    name: &str,
+    expected: &[&str],
+    required: Option<(&str, &str)>,
+    violations: &mut Vec<String>,
+) {
+    let Some(step) = step_named(job, name) else {
+        return;
+    };
+    let Some(environment) = field(step, "env").and_then(Yaml::as_hash) else {
+        violations.push(format!(
+            "release workflow step {name} must declare its bounded environment"
+        ));
+        return;
+    };
+    validate_exact_keys(
+        environment,
+        &format!("release workflow step {name}.env"),
+        expected,
+        violations,
+    );
+    if let Some((key, value)) = required {
+        if scalar_str(field(environment, key)) != Some(value) {
+            violations.push(format!(
+                "release workflow step {name} must use its one scoped credential"
+            ));
+        }
+    }
+}
+
+fn validate_step_environment_value(
+    job: &Hash,
+    name: &str,
+    key: &str,
+    expected: &str,
+    violations: &mut Vec<String>,
+) {
+    let Some(step) = step_named(job, name) else {
+        return;
+    };
+    let Some(environment) = field(step, "env").and_then(Yaml::as_hash) else {
+        return;
+    };
+    if scalar_str(field(environment, key)) != Some(expected) {
+        violations.push(format!(
+            "release workflow step {name} must pin {key} to the reviewed value"
+        ));
+    }
+}
+
+fn validate_step_without_environment(job: &Hash, name: &str, violations: &mut Vec<String>) {
+    let Some(step) = step_named(job, name) else {
+        return;
+    };
+    if field(step, "env").is_some() {
+        violations.push(format!(
+            "release workflow candidate step {name} must not inherit custom environment values"
+        ));
+    }
+}
+
+fn validate_matrix_receipt_shell(job: &Hash, name: &str, violations: &mut Vec<String>) {
+    validate_step_keys(job, name, &["name", "env", "shell", "run"], violations);
+    let Some(step) = step_named(job, name) else {
+        return;
+    };
+    if scalar_str(field(step, "shell")) != Some("bash") {
+        violations.push(format!(
+            "release workflow receipt step {name} must use Bash for its heredoc"
+        ));
     }
 }
 
@@ -796,6 +1440,14 @@ fn collect_strings(value: &Yaml, collected: &mut Vec<String>) {
 
 fn count_occurrences(value: &str, needle: &str) -> usize {
     value.match_indices(needle).count()
+}
+
+fn compact_expression_source(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase()
 }
 
 fn field<'a>(mapping: &'a Hash, key: &str) -> Option<&'a Yaml> {

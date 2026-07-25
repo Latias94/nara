@@ -21,10 +21,6 @@ run-name: "Reference Game Release ${{ inputs.tag }}"
         description: "SHA-256 of the canonical approval bytes"
         required: true
         type: string
-      publisher_definition_sha256:
-        description: "SHA-256 of the independently reviewed publisher workflow bytes"
-        required: true
-        type: string
       tag:
         description: "Existing protected annotated vX.Y.Z tag"
         required: true
@@ -49,6 +45,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  reject-rerun:
+    name: Reject repeated publication workflow attempts
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt != '1' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Reject rerun without reusing publication authority
+        run: exit 1
+
   immutable-policy:
     name: Verify immutable release policy
     if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
@@ -140,13 +146,13 @@ jobs:
       - name: Fetch pinned verifier, schemas, and public GitHub facts
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
-          REVIEWED_SOURCE_REVISION: 0d70fcf0b86e241bebb54c22a55350d5bf824680
+          REVIEWED_SOURCE_REVISION: fee339f11776eb837653bc0ca62e7db7b90eb396
           VERIFIER_PATH: reference-game/tools/verify_release.py
-          VERIFIER_BLOB: 3ef54305cb68f5b4076a37366dbd1a857d3d02e3
-          VERIFIER_SHA256: 7421e9e0449802b580465f36dd9c002d776ec0adc10006154080db532b7f45bd
+          VERIFIER_BLOB: a778e5eb701ae1354ed188fb7901d29d17f84e81
+          VERIFIER_SHA256: 708f7995811d4a76215c58f8f6f64190f499720bc1b8c421ce90ded7b681f696
           APPROVAL_SCHEMA_PATH: docs/benchmarks/data/approvals/v1/reference-game-pre-release.schema.json
-          APPROVAL_SCHEMA_BLOB: a24c17607b56de3d58aa9e2379b13c8c299cc991
-          APPROVAL_SCHEMA_SHA256: bd34ed827657042757aa03c1151c720d6384ee74c3cf597d906b55a778544716
+          APPROVAL_SCHEMA_BLOB: ec84b0787434a3e7601d135835ef42d491546f38
+          APPROVAL_SCHEMA_SHA256: 47aa27863f075aaa40a4d858ac11c5502279a80d2516e34c180f908bac752fb4
           TRUSTED_SCHEMA_PATH: docs/benchmarks/data/approvals/v1/release-trusted-input.schema.json
           TRUSTED_SCHEMA_BLOB: 10885ac3f368ba3e130cd18609088f63bdc037a4
           TRUSTED_SCHEMA_SHA256: 170abfae5e326bf65633b496cd5a9a7912481c6607ecf7e45917110fce233cc6
@@ -166,7 +172,6 @@ jobs:
           APPROVAL_COMMIT: "${{ inputs.approval_commit }}"
           APPROVAL_BLOB: "${{ inputs.approval_blob }}"
           APPROVAL_SHA256: "${{ inputs.approval_sha256 }}"
-          PUBLISHER_DEFINITION_SHA256: "${{ inputs.publisher_definition_sha256 }}"
           TAG_NAME: "${{ inputs.tag }}"
           CANDIDATE_RUN_ID: "${{ inputs.candidate_run_id }}"
           LINUX_ARTIFACT_ID: "${{ inputs.linux_artifact_id }}"
@@ -272,6 +277,42 @@ jobs:
               }
             }
 
+            async function releaseRuns() {
+              const perPage = 100;
+              const maxPages = 10;
+              const runs = [];
+              let totalCount;
+              for (let page = 1; page <= maxPages; page += 1) {
+                const response = await requestJson(
+                  `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/reference-game-release.yml/runs?event=workflow_dispatch&per_page=100&page=${page}`
+                );
+                if (
+                  !Array.isArray(response.workflow_runs) ||
+                  !Number.isSafeInteger(response.total_count) ||
+                  response.total_count < 0 ||
+                  response.workflow_runs.length > perPage
+                ) {
+                  fail("release run history is invalid");
+                }
+                if (totalCount === undefined) {
+                  totalCount = response.total_count;
+                  if (totalCount > perPage * maxPages) {
+                    fail("release run history exceeds its bounded pagination budget");
+                  }
+                } else if (response.total_count !== totalCount) {
+                  fail("release run history changed during verification");
+                }
+                runs.push(...response.workflow_runs);
+                if (runs.length >= totalCount) {
+                  return runs.slice(0, totalCount);
+                }
+                if (response.workflow_runs.length !== perPage) {
+                  fail("release run history is incomplete");
+                }
+              }
+              fail("release run history is incomplete");
+            }
+
             async function fileAt(revisionValue, filePath, expectedBlob, expectedSha256) {
               const response = await requestJson(
                 `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(filePath)}?ref=${encodeURIComponent(revisionValue)}`
@@ -330,13 +371,27 @@ jobs:
               return new RegExp(expression).test(tag);
             }
 
-            async function hasProtectedTagRule(tag) {
-              const summary = await requestJson(
-                `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/rulesets?targets=tag&includes_parents=true&per_page=100`
-              );
-              if (!Array.isArray(summary) || summary.length > 100) {
-                fail("tag rulesets response is not bounded");
+            async function tagRulesets() {
+              const perPage = 100;
+              const maxPages = 10;
+              const rulesets = [];
+              for (let page = 1; page <= maxPages; page += 1) {
+                const response = await requestJson(
+                  `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/rulesets?targets=tag&includes_parents=true&per_page=${perPage}&page=${page}`
+                );
+                if (!Array.isArray(response) || response.length > perPage) {
+                  fail("tag rulesets response is invalid");
+                }
+                rulesets.push(...response);
+                if (response.length < perPage) {
+                  return rulesets;
+                }
               }
+              fail("tag rulesets exceed its bounded pagination budget");
+            }
+
+            async function hasProtectedTagRule(tag) {
+              const summary = await tagRulesets();
               for (const entry of summary) {
                 if (
                   !entry ||
@@ -348,16 +403,33 @@ jobs:
                 const ruleset = await requestJson(
                   `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/rulesets/${entry.id}`
                 );
-                const includes = ruleset?.conditions?.ref_name?.include;
+                if (ruleset?.target !== "tag" || ruleset?.enforcement !== "active") {
+                  continue;
+                }
+                const refName = ruleset?.conditions?.ref_name;
+                const includes = refName?.include;
+                const excludes = refName?.exclude;
+                const bypassActors = ruleset?.bypass_actors;
+                if (
+                  !Array.isArray(includes) ||
+                  !Array.isArray(excludes) ||
+                  !Array.isArray(bypassActors)
+                ) {
+                  fail("tag ruleset conditions are incomplete");
+                }
+                if (
+                  !includes.some((pattern) => typeof pattern === "string" && globMatches(pattern, tag)) ||
+                  excludes.some((pattern) => typeof pattern === "string" && globMatches(pattern, tag)) ||
+                  bypassActors.length !== 0
+                ) {
+                  continue;
+                }
                 const ruleTypes = new Set(
                   Array.isArray(ruleset?.rules)
                     ? ruleset.rules.map((rule) => rule?.type)
                     : []
                 );
                 if (
-                  ruleset?.target === "tag" &&
-                  Array.isArray(includes) &&
-                  includes.some((pattern) => typeof pattern === "string" && globMatches(pattern, tag)) &&
                   ["creation", "update", "deletion"].every((kind) => ruleTypes.has(kind))
                 ) {
                   return true;
@@ -490,10 +562,6 @@ jobs:
             const approvalCommit = revision(process.env.APPROVAL_COMMIT, "approval commit");
             const approvalBlob = revision(process.env.APPROVAL_BLOB, "approval blob");
             const approvalSha256 = sha256(process.env.APPROVAL_SHA256, "approval digest");
-            const publisherDefinitionSha256 = sha256(
-              process.env.PUBLISHER_DEFINITION_SHA256,
-              "publisher workflow digest"
-            );
             const tagName = required(process.env.TAG_NAME, "tag");
             const candidateRunId = decimal(process.env.CANDIDATE_RUN_ID, "candidate run ID");
             const linuxArtifactId = decimal(process.env.LINUX_ARTIFACT_ID, "Linux artifact ID");
@@ -521,18 +589,9 @@ jobs:
             await requireAncestor(reviewedRevision, publisherRevision, "reviewed verifier revision");
             await requireAncestor(approvalCommit, publisherRevision, "approval commit");
 
-            const priorRuns = await requestJson(
-              `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/reference-game-release.yml/runs?event=workflow_dispatch&per_page=100`
-            );
+            const priorRuns = await releaseRuns();
             if (
-              !Array.isArray(priorRuns.workflow_runs) ||
-              !Number.isSafeInteger(priorRuns.total_count) ||
-              priorRuns.total_count > priorRuns.workflow_runs.length
-            ) {
-              fail("release run history is incomplete");
-            }
-            if (
-              priorRuns.workflow_runs.some(
+              priorRuns.some(
                 (run) =>
                   String(run.id) !== String(context.runId) &&
                   run.display_title === `Reference Game Release ${tagName}`
@@ -626,9 +685,6 @@ jobs:
               publisherRevision,
               ".github/workflows/reference-game-release.yml"
             );
-            if (publisherDefinition.sha256 !== publisherDefinitionSha256) {
-              fail("publisher workflow does not match the reviewed definition digest");
-            }
             const linux = await candidateFacts("linux-x86_64", linuxArtifactId);
             const windows = await candidateFacts("windows-x86_64", windowsArtifactId);
             const trusted = {
@@ -806,7 +862,7 @@ jobs:
           name: "nara-release-publisher-inputs-${{ github.run_id }}-${{ github.run_attempt }}"
           path: "${{ runner.temp }}/nara-release-verifier/stage/publisher-inputs"
           if-no-files-found: error
-          retention-days: "1"
+          retention-days: "14"
           compression-level: "0"
           include-hidden-files: "false"
       - name: Upload bounded publication manifest
@@ -815,7 +871,7 @@ jobs:
           name: "nara-release-manifest-${{ github.run_id }}-${{ github.run_attempt }}"
           path: "${{ runner.temp }}/nara-release-verifier/stage/release-manifest"
           if-no-files-found: error
-          retention-days: "1"
+          retention-days: "14"
           compression-level: "0"
           include-hidden-files: "false"
       - name: Upload pinned smoke helpers
@@ -824,7 +880,7 @@ jobs:
           name: "nara-release-smoke-tools-${{ github.run_id }}-${{ github.run_attempt }}"
           path: "${{ runner.temp }}/nara-release-verifier/stage/smoke-tools"
           if-no-files-found: error
-          retention-days: "1"
+          retention-days: "14"
           compression-level: "0"
           include-hidden-files: "false"
       - name: Upload credential-free verification record
@@ -1262,6 +1318,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/nara-release-draft-smoke/home", "${{ runner.temp }}/nara-release-draft-smoke/tmp", "${{ runner.temp }}/nara-release-draft-smoke/work" | Out-Null
           python -B "${{ runner.temp }}/nara-release-smoke-tools/reference-game/tools/smoke_artifact.py" smoke --archive "${{ runner.temp }}/nara-release-draft-assets/nara-reference-game-${{ matrix.platform }}.zip" --work-root "${{ runner.temp }}/nara-release-draft-smoke/work" --expected-platform "${{ matrix.platform }}" --desktop-environment NARA_WGPU_FORCE_FALLBACK=1 | Out-File -Encoding ascii -NoNewline "${{ runner.temp }}/nara-release-draft-smoke/candidate-result.json"
       - name: Record bound draft smoke result
+        shell: bash
         env:
           NARA_PLATFORM: "${{ matrix.platform }}"
           NARA_MANIFEST: "${{ runner.temp }}/nara-release-manifest/manifest.json"
@@ -1894,6 +1951,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/nara-release-public-smoke/home", "${{ runner.temp }}/nara-release-public-smoke/tmp", "${{ runner.temp }}/nara-release-public-smoke/work" | Out-Null
           python -B "${{ runner.temp }}/nara-release-smoke-tools/reference-game/tools/smoke_artifact.py" smoke --archive "${{ runner.temp }}/nara-release-public-assets/nara-reference-game-${{ matrix.platform }}.zip" --work-root "${{ runner.temp }}/nara-release-public-smoke/work" --expected-platform "${{ matrix.platform }}" --desktop-environment NARA_WGPU_FORCE_FALLBACK=1 | Out-File -Encoding ascii -NoNewline "${{ runner.temp }}/nara-release-public-smoke/candidate-result.json"
       - name: Record bound anonymous public smoke result
+        shell: bash
         env:
           NARA_PLATFORM: "${{ matrix.platform }}"
           NARA_MANIFEST: "${{ runner.temp }}/nara-release-manifest/manifest.json"
