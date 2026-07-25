@@ -3,7 +3,7 @@ type: "Verification Evidence"
 title: "RGD-U7 Runtime and Host authority verification"
 description: "Records the independent refreshed Runtime review, conditional Host/compatibility review, and bounded acceptance of ADR 0084 and ADR 0082."
 timestamp: 2026-07-23T08:12:41Z
-record_id: "38a8bf4d48614a829bdd6388f02c9446"
+record_id: "dc689c622436422381b3bcc1b9a18f18"
 tags: ["rgd-u7", "runtime", "host", "adr", "verification"]
 status: "completed"
 producer_id: "codex-root"

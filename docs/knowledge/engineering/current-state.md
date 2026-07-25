@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "eb2715a519522200f342cd8c8bbd45d7eac3a6187ff558f35d7477bb68b10614"
+source_fingerprint: "2fd661e4068baa0e817ad22291cfefcc5af356611a0eb6f2726b0ea163617aa5"
 ---
 
 # Current State
@@ -12,30 +12,36 @@ source_fingerprint: "eb2715a519522200f342cd8c8bbd45d7eac3a6187ff558f35d7477bb68b
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `eb2715a519522200f342cd8c8bbd45d7eac3a6187ff558f35d7477bb68b10614`
-- Immutable records: 169
-- Active lane heads: 2
+- Source fingerprint: `2fd661e4068baa0e817ad22291cfefcc5af356611a0eb6f2726b0ea163617aa5`
+- Immutable records: 245
+- Active lane heads: 3
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game-driven foundation refactor: RGF-U13](registry/2026-07/2026-07-19T193816Z-engine-foundation-contract-completion-codex-root-437f122f2a8143f18470951cd1741a80.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
-- [Nara deep module architecture exploration: plugin freedom](registry/2026-07/2026-07-19T163055Z-nara-deep-module-architecture-exploration-codex-root-9318026c84f84037b0536dfb5c72e533.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
+- [Reference-game runtime authority and delivery: RGD-U12 local security hardening](registry/2026-07/2026-07-25T061347Z-engine-foundation-contract-completion-codex-root-1cc231772b5547e5855c1ba5957106f7.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
+- [Reference-game runtime authority and delivery: carried RGF-U15](registry/2026-07/2026-07-21T141717Z-reference-game-foundation-rgf-u15-codex-root-0b5ca03232b44fd49c99ae872feef69f.md): `active` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
+- [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
+- [Reference-game-driven foundation refactor: RGF-U18](registry/2026-07/2026-07-20T022923Z-reference-game-foundation-rgf-u18-codex-root-ff9c13e50df34a868c59c4ebd5435375.md): `completed` (reference-game-foundation-rgf-u18-codex-root; producer `codex-root`)
+- [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-20T000516Z-reference-game-foundation-rgf-u19-codex-root-b395ac7f13cf4a0cbf6addc4ac712d20.md): `completed` (reference-game-foundation-rgf-u19-codex-root; producer `codex-root`)
+- [Reference-game-driven foundation refactor: RGF-U23](registry/2026-07/2026-07-21T131138Z-reference-game-foundation-rgf-u23-codex-root-ab7e4acc3ce143dc8b868eb820eb1181.md): `completed` (reference-game-foundation-rgf-u23-codex-root; producer `codex-root`)
+- [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T233045Z-reference-game-foundation-rgf-u8-codex-root-4007e43148c84b20a0c28c73e379d302.md): `completed` (reference-game-foundation-rgf-u8-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
-- **Verification Evidence**: [RGF-U13 desktop production wave automated verification](verification/2026-07/2026-07-19T192736Z-rgf-u13-desktop-production-wave-automated-verification-9d99f3f9c3c2450ea98dfa0952a1ded3.md) - Commit 198a680 completes the supported desktop product path, ordered input, owned render packet, native surface lifecycle, HUD, and atomic Retry; manual Windows play remains pending.
-- **Engineering Research**: [Plugin freedom and ecosystem UX in real-game-validated engines](2026-07/2026-07-19T162113Z-plugin-freedom-and-ecosystem-ux-in-real-game-validated-engines-e91777acf3b246209026dda460554a91.md) - Primary-source comparison of extension freedom, replacement workflows, tooling UI integration, and store-ready package UX for Nara.
-- **Verification Evidence**: [RGF-U6 deterministic headless wave verification](verification/2026-07/2026-07-19T065918Z-rgf-u6-deterministic-headless-wave-verification-203bdd80f8704a1a8e6440ef7f9069ba.md) - Commit db511a7 closes the authoritative reference-game wave, stable snapshots, terminal outcomes, privacy-safe CLI, and bounded shutdown.
-- **Verification Evidence**: [RGF-U24 concrete project Host verification](verification/2026-07/2026-07-18T225631Z-rgf-u24-concrete-project-host-verification-2471074f91454290a016a1b4f620af34.md) - Commit 5ddbf18 closes the bounded headless product action, atomic runtime publication, and U26 ownership reversal proof.
-- **Verification Evidence**: [RGF-U26 manual ownership counterfactual verification](verification/2026-07/2026-07-18T174414Z-rgf-u26-manual-ownership-counterfactual-verification-9730fc03912d4eaa874e5384771b0fe8.md) - Commit a2d695d freezes the minimal pre-Host success and three-failure ownership baseline without a policy engine.
-- **Session Handoff**: [SRP-level renderer target and ADR admission handoff](sessions/2026-07/2026-07-18T160416Z-srp-level-renderer-target-and-adr-admission-handoff-58aeee5efc21436fb6ed62fb6b3757d5.md) - Captures the non-authoritative conclusion that SRP-level renderer replaceability is a product-goal candidate while graph and public extension mechanisms remain evidence-gated.
-- **Verification Evidence**: [RGF-U29 explicit persistent composition verification](verification/2026-07/2026-07-18T102650Z-rgf-u29-explicit-persistent-composition-verification-57a04a45133744909a7c43441c99c9e0.md) - Commit e95cd4b closes frozen registry binding and guarded target-World persistent apply without changing runtime-only ECS behavior.
-- **Verification Evidence**: [RGF-U12 authorized startup content verification](verification/2026-07/2026-07-18T035846Z-rgf-u12-authorized-startup-content-verification-ac05708ff3764164865e4cae207bf5a3.md) - Commit f341255 closes bounded authorized scene, prefab, and image startup-content publication as an immutable budget-leased snapshot.
-- **Engineering Research**: [C# Gameplay Authoring Surface: Parameterless Behaviour over an ECS Kernel](csharp-gameplay-authoring-surface-research.md) - Primary-source comparison of Unity, Godot, C#, and Nara constraints for hiding frame and data-access mechanics while keeping gameplay object and dependency sources explicit.
-- **Engineering Research**: [Godot C# Integration Implications for Nara](godot-csharp-integration-research.md) - Primary-source review of Godot's .NET product stack and the boundaries it suggests for a future, optional Nara C# gameplay Adapter.
-- **Subagent Finding**: [LogLog Rust gamedev critique against an optional C# gameplay Adapter](subagents/2026-07/2026-07-17-loglog-rust-gamedev-csharp-gameplay-research.md) - Primary-source review of which Leaving Rust gamedev pain points an optional first-party C#/CoreCLR gameplay path could relieve, which remain engine-product problems, and which CLR/interop risks it introduces.
-- **Verification Evidence**: [RGF-U28 public schedule compatibility verification](verification/2026-07/2026-07-17T100726Z-rgf-u28-public-schedule-compatibility-verification-55f3d96f00e544dba50a1802e35c3190.md) - Commit c24b38a closes the four public schedule anchors and seal-time deferred compatibility contract.
+- **Memory Event**: [Governance correction: Reassigned the duplicate RGD-U7 verification record identity; evidence content a](logs/2026-07/2026-07-25T075756Z-governance-correction-reassigned-the-duplicate-rgd-u7-verification-record-identity-evidence-content-a-a4c66611c6154f069b490f57447ecc71.md) - Reassigned the duplicate RGD-U7 verification record identity; evidence content and the U7 registration lineage remain unchanged, restoring d
+- **Verification Evidence**: [RGD-U12 release security hardening verification](verification/2026-07/2026-07-25T061212Z-rgd-u12-release-security-hardening-verification-50b3c1491dce415e8f7e0fe508c59276.md) - Records local verification of publisher approval binding and immutable-release workflow hardening without claiming hosted publication.
+- **Verification Evidence**: [RGD-U12 local immutable pre-release preparation verification](verification/2026-07/2026-07-25T014944Z-rgd-u12-local-immutable-release-preparation-verification-5186939a5dec4103bfa1c702061af655.md) - Verifies the locally reviewable immutable-release workflow, policy, and credential boundaries without claiming a hosted release or publication.
+- **Verification Evidence**: [RGD-U7 Runtime and Host authority verification](verification/2026-07/2026-07-23T081241Z-rgd-u7-runtime-host-authority-verification-38a8bf4d48614a829bdd6388f02c9446.md) - Records the independent refreshed Runtime review, conditional Host/compatibility review, and bounded acceptance of ADR 0084 and ADR 0082.
+- **Decision**: [RGD-U7 Runtime and Host independent decision matrix](decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md) - Records the refreshed independent ADR 0084 Runtime verdict, ADR 0082 Host verdict, compatible-pair scope, and remaining delivery gates.
+- **Verification Evidence**: [RGD-U10 local standalone candidate preparation verification](verification/2026-07/2026-07-23T043428Z-rgd-u10-local-candidate-preparation-verification-668ca80db5e7483f80a3f25fe4ee0301.md) - Verifies the local packaging, checkout-free consumer, smoke, policy, and candidate-workflow preparation without claiming hosted candidate execution.
+- **Verification Evidence**: [RGD-U9 local first-playable measurement preparation verification](verification/2026-07/2026-07-23T013033Z-rgd-u9-local-measurement-preparation-verification-7d09e5953e7f4d50862ac7645438c9be.md) - Records the committed non-decisive U9 plan helper, policy boundaries, and focused local verification without claiming a product baseline.
+- **Verification Evidence**: [RGD-U6 external managed-runtime runner verification](verification/2026-07/2026-07-22T230538Z-rgd-u6-external-managed-runtime-runner-verification-5c2044aca8cd4eaf81087d08c7c75e40.md) - Verifies that an independently locked renamed-root Rust package can own one concrete managed-runtime loop through public Nara APIs.
+- **Verification Evidence**: [RGD-U5 real three-host semantic parity verification](verification/2026-07/2026-07-22T215822Z-rgd-u5-real-three-host-parity-verification-481fd3d8ac1e43b09fc91d38f47062da.md) - Verifies one bounded reference-game semantic command stream through public Headless, Desktop, and Editor product Hosts.
+- **Verification Evidence**: [RGD-U4 fresh runtime session reconstruction verification](verification/2026-07/2026-07-22T172958Z-rgd-u4-fresh-runtime-session-reconstruction-verification-0714cd8b40bb48d2a76a03ab75bde09d.md) - Verifies fresh mutable runtime sessions across generations while retaining only named immutable or process-parent authorities.
+- **Verification Evidence**: [RGD-U3 per-runtime Bevy fault routing verification](verification/2026-07/2026-07-22T152136Z-rgd-u3-per-runtime-bevy-fault-routing-verification-49c7a3efe7ad4a5e8ea569c862c2f64d.md) - Verifies bounded per-runtime Bevy failure attribution, reservation-before-transfer, truthful route retirement, and overlapping runtime execution.
+- **Verification Evidence**: [RGD-U2 frozen component behavior authority verification](verification/2026-07/2026-07-22T075903Z-rgd-u2-frozen-component-behavior-authority-verification-84188e9196d242078d5e32c6368f7ca6.md) - Verifies one executable component registry snapshot across composition, Editor, candidate startup, and managed runtime safe points.
 
 # Integration Notes
 
