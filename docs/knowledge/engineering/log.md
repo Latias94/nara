@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-25
+* **Work Registration**: [Reference-game runtime authority and delivery: RGD-U9 baseline complete](registry/2026-07/2026-07-25T163614Z-engine-foundation-contract-completion-codex-root-6c68bbff9de14e748011f0802e869add.md) - Closes the first-playable baseline with an isolated Windows population and Redirect verdict; records U10 as the next separately authorized delivery gate.
+* **Verification Evidence**: [RGD-U9 first-playable product baseline verification](verification/2026-07/2026-07-25T163453Z-rgd-u9-first-playable-product-baseline-verification-ae82fc256c2145f69a239bf8f6924aa2.md) - Records the isolated Windows first-playable automatic population, deterministic Redirect verdict, missing product evidence, and non-claims.
 * **Work Registration**: [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md) - Closes carried RGF-U15 with the final six-cell hosted Windows and Linux CI matrix at the integrated executable revision.
 * **Verification Evidence**: [RGD-U8 final hosted three-workspace CI verification](verification/2026-07/2026-07-25T115419Z-rgd-u8-final-hosted-three-workspace-ci-verification-0ee1fb9b871a4716ae3d0c533fbdd044.md) - Records the final user-authorized GitHub Actions matrix for root, reference-game, and module-consumer on Windows and Linux.
 * **Memory Event**: [Governance correction: Reassigned the duplicate RGD-U7 verification record identity; evidence content a](logs/2026-07/2026-07-25T075756Z-governance-correction-reassigned-the-duplicate-rgd-u7-verification-record-identity-evidence-content-a-a4c66611c6154f069b490f57447ecc71.md) - Reassigned the duplicate RGD-U7 verification record identity; evidence content and the U7 registration lineage remain unchanged, restoring d
@@ -141,7 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-07-15
 * **Verification Evidence**: [RGF-U4 pure plugin composition verification](verification/2026-07/2026-07-15T162857Z-rgf-u4-pure-plugin-composition-verification-1796d384bcee48fcbf2c6cb27ed08cdd.md) - Verified pure profile/plugin resolution, stable construction identity, schema-provider closure, sealed App commit, and independent reference-game consumption.
-* **Verification Evidence**: [RGF-U22 first-playable evidence protocol verification](verification/2026-07/2026-07-15T081419Z-rgf-u22-first-playable-evidence-protocol-verification-6ae07ce306d14b3bab489129f2758a32.md) - Verified the pre-target decision protocol, independent source attestations, trusted evidence envelope, Git revision admission, and ownership cohort gate.
-
-## 2026-07-14
-* **Verification Evidence**: [RGF-U10 bounded PNG ingest verification](verification/2026-07/2026-07-14T174858Z-rgf-u10-bounded-png-ingest-verification-cd08a4898f76409392fbaf093174ea5f.md) - Verified bounded PNG read, decode, publication, last-good reload, review disposition, and focused post-review gates.

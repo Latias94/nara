@@ -683,8 +683,9 @@ second real adapter or stronger isolation pressure.
   mechanisms chosen by measurement. See ADR [0054](adr/0054-gpu-upload-budget-and-buffer-allocation-policy.md)
   as refined by [0096](adr/0096-evidence-gated-render-scaling-and-upload-policy.md).
 - The minimum CI definition mirrors the locked root, reference-game, and direct module-consumer
-  boundaries on disposable Windows/Linux runners. Its first hosted green run is still pending;
-  broader feature, packaging, and artifact-consumer gates remain evidence-triggered. See ADR
+  boundaries on disposable Windows/Linux runners. The final integrated six-cell matrix passed on
+  both platforms in RGD-U8; standalone packaging, no-checkout artifact consumption, and broader
+  feature gates retain their own evidence requirements. See ADR
   [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md).
 
 ## Non-Authoritative Trigger Index
