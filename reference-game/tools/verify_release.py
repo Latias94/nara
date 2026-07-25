@@ -47,6 +47,7 @@ APPROVAL_FIELDS = (
     "repository",
     "source_revision",
     "protocol_sha256",
+    "publisher",
     "normalized_evidence",
     "journey",
     "review",
@@ -561,6 +562,14 @@ def validate_approval(value: Any) -> dict[str, Any]:
     source_revision = revision(approval["source_revision"])
     protocol_sha256 = digest(approval["protocol_sha256"])
 
+    publisher = mapping(approval["publisher"])
+    exact_keys(publisher, ("workflow_path", "definition_sha256", "source_revision"))
+    publisher_path = safe_relative_path(publisher["workflow_path"])
+    publisher_sha256 = digest(publisher["definition_sha256"])
+    publisher_source = revision(publisher["source_revision"])
+    if publisher_path != ".github/workflows/reference-game-release.yml":
+        reject()
+
     normalized_evidence = mapping(approval["normalized_evidence"])
     exact_keys(normalized_evidence, ("path", "size_bytes", "sha256"))
     evidence_path = safe_relative_path(normalized_evidence["path"])
@@ -611,6 +620,11 @@ def validate_approval(value: Any) -> dict[str, Any]:
         "repository": repository,
         "source_revision": source_revision,
         "protocol_sha256": protocol_sha256,
+        "publisher": {
+            "workflow_path": publisher_path,
+            "definition_sha256": publisher_sha256,
+            "source_revision": publisher_source,
+        },
         "normalized_evidence": {
             "path": evidence_path,
             "size_bytes": evidence_size,
@@ -885,6 +899,11 @@ def validate_against_trusted(
         approval["repository"] != trusted["repository"]["full_name"]
         or approval["source_revision"] != trusted["tag"]["target_sha"]
         or trusted["tag"]["name"] != f"v{approval['version']}"
+        or approval["publisher"]
+        != {
+            key: trusted["publisher"][key]
+            for key in ("workflow_path", "definition_sha256", "source_revision")
+        }
     ):
         reject()
     for approved, observed in zip(approval["candidates"], trusted["candidates"], strict=True):

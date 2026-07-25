@@ -208,6 +208,39 @@ fn release_verifier_rejects_non_publish_and_untrusted_identity_changes() {
 }
 
 #[test]
+fn release_verifier_rejects_publisher_definition_or_revision_substitution() {
+    let temporary = TemporaryDirectory::new("publisher-binding");
+    let approval = copy_fixture(temporary.path(), "approval.json", &approval_fixture());
+    let trusted = copy_fixture(temporary.path(), "trusted.json", &trusted_fixture());
+    let output = temporary.path().join("manifest.json");
+
+    replace_once(
+        &trusted,
+        "\"definition_sha256\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"",
+        "\"definition_sha256\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"",
+    );
+    assert!(
+        !build_manifest(&approval, &trusted, &output)
+            .status
+            .success(),
+        "a caller-controlled publisher definition digest must not be accepted"
+    );
+
+    fs::copy(trusted_fixture(), &trusted).expect("trusted fixture must reset");
+    replace_once(
+        &trusted,
+        "\"source_revision\": \"abababababababababababababababababababab\"",
+        "\"source_revision\": \"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"",
+    );
+    assert!(
+        !build_manifest(&approval, &trusted, &output)
+            .status
+            .success(),
+        "a caller-controlled publisher source revision must not be accepted"
+    );
+}
+
+#[test]
 fn release_verifier_rejects_candidate_digest_expiry_and_manifest_reuse() {
     let temporary = TemporaryDirectory::new("candidate");
     let approval = copy_fixture(temporary.path(), "approval.json", &approval_fixture());
@@ -278,7 +311,7 @@ fn release_verifier_rejects_noncanonical_unknown_and_unpinned_inputs() {
     fs::copy(approval_fixture(), &approval).expect("approval fixture must reset");
     replace_once(
         &trusted,
-        "\"sha256\": \"0728fd79ca318930cc95734bbec8ec73e388d31f5e6e5dbc80211686d97691c3\"",
+        "\"sha256\": \"d6cf94f490e06a410d842c4dff7fbe42b0657b1c37aac9f5a46ffb621076eeec\"",
         "\"sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"",
     );
     assert!(
