@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-26
+* **Work Registration**: [Reference-game runtime authority and delivery: U10 release alignment repaired](registry/2026-07/2026-07-26T025113Z-engine-foundation-contract-completion-codex-root-427f191683c748e486e1e5b51618957d.md) - Records the completed local release-verifier alignment repair and the remaining hosted CI and separately authorized U10 rerun gates.
+* **Verification Evidence**: [RGD-U12 release verifier pin follows candidate layout](verification/2026-07/2026-07-26T025029Z-rgd-u12-release-verifier-pin-follows-candidate-layout-651c8156185f48a080d52cd1c0b68247.md) - Records the reviewed ancestor, blob, and SHA-256 binding that keeps release validation aligned with the repaired candidate layout.
 * **Work Registration**: [Reference-game runtime authority and delivery: U10 budget repair awaiting rerun](registry/2026-07/2026-07-26T023137Z-engine-foundation-contract-completion-codex-root-996d8f32163f47a8a95d31826ffe2ebb.md) - Records the failed authorized U10 dispatch, bounded local repair, and the remaining independently authorized hosted rerun gate.
 * **Verification Evidence**: [RGD-U10 candidate capacity diagnosis and local budget repair](verification/2026-07/2026-07-26T023033Z-rgd-u10-candidate-capacity-diagnosis-and-local-budget-repair-914d3c5e90934617b4778cb2c85aa431.md) - Records the failed protected candidate run, measured Linux package capacity, and local bounded repair while preserving the required hosted rerun gate.
 
@@ -139,7 +141,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game-driven foundation refactor](registry/2026-07/2026-07-17T014904Z-engine-foundation-contract-completion-codex-root-a08a5a1abe424c2b94cdf130a2667d95.md) - Continue the active reference-game-driven foundation plan after independently closing RGF-U5.
 * **Verification Evidence**: [RGF-U5 managed runtime verification](verification/2026-07/2026-07-17T014655Z-rgf-u5-managed-runtime-verification-5b37e0cb30ca4d24bb1b30fc98dc7e47.md) - Verified sealed-App admission, sticky fault propagation, exact stepping, bounded close ownership, Winit retirement ordering, and independent reference-game consumption.
 * **Subagent Finding**: [RGF-U5 runtime ownership closure review](subagents/2026-07/2026-07-17-rgf-u5-runtime-closure-review.md) - Independent closure review of the corrected managed-runtime ownership, fault, driver, and finite-close contracts.
-* **Decision**: [Treat ignore-deferred scheduling as an explicit compatibility opt-out](decisions/2026-07/2026-07-17T003947Z-treat-ignore-deferred-scheduling-as-an-explicit-compatibility-opt-out-5cbaef069ee343789b4414771fa516e7.md) - Keep Bevy's typed scheduler surface while excluding explicit ignore-deferred relations from Nara's public semantic-anchor compatibility guarantee.
-
-## 2026-07-16
-* **Subagent Finding**: [Bevy lifecycle observer and deferred schedule verification](subagents/2026-07/2026-07-16T164357Z-bevy-lifecycle-observer-and-deferred-schedule-verification-027c48803a9442d8930a3d0f558bafd3.md) - Source-bound correction for lifecycle event names, observer scopes, dynamic hooks, public-anchor deferred policy, and package removal co-ownership.
