@@ -70,7 +70,24 @@ fn inline_code_values(document: &str) -> Vec<&str> {
 
 fn section<'a>(document: &'a str, heading: &str) -> Option<&'a str> {
     let (_, after_heading) = document.split_once(heading)?;
-    let end = after_heading.find("\n## ").unwrap_or(after_heading.len());
+    let heading_level = heading.bytes().take_while(|byte| *byte == b'#').count();
+    if heading_level == 0 || heading.as_bytes().get(heading_level) != Some(&b' ') {
+        return None;
+    }
+    let mut offset = 0;
+    let mut end = after_heading.len();
+    for line in after_heading.split_inclusive('\n') {
+        let candidate = line.trim_end_matches(['\r', '\n']);
+        let candidate_level = candidate.bytes().take_while(|byte| *byte == b'#').count();
+        if candidate_level > 0
+            && candidate_level <= heading_level
+            && candidate.as_bytes().get(candidate_level) == Some(&b' ')
+        {
+            end = offset;
+            break;
+        }
+        offset += line.len();
+    }
     Some(&after_heading[..end])
 }
 
@@ -892,7 +909,7 @@ e2e5ea1ed4cf4e28860cedb32f0e7e48.md";
     }
 
     assert_eq!(
-        table_key_values(&matrix, "## Evidence Revisions"),
+        table_key_values(&matrix, "# Evidence Revisions"),
         expected_table([
             (
                 "RGF-U23 historical matrix",
@@ -912,7 +929,7 @@ e2e5ea1ed4cf4e28860cedb32f0e7e48.md";
         ])
     );
     assert_eq!(
-        table_key_values(&matrix, "## ADR 0084 Runtime Metrics"),
+        table_key_values(&matrix, "# ADR 0084 Runtime Metrics"),
         expected_table([
             ("Startup publication", "Pass"),
             ("Ownership handoff", "Pass"),
@@ -930,7 +947,7 @@ e2e5ea1ed4cf4e28860cedb32f0e7e48.md";
         ])
     );
     assert_eq!(
-        table_key_values(&matrix, "## ADR 0082 Host Metrics"),
+        table_key_values(&matrix, "# ADR 0082 Host Metrics"),
         expected_table([
             ("Pre-mutation project rejection", "Pass"),
             ("Recipe coherence", "Pass"),
@@ -945,7 +962,7 @@ e2e5ea1ed4cf4e28860cedb32f0e7e48.md";
         ])
     );
     assert_eq!(
-        table_key_values(&matrix, "## Combined Runtime/Host Scenarios"),
+        table_key_values(&matrix, "# Combined Runtime/Host Scenarios"),
         expected_table([
             ("Sequential RuntimeInstances", "Pass"),
             ("Overlapping RuntimeInstances", "Pass"),
@@ -1123,7 +1140,7 @@ fn governance_validator_rejects_evidence_and_authority_drift() {
     assert_rejected(&baseline, |snapshot| {
         snapshot.authority_documents.push((
             "synthetic-product.md".to_owned(),
-            "ADR 0082 is current product authority.".to_owned(),
+            "ADR 0083 is current product authority.".to_owned(),
         ));
     });
     assert_eq!(
