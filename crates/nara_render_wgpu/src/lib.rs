@@ -1,6 +1,6 @@
 //! Wgpu backend for backend-neutral nara render data.
 
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Instant};
 
 mod backend;
 mod error;
@@ -9,6 +9,7 @@ mod quad;
 #[cfg(feature = "sprite-submitter")]
 mod sprite;
 mod surface;
+mod telemetry;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod texture;
 #[cfg(feature = "ui-submitter")]
@@ -20,9 +21,9 @@ use crate::quad::{
 };
 use crate::surface::{SurfaceDropReason, WgpuSurfaceState};
 use nara_app::{
-    __RuntimeDriverPort, App, CoreStage, Plugin, PluginError, PluginShutdownContext,
-    RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration,
-    RuntimeState, RuntimeWorldAccessError,
+    __RuntimeDriverPort, App, CoreStage, FrameExecutionStart, Plugin, PluginError,
+    PluginShutdownContext, RuntimeDriverScope, RuntimeFault, RuntimeFaultKind,
+    RuntimeFaultReporter, RuntimeGeneration, RuntimeState, RuntimeWorldAccessError,
 };
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_asset::Assets;
@@ -55,10 +56,16 @@ use nara_window::{
 
 pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats, WgpuRenderBackend};
 pub use crate::error::WgpuRenderError;
+pub use crate::telemetry::{
+    MAX_ADAPTER_SUMMARY_FIELD_BYTES, MAX_BUFFERED_FRAME_COMPLETIONS, MAX_PENDING_FRAME_COMPLETIONS,
+    WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
+    WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuTelemetryConfigError,
+};
 
 pub use crate::surface::{
-    SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, choose_present_mode,
-    clear_color_to_wgpu, map_present_mode, surface_acquire_policy, surface_resize_action,
+    SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, WgpuConfiguredPresentMode,
+    choose_present_mode, clear_color_to_wgpu, map_present_mode, surface_acquire_policy,
+    surface_resize_action,
 };
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
@@ -180,6 +187,8 @@ struct WgpuFramePayload {
 struct WgpuCapturedFrame {
     topology: RenderFramePacket,
     payload: WgpuFramePayload,
+    app_frame_index: u64,
+    work_started_at: Instant,
 }
 
 impl WgpuFramePayload {
@@ -214,6 +223,21 @@ impl WgpuFramePayload {
     }
 }
 
+impl PreparedSubmitterDraw {
+    fn instance_buffer_bytes(&self) -> u64 {
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        {
+            self.buffers.iter().fold(0_u64, |total, buffer| {
+                total.saturating_add(buffer.logical_bytes())
+            })
+        }
+        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        {
+            0
+        }
+    }
+}
+
 #[derive(Debug, Default, Resource)]
 struct WgpuFramePacketSlot {
     current: Option<Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>>,
@@ -231,6 +255,7 @@ enum WgpuFrameCaptureError {
 
 fn capture_wgpu_frame_packet(
     generation: Option<Res<RuntimeGeneration>>,
+    frame_start: Res<FrameExecutionStart>,
     frame: Res<RenderFrame>,
     primary_window_id: Option<Res<PrimaryWindowId>>,
     windows: Query<&Window>,
@@ -263,7 +288,14 @@ fn capture_wgpu_frame_packet(
             &views,
             phases,
         )
-        .map(|topology| topology.map(|topology| WgpuCapturedFrame { topology, payload }))
+        .map(|topology| {
+            topology.map(|topology| WgpuCapturedFrame {
+                topology,
+                payload,
+                app_frame_index: frame_start.frame(),
+                work_started_at: frame_start.started_at(),
+            })
+        })
         .map_err(WgpuFrameCaptureError::from),
     );
 }
@@ -623,6 +655,38 @@ mod tests {
     }
 
     #[test]
+    fn exact_fixed_step_does_not_require_app_and_render_frame_counters_to_match() {
+        let mut app = App::new();
+        app.add_plugins((
+            nara_reflect::ComponentRegistryPlugin,
+            nara_render::RenderPlugin,
+            WgpuRenderPlugin,
+        ))
+        .unwrap();
+        let candidate = admit_runtime(app);
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        assert!(matches!(
+            runtime.request_control(nara_app::RuntimeControl::Pause),
+            nara_app::RuntimeControlRequestResult::Accepted(_)
+        ));
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        assert!(matches!(
+            runtime.request_control(nara_app::RuntimeControl::StepFixedTick),
+            nara_app::RuntimeControlRequestResult::Accepted(_)
+        ));
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+
+        let app_frame = runtime.world().resource::<FrameExecutionStart>().frame();
+        let render_frame = runtime.world().resource::<RenderFrame>().index;
+        assert_eq!(app_frame, render_frame + 1);
+        assert_eq!(runtime.state(), RuntimeState::Paused);
+        assert_eq!(runtime.fault(), None);
+    }
+
+    #[test]
     fn captured_topology_is_immutable_and_next_frame_rejects_before_surface_work() {
         let mut app = App::new();
         app.add_plugins((
@@ -736,6 +800,48 @@ mod tests {
             surface_acquire_policy(SurfaceTextureStatus::Lost),
             SurfaceAcquireAction::RecreateSurface
         );
+    }
+
+    #[test]
+    fn configured_present_mode_reports_the_exact_wgpu_mode() {
+        let cases = [
+            (
+                wgpu::PresentMode::AutoVsync,
+                WgpuConfiguredPresentMode::AutoVsync,
+                "auto-vsync",
+            ),
+            (
+                wgpu::PresentMode::AutoNoVsync,
+                WgpuConfiguredPresentMode::AutoNoVsync,
+                "auto-no-vsync",
+            ),
+            (
+                wgpu::PresentMode::Fifo,
+                WgpuConfiguredPresentMode::Fifo,
+                "fifo",
+            ),
+            (
+                wgpu::PresentMode::FifoRelaxed,
+                WgpuConfiguredPresentMode::FifoRelaxed,
+                "fifo-relaxed",
+            ),
+            (
+                wgpu::PresentMode::Immediate,
+                WgpuConfiguredPresentMode::Immediate,
+                "immediate",
+            ),
+            (
+                wgpu::PresentMode::Mailbox,
+                WgpuConfiguredPresentMode::Mailbox,
+                "mailbox",
+            ),
+        ];
+
+        for (wgpu_mode, expected, label) in cases {
+            let configured = WgpuConfiguredPresentMode::from_wgpu(wgpu_mode);
+            assert_eq!(configured, expected);
+            assert_eq!(configured.as_str(), label);
+        }
     }
 
     #[test]

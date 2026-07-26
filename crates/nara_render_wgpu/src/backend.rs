@@ -5,6 +5,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
+    time::Duration,
 };
 
 use nara_ecs::Resource;
@@ -25,8 +26,12 @@ use crate::quad::{
     create_quad_pipeline, create_quad_texture_bind_group_layout, quad_batch_draw_stats,
 };
 use crate::surface::{
-    SurfaceDropReason, SurfaceResizeAction, WgpuSurfaceState, configure_surface, create_surface,
-    surface_extent, surface_resize_action,
+    SurfaceDropReason, SurfaceResizeAction, WgpuConfiguredPresentMode, WgpuSurfaceState,
+    configure_surface, create_surface, surface_extent, surface_resize_action,
+};
+use crate::telemetry::{
+    WgpuAdapterSummary, WgpuBackendTelemetry, WgpuBackendTelemetryConfig,
+    WgpuFrameCompletionSample, WgpuFrameCompletionStats, WgpuGpuResourceStats,
 };
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::texture::WgpuSpriteTextureCache;
@@ -38,6 +43,7 @@ use crate::{
 static NEXT_WGPU_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 const WGPU_FORCE_FALLBACK_ADAPTER_ENV: &str = "NARA_WGPU_FORCE_FALLBACK";
 const INVALID_FALLBACK_ADAPTER_ENV: &str = "NARA_WGPU_FORCE_FALLBACK must be either 0 or 1";
+const TELEMETRY_COMPLETION_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn force_fallback_adapter_from_value(value: Option<&OsStr>) -> Result<bool, &'static str> {
     match value {
@@ -163,6 +169,7 @@ pub struct WgpuRenderBackend {
     runtime_generation: Option<u64>,
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
+    telemetry: WgpuBackendTelemetry,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -206,6 +213,18 @@ impl WgpuRenderBackend {
     }
 
     #[must_use]
+    pub fn configured_surface_present_mode(
+        &self,
+        window_id: WindowId,
+    ) -> Option<WgpuConfiguredPresentMode> {
+        self.surfaces
+            .get(&window_id)?
+            .config
+            .as_ref()
+            .map(|config| WgpuConfiguredPresentMode::from_wgpu(config.present_mode))
+    }
+
+    #[must_use]
     pub const fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
         self.frame_transaction_stats
     }
@@ -218,6 +237,75 @@ impl WgpuRenderBackend {
     #[must_use]
     pub const fn device_epoch(&self) -> u64 {
         self.device_epoch
+    }
+
+    /// Returns bounded diagnostic information for the currently selected adapter.
+    ///
+    /// This is backend-local observation data. It is not a persistent adapter identity and must
+    /// not be used to select or reconstruct a device.
+    #[must_use]
+    pub fn adapter_summary(&self) -> Option<WgpuAdapterSummary> {
+        self.adapter.as_ref().map(|adapter| {
+            let info = adapter.get_info();
+            WgpuAdapterSummary::from_parts(
+                &info.name,
+                info.vendor,
+                info.device,
+                device_type_label(info.device_type),
+                backend_label(info.backend),
+                &info.driver,
+                &info.driver_info,
+            )
+        })
+    }
+
+    /// Enables finite GPU completion observations for this backend instance.
+    ///
+    /// Reconfiguration discards any pending or undrained observations and accounts them as lost.
+    /// It does not discard resource-retirement records from the same device epoch. Call this
+    /// before the first submitted frame when GPU resource peaks will be used as evidence; any
+    /// earlier instance-buffer submission is retained conservatively and reported as a lost
+    /// retirement.
+    pub fn configure_telemetry(&mut self, config: WgpuBackendTelemetryConfig) {
+        self.telemetry.configure(config);
+    }
+
+    #[must_use]
+    pub fn frame_completion_stats(&self) -> WgpuFrameCompletionStats {
+        self.telemetry.completion_stats()
+    }
+
+    /// Drains at most the configured number of completed frame observations.
+    pub fn drain_frame_completion_samples(&mut self) -> Vec<WgpuFrameCompletionSample> {
+        self.telemetry.drain_completed_frames()
+    }
+
+    #[must_use]
+    pub fn gpu_resource_stats(&self) -> WgpuGpuResourceStats {
+        self.telemetry.gpu_resource_stats()
+    }
+
+    /// Waits for the latest submitted GPU work and drives completion callbacks.
+    ///
+    /// This is a bounded diagnostic drain for an explicit measurement end boundary. Normal frame
+    /// execution must rely on regular queue submission and polling instead of calling it.
+    pub fn wait_for_telemetry_completions(&self) -> Result<(), WgpuRenderError> {
+        let device = self
+            .device
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(TELEMETRY_COMPLETION_WAIT_TIMEOUT),
+            })
+            .map(|_| ())
+            .map_err(|error| match error {
+                wgpu::PollError::Timeout => WgpuRenderError::TelemetryCompletionWaitTimeout,
+                wgpu::PollError::WrongSubmissionIndex(_, _) => {
+                    WgpuRenderError::TelemetryCompletionWaitFailed
+                }
+            })
     }
 
     pub(super) fn begin_frame_transaction(&mut self, frame_index: u64) {
@@ -246,6 +334,7 @@ impl WgpuRenderBackend {
             self.quad_pipelines.clear();
             self.quad_textures.clear();
         }
+        self.telemetry.retire_device_epoch();
         retirement_result
     }
 
@@ -273,6 +362,8 @@ impl WgpuRenderBackend {
         let WgpuCapturedFrame {
             topology: packet,
             payload,
+            app_frame_index,
+            work_started_at,
         } = captured;
         stats.draw_calls = 0;
         stats.sprites = 0;
@@ -342,6 +433,8 @@ impl WgpuRenderBackend {
         status.mark_ready(WGPU_RENDER_BACKEND);
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         self.quad_textures.begin_frame(frame.index);
+        self.telemetry
+            .observe_gpu_resources(self.logical_texture_bytes(), 0);
         self.configure_surface_if_needed(window, size)?;
         if !self
             .surfaces
@@ -357,14 +450,28 @@ impl WgpuRenderBackend {
             return Ok(());
         }
         let view_format = self.surface_view_format(window.id)?;
-        let draw = self.prepare_submitter_draw(view_format, &payload, resources, frame.index)?;
+        let draw = match self.prepare_submitter_draw(view_format, &payload, resources, frame.index)
+        {
+            Ok(draw) => draw,
+            Err(error) => {
+                self.telemetry
+                    .observe_gpu_resources(self.logical_texture_bytes(), 0);
+                return Err(error);
+            }
+        };
+        self.telemetry
+            .observe_gpu_resources(self.logical_texture_bytes(), draw.instance_buffer_bytes());
         let submitted = self.render_window(
             window.id,
             packet.view().viewport,
             packet.view().clear_color,
             &draw,
             packet.pass_plan().steps(),
-        )?;
+            app_frame_index,
+            work_started_at,
+        );
+        self.telemetry.finish_prepared_gpu_resources();
+        let submitted = submitted?;
 
         if submitted {
             stats.draw_calls = draw.draw_calls;
@@ -464,6 +571,7 @@ impl WgpuRenderBackend {
         self.queue = Some(queue);
         self.device_loss_signal = Some(device_loss_signal);
         self.device_epoch = device_epoch;
+        self.telemetry.begin_device_epoch(device_epoch);
         self.state = WgpuBackendState::Ready;
         self.last_error = None;
         Ok(())
@@ -523,6 +631,8 @@ impl WgpuRenderBackend {
         clear_color: Color,
         draw: &PreparedSubmitterDraw,
         pass_steps: &[nara_render::RenderPassStep],
+        frame_index: u64,
+        work_started_at: std::time::Instant,
     ) -> Result<bool, WgpuRenderError> {
         let device = self
             .device
@@ -554,6 +664,13 @@ impl WgpuRenderBackend {
                     draw,
                     pass_steps,
                 )?;
+                if let Some(completion) = self.telemetry.begin_frame_submission(
+                    frame_index,
+                    self.device_epoch,
+                    work_started_at,
+                ) {
+                    queue.on_submitted_work_done(move || completion.complete());
+                }
                 self.frame_transaction_stats.queue_submissions += 1;
                 self.frame_transaction_stats.presents += 1;
                 Ok(true)
@@ -571,6 +688,13 @@ impl WgpuRenderBackend {
                     draw,
                     pass_steps,
                 )?;
+                if let Some(completion) = self.telemetry.begin_frame_submission(
+                    frame_index,
+                    self.device_epoch,
+                    work_started_at,
+                ) {
+                    queue.on_submitted_work_done(move || completion.complete());
+                }
                 self.frame_transaction_stats.queue_submissions += 1;
                 self.frame_transaction_stats.presents += 1;
                 surface_state.dirty = true;
@@ -733,6 +857,17 @@ impl WgpuRenderBackend {
         }
     }
 
+    fn logical_texture_bytes(&self) -> u64 {
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        {
+            self.quad_textures.logical_texture_bytes()
+        }
+        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+        {
+            0
+        }
+    }
+
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     fn ensure_quad_texture_bind_group_layout(
         &mut self,
@@ -810,6 +945,27 @@ impl WgpuRenderBackend {
         };
         self.last_error = Some(message.clone());
         message
+    }
+}
+
+const fn device_type_label(device_type: wgpu::DeviceType) -> &'static str {
+    match device_type {
+        wgpu::DeviceType::Other => "other",
+        wgpu::DeviceType::IntegratedGpu => "integrated-gpu",
+        wgpu::DeviceType::DiscreteGpu => "discrete-gpu",
+        wgpu::DeviceType::VirtualGpu => "virtual-gpu",
+        wgpu::DeviceType::Cpu => "cpu",
+    }
+}
+
+const fn backend_label(backend: wgpu::Backend) -> &'static str {
+    match backend {
+        wgpu::Backend::Noop => "noop",
+        wgpu::Backend::Vulkan => "vulkan",
+        wgpu::Backend::Metal => "metal",
+        wgpu::Backend::Dx12 => "dx12",
+        wgpu::Backend::Gl => "gl",
+        wgpu::Backend::BrowserWebGpu => "browser-webgpu",
     }
 }
 
@@ -913,6 +1069,48 @@ mod tests {
     }
 
     #[test]
+    fn backend_completion_telemetry_is_bounded_and_opt_in() {
+        let mut backend = WgpuRenderBackend::default();
+        assert!(!backend.frame_completion_stats().enabled());
+
+        backend
+            .configure_telemetry(crate::telemetry::WgpuBackendTelemetryConfig::new(2, 3).unwrap());
+
+        let stats = backend.frame_completion_stats();
+        assert!(stats.enabled());
+        assert_eq!(stats.pending_samples(), 0);
+        assert_eq!(stats.buffered_samples(), 0);
+        assert!(backend.drain_frame_completion_samples().is_empty());
+    }
+
+    #[test]
+    fn backend_cleanup_quarantines_pending_completion_and_resource_tokens() {
+        let mut backend = WgpuRenderBackend::default();
+        backend.configure_telemetry(WgpuBackendTelemetryConfig::new(2, 2).unwrap());
+        backend.telemetry.begin_device_epoch(7);
+        backend.telemetry.observe_gpu_resources(4, 64);
+        let obsolete = backend
+            .telemetry
+            .begin_frame_submission(10, 7, std::time::Instant::now())
+            .unwrap();
+        backend.telemetry.finish_prepared_gpu_resources();
+
+        backend
+            .clear_gpu_resources(SurfaceDropReason::BackendCleanup)
+            .unwrap();
+        obsolete.complete();
+
+        let completion = backend.frame_completion_stats();
+        assert_eq!(completion.pending_samples(), 0);
+        assert_eq!(completion.completed_samples(), 0);
+        assert_eq!(completion.lost_samples(), 1);
+        let resources = backend.gpu_resource_stats();
+        assert_eq!(resources.pending_retirements(), 0);
+        assert_eq!(resources.lost_retirements(), 1);
+        assert_eq!(resources.current_total_bytes(), 0);
+    }
+
+    #[test]
     fn backend_instances_receive_non_reused_process_local_identities() {
         let first = WgpuRenderBackend::default();
         let second = WgpuRenderBackend::default();
@@ -973,6 +1171,7 @@ mod tests {
                 crate::WgpuRenderTextureCacheStats {
                     fallback_bindings: 1,
                     has_fallback_texture: true,
+                    texture_bytes: 4,
                     ..crate::WgpuRenderTextureCacheStats::default()
                 }
             );
@@ -1037,6 +1236,8 @@ mod tests {
         WgpuCapturedFrame {
             topology,
             payload: WgpuFramePayload::default(),
+            app_frame_index: frame_index,
+            work_started_at: std::time::Instant::now(),
         }
     }
 

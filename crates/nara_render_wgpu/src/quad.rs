@@ -78,6 +78,13 @@ pub(crate) struct WgpuQuadBatchBuffer {
     alpha_mode: AlphaMode2d,
     scissor: Option<WgpuScissorRect>,
     instance_count: u32,
+    logical_bytes: u64,
+}
+
+impl WgpuQuadBatchBuffer {
+    pub(crate) const fn logical_bytes(&self) -> u64 {
+        self.logical_bytes
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +193,7 @@ pub(crate) fn create_quad_batch_buffers(
                 ),
             };
             let instance_count = saturating_u32(batch.instances.len());
+            let logical_bytes = quad_instance_byte_len(batch.instances.len());
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("nara_wgpu_quad_instances"),
                 contents: bytemuck::cast_slice(&batch.instances),
@@ -199,6 +207,7 @@ pub(crate) fn create_quad_batch_buffers(
                 alpha_mode: batch.material.alpha_mode,
                 scissor: batch.scissor,
                 instance_count,
+                logical_bytes,
             })
         })
         .collect()
@@ -282,6 +291,12 @@ fn saturating_u32(value: usize) -> u32 {
     value.min(u32::MAX as usize) as u32
 }
 
+fn quad_instance_byte_len(instance_count: usize) -> wgpu::BufferAddress {
+    u64::try_from(instance_count)
+        .unwrap_or(u64::MAX)
+        .saturating_mul(std::mem::size_of::<WgpuQuadInstance>() as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,6 +312,7 @@ mod tests {
         assert_eq!(layout.attributes.len(), 6);
         assert_eq!(layout.attributes[0].offset, 0);
         assert_eq!(layout.attributes[5].offset, 48);
+        assert_eq!(quad_instance_byte_len(3), 3 * layout.array_stride);
     }
 
     #[test]

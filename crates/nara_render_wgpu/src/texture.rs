@@ -49,7 +49,20 @@ impl WgpuSpriteTextureCache {
         stats.image_bindings = self.image_bindings.len();
         stats.fallback_bindings = self.fallback_bindings.len();
         stats.has_fallback_texture = self.fallback_texture.is_some();
+        stats.texture_bytes = self.logical_texture_bytes();
         stats
+    }
+
+    #[must_use]
+    pub(crate) fn logical_texture_bytes(&self) -> u64 {
+        let image_bytes = self.images.values().fold(0_u64, |total, image| {
+            total.saturating_add(image.texture.logical_bytes)
+        });
+        image_bytes.saturating_add(
+            self.fallback_texture
+                .as_ref()
+                .map_or(0, |texture| texture.logical_bytes),
+        )
     }
 
     pub(crate) fn clear(&mut self) {
@@ -251,6 +264,7 @@ pub struct WgpuTextureCacheStats {
     pub image_bindings: usize,
     pub fallback_bindings: usize,
     pub has_fallback_texture: bool,
+    pub texture_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -264,6 +278,7 @@ struct WgpuImageTextureResource {
 struct WgpuTextureResource {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
+    logical_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -417,6 +432,7 @@ fn create_texture_resource(
     WgpuTextureResource {
         _texture: texture,
         view,
+        logical_bytes: u64::try_from(pixels.len()).unwrap_or(u64::MAX),
     }
 }
 

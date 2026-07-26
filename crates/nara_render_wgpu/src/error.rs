@@ -15,6 +15,10 @@ pub enum WgpuRenderError {
     DeviceLost,
     #[error("wgpu device epoch was exhausted")]
     DeviceEpochExhausted,
+    #[error("wgpu telemetry completion wait timed out")]
+    TelemetryCompletionWaitTimeout,
+    #[error("wgpu telemetry completion wait failed")]
+    TelemetryCompletionWaitFailed,
     #[error("render frame generation {actual} does not match active generation {expected}")]
     StaleFrameGeneration { expected: u64, actual: u64 },
     #[error("render frame {frame_index} was already consumed")]

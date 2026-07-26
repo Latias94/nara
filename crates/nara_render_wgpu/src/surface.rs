@@ -164,6 +164,46 @@ pub enum SurfaceAcquireAction {
     Error,
 }
 
+/// Present mode stored in the active wgpu surface configuration.
+///
+/// This reports the backend's configured mode rather than the project request. Auto modes may
+/// still select a platform-dependent fallback internally; evidence that requires disabled VSync
+/// should require [`Self::Immediate`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WgpuConfiguredPresentMode {
+    AutoVsync,
+    AutoNoVsync,
+    Fifo,
+    FifoRelaxed,
+    Immediate,
+    Mailbox,
+}
+
+impl WgpuConfiguredPresentMode {
+    pub(crate) const fn from_wgpu(mode: wgpu::PresentMode) -> Self {
+        match mode {
+            wgpu::PresentMode::AutoVsync => Self::AutoVsync,
+            wgpu::PresentMode::AutoNoVsync => Self::AutoNoVsync,
+            wgpu::PresentMode::Fifo => Self::Fifo,
+            wgpu::PresentMode::FifoRelaxed => Self::FifoRelaxed,
+            wgpu::PresentMode::Immediate => Self::Immediate,
+            wgpu::PresentMode::Mailbox => Self::Mailbox,
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AutoVsync => "auto-vsync",
+            Self::AutoNoVsync => "auto-no-vsync",
+            Self::Fifo => "fifo",
+            Self::FifoRelaxed => "fifo-relaxed",
+            Self::Immediate => "immediate",
+            Self::Mailbox => "mailbox",
+        }
+    }
+}
+
 #[must_use]
 pub fn surface_resize_action(current: Extent2d, next: Extent2d) -> SurfaceResizeAction {
     if next.is_empty() {

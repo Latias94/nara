@@ -6,7 +6,7 @@ use std::{
     num::NonZeroU32,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use nara_ecs::{
@@ -327,6 +327,34 @@ impl RealTime {
     #[must_use]
     pub fn elapsed_seconds(&self) -> f64 {
         self.elapsed.as_secs_f64()
+    }
+}
+
+/// Process-local start boundary for the currently executing App frame.
+///
+/// The App publishes this resource after the frame clock plan succeeds and before any
+/// [`CoreStage`] schedule runs. The timestamp includes frame-plan work but excludes one-time
+/// startup. It exists for correlated diagnostics and must not enter persistent data or gameplay
+/// decisions.
+#[derive(Clone, Copy, Debug, Resource)]
+pub struct FrameExecutionStart {
+    frame: u64,
+    started_at: Instant,
+}
+
+impl FrameExecutionStart {
+    const fn new(frame: u64, started_at: Instant) -> Self {
+        Self { frame, started_at }
+    }
+
+    #[must_use]
+    pub const fn frame(self) -> u64 {
+        self.frame
+    }
+
+    #[must_use]
+    pub const fn started_at(self) -> Instant {
+        self.started_at
     }
 }
 
@@ -1962,8 +1990,13 @@ impl App {
     ) -> Result<AppFrameOutcome, AppRunError> {
         debug_assert!(self.started, "managed frames require completed startup");
 
+        let frame_started_at = Instant::now();
         let time_frame_plan =
             TimeFramePlan::from_world(&self.world, real_delta, paused_stages_only)?;
+        self.world.insert_resource(FrameExecutionStart::new(
+            time_frame_plan.real_time.frame,
+            frame_started_at,
+        ));
         time_frame_plan.commit(&mut self.world);
         let mut fixed_time = time_frame_plan.fixed_time;
         let mut frame_status = None;
@@ -2121,6 +2154,9 @@ mod tests {
 
     #[derive(Debug, Default, Resource)]
     struct FrameStatusObservations(Vec<(u64, u32, u64, Duration, f32)>);
+
+    #[derive(Debug, Default, Resource)]
+    struct FrameExecutionStartObservations(Vec<(u64, u64, bool)>);
 
     #[derive(Debug, Default, Resource)]
     struct RemovalCount(u32);
@@ -2358,6 +2394,18 @@ mod tests {
         ));
     }
 
+    fn observe_frame_execution_start(
+        start: Res<FrameExecutionStart>,
+        real_time: Res<RealTime>,
+        mut observations: ResMut<FrameExecutionStartObservations>,
+    ) {
+        observations.0.push((
+            start.frame(),
+            real_time.frame,
+            start.started_at() <= Instant::now(),
+        ));
+    }
+
     fn record_removals(
         mut removed: RemovedComponents<Tracked>,
         mut removal_count: ResMut<RemovalCount>,
@@ -2507,6 +2555,23 @@ mod tests {
         assert_eq!(app.world().resource::<FixedTime>().steps_this_frame(), 1);
         assert_eq!(outcome.status.fixed_steps, 1);
         assert_eq!(outcome.exit, None);
+    }
+
+    #[test]
+    fn frame_execution_start_is_published_before_the_first_stage() {
+        let mut app = App::new();
+        app.insert_resource(FrameExecutionStartObservations::default())
+            .unwrap();
+        app.add_systems(CoreStage::First, observe_frame_execution_start)
+            .unwrap();
+        assert!(!app.world().contains_resource::<FrameExecutionStart>());
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(
+            app.world().resource::<FrameExecutionStartObservations>().0,
+            vec![(1, 1, true)]
+        );
     }
 
     #[test]
