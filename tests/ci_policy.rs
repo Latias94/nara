@@ -28,13 +28,13 @@ const CONCURRENCY_GROUP: &str =
     "ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}";
 const CANDIDATE_CONCURRENCY_GROUP: &str =
     "reference-game-candidate-${{ github.workflow }}-${{ github.ref }}";
-const CANDIDATE_JOB_GUARD: &str =
-    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}";
+const CANDIDATE_JOB_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}";
+const CANDIDATE_RERUN_REJECTION_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt != '1' }}";
 const EVIDENCE_INGEST_WORKFLOW_PATH: &str = ".github/workflows/reference-game-evidence-ingest.yml";
 const EVIDENCE_INGEST_CONCURRENCY_GROUP: &str =
     "reference-game-evidence-ingest-${{ github.workflow }}-${{ github.ref }}";
-const EVIDENCE_INGEST_JOB_GUARD: &str =
-    "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}";
+const EVIDENCE_INGEST_JOB_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}";
+const EVIDENCE_INGEST_RERUN_REJECTION_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt != '1' }}";
 const GITHUB_SCRIPT_ACTION: &str = "actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71";
 const REVIEWED_EVIDENCE_SOURCE_REVISION: &str = "0c23f48d93ebb66c46377db30ce889943c0d2d63";
 const EVIDENCE_INGEST_HELPER_PATH: &str = "reference-game/tools/ingest_evidence.py";
@@ -655,8 +655,8 @@ fn validate_evidence_ingest_concurrency(concurrency: Option<&Yaml>, violations: 
     if scalar_str(field(concurrency, "group")) != Some(EVIDENCE_INGEST_CONCURRENCY_GROUP) {
         violations.push("evidence-ingest concurrency must be workflow- and ref-scoped".to_owned());
     }
-    if field(concurrency, "cancel-in-progress").and_then(Yaml::as_bool) != Some(true) {
-        violations.push("evidence-ingest concurrency must be cancellable".to_owned());
+    if field(concurrency, "cancel-in-progress").and_then(Yaml::as_bool) != Some(false) {
+        violations.push("evidence-ingest concurrency must preserve an authorized run".to_owned());
     }
 }
 
@@ -665,14 +665,26 @@ fn validate_evidence_ingest_jobs(jobs: Option<&Yaml>, violations: &mut Vec<Strin
         violations.push("evidence-ingest workflow jobs must be a mapping".to_owned());
         return;
     };
-    let expected = ["policy"]
+    let expected = ["policy", "reject-rerun"]
         .into_iter()
         .map(str::to_owned)
         .collect::<BTreeSet<_>>();
     if string_keys(jobs, "evidence-ingest workflow.jobs", violations) != expected {
-        violations.push("evidence-ingest workflow must contain exactly one policy job".to_owned());
+        violations.push(
+            "evidence-ingest workflow must contain exactly policy and rerun-rejection jobs"
+                .to_owned(),
+        );
         return;
     }
+    let Some(reject_rerun) = field(jobs, "reject-rerun").and_then(Yaml::as_hash) else {
+        return;
+    };
+    validate_rerun_rejection_job(
+        "evidence-ingest",
+        reject_rerun,
+        EVIDENCE_INGEST_RERUN_REJECTION_GUARD,
+        violations,
+    );
     let Some(job) = field(jobs, "policy").and_then(Yaml::as_hash) else {
         return;
     };
@@ -882,7 +894,15 @@ fn scan_evidence_ingest_forbidden_features(node: &Yaml, path: &str, violations: 
                 if normalized == "continue-on-error" {
                     violations.push(format!("{child_path} masks failure"));
                 }
-                if normalized == "permissions" && path != "evidence-ingest workflow" {
+                let is_empty_rerun_permissions = normalized == "permissions"
+                    && path == "evidence-ingest workflow.jobs.reject-rerun"
+                    && value
+                        .as_hash()
+                        .is_some_and(|permissions| permissions.is_empty());
+                if normalized == "permissions"
+                    && path != "evidence-ingest workflow"
+                    && !is_empty_rerun_permissions
+                {
                     violations.push(format!("{child_path} overrides workflow permissions"));
                 }
                 scan_evidence_ingest_forbidden_features(value, &child_path, violations);
@@ -1081,8 +1101,8 @@ fn validate_candidate_concurrency(concurrency: Option<&Yaml>, violations: &mut V
     if scalar_str(field(concurrency, "group")) != Some(CANDIDATE_CONCURRENCY_GROUP) {
         violations.push("candidate concurrency must be workflow- and ref-scoped".to_owned());
     }
-    if field(concurrency, "cancel-in-progress").and_then(Yaml::as_bool) != Some(true) {
-        violations.push("candidate concurrency must be cancellable".to_owned());
+    if field(concurrency, "cancel-in-progress").and_then(Yaml::as_bool) != Some(false) {
+        violations.push("candidate concurrency must preserve an authorized run".to_owned());
     }
 }
 
@@ -1091,19 +1111,93 @@ fn validate_candidate_jobs(jobs: Option<&Yaml>, violations: &mut Vec<String>) {
         violations.push("candidate workflow jobs must be a mapping".to_owned());
         return;
     };
-    let expected = ["candidate-build", "candidate-consumer"]
+    let expected = ["candidate-build", "candidate-consumer", "reject-rerun"]
         .into_iter()
         .map(str::to_owned)
         .collect::<BTreeSet<_>>();
     if string_keys(jobs, "candidate workflow.jobs", violations) != expected {
-        violations
-            .push("candidate workflow must contain exactly build and consumer jobs".to_owned());
+        violations.push(
+            "candidate workflow must contain exactly build, consumer, and rerun-rejection jobs"
+                .to_owned(),
+        );
+    }
+    if let Some(reject_rerun) = field(jobs, "reject-rerun").and_then(Yaml::as_hash) {
+        validate_rerun_rejection_job(
+            "candidate",
+            reject_rerun,
+            CANDIDATE_RERUN_REJECTION_GUARD,
+            violations,
+        );
     }
     for job_name in ["candidate-build", "candidate-consumer"] {
         let Some(job) = field(jobs, job_name).and_then(Yaml::as_hash) else {
             continue;
         };
         validate_candidate_job(job_name, job, violations);
+    }
+}
+
+fn validate_rerun_rejection_job(
+    workflow: &str,
+    job: &yaml_rust2::yaml::Hash,
+    guard: &str,
+    violations: &mut Vec<String>,
+) {
+    validate_exact_keys(
+        job,
+        &format!("{workflow} workflow.jobs.reject-rerun"),
+        &[
+            "name",
+            "if",
+            "runs-on",
+            "timeout-minutes",
+            "permissions",
+            "steps",
+        ],
+        violations,
+    );
+    if scalar_str(field(job, "name")) != Some("Reject repeated workflow attempts")
+        || scalar_str(field(job, "if")) != Some(guard)
+        || scalar_str(field(job, "runs-on")) != Some("ubuntu-latest")
+        || field(job, "timeout-minutes").and_then(Yaml::as_i64) != Some(5)
+        || field(job, "permissions")
+            .and_then(Yaml::as_hash)
+            .is_none_or(|permissions| !permissions.is_empty())
+    {
+        violations.push(format!(
+            "{workflow} rerun rejection must be a bounded permissionless manual-attempt guard"
+        ));
+    }
+    let Some(steps) = field(job, "steps").and_then(Yaml::as_vec) else {
+        violations.push(format!(
+            "{workflow} rerun rejection must contain one failing step"
+        ));
+        return;
+    };
+    if steps.len() != 1 {
+        violations.push(format!(
+            "{workflow} rerun rejection must contain one failing step"
+        ));
+        return;
+    }
+    let Some(step) = steps[0].as_hash() else {
+        violations.push(format!(
+            "{workflow} rerun rejection must contain one failing step"
+        ));
+        return;
+    };
+    validate_exact_keys(
+        step,
+        &format!("{workflow} workflow.jobs.reject-rerun.steps[0]"),
+        &["name", "run"],
+        violations,
+    );
+    if scalar_str(field(step, "name")) != Some("Reject rerun without new authorization")
+        || scalar_str(field(step, "run")) != Some("exit 1")
+    {
+        violations.push(format!(
+            "{workflow} rerun rejection must contain one failing step"
+        ));
     }
 }
 
@@ -1471,7 +1565,15 @@ fn scan_candidate_forbidden_features(node: &Yaml, path: &str, violations: &mut V
                 if normalized == "continue-on-error" {
                     violations.push(format!("{child_path} masks failure"));
                 }
-                if normalized == "permissions" && path != "candidate workflow" {
+                let is_empty_rerun_permissions = normalized == "permissions"
+                    && path == "candidate workflow.jobs.reject-rerun"
+                    && value
+                        .as_hash()
+                        .is_some_and(|permissions| permissions.is_empty());
+                if normalized == "permissions"
+                    && path != "candidate workflow"
+                    && !is_empty_rerun_permissions
+                {
                     violations.push(format!("{child_path} overrides workflow permissions"));
                 }
                 scan_candidate_forbidden_features(value, &child_path, violations);

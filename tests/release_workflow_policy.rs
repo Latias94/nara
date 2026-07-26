@@ -20,6 +20,7 @@ const APPROVAL_SCHEMA_SHA256: &str =
 const PACKAGE_LAYOUT_BLOB: &str = "803460ad1d2ea2a2e3c36d193c72b09a636f9ef9";
 const PACKAGE_LAYOUT_SHA256: &str =
     "95d53fc19a2108276199b8def11061c4650ef550c058d29ae42f55161ddb82bf";
+const LINUX_SOFTWARE_PROFILE: &str = "sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb";
 
 #[derive(Clone)]
 struct ReleasePolicyFixture {
@@ -1235,6 +1236,11 @@ fn validate_draft_smoke(job: &Hash, violations: &mut Vec<String>) {
         "Smoke Linux draft candidate without credentials",
         violations,
     );
+    validate_linux_software_profile(
+        job,
+        "Install Linux software display and Vulkan fallback",
+        violations,
+    );
     validate_step_without_environment(
         job,
         "Smoke Windows draft candidate without credentials",
@@ -1292,6 +1298,11 @@ fn validate_public_smoke(job: &Hash, violations: &mut Vec<String>) {
         "Smoke Linux public candidate without credentials",
         violations,
     );
+    validate_linux_software_profile(
+        job,
+        "Install Linux software display and Vulkan fallback",
+        violations,
+    );
     validate_step_without_environment(
         job,
         "Smoke Windows public candidate without credentials",
@@ -1302,6 +1313,18 @@ fn validate_public_smoke(job: &Hash, violations: &mut Vec<String>) {
         "Record bound anonymous public smoke result",
         violations,
     );
+}
+
+fn validate_linux_software_profile(job: &Hash, name: &str, violations: &mut Vec<String>) {
+    let run = step_named(job, name)
+        .and_then(|step| field(step, "run"))
+        .and_then(Yaml::as_str)
+        .unwrap_or_default();
+    if !run.contains("sudo apt-get update") || !run.contains(LINUX_SOFTWARE_PROFILE) {
+        violations.push(format!(
+            "{name} must install the complete reviewed X11 and Vulkan software profile"
+        ));
+    }
 }
 
 fn validate_step_keys(job: &Hash, name: &str, expected: &[&str], violations: &mut Vec<String>) {

@@ -8,7 +8,7 @@ permissions:
 
 concurrency:
   group: "reference-game-candidate-${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_BUILD_JOBS: "1"
@@ -16,9 +16,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  reject-rerun:
+    name: Reject repeated workflow attempts
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt != '1' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Reject rerun without new authorization
+        run: exit 1
+
   candidate-build:
     name: "Candidate build (${{ matrix.platform }})"
-    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}"
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
     runs-on: "${{ matrix.os }}"
     timeout-minutes: 60
     strategy:
@@ -64,7 +74,7 @@ jobs:
 
   candidate-consumer:
     name: "Candidate consumer (${{ matrix.platform }})"
-    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}"
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
     needs: candidate-build
     runs-on: "${{ matrix.os }}"
     timeout-minutes: 60

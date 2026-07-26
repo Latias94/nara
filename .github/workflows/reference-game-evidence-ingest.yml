@@ -8,12 +8,22 @@ permissions:
 
 concurrency:
   group: "reference-game-evidence-ingest-${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  reject-rerun:
+    name: Reject repeated workflow attempts
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt != '1' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Reject rerun without new authorization
+        run: exit 1
+
   policy:
     name: Verify pinned evidence-ingest policy
-    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}"
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
