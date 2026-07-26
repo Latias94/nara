@@ -214,7 +214,7 @@ fn candidate_policy_rejects_untrusted_triggers_permissions_and_mutable_actions()
 }
 
 #[test]
-fn candidate_policy_rejects_checkout_in_consumer_and_missing_software_profile() {
+fn candidate_policy_rejects_checkout_and_incomplete_consumer_software_profile() {
     let mut consumer_checkout = CandidatePolicyFixture::committed();
     replace_first(
         &mut consumer_checkout.workflow,
@@ -236,6 +236,17 @@ fn candidate_policy_rejects_checkout_in_consumer_and_missing_software_profile() 
         "",
     );
     assert_candidate_policy_rejects(&missing_linux_profile, "exact ordered candidate pipeline");
+
+    let mut missing_linux_x11_runtime = CandidatePolicyFixture::committed();
+    replace_first(
+        &mut missing_linux_x11_runtime.workflow,
+        " libxkbcommon-x11-0",
+        "",
+    );
+    assert_candidate_policy_rejects(
+        &missing_linux_x11_runtime,
+        "exact ordered candidate pipeline",
+    );
 
     let mut missing_guard = CandidatePolicyFixture::committed();
     replace_first(
@@ -1413,7 +1424,7 @@ fn expected_candidate_pipeline(job_name: &str) -> Vec<String> {
             )
             .to_owned(),
             format!(
-                "Install Linux software display and Vulkan fallback|run:sudo apt-get update\nsudo apt-get install --yes xvfb mesa-vulkan-drivers vulkan-tools|if:{LINUX_STEP_GUARD}"
+                "Install Linux X11 and Vulkan software profile|run:sudo apt-get update\nsudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb|if:{LINUX_STEP_GUARD}"
             ),
             format!(
                 "{}|if:{LINUX_STEP_GUARD}",

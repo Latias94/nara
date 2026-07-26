@@ -90,11 +90,11 @@ jobs:
           path: "${{ runner.temp }}/candidate-bundle"
       - name: Verify candidate transport before extraction
         run: python -B "${{ runner.temp }}/candidate-bundle/verification/reference-game/tools/smoke_artifact.py" bundle-verify --bundle "${{ runner.temp }}/candidate-bundle" --expected-platform "${{ matrix.platform }}" --expected-source-revision "${{ github.sha }}"
-      - name: Install Linux software display and Vulkan fallback
+      - name: Install Linux X11 and Vulkan software profile
         if: "${{ runner.os == 'Linux' }}"
         run: |
           sudo apt-get update
-          sudo apt-get install --yes xvfb mesa-vulkan-drivers vulkan-tools
+          sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb
       - name: Smoke Linux candidate
         if: "${{ runner.os == 'Linux' }}"
         run: python -B "${{ runner.temp }}/candidate-bundle/verification/reference-game/tools/smoke_artifact.py" bundle-smoke --bundle "${{ runner.temp }}/candidate-bundle" --work-root "${{ runner.temp }}" --expected-platform "${{ matrix.platform }}" --expected-source-revision "${{ github.sha }}" --desktop-launcher-json '["xvfb-run","--auto-servernum","--server-args=-screen 0 1280x720x24"]' --desktop-environment NARA_WGPU_FORCE_FALLBACK=1
