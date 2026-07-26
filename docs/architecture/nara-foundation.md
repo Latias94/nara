@@ -683,10 +683,13 @@ second real adapter or stronger isolation pressure.
   mechanisms chosen by measurement. See ADR [0054](adr/0054-gpu-upload-budget-and-buffer-allocation-policy.md)
   as refined by [0096](adr/0096-evidence-gated-render-scaling-and-upload-policy.md).
 - The minimum CI definition mirrors the locked root, reference-game, and direct module-consumer
-  boundaries on disposable Windows/Linux runners. The final integrated six-cell matrix passed on
-  both platforms in RGD-U8; standalone packaging, no-checkout artifact consumption, and broader
-  feature gates retain their own evidence requirements. See ADR
-  [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md).
+  boundaries on disposable Windows/Linux runners and includes architecture governance in the root
+  job. The integrated six-cell matrix passed historically at `6914785`; later policy-test and
+  workflow hardening reopened final current-revision certification. Historical standalone
+  candidates remain evidence for that revision, while final candidates require a new run after the
+  renewed hosted gate. See ADR
+  [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md) and the
+  [delivery-evidence invalidation record](../knowledge/engineering/verification/2026-07/2026-07-26T120533Z-rgd-delivery-evidence-invalidation-after-workflow-hardening-755db565363243deb24cb34f5a08d008.md).
 
 ## Non-Authoritative Trigger Index
 
