@@ -34,7 +34,7 @@
   "limits": {
     "max_file_count": 32,
     "max_file_bytes": 33554432,
-    "max_expanded_bytes": 67108864,
+    "max_expanded_bytes": 83886080,
     "max_encoded_bytes": 33554432,
     "max_manifest_bytes": 65536
   }

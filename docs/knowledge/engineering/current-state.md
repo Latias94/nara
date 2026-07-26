@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "59a009439571e7282fc6bd20c12445f169764f2b5438b695b6974aec9b2f6563"
+source_fingerprint: "fd73951b747aaab20815aef04372a780a8c0c6053c6793ca68c2cb7267c8a314"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "59a009439571e7282fc6bd20c12445f169764f2b5438b695b6974aec9b2
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `59a009439571e7282fc6bd20c12445f169764f2b5438b695b6974aec9b2f6563`
-- Immutable records: 251
+- Source fingerprint: `fd73951b747aaab20815aef04372a780a8c0c6053c6793ca68c2cb7267c8a314`
+- Immutable records: 253
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game runtime authority and delivery: U8 refreshed, U10 awaiting authorization](registry/2026-07/2026-07-25T181936Z-engine-foundation-contract-completion-codex-root-64285f3e6e454643b68811f7cedb0379.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game runtime authority and delivery: U10 budget repair awaiting rerun](registry/2026-07/2026-07-26T023137Z-engine-foundation-contract-completion-codex-root-996d8f32163f47a8a95d31826ffe2ebb.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGD-U10 candidate capacity diagnosis and local budget repair](verification/2026-07/2026-07-26T023033Z-rgd-u10-candidate-capacity-diagnosis-and-local-budget-repair-914d3c5e90934617b4778cb2c85aa431.md) - Records the failed protected candidate run, measured Linux package capacity, and local bounded repair while preserving the required hosted rerun gate.
 - **Verification Evidence**: [RGD-U8 final-revision hosted CI refresh](verification/2026-07/2026-07-25T181843Z-rgd-u8-final-revision-hosted-ci-refresh-ac11b989e59c4df4b2db8804ceee3362.md) - Re-establishes the final hosted Windows/Linux matrix after the immutable-release approval-order repair.
 - **Verification Evidence**: [RGD-U9 first-playable product baseline verification](verification/2026-07/2026-07-25T163453Z-rgd-u9-first-playable-product-baseline-verification-ae82fc256c2145f69a239bf8f6924aa2.md) - Records the isolated Windows first-playable automatic population, deterministic Redirect verdict, missing product evidence, and non-claims.
 - **Verification Evidence**: [RGD-U8 final hosted three-workspace CI verification](verification/2026-07/2026-07-25T115419Z-rgd-u8-final-hosted-three-workspace-ci-verification-0ee1fb9b871a4716ae3d0c533fbdd044.md) - Records the final user-authorized GitHub Actions matrix for root, reference-game, and module-consumer on Windows and Linux.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGD-U10 local standalone candidate preparation verification](verification/2026-07/2026-07-23T043428Z-rgd-u10-local-candidate-preparation-verification-668ca80db5e7483f80a3f25fe4ee0301.md) - Verifies the local packaging, checkout-free consumer, smoke, policy, and candidate-workflow preparation without claiming hosted candidate execution.
 - **Verification Evidence**: [RGD-U9 local first-playable measurement preparation verification](verification/2026-07/2026-07-23T013033Z-rgd-u9-local-measurement-preparation-verification-7d09e5953e7f4d50862ac7645438c9be.md) - Records the committed non-decisive U9 plan helper, policy boundaries, and focused local verification without claiming a product baseline.
 - **Verification Evidence**: [RGD-U6 external managed-runtime runner verification](verification/2026-07/2026-07-22T230538Z-rgd-u6-external-managed-runtime-runner-verification-5c2044aca8cd4eaf81087d08c7c75e40.md) - Verifies that an independently locked renamed-root Rust package can own one concrete managed-runtime loop through public Nara APIs.
-- **Verification Evidence**: [RGD-U5 real three-host semantic parity verification](verification/2026-07/2026-07-22T215822Z-rgd-u5-real-three-host-parity-verification-481fd3d8ac1e43b09fc91d38f47062da.md) - Verifies one bounded reference-game semantic command stream through public Headless, Desktop, and Editor product Hosts.
 
 # Integration Notes
 

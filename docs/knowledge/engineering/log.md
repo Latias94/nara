@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-26
+* **Work Registration**: [Reference-game runtime authority and delivery: U10 budget repair awaiting rerun](registry/2026-07/2026-07-26T023137Z-engine-foundation-contract-completion-codex-root-996d8f32163f47a8a95d31826ffe2ebb.md) - Records the failed authorized U10 dispatch, bounded local repair, and the remaining independently authorized hosted rerun gate.
+* **Verification Evidence**: [RGD-U10 candidate capacity diagnosis and local budget repair](verification/2026-07/2026-07-26T023033Z-rgd-u10-candidate-capacity-diagnosis-and-local-budget-repair-914d3c5e90934617b4778cb2c85aa431.md) - Records the failed protected candidate run, measured Linux package capacity, and local bounded repair while preserving the required hosted rerun gate.
+
 ## 2026-07-25
 * **Work Registration**: [Reference-game runtime authority and delivery: U8 refreshed, U10 awaiting authorization](registry/2026-07/2026-07-25T181936Z-engine-foundation-contract-completion-codex-root-64285f3e6e454643b68811f7cedb0379.md) - Records the final-revision hosted CI refresh and preserves U10 as a separately authorized candidate-execution gate.
 * **Verification Evidence**: [RGD-U8 final-revision hosted CI refresh](verification/2026-07/2026-07-25T181843Z-rgd-u8-final-revision-hosted-ci-refresh-ac11b989e59c4df4b2db8804ceee3362.md) - Re-establishes the final hosted Windows/Linux matrix after the immutable-release approval-order repair.
@@ -139,5 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-07-16
 * **Subagent Finding**: [Bevy lifecycle observer and deferred schedule verification](subagents/2026-07/2026-07-16T164357Z-bevy-lifecycle-observer-and-deferred-schedule-verification-027c48803a9442d8930a3d0f558bafd3.md) - Source-bound correction for lifecycle event names, observer scopes, dynamic hooks, public-anchor deferred policy, and package removal co-ownership.
-* **Work Registration**: [Reference-game-driven foundation refactor](registry/2026-07/2026-07-16T163914Z-engine-foundation-contract-completion-codex-root-daa83b6521074f95b4a62fbd838a2425.md) - Execute the reference-game-driven successor plan with exact schedule-anchor and two-phase persistent-apply gates.
-* **Work Registration**: [Reference-game-driven foundation refactor](registry/2026-07/2026-07-16T151645Z-engine-foundation-contract-completion-codex-root-b02135bd2cdb4e50b425a3d87e18e186.md) - Execute the reference-game-driven successor plan with explicit schedule-anchor and persistent-composition gates.
