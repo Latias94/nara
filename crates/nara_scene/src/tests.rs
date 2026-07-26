@@ -57,6 +57,9 @@ struct TestEntityLink {
     target: EntityReference,
 }
 
+#[derive(Clone, Debug, PartialEq, Component)]
+struct TestLargeData;
+
 #[derive(Debug)]
 struct TestAsset;
 
@@ -614,6 +617,416 @@ fn repeated_prefab_instances_expand_without_id_collisions() {
 }
 
 #[test]
+fn repeated_prefab_instances_namespace_declared_scene_local_references() {
+    let registry = entity_link_registry();
+    let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
+    let persistent = persistent_reference("66666666-6666-4666-8666-666666666666");
+    let prefab = PrefabDocument::new([
+        SceneEntityRecord::new(scene_id("source")).with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::SceneLocal {
+                entity: scene_id("target"),
+            }),
+        ),
+        SceneEntityRecord::new(scene_id("target")),
+        SceneEntityRecord::new(scene_id("external")).with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::Persistent {
+                entity: persistent.clone(),
+            }),
+        ),
+    ]);
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let document = SceneDocument::new([
+        prefab_anchor("left", source.clone()),
+        prefab_anchor("right", source),
+    ]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    for anchor in ["left", "right"] {
+        let source = expanded
+            .entities
+            .iter()
+            .find(|entity| entity.id == scene_id(&format!("{anchor}/source")))
+            .unwrap();
+        assert_eq!(
+            exported_entity_link(source),
+            &EntityReference::SceneLocal {
+                entity: scene_id(&format!("{anchor}/target")),
+            }
+        );
+
+        let external = expanded
+            .entities
+            .iter()
+            .find(|entity| entity.id == scene_id(&format!("{anchor}/external")))
+            .unwrap();
+        assert_eq!(
+            exported_entity_link(external),
+            &EntityReference::Persistent {
+                entity: persistent.clone(),
+            }
+        );
+    }
+    let source_record = prefab
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("source"))
+        .unwrap();
+    assert_eq!(
+        exported_entity_link(source_record),
+        &EntityReference::SceneLocal {
+            entity: scene_id("target"),
+        }
+    );
+}
+
+#[test]
+fn nested_prefabs_namespace_declared_scene_local_references_through_each_anchor() {
+    let registry = entity_link_registry();
+    let inner_source = AssetRef::path("prefabs/linked-inner.ron").unwrap();
+    let outer_source = AssetRef::path("prefabs/linked-outer.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(
+            inner_source.clone(),
+            PrefabDocument::new([
+                SceneEntityRecord::new(scene_id("source")).with_component(
+                    entity_link_type_id(),
+                    entity_link_record(EntityReference::SceneLocal {
+                        entity: scene_id("target"),
+                    }),
+                ),
+                SceneEntityRecord::new(scene_id("target")),
+            ]),
+        )
+        .with_prefab(
+            outer_source.clone(),
+            PrefabDocument::new([prefab_anchor("nested", inner_source)]),
+        );
+    let document = SceneDocument::new([prefab_anchor("root", outer_source)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    let source = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("root/nested/source"))
+        .unwrap();
+    assert_eq!(
+        exported_entity_link(source),
+        &EntityReference::SceneLocal {
+            entity: scene_id("root/nested/target"),
+        }
+    );
+}
+
+#[test]
+fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
+    let registry = entity_link_registry();
+    let inner_source = AssetRef::path("prefabs/linked-inner.ron").unwrap();
+    let outer_source = AssetRef::path("prefabs/linked-outer.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(
+            inner_source.clone(),
+            PrefabDocument::new([
+                SceneEntityRecord::new(scene_id("source")).with_component(
+                    entity_link_type_id(),
+                    entity_link_record(EntityReference::SceneLocal {
+                        entity: scene_id("target"),
+                    }),
+                ),
+                SceneEntityRecord::new(scene_id("target")),
+            ]),
+        )
+        .with_prefab(
+            outer_source.clone(),
+            PrefabDocument::new([prefab_anchor("nested", inner_source)]),
+        );
+    let document = SceneDocument::new([prefab_anchor("root", outer_source)]);
+    let exact_limits = PrefabExpansionLimits::default()
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(91).unwrap());
+
+    let exact = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(exact_limits),
+    );
+
+    assert!(!exact.diagnostics.has_errors());
+    assert!(exact.document.is_some());
+
+    let failing_limits = PrefabExpansionLimits::default()
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(90).unwrap());
+    let failing = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(failing_limits),
+    );
+
+    assert!(failing.document.is_none());
+    assert!(failing.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
+            && diagnostic_has_u64_field(diagnostic, "observed", 91)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 90)
+    }));
+}
+
+#[test]
+fn prefab_reference_rewrite_uses_the_migrated_component_schema() {
+    let registry = migrated_entity_link_registry();
+    let source = AssetRef::path("prefabs/migrated-link.ron").unwrap();
+    let source_record = SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([(
+            "old_target",
+            ComponentValue::EntityReference(EntityReference::SceneLocal {
+                entity: scene_id("target"),
+            }),
+        )]),
+    );
+    let prefab = PrefabDocument::new([
+        SceneEntityRecord::new(scene_id("source"))
+            .with_component(entity_link_type_id(), source_record),
+        SceneEntityRecord::new(scene_id("target")),
+    ]);
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let document = SceneDocument::new([prefab_anchor("root", source)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    let source = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("root/source"))
+        .unwrap();
+    let component = source.components.get(&entity_link_type_id()).unwrap();
+    assert_eq!(component.version, ComponentSchemaVersion(2));
+    assert_eq!(
+        component.value.field_entity_reference("target").unwrap(),
+        &EntityReference::SceneLocal {
+            entity: scene_id("root/target"),
+        }
+    );
+    let source_component = prefab.entities[0]
+        .components
+        .get(&entity_link_type_id())
+        .unwrap();
+    assert_eq!(source_component.version, ComponentSchemaVersion::ONE);
+    assert!(source_component.value.field("old_target").is_ok());
+}
+
+#[test]
+fn prefab_expansion_budgets_namespaced_component_references_before_publication() {
+    let registry = entity_link_registry();
+    let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([
+            SceneEntityRecord::new(scene_id("source")).with_component(
+                entity_link_type_id(),
+                entity_link_record(EntityReference::SceneLocal {
+                    entity: scene_id("target"),
+                }),
+            ),
+            SceneEntityRecord::new(scene_id("target")),
+        ]),
+    );
+    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let exact_limits = PrefabExpansionLimits::default()
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(41).unwrap());
+    let exact = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(exact_limits),
+    );
+    assert!(!exact.diagnostics.has_errors());
+    assert!(exact.document.is_some());
+
+    let limits = PrefabExpansionLimits::default()
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(40).unwrap());
+    let expansion = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(limits),
+    );
+
+    assert!(expansion.document.is_none());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
+            && diagnostic_has_u64_field(diagnostic, "observed", 41)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 40)
+    }));
+}
+
+#[test]
+fn prefab_namespace_preflight_uses_the_public_materialized_node_budget() {
+    let registry = large_data_registry();
+    let source = AssetRef::path("prefabs/large-data.ron").unwrap();
+    let large_value = ComponentValue::map([(
+        "values",
+        ComponentValue::List(
+            (0..17_000)
+                .map(|value| ComponentValue::I64(i64::from(value)))
+                .collect(),
+        ),
+    )]);
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
+            large_data_type_id(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, large_value),
+        )]),
+    );
+    let document = SceneDocument::new([prefab_anchor("root", source)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(
+        !expansion.diagnostics.has_errors(),
+        "{:?}",
+        expansion.diagnostics
+    );
+    let expanded = expansion.document.unwrap();
+    let source = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("root/source"))
+        .unwrap();
+    let component = source.components.get(&large_data_type_id()).unwrap();
+    let ComponentValue::List(values) = component.value.field("values").unwrap() else {
+        panic!("large data values must remain a list");
+    };
+    assert_eq!(values.len(), 17_000);
+}
+
+#[test]
+fn prefab_namespace_rejects_undeclared_references_without_mutating_the_source() {
+    let registry = large_data_registry();
+    let source = AssetRef::path("prefabs/hidden-reference.ron").unwrap();
+    let prefab = PrefabDocument::new([
+        SceneEntityRecord::new(scene_id("source")).with_component(
+            large_data_type_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([(
+                    "values",
+                    ComponentValue::List(vec![ComponentValue::EntityReference(
+                        EntityReference::SceneLocal {
+                            entity: scene_id("target"),
+                        },
+                    )]),
+                )]),
+            ),
+        ),
+        SceneEntityRecord::new(scene_id("target")),
+    ]);
+    let source_before = prefab.clone();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let document = SceneDocument::new([prefab_anchor("root", source)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(expansion.document.is_none());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-entity-reference-rewrite-failed"
+            && diagnostic_has_text_field(diagnostic, "rewrite-error-kind", "undeclared-reference")
+            && diagnostic_has_text_field(diagnostic, "entity-id", "source")
+            && diagnostic_has_text_field(diagnostic, "component-id", "nara.test.LargeData")
+    }));
+    assert_eq!(prefab, source_before);
+}
+
+#[test]
+fn prefab_expansion_budgets_namespaced_reference_value_growth_before_publication() {
+    let registry = entity_link_registry();
+    let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([
+            SceneEntityRecord::new(scene_id("source")).with_component(
+                entity_link_type_id(),
+                entity_link_record(EntityReference::SceneLocal {
+                    entity: scene_id("target"),
+                }),
+            ),
+            SceneEntityRecord::new(scene_id("target")),
+        ]),
+    );
+    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let exact_limits = PrefabExpansionLimits::default()
+        .with_materialized_value_bytes(nara_core::ByteLimit::new(17).unwrap());
+
+    let exact = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(exact_limits),
+    );
+
+    assert!(!exact.diagnostics.has_errors());
+    assert!(exact.document.is_some());
+
+    let failing_limits = PrefabExpansionLimits::default()
+        .with_materialized_value_bytes(nara_core::ByteLimit::new(16).unwrap());
+    let failing = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(failing_limits),
+    );
+
+    assert!(failing.document.is_none());
+    assert!(failing.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-value-bytes")
+            && diagnostic_has_u64_field(diagnostic, "observed", 17)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 16)
+    }));
+}
+
+#[test]
+fn prefab_namespace_traversal_accepts_persistent_reference_at_logical_byte_limit() {
+    let registry = entity_link_registry();
+    let source = AssetRef::path("prefabs/persistent-link.ron").unwrap();
+    let persistent = persistent_reference("77777777-7777-4777-8777-777777777777");
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
+        source.clone(),
+        PrefabDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::Persistent {
+                entity: persistent.clone(),
+            }),
+        )]),
+    );
+    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let limits = PrefabExpansionLimits::default()
+        .with_materialized_value_nodes(ItemLimit::new(2).unwrap())
+        .with_materialized_value_bytes(nara_core::ByteLimit::new(26).unwrap());
+
+    let expansion = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(limits),
+    );
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    let source = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("root/source"))
+        .unwrap();
+    assert_eq!(
+        exported_entity_link(source),
+        &EntityReference::Persistent { entity: persistent }
+    );
+}
+
+#[test]
 fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
     let registry = test_registry();
     let source = AssetRef::path("prefabs/missing.ron").unwrap();
@@ -726,7 +1139,7 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
     assert!(expansion.document.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-depth-exceeded"
-            && diagnostic_has_text_field(diagnostic, "entity-id", "weapon")
+            && diagnostic_has_text_field(diagnostic, "entity-id", "enemy/weapon")
             && diagnostic_has_u64_field(diagnostic, "maximum-depth", 1)
     }));
 }
@@ -2599,6 +3012,221 @@ fn patch_validation_failure_preserves_sticky_pressure_stats_and_operation_contex
 }
 
 #[test]
+fn unpublished_patch_path_returns_no_inverse_and_canonicalizes_empty_patch() {
+    let registry = test_registry();
+    let mut document = SceneDocument {
+        entities: vec![
+            SceneEntityRecord::new(scene_id("z")),
+            SceneEntityRecord::new(scene_id("a")),
+        ],
+    };
+
+    let report =
+        ScenePatchDocument::default().apply_owned_to_unpublished_scene(&mut document, &registry);
+
+    assert!(report.applied);
+    assert!(report.inverse.is_none());
+    assert!(!report.diagnostics.has_errors());
+    assert_eq!(
+        document
+            .entities
+            .iter()
+            .map(|entity| entity.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a", "z"]
+    );
+}
+
+#[test]
+fn owned_unpublished_patch_moves_component_payload_into_candidate() {
+    let mut registry = ComponentRegistry::new();
+    register_scene_components(&mut registry).unwrap();
+    registry.freeze().unwrap();
+    let entity_id = scene_id("named");
+    let payload = "owned-prefab-override-payload".repeat(128);
+    let payload_pointer = payload.as_ptr();
+    let patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
+        entity: entity_id.clone(),
+        component: ComponentTypeId::new("nara.scene.Name"),
+        value: SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::String(payload),
+        ),
+    }]);
+    let mut document = SceneDocument::new([SceneEntityRecord::new(entity_id)]);
+
+    let report = patch.apply_owned_to_unpublished_scene(&mut document, &registry);
+
+    assert!(report.applied);
+    assert!(report.inverse.is_none());
+    let stored = document.entities[0]
+        .components
+        .get(&ComponentTypeId::new("nara.scene.Name"))
+        .unwrap()
+        .value
+        .as_str()
+        .unwrap();
+    assert_eq!(stored.as_ptr(), payload_pointer);
+}
+
+#[test]
+fn unpublished_patch_failure_isolated_from_public_atomic_patch_contract() {
+    let registry = test_registry();
+    let source = SceneDocument::new([SceneEntityRecord::new(scene_id("enemy"))
+        .with_component(position_type_id(), position_record(1))]);
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::SetField {
+            entity: scene_id("enemy"),
+            component: position_type_id(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("x"),
+            value: ComponentValue::I64(9),
+        },
+        ScenePatchOperation::SetField {
+            entity: scene_id("missing"),
+            component: position_type_id(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("x"),
+            value: ComponentValue::I64(12),
+        },
+    ]);
+    let public_patch = patch.clone();
+    let mut unpublished = source.clone();
+
+    let unpublished_report = patch.apply_owned_to_unpublished_scene(&mut unpublished, &registry);
+
+    assert!(!unpublished_report.applied);
+    assert!(unpublished_report.inverse.is_none());
+    assert_eq!(
+        unpublished.entities[0]
+            .components
+            .get(&position_type_id())
+            .unwrap()
+            .value
+            .field_i64("x")
+            .unwrap(),
+        9
+    );
+
+    let mut published = source;
+    let published_report = public_patch.apply_to_scene(&mut published, &registry);
+    assert!(!published_report.applied);
+    assert_eq!(
+        published.entities[0]
+            .components
+            .get(&position_type_id())
+            .unwrap()
+            .value
+            .field_i64("x")
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn owned_unpublished_patch_matches_public_apply_for_supported_operations() {
+    let registry = test_registry();
+    let source = SceneDocument::new([
+        SceneEntityRecord::new(scene_id("root"))
+            .with_component(position_type_id(), position_record(1)),
+        SceneEntityRecord::new(scene_id("editable"))
+            .with_component(position_type_id(), position_record(2)),
+        SceneEntityRecord::new(scene_id("empty")),
+        SceneEntityRecord::new(scene_id("doomed"))
+            .with_component(position_type_id(), position_record(7)),
+        SceneEntityRecord::new(scene_id("doomed-child")).with_parent(scene_id("doomed")),
+    ]);
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(scene_id("added"))
+                .with_component(position_type_id(), position_record(3)),
+        },
+        ScenePatchOperation::AddComponent {
+            entity: scene_id("empty"),
+            component: position_type_id(),
+            value: position_record(4),
+        },
+        ScenePatchOperation::ReplaceComponent {
+            entity: scene_id("editable"),
+            component: position_type_id(),
+            value: position_record(5),
+        },
+        ScenePatchOperation::SetField {
+            entity: scene_id("root"),
+            component: position_type_id(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("x"),
+            value: ComponentValue::I64(6),
+        },
+        ScenePatchOperation::Reparent {
+            entity: scene_id("empty"),
+            parent: Some(scene_id("root")),
+        },
+        ScenePatchOperation::RemoveComponent {
+            entity: scene_id("empty"),
+            component: position_type_id(),
+        },
+        ScenePatchOperation::RemoveEntity {
+            entity: scene_id("doomed"),
+        },
+    ]);
+    let mut published = source.clone();
+    let mut unpublished = source;
+
+    let public_report = patch.apply_to_scene(&mut published, &registry);
+    let owned_report = patch.apply_owned_to_unpublished_scene(&mut unpublished, &registry);
+
+    assert!(public_report.applied);
+    assert!(public_report.inverse.is_some());
+    assert!(owned_report.applied);
+    assert!(owned_report.inverse.is_none());
+    assert_eq!(unpublished, published);
+}
+
+#[test]
+fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
+    let registry = test_registry();
+    let inner_source = AssetRef::path("prefabs/inner.ron").unwrap();
+    let outer_source = AssetRef::path("prefabs/outer.ron").unwrap();
+    let invalid_override = ScenePatchDocument::new([ScenePatchOperation::SetField {
+        entity: scene_id("missing"),
+        component: position_type_id(),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("x"),
+        value: ComponentValue::I64(9),
+    }]);
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(
+            inner_source.clone(),
+            PrefabDocument::new([SceneEntityRecord::new(scene_id("target"))]),
+        )
+        .with_prefab(
+            outer_source.clone(),
+            PrefabDocument::new([
+                prefab_anchor_with_overrides("bad", inner_source.clone(), invalid_override),
+                prefab_anchor("good", inner_source),
+            ]),
+        );
+    let document = SceneDocument::new([prefab_anchor("root", outer_source)]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(expansion.document.is_none());
+    assert!(
+        expansion
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.patch-missing-entity" })
+    );
+    assert!(
+        !expansion
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.prefab-cycle" })
+    );
+}
+
+#[test]
 fn export_drops_parent_that_is_not_in_document() {
     let registry = test_registry();
     let mut world = World::new();
@@ -2824,6 +3452,92 @@ fn entity_link_registry() -> ComponentRegistry {
                     "target",
                     ComponentValue::EntityReference(link.target.clone()),
                 )]))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn large_data_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        large_data_type_id(),
+        "Large data",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "values",
+            "Values",
+            ComponentFieldPath::from_fields(["values"]),
+            ComponentValueKind::List,
+            true,
+        )],
+    );
+    registry
+        .register_persistent_component_with_codec::<TestLargeData, _, _>(
+            schema,
+            |value| {
+                if matches!(value.field("values")?, ComponentValue::List(_)) {
+                    Ok(TestLargeData)
+                } else {
+                    Err(ComponentCodecError::invalid_field("values", "list"))
+                }
+            },
+            |_| {
+                Ok(ComponentValue::map([(
+                    "values",
+                    ComponentValue::List(Vec::new()),
+                )]))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn migrated_entity_link_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        entity_link_type_id(),
+        "Entity link",
+        ComponentSchemaVersion(2),
+        [test_component_field(
+            "target",
+            "Target",
+            ComponentFieldPath::from_fields(["target"]),
+            ComponentValueKind::EntityRef,
+            true,
+        )],
+    );
+    registry
+        .register_persistent_component_with_codec::<TestEntityLink, _, _>(
+            schema,
+            |value| {
+                Ok(TestEntityLink {
+                    target: value.field_entity_reference("target")?.clone(),
+                })
+            },
+            |link| {
+                Ok(ComponentValue::map([(
+                    "target",
+                    ComponentValue::EntityReference(link.target.clone()),
+                )]))
+            },
+        )
+        .unwrap()
+        .register_component_migration(
+            &entity_link_type_id(),
+            ComponentSchemaVersion::ONE,
+            ComponentSchemaVersion(2),
+            |value| {
+                let ComponentValue::Map(mut fields) = value else {
+                    return Err(ComponentCodecError::invalid_field("<root>", "map"));
+                };
+                let target = fields
+                    .remove("old_target")
+                    .ok_or_else(|| ComponentCodecError::missing_field("old_target"))?;
+                fields.insert("target".to_string(), target);
+                Ok(ComponentValue::Map(fields))
             },
         )
         .unwrap();
@@ -3221,6 +3935,10 @@ fn apply_resolves_asset_type_id() -> ComponentTypeId {
 
 fn entity_link_type_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.test.EntityLink")
+}
+
+fn large_data_type_id() -> ComponentTypeId {
+    ComponentTypeId::new("nara.test.LargeData")
 }
 
 fn position_type_id() -> ComponentTypeId {

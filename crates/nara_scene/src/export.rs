@@ -1,24 +1,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use nara_asset::AssetRefExportPolicy;
-use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, World};
 use nara_identity::{
     EntityLookup, EntityReference, RuntimeEntityReference, SceneInstanceId, WorldEntityLocator,
     WorldIdentityDomain, WorldIdentityDomainId,
 };
 use nara_reflect::{
-    ComponentCapability, ComponentEncodeContext, ComponentEntityReferenceRewriteError,
-    ComponentFieldPath, ComponentRegistry, ComponentValueKind, EntityReferenceTraversalLimits,
+    ComponentCapability, ComponentEncodeContext, ComponentRegistry, EntityReferenceTraversalLimits,
     rewrite_declared_entity_references,
 };
 
 use crate::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     diagnostics::{
-        error as diagnostic_error, usize_to_u64, warning as diagnostic_warning, with_codec_error,
-        with_component_field_path, with_component_field_path_error, with_public_identifier,
-        with_public_locator, with_public_u64,
+        error as diagnostic_error, warning as diagnostic_warning, with_codec_error,
+        with_entity_reference_rewrite_error, with_public_locator,
     },
     hierarchy::Parent,
 };
@@ -283,7 +281,7 @@ pub fn export_scene_with_options(
                             );
                         }
                         Err(error) => {
-                            diagnostics.push(with_export_reference_rewrite_error(
+                            diagnostics.push(with_entity_reference_rewrite_error(
                                 with_public_locator(
                                     with_public_locator(
                                         diagnostic_error(
@@ -297,6 +295,7 @@ pub fn export_scene_with_options(
                                     schema.id.as_str(),
                                 ),
                                 &error,
+                                |error| export_reference_resolution_error_name(*error),
                             ));
                         }
                     }
@@ -340,115 +339,6 @@ pub fn export_scene_with_options(
     SceneExportReport {
         output,
         diagnostics,
-    }
-}
-
-fn with_export_reference_rewrite_error(
-    diagnostic: Diagnostic,
-    error: &ComponentEntityReferenceRewriteError<ExportReferenceResolutionError>,
-) -> Diagnostic {
-    match error {
-        ComponentEntityReferenceRewriteError::NodeLimit { maximum } => with_public_u64(
-            with_public_identifier(diagnostic, "rewrite-error-kind", "node-limit"),
-            "maximum-nodes",
-            usize_to_u64(*maximum),
-        ),
-        ComponentEntityReferenceRewriteError::ByteLimit { maximum } => with_public_u64(
-            with_public_identifier(diagnostic, "rewrite-error-kind", "byte-limit"),
-            "maximum-bytes",
-            usize_to_u64(*maximum),
-        ),
-        ComponentEntityReferenceRewriteError::DepthLimit { maximum } => with_public_u64(
-            with_public_identifier(diagnostic, "rewrite-error-kind", "depth-limit"),
-            "maximum-depth",
-            usize_to_u64(*maximum),
-        ),
-        ComponentEntityReferenceRewriteError::PathIndexOverflow => {
-            with_public_identifier(diagnostic, "rewrite-error-kind", "path-index-overflow")
-        }
-        ComponentEntityReferenceRewriteError::DuplicateDeclaredPath { path } => with_rewrite_path(
-            with_public_identifier(diagnostic, "rewrite-error-kind", "duplicate-declared-path"),
-            path,
-        ),
-        ComponentEntityReferenceRewriteError::UndeclaredReference { path } => with_rewrite_path(
-            with_public_identifier(diagnostic, "rewrite-error-kind", "undeclared-reference"),
-            path,
-        ),
-        ComponentEntityReferenceRewriteError::MissingEntityRefCapability { path } => {
-            with_rewrite_path(
-                with_public_identifier(
-                    diagnostic,
-                    "rewrite-error-kind",
-                    "missing-entity-ref-capability",
-                ),
-                path,
-            )
-        }
-        ComponentEntityReferenceRewriteError::RequiredReferenceMissing { path } => {
-            with_rewrite_path(
-                with_public_identifier(
-                    diagnostic,
-                    "rewrite-error-kind",
-                    "required-reference-missing",
-                ),
-                path,
-            )
-        }
-        ComponentEntityReferenceRewriteError::InvalidReferenceValue { path, actual } => {
-            with_public_identifier(
-                with_rewrite_path(
-                    with_public_identifier(
-                        diagnostic,
-                        "rewrite-error-kind",
-                        "invalid-reference-value",
-                    ),
-                    path,
-                ),
-                "actual-value-kind",
-                component_value_kind_name(*actual),
-            )
-        }
-        ComponentEntityReferenceRewriteError::InvalidPath { path, error } => {
-            with_component_field_path_error(
-                with_rewrite_path(
-                    with_public_identifier(diagnostic, "rewrite-error-kind", "invalid-path"),
-                    path,
-                ),
-                error,
-            )
-        }
-        ComponentEntityReferenceRewriteError::Rewrite { path, error } => with_rewrite_path(
-            with_public_identifier(
-                diagnostic,
-                "rewrite-error-kind",
-                export_reference_resolution_error_name(*error),
-            ),
-            path,
-        ),
-    }
-}
-
-fn with_rewrite_path(diagnostic: Diagnostic, path: &ComponentFieldPath) -> Diagnostic {
-    with_component_field_path(
-        diagnostic,
-        "reference-field-path",
-        "reference-field-path-depth",
-        path,
-    )
-}
-
-const fn component_value_kind_name(kind: ComponentValueKind) -> &'static str {
-    match kind {
-        ComponentValueKind::Null => "null",
-        ComponentValueKind::Bool => "bool",
-        ComponentValueKind::I64 => "i64",
-        ComponentValueKind::U64 => "u64",
-        ComponentValueKind::F64 => "f64",
-        ComponentValueKind::String => "string",
-        ComponentValueKind::List => "list",
-        ComponentValueKind::Map => "map",
-        ComponentValueKind::AssetRef => "asset-ref",
-        ComponentValueKind::EntityRef => "entity-ref",
     }
 }
 

@@ -1145,16 +1145,23 @@ impl ComponentRegistry {
         version: ComponentSchemaVersion,
         value: &ComponentValue,
     ) -> Result<MigratedComponentValue, ComponentMigrationError> {
+        self.migrate_component_value_owned(id, version, value.clone())
+    }
+
+    /// Migrates an owned component value without cloning the current-version value.
+    pub fn migrate_component_value_owned(
+        &self,
+        id: &ComponentTypeId,
+        version: ComponentSchemaVersion,
+        value: ComponentValue,
+    ) -> Result<MigratedComponentValue, ComponentMigrationError> {
         let Some(schema) = self.schema(id) else {
             return Err(ComponentMigrationError::UnknownComponentId {
                 component_id: id.clone(),
             });
         };
         if version == schema.version {
-            return Ok(MigratedComponentValue {
-                version,
-                value: value.clone(),
-            });
+            return Ok(MigratedComponentValue { version, value });
         }
         if version > schema.version {
             return Err(ComponentMigrationError::UnsupportedVersion {
@@ -1166,7 +1173,7 @@ impl ComponentRegistry {
 
         let data = self.data();
         let mut current_version = version;
-        let mut current_value = value.clone();
+        let mut current_value = value;
         let mut seen_versions = BTreeSet::from([current_version]);
         while current_version != schema.version {
             let Some(migration) = data.migrations.get(&(id.clone(), current_version)) else {

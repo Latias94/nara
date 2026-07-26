@@ -136,6 +136,54 @@ impl ScenePatchDocument {
         )
     }
 
+    /// Consumes this patch into an unpublished candidate document without retaining an inverse.
+    ///
+    /// The caller must discard `document` when this returns an unapplied report: operations before
+    /// the failure may already have mutated it. Published authoring documents must use the public,
+    /// failure-atomic entry points instead.
+    pub(crate) fn apply_owned_to_unpublished_scene(
+        self,
+        document: &mut SceneDocument,
+        registry: &ComponentRegistry,
+    ) -> ScenePatchReport {
+        self.apply_owned_to_unpublished_scene_with_validator(
+            document,
+            registry,
+            ScenePatchApplyLimits::default(),
+            |document, registry, operation_index| match operation_index {
+                Some(operation_index) => {
+                    document.validate_authoring_for_patch(registry, operation_index)
+                }
+                None => document.validate_authoring(registry),
+            },
+        )
+    }
+
+    /// Consumes this patch into an unpublished candidate with project asset validation.
+    ///
+    /// The caller must discard `document` when this returns an unapplied report. This path never
+    /// retains or publishes an inverse patch and is intended for private, consumption-only work.
+    pub(crate) fn apply_owned_to_unpublished_scene_with_asset_database(
+        self,
+        document: &mut SceneDocument,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> ScenePatchReport {
+        self.apply_owned_to_unpublished_scene_with_validator(
+            document,
+            registry,
+            ScenePatchApplyLimits::default(),
+            |document, registry, operation_index| match operation_index {
+                Some(operation_index) => document.validate_authoring_for_patch_with_asset_database(
+                    registry,
+                    database,
+                    operation_index,
+                ),
+                None => document.validate_authoring_with_asset_database(registry, database),
+            },
+        )
+    }
+
     fn apply_to_scene_with_validator(
         &self,
         document: &mut SceneDocument,
@@ -143,86 +191,31 @@ impl ScenePatchDocument {
         limits: ScenePatchApplyLimits,
         mut validate: impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
     ) -> ScenePatchReport {
-        if let Some(format_version) = self.unsupported_format_version() {
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(with_public_u64(
-                with_public_u64(
-                    diagnostic_error(
-                        "scene.patch-unsupported-format-version",
-                        "Scene patch format version is unsupported",
-                    ),
-                    "actual-version",
-                    u64::from(format_version),
-                ),
-                "expected-version",
-                u64::from(Self::CURRENT_FORMAT_VERSION),
-            ));
-            return ScenePatchReport {
-                applied: false,
-                inverse: None,
-                diagnostics,
+        let source_work =
+            match self.validate_patch_source(document, registry, limits, &mut validate) {
+                Ok(source_work) => source_work,
+                Err(report) => return report,
             };
-        }
-
-        let source_work = scene_validation_work(document);
-        if let Some(diagnostic) = validation_work_budget_diagnostic(source_work, limits, None) {
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(diagnostic);
-            return ScenePatchReport {
-                applied: false,
-                inverse: None,
-                diagnostics,
-            };
-        }
-
-        let source_validation = validate(document, registry, None);
-        if source_validation.has_errors() {
-            return ScenePatchReport {
-                applied: false,
-                inverse: None,
-                diagnostics: source_validation,
-            };
-        }
 
         let mut scratch = document.clone();
         let mut inverse_groups = Vec::<Vec<ScenePatchOperation>>::new();
         let mut validation_work = source_work;
         for (operation_index, operation) in self.operations.iter().enumerate() {
-            let inverse = match apply_operation(&mut scratch, registry, operation, operation_index)
-            {
-                Ok(inverse) => inverse,
-                Err(diagnostic) => {
-                    let mut diagnostics = DiagnosticReport::default();
-                    diagnostics.push(diagnostic);
-                    return ScenePatchReport {
-                        applied: false,
-                        inverse: None,
-                        diagnostics,
-                    };
-                }
-            };
-
-            let operation_work = scene_validation_work(&scratch);
-            let observed = validation_work.saturating_add(operation_work);
-            if let Some(diagnostic) =
-                validation_work_budget_diagnostic(observed, limits, Some(operation_index))
-            {
-                let mut diagnostics = DiagnosticReport::default();
-                diagnostics.push(diagnostic);
-                return ScenePatchReport {
-                    applied: false,
-                    inverse: None,
-                    diagnostics,
+            let inverse =
+                match apply_operation_for_patch(&mut scratch, registry, operation, operation_index)
+                {
+                    Ok(inverse) => inverse,
+                    Err(report) => return report,
                 };
-            }
-            validation_work = observed;
-            let validation = validate(&scratch, registry, Some(operation_index));
-            if validation.has_errors() {
-                return ScenePatchReport {
-                    applied: false,
-                    inverse: None,
-                    diagnostics: validation,
-                };
+            if let Err(report) = validate_applied_operation(
+                &scratch,
+                registry,
+                operation_index,
+                &mut validation_work,
+                limits,
+                &mut validate,
+            ) {
+                return report;
             }
 
             inverse_groups.push(inverse);
@@ -239,6 +232,112 @@ impl ScenePatchDocument {
             inverse: Some(ScenePatchDocument::new(inverse_operations)),
             diagnostics: DiagnosticReport::default(),
         }
+    }
+
+    fn apply_owned_to_unpublished_scene_with_validator(
+        self,
+        document: &mut SceneDocument,
+        registry: &ComponentRegistry,
+        limits: ScenePatchApplyLimits,
+        mut validate: impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+    ) -> ScenePatchReport {
+        let source_work =
+            match self.validate_patch_source(document, registry, limits, &mut validate) {
+                Ok(source_work) => source_work,
+                Err(report) => return report,
+            };
+
+        if self.operations.is_empty() {
+            document.canonicalize();
+            return ScenePatchReport {
+                applied: true,
+                inverse: None,
+                diagnostics: DiagnosticReport::default(),
+            };
+        }
+
+        let mut validation_work = source_work;
+        for (operation_index, operation) in self.operations.into_iter().enumerate() {
+            if let Err(diagnostic) =
+                apply_owned_operation(document, registry, operation, operation_index)
+            {
+                let mut diagnostics = DiagnosticReport::default();
+                diagnostics.push(diagnostic);
+                return ScenePatchReport {
+                    applied: false,
+                    inverse: None,
+                    diagnostics,
+                };
+            }
+            if let Err(report) = validate_applied_operation(
+                document,
+                registry,
+                operation_index,
+                &mut validation_work,
+                limits,
+                &mut validate,
+            ) {
+                return report;
+            }
+        }
+
+        document.canonicalize();
+        ScenePatchReport {
+            applied: true,
+            inverse: None,
+            diagnostics: DiagnosticReport::default(),
+        }
+    }
+
+    fn validate_patch_source(
+        &self,
+        document: &SceneDocument,
+        registry: &ComponentRegistry,
+        limits: ScenePatchApplyLimits,
+        validate: &mut impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+    ) -> Result<SceneValidationWork, ScenePatchReport> {
+        if let Some(format_version) = self.unsupported_format_version() {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(with_public_u64(
+                with_public_u64(
+                    diagnostic_error(
+                        "scene.patch-unsupported-format-version",
+                        "Scene patch format version is unsupported",
+                    ),
+                    "actual-version",
+                    u64::from(format_version),
+                ),
+                "expected-version",
+                u64::from(Self::CURRENT_FORMAT_VERSION),
+            ));
+            return Err(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            });
+        }
+
+        let source_work = scene_validation_work(document);
+        if let Some(diagnostic) = validation_work_budget_diagnostic(source_work, limits, None) {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(diagnostic);
+            return Err(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            });
+        }
+
+        let source_validation = validate(document, registry, None);
+        if source_validation.has_errors() {
+            return Err(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics: source_validation,
+            });
+        }
+
+        Ok(source_work)
     }
 }
 
@@ -567,6 +666,61 @@ fn validation_work_budget_diagnostic(
     ))
 }
 
+fn apply_operation_for_patch(
+    document: &mut SceneDocument,
+    registry: &ComponentRegistry,
+    operation: &ScenePatchOperation,
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, ScenePatchReport> {
+    match apply_operation(document, registry, operation, operation_index) {
+        Ok(inverse) => Ok(inverse),
+        Err(diagnostic) => {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(diagnostic);
+            Err(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            })
+        }
+    }
+}
+
+fn validate_applied_operation(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    operation_index: usize,
+    validation_work: &mut SceneValidationWork,
+    limits: ScenePatchApplyLimits,
+    validate: &mut impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+) -> Result<(), ScenePatchReport> {
+    let operation_work = scene_validation_work(document);
+    let observed = validation_work.saturating_add(operation_work);
+    if let Some(diagnostic) =
+        validation_work_budget_diagnostic(observed, limits, Some(operation_index))
+    {
+        let mut diagnostics = DiagnosticReport::default();
+        diagnostics.push(diagnostic);
+        return Err(ScenePatchReport {
+            applied: false,
+            inverse: None,
+            diagnostics,
+        });
+    }
+    *validation_work = observed;
+
+    let validation = validate(document, registry, Some(operation_index));
+    if validation.has_errors() {
+        return Err(ScenePatchReport {
+            applied: false,
+            inverse: None,
+            diagnostics: validation,
+        });
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 struct FieldPatchTarget<'a> {
     registry: &'a ComponentRegistry,
@@ -691,6 +845,245 @@ fn apply_operation(
             asset_ref,
         ),
     }
+}
+
+fn apply_owned_operation(
+    document: &mut SceneDocument,
+    registry: &ComponentRegistry,
+    operation: ScenePatchOperation,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
+    match operation {
+        ScenePatchOperation::AddEntity { entity } => {
+            add_owned_entity(document, registry, entity, operation_index)
+        }
+        ScenePatchOperation::RemoveEntity { entity } => {
+            remove_entity_subtree_without_inverse(document, registry, &entity, operation_index)
+        }
+        ScenePatchOperation::AddComponent {
+            entity,
+            component,
+            value,
+        } => add_owned_component(
+            document,
+            registry,
+            entity,
+            component,
+            value,
+            operation_index,
+        ),
+        ScenePatchOperation::RemoveComponent { entity, component } => {
+            remove_component_without_inverse(
+                document,
+                registry,
+                &entity,
+                &component,
+                operation_index,
+            )
+        }
+        ScenePatchOperation::ReplaceComponent {
+            entity,
+            component,
+            value,
+        } => replace_owned_component(
+            document,
+            registry,
+            entity,
+            component,
+            value,
+            operation_index,
+        ),
+        ScenePatchOperation::SetField {
+            entity,
+            component,
+            component_version,
+            field,
+            value,
+        } => {
+            let previous = set_field_value(
+                document,
+                FieldPatchTarget::new(
+                    registry,
+                    &entity,
+                    &component,
+                    &component_version,
+                    &field,
+                    operation_index,
+                ),
+                value,
+            )?;
+            drop(previous);
+            Ok(())
+        }
+        ScenePatchOperation::RemoveField {
+            entity,
+            component,
+            component_version,
+            field,
+        } => {
+            let previous = remove_field_value(
+                document,
+                FieldPatchTarget::new(
+                    registry,
+                    &entity,
+                    &component,
+                    &component_version,
+                    &field,
+                    operation_index,
+                ),
+            )?;
+            drop(previous);
+            Ok(())
+        }
+        ScenePatchOperation::Reparent { entity, parent } => {
+            reparent_entity_without_inverse(document, &entity, parent, operation_index)
+        }
+        ScenePatchOperation::SetAssetRefField {
+            entity,
+            component,
+            component_version,
+            field,
+            asset_ref,
+        } => set_asset_ref_field_without_inverse(
+            document,
+            FieldPatchTarget::new(
+                registry,
+                &entity,
+                &component,
+                &component_version,
+                &field,
+                operation_index,
+            ),
+            asset_ref,
+        ),
+    }
+}
+
+fn add_owned_entity(
+    document: &mut SceneDocument,
+    registry: &ComponentRegistry,
+    entity: SceneEntityRecord,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
+    if find_entity(document, &entity.id).is_some() {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-duplicate-entity",
+            "patch adds an entity that already exists",
+            Some(&entity.id),
+            None,
+            None,
+        ));
+    }
+    for component in entity.components.keys() {
+        require_whole_component_edit(registry, &entity.id, component, operation_index)?;
+    }
+
+    document.entities.push(entity);
+    Ok(())
+}
+
+fn remove_entity_subtree_without_inverse(
+    document: &mut SceneDocument,
+    registry: &ComponentRegistry,
+    entity: &SceneEntityId,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
+    if find_entity(document, entity).is_none() {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-missing-entity",
+            "patch removes an entity that does not exist",
+            Some(entity),
+            None,
+            None,
+        ));
+    }
+
+    let subtree = subtree_depths(document, entity);
+    for record in document
+        .entities
+        .iter()
+        .filter(|record| subtree.contains_key(&record.id))
+    {
+        for component in record.components.keys() {
+            require_whole_component_edit(registry, &record.id, component, operation_index)?;
+        }
+    }
+    document
+        .entities
+        .retain(|record| !subtree.contains_key(&record.id));
+    Ok(())
+}
+
+fn add_owned_component(
+    document: &mut SceneDocument,
+    registry: &ComponentRegistry,
+    entity: SceneEntityId,
+    component: ComponentTypeId,
+    value: SceneComponentRecord,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
+    require_whole_component_edit(registry, &entity, &component, operation_index)?;
+    let record = entity_mut(document, &entity, operation_index)?;
+    if record.components.contains_key(&component) {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-duplicate-component",
+            "patch adds a component that already exists",
+            Some(&entity),
+            Some(&component),
+            None,
+        ));
+    }
+    drop(record.components.insert(component, value));
+    Ok(())
+}
+
+fn remove_component_without_inverse(
+    document: &mut SceneDocument,
+    registry: &ComponentRegistry,
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
+    require_whole_component_edit(registry, entity, component, operation_index)?;
+    let record = entity_mut(document, entity, operation_index)?;
+    if record.components.remove(component).is_none() {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-missing-component",
+            "patch removes a component that does not exist",
+            Some(entity),
+            Some(component),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+fn replace_owned_component(
+    document: &mut SceneDocument,
+    registry: &ComponentRegistry,
+    entity: SceneEntityId,
+    component: ComponentTypeId,
+    value: SceneComponentRecord,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
+    require_whole_component_edit(registry, &entity, &component, operation_index)?;
+    let record = entity_mut(document, &entity, operation_index)?;
+    if !record.components.contains_key(&component) {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-missing-component",
+            "patch replaces a component that does not exist",
+            Some(&entity),
+            Some(&component),
+            None,
+        ));
+    }
+    drop(record.components.insert(component, value));
+    Ok(())
 }
 
 fn add_entity(
@@ -849,6 +1242,36 @@ fn set_field(
     target: FieldPatchTarget<'_>,
     value: ComponentValue,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    let previous = set_field_value(document, target, value)?;
+    let FieldPatchTarget {
+        entity,
+        component,
+        component_version,
+        field,
+        ..
+    } = target;
+    Ok(vec![match previous {
+        Some(value) => ScenePatchOperation::SetField {
+            entity: entity.clone(),
+            component: component.clone(),
+            component_version: *component_version,
+            field: field.clone(),
+            value,
+        },
+        None => ScenePatchOperation::RemoveField {
+            entity: entity.clone(),
+            component: component.clone(),
+            component_version: *component_version,
+            field: field.clone(),
+        },
+    }])
+}
+
+fn set_field_value(
+    document: &mut SceneDocument,
+    target: FieldPatchTarget<'_>,
+    value: ComponentValue,
+) -> Result<Option<ComponentValue>, Diagnostic> {
     let FieldPatchTarget {
         registry,
         entity,
@@ -918,21 +1341,7 @@ fn set_field(
             )
         })?;
 
-    Ok(vec![match previous {
-        Some(value) => ScenePatchOperation::SetField {
-            entity: entity.clone(),
-            component: component.clone(),
-            component_version: *component_version,
-            field: field.clone(),
-            value,
-        },
-        None => ScenePatchOperation::RemoveField {
-            entity: entity.clone(),
-            component: component.clone(),
-            component_version: *component_version,
-            field: field.clone(),
-        },
-    }])
+    Ok(previous)
 }
 
 fn remove_field(
@@ -944,6 +1353,38 @@ fn remove_field(
     field: &ComponentFieldId,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    let previous = remove_field_value(
+        document,
+        FieldPatchTarget::new(
+            registry,
+            entity,
+            component,
+            component_version,
+            field,
+            operation_index,
+        ),
+    )?;
+    Ok(vec![ScenePatchOperation::SetField {
+        entity: entity.clone(),
+        component: component.clone(),
+        component_version: *component_version,
+        field: field.clone(),
+        value: previous,
+    }])
+}
+
+fn remove_field_value(
+    document: &mut SceneDocument,
+    target: FieldPatchTarget<'_>,
+) -> Result<ComponentValue, Diagnostic> {
+    let FieldPatchTarget {
+        registry,
+        entity,
+        component,
+        component_version,
+        field,
+        operation_index,
+    } = target;
     let field_schema = field_schema(
         registry,
         component,
@@ -1001,14 +1442,7 @@ fn remove_field(
             field,
         )
     })?;
-
-    Ok(vec![ScenePatchOperation::SetField {
-        entity: entity.clone(),
-        component: component.clone(),
-        component_version: *component_version,
-        field: field.clone(),
-        value: previous,
-    }])
+    Ok(previous)
 }
 
 fn reparent_entity(
@@ -1036,6 +1470,29 @@ fn reparent_entity(
         entity: entity.clone(),
         parent: previous,
     }])
+}
+
+fn reparent_entity_without_inverse(
+    document: &mut SceneDocument,
+    entity: &SceneEntityId,
+    parent: Option<SceneEntityId>,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
+    if let Some(parent) = &parent
+        && find_entity(document, parent).is_none()
+    {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-missing-parent",
+            "patch reparents to an entity that does not exist",
+            Some(entity),
+            None,
+            None,
+        ));
+    }
+    let record = entity_mut(document, entity, operation_index)?;
+    record.parent = parent;
+    Ok(())
 }
 
 fn set_asset_ref_field(
@@ -1092,6 +1549,65 @@ fn set_asset_ref_field(
         ));
     }
     set_field(document, target, asset_ref_value(asset_ref))
+}
+
+fn set_asset_ref_field_without_inverse(
+    document: &mut SceneDocument,
+    target: FieldPatchTarget<'_>,
+    asset_ref: AssetRef,
+) -> Result<(), Diagnostic> {
+    let FieldPatchTarget {
+        registry,
+        entity,
+        component,
+        component_version,
+        field,
+        operation_index,
+    } = target;
+    let field_schema = field_schema(
+        registry,
+        component,
+        component_version,
+        field,
+        operation_index,
+        entity,
+    )?;
+    let path = &field_schema.path;
+    require_field_capability(
+        field_schema,
+        ComponentCapability::Edit,
+        component,
+        field,
+        path,
+        operation_index,
+        entity,
+    )?;
+    require_field_capability(
+        field_schema,
+        ComponentCapability::AssetRef,
+        component,
+        field,
+        path,
+        operation_index,
+        entity,
+    )?;
+    if field_schema.value_kind != ComponentValueKind::AssetRef {
+        return Err(with_component_field_id(
+            patch_diagnostic(
+                operation_index,
+                "scene.patch-invalid-field-kind",
+                "patch sets an asset reference into a field that is not registered as an asset reference",
+                Some(entity),
+                Some(component),
+                Some(path),
+            ),
+            field,
+        ));
+    }
+
+    let previous = set_field_value(document, target, asset_ref_value(&asset_ref))?;
+    drop(previous);
+    Ok(())
 }
 
 fn find_entity(document: &SceneDocument, id: &SceneEntityId) -> Option<usize> {

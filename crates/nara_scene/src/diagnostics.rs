@@ -7,8 +7,9 @@ use nara_identity::{
     __private::IdentitySupportTopologyError, EntityIdentityAxis, IdentityDomainError,
 };
 use nara_reflect::{
-    ComponentCapability, ComponentCodecError, ComponentFieldPath, ComponentFieldPathError,
-    ComponentFieldPathSegment, ComponentMigrationError, PersistentApplyRejection,
+    ComponentCapability, ComponentCodecError, ComponentEntityReferenceRewriteError,
+    ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
+    ComponentMigrationError, ComponentValueKind, PersistentApplyRejection,
 };
 
 const MAX_SCENE_FIELD_PATH_LOCATOR_BYTES: usize = 96;
@@ -131,6 +132,118 @@ pub(crate) fn with_component_field_path_error(
             "path-error-length",
             usize_to_u64(*len),
         ),
+    }
+}
+
+pub(crate) fn with_entity_reference_rewrite_error<E>(
+    diagnostic: Diagnostic,
+    error: &ComponentEntityReferenceRewriteError<E>,
+    rewrite_error_kind: impl FnOnce(&E) -> &'static str,
+) -> Diagnostic {
+    match error {
+        ComponentEntityReferenceRewriteError::NodeLimit { maximum } => with_public_u64(
+            with_public_identifier(diagnostic, "rewrite-error-kind", "node-limit"),
+            "maximum-nodes",
+            usize_to_u64(*maximum),
+        ),
+        ComponentEntityReferenceRewriteError::ByteLimit { maximum } => with_public_u64(
+            with_public_identifier(diagnostic, "rewrite-error-kind", "byte-limit"),
+            "maximum-bytes",
+            usize_to_u64(*maximum),
+        ),
+        ComponentEntityReferenceRewriteError::DepthLimit { maximum } => with_public_u64(
+            with_public_identifier(diagnostic, "rewrite-error-kind", "depth-limit"),
+            "maximum-depth",
+            usize_to_u64(*maximum),
+        ),
+        ComponentEntityReferenceRewriteError::PathIndexOverflow => {
+            with_public_identifier(diagnostic, "rewrite-error-kind", "path-index-overflow")
+        }
+        ComponentEntityReferenceRewriteError::DuplicateDeclaredPath { path } => {
+            with_reference_rewrite_path(
+                with_public_identifier(diagnostic, "rewrite-error-kind", "duplicate-declared-path"),
+                path,
+            )
+        }
+        ComponentEntityReferenceRewriteError::UndeclaredReference { path } => {
+            with_reference_rewrite_path(
+                with_public_identifier(diagnostic, "rewrite-error-kind", "undeclared-reference"),
+                path,
+            )
+        }
+        ComponentEntityReferenceRewriteError::MissingEntityRefCapability { path } => {
+            with_reference_rewrite_path(
+                with_public_identifier(
+                    diagnostic,
+                    "rewrite-error-kind",
+                    "missing-entity-ref-capability",
+                ),
+                path,
+            )
+        }
+        ComponentEntityReferenceRewriteError::RequiredReferenceMissing { path } => {
+            with_reference_rewrite_path(
+                with_public_identifier(
+                    diagnostic,
+                    "rewrite-error-kind",
+                    "required-reference-missing",
+                ),
+                path,
+            )
+        }
+        ComponentEntityReferenceRewriteError::InvalidReferenceValue { path, actual } => {
+            with_public_identifier(
+                with_reference_rewrite_path(
+                    with_public_identifier(
+                        diagnostic,
+                        "rewrite-error-kind",
+                        "invalid-reference-value",
+                    ),
+                    path,
+                ),
+                "actual-value-kind",
+                component_value_kind_name(*actual),
+            )
+        }
+        ComponentEntityReferenceRewriteError::InvalidPath { path, error } => {
+            with_component_field_path_error(
+                with_reference_rewrite_path(
+                    with_public_identifier(diagnostic, "rewrite-error-kind", "invalid-path"),
+                    path,
+                ),
+                error,
+            )
+        }
+        ComponentEntityReferenceRewriteError::Rewrite { path, error } => {
+            with_reference_rewrite_path(
+                with_public_identifier(diagnostic, "rewrite-error-kind", rewrite_error_kind(error)),
+                path,
+            )
+        }
+    }
+}
+
+fn with_reference_rewrite_path(diagnostic: Diagnostic, path: &ComponentFieldPath) -> Diagnostic {
+    with_component_field_path(
+        diagnostic,
+        "reference-field-path",
+        "reference-field-path-depth",
+        path,
+    )
+}
+
+const fn component_value_kind_name(kind: ComponentValueKind) -> &'static str {
+    match kind {
+        ComponentValueKind::Null => "null",
+        ComponentValueKind::Bool => "bool",
+        ComponentValueKind::I64 => "i64",
+        ComponentValueKind::U64 => "u64",
+        ComponentValueKind::F64 => "f64",
+        ComponentValueKind::String => "string",
+        ComponentValueKind::List => "list",
+        ComponentValueKind::Map => "map",
+        ComponentValueKind::AssetRef => "asset-ref",
+        ComponentValueKind::EntityRef => "entity-ref",
     }
 }
 

@@ -14,6 +14,8 @@ use nara_identity::{
     WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
 };
 
+use crate::__private::plan_declared_entity_references;
+
 use super::*;
 
 #[derive(Clone, Component, Reflect)]
@@ -322,6 +324,87 @@ fn migrates_component_values_to_current_schema_version() {
 
     assert_eq!(migrated.version, ComponentSchemaVersion(3));
     assert_eq!(migrated.value.field_i64("x3").unwrap(), 5);
+}
+
+#[test]
+fn owned_component_migration_reuses_storage_and_matches_borrowed_migration() {
+    let mut registry = ComponentRegistry::new();
+    let id = ComponentTypeId::new("nara.test.Position");
+    register_migration_test_component(&mut registry, &id, ComponentSchemaVersion(2));
+    registry
+        .register_component_migration(
+            &id,
+            ComponentSchemaVersion(1),
+            ComponentSchemaVersion(2),
+            |value| {
+                let ComponentValue::Map(mut fields) = value else {
+                    return Err(ComponentCodecError::invalid_field("<root>", "map"));
+                };
+                let payload = fields
+                    .remove("payload")
+                    .ok_or_else(|| ComponentCodecError::missing_field("payload"))?;
+                fields.insert("migrated".to_owned(), payload);
+                Ok(ComponentValue::Map(fields))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+
+    let current = ComponentValue::map([(
+        "payload",
+        ComponentValue::String("current-version-storage".to_owned()),
+    )]);
+    let current_pointer = current
+        .get("payload")
+        .and_then(ComponentValue::as_str)
+        .unwrap()
+        .as_ptr();
+    let current = registry
+        .migrate_component_value_owned(&id, ComponentSchemaVersion(2), current)
+        .unwrap();
+    assert_eq!(
+        current
+            .value
+            .get("payload")
+            .and_then(ComponentValue::as_str)
+            .unwrap()
+            .as_ptr(),
+        current_pointer
+    );
+
+    let owned_source = ComponentValue::map([(
+        "payload",
+        ComponentValue::String("migration-storage".to_owned()),
+    )]);
+    let owned_pointer = owned_source
+        .get("payload")
+        .and_then(ComponentValue::as_str)
+        .unwrap()
+        .as_ptr();
+    let borrowed_source = owned_source.clone();
+    let borrowed = registry
+        .migrate_component_value(&id, ComponentSchemaVersion(1), &borrowed_source)
+        .unwrap();
+    let owned = registry
+        .migrate_component_value_owned(&id, ComponentSchemaVersion(1), owned_source)
+        .unwrap();
+
+    assert_eq!(owned, borrowed);
+    assert_eq!(
+        owned
+            .value
+            .get("migrated")
+            .and_then(ComponentValue::as_str)
+            .unwrap()
+            .as_ptr(),
+        owned_pointer
+    );
+    assert_eq!(
+        borrowed_source
+            .get("payload")
+            .and_then(ComponentValue::as_str),
+        Some("migration-storage")
+    );
 }
 
 #[test]
@@ -880,6 +963,179 @@ fn scene_reference(value: &str) -> EntityReference {
 }
 
 #[test]
+fn declared_entity_reference_plan_visits_and_rewrites_only_planned_paths() {
+    let first_path = ComponentFieldPath::from_fields(["first"]);
+    let nested_path = ComponentFieldPath::new([
+        ComponentFieldPathSegment::field("nested"),
+        ComponentFieldPathSegment::index(0),
+    ]);
+    let schema = entity_reference_schema(vec![
+        required_test_field("first", first_path.clone(), ComponentValueKind::EntityRef)
+            .with_capability(ComponentCapability::EntityRef),
+        required_test_field("nested", nested_path.clone(), ComponentValueKind::EntityRef)
+            .with_capability(ComponentCapability::EntityRef),
+    ]);
+    let mut value = ComponentValue::map([
+        (
+            "first",
+            ComponentValue::EntityReference(scene_reference("first-target")),
+        ),
+        (
+            "nested",
+            ComponentValue::List(vec![ComponentValue::EntityReference(scene_reference(
+                "nested-target",
+            ))]),
+        ),
+        (
+            "ordinary",
+            ComponentValue::String("first-target".to_owned()),
+        ),
+    ]);
+    let plan = plan_declared_entity_references::<()>(
+        &schema,
+        &value,
+        EntityReferenceTraversalLimits::default(),
+    )
+    .unwrap();
+    let mut observed = Vec::new();
+
+    plan.visit(&value, |path, reference| {
+        observed.push((path.clone(), reference.clone()));
+        Ok::<_, ()>(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        observed,
+        vec![
+            (first_path.clone(), scene_reference("first-target")),
+            (nested_path.clone(), scene_reference("nested-target")),
+        ]
+    );
+
+    plan.rewrite_in_place(&mut value, |path, _reference| {
+        Ok::<_, ()>(if path == &first_path {
+            scene_reference("rewritten-first")
+        } else {
+            scene_reference("rewritten-nested")
+        })
+    })
+    .unwrap();
+
+    assert_eq!(
+        value.field_entity_reference("first").unwrap(),
+        &scene_reference("rewritten-first")
+    );
+    assert_eq!(
+        value.get_path(&nested_path).unwrap().as_entity_reference(),
+        Some(&scene_reference("rewritten-nested"))
+    );
+    assert_eq!(
+        value.get("ordinary").and_then(ComponentValue::as_str),
+        Some("first-target")
+    );
+}
+
+#[test]
+fn declared_entity_reference_plan_reports_stale_paths_and_values() {
+    let path = ComponentFieldPath::from_fields(["target"]);
+    let schema = entity_reference_schema(vec![
+        required_test_field("target", path.clone(), ComponentValueKind::EntityRef)
+            .with_capability(ComponentCapability::EntityRef),
+    ]);
+    let original = ComponentValue::map([(
+        "target",
+        ComponentValue::EntityReference(scene_reference("target")),
+    )]);
+    let plan = plan_declared_entity_references::<()>(
+        &schema,
+        &original,
+        EntityReferenceTraversalLimits::default(),
+    )
+    .unwrap();
+    let callbacks = Cell::new(0);
+
+    let missing = plan.visit(
+        &ComponentValue::Map(BTreeMap::new()),
+        |_path, _reference| {
+            callbacks.set(callbacks.get() + 1);
+            Ok::<_, ()>(())
+        },
+    );
+    assert!(matches!(
+        missing,
+        Err(ComponentEntityReferenceRewriteError::InvalidPath { .. })
+    ));
+    assert_eq!(callbacks.get(), 0);
+
+    let mut invalid =
+        ComponentValue::map([("target", ComponentValue::String("target".to_owned()))]);
+    let invalid = plan.rewrite_in_place(&mut invalid, |_path, reference| {
+        callbacks.set(callbacks.get() + 1);
+        Ok::<_, ()>(reference.clone())
+    });
+    assert!(matches!(
+        invalid,
+        Err(
+            ComponentEntityReferenceRewriteError::InvalidReferenceValue {
+                actual: ComponentValueKind::String,
+                ..
+            }
+        )
+    ));
+    assert_eq!(callbacks.get(), 0);
+}
+
+#[test]
+fn in_place_reference_rewrite_can_leave_an_unpublished_candidate_partially_changed() {
+    let first_path = ComponentFieldPath::from_fields(["first"]);
+    let second_path = ComponentFieldPath::from_fields(["second"]);
+    let schema = entity_reference_schema(vec![
+        required_test_field("first", first_path.clone(), ComponentValueKind::EntityRef)
+            .with_capability(ComponentCapability::EntityRef),
+        required_test_field("second", second_path, ComponentValueKind::EntityRef)
+            .with_capability(ComponentCapability::EntityRef),
+    ]);
+    let mut candidate = ComponentValue::map([
+        (
+            "first",
+            ComponentValue::EntityReference(scene_reference("first")),
+        ),
+        (
+            "second",
+            ComponentValue::EntityReference(scene_reference("second")),
+        ),
+    ]);
+    let plan = plan_declared_entity_references::<&'static str>(
+        &schema,
+        &candidate,
+        EntityReferenceTraversalLimits::default(),
+    )
+    .unwrap();
+
+    let result = plan.rewrite_in_place(&mut candidate, |path, _reference| {
+        if path == &first_path {
+            Ok(scene_reference("changed"))
+        } else {
+            Err("stop")
+        }
+    });
+
+    assert!(matches!(
+        result,
+        Err(ComponentEntityReferenceRewriteError::Rewrite { error: "stop", .. })
+    ));
+    assert_eq!(
+        candidate.field_entity_reference("first").unwrap(),
+        &scene_reference("changed")
+    );
+    assert_eq!(
+        candidate.field_entity_reference("second").unwrap(),
+        &scene_reference("second")
+    );
+}
+
+#[test]
 fn declared_entity_reference_rewrite_is_typed_and_failure_atomic() {
     let path = ComponentFieldPath::from_fields(["target"]);
     let schema = entity_reference_schema(vec![
@@ -925,6 +1181,57 @@ fn declared_entity_reference_rewrite_is_typed_and_failure_atomic() {
     assert_eq!(
         original.field_entity_reference("target").unwrap(),
         &scene_reference("old")
+    );
+}
+
+#[test]
+fn legacy_reference_rewrite_discards_a_partially_changed_candidate_on_failure() {
+    let first_path = ComponentFieldPath::from_fields(["first"]);
+    let schema = entity_reference_schema(vec![
+        required_test_field("first", first_path.clone(), ComponentValueKind::EntityRef)
+            .with_capability(ComponentCapability::EntityRef),
+        required_test_field(
+            "second",
+            ComponentFieldPath::from_fields(["second"]),
+            ComponentValueKind::EntityRef,
+        )
+        .with_capability(ComponentCapability::EntityRef),
+    ]);
+    let original = ComponentValue::map([
+        (
+            "first",
+            ComponentValue::EntityReference(scene_reference("first")),
+        ),
+        (
+            "second",
+            ComponentValue::EntityReference(scene_reference("second")),
+        ),
+    ]);
+
+    let failed = rewrite_declared_entity_references(
+        &schema,
+        &original,
+        EntityReferenceTraversalLimits::default(),
+        |path, _reference| {
+            if path == &first_path {
+                Ok(scene_reference("changed"))
+            } else {
+                Err("stop")
+            }
+        },
+    );
+
+    assert!(matches!(
+        failed,
+        Err(ComponentEntityReferenceRewriteError::Rewrite { error: "stop", .. })
+    ));
+    assert_eq!(
+        original.field_entity_reference("first").unwrap(),
+        &scene_reference("first")
+    );
+    assert_eq!(
+        original.field_entity_reference("second").unwrap(),
+        &scene_reference("second")
     );
 }
 
