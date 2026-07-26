@@ -10,13 +10,16 @@ const SETUP_PYTHON: &str = "actions/setup-python@83679a892e2d95755f2dac6acb0bfd1
 const DOWNLOAD_ARTIFACT: &str =
     "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
 const UPLOAD_ARTIFACT: &str = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
-const REVIEWED_RELEASE_VERIFIER_REVISION: &str = "fee339f11776eb837653bc0ca62e7db7b90eb396";
+const REVIEWED_RELEASE_VERIFIER_REVISION: &str = "476548f091a51c33110a3dca98edeee976876373";
 const RELEASE_VERIFIER_BLOB: &str = "a778e5eb701ae1354ed188fb7901d29d17f84e81";
 const RELEASE_VERIFIER_SHA256: &str =
     "708f7995811d4a76215c58f8f6f64190f499720bc1b8c421ce90ded7b681f696";
 const APPROVAL_SCHEMA_BLOB: &str = "ec84b0787434a3e7601d135835ef42d491546f38";
 const APPROVAL_SCHEMA_SHA256: &str =
     "47aa27863f075aaa40a4d858ac11c5502279a80d2516e34c180f908bac752fb4";
+const PACKAGE_LAYOUT_BLOB: &str = "803460ad1d2ea2a2e3c36d193c72b09a636f9ef9";
+const PACKAGE_LAYOUT_SHA256: &str =
+    "95d53fc19a2108276199b8def11061c4650ef550c058d29ae42f55161ddb82bf";
 
 #[derive(Clone)]
 struct ReleasePolicyFixture {
@@ -145,6 +148,39 @@ fn release_policy_rejects_credential_leakage_checkout_and_candidate_execution_ac
     assert_rejects(
         &verifier_environment,
         "Fetch pinned verifier, schemas, and public GitHub facts.env must contain exactly keys",
+    );
+
+    let mut reviewed_revision = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut reviewed_revision.workflow,
+        REVIEWED_RELEASE_VERIFIER_REVISION,
+        "0000000000000000000000000000000000000000",
+    );
+    assert_rejects(
+        &reviewed_revision,
+        "must pin REVIEWED_SOURCE_REVISION to the reviewed value",
+    );
+
+    let mut layout_blob = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut layout_blob.workflow,
+        PACKAGE_LAYOUT_BLOB,
+        "0000000000000000000000000000000000000000",
+    );
+    assert_rejects(
+        &layout_blob,
+        "must pin PACKAGE_LAYOUT_BLOB to the reviewed value",
+    );
+
+    let mut layout_sha256 = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut layout_sha256.workflow,
+        PACKAGE_LAYOUT_SHA256,
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    );
+    assert_rejects(
+        &layout_sha256,
+        "must pin PACKAGE_LAYOUT_SHA256 to the reviewed value",
     );
 
     let mut write_checkout = ReleasePolicyFixture::committed();
@@ -963,6 +999,8 @@ fn validate_verifier(job: &Hash, violations: &mut Vec<String>) {
         || !content.contains(RELEASE_VERIFIER_SHA256)
         || !content.contains(APPROVAL_SCHEMA_BLOB)
         || !content.contains(APPROVAL_SCHEMA_SHA256)
+        || !content.contains(PACKAGE_LAYOUT_BLOB)
+        || !content.contains(PACKAGE_LAYOUT_SHA256)
         || !content.contains("archiveFromTransport")
         || !content.contains("TRANSPORT_ROOT")
         || !content.contains("const publisherDefinition = await contentDigestAt(")
@@ -1055,6 +1093,8 @@ fn validate_verifier(job: &Hash, violations: &mut Vec<String>) {
         ("VERIFIER_SHA256", RELEASE_VERIFIER_SHA256),
         ("APPROVAL_SCHEMA_BLOB", APPROVAL_SCHEMA_BLOB),
         ("APPROVAL_SCHEMA_SHA256", APPROVAL_SCHEMA_SHA256),
+        ("PACKAGE_LAYOUT_BLOB", PACKAGE_LAYOUT_BLOB),
+        ("PACKAGE_LAYOUT_SHA256", PACKAGE_LAYOUT_SHA256),
     ] {
         validate_step_environment_value(
             job,

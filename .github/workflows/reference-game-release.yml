@@ -147,7 +147,7 @@ jobs:
       - name: Fetch pinned verifier, schemas, and public GitHub facts
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
-          REVIEWED_SOURCE_REVISION: fee339f11776eb837653bc0ca62e7db7b90eb396
+          REVIEWED_SOURCE_REVISION: 476548f091a51c33110a3dca98edeee976876373
           VERIFIER_PATH: reference-game/tools/verify_release.py
           VERIFIER_BLOB: a778e5eb701ae1354ed188fb7901d29d17f84e81
           VERIFIER_SHA256: 708f7995811d4a76215c58f8f6f64190f499720bc1b8c421ce90ded7b681f696
@@ -167,8 +167,8 @@ jobs:
           PACKAGE_HELPER_BLOB: 880913955155865026afa107df6f73a9b9d09719
           PACKAGE_HELPER_SHA256: 905b1ff3e3080f5b09fcbf1bb506712a6cefc8e799098836739cf4ef7b187498
           PACKAGE_LAYOUT_PATH: reference-game/packaging/package-layout-v1.json
-          PACKAGE_LAYOUT_BLOB: 53cbf9128c0112950b2d2888048a328c53cef3c6
-          PACKAGE_LAYOUT_SHA256: 62e043eb77464e35ecb49c0e31174d3a7a890f5dde5b7df5252e5b880806da85
+          PACKAGE_LAYOUT_BLOB: 803460ad1d2ea2a2e3c36d193c72b09a636f9ef9
+          PACKAGE_LAYOUT_SHA256: 95d53fc19a2108276199b8def11061c4650ef550c058d29ae42f55161ddb82bf
           APPROVAL_PATH: "${{ inputs.approval_path }}"
           APPROVAL_COMMIT: "${{ inputs.approval_commit }}"
           APPROVAL_BLOB: "${{ inputs.approval_blob }}"
