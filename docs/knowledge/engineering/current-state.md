@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "639d09d90773ca2a656b873c78b7ba1d822b06548f52dab726cb8c03ae02dbc1"
+source_fingerprint: "5043982b15b66572f721ecc5b8f8544d5e41f30eec6b3b9a3fa444d127da594b"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "639d09d90773ca2a656b873c78b7ba1d822b06548f52dab726cb8c03ae0
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `639d09d90773ca2a656b873c78b7ba1d822b06548f52dab726cb8c03ae02dbc1`
-- Immutable records: 255
+- Source fingerprint: `5043982b15b66572f721ecc5b8f8544d5e41f30eec6b3b9a3fa444d127da594b`
+- Immutable records: 257
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game runtime authority and delivery: U10 release alignment repaired](registry/2026-07/2026-07-26T025113Z-engine-foundation-contract-completion-codex-root-427f191683c748e486e1e5b51618957d.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game runtime authority and delivery: U10 rerun awaiting authorization](registry/2026-07/2026-07-26T030358Z-engine-foundation-contract-completion-codex-root-6b6df8de23764d76b5756d5e8f75723a.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGD-U8 final hosted CI after candidate capacity repair](verification/2026-07/2026-07-26T030317Z-rgd-u8-final-hosted-ci-after-candidate-capacity-repair-73cf3d9e548743eb9462aec8acbcfec1.md) - Re-establishes the six-cell hosted CI baseline after the candidate capacity and release-verifier pin repairs.
 - **Verification Evidence**: [RGD-U12 release verifier pin follows candidate layout](verification/2026-07/2026-07-26T025029Z-rgd-u12-release-verifier-pin-follows-candidate-layout-651c8156185f48a080d52cd1c0b68247.md) - Records the reviewed ancestor, blob, and SHA-256 binding that keeps release validation aligned with the repaired candidate layout.
 - **Verification Evidence**: [RGD-U10 candidate capacity diagnosis and local budget repair](verification/2026-07/2026-07-26T023033Z-rgd-u10-candidate-capacity-diagnosis-and-local-budget-repair-914d3c5e90934617b4778cb2c85aa431.md) - Records the failed protected candidate run, measured Linux package capacity, and local bounded repair while preserving the required hosted rerun gate.
 - **Verification Evidence**: [RGD-U8 final-revision hosted CI refresh](verification/2026-07/2026-07-25T181843Z-rgd-u8-final-revision-hosted-ci-refresh-ac11b989e59c4df4b2db8804ceee3362.md) - Re-establishes the final hosted Windows/Linux matrix after the immutable-release approval-order repair.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGD-U7 Runtime and Host authority verification](verification/2026-07/2026-07-23T081241Z-rgd-u7-runtime-host-authority-verification-38a8bf4d48614a829bdd6388f02c9446.md) - Records the independent refreshed Runtime review, conditional Host/compatibility review, and bounded acceptance of ADR 0084 and ADR 0082.
 - **Decision**: [RGD-U7 Runtime and Host independent decision matrix](decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md) - Records the refreshed independent ADR 0084 Runtime verdict, ADR 0082 Host verdict, compatible-pair scope, and remaining delivery gates.
 - **Verification Evidence**: [RGD-U10 local standalone candidate preparation verification](verification/2026-07/2026-07-23T043428Z-rgd-u10-local-candidate-preparation-verification-668ca80db5e7483f80a3f25fe4ee0301.md) - Verifies the local packaging, checkout-free consumer, smoke, policy, and candidate-workflow preparation without claiming hosted candidate execution.
-- **Verification Evidence**: [RGD-U9 local first-playable measurement preparation verification](verification/2026-07/2026-07-23T013033Z-rgd-u9-local-measurement-preparation-verification-7d09e5953e7f4d50862ac7645438c9be.md) - Records the committed non-decisive U9 plan helper, policy boundaries, and focused local verification without claiming a product baseline.
 
 # Integration Notes
 
