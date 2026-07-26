@@ -563,10 +563,9 @@ def validate_approval(value: Any) -> dict[str, Any]:
     protocol_sha256 = digest(approval["protocol_sha256"])
 
     publisher = mapping(approval["publisher"])
-    exact_keys(publisher, ("workflow_path", "definition_sha256", "source_revision"))
+    exact_keys(publisher, ("workflow_path", "definition_sha256"))
     publisher_path = safe_relative_path(publisher["workflow_path"])
     publisher_sha256 = digest(publisher["definition_sha256"])
-    publisher_source = revision(publisher["source_revision"])
     if publisher_path != ".github/workflows/reference-game-release.yml":
         reject()
 
@@ -623,7 +622,6 @@ def validate_approval(value: Any) -> dict[str, Any]:
         "publisher": {
             "workflow_path": publisher_path,
             "definition_sha256": publisher_sha256,
-            "source_revision": publisher_source,
         },
         "normalized_evidence": {
             "path": evidence_path,
@@ -902,7 +900,7 @@ def validate_against_trusted(
         or approval["publisher"]
         != {
             key: trusted["publisher"][key]
-            for key in ("workflow_path", "definition_sha256", "source_revision")
+            for key in ("workflow_path", "definition_sha256")
         }
     ):
         reject()

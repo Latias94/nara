@@ -6,7 +6,7 @@
     "path": "docs/benchmarks/data/approvals/v1/reference-game-pre-release.json",
     "commit": "cccccccccccccccccccccccccccccccccccccccc",
     "blob": "dddddddddddddddddddddddddddddddddddddddd",
-    "sha256": "d6cf94f490e06a410d842c4dff7fbe42b0657b1c37aac9f5a46ffb621076eeec"
+    "sha256": "b7c80f81e780841d312adfd32611b8ef35ccbb63c60bcd0723c96f71b672ab54"
   },
   "repository": {
     "full_name": "acme/nara",

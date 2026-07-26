@@ -8,8 +8,7 @@
   "protocol_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
   "publisher": {
     "workflow_path": ".github/workflows/reference-game-release.yml",
-    "definition_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-    "source_revision": "abababababababababababababababababababab"
+    "definition_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
   },
   "normalized_evidence": {
     "path": "docs/benchmarks/data/normalized/v1/reference-game.json",

@@ -152,6 +152,11 @@ fn release_policy_schema_is_checked_before_manifest_build() {
 fn valid_approval_and_trusted_input_produce_bounded_publication_manifest() {
     let temporary = TemporaryDirectory::new("valid");
     let output = temporary.path().join("publication-manifest.json");
+    let approval = read_json(&approval_fixture());
+    assert!(
+        approval["publisher"].get("source_revision").is_none(),
+        "an ancestor approval cannot predict its future publisher revision"
+    );
     let result = build_manifest(&approval_fixture(), &trusted_fixture(), &output);
     assert!(
         result.status.success(),
@@ -174,6 +179,10 @@ fn valid_approval_and_trusted_input_produce_bounded_publication_manifest() {
     );
     assert_eq!(manifest["release"]["draft"], true);
     assert_eq!(manifest["release"]["prerelease"], true);
+    assert_eq!(
+        manifest["publisher"]["source_revision"],
+        "abababababababababababababababababababab"
+    );
     assert!(
         manifest["checksum_file"]["content"]
             .as_str()
@@ -208,7 +217,7 @@ fn release_verifier_rejects_non_publish_and_untrusted_identity_changes() {
 }
 
 #[test]
-fn release_verifier_rejects_publisher_definition_or_revision_substitution() {
+fn release_verifier_rejects_publisher_definition_substitution() {
     let temporary = TemporaryDirectory::new("publisher-binding");
     let approval = copy_fixture(temporary.path(), "approval.json", &approval_fixture());
     let trusted = copy_fixture(temporary.path(), "trusted.json", &trusted_fixture());
@@ -224,19 +233,6 @@ fn release_verifier_rejects_publisher_definition_or_revision_substitution() {
             .status
             .success(),
         "a caller-controlled publisher definition digest must not be accepted"
-    );
-
-    fs::copy(trusted_fixture(), &trusted).expect("trusted fixture must reset");
-    replace_once(
-        &trusted,
-        "\"source_revision\": \"abababababababababababababababababababab\"",
-        "\"source_revision\": \"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"",
-    );
-    assert!(
-        !build_manifest(&approval, &trusted, &output)
-            .status
-            .success(),
-        "a caller-controlled publisher source revision must not be accepted"
     );
 }
 
@@ -311,7 +307,7 @@ fn release_verifier_rejects_noncanonical_unknown_and_unpinned_inputs() {
     fs::copy(approval_fixture(), &approval).expect("approval fixture must reset");
     replace_once(
         &trusted,
-        "\"sha256\": \"d6cf94f490e06a410d842c4dff7fbe42b0657b1c37aac9f5a46ffb621076eeec\"",
+        "\"sha256\": \"b7c80f81e780841d312adfd32611b8ef35ccbb63c60bcd0723c96f71b672ab54\"",
         "\"sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"",
     );
     assert!(

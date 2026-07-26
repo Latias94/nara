@@ -54,8 +54,7 @@
       "additionalProperties": false,
       "required": [
         "workflow_path",
-        "definition_sha256",
-        "source_revision"
+        "definition_sha256"
       ],
       "properties": {
         "workflow_path": {
@@ -64,10 +63,6 @@
         "definition_sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
-        },
-        "source_revision": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{40}$"
         }
       }
     },
