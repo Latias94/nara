@@ -147,13 +147,13 @@ jobs:
       - name: Fetch pinned verifier, schemas, and public GitHub facts
         uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         env:
-          REVIEWED_SOURCE_REVISION: 476548f091a51c33110a3dca98edeee976876373
+          REVIEWED_SOURCE_REVISION: 45b8fcdd0dd8c471d60b2879ff9e94c395bfb489
           VERIFIER_PATH: reference-game/tools/verify_release.py
-          VERIFIER_BLOB: a778e5eb701ae1354ed188fb7901d29d17f84e81
-          VERIFIER_SHA256: 708f7995811d4a76215c58f8f6f64190f499720bc1b8c421ce90ded7b681f696
+          VERIFIER_BLOB: 5cb02772173ca8b2d28c86e7937a0b4305b5ba2d
+          VERIFIER_SHA256: eb38257a003b069dde54177bc61b8b01a703608f729df3b28d646af5205254fd
           APPROVAL_SCHEMA_PATH: docs/benchmarks/data/approvals/v1/reference-game-pre-release.schema.json
-          APPROVAL_SCHEMA_BLOB: ec84b0787434a3e7601d135835ef42d491546f38
-          APPROVAL_SCHEMA_SHA256: 47aa27863f075aaa40a4d858ac11c5502279a80d2516e34c180f908bac752fb4
+          APPROVAL_SCHEMA_BLOB: 9dd8e042571032f9fb518e2e79d8deb50d0242e2
+          APPROVAL_SCHEMA_SHA256: edbf17d7092fbc24dc395add86a51c3e6d8a91b9d0497ee44d4734ce4c5f746f
           TRUSTED_SCHEMA_PATH: docs/benchmarks/data/approvals/v1/release-trusted-input.schema.json
           TRUSTED_SCHEMA_BLOB: 10885ac3f368ba3e130cd18609088f63bdc037a4
           TRUSTED_SCHEMA_SHA256: 170abfae5e326bf65633b496cd5a9a7912481c6607ecf7e45917110fce233cc6
