@@ -57,10 +57,14 @@ pub struct TransformPlugin;
 pub const TRANSFORM_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.transform");
 pub const TRANSFORM_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.transform.components");
+pub const TRANSFORM_SCHEMA_OWNER_ID: nara_reflect::ComponentSchemaOwnerId =
+    nara_reflect::ComponentSchemaOwnerId::new("nara.transform.components");
 pub const TRANSFORM_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
+        TRANSFORM_SCHEMA_OWNER_ID,
         TRANSFORM_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.transform.components.native", 1),
+        transform_schema_catalog,
         validate_transform_components,
         register_transform_components,
     );
@@ -111,12 +115,8 @@ pub fn register_transform_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     validate_transform_components(registry)?;
-    let component_id = ComponentTypeId::new("nara.transform.Transform2d");
-    let schema = ComponentSchema::new(component_id, "Transform 2D", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields(transform_fields());
     registry.register_persistent_component_with_codec::<Transform2d, _, _>(
-        schema,
+        transform_schema(),
         |value| {
             Ok(Transform2d {
                 translation: read_vec2(value.field("translation")?, "translation")?,
@@ -136,6 +136,24 @@ pub fn register_transform_components(
         },
     )?;
     Ok(())
+}
+
+fn transform_schema_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    Ok(nara_reflect::ComponentSchemaCatalog {
+        components: vec![transform_schema()],
+        ..nara_reflect::ComponentSchemaCatalog::default()
+    })
+}
+
+fn transform_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.transform.Transform2d"),
+        "Transform 2D",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields(transform_fields())
 }
 
 fn validate_transform_components(

@@ -78,8 +78,10 @@ As of RGF-U1 on 2026-07-12:
   mutable presentation data; removed IDs remain type or field tombstones and cannot be reused.
 - `ComponentSchemaVersion` is stored with each `SceneComponentRecord`.
 - `ComponentRegistry::catalog_candidate()` exposes build-time semantic data; `catalog()` and
-  `snapshot()` require a successful atomic freeze. A loaded catalog can seed
-  `from_catalog_candidate` before native bindings are registered.
+  `snapshot()` require a successful atomic freeze. A trusted single-owner catalog can seed
+  `from_owner_catalog_candidate` with an explicit owner before native bindings are registered; a
+  flattened Runtime composition cannot be reused as that owner's predecessor. Normal plugin and
+  product composition uses `ComponentSchemaProviderDefinition` instead.
 - Component owners register explicit schemas and native codecs before freeze. Freeze validates
   catalog lineage, aliases, tombstones, capability scope, current field locators, defaults,
   migrations, and required bindings without publishing a partial snapshot.

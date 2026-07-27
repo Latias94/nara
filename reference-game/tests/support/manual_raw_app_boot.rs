@@ -519,9 +519,21 @@ fn prepare_manual_raw_app() -> Result<(App, LoadedProjectContent), ManualRawAppF
             .ok_or(ManualRawAppBootError::PluginPlanDrift)?
             .snapshot()
             .map_err(|_| ManualRawAppBootError::PluginPlanDrift)?;
-        if raw_snapshot.catalog().fingerprint() != loaded.plan.schema_validation().fingerprint()
-            || raw_snapshot.provider_receipts().collect::<Vec<_>>()
-                != loaded.plan.schema_validation().provider_receipts()
+        let raw_schema_fingerprint = raw_snapshot
+            .schema_composition_fingerprint()
+            .map_err(|_| ManualRawAppBootError::PluginPlanDrift)?;
+        let raw_executable_fingerprint = raw_snapshot
+            .executable_registry_fingerprint()
+            .map_err(|_| ManualRawAppBootError::PluginPlanDrift)?;
+        if raw_schema_fingerprint != loaded.plan.schema_validation().composition_fingerprint()
+            || raw_executable_fingerprint
+                != loaded.plan.schema_validation().executable_fingerprint()
+            || raw_snapshot.contribution_receipts().collect::<Vec<_>>()
+                != loaded
+                    .plan
+                    .schema_validation()
+                    .contribution_receipts()
+                    .collect::<Vec<_>>()
         {
             return Err(ManualRawAppBootError::PluginPlanDrift);
         }

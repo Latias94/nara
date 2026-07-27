@@ -373,6 +373,11 @@ impl Default for ComponentSchemaCatalog {
 }
 
 impl ComponentSchemaCatalog {
+    /// Starts the immediate successor of one schema owner's catalog.
+    ///
+    /// This helper carries owner-local generation, predecessor, and tombstone lineage only. A
+    /// flattened Runtime composition has no owner-attribution proof and must not be supplied as
+    /// the predecessor of a later product recipe.
     pub fn successor_of(predecessor: &Self) -> Result<Self, ComponentCatalogGenerationError> {
         let generation = predecessor
             .generation
@@ -608,6 +613,11 @@ pub struct CatalogFingerprint([u8; 32]);
 
 impl CatalogFingerprint {
     pub const HEX_LENGTH: usize = 64;
+
+    #[must_use]
+    pub(crate) const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
 
     pub fn from_hex(value: &str) -> Result<Self, CatalogFingerprintParseError> {
         if value.len() != Self::HEX_LENGTH

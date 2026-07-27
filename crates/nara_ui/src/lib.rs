@@ -216,10 +216,14 @@ pub struct UiPlugin;
 pub const UI_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.ui");
 pub const UI_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.ui.components");
+pub const UI_SCHEMA_OWNER_ID: nara_reflect::ComponentSchemaOwnerId =
+    nara_reflect::ComponentSchemaOwnerId::new("nara.ui.components");
 pub const UI_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
+        UI_SCHEMA_OWNER_ID,
         UI_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 1),
+        ui_schema_catalog,
         crate::codec::validate_ui_components,
         register_ui_components,
     );
@@ -236,6 +240,11 @@ pub const UI_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
         .requires_plugins(UI_PLUGIN_REQUIREMENTS)
         .requires_product_capabilities(UI_PRODUCT_REQUIREMENTS)
         .provides_schema(&[UI_SCHEMA_PROVIDER_ID]);
+
+fn ui_schema_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    Ok(crate::codec::ui_schema_catalog())
+}
 
 impl Plugin for UiPlugin {
     fn declaration() -> &'static nara_app::PluginDeclaration {

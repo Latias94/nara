@@ -23,8 +23,13 @@ use nara_image::{
     ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan, ImageImporter,
     ImageImporterCreateError,
 };
+use nara_reflect::__private::{
+    ComponentRegistrySnapshotWitness, component_registry_snapshot_witness,
+    component_registry_snapshot_witness_matches,
+};
 use nara_reflect::{
-    CatalogFingerprint, DeclaredAssetReferenceError, collect_declared_asset_references,
+    ComponentRegistrySnapshot, DeclaredAssetReferenceError, SchemaCompositionFingerprint,
+    collect_declared_asset_references,
 };
 use nara_scene::{
     PrefabDocument, PrefabDocumentCandidate, PrefabInstance, PrefabSourceResolver, SceneDocument,
@@ -114,8 +119,8 @@ pub struct ProjectContentSnapshot {
 
 struct ProjectContentSnapshotInner {
     lineage: ProjectSettingsLineage,
-    schema_fingerprint: CatalogFingerprint,
-    schema_generation: u64,
+    schema_fingerprint: SchemaCompositionFingerprint,
+    schema_authority: ComponentRegistrySnapshotWitness,
     revision: ProjectContentRevision,
     content_digest: ContentDigest,
     source_upgrade_required: bool,
@@ -133,13 +138,13 @@ impl ProjectContentSnapshot {
     }
 
     #[must_use]
-    pub fn schema_fingerprint(&self) -> CatalogFingerprint {
+    pub fn schema_fingerprint(&self) -> SchemaCompositionFingerprint {
         self.inner.schema_fingerprint
     }
 
     #[must_use]
-    pub fn schema_generation(&self) -> u64 {
-        self.inner.schema_generation
+    pub(crate) fn shares_schema_snapshot(&self, snapshot: &ComponentRegistrySnapshot) -> bool {
+        component_registry_snapshot_witness_matches(&self.inner.schema_authority, snapshot)
     }
 
     #[must_use]
@@ -237,7 +242,6 @@ impl fmt::Debug for ProjectContentSnapshot {
             .debug_struct("ProjectContentSnapshot")
             .field("lineage", &self.inner.lineage)
             .field("schema_fingerprint", &self.inner.schema_fingerprint)
-            .field("schema_generation", &self.inner.schema_generation)
             .field("revision", &self.inner.revision)
             .field("content_digest", &self.inner.content_digest)
             .field("prefab_count", &self.inner.prefabs.len())
@@ -522,17 +526,20 @@ impl ProjectContentLoader {
             ));
         }
         let registry = plan.schema_validation().registry();
-        let fingerprint = registry
-            .catalog()
+        let snapshot_fingerprint = plan
+            .schema_validation()
+            .snapshot()
+            .schema_composition_fingerprint()
             .map_err(|_| {
                 ProjectContentError::single(
                     ProjectContentErrorKind::SchemaMismatch,
                     "project.content.schema-unavailable",
                     "Project schema validation authority is unavailable",
                 )
-            })?
-            .fingerprint();
-        if fingerprint != plan.schema_validation().fingerprint() {
+            })?;
+        if !registry.shares_snapshot(plan.schema_validation().snapshot())
+            || snapshot_fingerprint != plan.schema_validation().composition_fingerprint()
+        {
             return Err(ProjectContentError::single(
                 ProjectContentErrorKind::SchemaMismatch,
                 "project.content.schema-mismatch",
@@ -634,17 +641,10 @@ impl<'a> LoadContext<'a> {
         let open_handles = self.budget_value(ProjectContentBudgetKind::OpenHandles);
         self.subtract_budget(ProjectContentBudgetKind::OpenHandles, open_handles);
 
-        let schema_catalog = self.validation.registry().catalog().map_err(|_| {
-            ProjectContentError::single(
-                ProjectContentErrorKind::SchemaMismatch,
-                "project.content.schema-unavailable",
-                "Project schema validation authority is unavailable",
-            )
-        })?;
         let content_digest = self.finish_content_digest()?;
         let revision = content_revision(
             candidate.lineage(),
-            self.validation.fingerprint(),
+            self.validation.composition_fingerprint(),
             content_digest,
         )?;
 
@@ -693,8 +693,8 @@ impl<'a> LoadContext<'a> {
         Ok(ProjectContentSnapshot {
             inner: Arc::new(ProjectContentSnapshotInner {
                 lineage: candidate.lineage(),
-                schema_fingerprint: self.validation.fingerprint(),
-                schema_generation: schema_catalog.generation(),
+                schema_fingerprint: self.validation.composition_fingerprint(),
+                schema_authority: component_registry_snapshot_witness(self.validation.snapshot()),
                 revision,
                 content_digest,
                 source_upgrade_required: self.source_upgrade_required,
@@ -1463,11 +1463,11 @@ impl ContentDigestBuilder {
 
 fn content_revision(
     lineage: ProjectSettingsLineage,
-    schema: CatalogFingerprint,
+    schema: SchemaCompositionFingerprint,
     content: ContentDigest,
 ) -> Result<ProjectContentRevision, ProjectContentError> {
     let mut framed = Vec::with_capacity(160);
-    framed.extend_from_slice(b"nara.project-content-revision.v1\0");
+    framed.extend_from_slice(b"nara.project-content-revision.v2\0");
     framed.extend_from_slice(&lineage.settings_digest());
     if let Some(root) = lineage.project_root_identity() {
         framed.extend_from_slice(&root.session().get().to_le_bytes());

@@ -22,8 +22,9 @@ use nara::{
         ingest_project_manifest, project_runtime_plugins, resolve_runtime_plan,
     },
     reflect::{
-        ComponentRegistry, ComponentRegistryError, ComponentSchema,
-        ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
+        ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
+        ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+        ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId,
     },
     scene::HIERARCHY_SCHEMA_PROVIDER_ID,
@@ -93,6 +94,8 @@ const TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID: PluginId =
     PluginId::new("test.reentrant-project-request");
 const TEST_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
     PluginSchemaProviderId::new("test.schema-provider.components");
+const TEST_SCHEMA_OWNER_ID: ComponentSchemaOwnerId =
+    ComponentSchemaOwnerId::new("test.schema-provider.components");
 const TEST_SCHEMA_PROVIDER_BINDING_ID: ComponentSchemaProviderBindingId =
     ComponentSchemaProviderBindingId::new("test.schema-provider.components.native", 1);
 const TEST_SCHEMA_PROVIDER_SECOND_BINDING_ID: ComponentSchemaProviderBindingId =
@@ -100,6 +103,8 @@ const TEST_SCHEMA_PROVIDER_SECOND_BINDING_ID: ComponentSchemaProviderBindingId =
 const TEST_COUNTED_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.counted-schema-provider");
 const TEST_COUNTED_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
     PluginSchemaProviderId::new("test.counted-schema-provider.components");
+const TEST_COUNTED_SCHEMA_OWNER_ID: ComponentSchemaOwnerId =
+    ComponentSchemaOwnerId::new("test.counted-schema-provider.components");
 const TEST_COUNTED_SCHEMA_PROVIDER_BINDING_ID: ComponentSchemaProviderBindingId =
     ComponentSchemaProviderBindingId::new("test.counted-schema-provider.components.native", 1);
 const TEST_COUNTED_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
@@ -109,8 +114,48 @@ const TEST_COUNTED_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
 
 static COUNTED_PROVIDER_VALIDATIONS: AtomicUsize = AtomicUsize::new(0);
 static COUNTED_PROVIDER_REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
+static COUNTED_PROVIDER_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn empty_schema_catalog_source()
+-> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+    Ok(ComponentSchemaCatalog::default())
+}
+
+fn claimed_schema_catalog_source()
+-> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+    Ok(ComponentSchemaCatalog {
+        components: vec![ComponentSchema::new(
+            ComponentTypeId::new("test.shared.Component"),
+            "Shared component",
+            ComponentSchemaVersion::ONE,
+        )],
+        ..ComponentSchemaCatalog::default()
+    })
+}
+
+fn tombstoned_schema_catalog_source()
+-> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+    Ok(ComponentSchemaCatalog {
+        type_tombstones: vec![ComponentTypeId::new("test.shared.Component")],
+        ..ComponentSchemaCatalog::default()
+    })
+}
+
+fn rejected_schema_catalog_source()
+-> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+    Err(ComponentSchemaProviderSourceError::new(
+        "test-schema-source-rejected",
+    ))
+}
+
+fn panicking_schema_catalog_source()
+-> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+    panic!("schema source panic before provider callback")
+}
+
 const TEST_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(TEST_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
         .provides_schema(&[TEST_SCHEMA_PROVIDER_ID]);
 const TEST_SECOND_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(TEST_SECOND_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
@@ -356,10 +401,12 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
         built_in_schema_providers(),
     )
     .unwrap();
+    let mut reversed_providers = built_in_schema_providers();
+    reversed_providers.reverse();
     let repeated = resolve_runtime_plan(
         &candidate,
         project_runtime_plugins(&candidate),
-        built_in_schema_providers(),
+        reversed_providers,
     )
     .unwrap();
 
@@ -370,12 +417,33 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
         repeated.plugin_plan().fingerprint()
     );
     assert_eq!(
-        first.schema_validation().fingerprint(),
-        repeated.schema_validation().fingerprint()
+        first.schema_validation().composition_fingerprint(),
+        repeated.schema_validation().composition_fingerprint()
     );
     assert_eq!(
         first.schema_validation().provider_ids(),
         repeated.schema_validation().provider_ids()
+    );
+    assert_eq!(
+        first
+            .schema_validation()
+            .contribution_receipts()
+            .collect::<Vec<_>>(),
+        repeated
+            .schema_validation()
+            .contribution_receipts()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        first.schema_validation().executable_fingerprint(),
+        repeated.schema_validation().executable_fingerprint()
+    );
+    assert!(
+        !first
+            .schema_validation()
+            .snapshot()
+            .ptr_eq(repeated.schema_validation().snapshot()),
+        "independently resolved plans retain distinct snapshot authority"
     );
     assert!(
         first
@@ -389,8 +457,15 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
 
     let app = first.plugin_plan().instantiate().unwrap();
     let runtime_registry = app.world().resource::<ComponentRegistry>();
-    let runtime_fingerprint = runtime_registry.catalog().unwrap().fingerprint();
-    assert_eq!(runtime_fingerprint, first.schema_validation().fingerprint());
+    let runtime_fingerprint = runtime_registry
+        .snapshot()
+        .unwrap()
+        .schema_composition_fingerprint()
+        .unwrap();
+    assert_eq!(
+        runtime_fingerprint,
+        first.schema_validation().composition_fingerprint()
+    );
     assert!(
         runtime_registry.shares_snapshot(first.schema_validation().snapshot()),
         "the plan and instantiated World must share one executable behavior snapshot"
@@ -405,10 +480,90 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
         first.plugin_plan().fingerprint(),
         "the code-first registry recipe must not impersonate a snapshot-bound runtime plan"
     );
+    let raw_app = raw_app.seal().unwrap();
+    let raw_snapshot = raw_app
+        .world()
+        .resource::<ComponentRegistry>()
+        .snapshot()
+        .unwrap();
+    assert_eq!(
+        raw_snapshot.schema_composition_fingerprint().unwrap(),
+        first.schema_validation().composition_fingerprint()
+    );
+    assert_eq!(
+        raw_snapshot.executable_registry_fingerprint().unwrap(),
+        first.schema_validation().executable_fingerprint()
+    );
+    assert_eq!(
+        raw_snapshot.contribution_receipts().collect::<Vec<_>>(),
+        first
+            .schema_validation()
+            .contribution_receipts()
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !raw_snapshot.ptr_eq(first.schema_validation().snapshot()),
+        "equivalent direct and file-backed registries retain distinct authority"
+    );
+}
+
+#[cfg(feature = "runtime-2d")]
+#[test]
+fn omitted_known_owner_component_rejects_before_world_mutation() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+    assert!(
+        !plan
+            .schema_validation()
+            .provider_ids()
+            .contains(&nara::tilemap::TILEMAP_SCHEMA_PROVIDER_ID)
+    );
+
+    let document = nara::scene::SceneDocument::new([nara::scene::SceneEntityRecord::new(
+        nara::identity::SceneEntityId::new("omitted-owner").unwrap(),
+    )
+    .with_component(
+        ComponentTypeId::new("nara.tilemap.Tilemap"),
+        nara::scene::SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            nara::reflect::ComponentValue::Null,
+        ),
+    )]);
+    let mut world = nara::ecs::World::new();
+    world.spawn_empty();
+    let baseline = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+
+    let report =
+        nara::scene::spawn_scene(&mut world, plan.schema_validation().registry(), &document);
+
+    assert!(report.instance.is_none());
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.unknown-component"
+            || diagnostic.code().as_str() == "scene.unsupported-component-version"
+    }));
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline,
+    );
 }
 
 #[test]
-fn file_backed_schema_provider_registration_is_not_replayed_in_the_candidate() {
+fn file_backed_schema_provider_callbacks_run_once_in_the_private_candidate() {
+    let _guard = COUNTED_PROVIDER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
     COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
@@ -418,12 +573,14 @@ fn file_backed_schema_provider_registration_is_not_replayed_in_the_candidate() {
     );
     let mut providers = built_in_schema_providers();
     providers.push(counted_schema_provider());
+    providers.push(counted_schema_provider());
     let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     assert_eq!(
         plan.schema_validation()
             .provider_receipts()
             .iter()
+            .copied()
             .map(|receipt| receipt.provider())
             .collect::<Vec<_>>(),
         plan.schema_validation().provider_ids()
@@ -433,11 +590,112 @@ fn file_backed_schema_provider_registration_is_not_replayed_in_the_candidate() {
     let registry = app.world().resource::<ComponentRegistry>();
     assert!(registry.shares_snapshot(plan.schema_validation().snapshot()));
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+    assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn distinct_definitions_for_one_owner_reject_before_selected_callbacks() {
+    let _guard = COUNTED_PROVIDER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    const ALTERNATE_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("test.counted-schema-provider.alternate");
+    COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
+    COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+        PluginDefinition::for_default::<CountedSchemaProviderPlugin>(),
+    );
+    let mut providers = built_in_schema_providers();
+    providers.extend([
+        counted_schema_provider(),
+        ComponentSchemaProviderDefinition::new(
+            TEST_COUNTED_SCHEMA_OWNER_ID,
+            ALTERNATE_PROVIDER,
+            ComponentSchemaProviderBindingId::new(
+                "test.counted-schema-provider.alternate.native",
+                1,
+            ),
+            empty_schema_catalog_source,
+            panic_schema_provider,
+        ),
+    ]);
+
+    assert_eq!(
+        resolve_runtime_plan(&candidate, request, providers).unwrap_err(),
+        RuntimePlanError::Composition(CompositionError::DivergentSchemaOwner {
+            owner: TEST_COUNTED_SCHEMA_OWNER_ID,
+        }),
+    );
     assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 0);
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn schema_source_failure_rejects_before_any_selected_callback() {
+    let _guard = COUNTED_PROVIDER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    const REJECTED_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("test.rejected-source-provider");
+    const PANICKED_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("test.panicked-source-provider");
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+
+    for (provider_id, source, expected_panic) in [
+        (
+            REJECTED_PROVIDER,
+            rejected_schema_catalog_source as nara::reflect::ComponentSchemaProviderSource,
+            false,
+        ),
+        (
+            PANICKED_PROVIDER,
+            panicking_schema_catalog_source as nara::reflect::ComponentSchemaProviderSource,
+            true,
+        ),
+    ] {
+        COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
+        COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
+        let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::for_default::<CountedSchemaProviderPlugin>(),
+        );
+        let mut providers = built_in_schema_providers();
+        providers.extend([
+            counted_schema_provider(),
+            ComponentSchemaProviderDefinition::new(
+                ComponentSchemaOwnerId::new(provider_id.as_str()),
+                provider_id,
+                ComponentSchemaProviderBindingId::new(provider_id.as_str(), 1),
+                source,
+                panic_schema_provider,
+            ),
+        ]);
+
+        let error = resolve_runtime_plan(&candidate, request, providers).unwrap_err();
+        assert!(matches!(
+            error,
+            RuntimePlanError::Composition(CompositionError::SchemaProviderRejected {
+                provider,
+                source,
+            }) if provider == provider_id
+                && matches!(
+                    (source.as_ref(), expected_panic),
+                    (ComponentRegistryError::SchemaProviderSourcePanicked { .. }, true)
+                        | (ComponentRegistryError::SchemaProviderSourceRejected { .. }, false)
+                )
+        ));
+        assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 0);
+        assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 0);
+    }
 }
 
 #[test]
 fn code_first_schema_provider_builds_and_freezes_once_without_a_host() {
+    let _guard = COUNTED_PROVIDER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
     COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
     let mut app = nara::app::App::new();
@@ -454,6 +712,95 @@ fn code_first_schema_provider_builds_and_freezes_once_without_a_host() {
     assert!(registry.is_frozen());
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     nara::reflect::validate_component_registry_authority(app.world()).unwrap();
+}
+
+#[test]
+fn validation_rejection_and_panic_have_direct_and_file_backed_parity() {
+    let _guard = COUNTED_PROVIDER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+
+    for (validation, panics, configuration) in [
+        (
+            reject_counted_schema_provider_validation
+                as fn(&ComponentRegistry) -> Result<(), ComponentRegistryError>,
+            false,
+            b"reject".as_slice(),
+        ),
+        (
+            panic_counted_schema_provider_validation
+                as fn(&ComponentRegistry) -> Result<(), ComponentRegistryError>,
+            true,
+            b"panic".as_slice(),
+        ),
+    ] {
+        COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
+        COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
+        let provider = ComponentSchemaProviderDefinition::with_validation(
+            TEST_SCHEMA_OWNER_ID,
+            TEST_SCHEMA_PROVIDER_ID,
+            TEST_SCHEMA_PROVIDER_BINDING_ID,
+            empty_schema_catalog_source,
+            validation,
+            counted_schema_provider_registration,
+        );
+        let direct_plugin = ReceiptValidatingSchemaProviderPlugin { provider };
+        let mut app = nara::app::App::new();
+        let Err(direct_error) =
+            app.add_plugins((nara::reflect::ComponentRegistryPlugin, direct_plugin))
+        else {
+            panic!("rejecting schema validation unexpectedly admitted the direct App");
+        };
+        assert!(matches!(
+            (direct_error, panics),
+            (
+                AddPluginsError::Plugin(PluginError::ComponentRegistrationFailed {
+                    plugin: TEST_SCHEMA_PLUGIN_ID,
+                    ..
+                }),
+                false,
+            ) | (
+                AddPluginsError::Plugin(PluginError::HookPanicked {
+                    plugin: TEST_SCHEMA_PLUGIN_ID,
+                    hook: PluginHook::Build,
+                }),
+                true,
+            )
+        ));
+        assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
+        assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 0);
+
+        COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
+        let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::infallible::<ReceiptValidatingSchemaProviderPlugin, _>(
+                nara::app::PluginDefinitionId::new("test.schema-provider.validation-parity", 1),
+                configuration,
+                move || ReceiptValidatingSchemaProviderPlugin { provider },
+            ),
+        );
+        let mut providers = built_in_schema_providers();
+        providers.push(provider);
+        let file_error = resolve_runtime_plan(&candidate, request, providers).unwrap_err();
+        assert!(matches!(
+            (file_error, panics),
+            (
+                RuntimePlanError::Composition(CompositionError::SchemaProviderRejected {
+                    provider: TEST_SCHEMA_PROVIDER_ID,
+                    ..
+                }),
+                false,
+            ) | (
+                RuntimePlanError::Composition(CompositionError::SchemaProviderPanicked {
+                    provider: TEST_SCHEMA_PROVIDER_ID,
+                }),
+                true,
+            )
+        ));
+        assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
+        assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 0);
+    }
 }
 
 #[test]
@@ -507,8 +854,10 @@ fn file_backed_candidate_rejects_divergent_binding_codec_and_migration_receipts(
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     let admitted = ComponentSchemaProviderDefinition::new(
+        TEST_SCHEMA_OWNER_ID,
         TEST_SCHEMA_PROVIDER_ID,
         TEST_SCHEMA_PROVIDER_BINDING_ID,
+        empty_schema_catalog_source,
         register_empty_schema_provider,
     );
 
@@ -527,8 +876,10 @@ fn file_backed_candidate_rejects_divergent_binding_codec_and_migration_receipts(
         ),
     ] {
         let candidate_provider = ComponentSchemaProviderDefinition::new(
+            TEST_SCHEMA_OWNER_ID,
             TEST_SCHEMA_PROVIDER_ID,
             divergent,
+            empty_schema_catalog_source,
             panic_schema_provider,
         );
         let request = project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
@@ -547,6 +898,7 @@ fn file_backed_candidate_rejects_divergent_binding_codec_and_migration_receipts(
             plan.schema_validation()
                 .provider_receipts()
                 .iter()
+                .copied()
                 .find(|receipt| receipt.provider() == TEST_SCHEMA_PROVIDER_ID)
                 .unwrap()
                 .binding(),
@@ -660,8 +1012,10 @@ fn missing_schema_provider_rejects_before_a_plan_is_published_and_can_be_correct
 
     let mut providers = built_in_schema_providers();
     providers.push(ComponentSchemaProviderDefinition::new(
+        TEST_SCHEMA_OWNER_ID,
         TEST_SCHEMA_PROVIDER_ID,
         TEST_SCHEMA_PROVIDER_BINDING_ID,
+        empty_schema_catalog_source,
         register_empty_schema_provider,
     ));
     let corrected = resolve_runtime_plan(&candidate, plugins(), providers).unwrap();
@@ -720,18 +1074,24 @@ fn manifest_and_profile_identity_participate_in_opaque_lineage() {
 fn divergent_schema_provider_bindings_reject_even_when_not_selected() {
     const PROVIDER_ID: PluginSchemaProviderId =
         PluginSchemaProviderId::new("test.divergent-schema-provider");
+    const OWNER_ID: ComponentSchemaOwnerId =
+        ComponentSchemaOwnerId::new("test.divergent-schema-owner");
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     let mut providers = built_in_schema_providers();
     providers.extend([
         ComponentSchemaProviderDefinition::new(
+            OWNER_ID,
             PROVIDER_ID,
             TEST_SCHEMA_PROVIDER_BINDING_ID,
+            empty_schema_catalog_source,
             register_empty_schema_provider,
         ),
         ComponentSchemaProviderDefinition::new(
+            OWNER_ID,
             PROVIDER_ID,
             TEST_SCHEMA_PROVIDER_SECOND_BINDING_ID,
+            empty_schema_catalog_source,
             register_second_empty_schema_provider,
         ),
     ]);
@@ -748,7 +1108,99 @@ fn divergent_schema_provider_bindings_reject_even_when_not_selected() {
 }
 
 #[test]
-fn multiple_plugins_cannot_own_the_same_schema_provider() {
+fn known_inactive_schema_owners_reserve_their_type_claims_without_running_callbacks() {
+    const FIRST_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("test.inactive-owner-a.provider");
+    const SECOND_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("test.inactive-owner-b.provider");
+    const FIRST_OWNER: ComponentSchemaOwnerId =
+        ComponentSchemaOwnerId::new("test.inactive-owner-a");
+    const SECOND_OWNER: ComponentSchemaOwnerId =
+        ComponentSchemaOwnerId::new("test.inactive-owner-b");
+    const FIRST_BINDING: ComponentSchemaProviderBindingId =
+        ComponentSchemaProviderBindingId::new("test.inactive-owner-a.native", 1);
+    const SECOND_BINDING: ComponentSchemaProviderBindingId =
+        ComponentSchemaProviderBindingId::new("test.inactive-owner-b.native", 1);
+
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let mut providers = built_in_schema_providers();
+    providers.extend([
+        ComponentSchemaProviderDefinition::new(
+            FIRST_OWNER,
+            FIRST_PROVIDER,
+            FIRST_BINDING,
+            claimed_schema_catalog_source,
+            panic_schema_provider,
+        ),
+        ComponentSchemaProviderDefinition::new(
+            SECOND_OWNER,
+            SECOND_PROVIDER,
+            SECOND_BINDING,
+            claimed_schema_catalog_source,
+            panic_schema_provider,
+        ),
+    ]);
+
+    assert!(matches!(
+        resolve_runtime_plan(&candidate, project_runtime_plugins(&candidate), providers),
+        Err(RuntimePlanError::Composition(
+            CompositionError::ConflictingSchemaOwnerClaim {
+                component_id,
+                first_owner,
+                second_owner,
+            }
+        )) if component_id == ComponentTypeId::new("test.shared.Component")
+            && [first_owner, second_owner].contains(&FIRST_OWNER)
+            && [first_owner, second_owner].contains(&SECOND_OWNER)
+    ));
+}
+
+#[test]
+fn known_inactive_owner_tombstones_reserve_type_claims() {
+    const ACTIVE_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("test.inactive-active-owner.provider");
+    const TOMBSTONE_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("test.inactive-tombstone-owner.provider");
+    const ACTIVE_OWNER: ComponentSchemaOwnerId =
+        ComponentSchemaOwnerId::new("test.inactive-active-owner");
+    const TOMBSTONE_OWNER: ComponentSchemaOwnerId =
+        ComponentSchemaOwnerId::new("test.inactive-tombstone-owner");
+
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let mut providers = built_in_schema_providers();
+    providers.extend([
+        ComponentSchemaProviderDefinition::new(
+            ACTIVE_OWNER,
+            ACTIVE_PROVIDER,
+            ComponentSchemaProviderBindingId::new("test.inactive-active-owner.native", 1),
+            claimed_schema_catalog_source,
+            panic_schema_provider,
+        ),
+        ComponentSchemaProviderDefinition::new(
+            TOMBSTONE_OWNER,
+            TOMBSTONE_PROVIDER,
+            ComponentSchemaProviderBindingId::new("test.inactive-tombstone-owner.native", 1),
+            tombstoned_schema_catalog_source,
+            panic_schema_provider,
+        ),
+    ]);
+
+    assert!(matches!(
+        resolve_runtime_plan(&candidate, project_runtime_plugins(&candidate), providers),
+        Err(RuntimePlanError::Composition(
+            CompositionError::ConflictingSchemaOwnerClaim { component_id, .. }
+        )) if component_id == ComponentTypeId::new("test.shared.Component")
+    ));
+}
+
+#[test]
+fn multiple_plugins_may_select_one_identical_schema_provider() {
+    let _guard = COUNTED_PROVIDER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     let request = project_runtime_plugins(&candidate)
@@ -758,17 +1210,21 @@ fn multiple_plugins_cannot_own_the_same_schema_provider() {
         >());
     let mut providers = built_in_schema_providers();
     providers.push(ComponentSchemaProviderDefinition::new(
+        TEST_SCHEMA_OWNER_ID,
         TEST_SCHEMA_PROVIDER_ID,
         TEST_SCHEMA_PROVIDER_BINDING_ID,
-        register_empty_schema_provider,
+        empty_schema_catalog_source,
+        counted_schema_provider_registration,
     ));
 
-    assert_eq!(
-        resolve_runtime_plan(&candidate, request, providers).unwrap_err(),
-        RuntimePlanError::Composition(CompositionError::AmbiguousSchemaProviderOwner {
-            provider: TEST_SCHEMA_PROVIDER_ID,
-        })
+    let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
+
+    assert!(
+        plan.schema_validation()
+            .provider_ids()
+            .contains(&TEST_SCHEMA_PROVIDER_ID)
     );
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -779,8 +1235,10 @@ fn schema_provider_callback_rejection_preserves_the_composition_phase() {
         .insert_after::<TransformPlugin>(PluginDefinition::for_default::<SchemaProviderPlugin>());
     let mut providers = built_in_schema_providers();
     providers.push(ComponentSchemaProviderDefinition::new(
+        TEST_SCHEMA_OWNER_ID,
         TEST_SCHEMA_PROVIDER_ID,
         TEST_SCHEMA_PROVIDER_BINDING_ID,
+        empty_schema_catalog_source,
         reject_schema_provider,
     ));
 
@@ -804,8 +1262,10 @@ fn schema_provider_panic_is_typed_and_a_corrected_binding_can_retry() {
     };
     let mut providers = built_in_schema_providers();
     providers.push(ComponentSchemaProviderDefinition::new(
+        TEST_SCHEMA_OWNER_ID,
         TEST_SCHEMA_PROVIDER_ID,
         TEST_SCHEMA_PROVIDER_BINDING_ID,
+        empty_schema_catalog_source,
         panic_schema_provider,
     ));
 
@@ -818,31 +1278,39 @@ fn schema_provider_panic_is_typed_and_a_corrected_binding_can_retry() {
 
     let mut corrected = built_in_schema_providers();
     corrected.push(ComponentSchemaProviderDefinition::new(
+        TEST_SCHEMA_OWNER_ID,
         TEST_SCHEMA_PROVIDER_ID,
         TEST_SCHEMA_PROVIDER_BINDING_ID,
+        empty_schema_catalog_source,
         register_empty_schema_provider,
     ));
     resolve_runtime_plan(&candidate, request(), corrected).unwrap();
 }
 
 #[test]
-fn schema_catalog_freeze_failure_does_not_publish_a_runtime_plan() {
+fn owner_candidate_freeze_failure_does_not_publish_a_runtime_plan() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
     let request = project_runtime_plugins(&candidate)
         .insert_after::<TransformPlugin>(PluginDefinition::for_default::<SchemaProviderPlugin>());
     let mut providers = built_in_schema_providers();
     providers.push(ComponentSchemaProviderDefinition::new(
+        TEST_SCHEMA_OWNER_ID,
         TEST_SCHEMA_PROVIDER_ID,
         TEST_SCHEMA_PROVIDER_BINDING_ID,
+        empty_schema_catalog_source,
         register_unbound_component_schema,
     ));
 
     let error = resolve_runtime_plan(&candidate, request, providers).unwrap_err();
-    let RuntimePlanError::Composition(CompositionError::SchemaFreezeRejected { source }) = error
+    let RuntimePlanError::Composition(CompositionError::SchemaProviderRejected {
+        provider,
+        source,
+    }) = error
     else {
-        panic!("unbound schema must fail during catalog freeze");
+        panic!("unbound schema must fail during owner-candidate freeze");
     };
+    assert_eq!(provider, TEST_SCHEMA_PROVIDER_ID);
     assert!(matches!(
         *source,
         ComponentRegistryError::MissingNativeBinding { .. }
@@ -1093,8 +1561,10 @@ fn reinsert_code_first_registry(world: &mut nara::ecs::World) {
 
 fn counted_schema_provider() -> ComponentSchemaProviderDefinition {
     ComponentSchemaProviderDefinition::with_validation(
+        TEST_COUNTED_SCHEMA_OWNER_ID,
         TEST_COUNTED_SCHEMA_PROVIDER_ID,
         TEST_COUNTED_SCHEMA_PROVIDER_BINDING_ID,
+        empty_schema_catalog_source,
         counted_schema_provider_validation,
         counted_schema_provider_registration,
     )
@@ -1105,6 +1575,20 @@ fn counted_schema_provider_validation(
 ) -> Result<(), ComponentRegistryError> {
     COUNTED_PROVIDER_VALIDATIONS.fetch_add(1, Ordering::SeqCst);
     Ok(())
+}
+
+fn reject_counted_schema_provider_validation(
+    _registry: &ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    COUNTED_PROVIDER_VALIDATIONS.fetch_add(1, Ordering::SeqCst);
+    Err(ComponentRegistryError::Frozen)
+}
+
+fn panic_counted_schema_provider_validation(
+    _registry: &ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    COUNTED_PROVIDER_VALIDATIONS.fetch_add(1, Ordering::SeqCst);
+    panic!("schema provider validation panic")
 }
 
 fn counted_schema_provider_registration(

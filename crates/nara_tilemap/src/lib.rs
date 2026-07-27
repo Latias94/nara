@@ -463,10 +463,14 @@ pub struct TilemapPlugin;
 pub const TILEMAP_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.tilemap");
 pub const TILEMAP_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.tilemap.components");
+pub const TILEMAP_SCHEMA_OWNER_ID: nara_reflect::ComponentSchemaOwnerId =
+    nara_reflect::ComponentSchemaOwnerId::new("nara.tilemap.components");
 pub const TILEMAP_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
+        TILEMAP_SCHEMA_OWNER_ID,
         TILEMAP_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.tilemap.components.native", 1),
+        tilemap_schema_catalog,
         validate_tilemap_components,
         register_tilemap_components,
     );
@@ -513,12 +517,8 @@ pub fn register_tilemap_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     validate_tilemap_components(registry)?;
-    let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
-    let schema = ComponentSchema::new(component_id, "Tilemap", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields(tilemap_fields());
     registry.register_persistent_component_codec_with_context::<Tilemap, _, _>(
-        schema,
+        tilemap_schema(),
         |value, context| {
             let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
@@ -573,6 +573,24 @@ pub fn register_tilemap_components(
         },
     )?;
     Ok(())
+}
+
+fn tilemap_schema_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    Ok(nara_reflect::ComponentSchemaCatalog {
+        components: vec![tilemap_schema()],
+        ..nara_reflect::ComponentSchemaCatalog::default()
+    })
+}
+
+fn tilemap_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.tilemap.Tilemap"),
+        "Tilemap",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields(tilemap_fields())
 }
 
 fn validate_tilemap_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {

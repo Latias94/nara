@@ -21,6 +21,13 @@ pub fn register_ui_components(
     register_ui_panel_component(registry)
 }
 
+pub(crate) fn ui_schema_catalog() -> nara_reflect::ComponentSchemaCatalog {
+    nara_reflect::ComponentSchemaCatalog {
+        components: vec![ui_root_schema(), ui_node_schema(), ui_panel_schema()],
+        ..nara_reflect::ComponentSchemaCatalog::default()
+    }
+}
+
 pub(crate) fn validate_ui_components(
     registry: &ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
@@ -34,12 +41,8 @@ pub(crate) fn validate_ui_components(
 pub(crate) fn register_ui_root_component(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
-    let root_id = ComponentTypeId::new("nara.ui.UiRoot");
-    let schema = ComponentSchema::new(root_id, "UI root", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields(ui_root_fields());
     registry.register_persistent_component_with_codec::<UiRoot, _, _>(
-        schema,
+        ui_root_schema(),
         |value| {
             Ok(UiRoot {
                 target: read_render_target(value.get("target"))?,
@@ -59,12 +62,8 @@ pub(crate) fn register_ui_root_component(
 pub(crate) fn register_ui_node_component(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
-    let node_id = ComponentTypeId::new("nara.ui.UiNode");
-    let schema = ComponentSchema::new(node_id, "UI node", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields(ui_node_fields());
     registry.register_persistent_component_with_codec::<UiNode, _, _>(
-        schema,
+        ui_node_schema(),
         |value| {
             Ok(UiNode {
                 style: read_style(value.get("style"))?,
@@ -90,12 +89,8 @@ pub(crate) fn register_ui_node_component(
 pub(crate) fn register_ui_panel_component(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
-    let panel_id = ComponentTypeId::new("nara.ui.UiPanel");
-    let schema = ComponentSchema::new(panel_id, "UI panel", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields(ui_panel_fields());
     registry.register_persistent_component_codec_with_context::<UiPanel, _, _>(
-        schema,
+        ui_panel_schema(),
         |value, context| {
             let material = read_panel_material(value.field("material")?, context)?;
             if material.requires_asset_server() {
@@ -145,6 +140,36 @@ pub(crate) fn register_ui_panel_component(
         },
     )?;
     Ok(())
+}
+
+fn ui_root_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.ui.UiRoot"),
+        "UI root",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields(ui_root_fields())
+}
+
+fn ui_node_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.ui.UiNode"),
+        "UI node",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields(ui_node_fields())
+}
+
+fn ui_panel_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.ui.UiPanel"),
+        "UI panel",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields(ui_panel_fields())
 }
 
 fn ui_root_fields() -> [ComponentFieldSchema; 2] {

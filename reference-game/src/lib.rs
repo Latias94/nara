@@ -34,9 +34,10 @@ use nara::{
         project_runtime_plugins,
     },
     reflect::{
-        COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentCodecError, ComponentFieldPath,
-        ComponentRegistryError, ComponentSchemaProviderDefinition, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValue,
+        COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentCatalogFileLimits, ComponentCodecError,
+        ComponentFieldPath, ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaOwnerId,
+        ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     },
     tilemap::TilemapPlugin,
 };
@@ -65,13 +66,18 @@ pub const REFERENCE_PROJECT_OUTCOME_PLUGIN_ID: PluginId =
     PluginId::new("reference-game.project-outcome");
 pub const REFERENCE_GAME_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
     PluginSchemaProviderId::new("reference-game.components");
+pub const REFERENCE_GAME_SCHEMA_OWNER_ID: ComponentSchemaOwnerId =
+    ComponentSchemaOwnerId::new("reference-game.components");
 pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
     ComponentSchemaProviderDefinition::with_validation(
+        REFERENCE_GAME_SCHEMA_OWNER_ID,
         REFERENCE_GAME_SCHEMA_PROVIDER_ID,
         nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 3),
+        reference_game_schema_v3,
         validate_reference_game_components,
         register_reference_game_components,
-    );
+    )
+    .with_predecessor(reference_game_schema_v2);
 pub const REFERENCE_GAME_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_GAME_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
@@ -503,6 +509,34 @@ fn component_registry_unavailable() -> PluginError {
         "component-schema-catalog",
         "component registry resource is unavailable",
     )
+}
+
+fn reference_game_schema_v1() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>
+{
+    ComponentSchemaCatalog::from_json_bytes(include_bytes!("../schema/component-schema-v1.json"))
+        .map_err(|_| ComponentSchemaProviderSourceError::new("reference-game-schema-v1-invalid"))
+}
+
+fn reference_game_schema_v2() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>
+{
+    let predecessor = reference_game_schema_v1()?;
+    ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        include_bytes!("../schema/component-schema-v2.json"),
+        &predecessor,
+        ComponentCatalogFileLimits::default(),
+    )
+    .map_err(|_| ComponentSchemaProviderSourceError::new("reference-game-schema-v2-invalid"))
+}
+
+fn reference_game_schema_v3() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>
+{
+    let predecessor = reference_game_schema_v2()?;
+    ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        include_bytes!("../schema/component-schema-v3.json"),
+        &predecessor,
+        ComponentCatalogFileLimits::default(),
+    )
+    .map_err(|_| ComponentSchemaProviderSourceError::new("reference-game-schema-v3-invalid"))
 }
 
 pub fn register_reference_game_components(

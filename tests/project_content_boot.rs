@@ -23,7 +23,7 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     assert_eq!(snapshot.lineage(), candidate.lineage());
     assert_eq!(
         snapshot.schema_fingerprint(),
-        plan.schema_validation().fingerprint()
+        plan.schema_validation().composition_fingerprint()
     );
     assert_eq!(snapshot.prefabs().len(), 1);
     assert_eq!(snapshot.images().len(), 1);

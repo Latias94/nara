@@ -684,15 +684,16 @@ fn project_host_rejects_a_runtime_plan_from_another_project_lineage() {
 #[test]
 fn project_host_rejects_a_different_schema_plan_from_the_same_lineage() {
     let project = TestProject::new("schema-lineage");
-    let (snapshot, default_plan, reduced_plan) = project.snapshot_and_schema_plans();
+    let (snapshot, default_plan, equivalent_plan, reduced_plan) =
+        project.snapshot_and_schema_plans();
     assert_eq!(snapshot.lineage(), reduced_plan.lineage());
     assert_ne!(
-        default_plan.schema_validation().fingerprint(),
-        reduced_plan.schema_validation().fingerprint()
+        default_plan.schema_validation().composition_fingerprint(),
+        reduced_plan.schema_validation().composition_fingerprint()
     );
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
 
-    let Err(error) = host.begin_start(snapshot, reduced_plan, Vec::new()) else {
+    let Err(error) = host.begin_start(snapshot.clone(), reduced_plan, Vec::new()) else {
         panic!("cross-schema start unexpectedly succeeded");
     };
 
@@ -701,6 +702,26 @@ fn project_host_rejects_a_different_schema_plan_from_the_same_lineage() {
         "project.run.schema-mismatch"
     );
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
+
+    assert_eq!(
+        default_plan.schema_validation().composition_fingerprint(),
+        equivalent_plan
+            .schema_validation()
+            .composition_fingerprint()
+    );
+    assert!(
+        !default_plan
+            .schema_validation()
+            .snapshot()
+            .ptr_eq(equivalent_plan.schema_validation().snapshot())
+    );
+    let Err(error) = host.begin_start(snapshot, equivalent_plan, Vec::new()) else {
+        panic!("equal but independently constructed schema authority unexpectedly succeeded");
+    };
+    assert_eq!(
+        first_code(&error.diagnostics),
+        "project.run.schema-mismatch"
+    );
 }
 
 #[test]
@@ -1979,7 +2000,14 @@ requested = ["runtime-2d"]
         (snapshot, plan)
     }
 
-    fn snapshot_and_schema_plans(&self) -> (ProjectContentSnapshot, RuntimePlan, RuntimePlan) {
+    fn snapshot_and_schema_plans(
+        &self,
+    ) -> (
+        ProjectContentSnapshot,
+        RuntimePlan,
+        RuntimePlan,
+        RuntimePlan,
+    ) {
         let root = self.capability();
         let manifest = root
             .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
@@ -1987,6 +2015,12 @@ requested = ["runtime-2d"]
         let candidate = ingest_project_manifest(&manifest, None).unwrap();
         drop(manifest);
         let default_plan = resolve_runtime_plan(
+            &candidate,
+            project_runtime_plugins(&candidate),
+            built_in_schema_providers(),
+        )
+        .unwrap();
+        let equivalent_plan = resolve_runtime_plan(
             &candidate,
             project_runtime_plugins(&candidate),
             built_in_schema_providers(),
@@ -2000,7 +2034,7 @@ requested = ["runtime-2d"]
         .unwrap();
         let loader = ProjectContentLoader::new(root).unwrap();
         let snapshot = loader.load(&candidate, &default_plan).unwrap();
-        (snapshot, default_plan, reduced_plan)
+        (snapshot, default_plan, equivalent_plan, reduced_plan)
     }
 
     fn snapshot_and_registry_replacement_plan(

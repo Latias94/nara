@@ -6,8 +6,8 @@ use nara_reflect::{
     ComponentCapability, ComponentCatalogFileBudgetKind, ComponentCatalogFileError,
     ComponentCatalogFileLimits, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind,
 };
 use serde::Serialize;
 
@@ -259,7 +259,12 @@ fn loaded_catalog_remains_separate_from_native_binding_until_atomic_freeze() {
     let encoded = sample_catalog().to_json_string().unwrap();
     let catalog = ComponentSchemaCatalog::from_json_bytes(encoded.as_bytes()).unwrap();
     let id = ComponentTypeId::new("nara.test.Position");
-    let mut registry = ComponentRegistry::from_catalog_candidate(catalog, None).unwrap();
+    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+        ComponentSchemaOwnerId::new("nara.test.loaded-catalog"),
+        catalog,
+        None,
+    )
+    .unwrap();
     let before = registry.catalog_candidate().clone();
 
     assert!(matches!(

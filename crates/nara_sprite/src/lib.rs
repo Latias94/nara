@@ -218,10 +218,14 @@ pub struct SpritePlugin;
 pub const SPRITE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.sprite");
 pub const SPRITE_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.sprite.components");
+pub const SPRITE_SCHEMA_OWNER_ID: nara_reflect::ComponentSchemaOwnerId =
+    nara_reflect::ComponentSchemaOwnerId::new("nara.sprite.components");
 pub const SPRITE_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
+        SPRITE_SCHEMA_OWNER_ID,
         SPRITE_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.sprite.components.native", 1),
+        sprite_schema_catalog,
         validate_sprite_components,
         register_sprite_components,
     );
@@ -265,12 +269,8 @@ pub fn register_sprite_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     validate_sprite_components(registry)?;
-    let component_id = ComponentTypeId::new("nara.sprite.Sprite");
-    let schema = ComponentSchema::new(component_id, "Sprite", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields(sprite_fields());
     registry.register_persistent_component_codec_with_context::<Sprite, _, _>(
-        schema,
+        sprite_schema(),
         |value, context| {
             let size = read_vec2(value.field("size")?, "size")?;
             let anchor = read_optional_anchor(value.get("anchor"))?;
@@ -355,6 +355,24 @@ pub fn register_sprite_components(
         },
     )?;
     Ok(())
+}
+
+fn sprite_schema_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    Ok(nara_reflect::ComponentSchemaCatalog {
+        components: vec![sprite_schema()],
+        ..nara_reflect::ComponentSchemaCatalog::default()
+    })
+}
+
+fn sprite_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.sprite.Sprite"),
+        "Sprite",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields(sprite_fields())
 }
 
 fn validate_sprite_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {

@@ -31,16 +31,56 @@ The declaration is the single Rust source for the generated
 
 ## Register Components from a Plugin
 
-A component-owning plugin validates registration during read-only `preflight` and performs it
-during `build`:
+A component-owning plugin publishes one explicit owner/provider definition. Its source describes
+the owner-local catalog without touching a `World`, registry, filesystem, network, or mutable
+global state. The executable callback registers the native Rust binding into the private
+owner-local candidate:
 
 ```rust
-registry.validate_persistent_component::<Player>()?;
-registry.register_persistent_component::<Player>()?;
+use nara::app::PluginSchemaProviderId;
+use nara::reflect::{
+    ComponentRegistry, ComponentRegistryError, ComponentSchemaCatalog,
+    ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+    ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
+    PersistentComponentProvider,
+};
+
+const PLAYER_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
+    PluginSchemaProviderId::new("example.player.components");
+const PLAYER_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
+    ComponentSchemaProviderDefinition::new(
+        ComponentSchemaOwnerId::new("example.player.components"),
+        PLAYER_SCHEMA_PROVIDER_ID,
+        ComponentSchemaProviderBindingId::new("example.player.components.native", 1),
+        player_schema_catalog,
+        register_player_components,
+    );
+
+fn player_schema_catalog(
+) -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+    Ok(ComponentSchemaCatalog {
+        components: vec![Player::persistent_component_schema()],
+        ..ComponentSchemaCatalog::default()
+    })
+}
+
+fn register_player_components(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError> {
+    registry.register_persistent_component::<Player>().map(|_| ())
+}
 ```
 
-The registry owner freezes the complete catalog during plugin `finish`. A failed registration or
-freeze leaves the building candidate repairable; a frozen registry rejects every mutation.
+The plugin declaration lists `PLAYER_SCHEMA_PROVIDER_ID` in `provides_schema`. Its `preflight` and
+`build` methods call `PLAYER_SCHEMA_PROVIDER.preflight(registry)` and
+`PLAYER_SCHEMA_PROVIDER.register_or_validate_into(registry)` respectively. A file-backed product
+recipe also supplies the same definition in its complete trusted `known_providers` set, including
+definitions that the selected recipe leaves inactive.
+
+Product composition loads and validates every trusted owner source before it runs selected native
+callbacks. Each selected validation and registration callback runs once against a private
+owner-local candidate. A failed source, callback, freeze, or merge leaves the aggregate registry
+unchanged; a frozen registry rejects every mutation.
 
 Only a frozen registry may turn codec output into an applicable component. A building registry
 returns no runtime preflight result, so plugin preparation cannot publish a value before the final

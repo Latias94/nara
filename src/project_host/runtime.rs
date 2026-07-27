@@ -27,7 +27,7 @@ use nara_ecs::{Mut, Resource, World};
 use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
 use nara_image::ImageAsset;
 use nara_reflect::{
-    CatalogFingerprint, ComponentRegistry, ComponentRegistrySnapshot,
+    ComponentRegistry, ComponentRegistrySnapshot, SchemaCompositionFingerprint,
     validate_component_registry_authority,
 };
 use nara_scene::{SceneDocument, spawn_scene};
@@ -69,7 +69,7 @@ struct RuntimeStartInputs {
 struct RuntimeStartStamp {
     lineage: ProjectSettingsLineage,
     content_revision: ProjectContentRevision,
-    schema_fingerprint: CatalogFingerprint,
+    schema_fingerprint: SchemaCompositionFingerprint,
 }
 
 impl RuntimeStartStamp {
@@ -86,7 +86,8 @@ impl RuntimeStartStamp {
             && self.lineage == plan.lineage()
             && self.content_revision == snapshot.revision()
             && self.schema_fingerprint == snapshot.schema_fingerprint()
-            && self.schema_fingerprint == plan.schema_validation().fingerprint()
+            && self.schema_fingerprint == plan.schema_validation().composition_fingerprint()
+            && snapshot.shares_schema_snapshot(plan.schema_validation().snapshot())
     }
 }
 
@@ -481,7 +482,9 @@ impl ProjectHost {
                 "Project content and runtime plan lineages do not match",
             )));
         }
-        if snapshot.schema_fingerprint() != plan.schema_validation().fingerprint() {
+        if snapshot.schema_fingerprint() != plan.schema_validation().composition_fingerprint()
+            || !snapshot.shares_schema_snapshot(plan.schema_validation().snapshot())
+        {
             return Err(HostFault::new(single_error(
                 "project.run.schema-mismatch",
                 "Project content and runtime plan schemas do not match",
@@ -1118,7 +1121,8 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         CompositionError::UnrequestedProductCapability { .. } => "unrequested-product-capability",
         CompositionError::MissingSchemaProvider { .. } => "missing-schema-provider",
         CompositionError::DivergentSchemaProvider { .. } => "divergent-schema-provider",
-        CompositionError::AmbiguousSchemaProviderOwner { .. } => "ambiguous-schema-provider-owner",
+        CompositionError::DivergentSchemaOwner { .. } => "divergent-schema-owner",
+        CompositionError::ConflictingSchemaOwnerClaim { .. } => "conflicting-schema-owner-claim",
         CompositionError::SchemaProviderRejected { .. } => "schema-provider-rejected",
         CompositionError::SchemaProviderPanicked { .. } => "schema-provider-panicked",
         CompositionError::SchemaFreezeRejected { .. } => "schema-freeze-rejected",
@@ -1141,10 +1145,21 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         }
         CompositionError::MissingSchemaProvider { provider }
         | CompositionError::DivergentSchemaProvider { provider }
-        | CompositionError::AmbiguousSchemaProviderOwner { provider }
         | CompositionError::SchemaProviderRejected { provider, .. }
         | CompositionError::SchemaProviderPanicked { provider } => {
             diagnostic = attach_identifier(diagnostic, "provider", provider.as_str());
+        }
+        CompositionError::DivergentSchemaOwner { owner } => {
+            diagnostic = attach_identifier(diagnostic, "owner", owner.as_str());
+        }
+        CompositionError::ConflictingSchemaOwnerClaim {
+            component_id,
+            first_owner,
+            second_owner,
+        } => {
+            diagnostic = attach_identifier(diagnostic, "component", component_id.as_str());
+            diagnostic = attach_identifier(diagnostic, "first_owner", first_owner.as_str());
+            diagnostic = attach_identifier(diagnostic, "second_owner", second_owner.as_str());
         }
         CompositionError::ProjectLineageMismatch
         | CompositionError::SchemaFreezeRejected { .. }

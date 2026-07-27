@@ -6,8 +6,8 @@ use nara::{
     },
     reflect::{
         ComponentCatalogFileLimits, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-        ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentValue,
-        PersistentComponentProvider,
+        ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaOwnerId,
+        ComponentSchemaVersion, ComponentValue, PersistentComponentProvider,
     },
     scene::{
         SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
@@ -16,12 +16,14 @@ use nara::{
     },
 };
 use nara_reference_game::{
-    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin, RuntimeOnlyTag,
-    WaveSpawn, Weapon, register_reference_game_components,
+    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_OWNER_ID, REFERENCE_GAME_SCHEMA_PROVIDER,
+    ReferenceGamePlugin, RuntimeOnlyTag, WaveSpawn, Weapon,
 };
 
 const LINEAGE_PROBE_ID: &str = "nara.test.LineageProbe";
 const PLAYER_ID: &str = "reference_game.Player";
+const LINEAGE_PROBE_OWNER_ID: ComponentSchemaOwnerId =
+    ComponentSchemaOwnerId::new("nara.test.lineage-probe");
 
 #[derive(Component, PersistentComponent, Debug, PartialEq)]
 #[nara(
@@ -179,29 +181,60 @@ fn migrate_lineage_v1_to_v2(value: ComponentValue) -> Result<ComponentValue, Com
     Ok(ComponentValue::Map(fields))
 }
 
+fn bind_persistent_component<T>(
+    registry: &mut ComponentRegistry,
+) -> Result<(), ComponentRegistryError>
+where
+    T: PersistentComponentProvider,
+{
+    let id = T::persistent_component_schema().id().clone();
+    registry
+        .register_native_component_with_codec::<T, _, _>(
+            &id,
+            T::__decode_persistent_component,
+            T::__encode_persistent_component,
+        )
+        .map(|_| ())
+}
+
 fn register_lineage_successor<T>(
     predecessor: ComponentSchemaCatalog,
     from_version: ComponentSchemaVersion,
     to_version: ComponentSchemaVersion,
-) -> ComponentRegistry
+) -> Result<ComponentRegistry, ComponentRegistryError>
 where
     T: PersistentComponentProvider,
 {
     let id = ComponentTypeId::new(LINEAGE_PROBE_ID);
-    let mut registry = ComponentRegistry::successor_of(predecessor).unwrap();
-    registry.register_persistent_component::<T>().unwrap();
+    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the lineage fixture has a successor generation");
+    current.components.push(T::persistent_component_schema());
+    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+        LINEAGE_PROBE_OWNER_ID,
+        current,
+        Some(predecessor),
+    )?;
+    bind_persistent_component::<T>(&mut registry)?;
     registry
         .register_component_migration(&id, from_version, to_version, Ok)
-        .unwrap();
-    registry
+        .map(|_| ())?;
+    Ok(registry)
 }
 
 fn frozen_lineage_successor(predecessor: ComponentSchemaCatalog) -> ComponentRegistry {
     let id = ComponentTypeId::new(LINEAGE_PROBE_ID);
-    let mut registry = ComponentRegistry::successor_of(predecessor).unwrap();
-    registry
-        .register_persistent_component::<LineageProbe>()
-        .unwrap();
+    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the lineage fixture has a successor generation");
+    current
+        .components
+        .push(LineageProbe::persistent_component_schema());
+    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+        LINEAGE_PROBE_OWNER_ID,
+        current,
+        Some(predecessor),
+    )
+    .unwrap();
+    bind_persistent_component::<LineageProbe>(&mut registry).unwrap();
     registry
         .register_component_migration(
             &id,
@@ -315,38 +348,32 @@ fn generated_catalog_rejects_missing_reused_and_dropped_tombstones() {
     )
     .unwrap();
 
-    let mut missing = register_lineage_successor::<MissingTombstoneProbe>(
-        predecessor,
-        ComponentSchemaVersion::ONE,
-        ComponentSchemaVersion::new(2).unwrap(),
-    );
-    let missing_before = missing.catalog_candidate().clone();
     assert!(matches!(
-        missing.freeze(),
+        register_lineage_successor::<MissingTombstoneProbe>(
+            predecessor,
+            ComponentSchemaVersion::ONE,
+            ComponentSchemaVersion::new(2).unwrap(),
+        ),
         Err(ComponentRegistryError::MissingFieldTombstone { field_id, .. })
             if field_id == ComponentFieldId::new("removed")
     ));
-    assert_eq!(missing.catalog_candidate(), &missing_before);
-    assert!(!missing.is_frozen());
 
-    let mut reactivated = register_lineage_successor::<ReactivatedProbe>(
-        v2.clone(),
-        ComponentSchemaVersion::new(2).unwrap(),
-        ComponentSchemaVersion::new(3).unwrap(),
-    );
     assert!(matches!(
-        reactivated.freeze(),
+        register_lineage_successor::<ReactivatedProbe>(
+            v2.clone(),
+            ComponentSchemaVersion::new(2).unwrap(),
+            ComponentSchemaVersion::new(3).unwrap(),
+        ),
         Err(ComponentRegistryError::ReactivatedFieldId { field_id, .. })
             if field_id == ComponentFieldId::new("removed")
     ));
 
-    let mut dropped = register_lineage_successor::<DroppedTombstoneProbe>(
-        v2,
-        ComponentSchemaVersion::new(2).unwrap(),
-        ComponentSchemaVersion::new(3).unwrap(),
-    );
     assert!(matches!(
-        dropped.freeze(),
+        register_lineage_successor::<DroppedTombstoneProbe>(
+            v2,
+            ComponentSchemaVersion::new(2).unwrap(),
+            ComponentSchemaVersion::new(3).unwrap(),
+        ),
         Err(ComponentRegistryError::MissingFieldTombstone { field_id, .. })
             if field_id == ComponentFieldId::new("removed")
     ));
@@ -369,7 +396,7 @@ fn reference_game_catalog_preserves_v1_v2_and_matches_the_v3_successor() {
         ComponentCatalogFileLimits::default(),
     )
     .unwrap();
-    let mut v2_registry = reference_game_successor_with_player::<Player>();
+    let mut v2_registry = reference_game_successor_with_player::<Player>().unwrap();
     v2_registry.freeze().unwrap();
     assert_eq!(v2_registry.catalog().unwrap(), &expected_v2);
 
@@ -380,13 +407,28 @@ fn reference_game_catalog_preserves_v1_v2_and_matches_the_v3_successor() {
         ComponentCatalogFileLimits::default(),
     )
     .unwrap();
-    assert_eq!(registry.catalog().unwrap(), &expected_v3);
+    let snapshot = registry.snapshot().unwrap();
+    let owner_receipt = snapshot
+        .owner_receipt(REFERENCE_GAME_SCHEMA_OWNER_ID)
+        .unwrap();
+    assert_eq!(owner_receipt.generation(), expected_v3.generation());
+    assert_eq!(owner_receipt.catalog(), expected_v3.fingerprint());
+    assert_eq!(
+        owner_receipt.predecessor(),
+        expected_v3.predecessor().copied()
+    );
+    assert_eq!(
+        registry.catalog().unwrap().components(),
+        expected_v3.components()
+    );
+    assert_eq!(
+        registry.catalog().unwrap().type_tombstones(),
+        expected_v3.type_tombstones()
+    );
     assert_eq!(
         format!(
             "{}\n",
-            registry
-                .catalog()
-                .unwrap()
+            expected_v3
                 .to_json_string_with_predecessor(Some(&expected_v2))
                 .unwrap()
         ),
@@ -407,7 +449,7 @@ fn reference_game_catalog_preserves_v1_v2_and_matches_the_v3_successor() {
 fn reference_game_enemy_v1_migrates_to_the_current_runtime_component() {
     let enemy_id = ComponentTypeId::new("reference_game.Enemy");
     let expected = Enemy::fixture();
-    let mut legacy_registry = reference_game_successor_with_player::<Player>();
+    let mut legacy_registry = reference_game_successor_with_player::<Player>().unwrap();
     legacy_registry.freeze().unwrap();
     let mut legacy_world = World::new();
     let legacy_entity = legacy_world
@@ -449,24 +491,14 @@ fn reference_game_enemy_v1_migrates_to_the_current_runtime_component() {
 
 #[test]
 fn reference_game_catalog_rejects_unversioned_semantic_change_and_missing_tombstone() {
-    let mut missing_tombstone = reference_game_successor_with_player::<PlayerWithoutVelocity>();
-    missing_tombstone
-        .register_component_migration(
-            &ComponentTypeId::new(PLAYER_ID),
-            ComponentSchemaVersion::ONE,
-            ComponentSchemaVersion::new(2).unwrap(),
-            migrate_player_v1_to_v2,
-        )
-        .unwrap();
     assert!(matches!(
-        missing_tombstone.freeze(),
+        reference_game_successor_with_player::<PlayerWithoutVelocity>(),
         Err(ComponentRegistryError::MissingFieldTombstone { field_id, .. })
             if field_id == ComponentFieldId::new("velocity")
     ));
 
-    let mut changed_kind = reference_game_successor_with_player::<PlayerHealthKindChanged>();
     assert!(matches!(
-        changed_kind.freeze(),
+        reference_game_successor_with_player::<PlayerHealthKindChanged>(),
         Err(ComponentRegistryError::ComponentSchemaChangedWithoutVersionBump {
             component_id,
         }) if component_id == ComponentTypeId::new(PLAYER_ID)
@@ -595,53 +627,40 @@ fn reference_game_predecessor_catalog() -> ComponentSchemaCatalog {
         .unwrap()
 }
 
-fn reference_game_v2_catalog() -> ComponentSchemaCatalog {
-    ComponentSchemaCatalog::from_json_bytes_with_predecessor(
-        include_bytes!("../schema/component-schema-v2.json"),
-        &reference_game_predecessor_catalog(),
-        ComponentCatalogFileLimits::default(),
-    )
-    .unwrap()
-}
-
-fn reference_game_successor_with_player<T>() -> ComponentRegistry
+fn reference_game_successor_with_player<T>() -> Result<ComponentRegistry, ComponentRegistryError>
 where
     T: PersistentComponentProvider,
 {
-    let mut registry =
-        ComponentRegistry::successor_of(reference_game_predecessor_catalog()).unwrap();
-    register_reference_game_v1_components_with_player::<T>(&mut registry);
-    registry
-        .register_persistent_component::<WaveSpawn>()
-        .unwrap();
-    registry
+    let predecessor = reference_game_predecessor_catalog();
+    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the reference-game v1 catalog has a successor generation");
+    current.components.extend([
+        T::persistent_component_schema(),
+        EnemyV1::persistent_component_schema(),
+        WaveSpawn::persistent_component_schema(),
+        Weapon::persistent_component_schema(),
+        Projectile::persistent_component_schema(),
+    ]);
+    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+        REFERENCE_GAME_SCHEMA_OWNER_ID,
+        current,
+        Some(predecessor),
+    )?;
+    bind_persistent_component::<T>(&mut registry)?;
+    bind_persistent_component::<EnemyV1>(&mut registry)?;
+    bind_persistent_component::<WaveSpawn>(&mut registry)?;
+    bind_persistent_component::<Weapon>(&mut registry)?;
+    bind_persistent_component::<Projectile>(&mut registry)?;
+    Ok(registry)
 }
 
 fn frozen_reference_game_successor() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::successor_of(reference_game_v2_catalog()).unwrap();
-    register_reference_game_components(&mut registry).unwrap();
+    let mut registry = ComponentRegistry::new();
+    REFERENCE_GAME_SCHEMA_PROVIDER
+        .register_or_validate_into(&mut registry)
+        .unwrap();
     registry.freeze().unwrap();
     registry
-}
-
-fn register_reference_game_v1_components_with_player<T>(registry: &mut ComponentRegistry)
-where
-    T: PersistentComponentProvider,
-{
-    registry.register_persistent_component::<T>().unwrap();
-    registry.register_persistent_component::<EnemyV1>().unwrap();
-    registry.register_persistent_component::<Weapon>().unwrap();
-    registry
-        .register_persistent_component::<Projectile>()
-        .unwrap();
-}
-
-fn migrate_player_v1_to_v2(value: ComponentValue) -> Result<ComponentValue, ComponentCodecError> {
-    let ComponentValue::Map(mut fields) = value else {
-        return Err(ComponentCodecError::invalid_field("Player", "map"));
-    };
-    fields.remove("velocity");
-    Ok(ComponentValue::Map(fields))
 }
 
 fn scene_id(id: &str) -> SceneEntityId {

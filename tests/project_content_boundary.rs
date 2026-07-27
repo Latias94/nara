@@ -349,7 +349,6 @@ fn project_content_source_has_no_ambient_or_runtime_authority() {
         "read_dir(",
         "RuntimeInstance",
         "RuntimeCandidate",
-        "ComponentRegistrySnapshot",
         "ComponentSchemaProviderReceipt",
         "ComponentSchemaProviderBindingId",
         "RuntimeFaultReporter",
@@ -370,6 +369,130 @@ fn project_content_source_has_no_ambient_or_runtime_authority() {
     }
 
     assert_snapshot_field_allowlist(&sources);
+}
+
+#[test]
+fn owner_lineage_slice_does_not_publish_unavailable_schema_readiness() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let forbidden_exports = [
+        "AuthoringSchemaCatalog",
+        "KnownUnbound",
+        "OptionalNativeBinding",
+        "PlaceholderComponent",
+        "UnavailableSchema",
+        "UnknownSchema",
+    ];
+    for relative in ["crates/nara_reflect/src/lib.rs", "src/lib.rs"] {
+        let path = root.join(relative);
+        let source = std::fs::read_to_string(&path).unwrap();
+        let syntax = syn::parse_file(&source).unwrap();
+        let mut public_imports = Vec::new();
+        for item in &syntax.items {
+            let syn::Item::Use(item) = item else {
+                continue;
+            };
+            if !matches!(item.vis, syn::Visibility::Public(_)) {
+                continue;
+            }
+            flatten_use_tree(&item.tree, &mut Vec::new(), &mut public_imports);
+        }
+        for forbidden in forbidden_exports {
+            assert!(
+                public_imports
+                    .iter()
+                    .all(|import| import.binding() != Some(forbidden)),
+                "{} publicly exports unavailable-schema type {forbidden}",
+                path.display()
+            );
+        }
+    }
+
+    let registry_path = root.join("crates/nara_reflect/src/registry.rs");
+    let registry_source = std::fs::read_to_string(&registry_path).unwrap();
+    let registry = syn::parse_file(&registry_source).unwrap();
+    let registry_data = registry
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Struct(item) if item.ident == "RegistryData" => Some(item),
+            _ => None,
+        })
+        .expect("RegistryData remains the concrete Runtime registry storage");
+    let bindings = registry_data
+        .fields
+        .iter()
+        .find(|field| {
+            field
+                .ident
+                .as_ref()
+                .is_some_and(|ident| ident == "bindings")
+        })
+        .expect("RegistryData retains native binding storage");
+    assert_eq!(
+        type_shape(&bindings.ty),
+        "BTreeMap<ComponentTypeId,NativeComponentBinding>",
+        "Runtime bindings must remain concrete and complete rather than optional readiness wrappers"
+    );
+
+    let reflect_manifest_path = root.join("crates/nara_reflect/Cargo.toml");
+    let reflect_manifest_source = std::fs::read_to_string(&reflect_manifest_path).unwrap();
+    let reflect_manifest = toml::from_str::<toml::Value>(&reflect_manifest_source).unwrap();
+    let reflect_dependencies = reflect_manifest["dependencies"]
+        .as_table()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        reflect_dependencies,
+        [
+            "bevy_ecs",
+            "bevy_reflect",
+            "blake3",
+            "nara_app",
+            "nara_asset",
+            "nara_core",
+            "nara_ecs",
+            "nara_identity",
+            "nara_reflect_derive",
+            "ron",
+            "serde",
+            "serde_json",
+        ]
+        .into_iter()
+        .collect(),
+        "owner lineage must not grow package, VM, or unavailable-authoring dependencies"
+    );
+
+    let root_manifest_source = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    let root_manifest = toml::from_str::<toml::Value>(&root_manifest_source).unwrap();
+    let dependency_tables = [
+        root_manifest.get("dependencies"),
+        root_manifest
+            .get("workspace")
+            .and_then(|workspace| workspace.get("dependencies")),
+        reflect_manifest.get("dependencies"),
+    ];
+    let forbidden_dependencies = [
+        "extism",
+        "mlua",
+        "nara_authoring_schema",
+        "nara_package",
+        "nara_script",
+        "netcorehost",
+        "rhai",
+        "wasmer",
+        "wasmtime",
+    ];
+    for table in dependency_tables.into_iter().flatten() {
+        let table = table.as_table().unwrap();
+        for forbidden in forbidden_dependencies {
+            assert!(
+                !table.contains_key(forbidden),
+                "owner lineage unexpectedly admits dependency {forbidden}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -446,7 +569,7 @@ fn snapshot_type_identity_guard_rejects_renamed_authority() {
         r#"
             use std::sync::Arc;
             use nara_fs::ContentDigest;
-            use nara_reflect::CatalogFingerprint;
+            use nara_reflect::SchemaCompositionFingerprint;
             use nara_scene::SceneDocument;
             use crate::project_host::Owner as ProjectSettingsLineage;
             use budget::ProjectContentLease;
@@ -805,8 +928,8 @@ fn meta_contains_path_override(meta: &syn::Meta) -> bool {
 fn assert_snapshot_field_allowlist(sources: &[(std::path::PathBuf, String, syn::File)]) {
     const EXPECTED_FIELDS: [(&str, &str); 11] = [
         ("lineage", "ProjectSettingsLineage"),
-        ("schema_fingerprint", "CatalogFingerprint"),
-        ("schema_generation", "u64"),
+        ("schema_fingerprint", "SchemaCompositionFingerprint"),
+        ("schema_authority", "ComponentRegistrySnapshotWitness"),
         ("revision", "ProjectContentRevision"),
         ("content_digest", "ContentDigest"),
         ("source_upgrade_required", "bool"),
@@ -859,12 +982,24 @@ fn assert_snapshot_field_allowlist(sources: &[(std::path::PathBuf, String, syn::
 }
 
 fn assert_snapshot_import_identities(source_path: &std::path::Path, syntax: &syn::File) {
-    let expected_imports: [(&str, &[&str]); 6] = [
+    let expected_imports: [(&str, &[&str]); 8] = [
         ("Arc", &["std", "sync", "Arc"]),
         ("ContentDigest", &["nara_fs", "ContentDigest"]),
         (
-            "CatalogFingerprint",
-            &["nara_reflect", "CatalogFingerprint"],
+            "ComponentRegistrySnapshot",
+            &["nara_reflect", "ComponentRegistrySnapshot"],
+        ),
+        (
+            "ComponentRegistrySnapshotWitness",
+            &[
+                "nara_reflect",
+                "__private",
+                "ComponentRegistrySnapshotWitness",
+            ],
+        ),
+        (
+            "SchemaCompositionFingerprint",
+            &["nara_reflect", "SchemaCompositionFingerprint"],
         ),
         ("SceneDocument", &["nara_scene", "SceneDocument"]),
         (

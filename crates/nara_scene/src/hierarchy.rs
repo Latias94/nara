@@ -100,13 +100,17 @@ pub struct HierarchyPlugin;
 pub const HIERARCHY_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.scene.hierarchy");
 pub const HIERARCHY_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.scene.hierarchy.components");
+pub const HIERARCHY_SCHEMA_OWNER_ID: nara_reflect::ComponentSchemaOwnerId =
+    nara_reflect::ComponentSchemaOwnerId::new("nara.scene.hierarchy.components");
 pub const HIERARCHY_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
+        HIERARCHY_SCHEMA_OWNER_ID,
         HIERARCHY_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new(
             "nara.scene.hierarchy.components.native",
             1,
         ),
+        hierarchy_schema_catalog,
         validate_scene_components,
         register_scene_components,
     );
@@ -169,18 +173,8 @@ fn validate_scene_components(registry: &ComponentRegistry) -> Result<(), Compone
 }
 
 fn register_name_component(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
-    let name_id = ComponentTypeId::new("nara.scene.Name");
-    let schema = ComponentSchema::new(name_id, "Name", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields([ComponentFieldSchema::required(
-            ComponentFieldId::new("value"),
-            "Name",
-            ComponentFieldPath::empty(),
-            ComponentValueKind::String,
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
     registry.register_persistent_component_with_codec::<Name, _, _>(
-        schema,
+        name_schema(),
         |value| {
             Ok(Name::new(value.as_str().ok_or_else(|| {
                 ComponentCodecError::invalid_field("Name", "string")
@@ -194,18 +188,8 @@ fn register_name_component(registry: &mut ComponentRegistry) -> Result<(), Compo
 fn register_visibility_component(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
-    let visibility_id = ComponentTypeId::new("nara.scene.Visibility");
-    let schema = ComponentSchema::new(visibility_id, "Visibility", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields([ComponentFieldSchema::required(
-            ComponentFieldId::new("value"),
-            "Visibility",
-            ComponentFieldPath::empty(),
-            ComponentValueKind::String,
-        )
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
     registry.register_persistent_component_with_codec::<Visibility, _, _>(
-        schema,
+        visibility_schema(),
         |value| match value.as_str() {
             Some("visible") => Ok(Visibility::Visible),
             Some("hidden") => Ok(Visibility::Hidden),
@@ -222,4 +206,44 @@ fn register_visibility_component(
         },
     )?;
     Ok(())
+}
+
+fn hierarchy_schema_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    Ok(nara_reflect::ComponentSchemaCatalog {
+        components: vec![name_schema(), visibility_schema()],
+        ..nara_reflect::ComponentSchemaCatalog::default()
+    })
+}
+
+fn name_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.scene.Name"),
+        "Name",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("value"),
+        "Name",
+        ComponentFieldPath::empty(),
+        ComponentValueKind::String,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
+}
+
+fn visibility_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.scene.Visibility"),
+        "Visibility",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("value"),
+        "Visibility",
+        ComponentFieldPath::empty(),
+        ComponentValueKind::String,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
 }

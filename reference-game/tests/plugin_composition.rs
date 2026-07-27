@@ -6,7 +6,7 @@ use nara::{
     reflect::ComponentRegistry,
     render::RENDER_SCHEMA_PROVIDER_ID,
     sprite::SPRITE_SCHEMA_PROVIDER_ID,
-    tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_PROVIDER_ID},
+    tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_OWNER_ID, TILEMAP_SCHEMA_PROVIDER_ID},
 };
 use nara_reference_game::{REFERENCE_GAME_PLUGIN_ID, REFERENCE_GAME_SCHEMA_PROVIDER_ID};
 
@@ -43,8 +43,8 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
         repeated.plugin_plan().fingerprint()
     );
     assert_eq!(
-        first.schema_validation().fingerprint(),
-        repeated.schema_validation().fingerprint()
+        first.schema_validation().composition_fingerprint(),
+        repeated.schema_validation().composition_fingerprint()
     );
     assert!(
         first
@@ -93,8 +93,8 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
         with_tilemap.plugin_plan().fingerprint()
     );
     assert_ne!(
-        first.schema_validation().fingerprint(),
-        with_tilemap.schema_validation().fingerprint()
+        first.schema_validation().composition_fingerprint(),
+        with_tilemap.schema_validation().composition_fingerprint()
     );
 
     let first_app = first.plugin_plan().instantiate().unwrap();
@@ -112,12 +112,55 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
     assert!(first_registry.ptr_eq(&second_registry));
     assert!(first_registry.ptr_eq(first.schema_validation().snapshot()));
     assert_eq!(
-        first_registry.catalog().fingerprint(),
-        first.schema_validation().fingerprint()
+        first_registry.schema_composition_fingerprint().unwrap(),
+        first.schema_validation().composition_fingerprint()
     );
     assert_eq!(
-        second_registry.catalog().fingerprint(),
-        first.schema_validation().fingerprint()
+        second_registry.schema_composition_fingerprint().unwrap(),
+        first.schema_validation().composition_fingerprint()
+    );
+}
+
+#[test]
+fn optional_schema_owner_can_be_disabled_and_reactivated_without_deletion() {
+    let limits = ImageImportLimits::default().with_max_encoded_bytes(
+        ByteLimit::new(8 * 1024 * 1024).expect("test image limit is non-zero"),
+    );
+    let (candidate, _baseline, _root) = candidate_plan_and_root(limits, false);
+
+    let enabled_before = resolve_reference_plan(&candidate, limits, true);
+    let disabled = resolve_reference_plan(&candidate, limits, false);
+    let enabled_after = resolve_reference_plan(&candidate, limits, true);
+
+    assert_eq!(
+        enabled_before.schema_validation().composition_fingerprint(),
+        enabled_after.schema_validation().composition_fingerprint(),
+    );
+    assert_eq!(
+        enabled_before
+            .schema_validation()
+            .contribution_receipts()
+            .collect::<Vec<_>>(),
+        enabled_after
+            .schema_validation()
+            .contribution_receipts()
+            .collect::<Vec<_>>(),
+    );
+    assert_ne!(
+        enabled_before.schema_validation().composition_fingerprint(),
+        disabled.schema_validation().composition_fingerprint(),
+    );
+    assert!(
+        enabled_before
+            .schema_validation()
+            .owner_receipts()
+            .any(|receipt| receipt.owner() == TILEMAP_SCHEMA_OWNER_ID)
+    );
+    assert!(
+        disabled
+            .schema_validation()
+            .owner_receipts()
+            .all(|receipt| receipt.owner() != TILEMAP_SCHEMA_OWNER_ID)
     );
 }
 

@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     fmt,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{Arc, OnceLock},
@@ -11,9 +11,15 @@ use nara_app::{
 };
 use nara_fs::FileIdentity;
 use nara_project::{EffectiveProjectSettings, ProductCapability, ProductCapabilitySet};
+use nara_reflect::__private::{
+    ResolvedComponentSchemaProvider, register_or_validate_resolved_schema_provider,
+    resolve_schema_provider,
+};
 use nara_reflect::{
-    CatalogFingerprint, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
-    ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
+    ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
+    ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
+    ComponentSchemaOwnerId, ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
+    ComponentTypeId, ExecutableRegistryFingerprint, SchemaCompositionFingerprint,
     preloaded_component_registry_plugin,
 };
 
@@ -208,13 +214,18 @@ impl ProjectRuntimePlugins {
     }
 }
 
+/// Frozen schema authority selected for one admitted Runtime plan.
+///
+/// Provider and contribution receipts are immutable projections of `snapshot`; exact authority
+/// inside the managed Host still requires the same snapshot identity rather than equal hashes.
 #[derive(Clone)]
 pub struct SchemaValidationInput {
     provider_ids: Arc<[PluginSchemaProviderId]>,
     provider_receipts: Arc<[ComponentSchemaProviderReceipt]>,
     snapshot: ComponentRegistrySnapshot,
     registry: Arc<ComponentRegistry>,
-    fingerprint: CatalogFingerprint,
+    composition_fingerprint: SchemaCompositionFingerprint,
+    executable_fingerprint: ExecutableRegistryFingerprint,
 }
 
 impl fmt::Debug for SchemaValidationInput {
@@ -223,7 +234,12 @@ impl fmt::Debug for SchemaValidationInput {
             .debug_struct("SchemaValidationInput")
             .field("provider_ids", &self.provider_ids)
             .field("provider_receipts", &self.provider_receipts)
-            .field("fingerprint", &self.fingerprint)
+            .field(
+                "contribution_count",
+                &self.snapshot.contribution_receipts().count(),
+            )
+            .field("composition_fingerprint", &self.composition_fingerprint)
+            .field("executable_fingerprint", &self.executable_fingerprint)
             .finish_non_exhaustive()
     }
 }
@@ -234,9 +250,21 @@ impl SchemaValidationInput {
         &self.provider_ids
     }
 
+    pub fn contribution_receipts(
+        &self,
+    ) -> impl ExactSizeIterator<Item = ComponentSchemaContributionReceipt> + '_ {
+        self.snapshot.contribution_receipts()
+    }
+
     #[must_use]
     pub fn provider_receipts(&self) -> &[ComponentSchemaProviderReceipt] {
         &self.provider_receipts
+    }
+
+    pub fn owner_receipts(
+        &self,
+    ) -> impl ExactSizeIterator<Item = ComponentSchemaOwnerContributionReceipt> + '_ {
+        self.snapshot.owner_receipts()
     }
 
     #[must_use]
@@ -245,8 +273,13 @@ impl SchemaValidationInput {
     }
 
     #[must_use]
-    pub const fn fingerprint(&self) -> CatalogFingerprint {
-        self.fingerprint
+    pub const fn composition_fingerprint(&self) -> SchemaCompositionFingerprint {
+        self.composition_fingerprint
+    }
+
+    #[must_use]
+    pub const fn executable_fingerprint(&self) -> ExecutableRegistryFingerprint {
+        self.executable_fingerprint
     }
 
     #[must_use]
@@ -345,8 +378,13 @@ pub enum CompositionError {
     DivergentSchemaProvider {
         provider: PluginSchemaProviderId,
     },
-    AmbiguousSchemaProviderOwner {
-        provider: PluginSchemaProviderId,
+    DivergentSchemaOwner {
+        owner: ComponentSchemaOwnerId,
+    },
+    ConflictingSchemaOwnerClaim {
+        component_id: ComponentTypeId,
+        first_owner: ComponentSchemaOwnerId,
+        second_owner: ComponentSchemaOwnerId,
     },
     SchemaProviderRejected {
         provider: PluginSchemaProviderId,
@@ -382,8 +420,11 @@ impl fmt::Display for CompositionError {
             Self::DivergentSchemaProvider { .. } => {
                 "schema provider ID has divergent typed bindings"
             }
-            Self::AmbiguousSchemaProviderOwner { .. } => {
-                "schema provider ID is declared by more than one plugin"
+            Self::DivergentSchemaOwner { .. } => {
+                "schema owner has more than one trusted provider definition"
+            }
+            Self::ConflictingSchemaOwnerClaim { .. } => {
+                "different schema owners claim the same component type ID"
             }
             Self::SchemaProviderRejected { .. } => "component schema provider was rejected",
             Self::SchemaProviderPanicked { .. } => "component schema provider panicked",
@@ -480,10 +521,15 @@ pub fn project_runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectR
 }
 
 /// Resolves one project request without creating an `App` or acquiring runtime authority.
+///
+/// `known_providers` must contain the complete trusted provider set compiled for this product,
+/// including definitions that the selected plugin recipe does not activate. Resolution executes
+/// every current-head source to reserve inactive owner claims, but it executes native registration
+/// callbacks only for providers selected by the resolved plugin plan.
 pub fn resolve_runtime_plan(
     candidate: &ProjectSettingsCandidate,
     request: ProjectRuntimePlugins,
-    providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
+    known_providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
 ) -> Result<RuntimePlan, RuntimePlanError> {
     if request.lineage != candidate.lineage {
         return Err(CompositionError::ProjectLineageMismatch.into());
@@ -495,7 +541,7 @@ pub fn resolve_runtime_plan(
     )));
     let plugin_plan = PluginPlan::resolve(request.plugins)?;
     let required = resolve_product_requirements(candidate, &plugin_plan)?;
-    let schema_validation = resolve_schema_validation(&plugin_plan, providers)?;
+    let schema_validation = resolve_schema_validation(&plugin_plan, known_providers)?;
     snapshot_cell
         .set(schema_validation.snapshot().clone())
         .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
@@ -551,15 +597,25 @@ fn product_capability(declared: PluginProductCapability) -> Option<ProductCapabi
 
 fn resolve_schema_validation(
     plugin_plan: &PluginPlan,
-    providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
+    known_providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
 ) -> Result<SchemaValidationInput, CompositionError> {
-    let mut provider_catalog = BTreeMap::new();
-    for provider in providers {
-        match provider_catalog.entry(provider.id()) {
-            Entry::Vacant(entry) => {
-                entry.insert(provider);
+    let mut provider_catalog =
+        BTreeMap::<PluginSchemaProviderId, ResolvedComponentSchemaProvider>::new();
+    for provider in known_providers {
+        let provider_id = provider.id();
+        let resolved = resolve_schema_provider(provider).map_err(|source| {
+            CompositionError::SchemaProviderRejected {
+                provider: provider_id,
+                source: Box::new(source),
             }
-            Entry::Occupied(entry) if entry.get().has_same_binding(provider) => {}
+        })?;
+        match provider_catalog.entry(provider_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(resolved);
+            }
+            Entry::Occupied(entry)
+                if entry.get().provider_receipt() == resolved.provider_receipt()
+                    && entry.get().owner_receipt() == resolved.owner_receipt() => {}
             Entry::Occupied(entry) => {
                 return Err(CompositionError::DivergentSchemaProvider {
                     provider: *entry.key(),
@@ -568,28 +624,51 @@ fn resolve_schema_validation(
         }
     }
 
-    let mut owners = BTreeMap::<PluginSchemaProviderId, PluginId>::new();
-    for entry in plugin_plan.entries() {
-        for provider in entry.declaration().provides_schema {
-            if let Some(owner) = owners.insert(*provider, entry.plugin_id())
-                && owner != entry.plugin_id()
+    let mut known_owners = BTreeMap::<ComponentSchemaOwnerId, PluginSchemaProviderId>::new();
+    let mut known_claims = BTreeMap::<ComponentTypeId, ComponentSchemaOwnerId>::new();
+    for resolved in provider_catalog.values() {
+        let owner = resolved.definition().owner();
+        if let Some(existing) = known_owners.insert(owner, resolved.definition().id())
+            && existing != resolved.definition().id()
+        {
+            return Err(CompositionError::DivergentSchemaOwner { owner });
+        }
+        for component_id in resolved
+            .current()
+            .catalog()
+            .components()
+            .iter()
+            .map(|schema| schema.id())
+            .chain(resolved.current().catalog().type_tombstones())
+        {
+            if let Some(existing) = known_claims.insert(component_id.clone(), owner)
+                && existing != owner
             {
-                return Err(CompositionError::AmbiguousSchemaProviderOwner {
-                    provider: *provider,
+                return Err(CompositionError::ConflictingSchemaOwnerClaim {
+                    component_id: component_id.clone(),
+                    first_owner: existing,
+                    second_owner: owner,
                 });
             }
         }
     }
 
+    let mut selected_providers = BTreeSet::<PluginSchemaProviderId>::new();
+    for entry in plugin_plan.entries() {
+        for provider in entry.declaration().provides_schema {
+            selected_providers.insert(*provider);
+        }
+    }
+
     let mut registry = ComponentRegistry::new();
-    for provider_id in owners.keys() {
-        let provider = provider_catalog.get(provider_id).copied().ok_or(
+    for provider_id in &selected_providers {
+        let provider = provider_catalog.remove(provider_id).ok_or(
             CompositionError::MissingSchemaProvider {
                 provider: *provider_id,
             },
         )?;
         catch_unwind(AssertUnwindSafe(|| {
-            provider.register_or_validate_into(&mut registry)
+            register_or_validate_resolved_schema_provider(&mut registry, provider)
         }))
         .map_err(|_| CompositionError::SchemaProviderPanicked {
             provider: *provider_id,
@@ -610,15 +689,25 @@ fn resolve_schema_validation(
             .map_err(|source| CompositionError::SchemaFreezeRejected {
                 source: Box::new(source),
             })?;
-    let fingerprint = snapshot.catalog().fingerprint();
+    let composition_fingerprint = snapshot
+        .schema_composition_fingerprint()
+        .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
+    let executable_fingerprint = snapshot
+        .executable_registry_fingerprint()
+        .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
     let provider_receipts = snapshot.provider_receipts().collect::<Vec<_>>();
+    let provider_ids = provider_receipts
+        .iter()
+        .map(|receipt| receipt.provider())
+        .collect::<Vec<_>>();
     let registry = ComponentRegistry::from_snapshot(snapshot.clone());
 
     Ok(SchemaValidationInput {
-        provider_ids: owners.into_keys().collect::<Vec<_>>().into(),
+        provider_ids: provider_ids.into(),
         provider_receipts: provider_receipts.into(),
         snapshot,
         registry: Arc::new(registry),
-        fingerprint,
+        composition_fingerprint,
+        executable_fingerprint,
     })
 }

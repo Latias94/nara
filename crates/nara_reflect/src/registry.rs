@@ -5,7 +5,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     error::Error,
     fmt::{self, Display, Formatter},
-    sync::Arc,
+    sync::{Arc, Weak},
 };
 
 use bevy_reflect::{GetTypeRegistration, TypeRegistry};
@@ -27,7 +27,12 @@ use crate::{
     },
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
     persistent_apply::{PreparedComponent, PreparedComponentCandidate},
-    provider::{ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt},
+    provider::{
+        ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
+        ComponentSchemaOwnerId, ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
+        ComponentSchemaProviderSourceError, ExecutableRegistryFingerprint,
+        ResolvedComponentSchemaProvider, SchemaCompositionFingerprint,
+    },
     schema::{
         AliasError, CatalogFingerprint, ComponentCapability, ComponentFieldId,
         ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
@@ -39,6 +44,33 @@ use crate::{
 pub enum ComponentRegistryError {
     Frozen,
     NotFrozen,
+    InvalidSchemaOwnerId {
+        owner: ComponentSchemaOwnerId,
+    },
+    SchemaProviderSourceRejected {
+        provider: nara_app::PluginSchemaProviderId,
+        source: ComponentSchemaProviderSourceError,
+    },
+    SchemaProviderSourcePanicked {
+        provider: nara_app::PluginSchemaProviderId,
+    },
+    SchemaProviderCatalogMismatch {
+        provider: nara_app::PluginSchemaProviderId,
+    },
+    SchemaProviderCandidateAuthorityChanged {
+        provider: nara_app::PluginSchemaProviderId,
+    },
+    NestedSchemaProviderRegistration {
+        provider: nara_app::PluginSchemaProviderId,
+    },
+    MixedSchemaRegistrationModes {
+        provider: nara_app::PluginSchemaProviderId,
+    },
+    RawSchemaRegistrationInProviderComposition,
+    SchemaCompositionUnavailable,
+    DivergentSchemaOwnerReceipt {
+        owner: ComponentSchemaOwnerId,
+    },
     MissingSchemaProviderReceipt {
         provider: nara_app::PluginSchemaProviderId,
     },
@@ -134,6 +166,9 @@ pub enum ComponentRegistryError {
         expected: Option<CatalogFingerprint>,
         actual: Option<CatalogFingerprint>,
     },
+    MissingCatalogPredecessor {
+        generation: u64,
+    },
     MissingTypeTombstone {
         component_id: ComponentTypeId,
     },
@@ -177,6 +212,43 @@ impl Display for ComponentRegistryError {
         match self {
             Self::Frozen => formatter.write_str("component registry is frozen"),
             Self::NotFrozen => formatter.write_str("component registry is not frozen"),
+            Self::InvalidSchemaOwnerId { owner } => {
+                write!(formatter, "component schema owner ID '{owner}' is invalid")
+            }
+            Self::SchemaProviderSourceRejected { provider, source } => write!(
+                formatter,
+                "component schema provider '{provider}' source was rejected: {source}"
+            ),
+            Self::SchemaProviderSourcePanicked { provider } => write!(
+                formatter,
+                "component schema provider '{provider}' source panicked"
+            ),
+            Self::SchemaProviderCatalogMismatch { provider } => write!(
+                formatter,
+                "component schema provider '{provider}' executable candidate differs from its declared owner head"
+            ),
+            Self::SchemaProviderCandidateAuthorityChanged { provider } => write!(
+                formatter,
+                "component schema provider '{provider}' replaced its owner-local registry candidate"
+            ),
+            Self::NestedSchemaProviderRegistration { provider } => write!(
+                formatter,
+                "component schema provider '{provider}' cannot register inside an owner-local candidate"
+            ),
+            Self::MixedSchemaRegistrationModes { provider } => write!(
+                formatter,
+                "component schema provider '{provider}' cannot be mixed with ownerless raw registry registration"
+            ),
+            Self::RawSchemaRegistrationInProviderComposition => formatter.write_str(
+                "ownerless raw schema registration cannot mutate a provider-owned composition",
+            ),
+            Self::SchemaCompositionUnavailable => formatter.write_str(
+                "component registry does not contain a provider-owned Runtime composition",
+            ),
+            Self::DivergentSchemaOwnerReceipt { owner } => write!(
+                formatter,
+                "component schema owner '{owner}' has a different lineage receipt"
+            ),
             Self::MissingSchemaProviderReceipt { provider } => write!(
                 formatter,
                 "component schema provider '{provider}' has no executable behavior receipt"
@@ -340,6 +412,10 @@ impl Display for ComponentRegistryError {
             Self::InvalidCatalogPredecessor { .. } => {
                 formatter.write_str("component catalog predecessor fingerprint is invalid")
             }
+            Self::MissingCatalogPredecessor { generation } => write!(
+                formatter,
+                "component catalog generation {generation} must identify its predecessor"
+            ),
             Self::MissingTypeTombstone { component_id } => write!(
                 formatter,
                 "removed component ID '{component_id}' is missing a tombstone"
@@ -460,10 +536,21 @@ struct NativeComponentBinding {
     codec: Box<dyn ComponentCodec>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegistryBuildMode {
+    Undecided,
+    RawOwnerLocal,
+    ProviderComposition,
+    ProviderCallback,
+}
+
 struct RegistryData {
     catalog: ComponentSchemaCatalog,
     previous_catalog: Option<ComponentSchemaCatalog>,
-    provider_receipts: BTreeMap<nara_app::PluginSchemaProviderId, ComponentSchemaProviderReceipt>,
+    raw_owner: Option<ComponentSchemaOwnerId>,
+    build_mode: RegistryBuildMode,
+    contributions: BTreeMap<ComponentSchemaOwnerId, ComponentSchemaContributionReceipt>,
+    provider_owners: BTreeMap<nara_app::PluginSchemaProviderId, ComponentSchemaOwnerId>,
     type_registry: TypeRegistry,
     rust_type_ids: HashMap<TypeId, ComponentTypeId>,
     bindings: BTreeMap<ComponentTypeId, NativeComponentBinding>,
@@ -471,6 +558,7 @@ struct RegistryData {
     type_index: BTreeMap<ComponentTypeId, usize>,
     field_index: BTreeMap<(ComponentTypeId, ComponentFieldId), (usize, usize)>,
     path_indexes: BTreeMap<ComponentTypeId, SchemaPathIndex>,
+    type_tombstone_index: BTreeSet<ComponentTypeId>,
 }
 
 impl RegistryData {
@@ -479,6 +567,7 @@ impl RegistryData {
     }
 
     fn successor_of(
+        owner: ComponentSchemaOwnerId,
         previous_catalog: ComponentSchemaCatalog,
     ) -> Result<Self, ComponentRegistryError> {
         let catalog = ComponentSchemaCatalog::successor_of(&previous_catalog).map_err(|error| {
@@ -486,7 +575,10 @@ impl RegistryData {
                 generation: error.generation(),
             }
         })?;
-        Ok(Self::with_catalog(catalog, Some(previous_catalog)))
+        let mut data = Self::with_catalog(catalog, Some(previous_catalog));
+        data.raw_owner = Some(owner);
+        data.build_mode = RegistryBuildMode::RawOwnerLocal;
+        Ok(data)
     }
 
     fn with_catalog(
@@ -494,10 +586,14 @@ impl RegistryData {
         previous_catalog: Option<ComponentSchemaCatalog>,
     ) -> Self {
         let path_indexes = build_schema_path_indexes(&catalog);
+        let type_tombstone_index = catalog.type_tombstones.iter().cloned().collect();
         Self {
             catalog,
             previous_catalog,
-            provider_receipts: BTreeMap::new(),
+            raw_owner: None,
+            build_mode: RegistryBuildMode::Undecided,
+            contributions: BTreeMap::new(),
+            provider_owners: BTreeMap::new(),
             type_registry: TypeRegistry::default(),
             rust_type_ids: HashMap::new(),
             bindings: BTreeMap::new(),
@@ -505,8 +601,27 @@ impl RegistryData {
             type_index: BTreeMap::new(),
             field_index: BTreeMap::new(),
             path_indexes,
+            type_tombstone_index,
         }
     }
+}
+
+fn contribution_for_provider(
+    data: &RegistryData,
+    provider: nara_app::PluginSchemaProviderId,
+) -> Option<&ComponentSchemaContributionReceipt> {
+    data.provider_owners
+        .get(&provider)
+        .and_then(|owner| data.contributions.get(owner))
+}
+
+fn insert_contribution(data: &mut RegistryData, receipt: ComponentSchemaContributionReceipt) {
+    let owner = receipt.owner().owner();
+    let provider = receipt.provider().provider();
+    let previous_owner = data.provider_owners.insert(provider, owner);
+    let previous_receipt = data.contributions.insert(owner, receipt);
+    debug_assert!(previous_owner.is_none());
+    debug_assert!(previous_receipt.is_none());
 }
 
 enum RegistryState {
@@ -534,6 +649,19 @@ impl Default for ComponentRegistry {
 #[derive(Clone)]
 pub struct ComponentRegistrySnapshot(Arc<RegistryData>);
 
+/// Transient identity witness for one exact frozen registry snapshot.
+///
+/// The witness neither retains nor exposes schema bindings, codecs, or migrations.
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct ComponentRegistrySnapshotWitness(Weak<RegistryData>);
+
+impl ComponentRegistrySnapshotWitness {
+    pub(crate) fn matches(&self, snapshot: &ComponentRegistrySnapshot) -> bool {
+        Weak::ptr_eq(&self.0, &Arc::downgrade(&snapshot.0))
+    }
+}
+
 impl ComponentRegistrySnapshot {
     #[must_use]
     pub fn ptr_eq(&self, other: &Self) -> bool {
@@ -545,10 +673,39 @@ impl ComponentRegistrySnapshot {
         &self.0.catalog
     }
 
+    pub fn contribution_receipts(
+        &self,
+    ) -> impl ExactSizeIterator<Item = ComponentSchemaContributionReceipt> + '_ {
+        self.0.contributions.values().copied()
+    }
+
     pub fn provider_receipts(
         &self,
     ) -> impl ExactSizeIterator<Item = ComponentSchemaProviderReceipt> + '_ {
-        self.0.provider_receipts.values().copied()
+        self.0.provider_owners.values().map(|owner| {
+            self.0
+                .contributions
+                .get(owner)
+                .unwrap_or_else(|| unreachable!("provider index must reference one contribution"))
+                .provider()
+        })
+    }
+
+    pub fn owner_receipts(
+        &self,
+    ) -> impl ExactSizeIterator<Item = ComponentSchemaOwnerContributionReceipt> + '_ {
+        self.0.contributions.values().map(|receipt| receipt.owner())
+    }
+
+    #[must_use]
+    pub fn owner_receipt(
+        &self,
+        owner: ComponentSchemaOwnerId,
+    ) -> Option<ComponentSchemaOwnerContributionReceipt> {
+        self.0
+            .contributions
+            .get(&owner)
+            .map(|receipt| receipt.owner())
     }
 
     #[must_use]
@@ -556,7 +713,31 @@ impl ComponentRegistrySnapshot {
         &self,
         provider: nara_app::PluginSchemaProviderId,
     ) -> Option<ComponentSchemaProviderReceipt> {
-        self.0.provider_receipts.get(&provider).copied()
+        contribution_for_provider(&self.0, provider).map(|receipt| receipt.provider())
+    }
+
+    pub fn schema_composition_fingerprint(
+        &self,
+    ) -> Result<SchemaCompositionFingerprint, ComponentRegistryError> {
+        if self.0.build_mode != RegistryBuildMode::ProviderComposition {
+            return Err(ComponentRegistryError::SchemaCompositionUnavailable);
+        }
+        Ok(SchemaCompositionFingerprint::from_owner_receipts(
+            self.owner_receipts(),
+        ))
+    }
+
+    pub fn executable_registry_fingerprint(
+        &self,
+    ) -> Result<ExecutableRegistryFingerprint, ComponentRegistryError> {
+        Ok(ExecutableRegistryFingerprint::from_contributions(
+            self.schema_composition_fingerprint()?,
+            self.contribution_receipts(),
+        ))
+    }
+
+    pub(crate) fn witness(&self) -> ComponentRegistrySnapshotWitness {
+        ComponentRegistrySnapshotWitness(Arc::downgrade(&self.0))
     }
 }
 
@@ -569,30 +750,42 @@ impl ComponentRegistry {
         }
     }
 
-    #[must_use]
-    pub fn successor_of(
+    fn owner_local_successor(
+        owner: ComponentSchemaOwnerId,
         previous_catalog: ComponentSchemaCatalog,
     ) -> Result<Self, ComponentRegistryError> {
+        if !owner.is_valid() {
+            return Err(ComponentRegistryError::InvalidSchemaOwnerId { owner });
+        }
         Ok(Self {
-            state: RegistryState::Building(Box::new(RegistryData::successor_of(previous_catalog)?)),
+            state: RegistryState::Building(Box::new(RegistryData::successor_of(
+                owner,
+                previous_catalog,
+            )?)),
             instance_token: Arc::new(()),
         })
     }
 
-    /// Starts a building registry from a validated persistent catalog candidate.
+    /// Starts a building registry from one trusted single-owner catalog declaration.
     ///
-    /// Native bindings, codecs, reflected types, and migrations are intentionally registered
-    /// separately before [`Self::freeze`] publishes the runtime snapshot.
-    pub fn from_catalog_candidate(
+    /// `current` and `predecessor` must both belong to `owner`. A flattened Runtime composition has
+    /// no owner-attribution proof and must never be supplied here. This lower-level source tool
+    /// cannot publish product composition or executable fingerprints; normal plugin and product
+    /// paths use [`ComponentSchemaProviderDefinition`] instead.
+    pub fn from_owner_catalog_candidate(
+        owner: ComponentSchemaOwnerId,
         catalog: ComponentSchemaCatalog,
-        previous_catalog: Option<ComponentSchemaCatalog>,
+        predecessor: Option<ComponentSchemaCatalog>,
     ) -> Result<Self, ComponentRegistryError> {
-        let catalog = prepare_catalog_candidate(catalog, previous_catalog.as_ref())?;
+        if !owner.is_valid() {
+            return Err(ComponentRegistryError::InvalidSchemaOwnerId { owner });
+        }
+        let (catalog, predecessor) = prepare_owner_catalogs(catalog, predecessor)?;
+        let mut data = RegistryData::with_catalog(catalog, predecessor);
+        data.raw_owner = Some(owner);
+        data.build_mode = RegistryBuildMode::RawOwnerLocal;
         Ok(Self {
-            state: RegistryState::Building(Box::new(RegistryData::with_catalog(
-                catalog,
-                previous_catalog,
-            ))),
+            state: RegistryState::Building(Box::new(data)),
             instance_token: Arc::new(()),
         })
     }
@@ -619,12 +812,17 @@ impl ComponentRegistry {
         let RegistryState::Building(building) = &self.state else {
             unreachable!("component registry transition is synchronous")
         };
+        let publish_mode = match building.build_mode {
+            RegistryBuildMode::Undecided => RegistryBuildMode::ProviderComposition,
+            mode => mode,
+        };
         let (catalog, type_index, field_index, path_indexes) = validate_registry(building)?;
 
         let state = std::mem::replace(&mut self.state, RegistryState::Transitioning);
         let RegistryState::Building(mut data) = state else {
             unreachable!("validated component registry must still be building")
         };
+        data.build_mode = publish_mode;
         data.catalog = catalog;
         data.type_index = type_index;
         data.field_index = field_index;
@@ -663,50 +861,101 @@ impl ComponentRegistry {
         &self.instance_token
     }
 
+    fn validate_provider_registration_mode(
+        &self,
+        provider: nara_app::PluginSchemaProviderId,
+    ) -> Result<(), ComponentRegistryError> {
+        match self.data().build_mode {
+            RegistryBuildMode::RawOwnerLocal => {
+                Err(ComponentRegistryError::MixedSchemaRegistrationModes { provider })
+            }
+            RegistryBuildMode::ProviderCallback => {
+                Err(ComponentRegistryError::NestedSchemaProviderRegistration { provider })
+            }
+            RegistryBuildMode::Undecided | RegistryBuildMode::ProviderComposition => Ok(()),
+        }
+    }
+
     /// Registers a provider into a building registry or validates its stable behavior receipt
     /// against an already frozen snapshot.
-    pub fn register_or_validate_schema_provider(
+    pub(crate) fn register_or_validate_schema_provider(
         &mut self,
         provider: ComponentSchemaProviderDefinition,
     ) -> Result<&mut Self, ComponentRegistryError> {
-        let receipt = provider.receipt();
+        self.validate_provider_registration_mode(provider.id())?;
+        let resolved = provider.resolve()?;
+        self.register_or_validate_resolved_schema_provider(resolved)
+    }
+
+    #[doc(hidden)]
+    pub(crate) fn register_or_validate_resolved_schema_provider(
+        &mut self,
+        resolved: ResolvedComponentSchemaProvider,
+    ) -> Result<&mut Self, ComponentRegistryError> {
+        self.validate_provider_registration_mode(resolved.definition().id())?;
         if self.is_frozen() {
-            self.validate_schema_provider(provider)?;
+            self.validate_resolved_schema_provider(&resolved)?;
             return Ok(self);
         }
-        if let Some(existing) = self.data().provider_receipts.get(&provider.id()) {
-            if *existing == receipt {
+
+        let provider = resolved.definition().id();
+        if let Some(existing) = contribution_for_provider(self.data(), provider) {
+            if *existing == resolved.contribution_receipt() {
                 return Ok(self);
             }
-            return Err(ComponentRegistryError::DivergentSchemaProviderReceipt {
-                provider: provider.id(),
-            });
+            return Err(ComponentRegistryError::DivergentSchemaProviderReceipt { provider });
         }
 
-        provider.register_into(self)?;
-        self.building_mut()?
-            .provider_receipts
-            .insert(provider.id(), receipt);
+        let owner = resolved.definition().owner();
+        if self.data().contributions.contains_key(&owner) {
+            return Err(ComponentRegistryError::DivergentSchemaOwnerReceipt { owner });
+        }
+        preflight_owner_catalog_merge(self.data(), resolved.current().catalog())?;
+
+        let candidate = build_owner_candidate(&resolved)?;
+        preflight_owner_candidate_merge(self.data(), &candidate)?;
+        let aggregate = self.building_mut()?;
+        aggregate.build_mode = RegistryBuildMode::ProviderComposition;
+        merge_owner_candidate(aggregate, candidate);
         Ok(self)
     }
 
-    pub fn validate_schema_provider(
+    pub(crate) fn validate_schema_provider(
         &self,
         provider: ComponentSchemaProviderDefinition,
     ) -> Result<(), ComponentRegistryError> {
-        let Some(existing) = self.data().provider_receipts.get(&provider.id()) else {
-            return if self.is_frozen() {
-                Err(ComponentRegistryError::MissingSchemaProviderReceipt {
-                    provider: provider.id(),
-                })
-            } else {
-                Ok(())
-            };
-        };
-        if *existing != provider.receipt() {
-            return Err(ComponentRegistryError::DivergentSchemaProviderReceipt {
-                provider: provider.id(),
+        self.validate_provider_registration_mode(provider.id())?;
+        let resolved = provider.resolve()?;
+        if self.is_frozen() || contribution_for_provider(self.data(), provider.id()).is_some() {
+            return self.validate_resolved_schema_provider(&resolved);
+        }
+        if self.data().contributions.contains_key(&provider.owner()) {
+            return Err(ComponentRegistryError::DivergentSchemaOwnerReceipt {
+                owner: provider.owner(),
             });
+        }
+        preflight_owner_catalog_merge(self.data(), resolved.current().catalog())
+    }
+
+    fn validate_resolved_schema_provider(
+        &self,
+        resolved: &ResolvedComponentSchemaProvider,
+    ) -> Result<(), ComponentRegistryError> {
+        let provider = resolved.definition().id();
+        let Some(existing) = contribution_for_provider(self.data(), provider) else {
+            let owner = resolved.definition().owner();
+            if self.data().contributions.contains_key(&owner) {
+                return Err(ComponentRegistryError::DivergentSchemaOwnerReceipt { owner });
+            }
+            return Err(ComponentRegistryError::MissingSchemaProviderReceipt { provider });
+        };
+        if existing.provider() != resolved.provider_receipt() {
+            return Err(ComponentRegistryError::DivergentSchemaProviderReceipt { provider });
+        }
+
+        let owner = resolved.definition().owner();
+        if existing.owner() != resolved.owner_receipt() {
+            return Err(ComponentRegistryError::DivergentSchemaOwnerReceipt { owner });
         }
         Ok(())
     }
@@ -730,7 +979,7 @@ impl ComponentRegistry {
         &mut self,
         schema: ComponentSchema,
     ) -> Result<&mut Self, ComponentRegistryError> {
-        let data = self.building_mut()?;
+        let data = self.raw_building_mut()?;
         if data.path_indexes.contains_key(&schema.id) {
             return Err(ComponentRegistryError::DuplicateComponentId(schema.id));
         }
@@ -738,6 +987,7 @@ impl ComponentRegistry {
         let path_index = SchemaPathIndex::from_schema(&schema);
         data.catalog.components.push(schema);
         data.path_indexes.insert(id, path_index);
+        self.commit_raw_registration();
         Ok(self)
     }
 
@@ -745,10 +995,10 @@ impl ComponentRegistry {
         &mut self,
         component_id: ComponentTypeId,
     ) -> Result<&mut Self, ComponentRegistryError> {
-        self.building_mut()?
-            .catalog
-            .type_tombstones
-            .push(component_id);
+        let data = self.raw_building_mut()?;
+        data.catalog.type_tombstones.push(component_id.clone());
+        data.type_tombstone_index.insert(component_id);
+        self.commit_raw_registration();
         Ok(self)
     }
 
@@ -892,7 +1142,7 @@ impl ComponentRegistry {
             + 'static,
     {
         let id = schema.id.clone();
-        let data = self.building_mut()?;
+        let data = self.raw_building_mut()?;
         validate_persistent_registration::<T>(data, &schema)?;
 
         let rust_type_id = TypeId::of::<T>();
@@ -911,6 +1161,7 @@ impl ComponentRegistry {
                 codec: Box::new(FnComponentCodec { preflight, encode }),
             },
         );
+        self.commit_raw_registration();
         Ok(self)
     }
 
@@ -962,7 +1213,7 @@ impl ComponentRegistry {
             + Sync
             + 'static,
     {
-        let data = self.building_mut()?;
+        let data = self.raw_building_mut()?;
         if !data.path_indexes.contains_key(id) {
             return Err(ComponentRegistryError::UnknownComponentId(id.clone()));
         }
@@ -986,6 +1237,7 @@ impl ComponentRegistry {
                 codec: Box::new(FnComponentCodec { preflight, encode }),
             },
         );
+        self.commit_raw_registration();
         Ok(self)
     }
 
@@ -993,7 +1245,8 @@ impl ComponentRegistry {
     where
         T: GetTypeRegistration,
     {
-        self.building_mut()?.type_registry.register::<T>();
+        self.raw_building_mut()?.type_registry.register::<T>();
+        self.commit_raw_registration();
         Ok(self)
     }
 
@@ -1010,7 +1263,7 @@ impl ComponentRegistry {
             + Sync
             + 'static,
     {
-        let data = self.building_mut()?;
+        let data = self.raw_building_mut()?;
         if !data.path_indexes.contains_key(id) {
             return Err(ComponentRegistryError::UnknownComponentId(id.clone()));
         }
@@ -1035,6 +1288,7 @@ impl ComponentRegistry {
                 migrate: Box::new(migrate),
             },
         );
+        self.commit_raw_registration();
         Ok(self)
     }
 
@@ -1319,6 +1573,188 @@ impl ComponentRegistry {
             }
         }
     }
+
+    fn raw_building_mut(&mut self) -> Result<&mut RegistryData, ComponentRegistryError> {
+        let data = self.building_mut()?;
+        match data.build_mode {
+            RegistryBuildMode::Undecided
+            | RegistryBuildMode::RawOwnerLocal
+            | RegistryBuildMode::ProviderCallback => {}
+            RegistryBuildMode::ProviderComposition => {
+                return Err(ComponentRegistryError::RawSchemaRegistrationInProviderComposition);
+            }
+        }
+        Ok(data)
+    }
+
+    fn commit_raw_registration(&mut self) {
+        let data = self
+            .building_mut()
+            .unwrap_or_else(|_| unreachable!("a successful raw registration remains building"));
+        if data.build_mode == RegistryBuildMode::Undecided {
+            data.build_mode = RegistryBuildMode::RawOwnerLocal;
+        }
+    }
+
+    fn into_frozen_data(self) -> RegistryData {
+        let RegistryState::Frozen(data) = self.state else {
+            unreachable!("only a frozen owner candidate can be merged")
+        };
+        Arc::try_unwrap(data)
+            .unwrap_or_else(|_| unreachable!("private owner candidate snapshot cannot escape"))
+    }
+}
+
+fn owner_candidate_base(
+    resolved: &ResolvedComponentSchemaProvider,
+) -> Result<ComponentRegistry, ComponentRegistryError> {
+    let mut candidate = resolved.predecessor().map_or_else(
+        || {
+            let mut candidate = ComponentRegistry::new();
+            candidate.building_mut()?.raw_owner = Some(resolved.definition().owner());
+            Ok(candidate)
+        },
+        |predecessor| {
+            ComponentRegistry::owner_local_successor(
+                resolved.definition().owner(),
+                predecessor.catalog().clone(),
+            )
+        },
+    )?;
+    candidate.building_mut()?.build_mode = RegistryBuildMode::ProviderCallback;
+    Ok(candidate)
+}
+
+fn build_owner_candidate(
+    resolved: &ResolvedComponentSchemaProvider,
+) -> Result<RegistryData, ComponentRegistryError> {
+    let mut candidate = owner_candidate_base(resolved)?;
+    let instance_token = Arc::clone(candidate.instance_token());
+    resolved.definition().validate_into(&candidate)?;
+    resolved.definition().register_into(&mut candidate)?;
+    if !candidate.shares_instance_token(&instance_token)
+        || candidate.data().build_mode != RegistryBuildMode::ProviderCallback
+        || candidate.data().raw_owner != Some(resolved.definition().owner())
+    {
+        return Err(
+            ComponentRegistryError::SchemaProviderCandidateAuthorityChanged {
+                provider: resolved.definition().id(),
+            },
+        );
+    }
+    {
+        let data = candidate.building_mut()?;
+        insert_contribution(data, resolved.contribution_receipt());
+    }
+    candidate.freeze()?;
+    if candidate.catalog()? != resolved.current().catalog() {
+        return Err(ComponentRegistryError::SchemaProviderCatalogMismatch {
+            provider: resolved.definition().id(),
+        });
+    }
+    Ok(candidate.into_frozen_data())
+}
+
+fn preflight_owner_candidate_merge(
+    aggregate: &RegistryData,
+    candidate: &RegistryData,
+) -> Result<(), ComponentRegistryError> {
+    for (owner, receipt) in &candidate.contributions {
+        if aggregate.contributions.contains_key(owner) {
+            return Err(ComponentRegistryError::DivergentSchemaOwnerReceipt { owner: *owner });
+        }
+        let provider = receipt.provider().provider();
+        if let Some(existing) = contribution_for_provider(aggregate, provider) {
+            if existing == receipt {
+                continue;
+            }
+            return Err(ComponentRegistryError::DivergentSchemaProviderReceipt { provider });
+        }
+    }
+
+    for (rust_type_id, requested_component_id) in &candidate.rust_type_ids {
+        let Some(existing_component_id) = aggregate.rust_type_ids.get(rust_type_id) else {
+            continue;
+        };
+        let rust_type_path = candidate
+            .bindings
+            .get(requested_component_id)
+            .map_or("<unknown>", |binding| binding.rust_type_path);
+        return Err(ComponentRegistryError::DuplicateComponentRustType {
+            rust_type_path: rust_type_path.to_owned(),
+            existing_component_id: existing_component_id.clone(),
+            requested_component_id: requested_component_id.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn preflight_owner_catalog_merge(
+    aggregate: &RegistryData,
+    catalog: &ComponentSchemaCatalog,
+) -> Result<(), ComponentRegistryError> {
+    for schema in &catalog.components {
+        if aggregate.path_indexes.contains_key(schema.id()) {
+            return Err(ComponentRegistryError::DuplicateComponentId(
+                schema.id().clone(),
+            ));
+        }
+        if aggregate.type_tombstone_index.contains(schema.id()) {
+            return Err(ComponentRegistryError::ActiveTypeIsTombstoned(
+                schema.id().clone(),
+            ));
+        }
+    }
+    for tombstone in &catalog.type_tombstones {
+        if aggregate.path_indexes.contains_key(tombstone) {
+            return Err(ComponentRegistryError::ActiveTypeIsTombstoned(
+                tombstone.clone(),
+            ));
+        }
+        if aggregate.type_tombstone_index.contains(tombstone) {
+            return Err(ComponentRegistryError::DuplicateTypeTombstone(
+                tombstone.clone(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn merge_owner_candidate(aggregate: &mut RegistryData, candidate: RegistryData) {
+    let RegistryData {
+        catalog,
+        previous_catalog: _,
+        raw_owner: _,
+        build_mode: _,
+        contributions,
+        provider_owners,
+        type_registry,
+        rust_type_ids,
+        bindings,
+        migrations,
+        type_index: _,
+        field_index: _,
+        path_indexes,
+        type_tombstone_index,
+    } = candidate;
+
+    aggregate.catalog.components.extend(catalog.components);
+    aggregate
+        .catalog
+        .type_tombstones
+        .extend(catalog.type_tombstones);
+    debug_assert_eq!(provider_owners.len(), contributions.len());
+    for receipt in contributions.into_values() {
+        insert_contribution(aggregate, receipt);
+    }
+    for registration in type_registry.iter().cloned() {
+        aggregate.type_registry.add_registration(registration);
+    }
+    aggregate.rust_type_ids.extend(rust_type_ids);
+    aggregate.bindings.extend(bindings);
+    aggregate.migrations.extend(migrations);
+    aggregate.path_indexes.extend(path_indexes);
+    aggregate.type_tombstone_index.extend(type_tombstone_index);
 }
 
 fn validate_native_binding<T: Component>(
@@ -1454,6 +1890,38 @@ pub(crate) fn prepare_catalog_candidate(
     Ok(catalog)
 }
 
+pub(crate) fn prepare_owner_catalogs(
+    mut current: ComponentSchemaCatalog,
+    mut predecessor: Option<ComponentSchemaCatalog>,
+) -> Result<(ComponentSchemaCatalog, Option<ComponentSchemaCatalog>), ComponentRegistryError> {
+    if let Some(predecessor) = predecessor.as_mut() {
+        predecessor.canonicalize();
+        validate_catalog_contents(predecessor)?;
+        match predecessor.generation() {
+            0 => {
+                return Err(ComponentRegistryError::InvalidCatalogGeneration {
+                    expected: 1,
+                    actual: 0,
+                });
+            }
+            1 if predecessor.predecessor().is_some() => {
+                return Err(ComponentRegistryError::InvalidCatalogPredecessor {
+                    expected: None,
+                    actual: predecessor.predecessor().copied(),
+                });
+            }
+            generation if generation > 1 && predecessor.predecessor().is_none() => {
+                return Err(ComponentRegistryError::MissingCatalogPredecessor { generation });
+            }
+            _ => {}
+        }
+    }
+
+    current.canonicalize();
+    validate_catalog(&current, predecessor.as_ref())?;
+    Ok((current, predecessor))
+}
+
 fn validate_catalog(
     catalog: &ComponentSchemaCatalog,
     previous: Option<&ComponentSchemaCatalog>,
@@ -1480,6 +1948,16 @@ fn validate_catalog(
         });
     }
 
+    validate_catalog_contents(catalog)?;
+    if let Some(previous) = previous {
+        validate_catalog_lineage(catalog, previous)?;
+    }
+    Ok(())
+}
+
+fn validate_catalog_contents(
+    catalog: &ComponentSchemaCatalog,
+) -> Result<(), ComponentRegistryError> {
     let mut active_types = BTreeSet::new();
     for schema in &catalog.components {
         if !active_types.insert(schema.id.clone()) {
@@ -1506,10 +1984,6 @@ fn validate_catalog(
                 tombstone.clone(),
             ));
         }
-    }
-
-    if let Some(previous) = previous {
-        validate_catalog_lineage(catalog, previous)?;
     }
     Ok(())
 }
@@ -2000,4 +2474,229 @@ fn build_schema_path_indexes(catalog: &ComponentSchemaCatalog) -> PathIndexes {
         .iter()
         .map(|schema| (schema.id.clone(), SchemaPathIndex::from_schema(schema)))
         .collect()
+}
+
+#[cfg(test)]
+mod owner_composition_tests {
+    use std::{
+        any::TypeId,
+        collections::{BTreeMap, BTreeSet},
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Arc,
+    };
+
+    use bevy_reflect::Reflect;
+    use nara_app::PluginSchemaProviderId;
+    use nara_ecs::Component;
+
+    use super::*;
+    use crate::{ComponentSchemaProviderBindingId, ComponentSchemaProviderSourceError};
+
+    const BASELINE_OWNER: ComponentSchemaOwnerId =
+        ComponentSchemaOwnerId::new("nara.test.atomic-baseline-owner");
+    const BASELINE_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("nara.test.atomic-baseline-provider");
+    const FAILURE_OWNER: ComponentSchemaOwnerId =
+        ComponentSchemaOwnerId::new("nara.test.atomic-failure-owner");
+    const FAILURE_PROVIDER: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("nara.test.atomic-failure-provider");
+
+    #[derive(Component, Reflect)]
+    struct FailureProbe;
+
+    #[derive(Debug, PartialEq)]
+    struct BuildingProbe {
+        instance_token: usize,
+        catalog: ComponentSchemaCatalog,
+        previous_catalog: Option<ComponentSchemaCatalog>,
+        raw_owner: Option<ComponentSchemaOwnerId>,
+        build_mode: RegistryBuildMode,
+        contributions: BTreeMap<ComponentSchemaOwnerId, ComponentSchemaContributionReceipt>,
+        provider_owners: BTreeMap<PluginSchemaProviderId, ComponentSchemaOwnerId>,
+        reflected_types: BTreeSet<TypeId>,
+        rust_type_ids: BTreeMap<TypeId, ComponentTypeId>,
+        binding_ids: BTreeSet<ComponentTypeId>,
+        migration_ids: BTreeSet<(ComponentTypeId, ComponentSchemaVersion)>,
+        type_index: BTreeMap<ComponentTypeId, usize>,
+        field_index: BTreeMap<(ComponentTypeId, ComponentFieldId), (usize, usize)>,
+        path_index_ids: BTreeSet<ComponentTypeId>,
+        type_tombstone_index: BTreeSet<ComponentTypeId>,
+    }
+
+    fn building_probe(registry: &ComponentRegistry) -> BuildingProbe {
+        let data = registry.data();
+        BuildingProbe {
+            instance_token: Arc::as_ptr(registry.instance_token()) as usize,
+            catalog: data.catalog.clone(),
+            previous_catalog: data.previous_catalog.clone(),
+            raw_owner: data.raw_owner,
+            build_mode: data.build_mode,
+            contributions: data.contributions.clone(),
+            provider_owners: data.provider_owners.clone(),
+            reflected_types: data
+                .type_registry
+                .iter()
+                .map(|registration| registration.type_id())
+                .collect(),
+            rust_type_ids: data
+                .rust_type_ids
+                .iter()
+                .map(|(type_id, component_id)| (*type_id, component_id.clone()))
+                .collect(),
+            binding_ids: data.bindings.keys().cloned().collect(),
+            migration_ids: data.migrations.keys().cloned().collect(),
+            type_index: data.type_index.clone(),
+            field_index: data.field_index.clone(),
+            path_index_ids: data.path_indexes.keys().cloned().collect(),
+            type_tombstone_index: data.type_tombstone_index.clone(),
+        }
+    }
+
+    fn empty_source() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+        Ok(ComponentSchemaCatalog::default())
+    }
+
+    fn register_empty(_: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+        Ok(())
+    }
+
+    fn failure_schema(version: ComponentSchemaVersion) -> ComponentSchema {
+        ComponentSchema::new(
+            ComponentTypeId::new("nara.test.AtomicFailureProbe"),
+            "Failure probe",
+            version,
+        )
+    }
+
+    fn failure_predecessor_source()
+    -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+        Ok(ComponentSchemaCatalog {
+            components: vec![failure_schema(ComponentSchemaVersion::ONE)],
+            ..ComponentSchemaCatalog::default()
+        })
+    }
+
+    fn failure_current_source() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>
+    {
+        let predecessor = failure_predecessor_source()?;
+        let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
+            .map_err(|_| ComponentSchemaProviderSourceError::new("atomic-successor-exhausted"))?;
+        current.components.push(failure_schema(
+            ComponentSchemaVersion::new(2).expect("version two is non-zero"),
+        ));
+        Ok(current)
+    }
+
+    fn mutate_failure_candidate(
+        registry: &mut ComponentRegistry,
+    ) -> Result<(), ComponentRegistryError> {
+        let id = ComponentTypeId::new("nara.test.AtomicFailureProbe");
+        let version_two = ComponentSchemaVersion::new(2).expect("version two is non-zero");
+        registry.register_component_schema(failure_schema(version_two))?;
+        registry.register_native_component_with_codec::<FailureProbe, _, _>(
+            &id,
+            |_| Ok(FailureProbe),
+            |_| Ok(ComponentValue::Null),
+        )?;
+        registry.register_component_migration(&id, ComponentSchemaVersion::ONE, version_two, Ok)?;
+        registry.register_reflected_type::<FailureProbe>()?;
+        Ok(())
+    }
+
+    fn mutate_then_reject(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+        mutate_failure_candidate(registry)?;
+        Err(ComponentRegistryError::Frozen)
+    }
+
+    fn mutate_then_panic(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+        mutate_failure_candidate(registry)?;
+        panic!("owner candidate panic after complete private mutation")
+    }
+
+    fn baseline_provider() -> ComponentSchemaProviderDefinition {
+        ComponentSchemaProviderDefinition::new(
+            BASELINE_OWNER,
+            BASELINE_PROVIDER,
+            ComponentSchemaProviderBindingId::new("nara.test.atomic-baseline.native", 1),
+            empty_source,
+            register_empty,
+        )
+    }
+
+    fn failure_provider(
+        register: fn(&mut ComponentRegistry) -> Result<(), ComponentRegistryError>,
+    ) -> ComponentSchemaProviderDefinition {
+        ComponentSchemaProviderDefinition::new(
+            FAILURE_OWNER,
+            FAILURE_PROVIDER,
+            ComponentSchemaProviderBindingId::new("nara.test.atomic-failure.native", 2),
+            failure_current_source,
+            register,
+        )
+        .with_predecessor(failure_predecessor_source)
+    }
+
+    fn assert_failed_candidate_is_atomic(
+        register: fn(&mut ComponentRegistry) -> Result<(), ComponentRegistryError>,
+        should_panic: bool,
+    ) {
+        let mut registry = ComponentRegistry::new();
+        baseline_provider()
+            .register_or_validate_into(&mut registry)
+            .unwrap();
+        let before = building_probe(&registry);
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            failure_provider(register).register_or_validate_into(&mut registry)
+        }));
+        if should_panic {
+            assert!(result.is_err());
+        } else {
+            assert!(matches!(result, Ok(Err(ComponentRegistryError::Frozen))));
+        }
+        assert_eq!(building_probe(&registry), before);
+
+        registry.freeze().unwrap();
+        let snapshot = registry.snapshot().unwrap();
+        let mut control = ComponentRegistry::new();
+        baseline_provider()
+            .register_or_validate_into(&mut control)
+            .unwrap();
+        control.freeze().unwrap();
+        let control_snapshot = control.snapshot().unwrap();
+
+        assert_eq!(snapshot.catalog(), control_snapshot.catalog());
+        assert_eq!(
+            snapshot.contribution_receipts().collect::<Vec<_>>(),
+            control_snapshot.contribution_receipts().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            snapshot.schema_composition_fingerprint().unwrap(),
+            control_snapshot.schema_composition_fingerprint().unwrap()
+        );
+        assert_eq!(
+            snapshot.executable_registry_fingerprint().unwrap(),
+            control_snapshot.executable_registry_fingerprint().unwrap()
+        );
+        assert_eq!(snapshot.provider_receipt(FAILURE_PROVIDER), None);
+        assert_eq!(snapshot.owner_receipt(FAILURE_OWNER), None);
+        assert!(registry.schema_for_type::<FailureProbe>().is_none());
+        assert!(
+            registry
+                .type_registry()
+                .unwrap()
+                .get(TypeId::of::<FailureProbe>())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn rejected_private_owner_candidate_preserves_every_aggregate_index() {
+        assert_failed_candidate_is_atomic(mutate_then_reject, false);
+    }
+
+    #[test]
+    fn panicked_private_owner_candidate_preserves_every_aggregate_index() {
+        assert_failed_candidate_is_atomic(mutate_then_panic, true);
+    }
 }

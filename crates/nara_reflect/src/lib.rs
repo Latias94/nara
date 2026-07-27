@@ -49,8 +49,11 @@ pub use plugin::{
     validate_component_registry_authority,
 };
 pub use provider::{
-    ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
-    ComponentSchemaProviderReceipt,
+    ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
+    ComponentSchemaOwnerFingerprint, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+    ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
+    ComponentSchemaProviderSource, ComponentSchemaProviderSourceError,
+    ExecutableRegistryFingerprint, SchemaCompositionFingerprint,
 };
 pub use registry::{
     ComponentProjectionError, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
@@ -82,6 +85,39 @@ pub mod __private {
         declare_persistent_apply_targets, validate_declared_persistent_apply_targets,
         validate_fresh_persistent_component_apply, validate_persistent_apply_support_topology,
     };
+    pub use crate::provider::{ComponentSchemaOwnerRecord, ResolvedComponentSchemaProvider};
+    pub use crate::registry::ComponentRegistrySnapshotWitness;
+
+    use crate::{
+        ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
+        ComponentSchemaProviderDefinition,
+    };
+
+    pub fn resolve_schema_provider(
+        provider: ComponentSchemaProviderDefinition,
+    ) -> Result<ResolvedComponentSchemaProvider, ComponentRegistryError> {
+        provider.resolve()
+    }
+
+    pub fn register_or_validate_resolved_schema_provider(
+        registry: &mut ComponentRegistry,
+        provider: ResolvedComponentSchemaProvider,
+    ) -> Result<&mut ComponentRegistry, ComponentRegistryError> {
+        registry.register_or_validate_resolved_schema_provider(provider)
+    }
+
+    pub fn component_registry_snapshot_witness(
+        snapshot: &ComponentRegistrySnapshot,
+    ) -> ComponentRegistrySnapshotWitness {
+        snapshot.witness()
+    }
+
+    pub fn component_registry_snapshot_witness_matches(
+        witness: &ComponentRegistrySnapshotWitness,
+        snapshot: &ComponentRegistrySnapshot,
+    ) -> bool {
+        witness.matches(snapshot)
+    }
 }
 
 pub mod prelude {

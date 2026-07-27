@@ -530,10 +530,14 @@ pub struct RenderPlugin;
 pub const RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.render");
 pub const RENDER_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
     nara_app::PluginSchemaProviderId::new("nara.render.components");
+pub const RENDER_SCHEMA_OWNER_ID: nara_reflect::ComponentSchemaOwnerId =
+    nara_reflect::ComponentSchemaOwnerId::new("nara.render.components");
 pub const RENDER_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
+        RENDER_SCHEMA_OWNER_ID,
         RENDER_SCHEMA_PROVIDER_ID,
         nara_reflect::ComponentSchemaProviderBindingId::new("nara.render.components.native", 1),
+        render_schema_catalog,
         validate_render_components,
         register_render_components,
     );
@@ -582,12 +586,8 @@ pub fn register_render_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     validate_render_components(registry)?;
-    let component_id = ComponentTypeId::new("nara.render.Camera2d");
-    let schema = ComponentSchema::new(component_id, "Camera 2D", ComponentSchemaVersion::ONE)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields(camera_fields());
     registry.register_persistent_component_with_codec::<Camera2d, _, _>(
-        schema,
+        camera_schema(),
         |value| {
             Ok(Camera2d {
                 target: read_render_target(value.get("target"))?,
@@ -625,6 +625,24 @@ pub fn register_render_components(
         },
     )?;
     Ok(())
+}
+
+fn render_schema_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    Ok(nara_reflect::ComponentSchemaCatalog {
+        components: vec![camera_schema()],
+        ..nara_reflect::ComponentSchemaCatalog::default()
+    })
+}
+
+fn camera_schema() -> ComponentSchema {
+    ComponentSchema::new(
+        ComponentTypeId::new("nara.render.Camera2d"),
+        "Camera 2D",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields(camera_fields())
 }
 
 fn validate_render_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {

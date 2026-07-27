@@ -9,6 +9,7 @@ use std::{
 };
 
 use nara::project_host::ProjectContentBudgetKind;
+use nara_reference_game::REFERENCE_GAME_SCHEMA_OWNER_ID;
 use project_content_fixture::{load_project_content, texture_stable_id};
 
 const CHILD_MARKER: &str = "NARA_REFERENCE_CONTENT_CHILD";
@@ -52,9 +53,17 @@ fn assert_committed_content() {
     assert_eq!(snapshot.lineage(), loaded.plan.lineage());
     assert_eq!(
         snapshot.schema_fingerprint(),
-        loaded.plan.schema_validation().fingerprint(),
+        loaded.plan.schema_validation().composition_fingerprint(),
     );
-    assert_eq!(snapshot.schema_generation(), 1);
+    assert_eq!(
+        loaded
+            .plan
+            .schema_validation()
+            .owner_receipts()
+            .find(|receipt| receipt.owner() == REFERENCE_GAME_SCHEMA_OWNER_ID)
+            .map(|receipt| receipt.generation()),
+        Some(3),
+    );
     assert!(!snapshot.source_upgrade_required());
     assert_eq!(snapshot.revision().to_hex().len(), 64);
     assert_eq!(snapshot.prefabs().len(), 1);
