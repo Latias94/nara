@@ -8,9 +8,10 @@
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
 **Admission Evidence**: RGD-U11 independently reviewed the owner-local lineage, failure-atomic
 registration, known-owner claim, and typed-fingerprint design without a remaining P0/P1 finding.
-**Implementation Evidence Required**: A reference-product tracer must still prove optional owner
-disable and reactivation, real owner-local deletion and migration, known cross-owner collision
-rejection, one-shot provider execution, failure atomicity, and complete-binding Runtime publication.
+**Implementation Evidence**: Commit `9e3ae84` and the RGD-U11 implementation verification prove
+optional owner disable/reactivation, real owner-local deletion and migration, known cross-owner
+collision rejection, one-shot provider execution, failure atomicity, typed identities, and
+complete-binding Runtime publication.
 **Related**: ADR 0011, ADR 0035, ADR 0045, ADR 0046, ADR 0051, ADR 0079, ADR 0090, and OQ-044
 
 ## Context

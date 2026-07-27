@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8497d35a615070c6b374ed1081d0e33e642e1ac4ded4913e6e816028eb369f6a"
+source_fingerprint: "3763befde93496a69597dfd7e8aa8c5661ea10d808694c47559ca9928bd00979"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "8497d35a615070c6b374ed1081d0e33e642e1ac4ded4913e6e816028eb3
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8497d35a615070c6b374ed1081d0e33e642e1ac4ded4913e6e816028eb369f6a`
-- Immutable records: 273
+- Source fingerprint: `3763befde93496a69597dfd7e8aa8c5661ea10d808694c47559ca9928bd00979`
+- Immutable records: 275
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game delivery hardening: owner-lineage decision accepted, tracer active](registry/2026-07/2026-07-27T105214Z-engine-foundation-contract-completion-codex-root-b0e4530c1ccc4a72ad87cefe5acc1b8c.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game delivery hardening: owner-lineage correction closed](registry/2026-07/2026-07-27T165137Z-engine-foundation-contract-completion-codex-root-a0b7b9bae94e42cfa2ea4ccc3f752a77.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGD-U11 schema owner-lineage implementation](verification/2026-07/2026-07-27T165100Z-rgd-u11-schema-owner-lineage-implementation-f5b88b88b9dd4a7daab0d6adf0a5cac6.md) - Verifies owner-local schema lineage, atomic runtime composition, typed identities, and optional-owner reactivation under ADR 0098.
 - **Verification Evidence**: [RGD-U11 schema owner-lineage architecture decision](verification/2026-07/2026-07-27T105038Z-rgd-u11-schema-owner-lineage-architecture-decision-65b219ffe82144c083923249a21032f1.md) - Records independent review and governance verification for Accepted ADR 0098 while leaving implementation and delivery evidence open.
 - **Verification Evidence**: [RGD-U11 schedule, registry, reference-game, and CI hardening](verification/2026-07/2026-07-27T091437Z-rgd-u11-schedule-registry-reference-game-and-ci-hardening-3508e830c12045c1871db1855ae51a6e.md) - Verifies four local pre-publication corrections and records the exact authority and delivery evidence invalidated by their new revision.
 - **Verification Evidence**: [RGD-U11 prefab entity-reference namespace correction](verification/2026-07/2026-07-26T185044Z-rgd-u11-prefab-entity-reference-namespace-correction-f418e6562b9d4de5b2bca66deaaa719f.md) - Verifies migration-aware, bounded, failure-atomic SceneLocal entity-reference projection for repeated and nested prefab instances.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGD-U8 final hosted CI after candidate capacity repair](verification/2026-07/2026-07-26T030317Z-rgd-u8-final-hosted-ci-after-candidate-capacity-repair-73cf3d9e548743eb9462aec8acbcfec1.md) - Re-establishes the six-cell hosted CI baseline after the candidate capacity and release-verifier pin repairs.
 - **Verification Evidence**: [RGD-U12 release verifier pin follows candidate layout](verification/2026-07/2026-07-26T025029Z-rgd-u12-release-verifier-pin-follows-candidate-layout-651c8156185f48a080d52cd1c0b68247.md) - Records the reviewed ancestor, blob, and SHA-256 binding that keeps release validation aligned with the repaired candidate layout.
 - **Verification Evidence**: [RGD-U10 candidate capacity diagnosis and local budget repair](verification/2026-07/2026-07-26T023033Z-rgd-u10-candidate-capacity-diagnosis-and-local-budget-repair-914d3c5e90934617b4778cb2c85aa431.md) - Records the failed protected candidate run, measured Linux package capacity, and local bounded repair while preserving the required hosted rerun gate.
-- **Verification Evidence**: [RGD-U8 final-revision hosted CI refresh](verification/2026-07/2026-07-25T181843Z-rgd-u8-final-revision-hosted-ci-refresh-ac11b989e59c4df4b2db8804ceee3362.md) - Re-establishes the final hosted Windows/Linux matrix after the immutable-release approval-order repair.
 
 # Integration Notes
 
