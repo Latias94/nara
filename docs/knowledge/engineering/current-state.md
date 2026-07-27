@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "a0a116e2846ea38b2707667e78717b423887701e4e4fbb8b89e35fb12d9b5232"
+source_fingerprint: "c882ce8b723828e384fd94a736680b87774ebada15bd03c8713bd732ddddf21f"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "a0a116e2846ea38b2707667e78717b423887701e4e4fbb8b89e35fb12d9
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `a0a116e2846ea38b2707667e78717b423887701e4e4fbb8b89e35fb12d9b5232`
-- Immutable records: 269
+- Source fingerprint: `c882ce8b723828e384fd94a736680b87774ebada15bd03c8713bd732ddddf21f`
+- Immutable records: 271
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game delivery hardening: first U11 correction closed](registry/2026-07/2026-07-26T185044Z-engine-foundation-contract-completion-codex-root-ced846bec85246eabe8e56e7c290845d.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game delivery hardening: local corrections verified, evidence refresh required](registry/2026-07/2026-07-27T091437Z-engine-foundation-contract-completion-codex-root-aca5453546804f58ba8eb36425d8bd54.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGD-U11 schedule, registry, reference-game, and CI hardening](verification/2026-07/2026-07-27T091437Z-rgd-u11-schedule-registry-reference-game-and-ci-hardening-3508e830c12045c1871db1855ae51a6e.md) - Verifies four local pre-publication corrections and records the exact authority and delivery evidence invalidated by their new revision.
 - **Verification Evidence**: [RGD-U11 prefab entity-reference namespace correction](verification/2026-07/2026-07-26T185044Z-rgd-u11-prefab-entity-reference-namespace-correction-f418e6562b9d4de5b2bca66deaaa719f.md) - Verifies migration-aware, bounded, failure-atomic SceneLocal entity-reference projection for repeated and nested prefab instances.
 - **Verification Evidence**: [RGD-U11 bounded render telemetry and pre-publication correction gate](verification/2026-07/2026-07-26T142429Z-rgd-u11-bounded-render-telemetry-and-pre-publication-correction-gate-f9d30f3a58c341c7bd337654dac57cdc.md) - Verifies the bounded U11 render metric surface and records five independently reproduced P1 corrections that must precede final candidates.
 - **Verification Evidence**: [RGD delivery evidence invalidation after workflow hardening](verification/2026-07/2026-07-26T120533Z-rgd-delivery-evidence-invalidation-after-workflow-hardening-755db565363243deb24cb34f5a08d008.md) - Records why the hosted U8 and candidate U10 verdicts remain historical but no longer certify the hardened delivery revision, and corrects three immutable U10 citation anchors.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGD-U10 candidate capacity diagnosis and local budget repair](verification/2026-07/2026-07-26T023033Z-rgd-u10-candidate-capacity-diagnosis-and-local-budget-repair-914d3c5e90934617b4778cb2c85aa431.md) - Records the failed protected candidate run, measured Linux package capacity, and local bounded repair while preserving the required hosted rerun gate.
 - **Verification Evidence**: [RGD-U8 final-revision hosted CI refresh](verification/2026-07/2026-07-25T181843Z-rgd-u8-final-revision-hosted-ci-refresh-ac11b989e59c4df4b2db8804ceee3362.md) - Re-establishes the final hosted Windows/Linux matrix after the immutable-release approval-order repair.
 - **Verification Evidence**: [RGD-U9 first-playable product baseline verification](verification/2026-07/2026-07-25T163453Z-rgd-u9-first-playable-product-baseline-verification-ae82fc256c2145f69a239bf8f6924aa2.md) - Records the isolated Windows first-playable automatic population, deterministic Redirect verdict, missing product evidence, and non-claims.
-- **Verification Evidence**: [RGD-U8 final hosted three-workspace CI verification](verification/2026-07/2026-07-25T115419Z-rgd-u8-final-hosted-three-workspace-ci-verification-0ee1fb9b871a4716ae3d0c533fbdd044.md) - Records the final user-authorized GitHub Actions matrix for root, reference-game, and module-consumer on Windows and Linux.
 
 # Integration Notes
 

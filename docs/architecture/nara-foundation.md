@@ -387,9 +387,13 @@ second real adapter or stronger isolation pressure.
   startup scene, enemy prefab, canonical image metadata, and PNG source into one immutable content
   snapshot. Its ordinary product path now materializes that snapshot through U29's guarded apply,
   publishes one fresh managed runtime, and executes semantic movement, pursuit, automatic fire,
-  collision, damage, stable-identity retirement, score, and both terminal outcomes. Its admitted
-  tick gate prevents a command/topology/runtime failure from publishing a failed-frame success
-  snapshot; deterministic snapshots sort stable game identities and retain the last good state.
+  collision, damage, stable-identity retirement, score, and both terminal outcomes. The admitted
+  Enemy schema migrates from v1 to v2 by removing the old prefab-local Player target; runtime
+  systems resolve the unique Player role inside the same scene instance instead of persisting an
+  implicit outer-instance reference. The committed v1/v2/v3 catalogs retain the complete migration
+  and tombstone evidence. The tick gate prevents a command/topology/runtime failure from publishing
+  a failed-frame success snapshot; deterministic snapshots sort stable game identities and retain
+  the last good state.
   The bundled headless CLI accepts only a bounded maximum tick count, emits one versioned JSON
   terminal summary, separates privacy-safe failure diagnostics onto stderr, and drives finite
   cleanup. The desktop profile now lowers ordered WASD/Enter edges into the same semantic command
@@ -406,7 +410,9 @@ second real adapter or stronger isolation pressure.
   address; `ComponentFieldPath` is only the current value locator. A registry remains Building until
   freeze atomically validates the full candidate, required bindings, defaults, lineage, and
   migration chain, then publishes an immutable snapshot. Invalid registration candidates remain
-  repairable until freeze succeeds.
+  repairable until freeze succeeds. The registry resource itself carries intrinsic insert/discard
+  hooks, so a preinstalled registry and a remove/reinsert of the same object both participate in
+  the frozen runtime authority revision; plugin registration order cannot bypass that check.
 - `nara_reflect_derive` supplies the first low-boilerplate native Rust authoring path. Four
   independent reference-game components generate providers from explicit stable declarations,
   freeze against a committed predecessor catalog, round-trip through canonical scene and stable
@@ -686,13 +692,18 @@ second real adapter or stronger isolation pressure.
   mechanisms chosen by measurement. See ADR [0054](adr/0054-gpu-upload-budget-and-buffer-allocation-policy.md)
   as refined by [0096](adr/0096-evidence-gated-render-scaling-and-upload-policy.md).
 - The minimum CI definition mirrors the locked root, reference-game, and direct module-consumer
-  boundaries on disposable Windows/Linux runners and includes architecture governance in the root
-  job. The integrated six-cell matrix passed historically at `6914785`; later policy-test and
-  workflow hardening reopened final current-revision certification. Historical standalone
-  candidates remain evidence for that revision, while final candidates require a new run after the
-  renewed hosted gate. See ADR
+  boundaries on disposable Windows/Linux runners. Root CI compiles all targets, checks the
+  supported feature/example matrix, and runs complete default and all-feature nextest suites;
+  reference-game CI checks all targets and runs complete default and all-feature suites with the
+  supported Linux X11/Vulkan profile; the module consumer compiles all targets and runs its complete
+  suite. Exact policy tests reject selective replacements for these commands. The integrated
+  six-cell matrix passed historically at `6914785`; the later Rust, product-content, policy-test,
+  and workflow hardening through `a759949` reopened final current-revision certification.
+  Historical baselines and standalone candidates remain evidence for their revisions, while the
+  authority review, baseline, hosted matrix, and final candidates require dependency-ordered
+  refreshes. See ADR
   [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md) and the
-  [delivery-evidence invalidation record](../knowledge/engineering/verification/2026-07/2026-07-26T120533Z-rgd-delivery-evidence-invalidation-after-workflow-hardening-755db565363243deb24cb34f5a08d008.md).
+  [latest local hardening and invalidation record](../knowledge/engineering/verification/2026-07/2026-07-27T091437Z-rgd-u11-schedule-registry-reference-game-and-ci-hardening-3508e830c12045c1871db1855ae51a6e.md).
 
 ## Non-Authoritative Trigger Index
 

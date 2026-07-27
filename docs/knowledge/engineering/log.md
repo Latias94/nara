@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-27
+* **Work Registration**: [Reference-game delivery hardening: local corrections verified, evidence refresh required](registry/2026-07/2026-07-27T091437Z-engine-foundation-contract-completion-codex-root-aca5453546804f58ba8eb36425d8bd54.md) - Registers the schedule, registry, reference-game, and CI corrections while preserving four source blockers and the dependency-ordered evidence reruns.
+* **Verification Evidence**: [RGD-U11 schedule, registry, reference-game, and CI hardening](verification/2026-07/2026-07-27T091437Z-rgd-u11-schedule-registry-reference-game-and-ci-hardening-3508e830c12045c1871db1855ae51a6e.md) - Verifies four local pre-publication corrections and records the exact authority and delivery evidence invalidated by their new revision.
+
 ## 2026-07-26
 * **Verification Evidence**: [RGD-U11 prefab entity-reference namespace correction](verification/2026-07/2026-07-26T185044Z-rgd-u11-prefab-entity-reference-namespace-correction-f418e6562b9d4de5b2bca66deaaa719f.md) - Verifies migration-aware, bounded, failure-atomic SceneLocal entity-reference projection for repeated and nested prefab instances.
 * **Work Registration**: [Reference-game delivery hardening: first U11 correction closed](registry/2026-07/2026-07-26T185044Z-engine-foundation-contract-completion-codex-root-ced846bec85246eabe8e56e7c290845d.md) - Registers the verified prefab entity-reference correction and the four remaining pre-publication source gates.
@@ -137,5 +141,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U26](registry/2026-07/2026-07-18T103123Z-engine-foundation-contract-completion-codex-root-e4112cb092924b34890c1b79777f7722.md) - Activate the bounded pre-Host manual ownership counterfactual after U12 and U29 convergence.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U29](registry/2026-07/2026-07-18T103100Z-engine-foundation-contract-completion-codex-root-d5b70ec913f84afe8681d7f52f1b8180.md) - Close RGF-U29 after explicit persistent composition, target-World eligibility, independent review, and full repository verification.
 * **Verification Evidence**: [RGF-U29 explicit persistent composition verification](verification/2026-07/2026-07-18T102650Z-rgf-u29-explicit-persistent-composition-verification-57a04a45133744909a7c43441c99c9e0.md) - Commit e95cd4b closes frozen registry binding and guarded target-World persistent apply without changing runtime-only ECS behavior.
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U29](registry/2026-07/2026-07-18T041242Z-engine-foundation-contract-completion-codex-root-00dcd517bec7414ba2f9046879534c53.md) - Activate RGF-U29 to enforce explicit persistent component composition and target-World hook/observer eligibility.
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U12](registry/2026-07/2026-07-18T040020Z-engine-foundation-contract-completion-codex-root-89deb6d9d8b74d699b9dcdb9f1c5542a.md) - Close RGF-U12 after bounded startup-content implementation, adversarial review fixes, and full repository verification.
