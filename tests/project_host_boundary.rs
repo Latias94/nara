@@ -114,11 +114,11 @@ fn ordinary_reference_binary_names_only_product_level_concepts() {
         );
     }
     for required in [
-        "DirectoryCapability",
         "HeadlessRunOutcome",
-        "bundled_wave_run",
+        "bundled_wave_run_with_completed_tick_observer",
         "diagnostics",
         "execute_bounded",
+        "open_project_root",
     ] {
         assert!(
             identifiers.contains(required),

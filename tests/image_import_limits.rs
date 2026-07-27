@@ -97,14 +97,16 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
     let mut app = App::new();
     app.insert_resource(TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap())
         .unwrap();
-    app.add_plugin(nara::reflect::ComponentRegistryPlugin)
-        .unwrap();
-    app.add_plugin(nara::render::RenderPlugin).unwrap();
-    app.add_plugin(
+    app.add_plugins((
+        nara::reflect::ComponentRegistryPlugin,
+        nara::tasks::TaskPlugin::default(),
+        nara::asset::AssetPlugin,
+        nara::render::RenderPlugin,
+        ImagePreparePlugin,
         ImagePlugin::with_limits(limits)
             .unwrap()
             .with_source_directory(source_directory(root.path())),
-    )
+    ))
     .unwrap();
     app.world_mut()
         .unwrap()
