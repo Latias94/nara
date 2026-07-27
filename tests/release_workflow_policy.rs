@@ -17,9 +17,9 @@ const RELEASE_VERIFIER_SHA256: &str =
 const APPROVAL_SCHEMA_BLOB: &str = "9dd8e042571032f9fb518e2e79d8deb50d0242e2";
 const APPROVAL_SCHEMA_SHA256: &str =
     "edbf17d7092fbc24dc395add86a51c3e6d8a91b9d0497ee44d4734ce4c5f746f";
-const PACKAGE_LAYOUT_BLOB: &str = "803460ad1d2ea2a2e3c36d193c72b09a636f9ef9";
+const PACKAGE_LAYOUT_BLOB: &str = "14cb519cb7745d5cda5a397abc59004f7bbf425e";
 const PACKAGE_LAYOUT_SHA256: &str =
-    "95d53fc19a2108276199b8def11061c4650ef550c058d29ae42f55161ddb82bf";
+    "5cbca0fd6a8dd8145878da863b3f27ad93d5526e4743d72a701e8c7e2a8e4072";
 const LINUX_SOFTWARE_PROFILE: &str = "sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb";
 
 #[derive(Clone)]

@@ -22,12 +22,9 @@ use nara::{
     },
     gameplay::{GameplayCommandQueue, GameplayCommandSet, submit_gameplay_driver_command},
     identity::{EntityLookup, RuntimeEntityReference, TombstoneCause, WorldIdentityDomain},
-    prelude::{
-        App, Commands, EntityReference, FixedTime, Plugin, PluginError, Query, Res, ResMut, Vec2,
-        World,
-    },
+    prelude::{App, Commands, FixedTime, Plugin, PluginError, Query, Res, ResMut, Vec2, World},
     project_host::{HeadlessRun, HeadlessRunOutcome, HeadlessRunReport, ProjectContentLoader},
-    scene::{SceneEntityId, SceneEntitySource, spawn_scene},
+    scene::{SceneEntitySource, spawn_scene},
 };
 use nara_reference_game::{
     Enemy, MovementCommandError, MovementDirection, Player, Projectile, ProjectileId,
@@ -170,7 +167,7 @@ impl Plugin for LateSimulationFaultPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             CoreStage::FixedUpdate,
-            corrupt_enemy_target_after_first_tick.in_set(GameplayCommandSet::Consume),
+            remove_player_role_after_first_tick.in_set(GameplayCommandSet::Consume),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
@@ -341,18 +338,17 @@ fn report_capture_fault(faults: Res<RuntimeFaultReporter>) {
     ));
 }
 
-fn corrupt_enemy_target_after_first_tick(
-    fixed_time: Res<FixedTime>,
-    mut enemies: Query<&mut Enemy>,
-) {
-    if fixed_time.tick() < 2 {
+fn remove_player_role_after_first_tick(world: &mut World) {
+    if world.resource::<FixedTime>().tick() < 2 {
         return;
     }
-    let missing = SceneEntityId::new("missing-player").expect("test identity is valid");
-    for mut enemy in &mut enemies {
-        enemy.target = EntityReference::SceneLocal {
-            entity: missing.clone(),
-        };
+    let players = world
+        .iter_entities()
+        .filter(|entity| entity.contains::<Player>())
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    for player in players {
+        world.entity_mut(player).remove::<Player>();
     }
 }
 

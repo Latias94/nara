@@ -9,7 +9,7 @@ use nara::{
     },
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
     identity::{EntityLookup, TombstoneCause, WorldIdentityDomain, spawn_identity_entity},
-    prelude::{Commands, EntityReference, FixedTime, Query, Res, ResMut, Vec2, World},
+    prelude::{Commands, FixedTime, Query, Res, ResMut, Vec2, World},
     scene::{SceneEntitySource, retire_and_despawn_scene_entity},
 };
 
@@ -722,14 +722,9 @@ pub(crate) fn pursue_scene_players(
             if enemy.hit_points <= 0 || spawn.tick > run_tick {
                 continue;
             }
-            let EntityReference::SceneLocal { entity: target } = &enemy.target else {
-                return Err(BevyError::error(
-                    ReferenceSimulationError::UnsupportedEnemyTarget,
-                ));
-            };
             let mut target_position = None;
             for (source, player) in &players {
-                if source.instance_id != enemy_source.instance_id || &source.entity_id != target {
+                if source.instance_id != enemy_source.instance_id {
                     continue;
                 }
                 if target_position.replace(player.position).is_some() {
@@ -1114,7 +1109,6 @@ enum ReferenceSimulationError {
     InvalidMovementCommand,
     MissingEnemyTarget,
     DuplicateEnemyTarget,
-    UnsupportedEnemyTarget,
     IdentityRetirement,
     ProjectileDespawn,
     ScoreOverflow,
@@ -1151,7 +1145,6 @@ impl fmt::Display for ReferenceSimulationError {
             Self::InvalidMovementCommand => "reference wave movement command is invalid",
             Self::MissingEnemyTarget => "reference wave enemy target is missing",
             Self::DuplicateEnemyTarget => "reference wave enemy target identity is duplicated",
-            Self::UnsupportedEnemyTarget => "reference wave enemy target kind is unsupported",
             Self::IdentityRetirement => "reference wave identity retirement failed",
             Self::ProjectileDespawn => "reference wave projectile retirement failed",
             Self::ScoreOverflow => "reference wave score overflowed",

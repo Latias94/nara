@@ -136,7 +136,7 @@
             }
           },
           "reference_game.Enemy": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -155,13 +155,6 @@
                       "type": "f64",
                       "value": 0.0
                     }
-                  }
-                },
-                "target": {
-                  "type": "entity_ref",
-                  "value": {
-                    "kind": "scene_local",
-                    "entity": "player"
                   }
                 },
                 "velocity": {

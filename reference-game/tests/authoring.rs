@@ -1,6 +1,9 @@
 use nara::{
     identity::EntityLookup,
-    prelude::{Component, ComponentRegistry, ComponentTypeId, PersistentComponent, World},
+    prelude::{
+        Component, ComponentRegistry, ComponentTypeId, EntityReference, PersistentComponent, Vec2,
+        World,
+    },
     reflect::{
         ComponentCatalogFileLimits, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
         ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentValue,
@@ -14,7 +17,7 @@ use nara::{
 };
 use nara_reference_game::{
     Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin, RuntimeOnlyTag,
-    WaveSpawn, Weapon,
+    WaveSpawn, Weapon, register_reference_game_components,
 };
 
 const LINEAGE_PROBE_ID: &str = "nara.test.LineageProbe";
@@ -105,6 +108,29 @@ struct PlayerHealthKindChanged {
     velocity: nara::prelude::Vec2,
     #[nara(id = "hit-points", alias = "Hit points")]
     hit_points: u64,
+}
+
+#[derive(Component, PersistentComponent)]
+#[nara(
+    id = "reference_game.Enemy",
+    version = 1,
+    alias = "Enemy",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+struct EnemyV1 {
+    #[nara(id = "position", alias = "Position")]
+    position: Vec2,
+    #[nara(id = "velocity", alias = "Velocity")]
+    velocity: Vec2,
+    #[nara(id = "hit-points", alias = "Hit points")]
+    hit_points: i64,
+    #[nara(
+        id = "target",
+        alias = "Target",
+        capabilities(scene, inspect, edit, entity_ref)
+    )]
+    target: EntityReference,
 }
 
 #[test]
@@ -327,39 +353,44 @@ fn generated_catalog_rejects_missing_reused_and_dropped_tombstones() {
 }
 
 #[test]
-fn reference_game_catalog_preserves_v1_and_matches_the_v2_successor() {
-    assert_eq!(REFERENCE_GAME_SCHEMA_PROVIDER.binding().version(), 2);
+fn reference_game_catalog_preserves_v1_v2_and_matches_the_v3_successor() {
+    assert_eq!(REFERENCE_GAME_SCHEMA_PROVIDER.binding().version(), 3);
     let predecessor = reference_game_predecessor_catalog();
     let v1_fixture = include_str!("../schema/component-schema-v1.json");
     let v2_fixture = include_str!("../schema/component-schema-v2.json");
+    let v3_fixture = include_str!("../schema/component-schema-v3.json");
     assert_eq!(
         format!("{}\n", predecessor.to_json_string().unwrap()),
         v1_fixture
     );
-    let expected = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+    let expected_v2 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
         v2_fixture.as_bytes(),
         &predecessor,
         ComponentCatalogFileLimits::default(),
     )
     .unwrap();
-
-    let mut fresh = ComponentRegistry::new();
-    register_reference_game_v1_components_with_player::<Player>(&mut fresh);
-    fresh.freeze().unwrap();
-    assert_eq!(fresh.catalog().unwrap(), &predecessor);
+    let mut v2_registry = reference_game_successor_with_player::<Player>();
+    v2_registry.freeze().unwrap();
+    assert_eq!(v2_registry.catalog().unwrap(), &expected_v2);
 
     let registry = frozen_reference_game_successor();
-    assert_eq!(registry.catalog().unwrap(), &expected);
+    let expected_v3 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        v3_fixture.as_bytes(),
+        &expected_v2,
+        ComponentCatalogFileLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(registry.catalog().unwrap(), &expected_v3);
     assert_eq!(
         format!(
             "{}\n",
             registry
                 .catalog()
                 .unwrap()
-                .to_json_string_with_predecessor(Some(&predecessor))
+                .to_json_string_with_predecessor(Some(&expected_v2))
                 .unwrap()
         ),
-        v2_fixture
+        v3_fixture
     );
     for id in [
         "reference_game.Player",
@@ -370,6 +401,50 @@ fn reference_game_catalog_preserves_v1_and_matches_the_v2_successor() {
     ] {
         assert!(registry.schema(&ComponentTypeId::new(id)).is_some());
     }
+}
+
+#[test]
+fn reference_game_enemy_v1_migrates_to_the_current_runtime_component() {
+    let enemy_id = ComponentTypeId::new("reference_game.Enemy");
+    let expected = Enemy::fixture();
+    let mut legacy_registry = reference_game_successor_with_player::<Player>();
+    legacy_registry.freeze().unwrap();
+    let mut legacy_world = World::new();
+    let legacy_entity = legacy_world
+        .spawn(EnemyV1 {
+            position: expected.position,
+            velocity: expected.velocity,
+            hit_points: expected.hit_points,
+            target: EntityReference::SceneLocal {
+                entity: scene_id("player"),
+            },
+        })
+        .id();
+    let legacy_value = legacy_registry
+        .encode_component(&enemy_id, &legacy_world, legacy_entity)
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    let registry = frozen_reference_game_successor();
+    let migrated = registry
+        .migrate_component_value(&enemy_id, ComponentSchemaVersion::ONE, &legacy_value)
+        .unwrap();
+    assert_eq!(migrated.version, ComponentSchemaVersion::new(2).unwrap());
+    let ComponentValue::Map(fields) = &migrated.value else {
+        panic!("migrated Enemy value must remain a map");
+    };
+    assert!(!fields.contains_key("target"));
+
+    let mut current_world = World::new();
+    let current_entity = current_world.spawn_empty().id();
+    registry
+        .preflight_component(&enemy_id, &migrated.value)
+        .unwrap()
+        .unwrap()
+        .apply(&mut current_world, current_entity)
+        .unwrap();
+    assert_eq!(current_world.get::<Enemy>(current_entity), Some(&expected));
 }
 
 #[test]
@@ -520,6 +595,15 @@ fn reference_game_predecessor_catalog() -> ComponentSchemaCatalog {
         .unwrap()
 }
 
+fn reference_game_v2_catalog() -> ComponentSchemaCatalog {
+    ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        include_bytes!("../schema/component-schema-v2.json"),
+        &reference_game_predecessor_catalog(),
+        ComponentCatalogFileLimits::default(),
+    )
+    .unwrap()
+}
+
 fn reference_game_successor_with_player<T>() -> ComponentRegistry
 where
     T: PersistentComponentProvider,
@@ -534,7 +618,8 @@ where
 }
 
 fn frozen_reference_game_successor() -> ComponentRegistry {
-    let mut registry = reference_game_successor_with_player::<Player>();
+    let mut registry = ComponentRegistry::successor_of(reference_game_v2_catalog()).unwrap();
+    register_reference_game_components(&mut registry).unwrap();
     registry.freeze().unwrap();
     registry
 }
@@ -544,7 +629,7 @@ where
     T: PersistentComponentProvider,
 {
     registry.register_persistent_component::<T>().unwrap();
-    registry.register_persistent_component::<Enemy>().unwrap();
+    registry.register_persistent_component::<EnemyV1>().unwrap();
     registry.register_persistent_component::<Weapon>().unwrap();
     registry
         .register_persistent_component::<Projectile>()

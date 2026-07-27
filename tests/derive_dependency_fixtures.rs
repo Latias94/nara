@@ -72,6 +72,8 @@ fn canonical_catalog_fixtures_are_checked_out_with_lf() {
         "tests/fixtures/schema-catalog/lineage-probe-v1.json",
         "tests/fixtures/schema-catalog/lineage-probe-v2.json",
         "reference-game/schema/component-schema-v1.json",
+        "reference-game/schema/component-schema-v2.json",
+        "reference-game/schema/component-schema-v3.json",
     ];
     let output = Command::new("git")
         .current_dir(repository)

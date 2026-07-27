@@ -1,0 +1,359 @@
+{
+  "kind": "component_schema_catalog",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "generation": 3,
+    "predecessor": "c00e73a2323f50a47afe026540130f3a25849487c0e16c7c237605890f1e3790",
+    "components": [
+      {
+        "id": "reference_game.Enemy",
+        "aliases": [
+          "Enemy"
+        ],
+        "version": 2,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "hit-points",
+            "aliases": [
+              "Hit points"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "hit-points"
+              }
+            ],
+            "value_kind": "i64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "position",
+            "aliases": [
+              "Position"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "position"
+              }
+            ],
+            "value_kind": "map",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "velocity",
+            "aliases": [
+              "Velocity"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "velocity"
+              }
+            ],
+            "value_kind": "map",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": [
+          "target"
+        ]
+      },
+      {
+        "id": "reference_game.Player",
+        "aliases": [
+          "Player"
+        ],
+        "version": 1,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "hit-points",
+            "aliases": [
+              "Hit points"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "hit-points"
+              }
+            ],
+            "value_kind": "i64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "position",
+            "aliases": [
+              "Position"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "position"
+              }
+            ],
+            "value_kind": "map",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "velocity",
+            "aliases": [
+              "Velocity"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "velocity"
+              }
+            ],
+            "value_kind": "map",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      },
+      {
+        "id": "reference_game.Projectile",
+        "aliases": [
+          "Projectile"
+        ],
+        "version": 1,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "damage",
+            "aliases": [
+              "Damage"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "damage"
+              }
+            ],
+            "value_kind": "i64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "position",
+            "aliases": [
+              "Position"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "position"
+              }
+            ],
+            "value_kind": "map",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "ttl-ticks",
+            "aliases": [
+              "TTL ticks"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "ttl-ticks"
+              }
+            ],
+            "value_kind": "u64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "velocity",
+            "aliases": [
+              "Velocity"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "velocity"
+              }
+            ],
+            "value_kind": "map",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      },
+      {
+        "id": "reference_game.WaveSpawn",
+        "aliases": [
+          "Wave spawn"
+        ],
+        "version": 1,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "tick",
+            "aliases": [
+              "Tick"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "tick"
+              }
+            ],
+            "value_kind": "u64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      },
+      {
+        "id": "reference_game.Weapon",
+        "aliases": [
+          "Weapon"
+        ],
+        "version": 1,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "cooldown-ticks",
+            "aliases": [
+              "Cooldown ticks"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "cooldown-ticks"
+              }
+            ],
+            "value_kind": "u64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "damage",
+            "aliases": [
+              "Damage"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "damage"
+              }
+            ],
+            "value_kind": "i64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          },
+          {
+            "id": "remaining-ticks",
+            "aliases": [
+              "Remaining ticks"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "remaining-ticks"
+              }
+            ],
+            "value_kind": "u64",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      }
+    ],
+    "type_tombstones": []
+  }
+}

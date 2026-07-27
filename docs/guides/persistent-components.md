@@ -93,10 +93,13 @@ features normally.
 - Durable field patches use `ComponentTypeId + ComponentFieldId + ComponentSchemaVersion`.
   `ComponentFieldPath` is only the current value locator.
 
-The committed predecessor catalog for the reference game is
-[`reference-game/schema/component-schema-v1.json`](../../reference-game/schema/component-schema-v1.json).
-Its tests prove that rename/deletion lineage remains valid and that an unversioned semantic change,
-a missing tombstone, or ID reactivation cannot freeze.
+The committed reference-game lineage is preserved by
+[`component-schema-v1.json`](../../reference-game/schema/component-schema-v1.json),
+[`component-schema-v2.json`](../../reference-game/schema/component-schema-v2.json), and
+[`component-schema-v3.json`](../../reference-game/schema/component-schema-v3.json).
+Its tests prove that every predecessor remains loadable, field deletion requires both a versioned
+migration and a tombstone, and an unversioned semantic change, missing tombstone, or ID reactivation
+cannot freeze.
 
 ## Capabilities
 

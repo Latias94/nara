@@ -38,7 +38,7 @@
                 "args": {
                   "entity": "enemy",
                   "component": "reference_game.Enemy",
-                  "component_version": 1,
+                  "component_version": 2,
                   "field": "position",
                   "value": {
                     "type": "map",
@@ -88,7 +88,7 @@
                 "args": {
                   "entity": "enemy",
                   "component": "reference_game.Enemy",
-                  "component_version": 1,
+                  "component_version": 2,
                   "field": "position",
                   "value": {
                     "type": "map",

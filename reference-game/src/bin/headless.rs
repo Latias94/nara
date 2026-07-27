@@ -13,7 +13,6 @@ use nara::{
 };
 use nara_reference_game::{WaveSnapshot, bundled_wave_run_with_completed_tick_observer};
 
-#[path = "support/startup_marker.rs"]
 mod startup_marker;
 mod support;
 

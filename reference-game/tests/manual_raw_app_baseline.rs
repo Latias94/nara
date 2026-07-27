@@ -36,15 +36,15 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
     );
     assert_eq!(
         report.schema_fingerprint,
-        "f90c405f3448019449eec981f8ca03fca16f9f698f544a58d3431e8c5bc600bf"
+        "f3d7e8ca02344a20e2e875b3be0711dab57ec1356021c2dcdd3f4725dc63406c"
     );
     assert_eq!(
         report.content_revision,
-        "64c54b4c331e6a8f26e2d6541bbb3fb7d5f4207e5a96a71c0dee0e4378f957c1"
+        "3ca8a2053e53a09131f384d32c26090e4e10ed7d94bc4388b9c540d236864c36"
     );
     assert_eq!(
         report.content_digest,
-        "92839bdd99fdd1432437e1b13e506cfae11f6e008aa2b3f3bd9ef2de5735ec09"
+        "962a016b5eb275fd8bff78be1d8d15dfb4d35a8491ceb20cfe0e1b8fcabbb996"
     );
     assert_eq!(
         report.command_digest,

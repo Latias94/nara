@@ -306,7 +306,8 @@ fn enemy_anchor(id: &str, override_values: Option<(f64, u64)>) -> SceneEntityRec
             ScenePatchOperation::SetField {
                 entity: scene_id("enemy"),
                 component: ComponentTypeId::new("reference_game.Enemy"),
-                component_version: ComponentSchemaVersion::ONE,
+                component_version: ComponentSchemaVersion::new(2)
+                    .expect("the enemy component version is non-zero"),
                 field: ComponentFieldId::new("position"),
                 value: ComponentValue::map([
                     ("x", ComponentValue::f64(x).unwrap()),

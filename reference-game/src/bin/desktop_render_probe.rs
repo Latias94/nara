@@ -31,7 +31,6 @@ use nara_reference_game::{
     WaveSnapshot, movement_command, retry_command, wave_desktop_intent,
 };
 
-#[path = "support/startup_marker.rs"]
 mod startup_marker;
 mod support;
 

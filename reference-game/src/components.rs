@@ -1,6 +1,4 @@
-use nara::prelude::{Component, EntityReference, PersistentComponent, SceneEntityId, Vec2};
-
-use crate::resources::PLAYER_SCENE_ID;
+use nara::prelude::{Component, PersistentComponent, Vec2};
 
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
 #[nara(
@@ -33,10 +31,11 @@ impl Player {
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
 #[nara(
     id = "reference_game.Enemy",
-    version = 1,
+    version = 2,
     alias = "Enemy",
     component_capabilities(scene, inspect, edit),
-    field_capabilities(scene, inspect, edit)
+    field_capabilities(scene, inspect, edit),
+    tombstone = "target"
 )]
 pub struct Enemy {
     #[nara(id = "position", alias = "Position")]
@@ -45,12 +44,6 @@ pub struct Enemy {
     pub velocity: Vec2,
     #[nara(id = "hit-points", alias = "Hit points")]
     pub hit_points: i64,
-    #[nara(
-        id = "target",
-        alias = "Target",
-        capabilities(scene, inspect, edit, entity_ref)
-    )]
-    pub target: EntityReference,
 }
 
 impl Enemy {
@@ -60,10 +53,6 @@ impl Enemy {
             position: Vec2::new(5.0, 0.0),
             velocity: Vec2::new(-0.5, 0.0),
             hit_points: 10,
-            target: EntityReference::SceneLocal {
-                entity: SceneEntityId::new(PLAYER_SCENE_ID)
-                    .expect("the reference-game player fixture ID is valid"),
-            },
         }
     }
 }

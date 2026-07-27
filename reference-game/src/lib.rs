@@ -34,8 +34,9 @@ use nara::{
         project_runtime_plugins,
     },
     reflect::{
-        COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentRegistryError,
-        ComponentSchemaProviderDefinition,
+        COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentCodecError, ComponentFieldPath,
+        ComponentRegistryError, ComponentSchemaProviderDefinition, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue,
     },
     tilemap::TilemapPlugin,
 };
@@ -67,7 +68,7 @@ pub const REFERENCE_GAME_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
 pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
     ComponentSchemaProviderDefinition::with_validation(
         REFERENCE_GAME_SCHEMA_PROVIDER_ID,
-        nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 2),
+        nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 3),
         validate_reference_game_components,
         register_reference_game_components,
     );
@@ -510,9 +511,26 @@ pub fn register_reference_game_components(
     validate_reference_game_components(registry)?;
     register_component::<Player>(registry)?;
     register_component::<Enemy>(registry)?;
+    registry
+        .register_component_migration(
+            &ComponentTypeId::new("reference_game.Enemy"),
+            ComponentSchemaVersion::ONE,
+            ComponentSchemaVersion::new(2).expect("the enemy schema version is non-zero"),
+            migrate_enemy_v1_to_v2,
+        )
+        .map(|_| ())?;
     register_component::<WaveSpawn>(registry)?;
     register_component::<Weapon>(registry)?;
     register_component::<Projectile>(registry)
+}
+
+fn migrate_enemy_v1_to_v2(
+    mut value: ComponentValue,
+) -> Result<ComponentValue, ComponentCodecError> {
+    value
+        .remove_path(&ComponentFieldPath::from_fields(["target"]))
+        .map_err(|error| ComponentCodecError::invalid_field("target", error.to_string()))?;
+    Ok(value)
 }
 
 fn validate_reference_game_components(

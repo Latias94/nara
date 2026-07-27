@@ -167,8 +167,8 @@ jobs:
           PACKAGE_HELPER_BLOB: 880913955155865026afa107df6f73a9b9d09719
           PACKAGE_HELPER_SHA256: 905b1ff3e3080f5b09fcbf1bb506712a6cefc8e799098836739cf4ef7b187498
           PACKAGE_LAYOUT_PATH: reference-game/packaging/package-layout-v1.json
-          PACKAGE_LAYOUT_BLOB: 803460ad1d2ea2a2e3c36d193c72b09a636f9ef9
-          PACKAGE_LAYOUT_SHA256: 95d53fc19a2108276199b8def11061c4650ef550c058d29ae42f55161ddb82bf
+          PACKAGE_LAYOUT_BLOB: 14cb519cb7745d5cda5a397abc59004f7bbf425e
+          PACKAGE_LAYOUT_SHA256: 5cbca0fd6a8dd8145878da863b3f27ad93d5526e4743d72a701e8c7e2a8e4072
           APPROVAL_PATH: "${{ inputs.approval_path }}"
           APPROVAL_COMMIT: "${{ inputs.approval_commit }}"
           APPROVAL_BLOB: "${{ inputs.approval_blob }}"
