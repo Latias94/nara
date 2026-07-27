@@ -480,6 +480,29 @@ fn code_first_runtime_faults_when_the_registry_is_rewrapped_with_its_same_snapsh
 }
 
 #[test]
+fn code_first_runtime_faults_when_the_same_registry_is_removed_and_reinserted() {
+    let mut app = nara::app::App::new();
+    app.add_plugins(nara::reflect::ComponentRegistryPlugin)
+        .unwrap();
+    app.add_systems(CoreStage::Last, reinsert_code_first_registry)
+        .unwrap();
+    let candidate = RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap();
+    let mut runtime = candidate.complete_startup().unwrap().promote();
+
+    let error = runtime.drive(Duration::ZERO).unwrap_err();
+
+    assert_eq!(error.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
+    assert_eq!(runtime.state(), nara::app::RuntimeState::Faulted);
+}
+
+#[test]
 fn file_backed_candidate_rejects_divergent_binding_codec_and_migration_receipts() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
@@ -1059,6 +1082,13 @@ fn rewrap_code_first_registry(world: &mut nara::ecs::World) {
         .snapshot()
         .expect("the code-first registry is frozen before runtime execution");
     world.insert_resource(ComponentRegistry::from_snapshot(snapshot));
+}
+
+fn reinsert_code_first_registry(world: &mut nara::ecs::World) {
+    let registry = world
+        .remove_resource::<ComponentRegistry>()
+        .expect("the code-first registry is installed before runtime execution");
+    world.insert_resource(registry);
 }
 
 fn counted_schema_provider() -> ComponentSchemaProviderDefinition {

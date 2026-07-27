@@ -76,7 +76,10 @@ impl Error for ComponentRegistryAuthorityError {}
 #[derive(Debug, Default, Resource)]
 struct ComponentRegistryMutationRevision(u64);
 
-fn record_component_registry_structure_change(mut world: DeferredWorld<'_>, _context: HookContext) {
+pub(crate) fn record_component_registry_structure_change(
+    mut world: DeferredWorld<'_>,
+    _context: HookContext,
+) {
     let Some(mut revision) = world.get_resource_mut::<ComponentRegistryMutationRevision>() else {
         return;
     };
@@ -194,10 +197,6 @@ fn build_component_registry(
     snapshot: Option<&ComponentRegistrySnapshot>,
 ) -> Result<(), PluginError> {
     app.init_resource::<ComponentRegistryMutationRevision>()?;
-    app.world_mut()?
-        .register_component_hooks::<ComponentRegistry>()
-        .on_insert(record_component_registry_structure_change)
-        .on_discard(record_component_registry_structure_change);
     let Some(snapshot) = snapshot else {
         app.init_resource::<ComponentRegistry>()?;
         return Ok(());
@@ -223,28 +222,25 @@ fn finish_component_registry(
 ) -> Result<(), PluginError> {
     let (snapshot, instance_token) = {
         let world = app.world_mut()?;
-        let (snapshot, instance_token) = {
-            let mut registry = world.resource_mut::<ComponentRegistry>();
-            let snapshot = registry
-                .freeze()
-                .map_err(|error| {
-                    PluginError::component_registration(
-                        COMPONENT_REGISTRY_PLUGIN_ID,
-                        "component-schema-catalog",
-                        error,
-                    )
-                })?
-                .snapshot()
-                .map_err(|error| {
-                    PluginError::component_registration(
-                        COMPONENT_REGISTRY_PLUGIN_ID,
-                        "component-schema-catalog",
-                        error,
-                    )
-                })?;
-            (snapshot, registry.instance_token().clone())
-        };
-        (snapshot, instance_token)
+        let mut registry = world.resource_mut::<ComponentRegistry>();
+        let snapshot = registry
+            .freeze()
+            .map_err(|error| {
+                PluginError::component_registration(
+                    COMPONENT_REGISTRY_PLUGIN_ID,
+                    "component-schema-catalog",
+                    error,
+                )
+            })?
+            .snapshot()
+            .map_err(|error| {
+                PluginError::component_registration(
+                    COMPONENT_REGISTRY_PLUGIN_ID,
+                    "component-schema-catalog",
+                    error,
+                )
+            })?;
+        (snapshot, registry.instance_token().clone())
     };
     if let Some(expected) = expected
         && !snapshot.ptr_eq(expected)
@@ -292,4 +288,35 @@ pub fn report_component_registry_authority_fault(
         authority.0.reporter.report(authority.0.fault());
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preinstalled_registry_finishes_without_late_hook_registration() {
+        let mut app = App::new();
+        app.insert_resource(ComponentRegistry::default()).unwrap();
+        app.add_plugin(ComponentRegistryPlugin).unwrap();
+        let app = app.seal().unwrap();
+
+        validate_component_registry_authority(app.world()).unwrap();
+    }
+
+    #[test]
+    fn intrinsic_registry_hooks_track_same_tick_reinsert() {
+        let mut world = World::new();
+        world.insert_resource(ComponentRegistryMutationRevision::default());
+        world.insert_resource(ComponentRegistry::default());
+        let after_insert = world.resource::<ComponentRegistryMutationRevision>().0;
+
+        let registry = world.remove_resource::<ComponentRegistry>().unwrap();
+        let after_remove = world.resource::<ComponentRegistryMutationRevision>().0;
+        world.insert_resource(registry);
+        let after_reinsert = world.resource::<ComponentRegistryMutationRevision>().0;
+
+        assert!(after_remove > after_insert);
+        assert!(after_reinsert > after_remove);
+    }
 }

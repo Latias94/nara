@@ -516,6 +516,10 @@ enum RegistryState {
 }
 
 #[derive(Resource)]
+#[component(
+    on_insert = crate::plugin::record_component_registry_structure_change,
+    on_discard = crate::plugin::record_component_registry_structure_change
+)]
 pub struct ComponentRegistry {
     state: RegistryState,
     instance_token: Arc<()>,
