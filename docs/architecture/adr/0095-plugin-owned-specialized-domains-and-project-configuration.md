@@ -15,6 +15,8 @@
 [ADR 0046](0046-plugin-metadata-and-default-plugin-groups.md),
 [ADR 0079](0079-root-product-capabilities-and-placeholder-domain-retirement.md), and
 [ADR 0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md)
+**Refined By**:
+[ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md)
 
 ## Context
 

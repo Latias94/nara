@@ -8,7 +8,8 @@ native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12
 content/fingerprint handoff on 2026-07-18; RGF-U29 explicit persistent composition and guarded
 target-World eligibility on 2026-07-18
 **Refines**: ADR 0011, ADR 0045, ADR 0051
-**Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
+**Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md) and
+[ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md)
 **Related**: ADR 0034, ADR 0058, ADR 0076
 
 ## ADR 0095 Refinement

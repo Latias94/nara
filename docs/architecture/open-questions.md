@@ -780,6 +780,10 @@ flowchart LR
   permanent tombstone. Runtime/Play/Cook require complete bindings. Degraded documents may preserve
   bounded generic records only if ADR 0090 is accepted; unknown dependency semantics block asset
   closure, rename/delete, remap, flatten, cook, and export rather than guessing.
+- **Accepted bounded decision**: ADR 0098 selects explicit owner-local lineage plus an owner-aware
+  active Runtime composition, while deliberately deferring an owner-aware package/lock wire format
+  and every degraded-authoring readiness state. This question remains open for those deferred
+  records and workflows.
 
 ## OQ-045: Plugin Package Contribution and Official Product Recipe Ergonomics
 
