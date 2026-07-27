@@ -1335,14 +1335,14 @@ wrappers.
 - Requiring a root-only or renamed-root extension to add a direct `bevy_ecs` dependency merely to
   derive its own `Resource`, `ScheduleLabel`, or `SystemSet`.
 
-**Canonical replacement or deletion rationale**: the first-playable compatibility inventory is
-exactly `CoreStage::FixedUpdate` for typed registration plus joinable
-`FixedUpdateSet::Simulate`, `GameplayCommandSet::Consume`, and
-`GameplayCommandSet::Capture`. Their Rustdoc owns entry, completion, deferred, skip, error, and
-retention semantics. `App::seal` requires automatic deferred insertion, restores final deferred
-application, builds the fixed schedule, and returns a structured `ScheduleCompatibilityError`
-instead of publishing an invalid graph. `get_schedule_mut` now applies only to custom schedules;
-built-in schedules use `add_systems`, `configure_sets`, `set_schedule_build_settings`, and
+**Canonical replacement or deletion rationale at the U28 closure point**: the first-playable
+compatibility inventory was exactly `CoreStage::FixedUpdate` for typed registration plus joinable
+`FixedUpdateSet::Simulate`, `GameplayCommandSet::Consume`, and `GameplayCommandSet::Capture`.
+Their Rustdoc owned entry, completion, deferred, skip, error, and retention semantics.
+`App::seal` required automatic deferred insertion, restored final deferred application, built the
+fixed schedule, and returned a structured `ScheduleCompatibilityError` instead of publishing an
+invalid graph. `get_schedule_mut` now applies only to custom schedules; built-in schedules use
+`add_systems`, `configure_sets`, `set_schedule_build_settings`, and
 `set_schedule_apply_final_deferred`. Custom schedules remain owner-defined and inert.
 
 An explicit `before_ignore_deferred` / `after_ignore_deferred` relation is trusted advanced code:
@@ -1387,6 +1387,25 @@ restore runtime-panic graph validation as a compatibility layer.
 `crates/nara_gameplay/src/lib.rs#tests`, `tests/schedule_extension_contract.rs`,
 `tests/fixtures/schedule-extension/renamed-root/`, and
 `reference-game/tests/public_surface.rs`.
+
+## RGD-U11-1: Frame-End Cleanup Anchor Correction
+
+The first U28 inventory was intentionally narrow, but the desktop first-playable measurement later
+needed to inspect the submitted frame in the same frame, after the render pipeline had completed.
+Moving that observation to the next fixed tick would change the frozen startup boundary. The
+correction therefore adds `CoreStage::Cleanup` as a schedule-label anchor rather than exposing
+`FixedUpdateSet::Finalize` or any other internal phase.
+
+`Cleanup` runs after `Render` and before `Last`, including while paused. It is an observation and
+retirement point, not proof that a present occurred. `App::seal` applies the same automatic
+deferred-insertion and final-flush validation to `FixedUpdate` and `Cleanup`. The renamed-root
+fixture now covers both schedule labels; the reference-game probe registers its parity publication
+after the documented `GameplayCommandSet::Capture` anchor and does not depend on
+`FixedUpdateSet::Finalize`.
+
+This is a pre-1.0 compatibility correction. The remaining `CoreStage` variants and
+`FixedUpdateSet::{Prepare,Finalize}` remain callable implementation API but are not public
+ordering promises.
 
 ## RGF-U5-1: Thin Code-First Runtime and Truthful Close
 

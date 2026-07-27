@@ -86,6 +86,18 @@ pub enum CoreStage {
     Queue,
     Sort,
     Render,
+    /// Public schedule-label anchor for frame-end observation and cleanup.
+    ///
+    /// This schedule runs after the renderer has completed its current-frame work and before
+    /// [`CoreStage::Last`]. It still runs while the runtime is paused, so platform and diagnostic
+    /// adapters may observe a skipped render or retire frame-transient state without advancing
+    /// simulation time. Systems registered here must not assume that a render submission occurred.
+    ///
+    /// [`App::seal`] applies the same automatic deferred-command and final-flush validation used by
+    /// [`CoreStage::FixedUpdate`]. Deferred commands become visible only at the schedule's
+    /// configured boundaries and all remaining commands are applied before the schedule
+    /// completes. Errors follow the App's configured policy; managed-runtime escalation remains a
+    /// separate [`RuntimeInstance`] contract.
     Cleanup,
     Last,
 }
@@ -1627,27 +1639,27 @@ impl App {
     }
 
     fn validate_public_schedule_compatibility(&mut self) -> Result<(), PluginError> {
-        let fixed_update = self
-            .schedules
-            .get_mut(CoreStage::FixedUpdate)
-            .expect("FixedUpdate remains registered for the App lifetime");
-        let build_settings = fixed_update.get_build_settings();
-        if !build_settings.auto_insert_apply_deferred {
-            return Err(
-                ScheduleCompatibilityError::AutomaticDeferredInsertionDisabled {
-                    schedule: CoreStage::FixedUpdate,
-                }
-                .into(),
-            );
-        }
-        fixed_update.set_build_settings(build_settings);
-        fixed_update.set_apply_final_deferred(true);
-        if let Err(error) = fixed_update.initialize(&mut self.world) {
-            return Err(ScheduleCompatibilityError::BuildFailed {
-                schedule: CoreStage::FixedUpdate,
-                message: error.to_string(fixed_update.graph(), &self.world),
+        for schedule in [CoreStage::FixedUpdate, CoreStage::Cleanup] {
+            let public_schedule = self
+                .schedules
+                .get_mut(schedule)
+                .expect("public schedules remain registered for the App lifetime");
+            let build_settings = public_schedule.get_build_settings();
+            if !build_settings.auto_insert_apply_deferred {
+                return Err(
+                    ScheduleCompatibilityError::AutomaticDeferredInsertionDisabled { schedule }
+                        .into(),
+                );
             }
-            .into());
+            public_schedule.set_build_settings(build_settings);
+            public_schedule.set_apply_final_deferred(true);
+            if let Err(error) = public_schedule.initialize(&mut self.world) {
+                return Err(ScheduleCompatibilityError::BuildFailed {
+                    schedule,
+                    message: error.to_string(public_schedule.graph(), &self.world),
+                }
+                .into());
+            }
         }
         Ok(())
     }

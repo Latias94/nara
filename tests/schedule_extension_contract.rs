@@ -76,6 +76,7 @@ fn fixture_claims_exactly_the_documented_compatibility_anchors() {
     assert!(!surface.has_root_matching(|root| root.starts_with("nara_")));
     for anchor in [
         &["CoreStage", "FixedUpdate"][..],
+        &["CoreStage", "Cleanup"],
         &["FixedUpdateSet", "Simulate"],
         &["GameplayCommandSet", "Consume"],
         &["GameplayCommandSet", "Capture"],
@@ -121,6 +122,7 @@ fn reference_game_uses_only_documented_schedule_anchors() {
         RustSurface::from_schedule_files_in_directory(&repository.join("reference-game/tests"));
 
     assert!(surface.contains_path(&["CoreStage", "FixedUpdate"]));
+    assert!(surface.contains_path(&["CoreStage", "Cleanup"]));
     assert!(surface.contains_path(&["FixedUpdateSet", "Simulate"]));
     assert_only_documented_schedule_variants("reference game", repository, &surface);
     assert_only_documented_schedule_variants("reference game tests", repository, &test_surface);
@@ -248,7 +250,7 @@ fn assert_only_documented_schedule_variants(label: &str, repository: &Path, surf
         surface,
         &repository.join("crates/nara_app/src/lib.rs"),
         "CoreStage",
-        &["FixedUpdate"],
+        &["FixedUpdate", "Cleanup"],
     );
     assert_enum_variant_allowlist(
         label,

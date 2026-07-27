@@ -296,14 +296,17 @@ second real adapter or stronger isolation pressure.
   before running a registered custom schedule, while the standard frame loop remains closed to the
   engine-owned stage order.
 - ADR 0003 now distinguishes documented public semantic schedule/set anchors from public Rust
-  implementation details. The first-playable inventory is exactly `CoreStage::FixedUpdate`
-  (schedule label) plus joinable `FixedUpdateSet::Simulate`, `GameplayCommandSet::Consume`, and
-  `GameplayCommandSet::Capture`; unlisted public variants are not ordering promises. Extensions may
-  register in the schedule label and join/order only against the three set anchors, not concrete
-  system functions, private sets, or registration order. `App::seal` now requires automatic
-  deferred insertion, reasserts final deferred application, builds the owning fixed schedule, and
-  returns structured `ScheduleCompatibilityError` values for policy or graph failure before the App
-  becomes immutable. The renamed-root extension fixture proves entry/completion state, deferred
+  implementation details. The first-playable inventory contains the `CoreStage::FixedUpdate` and
+  `CoreStage::Cleanup` schedule-label anchors plus joinable `FixedUpdateSet::Simulate`,
+  `GameplayCommandSet::Consume`, and `GameplayCommandSet::Capture`; unlisted public variants are
+  not ordering promises. Extensions may register in either schedule label and join/order only
+  against the three fixed-tick set anchors, not concrete system functions, private sets, or
+  registration order. `Cleanup` is a frame-end observation/retirement point after the render
+  pipeline; it also runs while paused and therefore does not prove that a render was presented.
+  `App::seal` requires automatic deferred insertion, reasserts final deferred application for both
+  schedule-label anchors, builds them before publication, and returns structured
+  `ScheduleCompatibilityError` values for policy or graph failure before the App becomes
+  immutable. The renamed-root extension fixture proves entry/completion state, deferred
   visibility, conditional skip, App/domain fault handling, batch retention/cleanup, registration
   permutation, and absent/cross-schedule non-guarantees using only public APIs. Ignore-deferred
   relations remain a trusted advanced opt-out that can seal but cannot satisfy the visibility

@@ -36,6 +36,7 @@ mod tests {
         simulate_runs: usize,
         consume: Vec<(Option<u64>, usize, usize)>,
         capture: Vec<(Option<u64>, usize, usize)>,
+        cleanup_runs: usize,
     }
 
     #[derive(Component)]
@@ -83,6 +84,10 @@ mod tests {
         commands.spawn(CaptureDeferred);
     }
 
+    fn observe_cleanup(mut trace: ResMut<AnchorTrace>) {
+        trace.cleanup_runs += 1;
+    }
+
     fn configure_extension_anchors(app: &mut App) {
         app.configure_sets(
             CoreStage::FixedUpdate,
@@ -113,6 +118,8 @@ mod tests {
             CoreStage::FixedUpdate,
             observe_capture.in_set(ExtensionSet::CaptureMember),
         )
+        .unwrap()
+        .add_systems(CoreStage::Cleanup, observe_cleanup)
         .unwrap();
     }
 
@@ -143,6 +150,7 @@ mod tests {
         assert_eq!(trace.simulate_runs, 1);
         assert_eq!(trace.consume, [(Some(1), 1, 1)]);
         assert_eq!(trace.capture, [(Some(1), 1, 1)]);
+        assert_eq!(trace.cleanup_runs, 1);
         assert!(
             app.world()
                 .iter_entities()

@@ -1,12 +1,22 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use nara_app::{App, CoreStage, FixedTime, PluginError, ScheduleCompatibilityError, StartupStage};
-use nara_ecs::{Resource, schedule::IntoScheduleConfigs, system::Commands};
+use nara_ecs::{Resource, SystemSet, schedule::IntoScheduleConfigs, system::Commands};
 
 #[derive(Resource)]
 struct FinalDeferredApplied;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+enum CleanupTestSet {
+    First,
+    Second,
+}
+
 fn insert_final_deferred_marker(mut commands: Commands) {
+    commands.insert_resource(FinalDeferredApplied);
+}
+
+fn insert_second_deferred_marker(mut commands: Commands) {
     commands.insert_resource(FinalDeferredApplied);
 }
 
@@ -26,6 +36,27 @@ fn seal_rejects_disabled_automatic_deferred_insertion() {
         PluginError::ScheduleCompatibility(
             ScheduleCompatibilityError::AutomaticDeferredInsertionDisabled {
                 schedule: CoreStage::FixedUpdate,
+            }
+        )
+    );
+}
+
+#[test]
+fn seal_rejects_disabled_automatic_deferred_insertion_for_cleanup_anchor() {
+    let mut app = App::new();
+    let mut settings = app
+        .get_schedule(CoreStage::Cleanup)
+        .expect("Cleanup is an engine-owned schedule")
+        .get_build_settings();
+    settings.auto_insert_apply_deferred = false;
+    app.set_schedule_build_settings(CoreStage::Cleanup, settings)
+        .unwrap();
+
+    assert_eq!(
+        app.seal().unwrap_err(),
+        PluginError::ScheduleCompatibility(
+            ScheduleCompatibilityError::AutomaticDeferredInsertionDisabled {
+                schedule: CoreStage::Cleanup,
             }
         )
     );
@@ -54,11 +85,56 @@ fn seal_rejects_invalid_public_anchor_graph_without_panicking() {
 }
 
 #[test]
+fn seal_rejects_invalid_cleanup_anchor_graph_without_panicking() {
+    let mut app = App::new();
+    app.add_systems(
+        CoreStage::Cleanup,
+        insert_final_deferred_marker
+            .in_set(CleanupTestSet::First)
+            .before(CleanupTestSet::Second),
+    )
+    .unwrap()
+    .add_systems(
+        CoreStage::Cleanup,
+        insert_second_deferred_marker
+            .in_set(CleanupTestSet::Second)
+            .before(CleanupTestSet::First),
+    )
+    .unwrap();
+
+    let sealed = catch_unwind(AssertUnwindSafe(|| app.seal()));
+
+    assert!(sealed.is_ok(), "schedule validation panicked");
+    let error = sealed.unwrap().unwrap_err();
+    assert!(matches!(
+        error,
+        PluginError::ScheduleCompatibility(ScheduleCompatibilityError::BuildFailed {
+            schedule: CoreStage::Cleanup,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn seal_reasserts_final_deferred_application() {
     let mut app = App::new();
     app.add_systems(CoreStage::FixedUpdate, insert_final_deferred_marker)
         .unwrap();
     app.set_schedule_apply_final_deferred(CoreStage::FixedUpdate, false)
+        .unwrap();
+
+    app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    let final_deferred_applied = app.world().contains_resource::<FinalDeferredApplied>();
+
+    assert!(final_deferred_applied);
+}
+
+#[test]
+fn seal_reasserts_final_deferred_application_for_cleanup_anchor() {
+    let mut app = App::new();
+    app.add_systems(CoreStage::Cleanup, insert_final_deferred_marker)
+        .unwrap();
+    app.set_schedule_apply_final_deferred(CoreStage::Cleanup, false)
         .unwrap();
 
     app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();

@@ -3289,6 +3289,8 @@ fn a_failed_control_records_a_terminal_result_before_faulting() {
 struct StageCounts {
     task_updates: usize,
     simulation_updates: usize,
+    render_updates: usize,
+    cleanup_updates: usize,
 }
 
 fn count_task_update(mut counts: ResMut<StageCounts>) {
@@ -3299,6 +3301,14 @@ fn count_simulation_update(mut counts: ResMut<StageCounts>) {
     counts.simulation_updates += 1;
 }
 
+fn count_render_update(mut counts: ResMut<StageCounts>) {
+    counts.render_updates += 1;
+}
+
+fn count_cleanup_update(mut counts: ResMut<StageCounts>) {
+    counts.cleanup_updates += 1;
+}
+
 #[test]
 fn paused_driving_runs_real_time_work_without_variable_simulation() {
     let mut app = configured_app(FixedTime::default());
@@ -3307,17 +3317,24 @@ fn paused_driving_runs_real_time_work_without_variable_simulation() {
         .add_systems(CoreStage::TaskUpdate, count_task_update)
         .unwrap()
         .add_systems(CoreStage::Update, count_simulation_update)
+        .unwrap()
+        .add_systems(CoreStage::Render, count_render_update)
+        .unwrap()
+        .add_systems(CoreStage::Cleanup, count_cleanup_update)
         .unwrap();
     let mut runtime = start_runtime(app);
 
     accepted_ticket(runtime.request_control(RuntimeControl::Pause));
-    runtime.drive(Duration::from_millis(5)).unwrap();
+    let paused = runtime.drive(Duration::from_millis(5)).unwrap();
     assert_eq!(runtime.state(), RuntimeState::Paused);
+    assert_eq!(paused.frame().unwrap().status.fixed_steps, 0);
     assert_eq!(runtime.world().resource::<StageCounts>().task_updates, 1);
     assert_eq!(
         runtime.world().resource::<StageCounts>().simulation_updates,
         0
     );
+    assert_eq!(runtime.world().resource::<StageCounts>().render_updates, 1);
+    assert_eq!(runtime.world().resource::<StageCounts>().cleanup_updates, 1);
 
     accepted_ticket(runtime.request_control(RuntimeControl::Resume));
     runtime.drive(Duration::ZERO).unwrap();
@@ -3326,6 +3343,8 @@ fn paused_driving_runs_real_time_work_without_variable_simulation() {
         runtime.world().resource::<StageCounts>().simulation_updates,
         1
     );
+    assert_eq!(runtime.world().resource::<StageCounts>().render_updates, 2);
+    assert_eq!(runtime.world().resource::<StageCounts>().cleanup_updates, 2);
 }
 
 #[test]

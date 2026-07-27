@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-07-27
 **Refined By**: ADR 0010: Plugin Lifecycle, Dependencies, and Failure Containment; ADR 0046:
 Plugin Metadata and Default Plugin Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness
 
@@ -36,8 +36,12 @@ flowchart TD
     FixedUpdate --> Update[Update]
     Update --> PostUpdate[PostUpdate]
     PostUpdate --> Extract[Extract]
-    Extract --> Render[Render]
-    Render --> Last[Last]
+    Extract --> Prepare[Prepare]
+    Prepare --> Queue[Queue]
+    Queue --> Sort[Sort]
+    Sort --> Render[Render]
+    Render --> Cleanup[Cleanup]
+    Cleanup --> Last[Last]
     Last --> Frame
 ```
 
@@ -72,6 +76,7 @@ The first-playable compatibility inventory is deliberately small:
 | Anchor | Owning schedule | Participation | Supported purpose |
 |---|---|---|---|
 | `CoreStage::FixedUpdate` | Engine main loop | Schedule label | Register work in the exact fixed-tick schedule |
+| `CoreStage::Cleanup` | Engine main loop | Schedule label | Observe completed frame-end render/retirement state and release frame-transient work |
 | `FixedUpdateSet::Simulate` | `CoreStage::FixedUpdate` | Joinable phase | Run authoritative fixed-tick simulation |
 | `GameplayCommandSet::Consume` | `CoreStage::FixedUpdate` | Joinable phase | Consume the current authoritative gameplay-command batch |
 | `GameplayCommandSet::Capture` | `CoreStage::FixedUpdate` | Joinable phase | Observe consumed commands for replay/debug capture before engine acknowledgement |
@@ -107,9 +112,11 @@ methods; callers cannot replace their executor, graph, or build-pass inventory. 
 advanced custom-schedule freedom without making a built-in semantic anchor replaceable behind
 seal validation.
 
-For the first-playable anchors in `CoreStage::FixedUpdate`, seal validation specifically requires
-automatic deferred insertion to remain enabled and reasserts the schedule's final deferred
-application before configuration closes. A relation that uses Bevy's `before_ignore_deferred`,
+For the first-playable schedule-label anchors, seal validation specifically requires automatic
+deferred insertion to remain enabled and reasserts each schedule's final deferred application
+before configuration closes. `CoreStage::Cleanup` runs after the render pipeline and before
+`CoreStage::Last`; it also runs while the runtime is paused, but a member must tolerate a skipped
+render and must not treat the stage as proof that a frame was presented. A relation that uses Bevy's `before_ignore_deferred`,
 `after_ignore_deferred`, or equivalent ignore-deferred chaining explicitly opts out of the public
 anchor visibility contract and cannot be presented as a supported compatibility edge. Nara does not
 add a scheduler wrapper solely to discover and reject that trusted advanced opt-out. Custom

@@ -331,9 +331,7 @@ impl Plugin for HostParityProbePlugin {
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            publish_parity_evidence
-                .in_set(FixedUpdateSet::Finalize)
-                .after(GameplayCommandSet::Capture),
+            publish_parity_evidence.after(GameplayCommandSet::Capture),
         )?;
         Ok(())
     }
