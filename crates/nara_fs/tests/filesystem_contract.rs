@@ -407,9 +407,55 @@ fn same_directory_replace_is_atomic_but_does_not_claim_strong_cas() {
     );
     assert_eq!(receipt.durability().name_published(), StageStatus::Achieved);
     assert_eq!(
+        receipt.written_content_digest(),
+        ContentDigest::of_bytes(b"new")
+    );
+    assert_eq!(
+        receipt.published_content_digest(),
+        Some(ContentDigest::of_bytes(b"new"))
+    );
+    assert_eq!(
+        receipt.verified_content_digest(),
+        Some(ContentDigest::of_bytes(b"new"))
+    );
+    assert_eq!(
         fs::read(root.path().join("document.scene")).unwrap(),
         b"new"
     );
+}
+
+#[test]
+fn replacement_receipt_detects_candidate_bytes_changed_outside_its_capability() {
+    let root = TestRoot::new();
+    fs::write(root.path().join("document.scene"), b"old").unwrap();
+    let capability = trusted_read_write(&root);
+    let old = capability.open_file(&relative("document.scene")).unwrap();
+    let mut temporary = capability.create_temp(&component("document.tmp")).unwrap();
+    temporary.write_all(b"intended").unwrap();
+    temporary.sync().unwrap();
+
+    fs::write(root.path().join("document.tmp"), b"tampered").unwrap();
+    let receipt = capability
+        .replace_temp(
+            temporary,
+            &component("document.scene"),
+            ExpectedTarget::Identity(old.identity()),
+        )
+        .unwrap();
+
+    assert_eq!(
+        receipt.written_content_digest(),
+        ContentDigest::of_bytes(b"intended")
+    );
+    assert_eq!(
+        receipt.published_content_digest(),
+        Some(ContentDigest::of_bytes(b"tampered"))
+    );
+    assert_ne!(
+        receipt.published_content_digest(),
+        Some(receipt.written_content_digest())
+    );
+    assert_eq!(receipt.verified_content_digest(), None);
 }
 
 #[cfg(windows)]

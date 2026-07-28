@@ -1,0 +1,17 @@
+error: cannot construct `EditorPersistenceCheckpoint` with struct literal syntax due to private fields
+ --> tests/ui/editor_persistence/checkpoint_not_constructible.rs:7:22
+  |
+7 |     let checkpoint = EditorPersistenceCheckpoint {
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+8 |         document: EditorDocumentId::from_raw(1),
+  |         --------------------------------------- private field
+9 |         revision: session.revision(),
+  |         ---------------------------- private field
+  |
+  = note: ...and other private field `identity` that was not provided
+
+error[E0599]: no method named `__apply_persistence_checkpoint` found for struct `EditorWorkspace` in the current scope
+  --> tests/ui/editor_persistence/checkpoint_not_constructible.rs:12:23
+   |
+12 |     let _ = workspace.__apply_persistence_checkpoint(checkpoint);
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `EditorWorkspace`

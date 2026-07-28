@@ -920,6 +920,80 @@ fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
     assert_eq!(editor.play_view().generation(), None);
 }
 
+#[cfg(feature = "tooling")]
+#[test]
+fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
+    let project = TestProject::new("editor-save-failure-state");
+    let mut editor = super::editor::EditorProjectSession::open(
+        project.writable_capability(),
+        super::editor::EditorProjectIntent::new(),
+    )
+    .unwrap();
+    let document = editor.workspace().active_document().unwrap();
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
+                document: Some(document),
+                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                    entity: SceneEntityRecord::new(
+                        nara_identity::SceneEntityId::new("unsaved").unwrap(),
+                    ),
+                }]),
+            })
+            .applied
+    );
+    let saved_revision = editor.workspace().scene(document).unwrap().saved_revision();
+    let saved_digest = editor.workspace().scene(document).unwrap().saved_digest();
+
+    editor.test_fail_next_save(nara_tooling::EditorPersistenceFailureStage::Encode);
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Save {
+            document: Some(document),
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.persistence_view().result(),
+        Some(EditorPersistenceResult::Failed {
+            document: Some(failed_document),
+            stage: nara_tooling::EditorPersistenceFailureStage::Encode,
+        }) if failed_document == document
+    ));
+    let slot = editor.workspace().scene(document).unwrap();
+    assert_eq!(slot.saved_revision(), saved_revision);
+    assert_eq!(slot.saved_digest(), saved_digest);
+    assert!(slot.is_dirty());
+
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    editor.test_reject_next_valid_persistence_receipt();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Save {
+            document: Some(document),
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    let uncertain_result = editor.persistence_view().result();
+    assert!(
+        matches!(
+            uncertain_result,
+            Some(EditorPersistenceResult::PersistenceUncertain {
+                document: uncertain_document,
+                ..
+            }) if uncertain_document == document
+        ),
+        "expected an uncertain save, got {uncertain_result:?}"
+    );
+    let slot = editor.workspace().scene(document).unwrap();
+    assert_eq!(slot.saved_revision(), saved_revision);
+    assert_eq!(slot.saved_digest(), saved_digest);
+    assert!(slot.is_dirty());
+}
+
 #[test]
 fn sequential_starts_share_immutable_authority_and_rebuild_runtime_sessions() {
     let project = TestProject::new("publication-cut");
@@ -2074,6 +2148,14 @@ requested = ["runtime-2d"]
         DirectoryCapability::from_host_handle(
             host_directory(&self.root).unwrap(),
             HostCapabilityOptions::new(CapabilityRights::ReadOnly, portable_trust()),
+        )
+        .unwrap()
+    }
+
+    fn writable_capability(&self) -> DirectoryCapability {
+        DirectoryCapability::from_host_handle(
+            host_directory(&self.root).unwrap(),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
         )
         .unwrap()
     }

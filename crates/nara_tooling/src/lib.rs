@@ -32,10 +32,13 @@ pub use play::{
 };
 pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
 pub use workspace::{
-    EditorDocumentDigest, EditorDocumentId, EditorExternalReloadState, EditorPersistenceCheckpoint,
-    EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel,
-    EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
-    EditorWorkspaceModel,
+    EditorDocumentDigest, EditorDocumentId, EditorExternalReloadState, EditorSceneModel,
+    EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
+    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
+};
+#[doc(hidden)]
+pub use workspace::{
+    EditorPersistenceAuthority, EditorPersistenceCheckpoint, EditorPersistenceCommit,
 };
 
 #[derive(Debug, Default)]

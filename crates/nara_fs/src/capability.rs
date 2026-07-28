@@ -339,6 +339,7 @@ impl DirectoryCapability {
             ExpectedTarget::Missing | ExpectedTarget::Identity(_) => {}
         }
 
+        let written_content_digest = temporary.written_content_digest();
         platform::replace_temporary(
             &self.inner.file,
             temporary.file_handle(),
@@ -368,6 +369,11 @@ impl DirectoryCapability {
             DirectorySyncTier::Unsupported => StageStatus::Unsupported,
             DirectorySyncTier::Naming | DirectorySyncTier::Unproven => StageStatus::Unknown,
         };
+        let published_content_digest = self
+            .open_child_file(target)
+            .ok()
+            .filter(|published| published.identity() == temporary.identity())
+            .and_then(|published| published.digest(written_content_digest.length()).ok());
         Ok(crate::ReplaceReceipt::new(
             previous,
             temporary.identity(),
@@ -381,6 +387,8 @@ impl DirectoryCapability {
                 .durability()
                 .with_name_published()
                 .with_parent_directory(parent_sync),
+            written_content_digest,
+            published_content_digest,
         ))
     }
 

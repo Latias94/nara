@@ -2,10 +2,14 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
+    sync::Arc,
 };
 
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
+use nara_fs::{
+    FileIdentity, PublicationAtomicity, PublicationIdentityEvidence, ReplaceReceipt, StageStatus,
+};
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
     SceneAuthoringRevision, SceneAuthoringSession, SceneDocument, SceneEntityId,
@@ -59,12 +63,83 @@ impl EditorDocumentDigest {
     }
 }
 
-/// Facts a concrete persistence Host verified before advancing a saved checkpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default)]
+struct EditorWorkspacePersistenceIdentity;
+
+/// Exclusive capability for advancing persistence state in one hosted workspace.
+///
+/// The capability is intentionally neither cloneable nor available from [`EditorWorkspace::new`].
+/// A concrete Host obtains it together with the workspace, captures a linear checkpoint before
+/// persistence, and may commit that checkpoint only after its own typed filesystem receipt has
+/// been accepted.
+#[derive(Debug)]
+pub struct EditorPersistenceAuthority {
+    identity: Arc<EditorWorkspacePersistenceIdentity>,
+}
+
+/// Linear, workspace-bound capture of one document revision awaiting persistence evidence.
+#[derive(Debug)]
 pub struct EditorPersistenceCheckpoint {
-    pub document: EditorDocumentId,
-    pub revision: SceneAuthoringRevision,
-    pub digest: EditorDocumentDigest,
+    identity: Arc<EditorWorkspacePersistenceIdentity>,
+    document: EditorDocumentId,
+    revision: SceneAuthoringRevision,
+}
+
+/// Linear proof that one captured revision was published with the required filesystem evidence.
+///
+/// The value can only be created by consuming a [`ReplaceReceipt`] whose publication evidence
+/// satisfies the editor save contract. It deliberately carries no public constructor or fields.
+#[derive(Debug)]
+pub struct EditorPersistenceCommit {
+    checkpoint: EditorPersistenceCheckpoint,
+    digest: EditorDocumentDigest,
+}
+
+impl EditorPersistenceCommit {
+    /// Consumes accepted filesystem publication evidence for one captured editor revision.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn from_publication(
+        checkpoint: EditorPersistenceCheckpoint,
+        expected_previous: FileIdentity,
+        receipt: ReplaceReceipt,
+    ) -> Option<Self> {
+        if receipt.previous_identity() != Some(expected_previous)
+            || receipt.publication_atomicity() != PublicationAtomicity::AtomicNameSwitch
+            || receipt.published_identity() != Some(receipt.candidate_identity())
+            || !matches!(
+                receipt.publication_identity_evidence(),
+                PublicationIdentityEvidence::HandleBoundCandidate
+                    | PublicationIdentityEvidence::PostPublishObserved
+            )
+            || receipt.durability().data_synced() != StageStatus::Achieved
+            || receipt.durability().file_metadata_synced() != StageStatus::Achieved
+            || receipt.durability().name_published() != StageStatus::Achieved
+            || receipt.verified_content_digest().is_none()
+        {
+            return None;
+        }
+
+        let content_digest = receipt
+            .verified_content_digest()
+            .expect("matching published content evidence was checked above");
+        Some(Self {
+            checkpoint,
+            digest: EditorDocumentDigest::new(content_digest.length(), *content_digest.as_bytes()),
+        })
+    }
+}
+
+impl EditorPersistenceCheckpoint {
+    #[must_use]
+    pub const fn document(&self) -> EditorDocumentId {
+        self.document
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> SceneAuthoringRevision {
+        self.revision
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +162,7 @@ impl WorkspaceDocumentContext {
 
 #[derive(Debug, Default, Resource)]
 pub struct EditorWorkspace {
+    persistence_identity: Arc<EditorWorkspacePersistenceIdentity>,
     next_document_id: u64,
     active_document: Option<EditorDocumentId>,
     scenes: BTreeMap<EditorDocumentId, EditorSceneSlot>,
@@ -96,6 +172,20 @@ impl EditorWorkspace {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a workspace together with its exclusive persistence capability.
+    ///
+    /// This is the Host embedding path. UI adapters and ordinary workspace command producers
+    /// should use [`Self::new`], which cannot advance saved checkpoints.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new_hosted() -> (Self, EditorPersistenceAuthority) {
+        let workspace = Self::new();
+        let authority = EditorPersistenceAuthority {
+            identity: Arc::clone(&workspace.persistence_identity),
+        };
+        (workspace, authority)
     }
 
     #[must_use]
@@ -123,27 +213,23 @@ impl EditorWorkspace {
         self.active_document.and_then(|id| self.scenes.get(&id))
     }
 
-    /// Applies a checkpoint after the concrete Host has validated its persistence receipt.
-    ///
-    /// The checkpoint may lag the current revision when an edit was accepted while a save was in
-    /// flight. It may never target another authoring source, jump ahead, or regress an already
-    /// accepted checkpoint.
-    #[doc(hidden)]
-    pub fn __apply_persistence_checkpoint(
+    fn apply_persistence_checkpoint(
         &mut self,
-        checkpoint: EditorPersistenceCheckpoint,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+        digest: EditorDocumentDigest,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, Some(checkpoint.document));
-        let Some(slot) = self.scenes.get_mut(&checkpoint.document) else {
-            return workspace_document_error_report(context, checkpoint.document);
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(slot) = self.scenes.get_mut(&document) else {
+            return workspace_document_error_report(context, document);
         };
         let current = slot.revision();
         let saved = slot.saved_revision();
-        let revision_matches_source = checkpoint.revision.source_id() == current.source_id();
-        let revision_not_ahead = checkpoint.revision.generation() <= current.generation();
-        let revision_not_regressed = checkpoint.revision.source_id() == saved.source_id()
-            && checkpoint.revision.generation() >= saved.generation();
+        let revision_matches_source = revision.source_id() == current.source_id();
+        let revision_not_ahead = revision.generation() <= current.generation();
+        let revision_not_regressed = revision.source_id() == saved.source_id()
+            && revision.generation() >= saved.generation();
         if !revision_matches_source || !revision_not_ahead || !revision_not_regressed {
             return workspace_error_report(
                 context,
@@ -151,13 +237,11 @@ impl EditorWorkspace {
                 "persistence checkpoint does not match the open document revision",
             );
         }
-        slot.apply_persistence_checkpoint(checkpoint);
-        report_for_slot(checkpoint.document, active_document, slot)
+        slot.apply_persistence_checkpoint(revision, digest);
+        report_for_slot(document, active_document, slot)
     }
 
-    /// Binds the digest observed when a concrete Host opened the current saved revision.
-    #[doc(hidden)]
-    pub fn __bind_opened_source_digest(
+    fn bind_opened_source_digest(
         &mut self,
         document: EditorDocumentId,
         digest: EditorDocumentDigest,
@@ -538,8 +622,7 @@ impl EditorWorkspace {
     /// Unlike an unsolicited external reload, an explicit Reopen/Reconcile command is allowed to
     /// replace a dirty authoring session. The Host has already read and validated the candidate;
     /// this method only performs the workspace publication and resets authoring-local state.
-    #[doc(hidden)]
-    pub fn __publish_reopened_session(
+    fn publish_reopened_session(
         &mut self,
         document: Option<EditorDocumentId>,
         session: SceneAuthoringSession,
@@ -672,9 +755,13 @@ impl EditorSceneSlot {
         self.external_reload
     }
 
-    fn apply_persistence_checkpoint(&mut self, checkpoint: EditorPersistenceCheckpoint) {
-        self.saved_revision = checkpoint.revision;
-        self.saved_digest = Some(checkpoint.digest);
+    fn apply_persistence_checkpoint(
+        &mut self,
+        revision: SceneAuthoringRevision,
+        digest: EditorDocumentDigest,
+    ) {
+        self.saved_revision = revision;
+        self.saved_digest = Some(digest);
         self.session.acknowledge_source_saved();
         if self.external_reload != EditorExternalReloadState::Conflict {
             self.external_reload = EditorExternalReloadState::Clean;
@@ -709,6 +796,93 @@ impl EditorSceneSlot {
         self.editor
             .inspector_mut()
             .select_entity(self.selection.top_entity().cloned());
+    }
+}
+
+impl EditorPersistenceAuthority {
+    /// Captures the current revision of one document for a concrete persistence Host.
+    #[must_use]
+    pub fn capture(
+        &mut self,
+        workspace: &EditorWorkspace,
+        document: EditorDocumentId,
+    ) -> Option<EditorPersistenceCheckpoint> {
+        if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity) {
+            return None;
+        }
+        let revision = workspace.scene(document)?.revision();
+        Some(EditorPersistenceCheckpoint {
+            identity: Arc::clone(&self.identity),
+            document,
+            revision,
+        })
+    }
+
+    /// Commits a captured checkpoint backed by accepted filesystem publication evidence.
+    ///
+    /// The checkpoint may lag the current revision when an edit was accepted while a save was in
+    /// flight. It may never target another workspace or authoring source, jump ahead, or regress an
+    /// already accepted checkpoint.
+    pub fn commit(
+        &mut self,
+        workspace: &mut EditorWorkspace,
+        commit: EditorPersistenceCommit,
+    ) -> EditorWorkspaceCommandReport {
+        let EditorPersistenceCommit { checkpoint, digest } = commit;
+        if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity)
+            || !Arc::ptr_eq(&checkpoint.identity, &workspace.persistence_identity)
+        {
+            let context =
+                WorkspaceDocumentContext::new(workspace.active_document, Some(checkpoint.document));
+            return workspace_error_report(
+                context,
+                "tooling.workspace-persistence-authority-mismatch",
+                "persistence checkpoint does not belong to the hosted workspace authority",
+            );
+        }
+        workspace.apply_persistence_checkpoint(checkpoint.document, checkpoint.revision, digest)
+    }
+
+    /// Binds bytes read by the concrete Host when it first opened a document.
+    #[doc(hidden)]
+    pub fn bind_opened_source_digest(
+        &mut self,
+        workspace: &mut EditorWorkspace,
+        document: EditorDocumentId,
+        digest: EditorDocumentDigest,
+    ) -> EditorWorkspaceCommandReport {
+        if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity) {
+            let context = WorkspaceDocumentContext::new(workspace.active_document, Some(document));
+            return workspace_error_report(
+                context,
+                "tooling.workspace-persistence-authority-mismatch",
+                "opened source digest does not belong to the hosted workspace authority",
+            );
+        }
+        workspace.bind_opened_source_digest(document, digest)
+    }
+
+    /// Publishes a document explicitly reopened and validated by the concrete Host.
+    #[doc(hidden)]
+    pub fn publish_reopened_session(
+        &mut self,
+        workspace: &mut EditorWorkspace,
+        document: Option<EditorDocumentId>,
+        session: SceneAuthoringSession,
+        digest: EditorDocumentDigest,
+    ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
+        if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity) {
+            let context = WorkspaceDocumentContext::new(workspace.active_document, document);
+            return Err(EditorSceneSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-persistence-authority-mismatch",
+                    "reopened session does not belong to the hosted workspace authority",
+                ),
+                session,
+            ));
+        }
+        workspace.publish_reopened_session(document, session, digest)
     }
 }
 
@@ -1046,11 +1220,12 @@ mod tests {
     #[test]
     fn persistence_checkpoint_advances_only_the_captured_revision() {
         let registry = frozen_empty_registry();
-        let mut workspace = EditorWorkspace::new();
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
         let opened = workspace
             .open_scene_session("main", SceneAuthoringSession::new(SceneDocument::default()))
             .unwrap();
         let document = opened.opened_document.unwrap();
+        let stale = authority.capture(&workspace, document).unwrap();
 
         assert!(
             workspace
@@ -1064,6 +1239,7 @@ mod tests {
                 .applied
         );
         let captured_revision = workspace.scene(document).unwrap().revision();
+        let accepted_checkpoint = authority.capture(&workspace, document).unwrap();
         assert!(
             workspace
                 .apply_command(
@@ -1077,30 +1253,99 @@ mod tests {
         );
 
         let digest = EditorDocumentDigest::new(7, [0x5a; 32]);
-        let accepted = workspace.__apply_persistence_checkpoint(EditorPersistenceCheckpoint {
-            document,
-            revision: captured_revision,
-            digest,
-        });
+        let accepted = authority.commit(
+            &mut workspace,
+            EditorPersistenceCommit {
+                checkpoint: accepted_checkpoint,
+                digest,
+            },
+        );
         assert!(accepted.applied);
         let slot = workspace.scene(document).unwrap();
         assert_eq!(slot.saved_revision(), captured_revision);
         assert_eq!(slot.saved_digest(), Some(digest));
         assert!(slot.is_dirty());
 
-        let stale = workspace.__apply_persistence_checkpoint(EditorPersistenceCheckpoint {
-            document,
-            revision: opened.revision.unwrap(),
-            digest: EditorDocumentDigest::new(3, [0x11; 32]),
-        });
-        assert!(!stale.applied);
+        let stale_report = authority.commit(
+            &mut workspace,
+            EditorPersistenceCommit {
+                checkpoint: stale,
+                digest: EditorDocumentDigest::new(3, [0x11; 32]),
+            },
+        );
+        assert!(!stale_report.applied);
         assert_eq!(
-            stale.diagnostics.iter().next().unwrap().code().as_str(),
+            stale_report
+                .diagnostics
+                .iter()
+                .next()
+                .unwrap()
+                .code()
+                .as_str(),
             "tooling.workspace-persistence-checkpoint-mismatch"
         );
         assert_eq!(
             workspace.scene(document).unwrap().saved_revision(),
             captured_revision
+        );
+    }
+
+    #[test]
+    fn persistence_authority_and_checkpoint_must_belong_to_the_workspace() {
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
+        let document = workspace
+            .open_scene_session("main", SceneAuthoringSession::new(SceneDocument::default()))
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let local_checkpoint = authority.capture(&workspace, document).unwrap();
+        let saved_revision = workspace.scene(document).unwrap().saved_revision();
+        let (mut foreign_workspace, mut foreign_authority) = EditorWorkspace::new_hosted();
+        let foreign_document = foreign_workspace
+            .open_scene_session(
+                "foreign",
+                SceneAuthoringSession::new(SceneDocument::default()),
+            )
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let foreign_checkpoint = foreign_authority
+            .capture(&foreign_workspace, foreign_document)
+            .unwrap();
+
+        let report = foreign_authority.commit(
+            &mut workspace,
+            EditorPersistenceCommit {
+                checkpoint: local_checkpoint,
+                digest: EditorDocumentDigest::new(7, [0x5a; 32]),
+            },
+        );
+
+        assert!(!report.applied);
+        assert_eq!(
+            report.diagnostics.iter().next().unwrap().code().as_str(),
+            "tooling.workspace-persistence-authority-mismatch"
+        );
+        assert_eq!(
+            workspace.scene(document).unwrap().saved_revision(),
+            saved_revision
+        );
+
+        let report = authority.commit(
+            &mut workspace,
+            EditorPersistenceCommit {
+                checkpoint: foreign_checkpoint,
+                digest: EditorDocumentDigest::new(8, [0x6b; 32]),
+            },
+        );
+        assert!(!report.applied);
+        assert_eq!(
+            report.diagnostics.iter().next().unwrap().code().as_str(),
+            "tooling.workspace-persistence-authority-mismatch"
+        );
+        assert_eq!(
+            workspace.scene(document).unwrap().saved_revision(),
+            saved_revision
         );
     }
 

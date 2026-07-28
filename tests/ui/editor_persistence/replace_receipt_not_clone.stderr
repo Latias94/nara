@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `ReplaceReceipt` in the current scope
+ --> tests/ui/editor_persistence/replace_receipt_not_clone.rs:4:25
+  |
+4 |     let _copy = receipt.clone();
+  |                         ^^^^^ method not found in `ReplaceReceipt`

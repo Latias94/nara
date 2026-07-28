@@ -1,0 +1,30 @@
+error[E0624]: method `bind_opened_source_digest` is private
+  --> tests/ui/editor_persistence/workspace_saved_state_is_private.rs:12:23
+   |
+12 |       let _ = workspace.bind_opened_source_digest(document, digest);
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^ private method
+   |
+  ::: crates/nara_tooling/src/workspace.rs
+   |
+   | /     fn bind_opened_source_digest(
+   | |         &mut self,
+   | |         document: EditorDocumentId,
+   | |         digest: EditorDocumentDigest,
+   | |     ) -> EditorWorkspaceCommandReport {
+   | |_____________________________________- private method defined here
+
+error[E0624]: method `publish_reopened_session` is private
+  --> tests/ui/editor_persistence/workspace_saved_state_is_private.rs:14:23
+   |
+14 |       let _ = workspace.publish_reopened_session(Some(document), reopened, digest);
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^ private method
+   |
+  ::: crates/nara_tooling/src/workspace.rs
+   |
+   | /     fn publish_reopened_session(
+   | |         &mut self,
+   | |         document: Option<EditorDocumentId>,
+   | |         session: SceneAuthoringSession,
+   | |         digest: EditorDocumentDigest,
+   | |     ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
+   | |_________________________________________________________________________________- private method defined here

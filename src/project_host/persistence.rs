@@ -6,7 +6,7 @@ use std::{
 use nara_fs::{
     ContentDigest, DirectoryCapability, DurabilityProgress, ExpectedTarget, FileIdentity, FsError,
     LockMode, PublicationAtomicity, PublicationIdentityEvidence, RelativeComponent, RelativePath,
-    ReplaceReceipt, ReplaceSourceBinding, StageStatus,
+    ReplaceSourceBinding, StageStatus,
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
@@ -14,7 +14,7 @@ use nara_scene::{
     SceneFileLimits,
 };
 use nara_tooling::{
-    EditorDocumentDigest, EditorDocumentId, EditorPersistenceCheckpoint,
+    EditorDocumentDigest, EditorDocumentId, EditorPersistenceCheckpoint, EditorPersistenceCommit,
     EditorPersistenceFailureStage, EditorPersistenceRejection,
 };
 
@@ -37,6 +37,8 @@ pub(super) struct ScenePersistenceHost {
     uncertain: bool,
     #[cfg(test)]
     reject_next_valid_receipt: bool,
+    #[cfg(test)]
+    fail_next_save: Option<EditorPersistenceFailureStage>,
 }
 
 pub(super) struct OpenedScenePersistence {
@@ -46,17 +48,18 @@ pub(super) struct OpenedScenePersistence {
 }
 
 pub(super) struct SceneSaveCandidate {
-    pub document: EditorDocumentId,
-    pub revision: SceneAuthoringRevision,
+    pub checkpoint: EditorPersistenceCheckpoint,
     pub scene: SceneDocument,
 }
 
 pub(super) enum SceneSaveOutcome {
-    Saved(EditorPersistenceReceipt),
+    Saved {
+        commit: EditorPersistenceCommit,
+        evidence: EditorPersistenceReceipt,
+    },
     Rejected(EditorPersistenceRejection),
     Failed(EditorPersistenceFailureStage),
     PersistenceUncertain {
-        checkpoint: EditorPersistenceCheckpoint,
         evidence: EditorPersistenceReceipt,
     },
 }
@@ -79,6 +82,7 @@ pub struct EditorPersistenceReceipt {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
     digest: EditorDocumentDigest,
+    published_digest: Option<EditorDocumentDigest>,
     previous_identity: Option<FileIdentity>,
     candidate_identity: FileIdentity,
     published_identity: Option<FileIdentity>,
@@ -102,6 +106,11 @@ impl EditorPersistenceReceipt {
     #[must_use]
     pub const fn digest(self) -> EditorDocumentDigest {
         self.digest
+    }
+
+    #[must_use]
+    pub const fn published_digest(self) -> Option<EditorDocumentDigest> {
+        self.published_digest
     }
 
     #[must_use]
@@ -138,15 +147,6 @@ impl EditorPersistenceReceipt {
     pub const fn parent_directory_sync(self) -> StageStatus {
         self.parent_directory_sync
     }
-
-    #[must_use]
-    pub const fn checkpoint(self) -> EditorPersistenceCheckpoint {
-        EditorPersistenceCheckpoint {
-            document: self.document,
-            revision: self.revision,
-            digest: self.digest,
-        }
-    }
 }
 
 impl ScenePersistenceHost {
@@ -182,6 +182,8 @@ impl ScenePersistenceHost {
                 uncertain: false,
                 #[cfg(test)]
                 reject_next_valid_receipt: false,
+                #[cfg(test)]
+                fail_next_save: None,
             },
             session,
             digest: editor_digest(digest),
@@ -192,20 +194,18 @@ impl ScenePersistenceHost {
         if self.uncertain {
             return SceneSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile);
         }
-        let bytes = match encode_scene(self.encoding, &candidate.scene) {
+        #[cfg(test)]
+        if let Some(stage) = self.fail_next_save.take() {
+            return SceneSaveOutcome::Failed(stage);
+        }
+        let SceneSaveCandidate { checkpoint, scene } = candidate;
+        let bytes = match encode_scene(self.encoding, &scene) {
             Ok(bytes) => bytes,
             Err(stage) => return SceneSaveOutcome::Failed(stage),
         };
         if bytes.len() > self.limits.encoded_bytes().get() {
             return SceneSaveOutcome::Failed(EditorPersistenceFailureStage::Encode);
         }
-        let digest = ContentDigest::of_bytes(&bytes);
-        let checkpoint = EditorPersistenceCheckpoint {
-            document: candidate.document,
-            revision: candidate.revision,
-            digest: editor_digest(digest),
-        };
-
         let matrix = nara_fs::platform_capability_matrix();
         if matrix.publication_atomicity() != PublicationAtomicity::AtomicNameSwitch
             || matrix.replace_source_binding() == ReplaceSourceBinding::Unsupported
@@ -273,10 +273,14 @@ impl ScenePersistenceHost {
         let parent_directory_sync = self.parent.sync().map_or(StageStatus::Unknown, |receipt| {
             receipt.progress().parent_directory_synced()
         });
+        let expected_digest = ContentDigest::of_bytes(&bytes);
+        let written_digest = receipt.written_content_digest();
+        let published_digest = receipt.published_content_digest();
         let evidence = EditorPersistenceReceipt {
-            document: candidate.document,
-            revision: candidate.revision,
-            digest: checkpoint.digest,
+            document: checkpoint.document(),
+            revision: checkpoint.revision(),
+            digest: editor_digest(expected_digest),
+            published_digest: published_digest.map(editor_digest),
             previous_identity: receipt.previous_identity(),
             candidate_identity: receipt.candidate_identity(),
             published_identity: receipt.published_identity(),
@@ -286,21 +290,27 @@ impl ScenePersistenceHost {
             parent_directory_sync,
         };
 
-        let evidence_accepted = receipt_matches_required_evidence(receipt, self.observed_identity);
         #[cfg(test)]
-        let evidence_accepted =
-            evidence_accepted && !std::mem::take(&mut self.reject_next_valid_receipt);
-        if !evidence_accepted {
+        if std::mem::take(&mut self.reject_next_valid_receipt) {
             self.uncertain = true;
-            return SceneSaveOutcome::PersistenceUncertain {
-                checkpoint,
-                evidence,
-            };
+            return SceneSaveOutcome::PersistenceUncertain { evidence };
         }
+        if written_digest != expected_digest {
+            self.uncertain = true;
+            return SceneSaveOutcome::PersistenceUncertain { evidence };
+        }
+        let candidate_identity = receipt.candidate_identity();
+        let Some(commit) =
+            EditorPersistenceCommit::from_publication(checkpoint, self.observed_identity, receipt)
+        else {
+            self.uncertain = true;
+            return SceneSaveOutcome::PersistenceUncertain { evidence };
+        };
 
-        self.observed_identity = receipt.candidate_identity();
-        self.observed_digest = digest;
-        SceneSaveOutcome::Saved(evidence)
+        self.observed_identity = candidate_identity;
+        self.observed_digest = published_digest
+            .expect("an accepted persistence commit has published content evidence");
+        SceneSaveOutcome::Saved { commit, evidence }
     }
 
     pub(super) fn reopen(&self, registry: &ComponentRegistry) -> SceneReopenOutcome {
@@ -310,7 +320,8 @@ impl ScenePersistenceHost {
                 return match open_target_failure(error) {
                     SceneSaveOutcome::Rejected(reason) => SceneReopenOutcome::Rejected(reason),
                     SceneSaveOutcome::Failed(stage) => SceneReopenOutcome::Failed(stage),
-                    SceneSaveOutcome::Saved(_) | SceneSaveOutcome::PersistenceUncertain { .. } => {
+                    SceneSaveOutcome::Saved { .. }
+                    | SceneSaveOutcome::PersistenceUncertain { .. } => {
                         unreachable!()
                     }
                 };
@@ -339,6 +350,20 @@ impl ScenePersistenceHost {
         self.observed_identity = identity;
         self.observed_digest = digest;
         self.uncertain = false;
+    }
+
+    pub(super) fn mark_uncertain(&mut self) {
+        self.uncertain = true;
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_reject_next_valid_receipt(&mut self) {
+        self.reject_next_valid_receipt = true;
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
+        self.fail_next_save = Some(stage);
     }
 }
 
@@ -396,23 +421,6 @@ fn create_temporary(parent: &DirectoryCapability) -> Result<nara_fs::TemporaryFi
     })
 }
 
-fn receipt_matches_required_evidence(
-    receipt: ReplaceReceipt,
-    expected_previous: FileIdentity,
-) -> bool {
-    receipt.previous_identity() == Some(expected_previous)
-        && receipt.naming_is_atomic()
-        && receipt.published_identity() == Some(receipt.candidate_identity())
-        && matches!(
-            receipt.publication_identity_evidence(),
-            PublicationIdentityEvidence::HandleBoundCandidate
-                | PublicationIdentityEvidence::PostPublishObserved
-        )
-        && receipt.durability().data_synced() == StageStatus::Achieved
-        && receipt.durability().file_metadata_synced() == StageStatus::Achieved
-        && receipt.durability().name_published() == StageStatus::Achieved
-}
-
 fn open_target_failure(error: FsError) -> SceneSaveOutcome {
     match error {
         FsError::Io { ref source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
@@ -447,7 +455,8 @@ mod tests {
     use std::fs::OpenOptions;
 
     use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
-    use nara_scene::{SceneEntityId, SceneEntityRecord};
+    use nara_scene::{SceneAuthoringSession, SceneEntityId, SceneEntityRecord};
+    use nara_tooling::EditorWorkspace;
 
     static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
 
@@ -458,25 +467,28 @@ mod tests {
         let mut registry = ComponentRegistry::new();
         registry.freeze().unwrap();
         let opened = ScenePersistenceHost::open(&scenes, "startup.scene.json", &registry).unwrap();
-        let document = EditorDocumentId::from_raw(1);
-        let revision = opened.session.revision();
         let mut host = opened.host;
         let first = scene_with_entity("first");
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
+        let document = workspace
+            .open_scene_session(
+                "startup.scene.json",
+                SceneAuthoringSession::new(SceneDocument::default()),
+            )
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let revision = workspace.scene(document).unwrap().revision();
 
         host.reject_next_valid_receipt = true;
-        let SceneSaveOutcome::PersistenceUncertain {
-            checkpoint,
-            evidence,
-        } = host.save(SceneSaveCandidate {
-            document,
-            revision,
+        let SceneSaveOutcome::PersistenceUncertain { evidence } = host.save(SceneSaveCandidate {
+            checkpoint: authority.capture(&workspace, document).unwrap(),
             scene: first.clone(),
-        })
-        else {
+        }) else {
             panic!("a rejected post-publication receipt must be uncertain");
         };
-        assert_eq!(checkpoint.document, document);
-        assert_eq!(checkpoint.revision, revision);
+        assert_eq!(evidence.document(), document);
+        assert_eq!(evidence.revision(), revision);
         assert_eq!(
             evidence.publication_atomicity(),
             PublicationAtomicity::AtomicNameSwitch
@@ -490,8 +502,7 @@ mod tests {
 
         assert!(matches!(
             host.save(SceneSaveCandidate {
-                document,
-                revision,
+                checkpoint: authority.capture(&workspace, document).unwrap(),
                 scene: scene_with_entity("blind-retry"),
             }),
             SceneSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile)
@@ -514,11 +525,10 @@ mod tests {
         assert!(!host.uncertain);
         assert!(matches!(
             host.save(SceneSaveCandidate {
-                document,
-                revision,
+                checkpoint: authority.capture(&workspace, document).unwrap(),
                 scene: scene_with_entity("after-reconcile"),
             }),
-            SceneSaveOutcome::Saved(_)
+            SceneSaveOutcome::Saved { .. }
         ));
     }
 

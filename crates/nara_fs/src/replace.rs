@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    ConflictProtection, DurabilityProgress, FileCapability, FileIdentity, FsError,
+    ConflictProtection, ContentDigest, DurabilityProgress, FileCapability, FileIdentity, FsError,
     ParentAuthorizationTier, PublicationAtomicity, PublicationIdentityEvidence, RelativeComponent,
     ReplaceSourceBinding, capability::DirectoryInner, platform,
 };
@@ -22,6 +22,8 @@ pub struct TemporaryFile {
     name: RelativeComponent,
     file: FileCapability,
     durability: DurabilityProgress,
+    content_hasher: blake3::Hasher,
+    content_length: u64,
     cleanup_on_drop: bool,
 }
 
@@ -36,6 +38,8 @@ impl TemporaryFile {
             name,
             file,
             durability: DurabilityProgress::NONE,
+            content_hasher: blake3::Hasher::new(),
+            content_length: 0,
             cleanup_on_drop: true,
         }
     }
@@ -79,6 +83,13 @@ impl TemporaryFile {
         self.durability
     }
 
+    pub(crate) fn written_content_digest(&self) -> ContentDigest {
+        ContentDigest::from_parts(
+            self.content_length,
+            *self.content_hasher.clone().finalize().as_bytes(),
+        )
+    }
+
     pub(crate) fn mark_published(&mut self) {
         self.cleanup_on_drop = false;
     }
@@ -87,7 +98,13 @@ impl TemporaryFile {
 impl Write for TemporaryFile {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
         self.durability = DurabilityProgress::NONE;
-        self.file.file.write(buffer)
+        let written = self.file.file.write(buffer)?;
+        self.content_hasher.update(&buffer[..written]);
+        self.content_length = self
+            .content_length
+            .checked_add(written as u64)
+            .expect("temporary file content length fits in u64");
+        Ok(written)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -119,7 +136,7 @@ impl Drop for TemporaryFile {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ReplaceReceipt {
     previous: Option<FileIdentity>,
     candidate: FileIdentity,
@@ -130,6 +147,8 @@ pub struct ReplaceReceipt {
     conflict: ConflictProtection,
     source_binding: ReplaceSourceBinding,
     durability: DurabilityProgress,
+    written_content_digest: ContentDigest,
+    published_content_digest: Option<ContentDigest>,
 }
 
 impl ReplaceReceipt {
@@ -144,6 +163,8 @@ impl ReplaceReceipt {
         conflict: ConflictProtection,
         source_binding: ReplaceSourceBinding,
         durability: DurabilityProgress,
+        written_content_digest: ContentDigest,
+        published_content_digest: Option<ContentDigest>,
     ) -> Self {
         Self {
             previous,
@@ -155,56 +176,80 @@ impl ReplaceReceipt {
             conflict,
             source_binding,
             durability,
+            written_content_digest,
+            published_content_digest,
         }
     }
 
     #[must_use]
-    pub const fn previous_identity(self) -> Option<FileIdentity> {
+    pub const fn previous_identity(&self) -> Option<FileIdentity> {
         self.previous
     }
 
     #[must_use]
-    pub const fn candidate_identity(self) -> FileIdentity {
+    pub const fn candidate_identity(&self) -> FileIdentity {
         self.candidate
     }
 
     #[must_use]
-    pub const fn published_identity(self) -> Option<FileIdentity> {
+    pub const fn published_identity(&self) -> Option<FileIdentity> {
         self.observed_published
     }
 
     #[must_use]
-    pub const fn publication_identity_evidence(self) -> PublicationIdentityEvidence {
+    pub const fn publication_identity_evidence(&self) -> PublicationIdentityEvidence {
         self.identity_evidence
     }
 
     #[must_use]
-    pub const fn parent_authorization(self) -> ParentAuthorizationTier {
+    pub const fn parent_authorization(&self) -> ParentAuthorizationTier {
         self.parent_authorization
     }
 
     #[must_use]
-    pub const fn publication_atomicity(self) -> PublicationAtomicity {
+    pub const fn publication_atomicity(&self) -> PublicationAtomicity {
         self.publication
     }
 
     #[must_use]
-    pub const fn conflict_protection(self) -> ConflictProtection {
+    pub const fn conflict_protection(&self) -> ConflictProtection {
         self.conflict
     }
 
     #[must_use]
-    pub const fn source_binding(self) -> ReplaceSourceBinding {
+    pub const fn source_binding(&self) -> ReplaceSourceBinding {
         self.source_binding
     }
 
     #[must_use]
-    pub const fn durability(self) -> DurabilityProgress {
+    pub const fn durability(&self) -> DurabilityProgress {
         self.durability
     }
 
+    /// Digest of the exact byte stream accepted through this temporary-file capability.
     #[must_use]
-    pub const fn naming_is_atomic(self) -> bool {
+    pub const fn written_content_digest(&self) -> ContentDigest {
+        self.written_content_digest
+    }
+
+    /// Digest observed after publication through the target name and candidate identity.
+    ///
+    /// `None` means the published target could not be rebound, identified, or read within the
+    /// written byte bound. A caller must not treat the written digest as published evidence.
+    #[must_use]
+    pub const fn published_content_digest(&self) -> Option<ContentDigest> {
+        self.published_content_digest
+    }
+
+    /// Returns the digest only when post-publication observation matches the written byte stream.
+    #[must_use]
+    pub fn verified_content_digest(&self) -> Option<ContentDigest> {
+        self.published_content_digest
+            .filter(|published| *published == self.written_content_digest)
+    }
+
+    #[must_use]
+    pub const fn naming_is_atomic(&self) -> bool {
         matches!(self.publication, PublicationAtomicity::AtomicNameSwitch)
     }
 }

@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `EditorPersistenceCheckpoint` in the current scope
+  --> tests/ui/editor_persistence/checkpoint_not_clone.rs:12:33
+   |
+12 |     let _duplicate = checkpoint.clone();
+   |                                 ^^^^^ method not found in `EditorPersistenceCheckpoint`

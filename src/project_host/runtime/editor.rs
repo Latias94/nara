@@ -17,15 +17,16 @@ use nara_reflect::{
 use nara_scene::{SceneEntityId, SceneEntitySource};
 use nara_tooling::{
     __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId,
-    EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
-    EditorPersistenceRejection, EditorPersistenceRequestResult, EditorPersistenceResult,
-    EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
-    EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
-    EditorPlayView, EditorProjectView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
-    EditorRuntimeEditResult, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
-    EditorWorkspaceIntent, EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
-    EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
-    SceneApplyChangesComponentStatus, SceneApplyChangesRequest,
+    EditorPersistenceAuthority, EditorPersistenceCommand, EditorPersistenceFailureStage,
+    EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestResult,
+    EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
+    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
+    EditorPlayState, EditorPlayView, EditorProjectView, EditorRuntimeEditRejection,
+    EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorWorkspace, EditorWorkspaceCommand,
+    EditorWorkspaceCommandReport, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+    EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
+    EditorWorkspaceIntentResult, EditorWorkspaceIntentView, SceneApplyChangesComponentStatus,
+    SceneApplyChangesRequest,
 };
 use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 
@@ -387,14 +388,8 @@ impl fmt::Display for EditorProjectOpenError {
 
 impl std::error::Error for EditorProjectOpenError {}
 
-struct PendingSave {
-    document: EditorDocumentId,
-    revision: nara_scene::SceneAuthoringRevision,
-    scene: nara_scene::SceneDocument,
-}
-
 enum PendingPersistence {
-    Save(PendingSave),
+    Save(SceneSaveCandidate),
     Reopen { document: EditorDocumentId },
 }
 
@@ -452,6 +447,7 @@ struct PendingWorkspaceIntent {
 /// Concrete product Host for one Editor workspace and its future single Play owner.
 pub struct EditorProjectSession {
     workspace: EditorWorkspace,
+    persistence_authority: EditorPersistenceAuthority,
     scene_title: String,
     source_document: EditorDocumentId,
     plan: RuntimePlan,
@@ -550,7 +546,7 @@ impl EditorProjectSession {
         )
         .map_err(editor_persistence_open_error)?;
 
-        let mut workspace = EditorWorkspace::new();
+        let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
         let report = workspace
             .open_scene_session(startup.as_str(), opened.session)
             .map_err(|error| EditorProjectOpenError {
@@ -559,13 +555,22 @@ impl EditorProjectSession {
         let document = report
             .opened_document
             .expect("opening one editor scene publishes one document identity");
-        let binding = workspace.__bind_opened_source_digest(document, opened.digest);
-        debug_assert!(binding.applied);
+        let binding = persistence_authority.bind_opened_source_digest(
+            &mut workspace,
+            document,
+            opened.digest,
+        );
+        if !binding.applied {
+            return Err(editor_open_error(
+                "project.editor.persistence-authority-invalid",
+            ));
+        }
 
         let mut diagnostics = runtime_plan_selected_report(&plan);
         let _ = diagnostics.extend(report.diagnostics);
         Ok(Self {
             workspace,
+            persistence_authority,
             scene_title: startup.as_str().to_owned(),
             source_document: document,
             plan,
@@ -606,6 +611,16 @@ impl EditorProjectSession {
             .registry()
             .snapshot()
             .expect("the Editor plan registry is frozen")
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_reject_next_valid_persistence_receipt(&mut self) {
+        self.persistence.test_reject_next_valid_receipt();
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
+        self.persistence.test_fail_next_save(stage);
     }
 
     #[must_use]
@@ -923,11 +938,23 @@ impl EditorProjectSession {
                         EditorPersistenceRejection::NotDirty,
                     );
                 }
-                let revision = slot.revision();
-                self.pending_persistence = Some(PendingPersistence::Save(PendingSave {
-                    document: requested_document,
-                    revision,
-                    scene: slot.session().document().clone(),
+                let Some(checkpoint) = self
+                    .persistence_authority
+                    .capture(&self.workspace, requested_document)
+                else {
+                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
+                        document: Some(requested_document),
+                        reason: EditorPersistenceRejection::StaleRevision,
+                    });
+                    return EditorPersistenceRequestResult::Rejected(
+                        EditorPersistenceRejection::StaleRevision,
+                    );
+                };
+                let revision = checkpoint.revision();
+                let scene = slot.session().document().clone();
+                self.pending_persistence = Some(PendingPersistence::Save(SceneSaveCandidate {
+                    checkpoint,
+                    scene,
                 }));
                 self.persistence_operation = EditorPersistenceOperation::Saving {
                     document: requested_document,
@@ -1891,46 +1918,43 @@ impl EditorProjectSession {
         self.apply_changes_result = Some(EditorApplyChangesResult::Cancelled(pending.request));
     }
 
-    fn complete_save(&mut self, save: PendingSave) -> EditorPersistenceResult {
-        match self.persistence.save(SceneSaveCandidate {
-            document: save.document,
-            revision: save.revision,
-            scene: save.scene,
-        }) {
-            SceneSaveOutcome::Saved(receipt) => {
+    fn complete_save(&mut self, save: SceneSaveCandidate) -> EditorPersistenceResult {
+        let document = save.checkpoint.document();
+        match self.persistence.save(save) {
+            SceneSaveOutcome::Saved { commit, evidence } => {
                 let report = self
-                    .workspace
-                    .__apply_persistence_checkpoint(receipt.checkpoint());
+                    .persistence_authority
+                    .commit(&mut self.workspace, commit);
                 if !report.applied {
-                    return EditorPersistenceResult::Rejected {
-                        document: Some(save.document),
-                        reason: EditorPersistenceRejection::StaleRevision,
+                    self.persistence.mark_uncertain();
+                    self.last_persistence_receipt = Some(evidence);
+                    return EditorPersistenceResult::PersistenceUncertain {
+                        document: evidence.document(),
+                        revision: evidence.revision(),
+                        digest: evidence.digest(),
                     };
                 }
-                self.last_persistence_receipt = Some(receipt);
+                self.last_persistence_receipt = Some(evidence);
                 EditorPersistenceResult::Saved {
-                    document: receipt.document(),
-                    revision: receipt.revision(),
-                    digest: receipt.digest(),
+                    document: evidence.document(),
+                    revision: evidence.revision(),
+                    digest: evidence.digest(),
                 }
             }
             SceneSaveOutcome::Rejected(reason) => EditorPersistenceResult::Rejected {
-                document: Some(save.document),
+                document: Some(document),
                 reason,
             },
             SceneSaveOutcome::Failed(stage) => EditorPersistenceResult::Failed {
-                document: Some(save.document),
+                document: Some(document),
                 stage,
             },
-            SceneSaveOutcome::PersistenceUncertain {
-                checkpoint,
-                evidence,
-            } => {
+            SceneSaveOutcome::PersistenceUncertain { evidence } => {
                 self.last_persistence_receipt = Some(evidence);
                 EditorPersistenceResult::PersistenceUncertain {
-                    document: checkpoint.document,
-                    revision: checkpoint.revision,
-                    digest: checkpoint.digest,
+                    document: evidence.document(),
+                    revision: evidence.revision(),
+                    digest: evidence.digest(),
                 }
             }
         }
@@ -1950,10 +1974,12 @@ impl EditorProjectSession {
                 } = *opened;
                 let replacing_existing = self.workspace.scene(document).is_some();
                 let report = if replacing_existing {
-                    match self
-                        .workspace
-                        .__publish_reopened_session(Some(document), session, digest)
-                    {
+                    match self.persistence_authority.publish_reopened_session(
+                        &mut self.workspace,
+                        Some(document),
+                        session,
+                        digest,
+                    ) {
                         Ok(report) => report,
                         Err(_) => {
                             return EditorPersistenceResult::Rejected {
@@ -1986,10 +2012,17 @@ impl EditorProjectSession {
                     .revision
                     .expect("a reopened document reports its authoring revision");
                 if !replacing_existing {
-                    let binding = self
-                        .workspace
-                        .__bind_opened_source_digest(opened_document, digest);
-                    debug_assert!(binding.applied);
+                    let binding = self.persistence_authority.bind_opened_source_digest(
+                        &mut self.workspace,
+                        opened_document,
+                        digest,
+                    );
+                    if !binding.applied {
+                        return EditorPersistenceResult::Failed {
+                            document: Some(opened_document),
+                            stage: EditorPersistenceFailureStage::Validate,
+                        };
+                    }
                 }
                 self.persistence.commit_reopen(identity, content_digest);
                 self.source_document = opened_document;

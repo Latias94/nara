@@ -2,6 +2,7 @@
 
 use std::{
     fs::{self, File},
+    io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -11,23 +12,75 @@ use std::fs::OpenOptions;
 
 use nara::{
     fs::{
-        CapabilityRights, DirectoryCapability, HostCapabilityOptions, PublicationAtomicity,
-        TrustMode,
+        CapabilityRights, DirectoryCapability, ExpectedTarget, HostCapabilityOptions,
+        PublicationAtomicity, RelativeComponent, TrustMode,
     },
     project_host::{EditorProjectIntent, EditorProjectSession},
     scene::{
-        SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+        SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+        ScenePatchOperation,
     },
     tooling::{
-        EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceOperation,
-        EditorPersistenceRejection, EditorPersistenceRequestResult, EditorPersistenceResult,
-        EditorPlayCommand, EditorPlayRequestResult, EditorPlayState, EditorWorkspaceCommand,
-        EditorWorkspaceIntent, EditorWorkspaceIntentPhase, EditorWorkspaceIntentRequestResult,
-        EditorWorkspaceIntentResult,
+        EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceCommit,
+        EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestResult,
+        EditorPersistenceResult, EditorPlayCommand, EditorPlayRequestResult, EditorPlayState,
+        EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+        EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
     },
 };
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn persistence_authority_surface_is_opaque_and_linear() {
+    let tests = trybuild::TestCases::new();
+    tests.compile_fail("tests/ui/editor_persistence/authority_not_clone.rs");
+    tests.compile_fail("tests/ui/editor_persistence/checkpoint_not_clone.rs");
+    tests.compile_fail("tests/ui/editor_persistence/checkpoint_not_constructible.rs");
+    tests.compile_fail("tests/ui/editor_persistence/replace_receipt_not_clone.rs");
+    tests.compile_fail("tests/ui/editor_persistence/receiptless_commit.rs");
+    tests.compile_fail("tests/ui/editor_persistence/workspace_saved_state_is_private.rs");
+}
+
+#[test]
+fn persistence_commit_rejects_content_changed_outside_the_temporary_capability() {
+    let project = TestProject::new("persistence-content-evidence");
+    let target_path = project.root.join("publication.scene");
+    let temporary_path = project.root.join("publication.tmp");
+    fs::write(&target_path, b"old").unwrap();
+    let capability = project.capability();
+    let target = RelativeComponent::new("publication.scene").unwrap();
+    let temporary_name = RelativeComponent::new("publication.tmp").unwrap();
+    let previous = capability.open_child_file(&target).unwrap();
+    let mut temporary = capability.create_temp(&temporary_name).unwrap();
+    temporary.write_all(b"intended").unwrap();
+    temporary.sync().unwrap();
+    fs::write(&temporary_path, b"tampered").unwrap();
+    let receipt = capability
+        .replace_temp(
+            temporary,
+            &target,
+            ExpectedTarget::Identity(previous.identity()),
+        )
+        .unwrap();
+
+    let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
+    let document = workspace
+        .open_scene_session(
+            "publication.scene",
+            SceneAuthoringSession::new(SceneDocument::default()),
+        )
+        .unwrap()
+        .opened_document
+        .unwrap();
+    let checkpoint = authority.capture(&workspace, document).unwrap();
+
+    assert!(
+        EditorPersistenceCommit::from_publication(checkpoint, previous.identity(), receipt)
+            .is_none()
+    );
+    assert_eq!(fs::read(target_path).unwrap(), b"tampered");
+}
 
 #[test]
 fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_bytes() {
@@ -92,6 +145,7 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
         receipt.published_identity(),
         Some(receipt.candidate_identity())
     );
+    assert_eq!(receipt.published_digest(), Some(receipt.digest()));
 
     assert_eq!(
         editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
@@ -152,6 +206,8 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
     let document = editor.workspace().active_document().unwrap();
+    let saved_revision = editor.workspace().scene(document).unwrap().saved_revision();
+    let saved_digest = editor.workspace().scene(document).unwrap().saved_digest();
     assert!(
         editor
             .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
@@ -184,7 +240,10 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
             reason: EditorPersistenceRejection::TargetChanged,
         })
     );
-    assert!(editor.workspace().scene(document).unwrap().is_dirty());
+    let slot = editor.workspace().scene(document).unwrap();
+    assert_eq!(slot.saved_revision(), saved_revision);
+    assert_eq!(slot.saved_digest(), saved_digest);
+    assert!(slot.is_dirty());
     let disk = fs::read_to_string(project.scene_path()).unwrap();
     assert!(disk.contains("external"));
     assert!(!disk.contains("local"));
