@@ -12,7 +12,6 @@ use nara_ecs::Component;
 use nara_ecs::schedule::IntoScheduleConfigs;
 use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_reflect::ComponentRegistry;
 use nara_render::RenderTarget;
 
 pub use crate::codec::register_ui_components;
@@ -263,15 +262,12 @@ impl Plugin for UiPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        UI_SCHEMA_PROVIDER
-            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
-            .map_err(|error| {
-                PluginError::component_registration(
-                    UI_PLUGIN_ID,
-                    UI_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })?;
+        nara_reflect::register_schema_provider_for_plugin(
+            app,
+            UI_PLUGIN_ID,
+            UI_SCHEMA_PROVIDER_ID.as_str(),
+            &UI_SCHEMA_PROVIDER,
+        )?;
         app.init_resource::<ComputedUiLayouts>()?;
         app.init_resource::<UiInteractionState>()?;
         app.add_systems(

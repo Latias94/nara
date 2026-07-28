@@ -572,7 +572,9 @@ fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
         AppRunError::Plugin { .. } => "plugin",
         AppRunError::Runner { .. } => "runner",
         AppRunError::RunnerTeardown { .. } => "runner-teardown",
+        AppRunError::RunnerAuthority { .. } => "runner-authority",
         AppRunError::Time { .. } => "time",
+        AppRunError::DirectRuntime { .. } => "direct-runtime",
         AppRunError::ManagedRuntime { .. } => "managed-runtime",
         AppRunError::Shutdown { .. } => "shutdown",
     };
@@ -581,7 +583,7 @@ fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
         "Desktop project runner failed",
         reason,
     );
-    let diagnostic = match managed_runtime_fault(error) {
+    let diagnostic = match runtime_fault(error) {
         Some((kind, source)) => {
             let diagnostic =
                 attach_identifier(diagnostic, "fault-kind", runtime_fault_kind_id(kind));
@@ -593,13 +595,17 @@ fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-fn managed_runtime_fault(error: &AppRunError) -> Option<(RuntimeFaultKind, &'static str)> {
+fn runtime_fault(error: &AppRunError) -> Option<(RuntimeFaultKind, &'static str)> {
     match error {
-        AppRunError::ManagedRuntime { kind, fault_source } => Some((*kind, *fault_source)),
+        AppRunError::DirectRuntime { kind, fault_source }
+        | AppRunError::ManagedRuntime { kind, fault_source } => Some((*kind, *fault_source)),
         AppRunError::RunnerTeardown { prior, teardown } => {
-            managed_runtime_fault(prior).or_else(|| managed_runtime_fault(teardown))
+            runtime_fault(prior).or_else(|| runtime_fault(teardown))
         }
-        AppRunError::Shutdown { prior, .. } => prior.as_deref().and_then(managed_runtime_fault),
+        AppRunError::RunnerAuthority { runner, authority } => {
+            runtime_fault(authority).or_else(|| runtime_fault(runner))
+        }
+        AppRunError::Shutdown { prior, .. } => prior.as_deref().and_then(runtime_fault),
         AppRunError::Plugin { .. } | AppRunError::Runner { .. } | AppRunError::Time { .. } => None,
     }
 }

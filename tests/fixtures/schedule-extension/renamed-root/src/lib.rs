@@ -9,7 +9,10 @@ mod tests {
     };
 
     use engine::{
-        app::{App, CoreStage, FixedTime, FixedUpdateSet, RuntimeFaultKind, RuntimeFaultReporter},
+        app::{
+            App, AppRunError, CoreStage, FixedTime, FixedUpdateSet, RuntimeFaultKind,
+            RuntimeFaultReporter,
+        },
         ecs::{
             Commands, Component, Query, Res, ResMut, Resource, ScheduleLabel, SystemSet,
             error::{BevyError, ErrorContext, FallbackErrorHandler},
@@ -316,7 +319,16 @@ mod tests {
             .submit(submission(1))
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let first_error = app
+            .run_once(FixedTime::DEFAULT_TIMESTEP)
+            .expect_err("the acknowledgement fault must cross the direct runtime boundary");
+        assert_eq!(
+            first_error,
+            AppRunError::DirectRuntime {
+                kind: RuntimeFaultKind::GameplayLifecycle,
+                fault_source: "nara.gameplay.fixed-acknowledge",
+            }
+        );
 
         let trace = app.world().resource::<DomainFaultTrace>();
         assert_eq!(trace.consume, [(Some(1), 1)]);
@@ -335,7 +347,10 @@ mod tests {
         assert_eq!(fault.kind(), RuntimeFaultKind::GameplayLifecycle);
         assert_eq!(fault.source(), "nara.gameplay.fixed-acknowledge");
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let sticky_error = app
+            .run_once(FixedTime::DEFAULT_TIMESTEP)
+            .expect_err("the direct runtime fault must remain sticky");
+        assert_eq!(sticky_error, first_error);
 
         let trace = app.world().resource::<DomainFaultTrace>();
         assert_eq!(trace.consume, [(Some(1), 1)]);

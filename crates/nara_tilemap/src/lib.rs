@@ -504,12 +504,12 @@ impl Plugin for TilemapPlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<Assets<TileSet>>()?;
         let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
-        TILEMAP_SCHEMA_PROVIDER
-            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
-            .map_err(|error| {
-                PluginError::component_registration(TILEMAP_PLUGIN_ID, component_id.as_str(), error)
-            })?;
-        Ok(())
+        nara_reflect::register_schema_provider_for_plugin(
+            app,
+            TILEMAP_PLUGIN_ID,
+            component_id.as_str(),
+            &TILEMAP_SCHEMA_PROVIDER,
+        )
     }
 }
 

@@ -11,7 +11,7 @@ use nara_fs::{DirectoryCapability, RelativePath};
 use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandPlugin};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentRegistry, ComponentSchemaProviderDefinition,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, component_registry,
     report_component_registry_authority_fault,
 };
 use nara_scene::{SceneEntityId, SceneEntitySource};
@@ -174,9 +174,9 @@ fn apply_editor_runtime_edit(world: &mut World) {
             });
             return;
         }
-        let registry = world
-            .resource::<ComponentRegistry>()
-            .snapshot()
+        let registry = component_registry(world)
+            .ok_or(())
+            .and_then(|registry| registry.snapshot().map_err(|_| ()))
             .map(ComponentRegistry::from_snapshot);
         let mut result = match registry {
             Ok(registry) => apply_runtime_edit(world, &registry, pending.request()),
@@ -611,6 +611,16 @@ impl EditorProjectSession {
             .registry()
             .snapshot()
             .expect("the Editor plan registry is frozen")
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_runtime_schema_snapshot(
+        &self,
+    ) -> Option<nara_reflect::ComponentRegistrySnapshot> {
+        self.runtime_host
+            .with_running_world(|world| component_registry(world)?.snapshot().ok())
+            .ok()
+            .flatten()
     }
 
     #[cfg(test)]

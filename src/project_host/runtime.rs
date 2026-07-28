@@ -27,7 +27,7 @@ use nara_ecs::{Mut, Resource, World};
 use nara_gameplay::{GameplayCommandQueue, GameplayCommandSubmission};
 use nara_image::ImageAsset;
 use nara_reflect::{
-    ComponentRegistry, ComponentRegistrySnapshot, SchemaCompositionFingerprint,
+    ComponentRegistrySnapshot, SchemaCompositionFingerprint, component_registry,
     validate_component_registry_authority,
 };
 use nara_scene::{SceneDocument, spawn_scene};
@@ -1058,7 +1058,7 @@ fn verify_runtime_registry_snapshot(
     world: &World,
     expected: &ComponentRegistrySnapshot,
 ) -> Result<(), HostFault> {
-    let registry = world.get_resource::<ComponentRegistry>().ok_or_else(|| {
+    let registry = component_registry(world).ok_or_else(|| {
         HostFault::new(single_error(
             "project.run.registry-missing",
             "Project runtime component registry is missing",

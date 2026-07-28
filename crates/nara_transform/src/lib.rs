@@ -98,16 +98,12 @@ impl Plugin for TransformPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.transform.Transform2d");
-        TRANSFORM_SCHEMA_PROVIDER
-            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
-            .map_err(|error| {
-                PluginError::component_registration(
-                    TRANSFORM_PLUGIN_ID,
-                    component_id.as_str(),
-                    error,
-                )
-            })?;
-        Ok(())
+        nara_reflect::register_schema_provider_for_plugin(
+            app,
+            TRANSFORM_PLUGIN_ID,
+            component_id.as_str(),
+            &TRANSFORM_SCHEMA_PROVIDER,
+        )
     }
 }
 
@@ -235,19 +231,51 @@ pub mod prelude {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_app::{PluginId, PluginLifecycleState};
+    use nara_app::{PluginCategory, PluginDeclaration, PluginId, PluginLifecycleState};
     use nara_reflect::ComponentRegistryPlugin;
+
+    const CONFLICTING_TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.test.transform-conflict");
+    const CONFLICTING_TRANSFORM_PROVIDER_ID: nara_app::PluginSchemaProviderId =
+        nara_app::PluginSchemaProviderId::new("nara.test.transform-conflict.components");
+    const CONFLICTING_TRANSFORM_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
+        nara_reflect::ComponentSchemaProviderDefinition::with_validation(
+            nara_reflect::ComponentSchemaOwnerId::new("nara.test.transform-conflict.components"),
+            CONFLICTING_TRANSFORM_PROVIDER_ID,
+            nara_reflect::ComponentSchemaProviderBindingId::new(
+                "nara.test.transform-conflict.native",
+                1,
+            ),
+            transform_schema_catalog,
+            validate_transform_components,
+            register_transform_components,
+        );
+    const CONFLICTING_TRANSFORM_DECLARATION: PluginDeclaration =
+        PluginDeclaration::new(CONFLICTING_TRANSFORM_PLUGIN_ID, PluginCategory::Runtime)
+            .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+            .provides_schema(&[CONFLICTING_TRANSFORM_PROVIDER_ID]);
+
+    struct ConflictingTransformPlugin;
+
+    impl Plugin for ConflictingTransformPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &CONFLICTING_TRANSFORM_DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            nara_reflect::register_schema_provider_for_plugin(
+                app,
+                CONFLICTING_TRANSFORM_PLUGIN_ID,
+                CONFLICTING_TRANSFORM_PROVIDER_ID.as_str(),
+                &CONFLICTING_TRANSFORM_PROVIDER,
+            )
+        }
+    }
 
     #[test]
     fn plugin_preflight_reports_component_conflicts_without_poisoning_app() {
-        let mut registry = ComponentRegistry::new();
-        register_transform_components(&mut registry)
-            .expect("component registration should succeed");
         let mut app = App::new();
-        app.insert_resource(registry)
-            .expect("app should accept the component registry");
-        app.add_plugin(ComponentRegistryPlugin)
-            .expect("registry owner should install");
+        app.add_plugins((ComponentRegistryPlugin, ConflictingTransformPlugin))
+            .expect("the conflicting provider should install through the registry owner");
 
         let error = app
             .add_plugin(TransformPlugin)

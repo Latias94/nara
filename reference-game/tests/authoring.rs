@@ -142,7 +142,7 @@ fn five_game_components_register_and_round_trip_through_public_api() {
     app.add_plugin(ReferenceGamePlugin).unwrap();
     let app = app.seal().unwrap();
 
-    let registry = app.world().resource::<ComponentRegistry>();
+    let registry = nara::reflect::component_registry(app.world()).unwrap();
     for id in [
         "reference_game.Player",
         "reference_game.Enemy",

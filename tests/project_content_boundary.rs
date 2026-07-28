@@ -369,6 +369,7 @@ fn project_content_source_has_no_ambient_or_runtime_authority() {
     }
 
     assert_snapshot_field_allowlist(&sources);
+    assert_snapshot_public_api_allowlist(&sources);
 }
 
 #[test]
@@ -583,6 +584,49 @@ fn snapshot_type_identity_guard_rejects_renamed_authority() {
     assert!(rejected.is_err());
 }
 
+#[test]
+fn snapshot_method_allowlist_rejects_unreviewed_surface() {
+    let syntax = syn::parse_file(
+        r#"
+            pub struct ProjectContentSnapshot;
+            impl ProjectContentSnapshot {
+                pub fn startup_scene(&self) -> &SceneDocument { todo!() }
+                pub fn authority(&self) -> ComponentRegistrySnapshotWitness { todo!() }
+            }
+        "#,
+    )
+    .unwrap();
+
+    let rejected = std::panic::catch_unwind(|| {
+        assert_snapshot_inherent_method_allowlist(
+            std::path::Path::new("hostile.rs"),
+            &syntax.items,
+            &[("startup_scene", "&SceneDocument")],
+        );
+    });
+
+    assert!(rejected.is_err());
+}
+
+#[test]
+fn snapshot_api_guard_allows_shared_world_independent_content() {
+    let syntax = syn::parse_file(
+        r#"
+            pub struct ProjectContentSnapshot;
+            impl ProjectContentSnapshot {
+                pub fn startup_scene(&self) -> Arc<SceneDocument> { todo!() }
+            }
+        "#,
+    )
+    .unwrap();
+
+    assert_snapshot_inherent_method_allowlist(
+        std::path::Path::new("allowed.rs"),
+        &syntax.items,
+        &[("startup_scene", "Arc<SceneDocument>")],
+    );
+}
+
 #[derive(Debug)]
 struct UseImport {
     path: Vec<String>,
@@ -759,13 +803,13 @@ fn collect_use_imports(syntax: &syn::File) -> Vec<UseImport> {
 fn flatten_use_tree(tree: &syn::UseTree, prefix: &mut Vec<String>, imports: &mut Vec<UseImport>) {
     match tree {
         syn::UseTree::Path(path) => {
-            prefix.push(path.ident.to_string());
+            prefix.push(identifier_text(&path.ident));
             flatten_use_tree(&path.tree, prefix, imports);
             prefix.pop();
         }
         syn::UseTree::Name(name) => {
             let mut path = prefix.clone();
-            path.push(name.ident.to_string());
+            path.push(identifier_text(&name.ident));
             normalize_self_import(&mut path);
             imports.push(UseImport {
                 path,
@@ -775,11 +819,11 @@ fn flatten_use_tree(tree: &syn::UseTree, prefix: &mut Vec<String>, imports: &mut
         }
         syn::UseTree::Rename(rename) => {
             let mut path = prefix.clone();
-            path.push(rename.ident.to_string());
+            path.push(identifier_text(&rename.ident));
             normalize_self_import(&mut path);
             imports.push(UseImport {
                 path,
-                alias: Some(rename.rename.to_string()),
+                alias: Some(identifier_text(&rename.rename)),
                 is_glob: false,
             });
         }
@@ -981,6 +1025,244 @@ fn assert_snapshot_field_allowlist(sources: &[(std::path::PathBuf, String, syn::
     }
 }
 
+fn assert_snapshot_public_api_allowlist(sources: &[(std::path::PathBuf, String, syn::File)]) {
+    const EXPECTED_METHODS: [(&str, &str); 9] = [
+        ("lineage", "ProjectSettingsLineage"),
+        ("schema_fingerprint", "SchemaCompositionFingerprint"),
+        ("revision", "ProjectContentRevision"),
+        ("content_digest", "ContentDigest"),
+        ("source_upgrade_required", "bool"),
+        ("startup_scene", "&SceneDocument"),
+        ("expanded_startup_scene", "&SceneDocument"),
+        ("prefabs", "&[ProjectPrefabContent]"),
+        ("images", "&[ProjectImageContent]"),
+    ];
+
+    let public_snapshots = sources
+        .iter()
+        .flat_map(|(path, _, syntax)| {
+            syntax.items.iter().filter_map(move |item| match item {
+                syn::Item::Struct(item) if item.ident == "ProjectContentSnapshot" => {
+                    Some((path, item))
+                }
+                _ => None,
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        public_snapshots.len(),
+        1,
+        "ProjectContentSnapshot must have one public wrapper definition"
+    );
+    let (snapshot_path, snapshot) = public_snapshots[0];
+    assert!(matches!(snapshot.vis, syn::Visibility::Public(_)));
+    let fields = snapshot.fields.iter().collect::<Vec<_>>();
+    assert_eq!(fields.len(), 1, "snapshot wrapper changed field count");
+    assert_eq!(
+        fields[0].ident.as_ref().map(ToString::to_string).as_deref(),
+        Some("inner")
+    );
+    assert!(matches!(fields[0].vis, syn::Visibility::Inherited));
+    assert_eq!(
+        type_shape(&fields[0].ty),
+        "Arc<ProjectContentSnapshotInner>"
+    );
+
+    let derives = snapshot
+        .attrs
+        .iter()
+        .filter(|attribute| attribute.path().is_ident("derive"))
+        .flat_map(|attribute| {
+            attribute
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+                )
+                .unwrap()
+        })
+        .map(|path| path_shape(&path))
+        .collect::<Vec<_>>();
+    assert_eq!(derives, ["Clone"]);
+
+    let snapshot_syntax = sources
+        .iter()
+        .find_map(|(path, _, syntax)| (path == snapshot_path).then_some(syntax))
+        .unwrap();
+    assert_snapshot_inherent_method_allowlist(
+        snapshot_path,
+        &snapshot_syntax.items,
+        &EXPECTED_METHODS,
+    );
+    let mut snapshot_trait_impls = Vec::new();
+    let mut loader_load_count = 0;
+    for (_, _, syntax) in sources {
+        for item in flattened_items(&syntax.items) {
+            let syn::Item::Impl(item_impl) = item else {
+                continue;
+            };
+            let self_shape = type_shape(&item_impl.self_ty);
+            if self_shape == "ProjectContentSnapshot" {
+                if let Some((_, trait_path, _)) = &item_impl.trait_ {
+                    snapshot_trait_impls.push(path_shape(trait_path));
+                }
+            } else if self_shape == "ProjectContentLoader" && item_impl.trait_.is_none() {
+                for impl_item in &item_impl.items {
+                    if let syn::ImplItem::Fn(method) = impl_item
+                        && method.sig.ident == "load"
+                    {
+                        assert_project_content_loader_load(method);
+                        loader_load_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    snapshot_trait_impls.sort();
+    assert_eq!(snapshot_trait_impls, ["fmt::Debug"]);
+    assert_eq!(
+        loader_load_count, 1,
+        "ProjectContentLoader::load must have one reviewed definition"
+    );
+    assert!(
+        snapshot_path.ends_with("project_content.rs"),
+        "ProjectContentSnapshot moved out of its owning module"
+    );
+}
+
+fn assert_snapshot_inherent_method_allowlist(
+    source_path: &std::path::Path,
+    items: &[syn::Item],
+    expected: &[(&str, &str)],
+) {
+    let mut actual = std::collections::BTreeMap::new();
+    for item in flattened_items(items) {
+        let syn::Item::Impl(item_impl) = item else {
+            continue;
+        };
+        if item_impl.trait_.is_some() || type_shape(&item_impl.self_ty) != "ProjectContentSnapshot"
+        {
+            continue;
+        }
+        for item in &item_impl.items {
+            let syn::ImplItem::Fn(method) = item else {
+                continue;
+            };
+            if !matches!(method.vis, syn::Visibility::Public(_)) {
+                continue;
+            }
+            assert_shared_receiver_only(source_path, &method.sig);
+            let return_shape = match &method.sig.output {
+                syn::ReturnType::Type(_, ty) => type_shape(ty),
+                syn::ReturnType::Default => "()".to_owned(),
+            };
+            assert!(
+                actual
+                    .insert(method.sig.ident.to_string(), return_shape)
+                    .is_none(),
+                "{} duplicates public ProjectContentSnapshot method {}",
+                source_path.display(),
+                method.sig.ident
+            );
+        }
+    }
+    let expected = expected
+        .iter()
+        .map(|(name, output)| ((*name).to_owned(), (*output).to_owned()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        actual,
+        expected,
+        "{} changed the reviewed ProjectContentSnapshot SDK",
+        source_path.display()
+    );
+}
+
+fn assert_shared_receiver_only(source_path: &std::path::Path, signature: &syn::Signature) {
+    assert!(signature.constness.is_none());
+    assert!(signature.asyncness.is_none());
+    assert!(signature.unsafety.is_none());
+    assert!(signature.abi.is_none());
+    assert!(signature.generics.params.is_empty());
+    assert!(signature.generics.where_clause.is_none());
+    assert!(signature.variadic.is_none());
+    let inputs = signature.inputs.iter().collect::<Vec<_>>();
+    assert_eq!(
+        inputs.len(),
+        1,
+        "{} changed parameters for snapshot method {}",
+        source_path.display(),
+        signature.ident
+    );
+    let syn::FnArg::Receiver(receiver) = inputs[0] else {
+        panic!("snapshot methods must use a shared receiver");
+    };
+    assert!(receiver.reference.is_some());
+    assert!(receiver.mutability.is_none());
+    assert!(receiver.colon_token.is_none());
+}
+
+fn assert_project_content_loader_load(method: &syn::ImplItemFn) {
+    assert!(method.sig.constness.is_none());
+    assert!(method.sig.asyncness.is_none());
+    assert!(method.sig.unsafety.is_none());
+    assert!(method.sig.abi.is_none());
+    assert!(method.sig.generics.params.is_empty());
+    assert!(method.sig.generics.where_clause.is_none());
+    assert!(method.sig.variadic.is_none());
+    let inputs = method.sig.inputs.iter().collect::<Vec<_>>();
+    assert_eq!(inputs.len(), 3);
+    assert!(matches!(
+        inputs[0],
+        syn::FnArg::Receiver(receiver)
+            if receiver.reference.is_some()
+                && receiver.mutability.is_none()
+                && receiver.colon_token.is_none()
+    ));
+    let argument_types = inputs[1..]
+        .iter()
+        .map(|input| match input {
+            syn::FnArg::Typed(input) => type_shape(&input.ty),
+            syn::FnArg::Receiver(_) => "<unexpected-receiver>".to_owned(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        argument_types,
+        ["&ProjectSettingsCandidate", "&RuntimePlan"]
+    );
+    let syn::ReturnType::Type(_, output) = &method.sig.output else {
+        panic!("ProjectContentLoader::load must return the bounded snapshot result");
+    };
+    assert_eq!(
+        type_shape(output),
+        "Result<ProjectContentSnapshot,ProjectContentError>"
+    );
+}
+
+fn flattened_items(items: &[syn::Item]) -> Vec<&syn::Item> {
+    fn collect<'a>(items: &'a [syn::Item], output: &mut Vec<&'a syn::Item>) {
+        for item in items {
+            output.push(item);
+            if let syn::Item::Mod(item_mod) = item
+                && let Some((_, nested)) = &item_mod.content
+            {
+                collect(nested, output);
+            }
+        }
+    }
+
+    let mut output = Vec::new();
+    collect(items, &mut output);
+    output
+}
+
+fn path_shape(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| identifier_text(&segment.ident))
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
 fn assert_snapshot_import_identities(source_path: &std::path::Path, syntax: &syn::File) {
     let expected_imports: [(&str, &[&str]); 8] = [
         ("Arc", &["std", "sync", "Arc"]),
@@ -1105,6 +1387,9 @@ fn type_shape(ty: &syn::Type) -> String {
             .collect::<Vec<_>>()
             .join("::"),
         syn::Type::Slice(slice) => format!("[{}]", type_shape(&slice.elem)),
+        syn::Type::Reference(reference) if reference.mutability.is_none() => {
+            format!("&{}", type_shape(&reference.elem))
+        }
         _ => "<unsupported-type>".to_owned(),
     }
 }

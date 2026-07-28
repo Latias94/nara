@@ -4,7 +4,7 @@ use std::{
     collections::BTreeSet,
     fmt::{self, Display, Formatter},
     num::NonZeroU32,
-    panic::{AssertUnwindSafe, catch_unwind},
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -176,8 +176,18 @@ pub enum AppRunError {
         prior: Box<AppRunError>,
         teardown: Box<AppRunError>,
     },
+    #[error("app runner and runtime authority both failed: runner={runner}; authority={authority}")]
+    RunnerAuthority {
+        runner: Box<AppRunError>,
+        authority: Box<AppRunError>,
+    },
     #[error("time frame planning failed: {error}")]
     Time { error: TimeFrameError },
+    #[error("direct app runtime faulted: kind={kind:?}, source={fault_source}")]
+    DirectRuntime {
+        kind: RuntimeFaultKind,
+        fault_source: &'static str,
+    },
     #[error("managed runtime faulted: kind={kind:?}, source={fault_source}")]
     ManagedRuntime {
         kind: RuntimeFaultKind,
@@ -215,6 +225,14 @@ impl AppRunError {
     }
 
     #[must_use]
+    pub fn runner_authority(runner: AppRunError, authority: AppRunError) -> Self {
+        Self::RunnerAuthority {
+            runner: Box::new(runner),
+            authority: Box::new(authority),
+        }
+    }
+
+    #[must_use]
     pub const fn time(error: TimeFrameError) -> Self {
         Self::Time { error }
     }
@@ -228,6 +246,14 @@ impl AppRunError {
     }
 
     #[must_use]
+    pub const fn direct_runtime(kind: RuntimeFaultKind, source: &'static str) -> Self {
+        Self::DirectRuntime {
+            kind,
+            fault_source: source,
+        }
+    }
+
+    #[must_use]
     pub const fn plugin_error(&self) -> Option<&PluginError> {
         match self {
             Self::Plugin { error, .. } => Some(error),
@@ -235,8 +261,13 @@ impl AppRunError {
                 Some(error) => Some(error),
                 None => teardown.plugin_error(),
             },
+            Self::RunnerAuthority { runner, authority } => match runner.plugin_error() {
+                Some(error) => Some(error),
+                None => authority.plugin_error(),
+            },
             Self::Runner { .. }
             | Self::Time { .. }
+            | Self::DirectRuntime { .. }
             | Self::ManagedRuntime { .. }
             | Self::Shutdown { .. } => None,
         }
@@ -250,7 +281,13 @@ impl AppRunError {
             Self::RunnerTeardown { prior, teardown } => prior
                 .plugin_failure_report()
                 .or_else(|| teardown.plugin_failure_report()),
-            Self::Runner { .. } | Self::Time { .. } | Self::ManagedRuntime { .. } => None,
+            Self::RunnerAuthority { runner, authority } => runner
+                .plugin_failure_report()
+                .or_else(|| authority.plugin_failure_report()),
+            Self::Runner { .. }
+            | Self::Time { .. }
+            | Self::DirectRuntime { .. }
+            | Self::ManagedRuntime { .. } => None,
         }
     }
 }
@@ -273,7 +310,7 @@ impl From<FixedTimeError> for AppRunError {
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq)]
 pub enum AppScheduleRunError {
     #[error("app plugin lifecycle prevents schedule execution: {0}")]
     Plugin(PluginError),
@@ -283,6 +320,8 @@ pub enum AppScheduleRunError {
     BuiltInSchedule,
     #[error("the requested schedule is not registered")]
     MissingSchedule,
+    #[error("runtime rejected custom schedule execution: {0}")]
+    Runtime(#[source] AppRunError),
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -1106,7 +1145,21 @@ struct InstalledPlugin {
     shutdown_complete: bool,
 }
 
+struct InstalledRuntimeAuthorityValidator {
+    plugin: PluginId,
+    validator: Arc<runtime::__RuntimeAuthorityValidator>,
+}
+
+struct RuntimeAuthorityBoundary {
+    app_identity: Arc<()>,
+    reporter: RuntimeFaultReporter,
+    generation: Option<RuntimeGeneration>,
+    error_handler: Option<ErrorHandler>,
+    validator: Option<Arc<runtime::__RuntimeAuthorityValidator>>,
+}
+
 pub struct App {
+    instance_identity: Arc<()>,
     world: World,
     schedules: Schedules,
     runner: Option<RunnerFn>,
@@ -1121,7 +1174,7 @@ pub struct App {
     runtime_fault_reporter: RuntimeFaultReporter,
     managed_runtime_generation: Option<RuntimeGeneration>,
     managed_runtime_error_handler: Option<ErrorHandler>,
-    managed_runtime_authority_validator: Option<Arc<runtime::__ManagedRuntimeAuthorityValidator>>,
+    runtime_authority_validator: Option<InstalledRuntimeAuthorityValidator>,
     pending_observers: Vec<Observer>,
     plugin_lifecycle: PluginLifecycleState,
     plugin_failure_report: Option<PluginFailureReport>,
@@ -1180,6 +1233,7 @@ impl App {
             );
 
         Self {
+            instance_identity: Arc::new(()),
             world,
             schedules,
             runner: None,
@@ -1194,7 +1248,7 @@ impl App {
             runtime_fault_reporter,
             managed_runtime_generation: None,
             managed_runtime_error_handler: None,
-            managed_runtime_authority_validator: None,
+            runtime_authority_validator: None,
             pending_observers: Vec::new(),
             plugin_lifecycle: PluginLifecycleState::Configuring,
             plugin_failure_report: None,
@@ -1232,25 +1286,27 @@ impl App {
         Ok(&mut self.world)
     }
 
-    /// Installs the one hidden managed-runtime authority validator owned by a domain plugin.
+    /// Installs the one hidden runtime authority validator owned by a domain plugin.
     ///
     /// This is product plumbing rather than a public extension bus. The callback is invoked at
-    /// managed schedule boundaries and receives the immutable World view plus the admitted
-    /// runtime generation. Domain state and fault ownership remain inside the registering crate.
+    /// App and managed schedule boundaries and receives the immutable World view plus an admitted
+    /// runtime generation when one exists. Domain state and fault ownership remain inside the
+    /// registering crate.
     #[doc(hidden)]
-    pub fn __install_managed_runtime_authority_validator(
+    pub fn __install_runtime_authority_validator(
         &mut self,
         plugin: PluginId,
-        validator: Arc<runtime::__ManagedRuntimeAuthorityValidator>,
+        validator: Arc<runtime::__RuntimeAuthorityValidator>,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_mutation_allowed()?;
-        if self.managed_runtime_authority_validator.is_some() {
+        if self.runtime_authority_validator.is_some() {
             return Err(PluginError::SetupFailed {
                 plugin,
-                message: "a managed runtime authority validator is already installed".to_owned(),
+                message: "a runtime authority validator is already installed".to_owned(),
             });
         }
-        self.managed_runtime_authority_validator = Some(validator);
+        self.runtime_authority_validator =
+            Some(InstalledRuntimeAuthorityValidator { plugin, validator });
         Ok(self)
     }
 
@@ -1393,6 +1449,13 @@ impl App {
         Ok(self.schedules.get_mut(schedule))
     }
 
+    /// Runs one registered custom schedule after sealing the App.
+    ///
+    /// The same sticky runtime-authority boundary used by built-in schedules is checked before and
+    /// after normal execution. A prior fault prevents every system in the requested schedule from
+    /// running. System panics keep Rust's unwind behavior. The post-run authority check still
+    /// records a sticky fault before the original panic resumes, so a caller that catches the
+    /// unwind cannot observe an apparently healthy App.
     pub fn run_schedule(
         &mut self,
         schedule: impl ScheduleLabel,
@@ -1412,11 +1475,22 @@ impl App {
         self.seal_internal().map_err(AppScheduleRunError::Plugin)?;
         self.execution_started = true;
         self.materialize_pending_observers_with_current_handler();
+        self.validate_runtime_authority_boundary()
+            .map_err(AppScheduleRunError::Runtime)?;
         let Some(schedule) = self.schedules.get_mut(schedule) else {
             return Err(AppScheduleRunError::MissingSchedule);
         };
-        schedule.run(&mut self.world);
-        Ok(())
+        let run_result = catch_unwind(AssertUnwindSafe(|| schedule.run(&mut self.world)));
+        let authority_result = self
+            .validate_runtime_authority_boundary()
+            .map_err(AppScheduleRunError::Runtime);
+        match run_result {
+            Ok(()) => authority_result,
+            Err(payload) => {
+                let _ = authority_result;
+                resume_unwind(payload)
+            }
+        }
     }
 
     pub fn set_runner(
@@ -1627,6 +1701,24 @@ impl App {
 
         if self.plugin_lifecycle == PluginLifecycleState::Finishing {
             if let Err(error) = self.validate_public_schedule_compatibility() {
+                self.shutdown_plugins_internal();
+                return Err(error);
+            }
+            let authority_failure = self.runtime_authority_validator.as_ref().and_then(|owner| {
+                (owner.validator)(&self.world, None)
+                    .err()
+                    .map(|fault| (owner.plugin, fault))
+            });
+            if let Some((plugin, fault)) = authority_failure {
+                let error = PluginError::SetupFailed {
+                    plugin,
+                    message: format!(
+                        "runtime authority validation failed: kind={:?}, source={}",
+                        fault.kind(),
+                        fault.source()
+                    ),
+                };
+                self.poison(plugin, PluginHook::Finish, error.clone());
                 self.shutdown_plugins_internal();
                 return Err(error);
             }
@@ -1892,7 +1984,25 @@ impl App {
             .runner
             .take()
             .unwrap_or_else(|| Box::new(default_runner));
-        let run_result = runner(&mut self);
+        let authority_boundary = self.capture_runtime_authority_boundary();
+        let run_result = match self.validate_runtime_authority_boundary_against(&authority_boundary)
+        {
+            Err(error) => Err(error),
+            Ok(()) => {
+                let runner_result = runner(&mut self);
+                match (
+                    runner_result,
+                    self.validate_runtime_authority_boundary_against(&authority_boundary),
+                ) {
+                    (result, Ok(())) => result,
+                    (Ok(_), Err(authority)) => Err(authority),
+                    (Err(runner), Err(authority)) if runner == authority => Err(runner),
+                    (Err(runner), Err(authority)) => {
+                        Err(AppRunError::runner_authority(runner, authority))
+                    }
+                }
+            }
+        };
         match self.shutdown_plugins() {
             Ok(()) => run_result,
             Err(PluginShutdownError::Failure(report)) => Err(AppRunError::Shutdown {
@@ -1943,29 +2053,75 @@ impl App {
     }
 
     fn run_managed_schedule(&mut self, schedule: impl ScheduleLabel) -> Result<(), AppRunError> {
-        let generation = self.managed_runtime_generation;
-        if let Some(generation) = generation {
-            runtime::validate_managed_fault_boundary(
-                &self.world,
-                &self.runtime_fault_reporter,
-                self.managed_runtime_error_handler,
-                generation,
-                self.managed_runtime_authority_validator.as_ref(),
-            )?;
-        }
+        self.validate_runtime_authority_boundary()?;
         if let Some(schedule) = self.schedules.get_mut(schedule) {
             schedule.run(&mut self.world);
         }
+        self.validate_runtime_authority_boundary()?;
+        Ok(())
+    }
+
+    fn validate_runtime_authority_boundary(&self) -> Result<(), AppRunError> {
+        self.validate_runtime_authority_boundary_parts(
+            &self.runtime_fault_reporter,
+            self.managed_runtime_generation,
+            self.managed_runtime_error_handler,
+            self.runtime_authority_validator
+                .as_ref()
+                .map(|owner| &owner.validator),
+        )
+    }
+
+    fn capture_runtime_authority_boundary(&self) -> RuntimeAuthorityBoundary {
+        RuntimeAuthorityBoundary {
+            app_identity: Arc::clone(&self.instance_identity),
+            reporter: self.runtime_fault_reporter.clone(),
+            generation: self.managed_runtime_generation,
+            error_handler: self.managed_runtime_error_handler,
+            validator: self
+                .runtime_authority_validator
+                .as_ref()
+                .map(|owner| Arc::clone(&owner.validator)),
+        }
+    }
+
+    fn validate_runtime_authority_boundary_against(
+        &self,
+        boundary: &RuntimeAuthorityBoundary,
+    ) -> Result<(), AppRunError> {
+        if !Arc::ptr_eq(&self.instance_identity, &boundary.app_identity) {
+            let fault = runtime::record_app_instance_authority_fault(&boundary.reporter);
+            return Err(match boundary.generation {
+                Some(_) => AppRunError::managed_runtime(fault.kind(), fault.source()),
+                None => AppRunError::direct_runtime(fault.kind(), fault.source()),
+            });
+        }
+        self.validate_runtime_authority_boundary_parts(
+            &boundary.reporter,
+            boundary.generation,
+            boundary.error_handler,
+            boundary.validator.as_ref(),
+        )
+    }
+
+    fn validate_runtime_authority_boundary_parts(
+        &self,
+        reporter: &RuntimeFaultReporter,
+        generation: Option<RuntimeGeneration>,
+        error_handler: Option<ErrorHandler>,
+        authority: Option<&Arc<runtime::__RuntimeAuthorityValidator>>,
+    ) -> Result<(), AppRunError> {
         if let Some(generation) = generation {
             runtime::validate_managed_fault_boundary(
                 &self.world,
-                &self.runtime_fault_reporter,
-                self.managed_runtime_error_handler,
+                reporter,
+                error_handler,
                 generation,
-                self.managed_runtime_authority_validator.as_ref(),
-            )?;
+                authority,
+            )
+        } else {
+            runtime::validate_direct_authority_boundary(&self.world, reporter, authority)
         }
-        Ok(())
     }
 
     pub(crate) fn validate_managed_runtime_authority(&self) -> Result<(), runtime::RuntimeFault> {
@@ -1977,7 +2133,9 @@ impl App {
             &self.runtime_fault_reporter,
             self.managed_runtime_error_handler,
             generation,
-            self.managed_runtime_authority_validator.as_ref(),
+            self.runtime_authority_validator
+                .as_ref()
+                .map(|owner| &owner.validator),
         )
     }
 
@@ -2001,6 +2159,7 @@ impl App {
         paused_stages_only: bool,
     ) -> Result<AppFrameOutcome, AppRunError> {
         debug_assert!(self.started, "managed frames require completed startup");
+        self.validate_runtime_authority_boundary()?;
 
         let frame_started_at = Instant::now();
         let time_frame_plan =
@@ -2057,6 +2216,7 @@ impl App {
         real_delta: Duration,
     ) -> Result<AppFrameOutcome, AppRunError> {
         debug_assert!(self.started, "exact stepping requires completed startup");
+        self.validate_runtime_authority_boundary()?;
         required_frame_resource::<RuntimeTimeSettings>(
             &self.world,
             TimeFrameResource::RuntimeTimeSettings,
@@ -2113,6 +2273,9 @@ impl App {
     /// Startup is a committed one-time lifecycle phase. The frame clock plan is built from the
     /// resources left by startup; a planning failure does not roll startup back or run it again,
     /// but it commits no clock state, runs no core schedule, and does not clear frame trackers.
+    /// Runtime faults reported during a schedule return [`AppRunError::DirectRuntime`] at that
+    /// schedule boundary and prevent later schedules from running. Already completed lifecycle
+    /// work is not rolled back; the sticky fault rejects every later frame before new work begins.
     pub fn run_once(&mut self, real_delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
         self.complete_startup_once()?;
         self.run_frame_transaction(real_delta, false)
@@ -2179,6 +2342,9 @@ mod tests {
         removed: usize,
         fixed_runs: usize,
     }
+
+    #[derive(Debug, Default, Resource)]
+    struct ExactStepAuthorityRevision(u64);
 
     #[derive(Debug, Component)]
     struct Spawned;
@@ -2779,6 +2945,80 @@ mod tests {
         );
         assert!(runtime.world().removed::<Tracked>().next().is_none());
         assert!(runtime.world().get_entity(paused_removed_entity).is_ok());
+    }
+
+    #[test]
+    fn exact_step_rejects_authority_drift_before_committing_time_state() {
+        const AUTHORITY_PLUGIN_ID: PluginId = PluginId::new("nara.test.exact-step-authority");
+
+        let mut app = App::new();
+        app.insert_resource(ExactStepAuthorityRevision::default())
+            .unwrap();
+        app.__install_runtime_authority_validator(
+            AUTHORITY_PLUGIN_ID,
+            Arc::new(|world, _generation| {
+                if world
+                    .get_resource::<ExactStepAuthorityRevision>()
+                    .is_some_and(|revision| revision.0 == 0)
+                {
+                    Ok(())
+                } else {
+                    Err(RuntimeFault::engine(
+                        RuntimeFaultKind::RuntimeAuthority,
+                        "nara.test.exact-step-authority",
+                    ))
+                }
+            }),
+        )
+        .unwrap();
+        let candidate = RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                app.seal().unwrap(),
+                RuntimeObligationLedger::new(),
+                RuntimeClosePolicy::default(),
+            )
+            .unwrap();
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Pause),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(runtime.state(), RuntimeState::Paused);
+
+        let real_time = *runtime.world().resource::<RealTime>();
+        let virtual_time = *runtime.world().resource::<VirtualTime>();
+        let fixed_time = *runtime.world().resource::<FixedTime>();
+        let frame_status = *runtime.world().resource::<RuntimeFrameStatus>();
+        runtime
+            .world_mut_for_tests()
+            .resource_mut::<ExactStepAuthorityRevision>()
+            .0 = 1;
+        let ticket = match runtime.request_control(RuntimeControl::StepFixedTick) {
+            RuntimeControlRequestResult::Accepted(ticket) => ticket,
+            RuntimeControlRequestResult::Rejected(rejection) => {
+                panic!("paused runtime rejected exact step: {rejection:?}")
+            }
+        };
+
+        let failure = runtime.drive(Duration::from_millis(7)).unwrap_err();
+
+        assert_eq!(failure.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
+        assert_eq!(runtime.state(), RuntimeState::Faulted);
+        assert_eq!(
+            runtime.control_status(ticket),
+            Some(RuntimeControlStatus::Failed(
+                RuntimeControlFailure::RuntimeFaulted
+            ))
+        );
+        assert_eq!(*runtime.world().resource::<RealTime>(), real_time);
+        assert_eq!(*runtime.world().resource::<VirtualTime>(), virtual_time);
+        assert_eq!(*runtime.world().resource::<FixedTime>(), fixed_time);
+        assert_eq!(
+            *runtime.world().resource::<RuntimeFrameStatus>(),
+            frame_status
+        );
     }
 
     #[test]

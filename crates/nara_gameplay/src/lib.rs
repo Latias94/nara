@@ -259,7 +259,8 @@ mod tests {
 
     use super::*;
     use nara_app::{
-        CoreStage, PluginError, RuntimeFaultKind, RuntimeFaultReporter, ScheduleCompatibilityError,
+        AppRunError, CoreStage, PluginError, RuntimeFaultKind, RuntimeFaultReporter,
+        ScheduleCompatibilityError,
     };
     use nara_core::{ByteLimit, ItemLimit};
     use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
@@ -1309,7 +1310,16 @@ mod tests {
             .press(KeyCode::Enter)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let error = app
+            .run_once(Duration::ZERO)
+            .expect_err("local intent loss must cross the direct runtime boundary");
+        assert_eq!(
+            error,
+            AppRunError::DirectRuntime {
+                kind: RuntimeFaultKind::LocalIntentLoss,
+                fault_source: "nara.gameplay.local-action",
+            }
+        );
 
         let fault = app
             .world()
@@ -1485,7 +1495,16 @@ mod tests {
         assert_eq!(stale_batch.len(), 1);
         app.world_mut().unwrap().insert_resource(stale_batch);
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let error = app
+            .run_once(FixedTime::DEFAULT_TIMESTEP)
+            .expect_err("the stale batch must cross the direct runtime boundary");
+        assert_eq!(
+            error,
+            AppRunError::DirectRuntime {
+                kind: RuntimeFaultKind::GameplayLifecycle,
+                fault_source: "nara.gameplay.fixed-admit",
+            }
+        );
 
         assert!(app.world().resource::<CommandsByTick>().0.is_empty());
         assert!(app.world().resource::<BatchLifecycle>().0.is_empty());

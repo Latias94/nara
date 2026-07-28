@@ -14,7 +14,7 @@ use nara_ecs::{
         PersistentComponentMetadataError, register_persistent_component,
         validate_persistent_component_registration, validate_registered_persistent_component_apply,
     },
-    Component, Entity, Resource, World,
+    Component, Entity, World,
     component::ComponentId,
 };
 
@@ -630,11 +630,6 @@ enum RegistryState {
     Transitioning,
 }
 
-#[derive(Resource)]
-#[component(
-    on_insert = crate::plugin::record_component_registry_structure_change,
-    on_discard = crate::plugin::record_component_registry_structure_change
-)]
 pub struct ComponentRegistry {
     state: RegistryState,
     instance_token: Arc<()>,

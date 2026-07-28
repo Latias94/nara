@@ -4,16 +4,13 @@ use std::{
         Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    time::Duration,
 };
 
 use nara::{
     app::{
-        AddPluginsError, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
-        PluginError, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
-        PluginProductCapability, PluginSchemaProviderId, RuntimeAdmissionReservation,
-        RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeFaultKind,
-        RuntimeObligationLedger,
+        AddPluginsError, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError,
+        PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
+        PluginProductCapability, PluginSchemaProviderId, RuntimeCandidateRetirementState,
     },
     fs::{FileCapability, TrustMode},
     project::ProductCapability,
@@ -283,15 +280,11 @@ impl Plugin for CountedSchemaProviderPlugin {
         &self,
         context: &nara::app::PluginPreflightContext<'_>,
     ) -> Result<(), PluginError> {
-        let registry = context
-            .get_structural_resource::<ComponentRegistry>()
-            .ok_or_else(|| {
-                PluginError::component_registration(
-                    TEST_COUNTED_SCHEMA_PLUGIN_ID,
-                    TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
-                    "component registry unavailable",
-                )
-            })?;
+        let registry = nara::reflect::registry_for_plugin_preflight(
+            context,
+            TEST_COUNTED_SCHEMA_PLUGIN_ID,
+            TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+        )?;
         counted_schema_provider()
             .preflight(registry)
             .map_err(|error| {
@@ -304,16 +297,12 @@ impl Plugin for CountedSchemaProviderPlugin {
     }
 
     fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
-        let mut registry = app.world_mut()?.resource_mut::<ComponentRegistry>();
-        counted_schema_provider()
-            .register_or_validate_into(&mut registry)
-            .map_err(|error| {
-                PluginError::component_registration(
-                    TEST_COUNTED_SCHEMA_PLUGIN_ID,
-                    TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })
+        nara::reflect::register_schema_provider_for_plugin(
+            app,
+            TEST_COUNTED_SCHEMA_PLUGIN_ID,
+            TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+            &counted_schema_provider(),
+        )
     }
 }
 
@@ -330,15 +319,11 @@ impl Plugin for ReceiptValidatingSchemaProviderPlugin {
         &self,
         context: &nara::app::PluginPreflightContext<'_>,
     ) -> Result<(), PluginError> {
-        let registry = context
-            .get_structural_resource::<ComponentRegistry>()
-            .ok_or_else(|| {
-                PluginError::component_registration(
-                    TEST_SCHEMA_PLUGIN_ID,
-                    TEST_SCHEMA_PROVIDER_ID.as_str(),
-                    "component registry unavailable",
-                )
-            })?;
+        let registry = nara::reflect::registry_for_plugin_preflight(
+            context,
+            TEST_SCHEMA_PLUGIN_ID,
+            TEST_SCHEMA_PROVIDER_ID.as_str(),
+        )?;
         self.provider.preflight(registry).map_err(|error| {
             PluginError::component_registration(
                 TEST_SCHEMA_PLUGIN_ID,
@@ -349,15 +334,12 @@ impl Plugin for ReceiptValidatingSchemaProviderPlugin {
     }
 
     fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
-        self.provider
-            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
-            .map_err(|error| {
-                PluginError::component_registration(
-                    TEST_SCHEMA_PLUGIN_ID,
-                    TEST_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })
+        nara::reflect::register_schema_provider_for_plugin(
+            app,
+            TEST_SCHEMA_PLUGIN_ID,
+            TEST_SCHEMA_PROVIDER_ID.as_str(),
+            &self.provider,
+        )
     }
 }
 
@@ -456,7 +438,7 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
     );
 
     let app = first.plugin_plan().instantiate().unwrap();
-    let runtime_registry = app.world().resource::<ComponentRegistry>();
+    let runtime_registry = nara::reflect::component_registry(app.world()).unwrap();
     let runtime_fingerprint = runtime_registry
         .snapshot()
         .unwrap()
@@ -481,9 +463,8 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
         "the code-first registry recipe must not impersonate a snapshot-bound runtime plan"
     );
     let raw_app = raw_app.seal().unwrap();
-    let raw_snapshot = raw_app
-        .world()
-        .resource::<ComponentRegistry>()
+    let raw_snapshot = nara::reflect::component_registry(raw_app.world())
+        .unwrap()
         .snapshot()
         .unwrap();
     assert_eq!(
@@ -587,7 +568,7 @@ fn file_backed_schema_provider_callbacks_run_once_in_the_private_candidate() {
     );
 
     let app = plan.plugin_plan().instantiate().unwrap();
-    let registry = app.world().resource::<ComponentRegistry>();
+    let registry = nara::reflect::component_registry(app.world()).unwrap();
     assert!(registry.shares_snapshot(plan.schema_validation().snapshot()));
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
@@ -708,7 +689,7 @@ fn code_first_schema_provider_builds_and_freezes_once_without_a_host() {
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
 
     let app = app.seal().unwrap();
-    let registry = app.world().resource::<ComponentRegistry>();
+    let registry = nara::reflect::component_registry(app.world()).unwrap();
     assert!(registry.is_frozen());
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     nara::reflect::validate_component_registry_authority(app.world()).unwrap();
@@ -801,52 +782,6 @@ fn validation_rejection_and_panic_have_direct_and_file_backed_parity() {
         assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
         assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 0);
     }
-}
-
-#[test]
-fn code_first_runtime_faults_when_the_registry_is_rewrapped_with_its_same_snapshot() {
-    let mut app = nara::app::App::new();
-    app.add_plugins(nara::reflect::ComponentRegistryPlugin)
-        .unwrap();
-    app.add_systems(CoreStage::Last, rewrap_code_first_registry)
-        .unwrap();
-    let candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
-    let mut runtime = candidate.complete_startup().unwrap().promote();
-
-    let error = runtime.drive(Duration::ZERO).unwrap_err();
-
-    assert_eq!(error.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
-    assert_eq!(runtime.state(), nara::app::RuntimeState::Faulted);
-}
-
-#[test]
-fn code_first_runtime_faults_when_the_same_registry_is_removed_and_reinserted() {
-    let mut app = nara::app::App::new();
-    app.add_plugins(nara::reflect::ComponentRegistryPlugin)
-        .unwrap();
-    app.add_systems(CoreStage::Last, reinsert_code_first_registry)
-        .unwrap();
-    let candidate = RuntimeAdmissionReservation::try_acquire()
-        .unwrap()
-        .admit(
-            app.seal().unwrap(),
-            RuntimeObligationLedger::new(),
-            RuntimeClosePolicy::default(),
-        )
-        .unwrap();
-    let mut runtime = candidate.complete_startup().unwrap().promote();
-
-    let error = runtime.drive(Duration::ZERO).unwrap_err();
-
-    assert_eq!(error.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
-    assert_eq!(runtime.state(), nara::app::RuntimeState::Faulted);
 }
 
 #[test]
@@ -1542,21 +1477,6 @@ fn register_empty_schema_provider(
     _registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     Ok(())
-}
-
-fn rewrap_code_first_registry(world: &mut nara::ecs::World) {
-    let snapshot = world
-        .resource::<ComponentRegistry>()
-        .snapshot()
-        .expect("the code-first registry is frozen before runtime execution");
-    world.insert_resource(ComponentRegistry::from_snapshot(snapshot));
-}
-
-fn reinsert_code_first_registry(world: &mut nara::ecs::World) {
-    let registry = world
-        .remove_resource::<ComponentRegistry>()
-        .expect("the code-first registry is installed before runtime execution");
-    world.insert_resource(registry);
 }
 
 fn counted_schema_provider() -> ComponentSchemaProviderDefinition {

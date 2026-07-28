@@ -15,7 +15,7 @@ use nara::{
     identity::EntityLookup,
     image::ImageImportLimits,
     prelude::{App, FixedTime, Resource, Vec2, World},
-    reflect::{COMPONENT_REGISTRY_PLUGIN_ID, ComponentRegistry},
+    reflect::COMPONENT_REGISTRY_PLUGIN_ID,
     scene::{SceneSpawnReport, SpawnedSceneInstance, spawn_scene},
     sprite::Sprite,
     tasks::{
@@ -513,9 +513,7 @@ fn prepare_manual_raw_app() -> Result<(App, LoadedProjectContent), ManualRawAppF
         if startup.status.fixed_steps != 0 {
             return Err(ManualRawAppBootError::UnexpectedStartupTick);
         }
-        let raw_snapshot = app
-            .world()
-            .get_resource::<ComponentRegistry>()
+        let raw_snapshot = nara::reflect::component_registry(app.world())
             .ok_or(ManualRawAppBootError::PluginPlanDrift)?
             .snapshot()
             .map_err(|_| ManualRawAppBootError::PluginPlanDrift)?;
@@ -579,9 +577,7 @@ fn spawn_snapshot_scene(
     app: &mut App,
     loaded: &LoadedProjectContent,
 ) -> Result<SceneSpawnReport, ManualRawAppBootError> {
-    let registry = app
-        .world()
-        .get_resource::<nara::reflect::ComponentRegistry>()
+    let registry = nara::reflect::component_registry(app.world())
         .ok_or(ManualRawAppBootError::SceneSpawn)?
         .snapshot()
         .map(nara::reflect::ComponentRegistry::from_snapshot)

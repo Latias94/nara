@@ -142,15 +142,12 @@ impl Plugin for HierarchyPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        HIERARCHY_SCHEMA_PROVIDER
-            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
-            .map_err(|error| {
-                PluginError::component_registration(
-                    HIERARCHY_PLUGIN_ID,
-                    HIERARCHY_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })?;
+        nara_reflect::register_schema_provider_for_plugin(
+            app,
+            HIERARCHY_PLUGIN_ID,
+            HIERARCHY_SCHEMA_PROVIDER_ID.as_str(),
+            &HIERARCHY_SCHEMA_PROVIDER,
+        )?;
         app.add_systems(CoreStage::PostUpdate, sync_children)?;
         Ok(())
     }

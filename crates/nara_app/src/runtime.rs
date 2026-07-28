@@ -37,11 +37,11 @@ static QUARANTINED_RUNTIME_OWNER_COUNT: AtomicUsize = AtomicUsize::new(0);
 static TOTAL_QUARANTINED_RUNTIME_OWNERS: AtomicU64 = AtomicU64::new(0);
 static TOTAL_REAPED_RUNTIME_OWNERS: AtomicU64 = AtomicU64::new(0);
 
-/// Hidden product plumbing for an engine-owned authority that must be checked at managed
+/// Hidden product plumbing for an engine-owned authority that must be checked at App and managed
 /// runtime safe points. This is intentionally one callback rather than a public event bus or a
 /// general extension registry; the owning domain keeps the identity and fault reporter it needs.
-pub type __ManagedRuntimeAuthorityValidator =
-    dyn Fn(&World, RuntimeGeneration) -> Result<(), RuntimeFault> + Send + Sync;
+pub type __RuntimeAuthorityValidator =
+    dyn Fn(&World, Option<RuntimeGeneration>) -> Result<(), RuntimeFault> + Send + Sync;
 
 #[derive(Debug, Default, Resource)]
 struct RuntimeFaultBridgeRevision(u64);
@@ -98,7 +98,7 @@ pub(crate) fn validate_managed_fault_boundary(
     reporter: &RuntimeFaultReporter,
     expected_handler: Option<ErrorHandler>,
     generation: RuntimeGeneration,
-    authority: Option<&Arc<__ManagedRuntimeAuthorityValidator>>,
+    authority: Option<&Arc<__RuntimeAuthorityValidator>>,
 ) -> Result<(), AppRunError> {
     validate_managed_runtime_authority(world, reporter, expected_handler, generation, authority)
         .map_err(|fault| AppRunError::managed_runtime(fault.kind(), fault.source()))
@@ -109,14 +109,14 @@ pub(crate) fn validate_managed_runtime_authority(
     reporter: &RuntimeFaultReporter,
     expected_handler: Option<ErrorHandler>,
     generation: RuntimeGeneration,
-    authority: Option<&Arc<__ManagedRuntimeAuthorityValidator>>,
+    authority: Option<&Arc<__RuntimeAuthorityValidator>>,
 ) -> Result<(), RuntimeFault> {
     if let Some(fault) = reporter.fault() {
         return Err(fault);
     }
     let fault = (world.get_resource::<RuntimeGeneration>() != Some(&generation))
         .then(runtime_fault_bridge_authority_fault)
-        .or_else(|| authority.and_then(|validator| validator(world, generation).err()))
+        .or_else(|| authority.and_then(|validator| validator(world, Some(generation)).err()))
         .or_else(|| {
             validate_runtime_fault_bridge_authority(world, reporter, expected_handler).err()
         });
@@ -124,6 +124,37 @@ pub(crate) fn validate_managed_runtime_authority(
         return Ok(());
     };
     let canonical = reporter.record_canonical(fault.clone());
+    Err(canonical)
+}
+
+pub(crate) fn validate_direct_authority_boundary(
+    world: &World,
+    reporter: &RuntimeFaultReporter,
+    authority: Option<&Arc<__RuntimeAuthorityValidator>>,
+) -> Result<(), AppRunError> {
+    validate_direct_runtime_authority(world, reporter, authority)
+        .map_err(|fault| AppRunError::direct_runtime(fault.kind(), fault.source()))
+}
+
+pub(crate) fn record_app_instance_authority_fault(reporter: &RuntimeFaultReporter) -> RuntimeFault {
+    reporter.record_canonical(RuntimeFault::engine(
+        RuntimeFaultKind::RuntimeAuthority,
+        "nara.app.instance-authority",
+    ))
+}
+
+fn validate_direct_runtime_authority(
+    world: &World,
+    reporter: &RuntimeFaultReporter,
+    authority: Option<&Arc<__RuntimeAuthorityValidator>>,
+) -> Result<(), RuntimeFault> {
+    if let Some(fault) = reporter.fault() {
+        return Err(fault);
+    }
+    let Some(fault) = authority.and_then(|validator| validator(world, None).err()) else {
+        return Ok(());
+    };
+    let canonical = reporter.record_canonical(fault);
     Err(canonical)
 }
 

@@ -44,7 +44,6 @@ use nara::{
         ButtonInput, InputPlugin, KeyCode, MouseButton, apply_keyboard_driver_input,
         apply_mouse_driver_input,
     },
-    reflect::{ComponentRegistry, ComponentRegistryPlugin},
     tasks::{
         TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
         TaskPools, TaskShutdownPolicy, TaskSpawnRequest, TaskTerminal,
@@ -2892,14 +2891,6 @@ impl __RuntimeDriverPort for RetirementMarker {
     }
 }
 
-fn rewrap_component_registry(world: &mut World) {
-    let snapshot = world
-        .resource::<ComponentRegistry>()
-        .snapshot()
-        .expect("component registry freezes before runtime frame execution");
-    world.insert_resource(ComponentRegistry::from_snapshot(snapshot));
-}
-
 #[test]
 fn faulted_runtime_keeps_typed_retirement_ports_available() {
     let mut app = configured_app(FixedTime::default());
@@ -2936,15 +2927,14 @@ fn faulted_runtime_keeps_typed_retirement_ports_available() {
 }
 
 #[test]
-fn registry_authority_fault_does_not_block_typed_retirement_ports() {
+fn runtime_authority_fault_does_not_block_typed_retirement_ports() {
     let mut app = configured_app(FixedTime::default());
-    app.add_plugin(ComponentRegistryPlugin)
-        .unwrap()
-        .insert_resource(RetirementMarker(0))
-        .unwrap()
-        .add_systems(CoreStage::Last, rewrap_component_registry)
-        .unwrap();
+    app.insert_resource(RetirementMarker(0)).unwrap();
     let mut runtime = start_runtime(app);
+    runtime.fault_reporter().report(RuntimeFault::engine(
+        RuntimeFaultKind::RuntimeAuthority,
+        "nara.test.runtime-authority",
+    ));
 
     let failure = runtime.drive(Duration::ZERO).unwrap_err();
 

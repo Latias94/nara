@@ -112,9 +112,11 @@ impl Plugin for ReferenceGamePlugin {
     }
 
     fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
-        let registry = context
-            .get_structural_resource::<ComponentRegistry>()
-            .ok_or_else(component_registry_unavailable)?;
+        let registry = nara::reflect::registry_for_plugin_preflight(
+            context,
+            REFERENCE_GAME_PLUGIN_ID,
+            REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
+        )?;
         REFERENCE_GAME_SCHEMA_PROVIDER
             .preflight(registry)
             .map_err(|error| {
@@ -127,23 +129,12 @@ impl Plugin for ReferenceGamePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        {
-            let world = app.world_mut()?;
-            let mut registry = world
-                .get_resource_mut::<ComponentRegistry>()
-                .ok_or_else(component_registry_unavailable)?;
-            REFERENCE_GAME_SCHEMA_PROVIDER
-                .register_or_validate_into(&mut registry)
-                .map_err(|error| {
-                    PluginError::component_registration(
-                        REFERENCE_GAME_PLUGIN_ID,
-                        REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
-                        error,
-                    )
-                })?;
-        }
-
-        Ok(())
+        nara::reflect::register_schema_provider_for_plugin(
+            app,
+            REFERENCE_GAME_PLUGIN_ID,
+            REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
+            &REFERENCE_GAME_SCHEMA_PROVIDER,
+        )
     }
 }
 
@@ -500,14 +491,6 @@ pub fn project_first_tick_command() -> GameplayCommandSubmission {
             GameplayCommandTypeId::new(REFERENCE_FIRST_TICK_COMMAND_TYPE)
                 .expect("the reference command type is engine-owned and valid"),
         ),
-    )
-}
-
-fn component_registry_unavailable() -> PluginError {
-    PluginError::component_registration(
-        REFERENCE_GAME_PLUGIN_ID,
-        "component-schema-catalog",
-        "component registry resource is unavailable",
     )
 }
 

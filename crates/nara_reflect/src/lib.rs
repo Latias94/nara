@@ -44,7 +44,8 @@ pub use persistent_apply::{
 };
 pub use plugin::{
     COMPONENT_REGISTRY_PLUGIN_ID, COMPONENT_REGISTRY_PLUGIN_REQUIREMENT,
-    ComponentRegistryAuthorityError, ComponentRegistryPlugin, preloaded_component_registry_plugin,
+    ComponentRegistryAuthorityError, ComponentRegistryPlugin, component_registry,
+    preloaded_component_registry_plugin, register_schema_provider_for_plugin,
     registry_for_plugin_preflight, report_component_registry_authority_fault,
     validate_component_registry_authority,
 };

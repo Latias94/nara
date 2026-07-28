@@ -1,4 +1,4 @@
-use nara::prelude::{App, ComponentRegistry, ComponentTypeId, HeadlessRuntimePlugins};
+use nara::prelude::{App, ComponentTypeId, HeadlessRuntimePlugins};
 use nara_reference_game::{ReferenceGamePlugin, ReferenceWavePlugin, WaveOutcome, WaveSnapshot};
 
 #[test]
@@ -12,7 +12,7 @@ fn rust_code_first_plugins_publish_the_complete_game_schema() {
     .unwrap();
     let app = app.seal().unwrap();
 
-    let registry = app.world().resource::<ComponentRegistry>();
+    let registry = nara::reflect::component_registry(app.world()).unwrap();
     for component_id in [
         "reference_game.Player",
         "reference_game.Enemy",

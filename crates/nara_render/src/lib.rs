@@ -565,11 +565,12 @@ impl Plugin for RenderPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.render.Camera2d");
-        RENDER_SCHEMA_PROVIDER
-            .register_or_validate_into(&mut app.world_mut()?.resource_mut::<ComponentRegistry>())
-            .map_err(|error| {
-                PluginError::component_registration(RENDER_PLUGIN_ID, component_id.as_str(), error)
-            })?;
+        nara_reflect::register_schema_provider_for_plugin(
+            app,
+            RENDER_PLUGIN_ID,
+            component_id.as_str(),
+            &RENDER_SCHEMA_PROVIDER,
+        )?;
         app.init_resource::<ClearColor>()?;
         app.init_resource::<ExtractedViews>()?;
         app.init_resource::<RenderFrame>()?;

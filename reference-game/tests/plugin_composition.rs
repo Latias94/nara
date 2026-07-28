@@ -3,7 +3,6 @@ use nara::{
     gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
     image::{IMAGE_PLUGIN_ID, ImageImportLimits},
     project::ProductCapability,
-    reflect::ComponentRegistry,
     render::RENDER_SCHEMA_PROVIDER_ID,
     sprite::SPRITE_SCHEMA_PROVIDER_ID,
     tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_OWNER_ID, TILEMAP_SCHEMA_PROVIDER_ID},
@@ -99,14 +98,12 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
 
     let first_app = first.plugin_plan().instantiate().unwrap();
     let second_app = first.plugin_plan().instantiate().unwrap();
-    let first_registry = first_app
-        .world()
-        .resource::<ComponentRegistry>()
+    let first_registry = nara::reflect::component_registry(first_app.world())
+        .unwrap()
         .snapshot()
         .unwrap();
-    let second_registry = second_app
-        .world()
-        .resource::<ComponentRegistry>()
+    let second_registry = nara::reflect::component_registry(second_app.world())
+        .unwrap()
         .snapshot()
         .unwrap();
     assert!(first_registry.ptr_eq(&second_registry));
