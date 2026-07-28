@@ -5,6 +5,9 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-28
+* **Memory Event**: [Verification: RGD-U11 bounded asset reload terminality verified at 46d8c55; paused-input reten](logs/2026-07/2026-07-28T130433Z-verification-rgd-u11-bounded-asset-reload-terminality-verified-at-46d8c55-paused-input-reten-c255bd33cb384fe6b6ad29586b4162e1.md) - RGD-U11 bounded asset reload terminality verified at 46d8c55; paused-input retention remains the only source correction blocker.
+* **Work Registration**: [Reference-game delivery hardening: asset reload terminality closed](registry/2026-07/2026-07-28T130402Z-engine-foundation-contract-completion-codex-root-80386a62cae54b33a36c50f0f24ec517.md) - Closes the bounded asset-reload source gate while paused-input retention remains open.
+* **Verification Evidence**: [RGD-U11 bounded asset reload terminality](verification/2026-07/2026-07-28T130156Z-rgd-u11-bounded-asset-reload-terminality-a915d41a753d47369d2a22e202cb5d59.md) - Verifies bounded source-change, reload-request, watcher, event-observation, and image publication terminality.
 * **Work Registration**: [Reference-game delivery hardening: persistence authority closed](registry/2026-07/2026-07-28T030251Z-engine-foundation-contract-completion-codex-root-c9fab8d53c6545e8afff9c7b117db378.md) - Closes the verified persistence-receipt source gate while asset reload terminality and paused-input retention remain open.
 * **Verification Evidence**: [RGD-U11 verified editor persistence authority](verification/2026-07/2026-07-28T025934Z-rgd-u11-verified-editor-persistence-authority-ecc563c521db4408a236fe8caa4a17fe.md) - Closes the receipt-forgery source gate with workspace-bound linear authority and post-publication content verification.
 
@@ -140,6 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-07-18
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U6](registry/2026-07/2026-07-18T225701Z-engine-foundation-contract-completion-codex-root-eab721b330634ab1bccc8cdaa2de90f4.md) - Activate the complete authoritative headless wave on the verified U24 product action.
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U24](registry/2026-07/2026-07-18T225700Z-engine-foundation-contract-completion-codex-root-a57044b955be4f35bba73bfa6bfbba80.md) - Close RGF-U24 after the concrete headless product action, atomic publication, reversal matrix, and full repository verification passed review.
-* **Verification Evidence**: [RGF-U24 concrete project Host verification](verification/2026-07/2026-07-18T225631Z-rgf-u24-concrete-project-host-verification-2471074f91454290a016a1b4f620af34.md) - Commit 5ddbf18 closes the bounded headless product action, atomic runtime publication, and U26 ownership reversal proof.
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U24](registry/2026-07/2026-07-18T174549Z-engine-foundation-contract-completion-codex-root-422d9a1354ee41d8bbea896b84f83443.md) - Activate the concrete root product Host transaction and U26 reversal gate.
