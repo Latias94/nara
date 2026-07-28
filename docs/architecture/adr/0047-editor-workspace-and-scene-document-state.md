@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-21
+**Last Revised**: 2026-07-28
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 
 ## Context
@@ -55,9 +55,10 @@ Rules:
   multi-document transactions with per-document patches and rollback diagnostics.
 - Dirty/saved state is revision-based. A document is dirty when its current authoring revision
   differs from the last successful save revision.
-- A successful save is proven by a persistence receipt bound to the document identity, captured
-  revision, canonical content digest, and required filesystem guarantee tier. A UI/tooling command
-  cannot advance the saved revision without that evidence.
+- A successful save is proven by a non-cloneable, workspace-bound persistence checkpoint plus a
+  consumed filesystem replacement receipt bound to the prior/candidate identity, captured
+  revision, canonical content digest, post-publication content observation, and required guarantee
+  tier. A UI/tooling command or an unhosted `EditorWorkspace` cannot advance saved state.
 - External file changes enter as conflict state, not silent overwrite. The editor may offer reload,
   merge, save-as, or keep-local actions, but these are explicit workspace commands.
 - Play Mode is anchored to a document snapshot and workspace mode state. Stop Play still discards
@@ -143,12 +144,37 @@ revision, source digest, undo, and external-conflict state. The concrete root `E
 owns filesystem capability, persistence receipts, and the single Play lifecycle; tooling and egui
 hold no `World`, `RuntimeStartAttempt`, or `RuntimeInstance`.
 
-Known-schema Save advances a checkpoint only after the concrete Host accepts a document/revision/
-digest-bound atomic replacement receipt. Dirty Close and Exit require Save, Discard, or Cancel and
-retain the document until the selected persistence action plus runtime retirement complete.
-Explicit Reopen may replace a dirty authoring session only after bytes decode and validate; failed
-open, read, decode, validation, or workspace publication preserves the prior slot. This does not
-admit unavailable-schema authoring, recovery journals, or multi-document atomic publication.
+Known-schema Save captures one linear checkpoint through the workspace's non-cloneable
+`EditorPersistenceAuthority`. The concrete Host writes through `nara_fs`, then consumes a
+non-cloneable `ReplaceReceipt`; the receipt distinguishes bytes accepted by the temporary-file
+capability from bytes rebound and observed through the published target name. Only matching,
+identity-bound post-publication content creates an `EditorPersistenceCommit`. Failure, conflict, or
+ambiguous publication leaves the saved revision/digest unchanged and the document dirty; ambiguous
+publication additionally blocks retry until explicit Reopen reconciliation.
+
+Dirty Close and Exit require Save, Discard, or Cancel and retain the document until the selected
+persistence action plus runtime retirement complete. Explicit Reopen may replace a dirty authoring
+session only through the same workspace-bound authority after bytes decode and validate; failed
+open, read, decode, validation, or workspace publication preserves the prior slot. This is a
+single-document `DetectOnly` policy, not a strong compare-and-swap claim against a non-cooperative
+writer that changes the file after post-publication observation. It does not admit unavailable-
+schema authoring, recovery journals, or multi-document atomic publication.
+
+### RGD-U11 API Migration
+
+The former public `EditorPersistenceCheckpoint { document, revision, digest }` construction and
+`EditorWorkspace::__apply_persistence_checkpoint` mutation path are removed. Embedding Hosts now:
+
+1. create the paired workspace/authority through `EditorWorkspace::new_hosted`;
+2. capture a document revision through `EditorPersistenceAuthority::capture`;
+3. publish canonical bytes through a real `nara_fs` replacement operation;
+4. consume its `ReplaceReceipt` through `EditorPersistenceCommit::from_publication`; and
+5. advance saved state through the matching authority's `commit` method.
+
+Ordinary UI/tooling consumers continue to use `EditorWorkspace::new` and cannot obtain persistence
+authority. Opened-source digest binding and Reopen publication also require the paired authority;
+`#[doc(hidden)]` is used only to de-emphasize the Host embedding surface, not as the capability
+boundary.
 
 ## Open Questions
 

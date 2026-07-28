@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-28
+* **Work Registration**: [Reference-game delivery hardening: persistence authority closed](registry/2026-07/2026-07-28T030251Z-engine-foundation-contract-completion-codex-root-c9fab8d53c6545e8afff9c7b117db378.md) - Closes the verified persistence-receipt source gate while asset reload terminality and paused-input retention remain open.
+* **Verification Evidence**: [RGD-U11 verified editor persistence authority](verification/2026-07/2026-07-28T025934Z-rgd-u11-verified-editor-persistence-authority-ecc563c521db4408a236fe8caa4a17fe.md) - Closes the receipt-forgery source gate with workspace-bound linear authority and post-publication content verification.
+
 ## 2026-07-27
 * **Work Registration**: [Reference-game delivery hardening: owner-lineage correction closed](registry/2026-07/2026-07-27T165137Z-engine-foundation-contract-completion-codex-root-a0b7b9bae94e42cfa2ea4ccc3f752a77.md) - Closes the ADR 0098 implementation tracer while keeping persistence receipts, asset-reload terminality, and paused-input retention open.
 * **Verification Evidence**: [RGD-U11 schema owner-lineage implementation](verification/2026-07/2026-07-27T165100Z-rgd-u11-schema-owner-lineage-implementation-f5b88b88b9dd4a7daab0d6adf0a5cac6.md) - Verifies owner-local schema lineage, atomic runtime composition, typed identities, and optional-owner reactivation under ADR 0098.
@@ -139,5 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U24](registry/2026-07/2026-07-18T225700Z-engine-foundation-contract-completion-codex-root-a57044b955be4f35bba73bfa6bfbba80.md) - Close RGF-U24 after the concrete headless product action, atomic publication, reversal matrix, and full repository verification passed review.
 * **Verification Evidence**: [RGF-U24 concrete project Host verification](verification/2026-07/2026-07-18T225631Z-rgf-u24-concrete-project-host-verification-2471074f91454290a016a1b4f620af34.md) - Commit 5ddbf18 closes the bounded headless product action, atomic runtime publication, and U26 ownership reversal proof.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U24](registry/2026-07/2026-07-18T174549Z-engine-foundation-contract-completion-codex-root-422d9a1354ee41d8bbea896b84f83443.md) - Activate the concrete root product Host transaction and U26 reversal gate.
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U26](registry/2026-07/2026-07-18T174526Z-engine-foundation-contract-completion-codex-root-86fae29b6aed4b148743a8d5e392fd24.md) - Close RGF-U26 after the minimal manual success and three-failure ownership counterfactual passed independent review.
-* **Verification Evidence**: [RGF-U26 manual ownership counterfactual verification](verification/2026-07/2026-07-18T174414Z-rgf-u26-manual-ownership-counterfactual-verification-9730fc03912d4eaa874e5384771b0fe8.md) - Commit a2d695d freezes the minimal pre-Host success and three-failure ownership baseline without a policy engine.

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "3763befde93496a69597dfd7e8aa8c5661ea10d808694c47559ca9928bd00979"
+source_fingerprint: "a08cf8b4c0560ce1530d1ebb7a2efbad27b7ea8cbf344e33d93a316029a553d2"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "3763befde93496a69597dfd7e8aa8c5661ea10d808694c47559ca9928bd
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `3763befde93496a69597dfd7e8aa8c5661ea10d808694c47559ca9928bd00979`
-- Immutable records: 275
+- Source fingerprint: `a08cf8b4c0560ce1530d1ebb7a2efbad27b7ea8cbf344e33d93a316029a553d2`
+- Immutable records: 277
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game delivery hardening: owner-lineage correction closed](registry/2026-07/2026-07-27T165137Z-engine-foundation-contract-completion-codex-root-a0b7b9bae94e42cfa2ea4ccc3f752a77.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game delivery hardening: persistence authority closed](registry/2026-07/2026-07-28T030251Z-engine-foundation-contract-completion-codex-root-c9fab8d53c6545e8afff9c7b117db378.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGD-U11 verified editor persistence authority](verification/2026-07/2026-07-28T025934Z-rgd-u11-verified-editor-persistence-authority-ecc563c521db4408a236fe8caa4a17fe.md) - Closes the receipt-forgery source gate with workspace-bound linear authority and post-publication content verification.
 - **Verification Evidence**: [RGD-U11 schema owner-lineage implementation](verification/2026-07/2026-07-27T165100Z-rgd-u11-schema-owner-lineage-implementation-f5b88b88b9dd4a7daab0d6adf0a5cac6.md) - Verifies owner-local schema lineage, atomic runtime composition, typed identities, and optional-owner reactivation under ADR 0098.
 - **Verification Evidence**: [RGD-U11 schema owner-lineage architecture decision](verification/2026-07/2026-07-27T105038Z-rgd-u11-schema-owner-lineage-architecture-decision-65b219ffe82144c083923249a21032f1.md) - Records independent review and governance verification for Accepted ADR 0098 while leaving implementation and delivery evidence open.
 - **Verification Evidence**: [RGD-U11 schedule, registry, reference-game, and CI hardening](verification/2026-07/2026-07-27T091437Z-rgd-u11-schedule-registry-reference-game-and-ci-hardening-3508e830c12045c1871db1855ae51a6e.md) - Verifies four local pre-publication corrections and records the exact authority and delivery evidence invalidated by their new revision.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGD-U10 Linux X11 consumer diagnosis and local repair](verification/2026-07/2026-07-26T083759Z-rgd-u10-linux-x11-consumer-diagnosis-and-local-repair-4e1b673441774fd99f3637586cb2df4f.md) - Records the second protected candidate failure, exact Ubuntu 24.04 X11 runtime diagnosis, and locally verified workflow repair without claiming hosted completion.
 - **Verification Evidence**: [RGD-U8 final hosted CI after candidate capacity repair](verification/2026-07/2026-07-26T030317Z-rgd-u8-final-hosted-ci-after-candidate-capacity-repair-73cf3d9e548743eb9462aec8acbcfec1.md) - Re-establishes the six-cell hosted CI baseline after the candidate capacity and release-verifier pin repairs.
 - **Verification Evidence**: [RGD-U12 release verifier pin follows candidate layout](verification/2026-07/2026-07-26T025029Z-rgd-u12-release-verifier-pin-follows-candidate-layout-651c8156185f48a080d52cd1c0b68247.md) - Records the reviewed ancestor, blob, and SHA-256 binding that keeps release validation aligned with the repaired candidate layout.
-- **Verification Evidence**: [RGD-U10 candidate capacity diagnosis and local budget repair](verification/2026-07/2026-07-26T023033Z-rgd-u10-candidate-capacity-diagnosis-and-local-budget-repair-914d3c5e90934617b4778cb2c85aa431.md) - Records the failed protected candidate run, measured Linux package capacity, and local bounded repair while preserving the required hosted rerun gate.
 
 # Integration Notes
 
