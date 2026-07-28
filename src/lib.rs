@@ -124,8 +124,8 @@ pub mod prelude {
     pub use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionOutcome, ActionOutcomes,
         ActionPhase, ActionValue, ButtonInput, ButtonInputError, ButtonTransition,
-        ButtonTransitionPhase, InputBinding, KeyCode, MAX_BUTTON_TRANSITIONS_PER_FRAME,
-        MouseButton, PointerState,
+        ButtonTransitionPhase, InputBinding, KeyCode, MAX_RETAINED_BUTTON_TRANSITIONS, MouseButton,
+        PointerState,
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,

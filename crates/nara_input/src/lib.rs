@@ -44,8 +44,12 @@ pub enum MouseButton {
     Other(u16),
 }
 
-/// Maximum retained button edges for one input domain before frame cleanup.
-pub const MAX_BUTTON_TRANSITIONS_PER_FRAME: usize = 256;
+/// Maximum retained button edges for one input domain across frame observation and action
+/// resolution.
+///
+/// Paused frames still finish frame observation but defer action resolution, so one bounded
+/// retention interval can span multiple platform frames.
+pub const MAX_RETAINED_BUTTON_TRANSITIONS: usize = 256;
 
 /// Physical edge recorded for a retained button state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,11 +105,13 @@ impl Display for ButtonInputError {
 
 impl Error for ButtonInputError {}
 
-/// Retained button state plus its bounded, ordered edges since frame cleanup.
+/// Retained button state plus one bounded edge log with independent frame and action cursors.
 #[derive(Debug, Clone, Resource)]
 pub struct ButtonInput<T> {
     pressed: HashSet<T>,
     transitions: Vec<ButtonTransition<T>>,
+    action_resolved_prefix_len: usize,
+    frame_observed_prefix_len: usize,
     transition_sequence: u64,
 }
 
@@ -114,6 +120,8 @@ impl<T> Default for ButtonInput<T> {
         Self {
             pressed: HashSet::new(),
             transitions: Vec::new(),
+            action_resolved_prefix_len: 0,
+            frame_observed_prefix_len: 0,
             transition_sequence: 0,
         }
     }
@@ -159,35 +167,31 @@ where
 
     #[must_use]
     pub fn just_pressed(&self, button: T) -> bool {
-        self.transitions.iter().any(|transition| {
+        self.frame_transitions().iter().any(|transition| {
             transition.button == button && transition.phase == ButtonTransitionPhase::Pressed
         })
     }
 
     #[must_use]
     pub fn just_released(&self, button: T) -> bool {
-        self.transitions.iter().any(|transition| {
+        self.frame_transitions().iter().any(|transition| {
             transition.button == button && transition.phase == ButtonTransitionPhase::Released
         })
     }
 
-    pub fn clear_transitions(&mut self) {
-        self.transitions.clear();
-    }
-
     #[must_use]
     pub fn has_transitions(&self) -> bool {
-        !self.transitions.is_empty()
+        !self.frame_transitions().is_empty()
     }
 
     pub fn just_pressed_buttons(&self) -> impl Iterator<Item = T> + '_ {
-        self.transitions.iter().filter_map(|transition| {
+        self.frame_transitions().iter().filter_map(|transition| {
             (transition.phase == ButtonTransitionPhase::Pressed).then_some(transition.button)
         })
     }
 
     pub fn just_released_buttons(&self) -> impl Iterator<Item = T> + '_ {
-        self.transitions.iter().filter_map(|transition| {
+        self.frame_transitions().iter().filter_map(|transition| {
             (transition.phase == ButtonTransitionPhase::Released).then_some(transition.button)
         })
     }
@@ -196,9 +200,45 @@ where
         self.pressed.iter().copied()
     }
 
+    /// Ordered physical edges visible during the current app frame.
+    ///
+    /// Action resolution may retain older edges internally while the runtime is paused, but those
+    /// edges are not re-exposed as frame observations.
     #[must_use]
     pub fn transitions(&self) -> &[ButtonTransition<T>] {
-        &self.transitions
+        self.frame_transitions()
+    }
+
+    fn frame_transitions(&self) -> &[ButtonTransition<T>] {
+        &self.transitions[self.frame_observed_prefix_len..]
+    }
+
+    fn mark_action_transitions_resolved(&mut self) {
+        self.action_resolved_prefix_len = self.transitions.len();
+    }
+
+    fn has_unresolved_action_transitions(&self) -> bool {
+        self.action_resolved_prefix_len != self.transitions.len()
+    }
+
+    fn unresolved_action_transitions(&self) -> &[ButtonTransition<T>] {
+        &self.transitions[self.action_resolved_prefix_len..]
+    }
+
+    fn needs_frame_cleanup(&self) -> bool {
+        self.frame_observed_prefix_len != self.transitions.len()
+            || self.action_resolved_prefix_len != 0
+    }
+
+    fn finish_frame_transitions(&mut self) {
+        let consumed_prefix_len = self.action_resolved_prefix_len;
+        self.frame_observed_prefix_len = self.transitions.len();
+        if consumed_prefix_len == 0 {
+            return;
+        }
+        self.transitions.drain(..consumed_prefix_len);
+        self.action_resolved_prefix_len = 0;
+        self.frame_observed_prefix_len -= consumed_prefix_len;
     }
 
     fn push_transition(
@@ -212,9 +252,9 @@ where
     }
 
     fn preflight_transition_count(&self, count: usize) -> Result<(), ButtonInputError> {
-        if self.transitions.len().saturating_add(count) > MAX_BUTTON_TRANSITIONS_PER_FRAME {
+        if self.transitions.len().saturating_add(count) > MAX_RETAINED_BUTTON_TRANSITIONS {
             return Err(ButtonInputError::TransitionLimitExceeded {
-                limit: MAX_BUTTON_TRANSITIONS_PER_FRAME,
+                limit: MAX_RETAINED_BUTTON_TRANSITIONS,
             });
         }
         let count =
@@ -725,31 +765,33 @@ impl Plugin for InputPlugin {
 
 fn resolve_action_outcomes(
     action_map: Res<ActionMap>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    mut keyboard: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut outcomes: ResMut<ActionOutcomes>,
 ) {
     if !outcomes.is_empty() {
         outcomes.clear();
     }
-    if !keyboard.has_transitions() && !mouse.has_transitions() {
-        return;
-    }
-
     // Keyboard and mouse retain independent physical timelines. Resolve each timeline in event
     // order, with deterministic keyboard-before-mouse precedence between the two domains.
-    resolve_button_transitions(
-        &action_map,
-        keyboard.transitions(),
-        InputBinding::Key,
-        &mut outcomes,
-    );
-    resolve_button_transitions(
-        &action_map,
-        mouse.transitions(),
-        InputBinding::Mouse,
-        &mut outcomes,
-    );
+    if keyboard.has_unresolved_action_transitions() {
+        resolve_button_transitions(
+            &action_map,
+            keyboard.unresolved_action_transitions(),
+            InputBinding::Key,
+            &mut outcomes,
+        );
+        keyboard.mark_action_transitions_resolved();
+    }
+    if mouse.has_unresolved_action_transitions() {
+        resolve_button_transitions(
+            &action_map,
+            mouse.unresolved_action_transitions(),
+            InputBinding::Mouse,
+            &mut outcomes,
+        );
+        mouse.mark_action_transitions_resolved();
+    }
 }
 
 fn resolve_button_transitions<T: Copy>(
@@ -786,11 +828,11 @@ fn clear_input_transitions(
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut outcomes: ResMut<ActionOutcomes>,
 ) {
-    if keyboard.has_transitions() {
-        keyboard.clear_transitions();
+    if keyboard.needs_frame_cleanup() {
+        keyboard.finish_frame_transitions();
     }
-    if mouse.has_transitions() {
-        mouse.clear_transitions();
+    if mouse.needs_frame_cleanup() {
+        mouse.finish_frame_transitions();
     }
     if !outcomes.is_empty() {
         outcomes.clear();
@@ -811,14 +853,65 @@ fn validate_identifier(id: &str) -> Result<(), ActionIdError> {
 mod tests {
     use super::*;
     use nara_app::CoreStage;
-    use nara_ecs::{Res, Resource};
+    use nara_ecs::{DetectChanges, Res, Resource};
     use std::time::Duration;
 
     #[derive(Debug, Default, Resource)]
     struct ObservedOutcomes(Vec<ActionOutcome>);
 
+    #[derive(Debug, Resource)]
+    struct LateReleasePending(bool);
+
+    #[derive(Debug, Default, Resource)]
+    struct InputChangeObservations(Vec<(bool, bool)>);
+
     fn observe_outcomes(outcomes: Res<ActionOutcomes>, mut observed: ResMut<ObservedOutcomes>) {
         observed.0 = outcomes.as_slice().to_vec();
+    }
+
+    fn inject_late_key_release(
+        mut keyboard: ResMut<ButtonInput<KeyCode>>,
+        mut pending: ResMut<LateReleasePending>,
+    ) {
+        if pending.0 {
+            keyboard.release(KeyCode::Space).unwrap();
+            pending.0 = false;
+        }
+    }
+
+    fn observe_input_changes(
+        keyboard: Res<ButtonInput<KeyCode>>,
+        mouse: Res<ButtonInput<MouseButton>>,
+        mut observed: ResMut<InputChangeObservations>,
+    ) {
+        observed.0.push((keyboard.is_changed(), mouse.is_changed()));
+    }
+
+    fn observed_changes_after(mutate: impl FnOnce(&mut App)) -> (bool, bool) {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.insert_resource(InputChangeObservations::default())
+            .unwrap()
+            .add_systems(
+                CoreStage::PreUpdate,
+                observe_input_changes.after(InputSet::ResolveActions),
+            )
+            .unwrap();
+        app.run_once(Duration::ZERO).unwrap();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<InputChangeObservations>()
+            .0
+            .clear();
+
+        mutate(&mut app);
+        app.run_once(Duration::ZERO).unwrap();
+
+        *app.world()
+            .resource::<InputChangeObservations>()
+            .0
+            .last()
+            .unwrap()
     }
 
     #[test]
@@ -829,7 +922,8 @@ mod tests {
         assert!(input.pressed(KeyCode::Space));
         assert!(input.just_pressed(KeyCode::Space));
 
-        input.clear_transitions();
+        input.mark_action_transitions_resolved();
+        input.finish_frame_transitions();
         assert!(!input.just_pressed(KeyCode::Space));
 
         input.release(KeyCode::Space).unwrap();
@@ -842,7 +936,8 @@ mod tests {
         let mut input = ButtonInput::default();
         input.press(KeyCode::Space).unwrap();
         input.press(KeyCode::Enter).unwrap();
-        input.clear_transitions();
+        input.mark_action_transitions_resolved();
+        input.finish_frame_transitions();
 
         let released = input.release_all().unwrap();
 
@@ -878,9 +973,162 @@ mod tests {
     }
 
     #[test]
+    fn frame_cleanup_removes_only_the_common_consumed_prefix() {
+        let mut input = ButtonInput::default();
+        input.press(KeyCode::Space).unwrap();
+        input.mark_action_transitions_resolved();
+        input.release(KeyCode::Space).unwrap();
+
+        assert_eq!(
+            input
+                .unresolved_action_transitions()
+                .iter()
+                .copied()
+                .map(|transition| (transition.sequence(), transition.phase()))
+                .collect::<Vec<_>>(),
+            [(2, ButtonTransitionPhase::Released)]
+        );
+        assert_eq!(
+            input
+                .transitions()
+                .iter()
+                .copied()
+                .map(|transition| (transition.sequence(), transition.phase()))
+                .collect::<Vec<_>>(),
+            [
+                (1, ButtonTransitionPhase::Pressed),
+                (2, ButtonTransitionPhase::Released),
+            ]
+        );
+
+        input.finish_frame_transitions();
+
+        assert!(input.transitions().is_empty());
+        assert_eq!(
+            input
+                .unresolved_action_transitions()
+                .iter()
+                .copied()
+                .map(|transition| (transition.sequence(), transition.phase()))
+                .collect::<Vec<_>>(),
+            [(2, ButtonTransitionPhase::Released)]
+        );
+    }
+
+    #[test]
+    fn frame_cleanup_retains_edges_added_after_action_resolution() {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.insert_resource(ObservedOutcomes::default())
+            .unwrap()
+            .insert_resource(LateReleasePending(true))
+            .unwrap()
+            .add_systems(CoreStage::Update, observe_outcomes)
+            .unwrap()
+            .add_systems(CoreStage::Update, inject_late_key_release)
+            .unwrap();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ActionMap>()
+            .bind_key(ActionId::new("jump").unwrap(), KeyCode::Space);
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space)
+            .unwrap();
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(
+            app.world()
+                .resource::<ObservedOutcomes>()
+                .0
+                .iter()
+                .map(|outcome| outcome.phase)
+                .collect::<Vec<_>>(),
+            [ActionPhase::Started]
+        );
+        assert_eq!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .transitions()
+                .len(),
+            0
+        );
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(
+            app.world()
+                .resource::<ObservedOutcomes>()
+                .0
+                .iter()
+                .map(|outcome| outcome.phase)
+                .collect::<Vec<_>>(),
+            [ActionPhase::Released]
+        );
+        assert!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .transitions()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn paused_retention_limit_is_atomic_and_reclaimed_after_action_resolution() {
+        let mut input = ButtonInput::default();
+        for _ in 0..(MAX_RETAINED_BUTTON_TRANSITIONS / 2) {
+            input.press(KeyCode::Space).unwrap();
+            input.release(KeyCode::Space).unwrap();
+        }
+        input.finish_frame_transitions();
+
+        assert!(input.transitions().is_empty());
+        assert_eq!(input.transitions.len(), MAX_RETAINED_BUTTON_TRANSITIONS);
+        assert_eq!(
+            input.press(KeyCode::Enter),
+            Err(ButtonInputError::TransitionLimitExceeded {
+                limit: MAX_RETAINED_BUTTON_TRANSITIONS,
+            })
+        );
+        assert!(!input.pressed(KeyCode::Enter));
+
+        input.mark_action_transitions_resolved();
+        input.finish_frame_transitions();
+
+        assert!(input.transitions.is_empty());
+        assert!(input.press(KeyCode::Enter).unwrap());
+    }
+
+    #[test]
+    fn keyboard_and_mouse_change_ticks_remain_independent() {
+        assert_eq!(
+            observed_changes_after(|app| {
+                app.world_mut()
+                    .unwrap()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::Space)
+                    .unwrap();
+            }),
+            (true, false)
+        );
+        assert_eq!(
+            observed_changes_after(|app| {
+                app.world_mut()
+                    .unwrap()
+                    .resource_mut::<ButtonInput<MouseButton>>()
+                    .press(MouseButton::Left)
+                    .unwrap();
+            }),
+            (false, true)
+        );
+    }
+
+    #[test]
     fn transition_limit_rejects_the_first_extra_edge_atomically() {
         let mut input = ButtonInput::default();
-        for _ in 0..(MAX_BUTTON_TRANSITIONS_PER_FRAME / 2) {
+        for _ in 0..(MAX_RETAINED_BUTTON_TRANSITIONS / 2) {
             input.press(KeyCode::Space).unwrap();
             input.release(KeyCode::Space).unwrap();
         }
@@ -889,7 +1137,7 @@ mod tests {
         assert_eq!(
             input.press(KeyCode::Enter),
             Err(ButtonInputError::TransitionLimitExceeded {
-                limit: MAX_BUTTON_TRANSITIONS_PER_FRAME,
+                limit: MAX_RETAINED_BUTTON_TRANSITIONS,
             })
         );
         assert!(!input.pressed(KeyCode::Enter));
@@ -908,14 +1156,14 @@ mod tests {
         input.press(KeyCode::ArrowLeft).unwrap();
         assert_eq!(
             input.transitions().len(),
-            MAX_BUTTON_TRANSITIONS_PER_FRAME - 1
+            MAX_RETAINED_BUTTON_TRANSITIONS - 1
         );
         let before = input.transitions().to_vec();
 
         assert_eq!(
             input.release_all(),
             Err(ButtonInputError::TransitionLimitExceeded {
-                limit: MAX_BUTTON_TRANSITIONS_PER_FRAME,
+                limit: MAX_RETAINED_BUTTON_TRANSITIONS,
             })
         );
         assert!(input.pressed(KeyCode::Space));
@@ -944,7 +1192,8 @@ mod tests {
         let mut input = ButtonInput::default();
         input.press(KeyCode::Space).unwrap();
         input.press(KeyCode::Enter).unwrap();
-        input.clear_transitions();
+        input.mark_action_transitions_resolved();
+        input.finish_frame_transitions();
         input.transition_sequence = u64::MAX - 1;
         let before_pressed = input.pressed.clone();
         let before_transitions = input.transitions.clone();

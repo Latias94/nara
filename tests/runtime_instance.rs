@@ -39,6 +39,11 @@ use nara::{
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
         GameplayCommandTypeId, submit_gameplay_driver_command,
     },
+    input::{
+        ActionId, ActionMap, ActionOutcome, ActionOutcomes, ActionPhase, ButtonDriverInput,
+        ButtonInput, InputPlugin, KeyCode, MouseButton, apply_keyboard_driver_input,
+        apply_mouse_driver_input,
+    },
     reflect::{ComponentRegistry, ComponentRegistryPlugin},
     tasks::{
         TaskDomainKey, TaskHandle, TaskKindConfig, TaskPlugin, TaskPoolConfig, TaskPoolKind,
@@ -3309,6 +3314,35 @@ fn count_cleanup_update(mut counts: ResMut<StageCounts>) {
     counts.cleanup_updates += 1;
 }
 
+#[derive(Debug, Default, Resource)]
+struct ObservedInputOutcomes(Vec<ActionOutcome>);
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
+struct ObservedInputFrameEdges {
+    key_presses: usize,
+    key_releases: usize,
+    mouse_presses: usize,
+    mouse_releases: usize,
+}
+
+fn observe_input_outcomes(
+    outcomes: Res<ActionOutcomes>,
+    mut observed: ResMut<ObservedInputOutcomes>,
+) {
+    observed.0 = outcomes.as_slice().to_vec();
+}
+
+fn observe_input_frame_edges(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut observed: ResMut<ObservedInputFrameEdges>,
+) {
+    observed.key_presses += usize::from(keyboard.just_pressed(KeyCode::Enter));
+    observed.key_releases += usize::from(keyboard.just_released(KeyCode::Enter));
+    observed.mouse_presses += usize::from(mouse.just_pressed(MouseButton::Left));
+    observed.mouse_releases += usize::from(mouse.just_released(MouseButton::Left));
+}
+
 #[test]
 fn paused_driving_runs_real_time_work_without_variable_simulation() {
     let mut app = configured_app(FixedTime::default());
@@ -3345,6 +3379,116 @@ fn paused_driving_runs_real_time_work_without_variable_simulation() {
     );
     assert_eq!(runtime.world().resource::<StageCounts>().render_updates, 2);
     assert_eq!(runtime.world().resource::<StageCounts>().cleanup_updates, 2);
+}
+
+#[test]
+fn paused_input_edges_are_retained_until_the_next_resolving_frame() {
+    let mut app = configured_app(FixedTime::default());
+    app.add_plugin(InputPlugin)
+        .unwrap()
+        .insert_resource(ObservedInputOutcomes::default())
+        .unwrap()
+        .insert_resource(ObservedInputFrameEdges::default())
+        .unwrap()
+        .add_systems(CoreStage::Update, observe_input_outcomes)
+        .unwrap()
+        .add_systems(CoreStage::Extract, observe_input_frame_edges)
+        .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ActionMap>()
+        .bind_key(ActionId::new("confirm").unwrap(), KeyCode::Enter);
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ActionMap>()
+        .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
+    let mut runtime = start_runtime(app);
+
+    accepted_ticket(runtime.request_control(RuntimeControl::Pause));
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Enter)).unwrap();
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Release(KeyCode::Enter)).unwrap();
+            apply_mouse_driver_input(scope, ButtonDriverInput::Press(MouseButton::Left)).unwrap();
+            apply_mouse_driver_input(scope, ButtonDriverInput::Release(MouseButton::Left)).unwrap();
+        })
+        .unwrap();
+
+    runtime.drive(Duration::ZERO).unwrap();
+
+    assert_eq!(runtime.state(), RuntimeState::Paused);
+    assert!(
+        runtime
+            .world()
+            .resource::<ButtonInput<KeyCode>>()
+            .transitions()
+            .is_empty()
+    );
+    assert_eq!(
+        *runtime.world().resource::<ObservedInputFrameEdges>(),
+        ObservedInputFrameEdges {
+            key_presses: 1,
+            key_releases: 1,
+            mouse_presses: 1,
+            mouse_releases: 1,
+        }
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<ObservedInputOutcomes>()
+            .0
+            .is_empty()
+    );
+
+    runtime.drive(Duration::ZERO).unwrap();
+
+    assert_eq!(
+        *runtime.world().resource::<ObservedInputFrameEdges>(),
+        ObservedInputFrameEdges {
+            key_presses: 1,
+            key_releases: 1,
+            mouse_presses: 1,
+            mouse_releases: 1,
+        }
+    );
+
+    accepted_ticket(runtime.request_control(RuntimeControl::Resume));
+    runtime.drive(Duration::ZERO).unwrap();
+
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<ObservedInputOutcomes>()
+            .0
+            .iter()
+            .map(|outcome| (outcome.action.as_str(), outcome.phase))
+            .collect::<Vec<_>>(),
+        [
+            ("confirm", ActionPhase::Started),
+            ("confirm", ActionPhase::Released),
+            ("select", ActionPhase::Started),
+            ("select", ActionPhase::Released),
+        ]
+    );
+    assert_eq!(
+        *runtime.world().resource::<ObservedInputFrameEdges>(),
+        ObservedInputFrameEdges {
+            key_presses: 1,
+            key_releases: 1,
+            mouse_presses: 1,
+            mouse_releases: 1,
+        }
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<ButtonInput<KeyCode>>()
+            .transitions()
+            .is_empty()
+    );
+    finish_runtime(runtime);
 }
 
 #[test]
