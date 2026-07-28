@@ -61,7 +61,13 @@ The crate/module edges below summarize current ownership. RGD-U7 independently a
 Host scopes and ADR 0084 managed-runtime topology as a compatible bounded authority for
 already-compiled, Host-trusted paths. The accepted pair must not be used to infer a shared public
 Host trait, a universal Runner/service Interface, or product authority for package/native-code
-activation beyond its stated scope.
+activation beyond its stated scope. The `27cbd12` refresh retains that pair after removing public
+typed executable-Registry replacement authority and closing a direct fault-bridge bypass found by
+the initial `088e233` review. Structural replacement and ordinary in-place mutation tracked by Bevy
+change detection are checked at rolling direct/managed authority boundaries and fail closed through
+the sticky runtime fault. Explicit `bypass_change_detection`, manual tick rewriting, unsafe/raw ECS
+mutation, and equivalent Host-trusted escape hatches are not a tamper-proof boundary and remain
+outside that guarantee.
 
 ```mermaid
 flowchart TD
@@ -151,8 +157,12 @@ flowchart TD
   `RuntimeCloseEvidence`, a failed `CloseFailed` control result, and a Winit teardown error; an
   unfinished registered owner remains `CloseIncomplete`. RGD-U7 accepted ADR 0084 after one
   frozen behavior authority, per-runtime fault routes, external Runner, three-Host command parity,
-  and complete reconstruction evidence closed the U23 blockers. This still does not accept a
-  universal Runner/Host SPI, replay, or checkpoint topology.
+  and complete reconstruction evidence closed the U23 blockers. The post-registry-authority U7
+  review found a direct fault-bridge bypass at `088e233`; after `27cbd12` froze reporter/handler
+  identity and added maintenance-safe rolling mutation epochs, the final review retained every
+  Runtime metric and the dependent Host compatibility verdict. The guarantee covers structural and
+  normally change-detected writes, not explicit Bevy/raw mutation escape hatches. This still does
+  not accept a universal Runner/Host SPI, replay, or checkpoint topology.
 - `nara_tooling` owns bounded, UI-agnostic observation, diff, timeline, and lifecycle models. It
   consumes the implemented legacy U8 stable identity and `nara_reflect` codecs; it does not serialize arbitrary worlds,
   store allocator-local `Entity` values, or use `RuntimeDiagnostics` as a high-frequency trace.

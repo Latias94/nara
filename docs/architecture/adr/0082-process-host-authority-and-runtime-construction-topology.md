@@ -2,16 +2,19 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-23
+**Last Revised**: 2026-07-29
 **Owner**: Product composition and executable hosts
 **Admission Trigger**: RGD-U7 accepted ADR 0084 and independently confirmed this Host topology and
 the compatible pair at `5ebc45e`, preserving the already-compiled, Host-trusted scope without
-admitting a universal Host or service Interface.
+admitting a universal Host or service Interface. The post-registry-authority review found a direct
+Runtime fault-bridge bypass at `088e233`; after the Runtime repair, the dependent Host review
+retained both verdicts and their compatibility at `27cbd12`.
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
 **Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079, ADR 0084, ADR 0094
 **Decision Evidence**:
-[RGD-U7 Runtime and Host decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md)
+[RGD-U7 refreshed Runtime and Host decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-28T214815Z-rgd-u7-refreshed-runtime-and-host-independent-decision-matrix-cb08ecb6f5054f938f8a6d7de30941e4.md),
+the historical [RGD-U7 decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md),
 and the historical [RGF-U23 independent decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-a5b3266847924dfc93667c72c8929550.md)
 
 ## Context
@@ -379,6 +382,17 @@ subsets passed in the current concrete-authority scope. Its only dependency bloc
 Proposed ADR 0084. RGD-U2 through RGD-U6 repaired the named Runtime evidence gaps, and RGD-U7
 independently accepted ADR 0084, this Host topology, and the compatible pair at their refreshed
 revisions.
+
+Later source corrections made that first U7 baseline historical. The Registry-authority refresh at
+`b4d105c` makes the executable registry a private owner, revalidates it across direct and managed
+execution, and preserves one exact content/composition/runtime snapshot identity. The initial
+Runtime-first review at `088e233` then exposed a separate direct-App fault-bridge bypass, so that
+revision did not close U7. Commit `27cbd12` freezes the reporter and selected fallback handler,
+detects structural replacement, and carries rolling change epochs across direct and managed safe
+points, including Bevy change-tick maintenance. The dependent Host review then retained every Host
+metric and the compatible pair without admitting a universal Host, service hub, package activation
+system, replacement Render Host, or Runner SPI. Current-revision hosted and candidate evidence
+remains downstream work rather than Host acceptance evidence.
 
 The accepted external Runner evidence proves public managed-runtime embedding, not a public Host
 factory or universal Platform/Runner Adapter. A code-first owner may promote its own managed

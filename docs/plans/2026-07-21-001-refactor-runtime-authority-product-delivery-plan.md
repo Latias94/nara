@@ -116,6 +116,12 @@ The product proof is also incomplete. Existing desktop parity constructs a runti
 - Removing the private fault-route adapter after Bevy exposes a contextual per-World error handler.
 - General multi-process execution, distributed simulation, arbitrary concurrent Host mutation, and a public executor service.
 - Governance reduction described by the predecessor after the release evidence closes.
+- API-authority hardening after delivery evidence closes: describe the private executable Registry
+  precisely as denying typed replacement authority while detecting supported structural and normal
+  Bevy change-tracked bridge mutation fail-closed. Explicit change-detection bypass, manual tick
+  rewriting, unsafe/raw ECS mutation, and equivalent Host-trusted escape hatches remain outside the
+  integrity claim. Extend the Runtime public-surface oracle across every `nara_app` source file so a
+  later inherent impl cannot escape the reviewed boundary.
 - A dependency-architecture correction lane after delivery evidence closes: first trace the
   current `nara_ui -> nara_scene::Parent` authority leak through a focused candidate
   `nara_hierarchy` plus 2D transform-propagation slice, admitting only the proven subset of
@@ -434,11 +440,25 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 - **Goal:** Decide ADR 0084 on refreshed evidence, then decide ADR 0082 and the combined topology only when its runtime dependency permits it.
 - **Requirements:** R2-R3 and R12-R13; AE8.
 - **Dependencies:** U4, U5, and U6.
-- **Files:** `docs/architecture/adr/0084-executable-runtime-ownership-and-isolation.md`, `docs/architecture/adr/0082-process-host-authority-and-runtime-construction-topology.md`, `docs/architecture/adr/{README,implementation-status}.md`, `docs/architecture/nara-foundation.md`, `tests/architecture_docs.rs`, and a new immutable decision matrix under `docs/knowledge/engineering/decisions/2026-07/`.
+- **Files:** `docs/architecture/adr/0084-executable-runtime-ownership-and-isolation.md`, `docs/architecture/adr/0082-process-host-authority-and-runtime-construction-topology.md`, `docs/architecture/adr/{README,implementation-status}.md`, `docs/architecture/nara-foundation.md`, and a new immutable decision matrix under `docs/knowledge/engineering/decisions/2026-07/`.
 - **Approach:** Run an independent metric-by-metric Runtime review against exact refreshed revisions. If Accepted, run an independent Host dependency review and combined compatibility review. If Remain Proposed or Rejected, record the verdict, end this execution chain, and atomically activate a bounded successor that owns the named repair/successor-ADR work plus another review; reusable local preparation evidence remains cited but U11 stays blocked. The current plan never invents an ADR 0082 or pair verdict when Runtime authority is not Accepted.
-- **Patterns to follow:** The RGF-U23 matrix shape and exact table-equality governance tests, with new revisions rather than edited historical evidence.
+- **Patterns to follow:** The RGF-U23 matrix shape, immutable-memory validation, and exact manual table reconciliation, with new revisions rather than edited historical evidence. The legacy `architecture_docs` binary is not a U7 gate.
 - **Test scenarios:** Missing or failed metrics, old invalidated revisions, hidden mixed outcomes, weakened trust scope, or acceptance by implementation volume fail. Runtime acceptance can precede Host acceptance but never the reverse dependency. Proposed/Rejected outcomes leave U11 blocked and require one active bounded successor rather than an ownerless repair loop. Accepted/Accepted requires a fresh compatible pair verdict and no universal interface admission.
-- **Verification:** ADR files, catalogue, ledger, foundation, matrix, and architecture tests agree exactly; the evidence record names all refreshed revision and invalidation reruns.
+- **Verification:** ADR files, catalogue, ledger, foundation, matrix, active registration, and rendered engineering memory agree exactly; the evidence record names all refreshed revisions and invalidation reruns. Validate memory and links directly rather than treating a compiled documentation-test binary as product evidence.
+
+- **Refresh closure (2026-07-29):** The initial independent Runtime review at `088e233` exposed a
+  P1 direct-App fault-bridge bypass: ordinary Rust code could temporarily replace and restore the
+  reporter or selected fallback handler while preserving final identity. Commit `27cbd12` freezes
+  that pair, detects structural replacement, and carries rolling Bevy-semantic change epochs across
+  direct schedules, custom schedules, custom runners, managed safe points, and change-tick
+  maintenance observers. This guarantee covers normal Bevy change-detected writes; explicit
+  `bypass_change_detection`, manual tick rewriting, unsafe/raw ECS mutation, and equivalent
+  Host-trusted escape hatches remain outside it. Serial verification and final independent review
+  retained ADR 0084 as Accepted; only then did the dependent Host and compatible-pair review retain
+  ADR 0082 and the bounded Accepted pair. The immutable refresh
+  matrix records the complete review/repair chain, exact evidence revisions, and the still-blocked
+  downstream delivery gates. U8 is the next active unit; this closure authorizes no candidate
+  dispatch, ingest, approval, tag, draft, release, or publication mutation.
 
 ### U8. Close Hosted Three-Workspace CI
 
@@ -514,7 +534,7 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 | U4 | Runtime/Host/Editor/task/identity tests plus feature-enabled `nara_render_wgpu` instance/epoch/cache-session tests |
 | U5 | Parent-driven reference-game `host_parity` child-process oracle, existing desktop/headless tests, and workspace Play tests under the supported desktop feature set |
 | U6 | `cargo nextest run --locked -p nara --test runtime_runner_contract --test runtime_driver_boundary --test-threads=1`; independent fixture locked build and smoke |
-| U7 | `cargo nextest run --locked -p nara --test architecture_docs --test-threads=1`; exact decision-table mutation tests and independent reviews |
+| U7 | `wiki_memory.py validate`; `wiki_memory.py render --check`; exact ADR/ledger/matrix/link reconciliation; independent Runtime then Host/compatibility reviews; `git diff --check` |
 | U8 | Local CI policy gate plus one post-preparation final-revision six-job GitHub-hosted Windows/Linux run; invalidation back-edge tests |
 | U9 | Focused measurement policy/helper tests and reproducibility from committed instructions |
 | U10 | CI/artifact-package policy tests plus hosted candidate and no-checkout Windows/Linux consumer smoke |

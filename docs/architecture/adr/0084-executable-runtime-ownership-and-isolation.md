@@ -2,17 +2,20 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-23
+**Last Revised**: 2026-07-29
 **Owner**: `nara_app` and concrete executable hosts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
 process-global runtime contention, and proved three-Host parity, external Runner authority, and
 fresh session reconstruction. RGD-U7 independently accepted this bounded authority at `5ebc45e`.
+The post-registry-authority review found a direct fault-bridge bypass at `088e233`; the repaired
+implementation independently retained this bounded authority at `27cbd12`.
 **Revisit Trigger**: A concrete embedded or multi-runtime workflow proves that a thin lifecycle owner
 cannot preserve `App` as the sole schedule/world authority
 **Related**: ADR 0003, ADR 0008, ADR 0034, ADR 0039, ADR 0042, ADR 0052, ADR 0057, ADR 0058,
 ADR 0076, ADR 0081, ADR 0082
 **Decision Evidence**:
-[RGD-U7 Runtime and Host decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md)
+[RGD-U7 refreshed Runtime and Host decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-28T214815Z-rgd-u7-refreshed-runtime-and-host-independent-decision-matrix-cb08ecb6f5054f938f8a6d7de30941e4.md),
+the historical [RGD-U7 decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md),
 and the historical [RGF-U23 independent decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-21T112729Z-rgf-u23-runtime-and-host-independent-decision-matrix-a5b3266847924dfc93667c72c8929550.md)
 
 ## Context
@@ -76,6 +79,19 @@ SPI.
 The accepted scope remains only already-compiled, Host-trusted code-first and RGF paths. Project
 data does not authorize Cargo resolution, build scripts, proc macros, native packages/importers, or
 in-process Play; broader activation remains owned by OQ-031 or an Accepted successor.
+
+Later product hardening changed the executable evidence after the first RGD-U7 decision. The
+refresh removes public executable-registry replacement authority, checks one private Registry
+instance at direct and managed schedule boundaries, preserves receipt-backed Editor persistence,
+bounded reload terminality, and paused input transitions, and re-runs the complete serial product
+suites. The first independent refresh at `088e233` found that direct code could temporarily replace
+and restore the reporter or selected fallback handler while preserving final identity. Commit
+`27cbd12` closes that ordinary mutation path with structural revision hooks and rolling,
+Bevy-semantic change epochs at direct and managed safe points, including maintenance observers.
+This detects structural writes and in-place writes tracked by Bevy change detection. Explicit
+`bypass_change_detection`, manual change-tick rewriting, unsafe/raw ECS mutation, and equivalent
+trusted-native escape hatches are outside this integrity guarantee. The final review retained every
+metric without expanding the trust scope or introducing a universal Runtime/Host interface.
 
 ## Decision
 
@@ -477,6 +493,14 @@ package drives one concrete managed runtime without a Runner SPI. RGD-U7 recorde
 Runtime, Host, and compatible-pair reviews at the exact refreshed revisions. The accepted scope is
 only already-compiled, Host-trusted code. Project data still does not authorize Cargo resolution,
 build scripts, proc macros, native packages/importers, or in-process Play.
+
+After subsequent source corrections invalidated that executable review baseline, the RGD-U2
+authority refresh at `b4d105c` removed the public Registry resource contract and closed its direct
+plus managed replacement bypasses. The initial refreshed RGD-U7 review at `088e233` exposed the
+separate fault-bridge bypass described above; it is historical review input, not closure evidence.
+The repaired matrix and verification at `27cbd12` independently retain the Runtime, Host, and
+compatible-pair verdicts. Hosted CI, baseline, candidate, and publication evidence remain separate
+downstream gates; this decision does not authorize them.
 
 ## Citations
 
