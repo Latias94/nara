@@ -50,7 +50,8 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
 
     drive_until(&mut app, |app| {
         app.world()
@@ -77,7 +78,8 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
     drive_until(&mut app, |app| {
         app.world().resource::<ImageReloadStats>().failed > 0
     });

@@ -97,16 +97,18 @@ pub(crate) enum AssetWatchFailureKind {
     Translation = 3,
     Backend = 4,
     Unavailable = 5,
+    SourceAdmission = 6,
 }
 
 impl AssetWatchFailureKind {
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Overflow,
         Self::Busy,
         Self::Disconnected,
         Self::Translation,
         Self::Backend,
         Self::Unavailable,
+        Self::SourceAdmission,
     ];
 
     const COUNT: usize = Self::ALL.len();
@@ -189,6 +191,11 @@ impl AssetWatchQueueStats {
     #[must_use]
     pub const fn unavailable_failures(self) -> u64 {
         self.failure(AssetWatchFailureKind::Unavailable)
+    }
+
+    #[must_use]
+    pub const fn source_admission_failures(self) -> u64 {
+        self.failure(AssetWatchFailureKind::SourceAdmission)
     }
 
     #[must_use]
@@ -328,6 +335,14 @@ impl AssetWatchQueueShared {
 
     pub(crate) fn record_translation_failure(&self, discarded_events: usize) {
         self.record_failure(AssetWatchFailureKind::Translation, discarded_events, true);
+    }
+
+    pub(crate) fn record_source_admission_failure(&self, discarded_events: usize) {
+        self.record_failure(
+            AssetWatchFailureKind::SourceAdmission,
+            discarded_events,
+            true,
+        );
     }
 
     fn record_backend_failure(&self) {
@@ -631,6 +646,11 @@ pub(crate) struct AssetWatchQueueObserver {
 impl AssetWatchQueueObserver {
     pub(crate) fn record_translation_failure(&self, discarded_events: usize) {
         self.shared.record_translation_failure(discarded_events);
+    }
+
+    pub(crate) fn record_source_admission_failure(&self, discarded_events: usize) {
+        self.shared
+            .record_source_admission_failure(discarded_events);
     }
 
     pub(crate) fn observe(&mut self) -> AssetWatchQueueObservation {

@@ -17,15 +17,15 @@ use std::{
 use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
 use nara_asset::{
     AssetEvents, AssetId, AssetLoadGenerations, AssetPath, AssetReloadDiagnostics,
-    AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetSourceKind,
-    AssetStateError, AssetStates, AssetTaskUpdateSet, Assets, Handle, ImporterRegistry,
-    ImporterRegistryError,
+    AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetStateError,
+    AssetStates, AssetTaskUpdateSet, Assets, Handle, ImageReloadConsumer, ImageReloadDrainError,
+    ImageReloadRegistrationError, ImporterRegistry, register_image_reload_consumer,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
     SafeSummary,
 };
-use nara_ecs::{Res, ResMut, Resource, error::BevyError, schedule::IntoScheduleConfigs};
+use nara_ecs::{Res, ResMut, Resource, SystemSet, error::BevyError, schedule::IntoScheduleConfigs};
 use nara_tasks::{
     OrderedTaskReadySnapshot, OrderedTaskResults, TaskCancellation, TaskCancellationReason,
     TaskCoalesceKey, TaskCompletionCutoff, TaskCompletionCutoffError, TaskDomainKey, TaskFailure,
@@ -297,7 +297,12 @@ impl ReadyImageImportJob {
 #[derive(Default, Resource)]
 struct ReadyImageJobs {
     imports: Vec<ReadyImageImportJob>,
-    removals: Vec<AssetReloadRequest>,
+    removals: Vec<ImageReloadAttempt>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub(crate) enum ImageReloadInternalSet {
+    ApplyResults,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -386,6 +391,8 @@ impl Plugin for ImagePlugin {
         app.init_resource::<ImporterRegistry>()?;
         app.insert_resource(self.importer.clone())?;
         register_image_importer(app, self.importer.clone())?;
+        let reload_consumer =
+            register_image_reload_consumer(app).map_err(image_reload_registration_plugin_error)?;
         app.add_systems(
             CoreStage::TaskUpdate,
             poll_image_reload_results.in_set(AssetTaskUpdateSet::Poll),
@@ -406,6 +413,7 @@ impl Plugin for ImagePlugin {
                 spawn_image_reload_jobs(
                     source_directory.as_deref(),
                     requests,
+                    &reload_consumer,
                     importer,
                     asset_server,
                     images,
@@ -415,13 +423,16 @@ impl Plugin for ImagePlugin {
                     pending,
                     ready,
                     stats,
-                );
+                )
+                .map_err(BevyError::error)
             })
             .in_set(AssetTaskUpdateSet::SpawnJobs),
         )?;
         app.add_systems(
             CoreStage::TaskUpdate,
-            apply_image_reload_results.in_set(AssetTaskUpdateSet::ApplyResults),
+            apply_image_reload_results
+                .in_set(AssetTaskUpdateSet::ApplyResults)
+                .in_set(ImageReloadInternalSet::ApplyResults),
         )?;
         Ok(())
     }
@@ -434,10 +445,20 @@ fn register_image_importer(app: &mut App, importer: ImageImporter) -> Result<(),
         .map_err(|error| image_plugin_setup_error("register image importer", error))
 }
 
-fn image_plugin_setup_error(context: &'static str, error: ImporterRegistryError) -> PluginError {
+fn image_plugin_setup_error(context: &'static str, error: impl fmt::Display) -> PluginError {
     PluginError::SetupFailed {
-        plugin: nara_app::PluginId::new("nara.image"),
+        plugin: IMAGE_PLUGIN_ID,
         message: format!("{context}: {error}"),
+    }
+}
+
+fn image_reload_registration_plugin_error(error: ImageReloadRegistrationError) -> PluginError {
+    match error {
+        ImageReloadRegistrationError::AppMutation(error) => error,
+        error => PluginError::SetupFailed {
+            plugin: IMAGE_PLUGIN_ID,
+            message: error.to_string(),
+        },
     }
 }
 
@@ -445,6 +466,7 @@ fn image_plugin_setup_error(context: &'static str, error: ImporterRegistryError)
 fn spawn_image_reload_jobs(
     source_directory: Option<&ImageSourceDirectory>,
     mut requests: ResMut<AssetReloadRequests>,
+    consumer: &ImageReloadConsumer,
     importer: Res<ImageImporter>,
     asset_server: Res<AssetServer>,
     images: Res<Assets<ImageAsset>>,
@@ -454,12 +476,12 @@ fn spawn_image_reload_jobs(
     mut pending: ResMut<PendingImageJobs>,
     mut ready: ResMut<ReadyImageJobs>,
     mut stats: ResMut<ImageReloadStats>,
-) {
-    for request in requests.drain_for_source_kind(&AssetSourceKind::Image) {
-        match request.request_kind() {
-            AssetReloadRequestKind::Remove => ready.removals.push(request),
+) -> Result<(), ImageReloadDrainError> {
+    for request in requests.drain_images(consumer)? {
+        let attempt = ImageReloadAttempt::capture(request, &images, &states);
+        match attempt.request.request_kind() {
+            AssetReloadRequestKind::Remove => ready.removals.push(attempt),
             AssetReloadRequestKind::LoadOrReload => {
-                let attempt = ImageReloadAttempt::capture(request, &images, &states);
                 let record = attempt.request.record();
                 let asset_id = attempt.request.asset_id();
                 let admitted = source_directory
@@ -538,6 +560,7 @@ fn spawn_image_reload_jobs(
         }
     }
     stats.pending = pending.len().min(u32::MAX as usize) as u32;
+    Ok(())
 }
 
 fn poll_image_reload_results(
@@ -572,9 +595,12 @@ fn apply_image_reload_results(
     mut stats: ResMut<ImageReloadStats>,
 ) {
     let mut removals = std::mem::take(&mut ready.removals);
-    removals.sort_by_key(AssetReloadRequest::id);
-    for request in removals {
-        if !generations.is_current(request.asset_id(), request.generation()) {
+    removals.sort_by_key(|attempt| attempt.request.id());
+    for attempt in removals {
+        let request = &attempt.request;
+        if !generations.is_current(request.asset_id(), request.generation())
+            || !attempt.is_current(&images, &states)
+        {
             stats.stale = stats.stale.saturating_add(1);
             continue;
         }

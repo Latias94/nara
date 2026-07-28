@@ -160,6 +160,16 @@ impl AssetServer {
     }
 
     #[must_use]
+    pub(crate) fn id_for_path(&self, path: &AssetPath) -> Option<AssetId> {
+        self.paths.get(path).copied()
+    }
+
+    #[must_use]
+    pub(crate) fn id_for_stable_id(&self, stable_id: StableAssetId) -> Option<AssetId> {
+        self.stable_ids.get(&stable_id).copied()
+    }
+
+    #[must_use]
     pub fn path(&self, id: AssetId) -> Option<&str> {
         self.reverse_paths.get(&id).map(AssetPath::as_str)
     }

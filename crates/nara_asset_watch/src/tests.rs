@@ -1,13 +1,15 @@
 use super::*;
 use crate::backend::admit_notify_event;
 use nara_asset::{
-    AssetPlugin, AssetRecord, AssetReloadRequestKind, AssetReloadRequests, AssetSourceChanges,
-    AssetSourceKind, ProjectAssetDatabase, StableAssetId,
+    AssetPlugin, AssetRecord, AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests,
+    AssetSourceChangeLimits, AssetSourceChanges, AssetSourceKind, ProjectAssetDatabase,
+    StableAssetId, register_image_reload_consumer,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
     DiagnosticsPlugin, PressureSourceId, RuntimeDiagnostics, RuntimePressureSnapshots,
 };
+use nara_ecs::{ResMut, Resource};
 use notify::{Event, EventKind, event::ModifyKind, event::RenameMode};
 use std::{
     fs,
@@ -349,6 +351,27 @@ fn concurrent_producer_rejection_is_non_blocking_and_requires_rescan() {
     assert!(sender.stats().rescan_required());
 }
 
+#[derive(Debug, Default, Resource)]
+struct WatchCapturedReloadRequests(Vec<AssetReloadRequest>);
+
+fn install_reload_capture(app: &mut App) {
+    let consumer = register_image_reload_consumer(app).unwrap();
+    app.init_resource::<WatchCapturedReloadRequests>().unwrap();
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        (move |mut requests: ResMut<AssetReloadRequests>,
+               mut captured: ResMut<WatchCapturedReloadRequests>| {
+            captured.0.extend(
+                requests
+                    .drain_images(&consumer)
+                    .expect("test consumer owns requests"),
+            );
+        })
+        .in_set(AssetTaskUpdateSet::SpawnJobs),
+    )
+    .unwrap();
+}
+
 #[test]
 fn poisoned_producer_admission_is_terminal_and_observable() {
     let queue = AssetWatchEventQueue::new();
@@ -500,7 +523,7 @@ fn queue_drains_into_source_changes() {
             .translate_event(&AssetSourceRoot::new(&root), &event)
             .unwrap()
         {
-            changes.push(change);
+            changes.push(change).unwrap();
         }
     }
 
@@ -553,12 +576,13 @@ fn queued_watch_events_are_resolved_in_the_same_task_update() {
         .resource_mut::<ProjectAssetDatabase>()
         .insert(record)
         .unwrap();
+    install_reload_capture(&mut app);
     install_watch_runtime(&mut app, queue);
 
     app.update().unwrap();
 
-    let requests = app.world().resource::<AssetReloadRequests>();
-    let request = requests.iter().next().unwrap();
+    let requests = app.world().resource::<WatchCapturedReloadRequests>();
+    let request = requests.0.first().unwrap();
     assert_eq!(request.path().as_str(), "textures/player.png");
     assert_eq!(request.request_kind(), AssetReloadRequestKind::LoadOrReload);
     remove_temp_root(&root);
@@ -641,6 +665,49 @@ fn translation_failure_records_diagnostic_without_source_change() {
     assert!(pressure.measurements().iter().any(|measurement| {
         measurement.metric().as_str() == "discarded-events" && measurement.value() == 1
     }));
+    assert!(
+        app.world()
+            .resource::<AssetWatchRuntimeStatus>()
+            .requires_rescan()
+    );
+    remove_temp_root(&root);
+}
+
+#[test]
+fn downstream_source_change_overflow_requires_a_rescan() {
+    let root = temp_root();
+    fs::create_dir_all(root.join("textures")).unwrap();
+    let queue = AssetWatchEventQueue::new();
+    queue
+        .sender()
+        .try_send_batch(vec![
+            AssetWatchEvent::modified(root.join("textures/a.png")),
+            AssetWatchEvent::modified(root.join("textures/b.png")),
+        ])
+        .unwrap();
+    let mut app = App::new();
+    app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
+    install_asset_prerequisites(&mut app);
+    app.insert_resource(AssetSourceChanges::with_limits(
+        AssetSourceChangeLimits::new(ItemLimit::ONE, ByteLimit::new(4 * 1024).unwrap()),
+    ))
+    .unwrap();
+    install_watch_runtime(&mut app, queue);
+
+    app.update().unwrap();
+
+    assert!(app.world().resource::<AssetSourceChanges>().is_empty());
+    assert!(
+        app.world()
+            .resource::<RuntimeDiagnostics>()
+            .iter()
+            .any(|entry| entry.code().as_str() == "asset-watch.source-change-admission-failed")
+    );
+    assert_eq!(
+        watch_pressure_value(&app, "source-admission-failures"),
+        Some(1)
+    );
+    assert_eq!(watch_pressure_value(&app, "discarded-events"), Some(2));
     assert!(
         app.world()
             .resource::<AssetWatchRuntimeStatus>()

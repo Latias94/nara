@@ -40,15 +40,19 @@ pub use import::{
 };
 pub use reload::{
     ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations,
-    AssetPlugin, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
-    AssetReloadRequestKind, AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind,
-    AssetSourceChanges, AssetSourceRoot, AssetTaskUpdateSet, SourceChangeResolver,
-    UnresolvedAssetSourceChange,
+    AssetPlugin, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestAdmissionError,
+    AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequestLimitKind,
+    AssetReloadRequestLimits, AssetReloadRequests, AssetSourceChange,
+    AssetSourceChangeAdmissionError, AssetSourceChangeKind, AssetSourceChangeLimitKind,
+    AssetSourceChangeLimits, AssetSourceChanges, AssetSourceRoot, AssetTaskUpdateSet,
+    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
+    register_image_reload_consumer,
 };
 pub use server::{AssetError, AssetServer};
 pub use state::{
-    AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEvents, AssetState, AssetStateError,
-    AssetStateRevision, AssetStates, AssetVersion, LoadState,
+    AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEventLimits, AssetEventPushOutcome,
+    AssetEvents, AssetState, AssetStateError, AssetStateRevision, AssetStates, AssetVersion,
+    LoadState,
 };
 pub use storage::{Asset, AssetSlotRevision, Assets, Handle};
 

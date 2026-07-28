@@ -32,6 +32,15 @@ impl Display for AssetSourceKind {
     }
 }
 
+impl AssetSourceKind {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Other(kind) => kind.capacity(),
+            Self::Unknown | Self::Image | Self::Scene | Self::Prefab => 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
@@ -90,6 +99,12 @@ impl AssetRecord {
     #[must_use]
     pub const fn source_kind(&self) -> &AssetSourceKind {
         &self.source_kind
+    }
+
+    pub(crate) fn retained_bytes(&self) -> Option<usize> {
+        self.path
+            .retained_bytes()
+            .checked_add(self.source_kind.retained_bytes())
     }
 }
 

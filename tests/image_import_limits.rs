@@ -260,7 +260,8 @@ fn request_reload(app: &mut App, record: &AssetRecord) {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
 }
 
 fn drive_image_jobs(app: &mut App) {

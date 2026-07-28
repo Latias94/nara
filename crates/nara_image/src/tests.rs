@@ -11,18 +11,18 @@ use std::{
 use nara_app::{App, CoreStage};
 use nara_asset::{
     AssetEventKind, AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
-    AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestKind,
-    AssetReloadRequests, AssetServer, AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind,
-    AssetStates, AssetTaskUpdateSet, AssetVersion, Assets, Handle, ImportArtifactPathError,
-    ImportDependencyDigest, ImportProfile, ImportRequest, ImportSettingsHash, Importer,
-    ImporterRegistry, ImporterSelectionError, LoadState, SourceExtension, SourceHash,
-    StableAssetId,
+    AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
+    AssetReloadRequestKind, AssetServer, AssetSourceChangeKind, AssetSourceChanges,
+    AssetSourceKind, AssetStates, AssetTaskUpdateSet, AssetVersion, Assets, Handle,
+    ImportArtifactPathError, ImportDependencyDigest, ImportProfile, ImportRequest,
+    ImportSettingsHash, Importer, ImporterRegistry, ImporterSelectionError, LoadState,
+    SourceExtension, SourceHash, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
     Diagnostic, DiagnosticFieldClass, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
 };
-use nara_ecs::{ResMut, schedule::IntoScheduleConfigs};
+use nara_ecs::{ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 use nara_render::{
     PreparedRenderResources, RenderPrepareInvalidationReason, RenderPrepareInvalidations,
@@ -36,9 +36,9 @@ use nara_tasks::{
 use tracing::{Event, Metadata, Subscriber, field::Visit, span};
 
 use crate::reload::{
-    IMAGE_RELOAD_TASK_DOMAIN, ImageImportTaskResult, ImageReloadAttempt, PendingImageImportStream,
-    PendingImageJobs, ReadyImageImportJob, apply_imported_image, image_reload_diagnostic,
-    record_image_reload_failure,
+    IMAGE_RELOAD_TASK_DOMAIN, ImageImportTaskResult, ImageReloadAttempt, ImageReloadInternalSet,
+    PendingImageImportStream, PendingImageJobs, ReadyImageImportJob, apply_imported_image,
+    image_reload_diagnostic, record_image_reload_failure,
 };
 
 fn stable_id() -> StableAssetId {
@@ -1390,7 +1390,8 @@ fn image_plugin_loads_and_reloads_image_through_task_update() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
     drive_image_jobs(&mut app);
 
     let first_hash = app
@@ -1416,7 +1417,8 @@ fn image_plugin_loads_and_reloads_image_through_task_update() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
     drive_image_jobs(&mut app);
 
     let image = app
@@ -1465,7 +1467,8 @@ fn image_plugin_records_first_load_failure_without_asset_value() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
     drive_image_jobs(&mut app);
 
     assert!(
@@ -1518,7 +1521,8 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
     drive_image_jobs(&mut app);
 
     let last_good_hash = app
@@ -1552,7 +1556,8 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
     drive_image_jobs(&mut app);
 
     assert_eq!(
@@ -1952,8 +1957,8 @@ fn queue_rejection_records_failure_and_never_leaves_loading_state() {
             .world_mut()
             .unwrap()
             .resource_mut::<AssetSourceChanges>();
-        changes.modified(first_record.path().clone());
-        changes.modified(second_record.path().clone());
+        changes.modified(first_record.path().clone()).unwrap();
+        changes.modified(second_record.path().clone()).unwrap();
     }
 
     app.update().unwrap();
@@ -2462,6 +2467,110 @@ fn slot_replacement_retires_an_old_failure_as_stale() {
     assert_budget_released(importer.budget_snapshot());
 }
 
+#[derive(Resource)]
+struct PendingImageReplacement {
+    handle: Handle<ImageAsset>,
+    image: Option<ImageAsset>,
+}
+
+fn publish_pending_image_replacement(
+    mut replacement: ResMut<PendingImageReplacement>,
+    mut images: ResMut<Assets<ImageAsset>>,
+    mut states: ResMut<AssetStates>,
+    mut events: ResMut<AssetEvents>,
+) {
+    let Some(image) = replacement.image.take() else {
+        return;
+    };
+    images
+        .commit_loaded(
+            replacement.handle,
+            image,
+            &mut states,
+            &mut events,
+            None,
+            None,
+        )
+        .unwrap();
+}
+
+#[test]
+fn stale_removal_cannot_delete_a_newer_same_frame_publication() {
+    let temp_root = unique_temp_root();
+    let texture_path = temp_root.join("textures").join("player.png");
+    fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+    fs::write(&texture_path, rgba_png(1, 1, &[255, 0, 0, 255])).unwrap();
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(&temp_root, record.clone());
+    let handle = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<AssetServer>()
+        .reserve_record::<ImageAsset>(&record)
+        .unwrap();
+    app.insert_resource(PendingImageReplacement {
+        handle,
+        image: None,
+    })
+    .unwrap();
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        publish_pending_image_replacement
+            .in_set(AssetTaskUpdateSet::ApplyResults)
+            .before(ImageReloadInternalSet::ApplyResults),
+    )
+    .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .modified(record.path().clone())
+        .unwrap();
+    drive_image_jobs(&mut app);
+
+    let replacement = import_uncommitted(
+        &ImageImporter::default(),
+        &record,
+        &rgba_png(1, 1, &[0, 255, 0, 255]),
+    )
+    .into_image();
+    let replacement_hash = replacement.source().source_hash();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<PendingImageReplacement>()
+        .image = Some(replacement);
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .removed(record.path().clone())
+        .unwrap();
+
+    app.update().unwrap();
+
+    let world = app.world();
+    assert_eq!(
+        world
+            .resource::<Assets<ImageAsset>>()
+            .get(handle)
+            .unwrap()
+            .source()
+            .source_hash(),
+        replacement_hash
+    );
+    assert_eq!(
+        world
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .load_state(),
+        &LoadState::Loaded
+    );
+    let stats = world.resource::<ImageReloadStats>();
+    assert_eq!(stats.stale, 1);
+    assert_eq!(stats.removed, 0);
+
+    remove_temp_root(&temp_root);
+}
+
 #[test]
 fn image_plugin_removes_runtime_and_prepared_image() {
     let temp_root = unique_temp_root();
@@ -2479,7 +2588,8 @@ fn image_plugin_removes_runtime_and_prepared_image() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone());
+        .modified(record.path().clone())
+        .unwrap();
     drive_image_jobs(&mut app);
     app.world_mut()
         .unwrap()
@@ -2489,7 +2599,8 @@ fn image_plugin_removes_runtime_and_prepared_image() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetSourceChanges>()
-        .removed(record.path().clone());
+        .removed(record.path().clone())
+        .unwrap();
     app.update().unwrap();
 
     assert!(
@@ -3172,21 +3283,16 @@ fn reload_request(
     handle: Handle<ImageAsset>,
     expected_version: AssetVersion,
 ) -> AssetReloadRequest {
-    let mut requests = AssetReloadRequests::new();
-    requests.push_resolved(
+    AssetReloadRequest::new(
+        AssetReloadRequestId::from_raw(0),
         handle.id(),
-        record,
+        record.clone(),
         AssetReloadRequestKind::LoadOrReload,
         AssetSourceChangeKind::Modified,
         expected_version,
         AssetLoadGeneration::ZERO,
         Vec::new(),
-    );
-    requests
-        .drain_for_source_kind(&AssetSourceKind::Image)
-        .into_iter()
-        .next()
-        .unwrap()
+    )
 }
 
 fn unique_temp_root() -> PathBuf {

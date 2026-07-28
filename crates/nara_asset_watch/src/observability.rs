@@ -73,8 +73,8 @@ pub(crate) fn drain_asset_watch_events(
                 }
             }
             if !failed {
-                for change in translated {
-                    changes.push(change);
+                if changes.try_extend(translated).is_err() {
+                    observer.record_source_admission_failure(captured_events);
                 }
             }
         }
@@ -99,8 +99,9 @@ fn publish_watch_diagnostics(
 ) {
     for kind in AssetWatchFailureKind::ALL {
         if observation.new_failures.get(kind) > 0 {
+            let description = failure_description(kind);
             diagnostics.publish(
-                watch_warning(failure_diagnostic_code(kind), failure_summary(kind)),
+                watch_warning(description.diagnostic_code, description.summary),
                 frame,
             );
         }
@@ -116,27 +117,50 @@ fn publish_watch_diagnostics(
     }
 }
 
-fn failure_diagnostic_code(kind: AssetWatchFailureKind) -> &'static str {
-    match kind {
-        AssetWatchFailureKind::Overflow => "asset-watch.queue-overflow",
-        AssetWatchFailureKind::Busy => "asset-watch.queue-contention",
-        AssetWatchFailureKind::Disconnected => "asset-watch.queue-disconnected",
-        AssetWatchFailureKind::Translation => "asset-watch.translation-failed",
-        AssetWatchFailureKind::Backend => "asset-watch.backend-failed",
-        AssetWatchFailureKind::Unavailable => "asset-watch.queue-unavailable",
-    }
+#[derive(Clone, Copy)]
+struct AssetWatchFailureDescription {
+    diagnostic_code: &'static str,
+    summary: &'static str,
+    pressure_metric: &'static str,
 }
 
-fn failure_summary(kind: AssetWatchFailureKind) -> &'static str {
+const fn failure_description(kind: AssetWatchFailureKind) -> AssetWatchFailureDescription {
     match kind {
-        AssetWatchFailureKind::Overflow => "Asset watch queue capacity was exceeded",
-        AssetWatchFailureKind::Busy => {
-            "Concurrent asset watch producers could not admit a batch without blocking"
-        }
-        AssetWatchFailureKind::Disconnected => "Asset watch queue receiver was disconnected",
-        AssetWatchFailureKind::Translation => "Asset watch event translation failed",
-        AssetWatchFailureKind::Backend => "Asset watch backend reported an event failure",
-        AssetWatchFailureKind::Unavailable => "Asset watch queue became unavailable",
+        AssetWatchFailureKind::Overflow => AssetWatchFailureDescription {
+            diagnostic_code: "asset-watch.queue-overflow",
+            summary: "Asset watch queue capacity was exceeded",
+            pressure_metric: "overflow-rejections",
+        },
+        AssetWatchFailureKind::Busy => AssetWatchFailureDescription {
+            diagnostic_code: "asset-watch.queue-contention",
+            summary: "Concurrent asset watch producers could not admit a batch without blocking",
+            pressure_metric: "busy-rejections",
+        },
+        AssetWatchFailureKind::Disconnected => AssetWatchFailureDescription {
+            diagnostic_code: "asset-watch.queue-disconnected",
+            summary: "Asset watch queue receiver was disconnected",
+            pressure_metric: "disconnect-rejections",
+        },
+        AssetWatchFailureKind::Translation => AssetWatchFailureDescription {
+            diagnostic_code: "asset-watch.translation-failed",
+            summary: "Asset watch event translation failed",
+            pressure_metric: "translation-failures",
+        },
+        AssetWatchFailureKind::Backend => AssetWatchFailureDescription {
+            diagnostic_code: "asset-watch.backend-failed",
+            summary: "Asset watch backend reported an event failure",
+            pressure_metric: "backend-failures",
+        },
+        AssetWatchFailureKind::Unavailable => AssetWatchFailureDescription {
+            diagnostic_code: "asset-watch.queue-unavailable",
+            summary: "Asset watch queue became unavailable",
+            pressure_metric: "unavailable-failures",
+        },
+        AssetWatchFailureKind::SourceAdmission => AssetWatchFailureDescription {
+            diagnostic_code: "asset-watch.source-change-admission-failed",
+            summary: "Translated asset changes exceeded the downstream source-change budget",
+            pressure_metric: "source-admission-failures",
+        },
     }
 }
 
@@ -215,24 +239,13 @@ fn publish_watch_pressure(
     for kind in AssetWatchFailureKind::ALL {
         draft = draft
             .try_with_measurement(counter(
-                failure_pressure_metric(kind),
+                failure_description(kind).pressure_metric,
                 PressureUnit::Count,
                 stats.failure(kind),
             ))
             .expect("asset watch failure pressure metrics are unique and bounded");
     }
     pressure.publish(draft, frame);
-}
-
-fn failure_pressure_metric(kind: AssetWatchFailureKind) -> &'static str {
-    match kind {
-        AssetWatchFailureKind::Overflow => "overflow-rejections",
-        AssetWatchFailureKind::Busy => "busy-rejections",
-        AssetWatchFailureKind::Disconnected => "disconnect-rejections",
-        AssetWatchFailureKind::Translation => "translation-failures",
-        AssetWatchFailureKind::Backend => "backend-failures",
-        AssetWatchFailureKind::Unavailable => "unavailable-failures",
-    }
 }
 
 fn gauge(metric: &'static str, unit: PressureUnit, value: u64) -> PressureMeasurement {

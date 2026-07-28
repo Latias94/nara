@@ -187,8 +187,8 @@ pub mod advanced_prelude {
         ImportArtifactKey, ImportArtifactPath, ImportArtifactRecord, ImportDependency,
         ImportDependencyDigest, ImportDependencyRole, ImportError, ImportJobInput, ImportProfile,
         ImportRequest, ImportSettingsHash, ImportedAsset, Importer, ImporterDescriptor, ImporterId,
-        ImporterRegistry, LoadState, MissingMetaPolicy, ProjectAssetDatabase, SourceChangeResolver,
-        SourceExtension, SourceHash, TypedImporter,
+        ImporterRegistry, LoadState, MissingMetaPolicy, ProjectAssetDatabase, SourceExtension,
+        SourceHash, TypedImporter,
     };
     pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
     pub use nara_diagnostic::{

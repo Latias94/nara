@@ -113,6 +113,10 @@ impl AssetPath {
         &self.0
     }
 
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.0.capacity()
+    }
+
     #[must_use]
     pub fn meta_path(&self) -> String {
         format!("{}.meta", self.0)

@@ -148,7 +148,7 @@ impl<T: Asset> Assets<T> {
             AssetEventKind::Added
         };
         states.set_loaded_at(id, version, source_hash, import_hash);
-        events.push(id, version, event_kind);
+        let _ = events.push(id, version, event_kind);
         Ok(version)
     }
 
@@ -174,7 +174,7 @@ impl<T: Asset> Assets<T> {
         message: impl Into<String>,
     ) -> Result<AssetVersion, AssetStateError> {
         let version = states.set_failed(handle.id(), message.into())?;
-        events.push(handle.id(), version, AssetEventKind::ReloadFailed);
+        let _ = events.push(handle.id(), version, AssetEventKind::ReloadFailed);
         Ok(version)
     }
 
@@ -188,7 +188,7 @@ impl<T: Asset> Assets<T> {
         let id = handle.id();
         let version = states.set_failed(id, message.into())?;
         self.remove(handle);
-        events.push(id, version, AssetEventKind::LoadFailed);
+        let _ = events.push(id, version, AssetEventKind::LoadFailed);
         Ok(version)
     }
 
@@ -202,7 +202,7 @@ impl<T: Asset> Assets<T> {
         let version = states.next_version(id)?;
         let removed = self.remove(handle);
         states.set_removed_at(id, version);
-        events.push(id, version, AssetEventKind::Removed);
+        let _ = events.push(id, version, AssetEventKind::Removed);
         Ok(removed)
     }
 

@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use nara_core::ItemLimit;
 use nara_ecs::Resource;
 
 use crate::revision::{RevisionCounter, RevisionIdentity};
@@ -153,6 +154,23 @@ impl AssetStates {
         self.states.get(&id)
     }
 
+    /// Iterates every authoritative runtime asset state, including removed and failed assets.
+    ///
+    /// Observers use this view to rebuild after [`AssetEvents`] reports an observation gap.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (AssetId, &AssetState)> {
+        self.states.iter().map(|(&id, state)| (id, state))
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.states.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.states.is_empty()
+    }
+
     /// Returns this store's identity plus the latest runtime-state write identity for this asset.
     #[must_use]
     pub fn state_revision(&self, id: AssetId) -> AssetStateRevision {
@@ -244,22 +262,41 @@ impl AssetStates {
         Ok(current.version())
     }
 
+    pub(crate) fn reject_reload_request(
+        &mut self,
+        id: AssetId,
+        message: &'static str,
+    ) -> AssetVersion {
+        let (version, source_hash, import_hash) = self
+            .state(id)
+            .map(|current| {
+                (
+                    current.version(),
+                    current.source_hash(),
+                    current.import_hash(),
+                )
+            })
+            .unwrap_or((AssetVersion::ZERO, None, None));
+        self.insert_state(
+            id,
+            AssetState::new(
+                version,
+                LoadState::Failed {
+                    message: message.to_owned(),
+                },
+                source_hash,
+                import_hash,
+            ),
+        );
+        version
+    }
+
     fn insert_state(&mut self, id: AssetId, state: AssetState) {
         self.states.insert(id, state);
         self.state_revisions
             .entry(id)
             .and_modify(RevisionCounter::advance)
             .or_default();
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.states.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.states.is_empty()
     }
 }
 
@@ -310,6 +347,7 @@ pub enum AssetEventKind {
     Removed,
     LoadFailed,
     ReloadFailed,
+    ReloadRejected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -341,9 +379,58 @@ impl AssetEvent {
     }
 }
 
-#[derive(Debug, Default, Resource)]
+const DEFAULT_MAX_ASSET_EVENTS: usize = 4_096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssetEventLimits {
+    items: ItemLimit,
+}
+
+impl AssetEventLimits {
+    #[must_use]
+    pub const fn new(items: ItemLimit) -> Self {
+        Self { items }
+    }
+
+    #[must_use]
+    pub const fn items(self) -> ItemLimit {
+        self.items
+    }
+}
+
+impl Default for AssetEventLimits {
+    fn default() -> Self {
+        Self::new(
+            ItemLimit::new(DEFAULT_MAX_ASSET_EVENTS)
+                .expect("default asset event limit is non-zero"),
+        )
+    }
+}
+
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetEventPushOutcome {
+    Accepted,
+    RescanRequired,
+}
+
+/// Bounded retained asset observations.
+///
+/// Asset publication/removal/reload paths are producers and tooling or domain observers explicitly
+/// drain admitted events. If state transitions exceed the item ceiling, later events are
+/// suppressed and `requires_rescan` remains sticky until the owner completes a full `AssetStates`
+/// rescan and calls `complete_rescan`. The queue is observational runtime state, not replay input.
+#[derive(Debug, Resource)]
 pub struct AssetEvents {
+    limits: AssetEventLimits,
+    discarded_events: u64,
     events: Vec<AssetEvent>,
+}
+
+impl Default for AssetEvents {
+    fn default() -> Self {
+        Self::with_limits(AssetEventLimits::default())
+    }
 }
 
 impl AssetEvents {
@@ -352,8 +439,27 @@ impl AssetEvents {
         Self::default()
     }
 
-    pub fn push(&mut self, id: AssetId, version: AssetVersion, kind: AssetEventKind) {
+    #[must_use]
+    pub const fn with_limits(limits: AssetEventLimits) -> Self {
+        Self {
+            limits,
+            discarded_events: 0,
+            events: Vec::new(),
+        }
+    }
+
+    pub fn push(
+        &mut self,
+        id: AssetId,
+        version: AssetVersion,
+        kind: AssetEventKind,
+    ) -> AssetEventPushOutcome {
+        if self.requires_rescan() || self.events.len() >= self.limits.items().get() {
+            self.discarded_events = self.discarded_events.saturating_add(1);
+            return AssetEventPushOutcome::RescanRequired;
+        }
         self.events.push(AssetEvent::new(id, version, kind));
+        AssetEventPushOutcome::Accepted
     }
 
     #[must_use]
@@ -363,6 +469,27 @@ impl AssetEvents {
 
     pub fn drain(&mut self) -> Vec<AssetEvent> {
         std::mem::take(&mut self.events)
+    }
+
+    #[must_use]
+    pub const fn limits(&self) -> AssetEventLimits {
+        self.limits
+    }
+
+    #[must_use]
+    pub const fn discarded_events(&self) -> u64 {
+        self.discarded_events
+    }
+
+    #[must_use]
+    pub const fn requires_rescan(&self) -> bool {
+        self.discarded_events != 0
+    }
+
+    /// Clears retained observations after the caller has rebuilt its view from `AssetStates`.
+    pub fn complete_rescan(&mut self) {
+        self.events.clear();
+        self.discarded_events = 0;
     }
 
     #[must_use]
