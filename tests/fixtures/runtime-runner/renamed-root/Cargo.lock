@@ -642,6 +642,7 @@ dependencies = [
  "bevy_ecs",
  "blake3",
  "nara_app",
+ "nara_core",
  "nara_diagnostic",
  "nara_ecs",
  "nara_tasks",
