@@ -132,7 +132,7 @@ flowchart TD
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteMaterialKey`, `TextureUvRect`, `SpriteRenderPlugin` | 2D extraction, tilemap lowering, deterministic sort keys, and material-keyed textured quad batches |
 | `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState`, `UiPointerRoute`, `UiInteractionTarget` | Runtime ECS UI authoring data, layout projection, and target/view-aware pointer hover/capture/focus state; no editor UI toolkit or backend handles |
 | `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, UI-owned material/instance/UV types, image/color material queueing, clipping, sort, and batching for the UI render phase |
-| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, bounded ordered `ButtonTransition`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized retained state plus atomic per-frame edge admission, deterministic transition-order action resolution, focus-loss release, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
+| `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, bounded ordered `ButtonTransition`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized retained state plus atomic retained-edge admission, independent frame-observation/action-resolution cursors, deterministic transition-order action resolution, focus-loss release, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
 | `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonically ordered fixed-tick admission with reserved local-action authority, pending/active/quarantine accounting, terminal fail-closed lifecycle state, and action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
 | `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver over `RuntimeInstance` that owns native windows, updates normalized input/window state through short driver scopes, invokes scoped renderer retirement only for its targets, joins registered runtime close with provider/native teardown, and preserves distinct primary-runner and teardown failures |
@@ -519,9 +519,11 @@ second real adapter or stronger isolation pressure.
 - `nara_input` exposes normalized `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, and
   `PointerState`; `nara_winit` is the desktop adapter that updates those resources from winit
   events. Each button resource retains current state and a bounded, monotonically sequenced
-  transition list, so press/release in one frame is not collapsed. Capacity or sequence exhaustion
-  rejects without changing retained state, and focus loss atomically emits releases before stale
-  repeats are gated.
+  transition log with independent frame-observation and action-resolution cursors. A paused frame
+  observes each physical edge at most once while retaining unresolved action work for the first
+  resumed `PreUpdate`; only the prefix consumed by both lifetimes is compacted. Capacity or sequence
+  exhaustion rejects without changing retained state, and focus loss atomically emits releases
+  before stale repeats are gated.
 - `nara_input::ActionMap` resolves those ordered key/mouse transitions into frame-transient
   `ActionOutcomes` in `InputSet::ResolveActions`, with action IDs, contexts, key/mouse bindings,
   started/released phases, and deterministic binding order.
