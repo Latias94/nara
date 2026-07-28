@@ -118,7 +118,7 @@ flowchart TD
 | `nara_ecs_derive` | `Component`, `Resource`, `ScheduleLabel`, and `SystemSet` derives behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, Bevy-compatible expansion, declaration diagnostics, and renamed-package path resolution |
 | `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, and stable non-`Entity` observation vocabulary |
 | `nara_transform` | Current: `Transform2d`, `GlobalTransform2d`; accepted ADR 0097 target: separate 2D/3D base TRS, optional typed post-affine residuals, and opaque derived global affines | 2D/3D transform propagation, exact reparent lowering, and spatial hierarchy integration |
-| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, explicit `ComponentSchemaOwnerId`, owner-local `ComponentSchemaCatalog` lineage, typed semantic/executable composition fingerprints, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext`, declared asset-reference traversal | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, private failure-atomic owner candidates, known inactive-owner claim reservation, atomic Building-to-Frozen publication, exact managed snapshot authority, asset-aware scene preflight, schema/capability export, and migrations |
+| `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, explicit `ComponentSchemaOwnerId`, owner-local `ComponentSchemaCatalog` lineage, typed semantic/executable composition fingerprints, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext`, declared asset-reference traversal | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, private failure-atomic owner candidates, known inactive-owner claim reservation, atomic Building-to-Frozen publication, exact direct/managed snapshot authority, asset-aware scene preflight, schema/capability export, and migrations |
 | `nara_reflect_derive` | `PersistentComponent` derive and generated native `PersistentComponentProvider` | Proc-macro dependency isolation, schema/codec declaration diagnostics, and direct/renamed dependency resolution |
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, `TypedImporter<T>`, `ImportJobInput`, bounded `AssetSourceChanges`, bounded `AssetReloadRequests`, and bounded `AssetEvents` | Import cache records, O(1) state and persistent slot revisions, dependency-aware reload generations, private typed consumer authority, same-frame terminal rejection, and sticky full-rescan observation recovery |
@@ -410,9 +410,13 @@ second real adapter or stronger isolation pressure.
   address; `ComponentFieldPath` is only the current value locator. A registry remains Building until
   freeze atomically validates the full candidate, required bindings, defaults, lineage, and
   migration chain, then publishes an immutable snapshot. Invalid registration candidates remain
-  repairable until freeze succeeds. The registry resource itself carries intrinsic insert/discard
-  hooks, so a preinstalled registry and a remove/reinsert of the same object both participate in
-  the frozen runtime authority revision; plugin registration order cannot bypass that check.
+  repairable until freeze succeeds. `ComponentRegistry` remains a standalone build/read value for
+  direct module consumers, but it is not an ECS `Resource`. An App stores it behind a private
+  `nara_reflect` owner resource: schema plugins use the controlled provider-registration API,
+  runtime consumers receive only an immutable view, and intrinsic insert/discard hooks make every
+  owner replacement or remove/reinsert participate in the frozen authority revision. Plugin
+  registration order and temporary public World mutation therefore cannot replace executable
+  behavior and restore the old value before validation.
 - `nara_reflect_derive` supplies the first low-boilerplate native Rust authoring path. Four
   independent reference-game components generate providers from explicit stable declarations,
   freeze against a committed predecessor catalog, round-trip through canonical scene and stable

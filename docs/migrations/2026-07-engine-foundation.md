@@ -28,6 +28,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 |---|---|---|---|---|---|
 | U2-1 | U2 | `2867235` | `rust-api` | `App` mutation/update, `Plugin`, cleanup, group, and runner signatures | Propagate setup/update errors, use narrow cleanup/group contexts, and let runners borrow the app. |
 | U2-2 | U2 | `2867235` | `rust-api` | Built-in `register_*_components` helpers | Handle `ComponentRegistryError`; plugin installation now reports contextual registration failure. |
+| RGD-U2-1 | RGD-U2 refresh | `b4d105c` | `rust-api/behavior` | Executable `ComponentRegistry` ownership and direct-App runtime fault reporting | Read the runtime registry through `component_registry`, register schema providers through `register_schema_provider_for_plugin`, and handle `AppRunError::DirectRuntime` or `AppScheduleRunError::Runtime`. |
 | U3-1 | U3 | `a4167e4` | `rust-api/behavior` | Runtime/fixed/render time construction, mutation, and frame semantics | Use validated constructors/setters, handle time-frame errors, and replace bulk fixed-step observations with per-tick clock state. |
 | U4-1 | U4 | `8ba9384` | `rust-api/behavior` | Gameplay command construction, ingress, fixed-tick observation, retirement, and action mapping | Build bounded drafts/submissions, handle typed rejection, consume the current batch in declared sets, and propagate fallible action bindings. |
 | U4-2 | U4 | `8ba9384` | `persistent-shape` | Prototype serialized gameplay command submissions | Rewrite to the canonical tick/source/source-sequence/command shape; enforce ADR 0049 outer parse budgets before serde. |
@@ -167,6 +168,80 @@ helpers directly. Plugin users receive a contextual `PluginError` automatically.
 
 **Verification anchors**: component registry read-only validation test, built-in duplicate conflict
 tests, and a stale search for registration `expect` calls.
+
+## RGD-U2-1: Private Executable Registry Authority
+
+**Removed contract**:
+
+- `ComponentRegistry: Resource` and direct runtime access through
+  `World::{resource, resource_mut, insert_resource, remove_resource}`.
+- Schema-owning plugins mutating the executable registry through a public ECS resource borrow.
+- Direct `App` frames and custom schedules returning success after a sticky runtime or registry
+  authority fault had already been reported.
+- The hidden managed-only authority-validator installation entry point.
+
+**Canonical replacement or deletion rationale**: `ComponentRegistry` remains a standalone
+build/freeze/read value for direct module consumers and isolated authoring code, but an `App` stores
+its executable instance behind a private owner resource. Schema-owning plugins call
+`register_schema_provider_for_plugin`; runtime and Host readers call `component_registry` and receive
+only an immutable view. One hidden validator now covers direct and managed schedule boundaries.
+Direct execution reports sticky failures as `AppRunError::DirectRuntime`, while custom schedules
+wrap that error in `AppScheduleRunError::Runtime`. The public resource contract is deleted because
+temporary removal, replacement, or same-snapshot rewrapping could bypass the claimed frozen
+behavior authority.
+
+**Before**:
+
+```rust
+let registry = world.resource::<ComponentRegistry>();
+let mut registry = app.world_mut()?.resource_mut::<ComponentRegistry>();
+provider.register_or_validate_into(&mut registry)?;
+app.run_once(delta)?;
+```
+
+**After**:
+
+```rust
+let registry = nara_reflect::component_registry(world)
+    .expect("the component-registry plugin must own the runtime registry");
+
+nara_reflect::register_schema_provider_for_plugin(
+    app,
+    PLUGIN_ID,
+    "example-component",
+    &PROVIDER,
+)?;
+
+let outcome = match app.run_once(delta) {
+    Err(error @ AppRunError::DirectRuntime { .. }) => return Err(error),
+    result => result?,
+};
+```
+
+**Affected examples and fixtures**: all built-in schema-owning plugins, project Host and Editor
+runtime readers, reference-game authoring/runtime composition, direct-App gameplay fault tests,
+the renamed-root schedule-extension consumer, and the compile-fail public contract fixture.
+
+**User action**: remove `ComponentRegistry` ECS resource reads and mutations. Use
+`component_registry` for runtime reads, keep standalone registries outside an `App` where direct
+module composition requires them, and use `register_schema_provider_for_plugin` only during plugin
+construction. Handle the new direct runtime error variants instead of assuming a completed frame
+was healthy.
+
+**Source action**: `none`.
+
+**Cache action**: `keep`.
+
+**Compatibility window**: none (unreleased canonical replacement).
+
+**Rollback**: revert `b4d105c` and all migrated callers together. Do not restore a public mutable
+registry resource or downgrade sticky runtime faults to successful frame results.
+
+**Verification anchors**: `crates/nara_reflect/tests/ui/component_registry_is_not_resource.rs`,
+`crates/nara_reflect/src/plugin.rs#tests`, `crates/nara_app/src/lib.rs#tests`,
+`tests/runtime_instance.rs`, `tests/plugin_composition.rs`,
+`tests/fixtures/schedule-extension/renamed-root/src/lib.rs`, and the RGD-U2 refresh verification
+record.
 
 ## U3-1: Validated Time Configuration and Per-Tick Fixed Clock
 
