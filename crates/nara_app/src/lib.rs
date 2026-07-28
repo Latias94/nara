@@ -1155,6 +1155,7 @@ struct RuntimeAuthorityBoundary {
     reporter: RuntimeFaultReporter,
     generation: Option<RuntimeGeneration>,
     error_handler: Option<ErrorHandler>,
+    fault_bridge: Option<runtime::RuntimeFaultBridgeIdentity>,
     validator: Option<Arc<runtime::__RuntimeAuthorityValidator>>,
 }
 
@@ -1173,7 +1174,9 @@ pub struct App {
     runtime_obligations: RuntimeObligationLedger,
     runtime_fault_reporter: RuntimeFaultReporter,
     managed_runtime_generation: Option<RuntimeGeneration>,
-    managed_runtime_error_handler: Option<ErrorHandler>,
+    runtime_error_handler: Option<ErrorHandler>,
+    runtime_fault_bridge: Option<runtime::RuntimeFaultBridgeIdentity>,
+    runtime_fault_bridge_guard: Option<runtime::RuntimeFaultBridgeEpoch>,
     runtime_authority_validator: Option<InstalledRuntimeAuthorityValidator>,
     pending_observers: Vec<Observer>,
     plugin_lifecycle: PluginLifecycleState,
@@ -1247,7 +1250,9 @@ impl App {
             runtime_obligations: RuntimeObligationLedger::new(),
             runtime_fault_reporter,
             managed_runtime_generation: None,
-            managed_runtime_error_handler: None,
+            runtime_error_handler: None,
+            runtime_fault_bridge: None,
+            runtime_fault_bridge_guard: None,
             runtime_authority_validator: None,
             pending_observers: Vec::new(),
             plugin_lifecycle: PluginLifecycleState::Configuring,
@@ -1328,9 +1333,10 @@ impl App {
     /// Registers systems with Nara's schedule set.
     ///
     /// Managed runtimes route unhandled schedule, run-condition, and default command failures into
-    /// the sticky runtime fault channel. Code that installs an explicit per-system or per-command
-    /// handler, or directly mutates Bevy's [`bevy_ecs::error::FallbackErrorHandler`], owns that
-    /// error policy instead.
+    /// the sticky runtime fault channel. A raw App may configure its
+    /// [`bevy_ecs::error::FallbackErrorHandler`] before first execution; that selected handler and
+    /// the canonical reporter then become one fixed bridge. Later bridge mutation faults closed.
+    /// Explicit per-system or per-command handlers remain caller-owned error policy.
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
@@ -1344,11 +1350,12 @@ impl App {
     /// Registers an observer whose unhandled failures enter the managed runtime fault channel.
     ///
     /// Nara materializes registered observers after the App's final error authority is known. A raw
-    /// App uses its current fallback handler; a managed runtime binds the observer to its reserved
-    /// runtime route before startup and project-content admission. Registered observers become
-    /// active only at that first execution or admission boundary, so they do not observe events
-    /// triggered while the App is still being configured. Callers that need a different error
-    /// policy should build and drive that observer outside Nara's managed fault contract.
+    /// App freezes its configured fallback handler at first execution; a managed runtime binds the
+    /// observer to its reserved runtime route before startup and project-content admission.
+    /// Registered observers become active only at that first execution or admission boundary, so
+    /// they do not observe events triggered while the App is still being configured. Callers that
+    /// need a different error policy should build and drive that observer outside Nara's managed
+    /// fault contract.
     pub fn add_observer<M>(
         &mut self,
         observer: impl IntoObserver<M>,
@@ -1365,15 +1372,28 @@ impl App {
         self.world.flush();
     }
 
-    fn materialize_pending_observers_with_current_handler(&mut self) {
-        let error_handler = self.world.fallback_error_handler();
+    fn begin_runtime_execution(&mut self) {
+        self.execution_started = true;
+        if self.runtime_error_handler.is_none() {
+            let error_handler = self.world.fallback_error_handler();
+            if !self.world.contains_resource::<FallbackErrorHandler>() {
+                self.world
+                    .insert_resource(FallbackErrorHandler(error_handler));
+            }
+            self.runtime_error_handler = Some(error_handler);
+            self.runtime_fault_bridge = runtime::RuntimeFaultBridgeIdentity::capture(&self.world);
+        }
+        let error_handler = self
+            .runtime_error_handler
+            .expect("runtime execution binds one fallback error handler");
         self.materialize_pending_observers(error_handler);
     }
 
     pub(crate) fn bind_managed_runtime_error_handler(&mut self, error_handler: ErrorHandler) {
-        self.managed_runtime_error_handler = Some(error_handler);
         self.world
             .insert_resource(FallbackErrorHandler(error_handler));
+        self.runtime_error_handler = Some(error_handler);
+        self.runtime_fault_bridge = runtime::RuntimeFaultBridgeIdentity::capture(&self.world);
         self.materialize_pending_observers(error_handler);
     }
 
@@ -1473,16 +1493,16 @@ impl App {
             return Err(AppScheduleRunError::MissingSchedule);
         }
         self.seal_internal().map_err(AppScheduleRunError::Plugin)?;
-        self.execution_started = true;
-        self.materialize_pending_observers_with_current_handler();
-        self.validate_runtime_authority_boundary()
+        self.begin_runtime_execution();
+        let authority_boundary = self
+            .begin_runtime_authority_boundary()
             .map_err(AppScheduleRunError::Runtime)?;
         let Some(schedule) = self.schedules.get_mut(schedule) else {
             return Err(AppScheduleRunError::MissingSchedule);
         };
         let run_result = catch_unwind(AssertUnwindSafe(|| schedule.run(&mut self.world)));
         let authority_result = self
-            .validate_runtime_authority_boundary()
+            .validate_runtime_authority_boundary_against(&authority_boundary)
             .map_err(AppScheduleRunError::Runtime);
         match run_result {
             Ok(()) => authority_result,
@@ -1978,17 +1998,14 @@ impl App {
                 self.plugin_failure_report.clone(),
             ));
         }
-        self.execution_started = true;
-        self.materialize_pending_observers_with_current_handler();
+        self.begin_runtime_execution();
         let runner = self
             .runner
             .take()
             .unwrap_or_else(|| Box::new(default_runner));
-        let authority_boundary = self.capture_runtime_authority_boundary();
-        let run_result = match self.validate_runtime_authority_boundary_against(&authority_boundary)
-        {
+        let run_result = match self.begin_runtime_authority_boundary() {
             Err(error) => Err(error),
-            Ok(()) => {
+            Ok(authority_boundary) => {
                 let runner_result = runner(&mut self);
                 match (
                     runner_result,
@@ -2025,8 +2042,7 @@ impl App {
                 self.plugin_failure_report.clone(),
             ));
         }
-        self.execution_started = true;
-        self.materialize_pending_observers_with_current_handler();
+        self.begin_runtime_execution();
 
         if !self.started {
             for stage in StartupStage::ALL {
@@ -2053,11 +2069,16 @@ impl App {
     }
 
     fn run_managed_schedule(&mut self, schedule: impl ScheduleLabel) -> Result<(), AppRunError> {
-        self.validate_runtime_authority_boundary()?;
+        let fault_bridge_epoch = self.begin_runtime_fault_bridge_epoch()?;
         if let Some(schedule) = self.schedules.get_mut(schedule) {
             schedule.run(&mut self.world);
         }
         self.validate_runtime_authority_boundary()?;
+        self.validate_runtime_fault_bridge_epoch_against(
+            fault_bridge_epoch,
+            &self.runtime_fault_reporter,
+            self.managed_runtime_generation,
+        )?;
         Ok(())
     }
 
@@ -2065,24 +2086,29 @@ impl App {
         self.validate_runtime_authority_boundary_parts(
             &self.runtime_fault_reporter,
             self.managed_runtime_generation,
-            self.managed_runtime_error_handler,
+            self.runtime_error_handler,
+            self.runtime_fault_bridge,
             self.runtime_authority_validator
                 .as_ref()
                 .map(|owner| &owner.validator),
         )
     }
 
-    fn capture_runtime_authority_boundary(&self) -> RuntimeAuthorityBoundary {
-        RuntimeAuthorityBoundary {
+    fn begin_runtime_authority_boundary(
+        &mut self,
+    ) -> Result<RuntimeAuthorityBoundary, AppRunError> {
+        self.begin_runtime_fault_bridge_epoch()?;
+        Ok(RuntimeAuthorityBoundary {
             app_identity: Arc::clone(&self.instance_identity),
             reporter: self.runtime_fault_reporter.clone(),
             generation: self.managed_runtime_generation,
-            error_handler: self.managed_runtime_error_handler,
+            error_handler: self.runtime_error_handler,
+            fault_bridge: self.runtime_fault_bridge,
             validator: self
                 .runtime_authority_validator
                 .as_ref()
                 .map(|owner| Arc::clone(&owner.validator)),
-        }
+        })
     }
 
     fn validate_runtime_authority_boundary_against(
@@ -2100,8 +2126,83 @@ impl App {
             &boundary.reporter,
             boundary.generation,
             boundary.error_handler,
+            boundary.fault_bridge,
             boundary.validator.as_ref(),
-        )
+        )?;
+        self.validate_runtime_fault_bridge_guard_against(&boundary.reporter, boundary.generation)
+    }
+
+    fn begin_runtime_fault_bridge_epoch(
+        &mut self,
+    ) -> Result<runtime::RuntimeFaultBridgeEpoch, AppRunError> {
+        self.begin_runtime_fault_bridge_epoch_with_maintenance(|world| {
+            world.increment_change_tick();
+            world.check_change_ticks();
+        })
+    }
+
+    fn begin_runtime_fault_bridge_epoch_with_maintenance(
+        &mut self,
+        maintenance: impl FnOnce(&mut World),
+    ) -> Result<runtime::RuntimeFaultBridgeEpoch, AppRunError> {
+        self.validate_runtime_authority_boundary()?;
+        self.validate_runtime_fault_bridge_guard_against(
+            &self.runtime_fault_reporter,
+            self.managed_runtime_generation,
+        )?;
+        if runtime::run_runtime_fault_bridge_maintenance(&mut self.world, maintenance).is_err() {
+            return Err(Self::runtime_fault_bridge_authority_error(
+                &self.runtime_fault_reporter,
+                self.managed_runtime_generation,
+            ));
+        }
+        self.validate_runtime_authority_boundary()?;
+        let epoch = runtime::RuntimeFaultBridgeEpoch::capture(&self.world).ok_or_else(|| {
+            Self::runtime_fault_bridge_authority_error(
+                &self.runtime_fault_reporter,
+                self.managed_runtime_generation,
+            )
+        })?;
+        self.world.increment_change_tick();
+        self.runtime_fault_bridge_guard = Some(epoch);
+        Ok(epoch)
+    }
+
+    fn validate_runtime_fault_bridge_guard_against(
+        &self,
+        reporter: &RuntimeFaultReporter,
+        generation: Option<RuntimeGeneration>,
+    ) -> Result<(), AppRunError> {
+        let Some(expected) = self.runtime_fault_bridge_guard else {
+            return Ok(());
+        };
+        self.validate_runtime_fault_bridge_epoch_against(expected, reporter, generation)
+    }
+
+    fn validate_runtime_fault_bridge_epoch_against(
+        &self,
+        expected: runtime::RuntimeFaultBridgeEpoch,
+        reporter: &RuntimeFaultReporter,
+        generation: Option<RuntimeGeneration>,
+    ) -> Result<(), AppRunError> {
+        if expected.is_unchanged(&self.world) {
+            Ok(())
+        } else {
+            Err(Self::runtime_fault_bridge_authority_error(
+                reporter, generation,
+            ))
+        }
+    }
+
+    fn runtime_fault_bridge_authority_error(
+        reporter: &RuntimeFaultReporter,
+        generation: Option<RuntimeGeneration>,
+    ) -> AppRunError {
+        let fault = runtime::record_runtime_fault_bridge_authority_fault(reporter);
+        match generation {
+            Some(_) => AppRunError::managed_runtime(fault.kind(), fault.source()),
+            None => AppRunError::direct_runtime(fault.kind(), fault.source()),
+        }
     }
 
     fn validate_runtime_authority_boundary_parts(
@@ -2109,6 +2210,7 @@ impl App {
         reporter: &RuntimeFaultReporter,
         generation: Option<RuntimeGeneration>,
         error_handler: Option<ErrorHandler>,
+        fault_bridge: Option<runtime::RuntimeFaultBridgeIdentity>,
         authority: Option<&Arc<runtime::__RuntimeAuthorityValidator>>,
     ) -> Result<(), AppRunError> {
         if let Some(generation) = generation {
@@ -2116,11 +2218,18 @@ impl App {
                 &self.world,
                 reporter,
                 error_handler,
+                fault_bridge,
                 generation,
                 authority,
             )
         } else {
-            runtime::validate_direct_authority_boundary(&self.world, reporter, authority)
+            runtime::validate_direct_authority_boundary(
+                &self.world,
+                reporter,
+                error_handler,
+                fault_bridge,
+                authority,
+            )
         }
     }
 
@@ -2131,7 +2240,8 @@ impl App {
         runtime::validate_managed_runtime_authority(
             &self.world,
             &self.runtime_fault_reporter,
-            self.managed_runtime_error_handler,
+            self.runtime_error_handler,
+            self.runtime_fault_bridge,
             generation,
             self.runtime_authority_validator
                 .as_ref()
@@ -2312,6 +2422,7 @@ mod tests {
     use nara_ecs::{
         Commands, Component, DetectChanges, DetectChangesMut, Query, Ref, RemovedComponents, Res,
         ResMut, Resource,
+        error::{BevyError, ErrorContext},
     };
     use std::sync::{
         Arc,
@@ -2368,6 +2479,94 @@ mod tests {
 
     #[derive(Debug, Default, Resource)]
     struct Order(Vec<&'static str>);
+
+    #[derive(Debug, Default, PartialEq, Eq, Resource)]
+    struct DirectFaultBridgeProbe {
+        update_runs: usize,
+        last_runs: usize,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
+    struct DirectFaultBridgeSchedule;
+
+    #[derive(Debug, Error)]
+    #[error("direct handler probe failure")]
+    struct DirectHandlerProbeError;
+
+    static DIRECT_HANDLER_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    fn count_direct_update(mut probe: ResMut<DirectFaultBridgeProbe>) {
+        probe.update_runs += 1;
+    }
+
+    fn count_direct_last(mut probe: ResMut<DirectFaultBridgeProbe>) {
+        probe.last_runs += 1;
+    }
+
+    fn ignore_direct_bevy_error(_error: BevyError, _context: ErrorContext) {}
+
+    fn count_direct_bevy_error(_error: BevyError, _context: ErrorContext) {
+        DIRECT_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn fail_direct_system() -> Result<(), BevyError> {
+        Err(BevyError::error(DirectHandlerProbeError))
+    }
+
+    fn replace_direct_reporter_and_report(world: &mut World) {
+        let replacement = RuntimeFaultReporter::new();
+        assert!(replacement.report(RuntimeFault::engine(
+            RuntimeFaultKind::System,
+            "nara.test.replaced-direct-reporter",
+        )));
+        world.insert_resource(replacement);
+        world.resource_mut::<DirectFaultBridgeProbe>().update_runs += 1;
+    }
+
+    fn replace_and_restore_direct_reporter(
+        mut reporter: ResMut<RuntimeFaultReporter>,
+        mut probe: ResMut<DirectFaultBridgeProbe>,
+    ) {
+        let canonical = reporter.clone();
+        *reporter = RuntimeFaultReporter::new();
+        assert!(reporter.report(RuntimeFault::engine(
+            RuntimeFaultKind::System,
+            "nara.test.temporary-direct-reporter",
+        )));
+        *reporter = canonical;
+        probe.update_runs += 1;
+    }
+
+    fn replace_and_restore_direct_error_handler(
+        mut handler: ResMut<FallbackErrorHandler>,
+        mut probe: ResMut<DirectFaultBridgeProbe>,
+    ) {
+        let canonical = *handler;
+        *handler = FallbackErrorHandler(ignore_direct_bevy_error);
+        *handler = canonical;
+        probe.update_runs += 1;
+    }
+
+    fn direct_fault_bridge_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<DirectFaultBridgeProbe>()
+            .unwrap()
+            .add_systems(CoreStage::Update, count_direct_update)
+            .unwrap()
+            .add_systems(CoreStage::Last, count_direct_last)
+            .unwrap();
+        app
+    }
+
+    fn assert_direct_fault_bridge_error(error: AppRunError) {
+        assert_eq!(
+            error,
+            AppRunError::direct_runtime(
+                RuntimeFaultKind::FaultReporterAuthority,
+                "nara.app.runtime-fault-reporter",
+            )
+        );
+    }
 
     const RAW_APP_CLOSE_PLUGIN_ID: PluginId = PluginId::new("nara.test.raw-app-close");
     const RAW_APP_CLOSE_OBLIGATION: PluginShutdownObligationId =
@@ -3642,6 +3841,285 @@ mod tests {
         app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert!(app.world().resource::<BoundaryObserved>().0);
+    }
+
+    #[test]
+    fn direct_app_rejects_removed_replaced_or_reinserted_fault_reporter() {
+        for mutation in 0..3 {
+            let mut app = direct_fault_bridge_app();
+            app.run_once(Duration::ZERO).unwrap();
+            let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+
+            let world = app.world_mut().unwrap();
+            match mutation {
+                0 => {
+                    world.remove_resource::<RuntimeFaultReporter>();
+                }
+                1 => {
+                    world.insert_resource(RuntimeFaultReporter::new());
+                }
+                2 => {
+                    world.remove_resource::<RuntimeFaultReporter>();
+                    world.insert_resource(canonical.clone());
+                }
+                _ => unreachable!(),
+            }
+
+            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_eq!(
+                *app.world().resource::<DirectFaultBridgeProbe>(),
+                DirectFaultBridgeProbe {
+                    update_runs: 1,
+                    last_runs: 1,
+                }
+            );
+            assert_eq!(
+                canonical.fault().unwrap().kind(),
+                RuntimeFaultKind::FaultReporterAuthority
+            );
+            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+        }
+    }
+
+    #[test]
+    fn direct_app_rejects_removed_replaced_or_reinserted_error_handler() {
+        for mutation in 0..3 {
+            let mut app = direct_fault_bridge_app();
+            app.run_once(Duration::ZERO).unwrap();
+            let canonical = *app.world().resource::<FallbackErrorHandler>();
+            let reporter = app.world().resource::<RuntimeFaultReporter>().clone();
+
+            let world = app.world_mut().unwrap();
+            match mutation {
+                0 => {
+                    world.remove_resource::<FallbackErrorHandler>();
+                }
+                1 => {
+                    world.insert_resource(FallbackErrorHandler(ignore_direct_bevy_error));
+                }
+                2 => {
+                    world.remove_resource::<FallbackErrorHandler>();
+                    world.insert_resource(canonical);
+                }
+                _ => unreachable!(),
+            }
+
+            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_eq!(
+                *app.world().resource::<DirectFaultBridgeProbe>(),
+                DirectFaultBridgeProbe {
+                    update_runs: 1,
+                    last_runs: 1,
+                }
+            );
+            assert_eq!(
+                reporter.fault().unwrap().kind(),
+                RuntimeFaultKind::FaultReporterAuthority
+            );
+            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+        }
+    }
+
+    #[test]
+    fn direct_app_freezes_a_pre_execution_error_handler_configuration() {
+        DIRECT_HANDLER_CALLS.store(0, Ordering::SeqCst);
+        let mut app = direct_fault_bridge_app();
+        app.add_systems(CoreStage::Update, fail_direct_system)
+            .unwrap();
+        app.insert_resource(FallbackErrorHandler(count_direct_bevy_error))
+            .unwrap();
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(DIRECT_HANDLER_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *app.world().resource::<DirectFaultBridgeProbe>(),
+            DirectFaultBridgeProbe {
+                update_runs: 1,
+                last_runs: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn direct_schedule_rejects_in_place_fault_bridge_mutation_after_restore() {
+        for mutation in 0..2 {
+            let mut app = App::new();
+            app.init_resource::<DirectFaultBridgeProbe>().unwrap();
+            match mutation {
+                0 => app
+                    .add_systems(CoreStage::Update, replace_and_restore_direct_reporter)
+                    .unwrap(),
+                1 => app
+                    .add_systems(CoreStage::Update, replace_and_restore_direct_error_handler)
+                    .unwrap(),
+                _ => unreachable!(),
+            };
+            app.add_systems(CoreStage::Last, count_direct_last).unwrap();
+            let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+
+            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_eq!(
+                *app.world().resource::<DirectFaultBridgeProbe>(),
+                DirectFaultBridgeProbe {
+                    update_runs: 1,
+                    last_runs: 0,
+                }
+            );
+            assert_eq!(
+                canonical.fault().unwrap().kind(),
+                RuntimeFaultKind::FaultReporterAuthority
+            );
+            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_eq!(
+                app.world().resource::<DirectFaultBridgeProbe>().update_runs,
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn direct_change_tick_maintenance_cannot_hide_fault_bridge_mutation() {
+        for mutation in 0..2 {
+            let mut app = direct_fault_bridge_app();
+            app.run_once(Duration::ZERO).unwrap();
+            let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+
+            let error = app
+                .begin_runtime_fault_bridge_epoch_with_maintenance(|world| {
+                    world.increment_change_tick();
+                    match mutation {
+                        0 => {
+                            let mut reporter = world.resource_mut::<RuntimeFaultReporter>();
+                            let canonical = reporter.clone();
+                            *reporter = RuntimeFaultReporter::new();
+                            *reporter = canonical;
+                        }
+                        1 => {
+                            let mut handler = world.resource_mut::<FallbackErrorHandler>();
+                            let canonical = *handler;
+                            *handler = FallbackErrorHandler(ignore_direct_bevy_error);
+                            *handler = canonical;
+                        }
+                        _ => unreachable!(),
+                    }
+                })
+                .unwrap_err();
+
+            assert_direct_fault_bridge_error(error);
+            assert_eq!(
+                canonical.fault().unwrap().kind(),
+                RuntimeFaultKind::FaultReporterAuthority
+            );
+            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+        }
+    }
+
+    #[test]
+    fn custom_schedule_rejects_in_place_reporter_mutation_after_restore() {
+        let mut app = App::new();
+        app.init_resource::<DirectFaultBridgeProbe>()
+            .unwrap()
+            .init_schedule(DirectFaultBridgeSchedule)
+            .unwrap()
+            .add_systems(
+                DirectFaultBridgeSchedule,
+                replace_and_restore_direct_reporter,
+            )
+            .unwrap();
+        let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+
+        let error = app.run_schedule(DirectFaultBridgeSchedule).unwrap_err();
+        let AppScheduleRunError::Runtime(error) = error else {
+            panic!("custom schedule bridge mutation must be a runtime error");
+        };
+        assert_direct_fault_bridge_error(error);
+        assert_eq!(
+            app.world().resource::<DirectFaultBridgeProbe>().update_runs,
+            1
+        );
+        assert_eq!(
+            canonical.fault().unwrap().kind(),
+            RuntimeFaultKind::FaultReporterAuthority
+        );
+
+        let error = app.run_schedule(DirectFaultBridgeSchedule).unwrap_err();
+        let AppScheduleRunError::Runtime(error) = error else {
+            panic!("sticky bridge fault must reject the custom schedule");
+        };
+        assert_direct_fault_bridge_error(error);
+        assert_eq!(
+            app.world().resource::<DirectFaultBridgeProbe>().update_runs,
+            1
+        );
+    }
+
+    #[test]
+    fn custom_runner_rejects_in_place_reporter_mutation_after_restore() {
+        let mut app = App::new();
+        let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+        app.set_runner(|app| {
+            {
+                let world = app
+                    .world_mut()
+                    .expect("runner keeps App mutation authority");
+                let mut reporter = world.resource_mut::<RuntimeFaultReporter>();
+                let canonical = reporter.clone();
+                *reporter = RuntimeFaultReporter::new();
+                assert!(reporter.report(RuntimeFault::engine(
+                    RuntimeFaultKind::System,
+                    "nara.test.temporary-runner-reporter",
+                )));
+                *reporter = canonical;
+            }
+
+            let error = app.run_once(Duration::ZERO).unwrap_err();
+            assert_eq!(
+                error,
+                AppRunError::direct_runtime(
+                    RuntimeFaultKind::FaultReporterAuthority,
+                    "nara.app.runtime-fault-reporter",
+                )
+            );
+            Err(error)
+        })
+        .unwrap();
+
+        assert_direct_fault_bridge_error(app.run().unwrap_err());
+        assert_eq!(
+            canonical.fault().unwrap().kind(),
+            RuntimeFaultKind::FaultReporterAuthority
+        );
+    }
+
+    #[test]
+    fn direct_schedule_cannot_hide_a_fault_behind_a_replaced_world_reporter() {
+        let mut app = App::new();
+        app.init_resource::<DirectFaultBridgeProbe>()
+            .unwrap()
+            .add_systems(CoreStage::Update, replace_direct_reporter_and_report)
+            .unwrap()
+            .add_systems(CoreStage::Last, count_direct_last)
+            .unwrap();
+        let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+
+        assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+        assert_eq!(
+            *app.world().resource::<DirectFaultBridgeProbe>(),
+            DirectFaultBridgeProbe {
+                update_runs: 1,
+                last_runs: 0,
+            }
+        );
+        assert_eq!(
+            canonical.fault().unwrap().kind(),
+            RuntimeFaultKind::FaultReporterAuthority
+        );
+        assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+        assert_eq!(
+            app.world().resource::<DirectFaultBridgeProbe>().update_runs,
+            1
+        );
     }
 
     #[test]
