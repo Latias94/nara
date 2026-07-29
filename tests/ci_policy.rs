@@ -16,7 +16,9 @@ const REQUIRED_LOCKFILES: [&str; 3] = [
 ];
 const REQUIRED_JOBS: [&str; 3] = ["root", "reference-game", "module-consumer"];
 const ALLOWED_RUNNERS: [&str; 2] = ["ubuntu-latest", "windows-latest"];
-const MAX_TIMEOUT_MINUTES: i64 = 45;
+const ROOT_TIMEOUT_MINUTES: i64 = 75;
+const STANDARD_TIMEOUT_MINUTES: i64 = 45;
+const MAX_TIMEOUT_MINUTES: i64 = ROOT_TIMEOUT_MINUTES;
 const CHECKOUT_ACTION: &str = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
 const INSTALL_ACTION: &str = "taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853";
 const SETUP_PYTHON_ACTION: &str = "actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548";
@@ -303,6 +305,22 @@ fn policy_rejects_mutable_actions_and_checkout_credentials() {
         "persist-credentials: true",
     );
     assert_policy_rejects(&persistent_credentials, "persist-credentials");
+
+    let mut shallow_root_history = PolicyFixture::committed();
+    replace_first(
+        &mut shallow_root_history.workflow,
+        "fetch-depth: 0",
+        "fetch-depth: 1",
+    );
+    assert_policy_rejects(&shallow_root_history, "full Git history");
+
+    let mut missing_root_history = PolicyFixture::committed();
+    replace_first(
+        &mut missing_root_history.workflow,
+        "          fetch-depth: 0\n",
+        "",
+    );
+    assert_policy_rejects(&missing_root_history, "workflow.jobs.root.steps[0].with");
 }
 
 #[test]
@@ -310,7 +328,7 @@ fn policy_rejects_unbounded_or_uncancellable_jobs() {
     let mut missing_timeout = PolicyFixture::committed();
     replace_first(
         &mut missing_timeout.workflow,
-        "    timeout-minutes: 45\n",
+        "    timeout-minutes: 75\n",
         "",
     );
     assert_policy_rejects(&missing_timeout, "timeout-minutes");
@@ -318,10 +336,26 @@ fn policy_rejects_unbounded_or_uncancellable_jobs() {
     let mut excessive_timeout = PolicyFixture::committed();
     replace_first(
         &mut excessive_timeout.workflow,
-        "timeout-minutes: 45",
+        "timeout-minutes: 75",
         "timeout-minutes: 120",
     );
-    assert_policy_rejects(&excessive_timeout, "exceeds 45");
+    assert_policy_rejects(&excessive_timeout, "exceeds 75");
+
+    let mut shortened_root_timeout = PolicyFixture::committed();
+    replace_first(
+        &mut shortened_root_timeout.workflow,
+        "timeout-minutes: 75",
+        "timeout-minutes: 60",
+    );
+    assert_policy_rejects(&shortened_root_timeout, "must equal 75");
+
+    let mut relaxed_standard_timeout = PolicyFixture::committed();
+    replace_first(
+        &mut relaxed_standard_timeout.workflow,
+        "timeout-minutes: 45",
+        "timeout-minutes: 60",
+    );
+    assert_policy_rejects(&relaxed_standard_timeout, "must equal 45");
 
     let mut cancellation_disabled = PolicyFixture::committed();
     replace_first(
@@ -1827,6 +1861,17 @@ fn validate_job(job_name: &str, job: &yaml_rust2::yaml::Hash, violations: &mut V
         violations.push(format!(
             "job {job_name} timeout-minutes is missing or exceeds {MAX_TIMEOUT_MINUTES}"
         ));
+    } else {
+        let expected_timeout = if job_name == "root" {
+            ROOT_TIMEOUT_MINUTES
+        } else {
+            STANDARD_TIMEOUT_MINUTES
+        };
+        if timeout != Some(expected_timeout) {
+            violations.push(format!(
+                "job {job_name} timeout-minutes must equal {expected_timeout}"
+            ));
+        }
     }
     if scalar_str(field(job, "runs-on")) != Some("${{ matrix.os }}") {
         violations.push(format!(
@@ -1898,10 +1943,15 @@ fn validate_job_steps(job_name: &str, steps: &[Yaml], violations: &mut Vec<Strin
                     continue;
                 };
                 if action == CHECKOUT_ACTION {
+                    let expected_keys = if job_name == "root" {
+                        &["fetch-depth", "persist-credentials"][..]
+                    } else {
+                        &["persist-credentials"][..]
+                    };
                     validate_exact_keys(
                         with,
                         &format!("{step_path}.with"),
-                        &["persist-credentials"],
+                        expected_keys,
                         violations,
                     );
                     checkout_count += 1;
@@ -1910,6 +1960,14 @@ fn validate_job_steps(job_name: &str, steps: &[Yaml], violations: &mut Vec<Strin
                         violations.push(format!(
                             "job {job_name} checkout must set persist-credentials: false"
                         ));
+                    }
+                    if job_name == "root"
+                        && field(with, "fetch-depth").and_then(Yaml::as_i64) != Some(0)
+                    {
+                        violations.push(
+                            "job root checkout must fetch full Git history for ancestry evidence"
+                                .to_owned(),
+                        );
                     }
                 } else if action == INSTALL_ACTION {
                     validate_exact_keys(
