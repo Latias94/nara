@@ -5,6 +5,8 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
+    thread,
+    time::{Duration, Instant},
 };
 
 #[cfg(windows)]
@@ -30,6 +32,8 @@ use nara::{
 };
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const ASYNC_DRIVER_TIMEOUT: Duration = Duration::from_secs(5);
+const ASYNC_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
 #[test]
 fn persistence_authority_surface_is_opaque_and_linear() {
@@ -729,23 +733,37 @@ fn dirty_exit_uses_the_same_explicit_decision_before_closing() {
 }
 
 fn drive_play_until(editor: &mut EditorProjectSession, expected: EditorPlayState) {
-    for _ in 0..32 {
+    let deadline = Instant::now() + ASYNC_DRIVER_TIMEOUT;
+    loop {
         if editor.play_view().state() == expected {
             return;
         }
-        editor.drive_editor_frame(std::time::Duration::ZERO);
+        if Instant::now() >= deadline {
+            panic!(
+                "editor Play state did not reach {expected:?}; observed {:?}",
+                editor.play_view().state()
+            );
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        thread::sleep(ASYNC_POLL_INTERVAL);
     }
-    panic!("editor Play state did not reach {expected:?}");
 }
 
 fn drive_workspace_intent_until_idle(editor: &mut EditorProjectSession) {
-    for _ in 0..32 {
+    let deadline = Instant::now() + ASYNC_DRIVER_TIMEOUT;
+    loop {
         if editor.workspace_intent_view().phase().is_none() {
             return;
         }
-        editor.drive_editor_frame(std::time::Duration::ZERO);
+        if Instant::now() >= deadline {
+            panic!(
+                "workspace intent did not complete; observed {:?}",
+                editor.workspace_intent_view().phase()
+            );
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        thread::sleep(ASYNC_POLL_INTERVAL);
     }
-    panic!("workspace intent did not complete");
 }
 
 fn add_entity_patch(id: &str) -> ScenePatchDocument {

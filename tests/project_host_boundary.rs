@@ -1,5 +1,15 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
+use nara::{
+    fs::DirectoryCapability,
+    gameplay::GameplayCommandSubmission,
+    prelude::Resource,
+    project_host::{HeadlessRun, HeadlessRunIntent},
+};
+
+#[derive(Clone, Resource)]
+struct ProductOutcome;
+
 const ALLOWED_RUNTIME_EXPORTS: [&str; 8] = [
     "DesktopRun",
     "DesktopRunIntent",
@@ -64,15 +74,6 @@ fn concrete_product_action_exposes_only_the_reviewed_carriers() {
     ));
 
     let runtime_source = read(root.join("src/project_host/runtime/action.rs"));
-    let compact_runtime = runtime_source.split_whitespace().collect::<String>();
-    assert!(
-        compact_runtime.contains("commands:Vec<GameplayCommandSubmission>"),
-        "the product action must take an already-owned command buffer"
-    );
-    assert!(
-        !compact_runtime.contains("IntoIterator<Item=GameplayCommandSubmission>"),
-        "the product Host must not consume an unbounded command iterator"
-    );
     let mut public_types = BTreeSet::new();
     let mut public_methods = BTreeSet::new();
     for line in runtime_source.lines() {
@@ -153,10 +154,91 @@ fn ordinary_desktop_binary_names_only_product_level_concepts() {
 }
 
 #[test]
-fn external_consumer_compiles_with_the_product_concepts() {
-    let cases = trybuild::TestCases::new();
-    cases.pass("tests/fixtures/project-host-boundary/ordinary_product_action.rs");
-    cases.compile_fail("tests/ui/project_host/headless_run_rejects_unbounded_commands.rs");
+fn headless_run_constructor_requires_an_owned_command_buffer() {
+    type Constructor = fn(
+        DirectoryCapability,
+        HeadlessRunIntent<ProductOutcome>,
+        Vec<GameplayCommandSubmission>,
+    ) -> HeadlessRun<ProductOutcome>;
+
+    let constructor: Constructor = HeadlessRun::new;
+    let _ = constructor;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = read(root.join("src/project_host/runtime/action.rs"));
+    let syntax = syn::parse_file(&source).expect("project Host runtime source must parse");
+    let constructor = syntax
+        .items
+        .iter()
+        .filter_map(|item| {
+            let syn::Item::Impl(item_impl) = item else {
+                return None;
+            };
+            let syn::Type::Path(self_ty) = item_impl.self_ty.as_ref() else {
+                return None;
+            };
+            if !self_ty
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "HeadlessRun")
+            {
+                return None;
+            }
+            item_impl.items.iter().find_map(|item| match item {
+                syn::ImplItem::Fn(method) if method.sig.ident == "new" => Some(method),
+                _ => None,
+            })
+        })
+        .next()
+        .expect("HeadlessRun must expose one constructor");
+
+    assert!(
+        constructor.sig.generics.params.is_empty()
+            && constructor.sig.generics.where_clause.is_none(),
+        "HeadlessRun::new must not generalize command admission through method generics"
+    );
+    assert_eq!(
+        constructor.sig.inputs.len(),
+        3,
+        "HeadlessRun::new must retain the reviewed three-argument product action"
+    );
+    let commands = constructor
+        .sig
+        .inputs
+        .iter()
+        .nth(2)
+        .and_then(|input| match input {
+            syn::FnArg::Typed(argument) => Some(argument),
+            syn::FnArg::Receiver(_) => None,
+        })
+        .expect("the third constructor argument must be the command buffer");
+    let syn::Pat::Ident(pattern) = commands.pat.as_ref() else {
+        panic!("the command buffer argument must have a stable name");
+    };
+    assert_eq!(pattern.ident, "commands");
+    assert_vec_of_gameplay_submissions(commands.ty.as_ref());
+}
+
+fn assert_vec_of_gameplay_submissions(ty: &syn::Type) {
+    let syn::Type::Path(commands) = ty else {
+        panic!("the command buffer must be a concrete path type");
+    };
+    assert_eq!(commands.path.segments.len(), 1);
+    let vec = commands.path.segments.last().unwrap();
+    assert_eq!(vec.ident, "Vec");
+    let syn::PathArguments::AngleBracketed(arguments) = &vec.arguments else {
+        panic!("the command buffer must identify its bounded item type");
+    };
+    assert_eq!(arguments.args.len(), 1);
+    let Some(syn::GenericArgument::Type(syn::Type::Path(item))) = arguments.args.first() else {
+        panic!("the command buffer must contain one concrete item type");
+    };
+    assert_eq!(item.path.segments.len(), 1);
+    assert_eq!(
+        item.path.segments.last().unwrap().ident,
+        "GameplayCommandSubmission"
+    );
 }
 
 fn read(path: impl AsRef<Path>) -> String {

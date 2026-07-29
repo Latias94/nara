@@ -1920,9 +1920,9 @@ owner.
 
 **Verification anchors**: `reference-game/tests/{first_wave,headless_cli,headless_snapshot}.rs`,
 `tests/{reference_game_contract,project_runtime_boot,project_host_boundary}.rs`, and the
-`headless_run_rejects_unbounded_commands` compile-fail fixture prove stable terminal ticks, same-tick
-Defeated priority, last-good snapshot retention, privacy-safe CLI sinks, bounded cleanup, public-only
-game code, and the owned command boundary.
+`headless_run_constructor_requires_an_owned_command_buffer` type and syntax contract prove stable
+terminal ticks, same-tick Defeated priority, last-good snapshot retention, privacy-safe CLI sinks,
+bounded cleanup, public-only game code, and the owned command boundary.
 
 ## RGF-U13-1: Typed Desktop Driver and Ordered Button Transitions
 
