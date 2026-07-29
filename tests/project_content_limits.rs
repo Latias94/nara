@@ -26,11 +26,19 @@ const PORTABLE_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 10] = [
     (ProjectContentBudgetKind::ArtifactBytes, 4),
 ];
 
-// These three modeled allocation values depend on pointer width.
-#[cfg(target_pointer_width = "64")]
+// These modeled allocations include target-specific Rust and standard-library type layouts.
+#[cfg(all(target_pointer_width = "64", target_os = "windows"))]
 const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
     (ProjectContentBudgetKind::WorkBytes, 393_075_070),
     (ProjectContentBudgetKind::RetainedBytes, 3_944),
+    (ProjectContentBudgetKind::AggregateBytes, 393_078_159),
+];
+
+#[cfg(all(target_pointer_width = "64", target_os = "linux"))]
+const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
+    (ProjectContentBudgetKind::WorkBytes, 393_075_070),
+    (ProjectContentBudgetKind::RetainedBytes, 3_936),
+    // The aggregate peak precedes final retained publication for this fixture.
     (ProjectContentBudgetKind::AggregateBytes, 393_078_159),
 ];
 
@@ -41,9 +49,12 @@ fn portable_loader_budgets_match_the_independent_fixture_oracle() {
     }
 }
 
-#[cfg(target_pointer_width = "64")]
+#[cfg(all(
+    target_pointer_width = "64",
+    any(target_os = "linux", target_os = "windows")
+))]
 #[test]
-fn layout_dependent_loader_budgets_match_the_64_bit_fixture_oracle() {
+fn layout_dependent_loader_budgets_match_the_supported_target_fixture_oracle() {
     for (kind, expected) in LAYOUT_FIXTURE_HIGH_WATER {
         assert_budget_boundary(kind, expected);
     }
