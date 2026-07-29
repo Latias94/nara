@@ -881,6 +881,7 @@ fn map_fs_error(stage: ImageImportStage, error: FsError) -> ImageImportError {
         | FsError::NotDirectory
         | FsError::NotRegularFile
         | FsError::ReparsePoint { .. }
+        | FsError::SymbolicLinkTraversal
         | FsError::CrossVolume
         | FsError::MultipleLinks { .. }
         | FsError::IdentityUnavailable

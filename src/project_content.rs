@@ -1952,6 +1952,7 @@ fn map_fs_error(error: FsError) -> ProjectContentError {
         | FsError::NotDirectory
         | FsError::NotRegularFile
         | FsError::ReparsePoint { .. }
+        | FsError::SymbolicLinkTraversal
         | FsError::CrossVolume
         | FsError::MultipleLinks { .. }
         | FsError::IdentityUnavailable

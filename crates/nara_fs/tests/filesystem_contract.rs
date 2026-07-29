@@ -855,5 +855,8 @@ fn unix_open_rejects_symlink_leaf() {
     symlink("target.txt", root.path().join("link.txt")).unwrap();
     let capability = portable_read_only(&root);
 
-    assert!(capability.open_file(&relative("link.txt")).is_err());
+    assert!(matches!(
+        capability.open_file(&relative("link.txt")),
+        Err(FsError::SymbolicLinkTraversal)
+    ));
 }

@@ -101,6 +101,8 @@ pub enum FsError {
     NotRegularFile,
     #[error("reparse traversal is forbidden (tag {tag:#x})")]
     ReparsePoint { tag: u32 },
+    #[error("symbolic-link traversal is forbidden")]
+    SymbolicLinkTraversal,
     #[error("opened object crossed the capability volume or device boundary")]
     CrossVolume,
     #[error("strict mode requires a single-link file, found {links} links")]

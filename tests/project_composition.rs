@@ -217,6 +217,12 @@ fn manifest_authority_errors_lower_to_stable_private_diagnostics() {
             vec!["deadbeef", "3735928559"],
         ),
         (
+            FsError::SymbolicLinkTraversal,
+            ProjectCandidateErrorKind::HostAuthorityRejected,
+            "project.manifest.authority-rejected",
+            vec![],
+        ),
+        (
             FsError::MultipleLinks { links: 4_242_424 },
             ProjectCandidateErrorKind::HostAuthorityRejected,
             "project.manifest.authority-rejected",

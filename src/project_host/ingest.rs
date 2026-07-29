@@ -283,6 +283,7 @@ fn project_fs_error(error: FsError) -> ProjectCandidateError {
         FsError::NotDirectory => authority_rejection("not-directory"),
         FsError::NotRegularFile => authority_rejection("not-regular-file"),
         FsError::ReparsePoint { .. } => authority_rejection("reparse-point"),
+        FsError::SymbolicLinkTraversal => authority_rejection("symbolic-link"),
         FsError::CrossVolume => authority_rejection("cross-volume"),
         FsError::MultipleLinks { .. } => authority_rejection("multiple-links"),
         FsError::IdentityUnavailable => authority_rejection("identity-unavailable"),

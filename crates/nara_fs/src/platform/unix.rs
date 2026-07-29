@@ -265,6 +265,12 @@ fn resolution_error_tier(error: rustix::io::Errno) -> ResolutionTier {
 
 #[cfg(target_os = "linux")]
 fn strict_open_error(operation: FsOperation, error: rustix::io::Errno) -> FsError {
+    if error == rustix::io::Errno::LOOP {
+        return FsError::SymbolicLinkTraversal;
+    }
+    if error == rustix::io::Errno::XDEV {
+        return FsError::CrossVolume;
+    }
     match resolution_error_tier(error) {
         ResolutionTier::Unsupported => FsError::Unsupported {
             operation,
@@ -295,5 +301,17 @@ mod tests {
             resolution_error_tier(rustix::io::Errno::PERM),
             ResolutionTier::Unproven
         );
+    }
+
+    #[test]
+    fn strict_open_classifies_link_and_mount_policy_rejections() {
+        assert!(matches!(
+            strict_open_error(FsOperation::OpenFile, rustix::io::Errno::LOOP),
+            FsError::SymbolicLinkTraversal
+        ));
+        assert!(matches!(
+            strict_open_error(FsOperation::OpenFile, rustix::io::Errno::XDEV),
+            FsError::CrossVolume
+        ));
     }
 }
