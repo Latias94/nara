@@ -12,6 +12,7 @@ use nara::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     project::{ProductCapability, RuntimePreset},
     project_host::ingest_project_manifest,
+    tasks::TaskPoolKind,
 };
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -74,6 +75,29 @@ fn committed_manifest_is_opened_by_capability_and_lowers_product_settings() {
     assert_eq!(
         candidate.settings().runtime.fixed_time().timestep(),
         std::time::Duration::from_millis(20)
+    );
+    let task_config = candidate.settings().tasks.pool_config;
+    for (kind, workers, pending) in [
+        (TaskPoolKind::Io, 2, 512),
+        (TaskPoolKind::Compute, 4, 512),
+        (TaskPoolKind::AsyncCompute, 2, 256),
+    ] {
+        let pool = task_config.kind(kind);
+        assert_eq!(pool.workers().get(), workers);
+        assert_eq!(pool.pending().get(), pending);
+    }
+    let shutdown = task_config.shutdown_policy();
+    assert_eq!(
+        shutdown.drain_timeout().get(),
+        std::time::Duration::from_millis(250)
+    );
+    assert_eq!(
+        shutdown.cancel_timeout().get(),
+        std::time::Duration::from_millis(250)
+    );
+    assert_eq!(
+        shutdown.join_timeout().get(),
+        std::time::Duration::from_millis(100)
     );
     assert_eq!(
         candidate

@@ -486,8 +486,24 @@ fn managed_runtime_scopes_do_not_expose_raw_world_mutation() {
         ["__apply_port"],
         "first-party driver plumbing must remain one explicitly hidden, removable entry"
     );
+    let driver_port = runtime_file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Trait(item_trait) if item_trait.ident == "__RuntimeDriverPort" => {
+                Some(item_trait)
+            }
+            _ => None,
+        })
+        .expect("the first-party runtime driver port must remain present");
+    let driver_port_is_hidden = driver_port.attrs.iter().any(|attribute| {
+        attribute.path().is_ident("doc")
+            && attribute
+                .parse_args::<syn::Ident>()
+                .is_ok_and(|argument| argument == "hidden")
+    });
     assert!(
-        runtime_source.contains("#[doc(hidden)]\npub trait __RuntimeDriverPort"),
+        is_public(&driver_port.vis) && driver_port_is_hidden,
         "first-party driver plumbing must not be presented as a stable public Adapter contract"
     );
     assert!(

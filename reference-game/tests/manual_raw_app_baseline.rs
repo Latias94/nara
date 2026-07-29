@@ -32,7 +32,7 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
 
     assert_eq!(
         report.plugin_plan_fingerprint,
-        "f499fbeb8c84c4592b5a5bf503bf75e9b85898ba17ac7ae8d5107b90f5f6f38f"
+        "c822c54168160ed7c23c89ceb2fd0f23d87d0012cc2607388db95fbbaea5ecb2"
     );
     assert_eq!(
         report.schema_fingerprint,
@@ -40,7 +40,7 @@ fn committed_manual_raw_app_task_reaches_the_frozen_first_tick_and_retires_owner
     );
     assert_eq!(
         report.content_revision,
-        "f4c2461e044bc4c5bed2d92dc7ab102e757d05e30c1c0b6059f152d0d8dc96ff"
+        "60d9ff54b0aadf73d19142b977ebe24a73a7967d5fe5ad9cfbce554e9f02e7d4"
     );
     assert_eq!(
         report.content_digest,

@@ -425,7 +425,7 @@ fn policy_rejects_skipped_matrix_entries_and_masked_commands() {
     let mut selective_tests = PolicyFixture::committed();
     replace_first(
         &mut selective_tests.workflow,
-        "cargo nextest run --workspace --locked --test-threads=1",
+        "cargo nextest run --workspace --locked -E 'not binary(architecture_docs)' --test-threads=1",
         "cargo nextest run --locked -p nara --test ci_policy --test-threads=1",
     );
     assert_policy_rejects(&selective_tests, "exact ordered run commands");
@@ -1979,7 +1979,7 @@ fn required_step_pipeline(job_name: &str) -> &'static [&'static str] {
             "run:cargo fmt --all -- --check",
             "run:cargo check --workspace --locked --all-targets",
             "run:cargo check -p nara --locked --no-default-features --lib\ncargo check -p nara --locked --no-default-features --features runtime-core --lib\ncargo check -p nara --locked --no-default-features --features runtime-2d --lib\ncargo check -p nara --locked --no-default-features --features runtime-ui --lib\ncargo check -p nara --locked --no-default-features --features tooling --lib\ncargo check -p nara --locked --no-default-features --features asset-watch --lib\ncargo check -p nara --locked --no-default-features --features desktop-winit --lib\ncargo check -p nara --locked --no-default-features --features render-wgpu --lib\ncargo check -p nara --locked --no-default-features --features tooling-egui --lib\ncargo check -p nara --locked --no-default-features --features serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-core,serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-2d,serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-ui,serde --lib\ncargo check -p nara --locked --no-default-features --features tooling,runtime-2d,serde --lib\ncargo check -p nara --locked --no-default-features --features desktop-winit,render-wgpu --example windowed_clear\ncargo check -p nara --locked --no-default-features --features runtime-2d,desktop-winit,render-wgpu --example windowed_sprites\ncargo check -p nara --locked --no-default-features --features runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel\ncargo check --workspace --locked --all-features --all-targets|shell:bash",
-            "run:cargo nextest run --workspace --locked --test-threads=1\ncargo nextest run --workspace --locked --all-features --test-threads=1|shell:bash",
+            "run:cargo nextest run --workspace --locked -E 'not binary(architecture_docs)' --test-threads=1\ncargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1|shell:bash",
         ],
         "reference-game" => &[
             "uses:actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",

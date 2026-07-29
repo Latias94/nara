@@ -17,6 +17,23 @@ default_scene = "startup.scene.json"
 preset = "local-headless"
 fixed_timestep_seconds = 0.02
 
+[tasks.io]
+workers = 2
+pending_capacity = 512
+
+[tasks.compute]
+workers = 4
+pending_capacity = 512
+
+[tasks.async_compute]
+workers = 2
+pending_capacity = 256
+
+[tasks.shutdown]
+drain_timeout_ms = 250
+cancel_timeout_ms = 250
+join_timeout_ms = 100
+
 [capabilities]
 requested = ["runtime-2d"]
 

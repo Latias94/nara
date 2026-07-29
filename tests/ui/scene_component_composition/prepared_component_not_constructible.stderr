@@ -1,5 +1,5 @@
-error[E0599]: no associated function or constant named `insert` found for struct `PreparedComponent` in the current scope
+error[E0599]: no function or associated item named `insert` found for struct `PreparedComponent` in the current scope
   --> tests/ui/scene_component_composition/prepared_component_not_constructible.rs:12:24
    |
 12 |     PreparedComponent::insert(Forged)
-   |                        ^^^^^^ associated function or constant not found in `PreparedComponent`
+   |                        ^^^^^^ function or associated item not found in `PreparedComponent`

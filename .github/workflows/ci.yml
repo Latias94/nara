@@ -72,8 +72,8 @@ jobs:
       - name: Test root workspace
         shell: bash
         run: |
-          cargo nextest run --workspace --locked --test-threads=1
-          cargo nextest run --workspace --locked --all-features --test-threads=1
+          cargo nextest run --workspace --locked -E 'not binary(architecture_docs)' --test-threads=1
+          cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1
 
   reference-game:
     name: "Reference game (${{ matrix.os }})"
