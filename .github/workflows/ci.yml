@@ -45,6 +45,13 @@ jobs:
         with:
           tool: nextest@0.9.138
           fallback: none
+      - name: Install root system test profile
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb
+          fi
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Check root workspace
@@ -74,7 +81,11 @@ jobs:
         shell: bash
         run: |
           cargo nextest run --workspace --locked -E 'not binary(architecture_docs)' --test-threads=1
-          cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1
+          else
+            NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1
+          fi
 
   reference-game:
     name: "Reference game (${{ matrix.os }})"

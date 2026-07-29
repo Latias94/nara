@@ -498,6 +498,22 @@ fn policy_rejects_skipped_matrix_entries_and_masked_commands() {
         "          if [[ \"$RUNNER_OS\" == \"Windows\" ]]; then",
     );
     assert_policy_rejects(&wrong_linux_guard, "exact ordered run commands");
+
+    let mut missing_root_software_adapter = PolicyFixture::committed();
+    replace_first(
+        &mut missing_root_software_adapter.workflow,
+        "libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools",
+        "libxkbcommon-x11-0 vulkan-tools",
+    );
+    assert_policy_rejects(&missing_root_software_adapter, "exact ordered run commands");
+
+    let mut root_gpu_tests_without_xvfb = PolicyFixture::committed();
+    replace_first(
+        &mut root_gpu_tests_without_xvfb.workflow,
+        "NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args=\"-screen 0 1280x720x24\" cargo nextest run --workspace",
+        "NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace",
+    );
+    assert_policy_rejects(&root_gpu_tests_without_xvfb, "exact ordered run commands");
 }
 
 #[test]
@@ -2034,10 +2050,11 @@ fn required_step_pipeline(job_name: &str) -> &'static [&'static str] {
             "uses:actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
             "run:rustup toolchain install 1.95.0 --profile minimal --component rustfmt\nrustup default 1.95.0|shell:bash",
             "uses:taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853",
+            "run:if [[ \"$RUNNER_OS\" == \"Linux\" ]]; then\n  sudo apt-get update\n  sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb\nfi|shell:bash",
             "run:cargo fmt --all -- --check",
             "run:cargo check --workspace --locked --all-targets",
             "run:cargo check -p nara --locked --no-default-features --lib\ncargo check -p nara --locked --no-default-features --features runtime-core --lib\ncargo check -p nara --locked --no-default-features --features runtime-2d --lib\ncargo check -p nara --locked --no-default-features --features runtime-ui --lib\ncargo check -p nara --locked --no-default-features --features tooling --lib\ncargo check -p nara --locked --no-default-features --features asset-watch --lib\ncargo check -p nara --locked --no-default-features --features desktop-winit --lib\ncargo check -p nara --locked --no-default-features --features render-wgpu --lib\ncargo check -p nara --locked --no-default-features --features tooling-egui --lib\ncargo check -p nara --locked --no-default-features --features serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-core,serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-2d,serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-ui,serde --lib\ncargo check -p nara --locked --no-default-features --features tooling,runtime-2d,serde --lib\ncargo check -p nara --locked --no-default-features --features desktop-winit,render-wgpu --example windowed_clear\ncargo check -p nara --locked --no-default-features --features runtime-2d,desktop-winit,render-wgpu --example windowed_sprites\ncargo check -p nara --locked --no-default-features --features runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel\ncargo check --workspace --locked --all-features --all-targets|shell:bash",
-            "run:cargo nextest run --workspace --locked -E 'not binary(architecture_docs)' --test-threads=1\ncargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1|shell:bash",
+            "run:cargo nextest run --workspace --locked -E 'not binary(architecture_docs)' --test-threads=1\nif [[ \"$RUNNER_OS\" == \"Linux\" ]]; then\n  NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args=\"-screen 0 1280x720x24\" cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1\nelse\n  NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1\nfi|shell:bash",
         ],
         "reference-game" => &[
             "uses:actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
