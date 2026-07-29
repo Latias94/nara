@@ -193,13 +193,15 @@ fn runtime_runner_manifest_rejects_workspace_and_private_dependency_shortcuts() 
 
 #[test]
 fn managed_runtime_runner_guide_documents_the_public_contract() {
-    let guide = fs::read_to_string(
-        repository_root()
-            .join("docs")
-            .join("guides")
-            .join("managed-runtime-runner.md"),
-    )
-    .expect("RGD-U6 requires the public managed-runtime runner guide");
+    let guide = normalize_newlines(
+        fs::read_to_string(
+            repository_root()
+                .join("docs")
+                .join("guides")
+                .join("managed-runtime-runner.md"),
+        )
+        .expect("RGD-U6 requires the public managed-runtime runner guide"),
+    );
 
     for required in [
         "RuntimeAdmissionReservation",
@@ -213,6 +215,18 @@ fn managed_runtime_runner_guide_documents_the_public_contract() {
     }
     assert!(guide.contains("Do not call\n`App::run_once`"));
     assert!(!guide.contains("__RuntimeDriverPort"));
+}
+
+#[test]
+fn managed_runtime_runner_guide_guard_normalizes_windows_line_endings() {
+    assert_eq!(
+        normalize_newlines("Do not call\r\n`App::run_once`".to_owned()),
+        "Do not call\n`App::run_once`"
+    );
+}
+
+fn normalize_newlines(document: String) -> String {
+    document.replace("\r\n", "\n")
 }
 
 fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {

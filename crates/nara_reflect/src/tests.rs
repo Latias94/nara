@@ -33,6 +33,22 @@ struct Velocity {
 #[derive(Debug, PartialEq, Eq, Resource)]
 struct ExistingApplyState(u32);
 
+trait AmbiguousIfResource<Marker> {
+    fn marker() {}
+}
+
+impl<T: ?Sized> AmbiguousIfResource<()> for T {}
+
+struct ResourceImplemented;
+
+impl<T: Resource + ?Sized> AmbiguousIfResource<ResourceImplemented> for T {}
+
+#[test]
+fn component_registry_is_not_an_ecs_resource() {
+    // Inference succeeds only while ComponentRegistry does not implement Resource.
+    let _ = <ComponentRegistry as AmbiguousIfResource<_>>::marker;
+}
+
 struct TestAsset;
 
 #[derive(Component)]
