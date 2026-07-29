@@ -69,6 +69,14 @@ fn reference_game_depends_only_on_the_public_root_package() {
 fn canonical_project_fixtures_are_checked_out_with_lf() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture_paths = [
+        "tests/fixtures/formats/v1/component_schema_catalog.json",
+        "tests/fixtures/formats/v1/component_schema_catalog.ron",
+        "tests/fixtures/formats/v1/prefab.json",
+        "tests/fixtures/formats/v1/prefab.ron",
+        "tests/fixtures/formats/v1/scene.json",
+        "tests/fixtures/formats/v1/scene.ron",
+        "tests/fixtures/formats/v1/scene_patch.json",
+        "tests/fixtures/formats/v1/scene_patch.ron",
         "tests/fixtures/schema-catalog/lineage-probe-v1.json",
         "tests/fixtures/schema-catalog/lineage-probe-v2.json",
         "reference-game/nara.toml",

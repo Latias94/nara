@@ -1575,6 +1575,7 @@ dependencies = [
  "ron",
  "serde",
  "serde_json",
+ "static_assertions",
  "syn",
  "toml",
  "tracing",

@@ -520,8 +520,7 @@ fn project_content_paths_are_charged_before_relative_path_allocation() {
 
 #[test]
 fn project_content_image_payload_cannot_escape_its_snapshot_lease_by_clone() {
-    let tests = trybuild::TestCases::new();
-    tests.compile_fail("tests/ui/project_content/image_asset_not_clone.rs");
+    static_assertions::assert_not_impl_any!(nara::image::ImageAsset: Clone);
 }
 
 #[test]

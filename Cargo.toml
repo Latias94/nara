@@ -95,6 +95,7 @@ ron = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = { version = "1", features = ["serde"] }
+static_assertions = "1"
 thiserror = "2"
 toml = "1.1"
 tracing = "0.1"
@@ -149,6 +150,7 @@ raw-window-handle.workspace = true
 ron.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+static_assertions.workspace = true
 syn.workspace = true
 toml.workspace = true
 tracing.workspace = true
