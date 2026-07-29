@@ -66,11 +66,16 @@ fn reference_game_depends_only_on_the_public_root_package() {
 }
 
 #[test]
-fn canonical_catalog_fixtures_are_checked_out_with_lf() {
+fn canonical_project_fixtures_are_checked_out_with_lf() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture_paths = [
         "tests/fixtures/schema-catalog/lineage-probe-v1.json",
         "tests/fixtures/schema-catalog/lineage-probe-v2.json",
+        "reference-game/nara.toml",
+        "reference-game/scenes/startup.scene.json",
+        "reference-game/prefabs/enemy.prefab.json",
+        "reference-game/assets/textures/player.png.meta",
+        "reference-game/assets/textures/tiny-dungeon.png.meta",
         "reference-game/schema/component-schema-v1.json",
         "reference-game/schema/component-schema-v2.json",
         "reference-game/schema/component-schema-v3.json",

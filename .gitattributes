@@ -6,6 +6,12 @@ tests/fixtures/**/*.json text eol=lf
 reference-game/schema/*.json text eol=lf
 reference-game/tests/data/*.command text eol=lf
 
+# Reference-game project sources participate in cross-platform content revisions.
+reference-game/nara.toml text eol=lf
+reference-game/scenes/*.json text eol=lf
+reference-game/prefabs/*.json text eol=lf
+reference-game/assets/**/*.meta text eol=lf
+
 # Canonical U22 evidence is hashed byte-for-byte.
 docs/benchmarks/data/**/*.json text eol=lf
 docs/benchmarks/data/**/*.blake3 text eol=lf
