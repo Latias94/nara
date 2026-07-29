@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-29
+* **Work Registration**: [Reference-game delivery hardening: U9 baseline refresh](registry/2026-07/2026-07-29T163416Z-engine-foundation-contract-completion-codex-root-b3e0c9dc77af407c86488e42c1816906.md) - Closes final-revision U8 hosted CI and activates a fresh first-playable baseline for the current source.
+* **Verification Evidence**: [RGD-U8 final hosted three-workspace CI refresh](verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md) - Closes the final-revision Windows/Linux root, reference-game, and module-consumer CI matrix at ef8f300.
+
 ## 2026-07-28
 * **Work Registration**: [Reference-game delivery hardening: U8 hosted CI refresh](registry/2026-07/2026-07-28T232059Z-engine-foundation-contract-completion-codex-root-658d0197b447461d9dd30c1fde607548.md) - Closes refreshed RGD-U7 runtime and host authority and activates the final-revision hosted CI refresh.
 * **Verification Evidence**: [RGD-U7 refreshed runtime and host authority verification](verification/2026-07/2026-07-28T232042Z-rgd-u7-refreshed-runtime-and-host-authority-verification-82512f2b3f4d4887bef7431f1b703e7d.md) - Closes the refreshed Runtime-first and dependent Host compatibility review after the direct fault-bridge bypass repair.
@@ -139,5 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 ## 2026-07-19
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-19T234126Z-reference-game-foundation-rgf-u19-codex-root-2537f16f6c72472d8eadb65ea506c1ec.md) - Activate bounded ADR catalogue, ledger, relationship, authority, and draft-governance validation.
 * **Verification Evidence**: [RGF-U8 domain-owned task integration verification](verification/2026-07/2026-07-19T233045Z-rgf-u8-domain-owned-task-integration-verification-67f01d8db42b423ba82110d3f00633f7.md) - Commit 60292e7 moves asset task phases to their domain, linearizes Poll entry cutoffs, and makes watcher loss bounded, sticky, and observable.
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T233045Z-reference-game-foundation-rgf-u8-codex-root-4007e43148c84b20a0c28c73e379d302.md) - Close domain-owned asset task integration and bounded observable watcher admission at implementation commit 60292e7.
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T200454Z-reference-game-foundation-rgf-u8-codex-root-8112eb5e569940a09e7f1f7df245b251.md) - Restore domain-owned asset task integration sets and bounded observable watcher admission.

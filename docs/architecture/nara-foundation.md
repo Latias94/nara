@@ -715,13 +715,13 @@ second real adapter or stronger isolation pressure.
   reference-game CI checks all targets and runs complete default and all-feature suites with the
   supported Linux X11/Vulkan profile; the module consumer compiles all targets and runs its complete
   suite. Exact policy tests reject selective replacements for these commands. The integrated
-  six-cell matrix passed historically at `6914785`; the later Rust, product-content, policy-test,
-  and workflow hardening through `a759949` reopened final current-revision certification.
-  Historical baselines and standalone candidates remain evidence for their revisions, while the
-  authority review, baseline, hosted matrix, and final candidates require dependency-ordered
-  refreshes. See ADR
+  six-cell matrix passes at `ef8f300` through GitHub Actions run `30462379022` after the later
+  Rust, product-content, policy-test, workflow, strict-filesystem, canonical-fixture,
+  cross-platform budget, and software-GPU repairs. Historical baselines and standalone candidates
+  remain evidence for their revisions; RGD-U9 and RGD-U10 still require dependency-ordered fresh
+  evidence against this hosted baseline. See ADR
   [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md) and the
-  [latest local hardening and invalidation record](../knowledge/engineering/verification/2026-07/2026-07-27T091437Z-rgd-u11-schedule-registry-reference-game-and-ci-hardening-3508e830c12045c1871db1855ae51a6e.md).
+  [final hosted verification](../knowledge/engineering/verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md).
 
 ## Non-Authoritative Trigger Index
 
