@@ -487,7 +487,8 @@ transaction, and device-epoch isolation. It does not accept the capability taxon
 
 ## References
 
-- [Repository direction](../../AGENTS.md)
+- [Product strategy](../../STRATEGY.md)
+- [Architecture authority](README.md)
 - [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
 - [ADR 0077 historical decision](adr/0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 - [ADR 0094 current render boundary](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)

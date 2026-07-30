@@ -111,7 +111,8 @@ right imports.
   compiled product capability vocabulary; `default = ["runtime-core"]` does not compile or expose
   2D, runtime UI, tooling, watcher, platform-adapter, or GPU-backend domains.
 - Examples should demonstrate explicit imports for backend adapters and tooling.
-- `AGENTS.md` should treat root prelude layering as an architecture rule.
+- Repository agent guidance should route facade and prelude work to this Accepted ADR rather than
+  duplicating the policy in `AGENTS.md`.
 
 ## Open Questions
 
