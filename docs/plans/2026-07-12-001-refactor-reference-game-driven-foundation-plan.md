@@ -12,9 +12,15 @@ supersedes: docs/plans/2026-07-10-001-refactor-engine-foundation-contracts-plan.
 superseded_by: docs/plans/2026-07-21-001-refactor-runtime-authority-product-delivery-plan.md
 plan_id: reference-game-foundation-2026-07
 unit_namespace: RGF
+operator_execution_authority: superseded-by-active-plan-standing-authority
 ---
 
 # Reference-Game-Driven Foundation Refactor - Plan
+
+> **Execution-authority correction (2026-07-30):** This plan is superseded. Any one-shot human
+> authorization wording below is historical and does not govern current execution. The active
+> successor grants repository-owner standing authority; dependency, identity, protection,
+> least-privilege, and replay gates remain technical requirements.
 
 ## Goal Capsule
 

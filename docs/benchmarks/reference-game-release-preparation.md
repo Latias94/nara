@@ -29,14 +29,14 @@ candidate code. The next verifier process has `permissions: {}`, receives no Git
 the downloaded transport manifests and archives without extraction, then stages only manifest-bound
 raw candidate ZIP bytes.
 
-## Authorization Boundaries
+## Execution And Replay Boundaries
 
 The workflow is a protected-`main`, manual, first-attempt-only path. Its run name and tag-scoped
-concurrency key serialize dispatches for the same tag; the verifier rejects any prior authorization
-for that tag and a repeated workflow attempt fails explicitly. A tag is never created by the workflow.
-The intended one-shot sequence is:
+concurrency key serialize dispatches for the same tag; the verifier rejects any prior publication
+attempt for that tag and a repeated workflow attempt fails explicitly. A tag is never created by the
+workflow. The intended immutable sequence is:
 
-1. An authorized maintainer creates the protected annotated version tag after U11 records `Publish`.
+1. The integration owner creates the protected annotated version tag after U11 records `Publish`.
 2. The `reference-game-immutable-policy` environment supplies a policy-only token with
    Administration read access. It must prove that repository immutable releases are already enabled;
    the workflow never enables or disables that setting.
@@ -68,7 +68,7 @@ or failed smoke receipt, or a public Release that does not immediately report `i
 
 No rebuild occurs in publication. A candidate expiry, provenance mismatch, failed draft smoke, failed
 public smoke, or any failure after tag creation leaves that version unannounced and requires a new
-U11/U12 version. An external operator must retain the authorization and run identities in the final
+U11/U12 version. The execution owner must retain the environment-gate and run identities in the final
 evidence record; local policy preparation is not evidence that any of those stages ran.
 
 ## Non-Claims

@@ -28,6 +28,20 @@ from the newest filename, the most detailed document, or the value
 `artifact_readiness: implementation-ready`. When sources disagree, stop the affected implementation
 path and reconcile the authority, ledger, active plan, and engineering-memory evidence first.
 
+## Repository Execution Authority
+
+The repository owner grants agents standing authority to create commits, fast-forward and push
+`main`, open or merge pull requests, dispatch fresh workflow runs, create release tags, pass or
+request configured GitHub environment gates when technically possible, and create or update GitHub
+Releases. Do not pause to request repeated chat confirmation for those actions.
+
+Standing authority does not relax active-plan dependencies, evidence invalidation, branch and tag
+protection, least-privilege workflow boundaries, immutable-release rules, or exact identity and
+digest checks. Revalidate the current revision and external state immediately before each mutation,
+record its resulting identity, and stop on a real credential, platform, policy, or evidence failure.
+Technical replay protection may require a fresh workflow run identity; it is not a user-authorization
+gate.
+
 ## State Vocabulary
 
 - **Implemented** means repository evidence exists in the implementation ledger at the reviewed

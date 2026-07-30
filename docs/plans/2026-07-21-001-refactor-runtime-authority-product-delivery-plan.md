@@ -12,6 +12,7 @@ origin: docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan
 supersedes: docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md
 plan_id: reference-game-runtime-delivery-2026-07
 unit_namespace: RGD
+operator_execution_authority: standing
 ---
 
 # Reference-Game Runtime Authority and Product Delivery - Plan
@@ -23,7 +24,7 @@ unit_namespace: RGD
 - **Execution profile:** Fearless pre-1.0 refactoring is authorized. Deepen existing modules, delete obsolete compatibility plumbing, and do not preserve single-active process-global runtime routing or duplicate registry behavior authority merely because current tests encode them.
 - **Preserved product boundary:** Rust remains the complete official authoring language, `bevy_ecs` remains the ECS substrate, `App` remains the only World/schedule/plugin/time authority, and project data never grants native-code trust.
 - **Stop conditions:** Stop and re-plan if per-runtime Bevy error attribution cannot preserve multithreaded execution, if a registry repair requires native binding data in `ProjectContentSnapshot`, if external Runner evidence requires a universal Runner SPI, or if either ADR is rejected without a compatible Accepted successor.
-- **Tail ownership:** The selected execution driver (`ce-work` or the host's goal loop, never both concurrently) owns focused implementation and documentation commits, exact evidence reruns, review follow-up, external-authorization pauses, and removal of abandoned attempts. It must preserve every unrelated dirty-worktree change.
+- **Tail ownership:** The selected execution driver (`ce-work` or the host's goal loop, never both concurrently) owns focused implementation and documentation commits, exact evidence reruns, review follow-up, external-state waits, and removal of abandoned attempts. It must preserve every unrelated dirty-worktree change.
 
 ---
 
@@ -41,7 +42,7 @@ This successor repairs those two defects first. It then proves fresh runtime-ses
 
 Bevy 0.19 supplies `FallbackErrorHandler` as an uncontextualized function pointer and copies it into multithreaded executor tasks. Nara currently compensates with one process-global schedule lock and one active reporter. Contention becomes a sticky `ScheduleAuthority` fault on an otherwise healthy runtime. Thread-local replacement would fail on Bevy worker threads, while forcing all schedules single-threaded would trade correctness evidence for a product regression.
 
-The product proof is also incomplete. Existing desktop parity constructs a runtime directly, Editor evidence uses a different workflow, and no renamed-dependency external package owns a concrete Runner loop. Hosted Windows/Linux CI exists locally at commit `188a493` but has never run on GitHub, so every downstream candidate and release claim remains blocked on external evidence and explicit authorization.
+The product proof is also incomplete. Existing desktop parity constructs a runtime directly, Editor evidence uses a different workflow, and no renamed-dependency external package owns a concrete Runner loop. Hosted Windows/Linux CI exists locally at commit `188a493` but has never run on GitHub, so every downstream candidate and release claim remains blocked on external evidence and the plan's dependency gates.
 
 ### Requirements
 
@@ -74,7 +75,7 @@ The product proof is also incomplete. Existing desktop parity constructs a runti
 - R16. Standalone Windows/Linux candidates must preserve the complete RGF-U7 package, trust-record, archive-preflight, random-environment, toolchain-free, headless, and desktop-smoke contract.
 - R17. Pre-publication evidence must preserve the complete RGF-U20 review, clean-room Rust-author journey, bounded ingestion, approval-record, and next-slice decision contract.
 - R18. Publication must preserve the complete RGF-U21 least-privilege, pinned approval, immutable tag/release, credential-separated draft smoke, anonymous public smoke, and no-rebuild contract. Repository-controlled verification code runs only in a credential-free job. The draft-upload write job may read and stream only manifest-bound candidate bytes after fixed digest/size/name checks and must never extract or execute them; the finalize write job consumes only bounded manifest and release identities and touches no candidate bytes or repository helper.
-- R19. Pushes, PRs, protected dispatches, tags, draft-upload environment approval, release-finalize environment approval, and Release mutations require separate one-shot explicit authorization. Local readiness never implies hosted verification or publication authority, and post-tag failure starts a new version.
+- R19. Repository-owner standing authority covers pushes, pull requests, fresh protected workflow dispatches, tags, configured GitHub environment actions, and Release mutations. Agents must not request per-action chat confirmation. Execution still requires every preceding unit, exact revision and identity check, least-privilege workflow boundary, and platform protection gate to pass. A repeated attempt uses a fresh run identity, local readiness never implies hosted or publication evidence, and post-tag failure starts a new version.
 
 ### Acceptance Examples
 
@@ -86,8 +87,8 @@ The product proof is also incomplete. Existing desktop parity constructs a runti
 - AE6. Given the same reference-game semantic submissions, dedicated real Headless, Desktop, and Editor product-Host processes finish at the same tick with the same bounded canonical stable-ID snapshot envelope. The Desktop child owns the Winit main thread; the fixture uses only a bounded reference-game-owned plugin and observation sink.
 - AE7. Given a package that renames the root dependency, its own concrete Runner constructs and drives a managed code-first runtime. Source and dependency audits reject private crates, workspace inheritance, patches, hidden driver ports, raw App driving, and a newly introduced universal Runner interface.
 - AE8. Given refreshed evidence, ADR 0084 may become Accepted, remain Proposed, or be Rejected independently. Only Accepted Runtime authority triggers ADR 0082 dependency review; only a compatible Accepted pair or successors unblocks pre-publication approval.
-- AE9. Given no authorization to push or publish, local policy, packaging, and evidence preparation may be committed, but the workflow remains `awaiting-hosted-run` and no Hosted, Publish, or Released claim is recorded.
-- AE10. Given a U11 `Publish` approval bound to exact candidate identities and digests, U12 consumes separate tag, draft-environment, finalize-environment, and Release-mutation authorizations once, verifies a bounded publication manifest without credentials, and publicly smokes those bytes. `Redirect`, `Stop`, an unpinned approval, changed input, reused authorization, or post-tag failure prevents that version from publishing.
+- AE9. Given standing execution authority but incomplete dependencies or external evidence, local policy, packaging, and evidence preparation may be committed, but the workflow remains `awaiting-hosted-run` and no Hosted, Publish, or Released claim is recorded. Missing chat confirmation is never a blocker.
+- AE10. Given a U11 `Publish` approval bound to exact candidate identities and digests, U12 advances through distinct tag, draft-environment, finalize-environment, and Release-mutation stages without another chat prompt, verifies a bounded publication manifest without credentials, and publicly smokes those bytes. `Redirect`, `Stop`, an unpinned approval, changed input, a replayed run identity, or post-tag failure prevents that version from publishing.
 
 ### Success Criteria
 
@@ -99,7 +100,7 @@ The product proof is also incomplete. Existing desktop parity constructs a runti
 - Independent review either accepts ADR 0084 then ADR 0082 plus their combination, or records the remaining/rejected outcome without unblocking U11.
 - Hosted Windows/Linux evidence closes the carried CI gate only after all later-unit local executable, policy-test, and workflow preparation has landed; any later qualifying change reopens it.
 - Baseline, standalone candidates, pre-publication approval, and immutable pre-release satisfy the predecessor's unfinished Definition of Done without relaxed trust or smoke requirements.
-- Every externally mutating stage consumes one separate user authorization and records a truthful waiting or new-version-required state.
+- Every externally mutating stage runs only after its dependency and platform gates pass, records its exact external identity, and never pauses merely for repeated user confirmation.
 
 ### Scope Boundaries
 
@@ -165,7 +166,7 @@ The product proof is also incomplete. Existing desktop parity constructs a runti
 - KTD6. **Use product-owned evidence fixtures, not new engine buses.** A bounded reference-game plugin injects semantic submissions and writes stable snapshots to a test-owned sink for three-Host parity. A parent oracle launches dedicated Headless, Desktop, and Editor fixture processes; the Desktop child runs the real Winit loop on its process main thread, and every child emits the same bounded canonical parity envelope. The external Runner is a clean-room renamed-dependency package with its own concrete loop; neither fixture creates a reusable Nara Interface.
 - KTD7. **Review Runtime authority before Host authority.** ADR 0084 owns the repaired behavior. ADR 0082 already passes its independent Host metrics but cannot be promoted until its executable-runtime dependency is Accepted and the pair remains compatible.
 - KTD8. **Preserve delivery gates while replacing PowerShell-only helper plans with cross-platform Python.** The orchestration language changes, not the package layout, evidence schema, metrics, trust model, or decision semantics. Workflow YAML remains policy and invocation, not business logic.
-- KTD9. **Treat every external mutation as a separate one-shot authorization boundary.** Local commits may prepare later stages, but PR/push, protected execution, tag creation, draft-upload environment approval, release-finalize environment approval, and Release mutation never inherit permission from an earlier step. A consumed or cancelled authorization cannot be reused; once an immutable tag exists, later failure requires a new version rather than a false transition back to the prior approval.
+- KTD9. **Use standing operator authority with fresh, auditable external identities.** Chosen over both per-action chat prompts and unguarded automation: PR/push, protected execution, tag creation, environment-gated jobs, and Release mutation proceed without repeated user confirmation only after the active plan and exact external preflight pass. A failed or cancelled workflow is replaced by a fresh run identity rather than an opaque rerun; once an immutable tag exists, later failure requires a new version rather than a false transition back to the prior approval.
 
 ### High-Level Technical Design
 
@@ -251,43 +252,41 @@ flowchart TB
   U11E --> U12E[U12 immutable pre-release]
 ```
 
-#### External authorization and delivery states
+#### External execution and delivery states
 
 ```mermaid
 stateDiagram-v2
   [*] --> LocalReady
-  LocalReady --> AwaitingPushAuthorization
-  AwaitingPushAuthorization --> AwaitingHostedRun: PR or push authorized and completed
+  LocalReady --> AwaitingHostedRun: integrated revision pushed after dependency preflight
   AwaitingHostedRun --> HostedVerified: Windows and Linux pass
   AwaitingHostedRun --> LocalReady: run failure requires a source or policy repair
-  HostedVerified --> AwaitingCandidateDispatchAuthorization
-  AwaitingCandidateDispatchAuthorization --> CandidateRecorded: protected candidate run authorized and completed
+  HostedVerified --> CandidateReady
+  CandidateReady --> CandidateRecorded: fresh protected candidate run completes
   CandidateRecorded --> HostedVerified: candidate invalid, expired, or superseded
-  CandidateRecorded --> AwaitingEvidenceIngestAuthorization
-  AwaitingEvidenceIngestAuthorization --> EvidenceReviewed: evidence-ingest dispatch separately authorized
-  EvidenceReviewed --> AwaitingApprovalCommitAuthorization: Publish, Redirect, or Stop selected
-  AwaitingApprovalCommitAuthorization --> ApprovalRecorded: approval commit separately authorized
+  CandidateRecorded --> EvidenceIngestReady
+  EvidenceIngestReady --> EvidenceReviewed: fresh protected evidence run completes
+  EvidenceReviewed --> ApprovalRecorded: Publish, Redirect, or Stop record committed
   ApprovalRecorded --> CandidateRecorded: source or evidence invalidation requires a new candidate
   ApprovalRecorded --> Redirected: Redirect
   ApprovalRecorded --> Stopped: Stop
-  ApprovalRecorded --> AwaitingTagAuthorization: Publish
-  AwaitingTagAuthorization --> ApprovalRecorded: cancelled before tag creation
-  AwaitingTagAuthorization --> TagCreated: protected tag creation authorized and completed
+  ApprovalRecorded --> TagReady: Publish
+  TagReady --> ApprovalRecorded: cancelled before tag creation
+  TagReady --> TagCreated: protected tag created after identity preflight
   TagCreated --> CredentialFreeVerified: reviewed verifier emits bounded publication manifest
-  CredentialFreeVerified --> AwaitingDraftEnvironmentApproval
-  AwaitingDraftEnvironmentApproval --> DraftUploaded: draft-upload environment approved
+  CredentialFreeVerified --> DraftEnvironmentGate
+  DraftEnvironmentGate --> DraftUploaded: configured GitHub environment gate passes
   DraftUploaded --> DraftSmoked: credential-free exact-byte smoke passes
-  DraftSmoked --> AwaitingFinalizeEnvironmentApproval
-  AwaitingFinalizeEnvironmentApproval --> AwaitingReleaseMutationAuthorization: release-finalize environment approved
-  AwaitingReleaseMutationAuthorization --> Released: Release mutation separately authorized
+  DraftSmoked --> FinalizeEnvironmentGate
+  FinalizeEnvironmentGate --> ReleaseEnvironmentGate: finalize identity gate passes
+  ReleaseEnvironmentGate --> Released: Release mutation gate passes
   Released --> PublishedAndPublicSmoked: anonymous public smoke passes
   TagCreated --> NewVersionRequired: any post-tag failure
   CredentialFreeVerified --> NewVersionRequired: verifier or approval invalidation
-  AwaitingDraftEnvironmentApproval --> NewVersionRequired: cancelled or failed
+  DraftEnvironmentGate --> NewVersionRequired: cancelled or failed
   DraftUploaded --> NewVersionRequired: draft or smoke failure
   DraftSmoked --> NewVersionRequired: finalize cancellation or failure
-  AwaitingFinalizeEnvironmentApproval --> NewVersionRequired: cancelled or failed
-  AwaitingReleaseMutationAuthorization --> NewVersionRequired: cancelled or failed
+  FinalizeEnvironmentGate --> NewVersionRequired: cancelled or failed
+  ReleaseEnvironmentGate --> NewVersionRequired: cancelled or failed
   Released --> NewVersionRequired: public smoke failure
 ```
 
@@ -311,7 +310,7 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 - **Editor:** Authoring continues without a running World by reading the plan-owned immutable snapshot. Play uses the exact same behavior data after publication.
 - **Runtime and tasks:** Independent runtimes may execute concurrently without sharing error attribution. Quarantined owners retain scarce route capacity, making leaks observable rather than unsafe.
 - **Platform adapters:** First-party Winit behavior remains concrete. External evidence proves public reachability without freezing a common Runner abstraction.
-- **CI and release operators:** Hosted and privileged stages remain explicit waiting states, with no authority inferred from local success.
+- **CI and release operators:** Hosted and privileged stages advance automatically after exact dependency and platform preflight; local success still cannot be recorded as external evidence.
 
 ### Risks and Dependencies
 
@@ -323,6 +322,7 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 | Shared parent authority is confused with mutable runtime state | Test runtime-issued session/cache namespaces separately from process-level devices, libraries, and immutable snapshots. |
 | Three-Host parity adds a test-only engine hook | Keep injection and observation in a normal reference-game plugin configured through public product recipes. |
 | ADR review becomes a forced acceptance gate | Preserve Accepted/Proposed/Rejected outcomes; a non-Accepted Runtime verdict terminates this chain and activates a bounded successor, while Host/combined review and later preparation remain unrun. |
+| Standing execution authority runs a stale or mismatched external stage | Revalidate the active plan, protected revision, exact inputs, prior evidence, and least-privilege permissions immediately before mutation; abort on mismatch and record the external identity after success. |
 | External GitHub state stalls execution | Continue only dependency-valid local preparation and record the exact waiting state; do not fabricate Hosted or Publish evidence. |
 | Privileged jobs execute repository-controlled verification code | Run the exact reviewed verifier in a credential-free no-checkout job and let write-capable jobs consume only its bounded digest-bound publication manifest plus fixed identity comparisons. |
 | Concurrent user edits overlap authority documents | Stage only exact successor hunks and immutable records; never overwrite derived rollups or unrelated ADR edits. |
@@ -466,7 +466,7 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 - **Requirements:** R14 and R19; AE9.
 - **Dependencies:** U1 permits provisional hosted feedback. U7 plus the committed local-preparation slices of U9-U12 are required before the final hosted run can close this unit.
 - **Files:** `.github/workflows/ci.yml`, `tests/ci_policy.rs`, new hosted verification and registration records under `docs/knowledge/engineering/`, and workflow documentation only if a real hosted failure requires it.
-- **Approach:** Preserve commit `188a493`'s six disposable jobs and policy. Provisional runs may expose cross-platform failures while U2-U7 and later-unit local preparation are active, but they cannot close the unit. After U9-U12 executable, policy-test, and workflow preparation lands, run that exact integrated revision with explicit PR or protected-push authorization and observe all Windows/Linux root/reference-game/module-consumer jobs. A hosted repair invalidates the affected focused unit; if it touches U2-U6 evidence, rerun U7 before rerunning the final matrix.
+- **Approach:** Preserve commit `188a493`'s six disposable jobs and policy. Provisional runs may expose cross-platform failures while U2-U7 and later-unit local preparation are active, but they cannot close the unit. After U9-U12 executable, policy-test, and workflow preparation lands, push the exact integrated revision after preflight and observe all Windows/Linux root/reference-game/module-consumer jobs without another chat gate. A hosted repair invalidates the affected focused unit; if it touches U2-U6 evidence, rerun U7 before rerunning the final matrix.
 - **Patterns to follow:** The active RGF-U15 progress record and mutation-tested CI policy.
 - **Test scenarios:** Every matrix cell is independently visible and time-bounded. A local pass, skipped/neutral job, cancelled final run, wrong revision, fork/untrusted event, write permission, secret/OIDC use, persistent checkout credentials, or shared trusted cache cannot close the unit. Later Rust, Cargo, policy-test, or workflow changes reopen U8; later evidence-only records do not when executable inputs remain identical.
 - **Verification:** One reviewed final-revision hosted run is green on both operating systems and all three lockfiles; the successor registration records exact run identity while making no packaging claim.
@@ -499,26 +499,26 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 - **Requirements:** R2, R12-R13, R17, and R19.
 - **Dependencies:** U7 Accepted authorities admit local evidence-workflow/tool/policy preparation before U8. U8, U9, and U10 are required before the evidence run and decision; completed RGF-U8/RGF-U13/RGF-U17/RGF-U19 remain prerequisites.
 - **Files:** new `.github/workflows/reference-game-evidence-ingest.yml`, new `reference-game/tools/{measure_headless_iteration,measure_desktop_product,ingest_evidence}.py`, `tests/{measurement_policy,ci_policy,evidence_envelope}.rs`, `docs/benchmarks/{reference-game-baseline,reference-game-evidence-review}.md`, versioned normalized schema/data/approval paths under `docs/benchmarks/data/`, and focused verification records.
-- **Approach:** Land the evidence workflow, helpers, schemas, and policy tests before U8's final hosted revision. After U9/U10 finish without executable drift, obtain separate authorization for the protected evidence-ingest dispatch, then run RGF-U20's full pre-publication simplify/review pass, P0/P1 resolution, independent credential-free Rust-author public-API journey, exact final-candidate rerun, bounded non-executing ingestion, metric invalidation rules, immutable normalized evidence, canonical approval record, architecture handoff, and non-blocking next-slice decision. Committing the final approval record to the protected default branch requires a new PR/push authorization; neither authorization is inherited from U8 or U10.
+- **Approach:** Land the evidence workflow, helpers, schemas, and policy tests before U8's final hosted revision. After U9/U10 finish without executable drift, dispatch protected evidence ingest after exact source, candidate, workflow, and retention preflight, then run RGF-U20's full pre-publication simplify/review pass, P0/P1 resolution, independent credential-free Rust-author public-API journey, exact final-candidate rerun, bounded non-executing ingestion, metric invalidation rules, immutable normalized evidence, canonical approval record, architecture handoff, and non-blocking next-slice decision. Commit and push the final approval record when that evidence is complete; neither action requires another chat authorization.
 - **Discovered pre-publication correction gate:** The 2026-07-26 independent review reproduced five source P1 defects that now belong to U11's existing P0/P1-resolution obligation: optional-plugin omission is still conflated with owner-lineage schema deletion; prefab expansion does not namespace schema-declared `SceneLocal` entity references; public tooling code can forge a saved checkpoint without a Host/FS persistence receipt; unresolved and unsupported asset-reload work can remain unbounded and non-terminal; and paused frames clear physical-input transitions without first resolving or retaining them. Each defect must land as a focused engine correction with a public regression, exact authority/ledger reconciliation, and affected-evidence invalidation before final U8/U10 candidates are built. The owner-lineage repair first resolves OQ-044's minimal owner-catalog record and predecessor authority through an independently reviewed architecture decision; Accepted ADR 0081/0095 already forbid omission-as-deletion, but the active plan must not invent a public persistent wire shape. The `Vec<u8>` spare-capacity observation is a P2 API/measurement follow-up under ADR 0068's logical-payload budget, not a U11 P1 blocker.
-- **Correction progress (2026-07-26):** Commit `d88ddab2056b42da225e5d28970062c49a345c97` closes the prefab-local entity-reference defect. Prefab expansion now migrates values before using the current schema, validates the complete declared `entity_ref` structure, rewrites only `SceneLocal` references into each instance namespace, preserves `Persistent` references, charges exact projected identity/value growth, and publishes no partial override or target state on rejection. Focused default/all-feature tests, workspace check, strict changed-target Clippy, and independent correctness/performance/simplicity review passed. The optional-owner lineage, persistence receipt, asset-reload terminality, and paused-input defects remain blocking; U11 and all protected dispatch/publication authority remain open.
-- **Further correction hardening (2026-07-27):** Commits `78300531c23317665da5b042e5ba4963107c3122`, `e67dce37a44e7b121fc66d2745e2e052a46c4813`, `bb0ab56fcfa35a3d7cfff5345a5b958b66130c10`, and `a7599490ba1fe8e18d01ad172db61d426db99649` close four additional review findings without closing the four source gates above. `CoreStage::Cleanup` is now the validated public frame-end schedule anchor, so the reference product no longer orders against the private `FixedUpdateSet::Finalize`. The registry owner carries intrinsic insert/discard hooks, so removing and reinserting the same owner object cannot evade frozen authority validation. The reference-game Enemy schema migrates from v1 to v2 without a prefab-local outer Player target and resolves the unique Player role within its scene instance at runtime. CI now compiles every root target, exercises the full root feature/example matrix, runs complete default/all-feature root and reference-game suites, and checks/tests the direct module consumer. These Rust, product-content, policy, and workflow changes make the prior U2/U7 authority review, U8 hosted matrix, U9 baseline, and U10 candidate evidence historical for the new revision; each affected gate must be refreshed in dependency order before U11 evidence ingest. No protected dispatch or publication stage is authorized by this local progress.
-- **Owner-lineage correction progress (2026-07-27):** Commit `9e3ae84dac22c805751f1223b2bee85699e9597a` implements Accepted ADR 0098. Schema owners now carry independent current/predecessor lineage and atomic owner/provider receipts; product composition builds selected owners through private failure-atomic candidates, reserves known inactive-owner claims, publishes distinct semantic/executable fingerprints, and preserves exact managed snapshot identity. Public regressions prove `A+B -> A -> A+B`, real deletion/migration, collision rejection, direct/file-backed parity, omitted-owner Scene rejection, and the unchanged ADR 0090 fail-closed boundary. Default workspace nextest passed 1053 tests, affected all-feature suites passed, all-target compile checks and strict changed-target Clippy passed, and final independent review reported no remaining P0/P1/P2. Persistence receipts, asset-reload terminality, and paused-input retention remain blocking; U11 and every protected dispatch/publication authority remain open.
+- **Correction progress (2026-07-26):** Commit `d88ddab2056b42da225e5d28970062c49a345c97` closes the prefab-local entity-reference defect. Prefab expansion now migrates values before using the current schema, validates the complete declared `entity_ref` structure, rewrites only `SceneLocal` references into each instance namespace, preserves `Persistent` references, charges exact projected identity/value growth, and publishes no partial override or target state on rejection. Focused default/all-feature tests, workspace check, strict changed-target Clippy, and independent correctness/performance/simplicity review passed. The optional-owner lineage, persistence receipt, asset-reload terminality, and paused-input defects remain blocking; U11 and all protected dispatch/publication stages remain unexecuted.
+- **Further correction hardening (2026-07-27):** Commits `78300531c23317665da5b042e5ba4963107c3122`, `e67dce37a44e7b121fc66d2745e2e052a46c4813`, `bb0ab56fcfa35a3d7cfff5345a5b958b66130c10`, and `a7599490ba1fe8e18d01ad172db61d426db99649` close four additional review findings without closing the four source gates above. `CoreStage::Cleanup` is now the validated public frame-end schedule anchor, so the reference product no longer orders against the private `FixedUpdateSet::Finalize`. The registry owner carries intrinsic insert/discard hooks, so removing and reinserting the same owner object cannot evade frozen authority validation. The reference-game Enemy schema migrates from v1 to v2 without a prefab-local outer Player target and resolves the unique Player role within its scene instance at runtime. CI now compiles every root target, exercises the full root feature/example matrix, runs complete default/all-feature root and reference-game suites, and checks/tests the direct module consumer. These Rust, product-content, policy, and workflow changes make the prior U2/U7 authority review, U8 hosted matrix, U9 baseline, and U10 candidate evidence historical for the new revision; each affected gate must be refreshed in dependency order before U11 evidence ingest. No protected dispatch or publication stage had executed at this local progress point.
+- **Owner-lineage correction progress (2026-07-27):** Commit `9e3ae84dac22c805751f1223b2bee85699e9597a` implements Accepted ADR 0098. Schema owners now carry independent current/predecessor lineage and atomic owner/provider receipts; product composition builds selected owners through private failure-atomic candidates, reserves known inactive-owner claims, publishes distinct semantic/executable fingerprints, and preserves exact managed snapshot identity. Public regressions prove `A+B -> A -> A+B`, real deletion/migration, collision rejection, direct/file-backed parity, omitted-owner Scene rejection, and the unchanged ADR 0090 fail-closed boundary. Default workspace nextest passed 1053 tests, affected all-feature suites passed, all-target compile checks and strict changed-target Clippy passed, and final independent review reported no remaining P0/P1/P2. Persistence receipts, asset-reload terminality, and paused-input retention remain blocking; U11 and every protected dispatch/publication stage remained unexecuted at that revision.
 - **Scope boundary:** U11 records, but does not implement, the broader product-SDK follow-ups from the same review: OQ-045 typed contributions, semantic capability-to-recipe mapping, importer/render surface honesty, public API support tiers, the ordinary desktop facade, and identity-before-hierarchy/transform sequencing. U11 may remove one of those surfaces only if the clean-room journey proves a concrete P0/P1 obstruction; otherwise the architecture handoff selects a bounded successor after delivery evidence closes.
 - **Patterns to follow:** RGF-U22 evidence envelopes, U9 environment classes, U10 candidate trust records, and the predecessor's exact RGF-U20 contract.
-- **Test scenarios:** Missing or reused evidence-ingest/approval-commit authorization, invalidated source/environment lineage, oversized or hostile records, sensitive canaries, identity/digest mismatch, executable ingestion, repository mutation, failed clean-room journey, undocumented intervention, unresolved P0/P1, expired candidate, or non-Accepted authority prevents Publish. Focused engine regressions prove optional schema reactivation, per-instance prefab reference isolation, unforgeable receipt-backed save advancement, bounded terminal reload handling, and retained paused-input semantics. Any source, policy-test, or workflow repair invalidates U8 and the affected U2-U7 evidence before U11 may rerun. Redirect/Stop remains a valid terminal decision but cannot trigger U12.
+- **Test scenarios:** A missing, noncanonical, or replayed evidence-ingest run; a mutable or unpinned approval commit; invalidated source/environment lineage; oversized or hostile records; sensitive canaries; identity/digest mismatch; executable ingestion; repository mutation; failed clean-room journey; undocumented intervention; unresolved P0/P1; an expired candidate; or non-Accepted authority prevents Publish. Focused engine regressions prove optional schema reactivation, per-instance prefab reference isolation, unforgeable receipt-backed save advancement, bounded terminal reload handling, and retained paused-input semantics. Any source, policy-test, or workflow repair invalidates U8 and the affected U2-U7 evidence before U11 may rerun. Redirect/Stop remains a valid terminal decision but cannot trigger U12.
 - **Verification:** The reviewed final source and exact final candidates have one immutable, bounded, redacted evidence set and a pinned approval commit/blob/SHA record; no candidate code executes in a credential-bearing or repository-mutating step.
 
 ### U12. Publish the Evidence-Approved Immutable GitHub Pre-release
 
 - **Goal:** Complete carried RGF-U21 by publishing only U11-approved bytes and proving anonymous public consumption.
 - **Requirements:** R18-R19; AE10.
-- **Dependencies:** U7 admits local publisher/workflow/policy preparation before U8. Publication requires U11 `Publish`, then separately authorized tag creation, draft-upload environment approval, release-finalize environment approval, and Release mutation.
+- **Dependencies:** U7 admits local publisher/workflow/policy preparation before U8. Publication requires U11 `Publish`, then distinct protected tag creation, draft-upload environment, release-finalize environment, and Release-mutation gates. Standing authority removes repeated chat prompts but not those technical gates.
 - **Files:** new `.github/workflows/reference-game-release.yml`, new `reference-game/tools/verify_release.py`, `tests/ci_policy.rs`, release documentation, U11's versioned approval record and evidence review, and release verification records.
 - **Approach:** Land and independently review the publisher, verifier, and policy tests before U8's final hosted revision. At publication, a credential-free no-checkout verifier fetches the exact reviewed helper and approval/schema blobs by commit, blob ID, and SHA-256 and emits one bounded digest-bound publication manifest. The draft-upload write job consumes only allowlisted manifest outputs, fetches exactly the approved candidate artifacts, verifies name/size/digest before streaming their raw bytes to GitHub, and never extracts or executes them or any repository helper. The release-finalize write job consumes only bounded manifest/release identities and touches no helper or candidate bytes. Preserve RGF-U21's protected immutable version tag, identity-bound credential-free draft smoke, anonymous public download/smoke, and no announcement before success.
 - **Patterns to follow:** The predecessor's RGF-U21 approval and credential-barrier contract plus GitHub immutable Releases policy.
-- **Test scenarios:** Any unreviewed workflow, extra write-capable job, checkout/helper/candidate execution in a write job, unbounded verifier output, credential leakage, unprotected/moved tag, reused authorization, version mismatch, approval substitution, wrong candidate/digest/identity, unsafe archive, mutable release setting, failed draft/public smoke, or later asset mutation prevents announcement. Cancellation before tag creation returns to approval; every failure after tag creation starts a new U11/U12 version.
-- **Verification:** Independent security and bug/regression review clears the exact publisher revision; the immutable pre-release contains only approved artifacts; anonymous public headless/desktop smoke verifies exact bytes; the final evidence records authorization and public run identities.
+- **Test scenarios:** Any unreviewed workflow, extra write-capable job, checkout/helper/candidate execution in a write job, unbounded verifier output, credential leakage, unprotected/moved tag, replayed or noncanonical publisher attempt, version mismatch, approval substitution, wrong candidate/digest/identity, unsafe archive, mutable release setting, failed draft/public smoke, or later asset mutation prevents announcement. Cancellation before tag creation returns to approval; every failure after tag creation starts a new U11/U12 version.
+- **Verification:** Independent security and bug/regression review clears the exact publisher revision; the immutable pre-release contains only approved artifacts; anonymous public headless/desktop smoke verifies exact bytes; the final evidence records environment-gate and public run identities.
 
 ---
 
@@ -539,7 +539,7 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 | U9 | Focused measurement policy/helper tests and reproducibility from committed instructions |
 | U10 | CI/artifact-package policy tests plus hosted candidate and no-checkout Windows/Linux consumer smoke |
 | U11 | Measurement/evidence/CI policy tests, clean-room journey, final candidate rerun, bounded ingestion, and complete pre-publication review |
-| U12 | CI/release policy tests, credential-free verifier manifest, independent publisher review, separately authorized protected draft/finalize stages, immutable publication, and anonymous public smoke |
+| U12 | CI/release policy tests, credential-free verifier manifest, independent publisher review, protected environment-gated draft/finalize stages, immutable publication, and anonymous public smoke |
 
 ### Regression Gates
 
@@ -554,7 +554,7 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 - U2 and U3 receive independent correctness, failure-ownership, and test-quality review before their commits close.
 - U7 always uses a separate Runtime reviewer. Host and combined-compatibility reviewers run only after an Accepted Runtime verdict; no reviewer is told to force acceptance.
 - U11 runs simplification plus bug/regression review over the complete pre-publication delta and clears every P0/P1.
-- U12 receives independent security and bug/regression review of the exact permission-bearing workflow before external publication authorization is requested.
+- U12 receives independent security and bug/regression review of the exact permission-bearing workflow before external publication execution begins.
 
 ---
 
@@ -571,7 +571,7 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 - U9 closes the carried RGF-U14 baseline with the original metrics, environment classes, failure records, and non-claims.
 - U10 closes the carried RGF-U7 contract with licensed, trusted, checkout-free Windows/Linux candidates and no publication authority.
 - U11 closes the carried RGF-U20 contract with a reviewed final source, independent Rust-author journey, final candidates, bounded evidence, pinned approval record, architecture handoff, and Publish/Redirect/Stop decision.
-- U12 closes the carried RGF-U21 contract only after a credential-free bounded verifier, separately consumed tag/draft-environment/finalize-environment/Release authorizations, exact approval consumption, immutable pre-release publication, and anonymous public smoke of unchanged bytes.
+- U12 closes the carried RGF-U21 contract only after a credential-free bounded verifier, distinct protected tag/draft-environment/finalize-environment/Release stages, exact approval consumption, immutable pre-release publication, and anonymous public smoke of unchanged bytes.
 - Every invalidated predecessor contract has focused rerun evidence; all unaffected completed RGF evidence remains cited at its original revision rather than reimplemented.
 - Every changed public/persistent contract has aligned English ADR, ledger, foundation, migration, example, and user documentation.
 - Every completed unit has focused tests, a precise Conventional Commit, immutable verification evidence, and no unresolved P0/P1 finding.

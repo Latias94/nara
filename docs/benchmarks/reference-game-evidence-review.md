@@ -3,7 +3,7 @@
 This document defines the local-preparation evidence path for the RGD U11 successor of RGF-U20.
 It records no measurement result, approval, release candidate, or Publish/Redirect/Stop decision.
 Those facts may be added only after the hosted candidate, clean-room journey, complete review, and
-separate protected-branch authorization gates have completed.
+protected-branch execution gates have completed.
 
 ## Trust Flow
 
@@ -74,7 +74,7 @@ facts.
 The workflow may be extended into a real ingest execution only after U8, U9, and U10 have supplied
 the final candidate evidence and a separately reviewed, read-only producer contract can construct
 all required trusted-input fields. That extension must preserve the constraints below and receive
-its own policy review before an authorized evidence-ingest dispatch.
+its own policy review before an evidence-ingest workflow run.
 
 The reviewed source revision must remain an ancestor of the protected dispatch revision. If
 integration rewrites that identity, for example through a squash, the workflow fails closed until
@@ -137,7 +137,7 @@ may consume it:
 - a `Publish`, `Redirect`, or `Stop` decision plus a non-activating next-slice rule.
 
 Changing any bound field allocates a new versioned record and reruns its affected evidence. An
-outer-only normalized artifact, a reused authorization, an expired candidate, or any non-Accepted
+outer-only normalized artifact, a replayed workflow identity, an expired candidate, or any non-Accepted
 authority is not a valid approval input.
 
 The later immutable pre-release preparation is documented in
