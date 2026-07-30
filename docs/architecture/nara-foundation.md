@@ -717,11 +717,13 @@ second real adapter or stronger isolation pressure.
   suite. Exact policy tests reject selective replacements for these commands. The integrated
   six-cell matrix passes at `ef8f300` through GitHub Actions run `30462379022` after the later
   Rust, product-content, policy-test, workflow, strict-filesystem, canonical-fixture,
-  cross-platform budget, and software-GPU repairs. Historical baselines and standalone candidates
-  remain evidence for their revisions; RGD-U9 and RGD-U10 still require dependency-ordered fresh
-  evidence against this hosted baseline. See ADR
+  cross-platform budget, and software-GPU repairs. RGD-U9 now records the current Windows automatic
+  baseline at `b2ddb5b` with 10 admitted passing metrics, 10 missing required metrics, and a
+  deterministic `Redirect`; the earlier baseline remains historical. RGD-U10 still requires a
+  fresh separately authorized candidate run against this hosted baseline. See ADR
   [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md) and the
-  [final hosted verification](../knowledge/engineering/verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md).
+  [final hosted verification](../knowledge/engineering/verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md)
+  and [refreshed baseline verification](../knowledge/engineering/verification/2026-07/2026-07-29T182729Z-rgd-u9-refreshed-first-playable-product-baseline-verification-406733392389447c879f6de86245151e.md).
 
 ## Non-Authoritative Trigger Index
 

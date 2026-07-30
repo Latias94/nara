@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-07-29
+* **Work Registration**: [Reference-game delivery hardening: U9 baseline refreshed](registry/2026-07/2026-07-29T182757Z-engine-foundation-contract-completion-codex-root-74e04edd91fb4dd38af9264a5f5cc97e.md) - Closes the current first-playable baseline with an isolated Windows population and Redirect verdict; records U10 as the next separately authorized delivery gate.
+* **Verification Evidence**: [RGD-U9 refreshed first-playable product baseline verification](verification/2026-07/2026-07-29T182729Z-rgd-u9-refreshed-first-playable-product-baseline-verification-406733392389447c879f6de86245151e.md) - Records the current isolated Windows first-playable population, deterministic Redirect verdict, missing product evidence, and non-claims.
 * **Work Registration**: [Reference-game delivery hardening: U9 baseline refresh](registry/2026-07/2026-07-29T163416Z-engine-foundation-contract-completion-codex-root-b3e0c9dc77af407c86488e42c1816906.md) - Closes final-revision U8 hosted CI and activates a fresh first-playable baseline for the current source.
 * **Verification Evidence**: [RGD-U8 final hosted three-workspace CI refresh](verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md) - Closes the final-revision Windows/Linux root, reference-game, and module-consumer CI matrix at ef8f300.
 
@@ -139,7 +141,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U18](registry/2026-07/2026-07-20T002242Z-reference-game-foundation-rgf-u18-codex-root-ac914628924f41afb7aad4f1bacd4cd3.md) - Activate the locked direct nara_scene module consumer and public boundary proof.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-20T000516Z-reference-game-foundation-rgf-u19-codex-root-b395ac7f13cf4a0cbf6addc4ac712d20.md) - Close bounded ADR catalogue, ledger, relationship, authority, and draft-governance validation at implementation commit 347015e.
 * **Verification Evidence**: [RGF-U19 bounded ADR governance verification](verification/2026-07/2026-07-20T000516Z-rgf-u19-bounded-adr-governance-verification-2249e99c53684f7ca9b292f893c168e0.md) - Commit 347015e derives governance membership dynamically and rejects bounded authority, relationship, evidence, and draft-role drift.
-
-## 2026-07-19
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-19T234126Z-reference-game-foundation-rgf-u19-codex-root-2537f16f6c72472d8eadb65ea506c1ec.md) - Activate bounded ADR catalogue, ledger, relationship, authority, and draft-governance validation.
-* **Verification Evidence**: [RGF-U8 domain-owned task integration verification](verification/2026-07/2026-07-19T233045Z-rgf-u8-domain-owned-task-integration-verification-67f01d8db42b423ba82110d3f00633f7.md) - Commit 60292e7 moves asset task phases to their domain, linearizes Poll entry cutoffs, and makes watcher loss bounded, sticky, and observable.
