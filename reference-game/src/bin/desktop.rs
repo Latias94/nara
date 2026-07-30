@@ -3,46 +3,24 @@ use std::{
     ffi::OsString,
     io::{self, Write},
     process::ExitCode,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
     time::{Duration, Instant},
 };
 
 use nara::{
-    app::{
-        AppExitRequests, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-        PluginError, PluginId,
-    },
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
-    image::PreparedImageResource,
-    prelude::{App, CoreStage, Plugin, Res, ResMut, Resource},
     project_host::{DesktopRun, DesktopRunOutcome},
-    render::{PreparedRenderResources, RenderFrame},
-    render_wgpu::WgpuRenderBackend,
-    sprite_render::SpriteBatches,
 };
-use nara_reference_game::{
-    REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, bundled_desktop_run, wave_desktop_intent,
-};
+use nara_reference_game::bundled_desktop_run;
 
+mod desktop_candidate_smoke;
 mod desktop_support;
 mod support;
-use desktop_support::submitted_product_frame;
+use desktop_candidate_smoke::{CandidateSmokeEvidence, candidate_smoke_run};
 use support::project_root::open_project_root;
 
 const CLEANUP_DEADLINE: Duration = Duration::from_secs(5);
-const CANDIDATE_SMOKE_DEADLINE: Duration = Duration::from_secs(30);
 const CANDIDATE_SMOKE_ARGUMENT: &str = "--candidate-smoke";
 const CANDIDATE_SMOKE_SUCCESS: &str = "desktop_candidate_smoke: ok";
-const CANDIDATE_SMOKE_PLUGIN_ID: PluginId = PluginId::new("reference-game.desktop-candidate-smoke");
-const CANDIDATE_SMOKE_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("reference-game.desktop-candidate-smoke", 1);
-const CANDIDATE_SMOKE_REQUIREMENTS: &[PluginId] = &[REFERENCE_DESKTOP_PLUGIN_ID];
-const CANDIDATE_SMOKE_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(CANDIDATE_SMOKE_PLUGIN_ID, PluginCategory::Tooling)
-        .requires_plugins(CANDIDATE_SMOKE_REQUIREMENTS);
 
 fn main() -> ExitCode {
     let mode = match DesktopMode::parse(env::args_os().skip(1)) {
@@ -73,7 +51,7 @@ fn main() -> ExitCode {
     let Some(candidate_smoke) = candidate_smoke else {
         return exit.exit_code();
     };
-    if !candidate_smoke.completed.load(Ordering::SeqCst) {
+    if !candidate_smoke.completed() {
         emit_static_error(
             "reference-game.desktop.candidate-smoke-failed",
             "Desktop candidate did not submit its bounded product frame",
@@ -109,75 +87,10 @@ impl DesktopMode {
 fn desktop_run(
     project_root: nara::fs::DirectoryCapability,
     mode: DesktopMode,
-) -> (DesktopRun, Option<Arc<CandidateSmokeEvidence>>) {
+) -> (DesktopRun, Option<CandidateSmokeEvidence>) {
     match mode {
         DesktopMode::Interactive => (bundled_desktop_run(project_root), None),
-        DesktopMode::CandidateSmoke => {
-            let evidence = Arc::new(CandidateSmokeEvidence::default());
-            let plugin_evidence = Arc::clone(&evidence);
-            let probe = PluginDefinition::infallible::<CandidateSmokePlugin, _>(
-                CANDIDATE_SMOKE_DEFINITION_ID,
-                b"reference-game-desktop-candidate-smoke-v1",
-                move || CandidateSmokePlugin {
-                    evidence: Arc::clone(&plugin_evidence),
-                },
-            );
-            let intent = wave_desktop_intent().insert_after::<ReferenceDesktopPlugin>(probe);
-            (DesktopRun::new(project_root, intent), Some(evidence))
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct CandidateSmokeEvidence {
-    completed: AtomicBool,
-}
-
-#[derive(Debug)]
-struct CandidateSmokePlugin {
-    evidence: Arc<CandidateSmokeEvidence>,
-}
-
-impl Plugin for CandidateSmokePlugin {
-    fn declaration() -> &'static PluginDeclaration {
-        &CANDIDATE_SMOKE_DECLARATION
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.insert_resource(CandidateSmokeState {
-            evidence: Arc::clone(&self.evidence),
-            deadline: Instant::now() + CANDIDATE_SMOKE_DEADLINE,
-        })?
-        .add_systems(CoreStage::Cleanup, observe_candidate_frame)?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Resource)]
-struct CandidateSmokeState {
-    evidence: Arc<CandidateSmokeEvidence>,
-    deadline: Instant,
-}
-
-fn observe_candidate_frame(
-    prepared: Res<PreparedRenderResources<PreparedImageResource>>,
-    batches: Res<SpriteBatches>,
-    frame: Res<RenderFrame>,
-    backend: Res<WgpuRenderBackend>,
-    state: Res<CandidateSmokeState>,
-    mut exit: ResMut<AppExitRequests>,
-) {
-    let product_frame_ready = !prepared.is_empty()
-        && batches
-            .as_slice()
-            .iter()
-            .any(|batch| batch.material.image.is_some())
-        && submitted_product_frame(&frame, &backend);
-    if product_frame_ready {
-        state.evidence.completed.store(true, Ordering::SeqCst);
-        exit.request_exit();
-    } else if Instant::now() >= state.deadline {
-        exit.request_exit();
+        DesktopMode::CandidateSmoke => candidate_smoke_run(project_root),
     }
 }
 
