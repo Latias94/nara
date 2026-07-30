@@ -1947,22 +1947,7 @@ fn map_fs_error(error: FsError) -> ProjectContentError {
             );
             ProjectContentError::budget(error)
         }
-        FsError::Path(_)
-        | FsError::ReadOnlyCapability { .. }
-        | FsError::NotDirectory
-        | FsError::NotRegularFile
-        | FsError::ReparsePoint { .. }
-        | FsError::SymbolicLinkTraversal
-        | FsError::CrossVolume
-        | FsError::MultipleLinks { .. }
-        | FsError::IdentityUnavailable
-        | FsError::CapabilitySessionExhausted
-        | FsError::IdentityMismatch { .. }
-        | FsError::TemporaryParentMismatch
-        | FsError::AlreadyExists { .. }
-        | FsError::TargetStateMismatch
-        | FsError::LockContended
-        | FsError::DigestMismatch { .. } => ProjectContentError::single(
+        _ => ProjectContentError::single(
             ProjectContentErrorKind::HostAuthorityRejected,
             "project.content.authority-rejected",
             "Project content authority was rejected",

@@ -876,22 +876,7 @@ fn map_fs_error(stage: ImageImportStage, error: FsError) -> ImageImportError {
             stage,
             kind: ImageSourceFailureKind::Unsupported,
         },
-        FsError::Unproven { .. }
-        | FsError::ReadOnlyCapability { .. }
-        | FsError::NotDirectory
-        | FsError::NotRegularFile
-        | FsError::ReparsePoint { .. }
-        | FsError::SymbolicLinkTraversal
-        | FsError::CrossVolume
-        | FsError::MultipleLinks { .. }
-        | FsError::IdentityUnavailable
-        | FsError::CapabilitySessionExhausted
-        | FsError::IdentityMismatch { .. }
-        | FsError::TemporaryParentMismatch
-        | FsError::AlreadyExists { .. }
-        | FsError::TargetStateMismatch
-        | FsError::LockContended
-        | FsError::DigestMismatch { .. } => ImageImportError::Source {
+        _ => ImageImportError::Source {
             stage,
             kind: ImageSourceFailureKind::AuthorityRejected,
         },

@@ -73,7 +73,11 @@ pub enum PathValidationError {
     PathTooLong,
 }
 
+/// Failures reported by filesystem capabilities and operations.
+///
+/// New variants may be added as platform adapters prove additional rejection causes.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum FsError {
     #[error(transparent)]
     Path(#[from] PathValidationError),

@@ -293,6 +293,7 @@ fn project_fs_error(error: FsError) -> ProjectCandidateError {
         FsError::TargetStateMismatch => authority_rejection("target-state-mismatch"),
         FsError::LockContended => authority_rejection("lock-contended"),
         FsError::DigestMismatch { .. } => authority_rejection("digest-mismatch"),
+        _ => authority_rejection("unclassified-filesystem-rejection"),
     }
 }
 

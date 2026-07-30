@@ -45,6 +45,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U29-1 | RGF-U29 | `RGF-U29` | `rust-api/behavior` | Persistent codec output, registry binding, explicit component composition, and target-World apply eligibility | Return `PreparedComponentCandidate`, freeze the registry before runtime preflight, remove implicit required components/hooks from persistent types, and handle fail-closed target-World rejection. |
 | RGF-U13-1 | RGF-U13 | `198a680` | `rust-api/behavior` | Managed runtime driver access, physical button transitions, App-exit propagation, and desktop frame/shutdown semantics | Replace generic driver World/resource access with typed resource-local ports, propagate fallible button-edge admission, and handle the one-target desktop result/close contract. |
 | RGF-U8-1 | RGF-U8 | `60292e7` | `rust-api/behavior` | Task-update set ownership, ordered task result polling, and filesystem watcher admission/observability | Import asset phases from `nara_asset`, capture a task-pool completion cutoff before consuming ordered results, and send watcher batches through the bounded non-blocking sender while handling sticky `RescanRequired`. |
+| RGD-U8-2 | RGD-U8 refresh | `be9b264` | `rust-api/behavior` | `FsError` forward compatibility and strict Unix traversal rejection classification | Add a wildcard arm to external `FsError` matches. Treat exact platform rejection variants as diagnostic detail: all strict Unix adapters reject a symlink leaf, while Linux currently reports `SymbolicLinkTraversal`. |
 
 ## Entry Contract
 
@@ -220,7 +221,7 @@ let outcome = match app.run_once(delta) {
 
 **Affected examples and fixtures**: all built-in schema-owning plugins, project Host and Editor
 runtime readers, reference-game authoring/runtime composition, direct-App gameplay fault tests,
-the renamed-root schedule-extension consumer, and the compile-fail public contract fixture.
+the renamed-root schedule-extension consumer, and the compile-time negative trait assertion.
 
 **User action**: remove `ComponentRegistry` ECS resource reads and mutations. Use
 `component_registry` for runtime reads, keep standalone registries outside an `App` where direct
@@ -237,11 +238,83 @@ was healthy.
 **Rollback**: revert `b4d105c` and all migrated callers together. Do not restore a public mutable
 registry resource or downgrade sticky runtime faults to successful frame results.
 
-**Verification anchors**: `crates/nara_reflect/tests/ui/component_registry_is_not_resource.rs`,
+**Verification anchors**:
+`crates/nara_reflect/src/tests.rs#component_registry_is_not_an_ecs_resource`,
 `crates/nara_reflect/src/plugin.rs#tests`, `crates/nara_app/src/lib.rs#tests`,
 `tests/runtime_instance.rs`, `tests/plugin_composition.rs`,
 `tests/fixtures/schedule-extension/renamed-root/src/lib.rs`, and the RGD-U2 refresh verification
 record.
+
+## RGD-U8-2: Forward-Compatible Filesystem Rejection Errors
+
+**Removed contract**:
+
+- Treating the public `FsError` enum as an exhaustively matchable list of every future filesystem
+  rejection.
+- Treating `FsError::SymbolicLinkTraversal` as the exact rejection returned by every Unix adapter.
+
+**Canonical replacement or deletion rationale**: `FsError` is `#[non_exhaustive]`. Filesystem
+capability errors can gain new typed variants as platform adapters prove additional rejection
+causes, so downstream callers must retain a fallback arm. Strict Unix adapters share the semantic
+contract that a symlink leaf is rejected. Linux currently classifies the `openat2` `ELOOP` result as
+`SymbolicLinkTraversal`; Unix adapters without that Linux guarantee may fail closed with another
+typed error such as `Unproven`.
+
+**Before**:
+
+```rust
+let category = match error {
+    FsError::Path(_) => "path",
+    FsError::Io { .. } => "io",
+    FsError::Unsupported { .. } | FsError::Unproven { .. } => "capability",
+    FsError::ReadOnlyCapability { .. }
+    | FsError::NotDirectory
+    | FsError::NotRegularFile
+    | FsError::ReparsePoint { .. }
+    | FsError::SymbolicLinkTraversal
+    | FsError::CrossVolume
+    | FsError::MultipleLinks { .. }
+    | FsError::IdentityUnavailable
+    | FsError::CapabilitySessionExhausted
+    | FsError::IdentityMismatch { .. }
+    | FsError::TemporaryParentMismatch
+    | FsError::AlreadyExists { .. }
+    | FsError::TargetStateMismatch
+    | FsError::LockContended
+    | FsError::ByteLimitExceeded { .. }
+    | FsError::DigestMismatch { .. } => "rejected",
+};
+```
+
+**After**:
+
+```rust
+let category = match error {
+    FsError::Path(_) => "path",
+    FsError::SymbolicLinkTraversal => "symbolic-link",
+    _ => "other-filesystem-rejection",
+};
+```
+
+**Affected examples and fixtures**: downstream exhaustive matches must add a wildcard arm. The
+filesystem contract fixture verifies rejection on all Unix targets and verifies the exact
+`SymbolicLinkTraversal` classification only on Linux.
+
+**User action**: add a wildcard arm to every external `FsError` match. Do not use an exact
+platform-specific variant as the portable proof that an operation was rejected.
+
+**Source action**: `none`; no persistent project format changes.
+
+**Cache action**: `keep`; rebuild Rust artifacts after updating exhaustive matches.
+
+**Compatibility window**: none (pre-1.0 public-contract correction).
+
+**Rollback**: revert the typed strict-traversal classification and this migration together. Do not
+make `FsError` exhaustive again or claim one platform's diagnostic classification as a portable
+filesystem guarantee.
+
+**Verification anchors**: `crates/nara_fs/tests/filesystem_contract.rs` and
+`crates/nara_fs/src/platform/unix.rs#tests`.
 
 ## U3-1: Validated Time Configuration and Per-Tick Fixed Clock
 
