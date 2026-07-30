@@ -553,6 +553,22 @@ with tempfile.TemporaryDirectory(prefix="nara-smoke-runner-policy-") as temporar
     assert isolated_cwd == isolated_root / "cwd"
     assert "CARGO_HOME" not in isolated_environment
     assert ".cargo" not in isolated_environment["PATH"].lower()
+    assert smoke.parse_environment(["nara_wgpu_force_fallback=1"]) == {
+        "NARA_WGPU_FORCE_FALLBACK": "1"
+    }
+    for protected in ["home=outside", "Temp=outside", "cargo_home=outside"]:
+        try:
+            smoke.parse_environment([protected])
+        except smoke.ArtifactError as error:
+            assert "override is invalid" in str(error), str(error)
+        else:
+            raise AssertionError(f"protected environment alias was accepted: {protected}")
+    try:
+        smoke.parse_environment(["NARA_TEST=one", "nara_test=two"])
+    except smoke.ArtifactError as error:
+        assert "override is duplicated" in str(error), str(error)
+    else:
+        raise AssertionError("case-insensitive duplicate environment keys were accepted")
 
     try:
         smoke.run_bounded(

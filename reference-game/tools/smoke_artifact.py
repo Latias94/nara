@@ -722,11 +722,13 @@ def parse_launcher(value: str) -> list[str]:
 def parse_environment(values: Sequence[str]) -> dict[str, str]:
     environment: dict[str, str] = {}
     for value in values:
-        key, separator, raw_value = value.partition("=")
+        raw_key, separator, raw_value = value.partition("=")
+        key = raw_key.upper()
         if (
             not separator
             or not key
             or len(key) > 64
+            or not key.isascii()
             or not key.replace("_", "A").isalnum()
             or not key[0].isalpha()
             or len(raw_value) > 1024
