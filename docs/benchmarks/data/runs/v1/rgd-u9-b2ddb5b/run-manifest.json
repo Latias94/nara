@@ -1,0 +1,70 @@
+{
+  "automatic_scope": [
+    "build.cold_ns",
+    "build.incremental_ns",
+    "journey.clean_to_headless_wave_ns",
+    "gameplay.headless_wave_success",
+    "iteration.body.p50_ns",
+    "iteration.body.p95_ns",
+    "iteration.data.p50_ns",
+    "iteration.data.p95_ns",
+    "iteration.structural.p50_ns",
+    "iteration.structural.p95_ns",
+    "public.production.coverage_basis_points"
+  ],
+  "base_terminal_summary": {
+    "enemies_remaining": 0,
+    "outcome": "completed",
+    "player_hit_points": 20,
+    "projectiles_remaining": 4,
+    "schema": "nara-reference-game.wave-summary-v1",
+    "score": 300,
+    "tick": 49
+  },
+  "base_terminal_summary_digest": "77819d5cac39ab3e25d9e9537e09995480e96d0e9488515cb480c7d50dba5169",
+  "completed_at_utc": "2026-07-29T18:23:17.324842Z",
+  "edits": {
+    "body": {
+      "base_sha256": "edb3ecf47f6ada755a1f0f8a711887d1dc7598facfeca3f5bfd3f9cbf418587e",
+      "patch_sha256": "828c7aef98d5981c989382f853fde4ef4e163de29adf637261044e593ae150ec",
+      "variant_sha256": "536ff685c526bea56659241063178cd16eaea0b2bd25c3f3ffce80ab2400890e"
+    },
+    "data": {
+      "base_sha256": "793cb110ffebc2e929c48a29b3e8f682d6c229465cd24fe05d17b3cc014d9bf3",
+      "patch_sha256": "6729bf40be8c43314e55b3857c7eb72440709964139eedf8a834a3e5da331e19",
+      "variant_sha256": "bc020909050734c91155134d84e4c16a3b09cd056244bbd8323db2805ae6c755"
+    },
+    "structural": {
+      "base_sha256": "edb3ecf47f6ada755a1f0f8a711887d1dc7598facfeca3f5bfd3f9cbf418587e",
+      "patch_sha256": "12338d675fcac9a7cd5ffb4cf078b361b47fff19efe3a9f2434e0acf84ea06b6",
+      "variant_sha256": "799ced4bf6fbb2de28f09f7a4a47ea436242aad602e979a611f6594fa07a4a63"
+    }
+  },
+  "environment": {
+    "build_profile": "debug",
+    "cargo_build_jobs": 1,
+    "cargo_network": "offline",
+    "cargo_version": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "collector_revision": "c70aea68f493ca3874e4beb25ad78b4183407d0e200c925b5951e286fe899cf4",
+    "cpu_logical_processors": 32,
+    "cpu_model": "13th Gen Intel(R) Core(TM) i9-13900KF",
+    "cpu_physical_cores": 24,
+    "dependency_cache_state": "copied-isolated-registry-read-offline",
+    "desktop_adapter_or_software_profile": "not-collected-in-automatic-slice",
+    "fingerprint": "23c62c56777a214c57686aa7ee4513e8c52be6912584a64537160485e660ce6e",
+    "os_name": "Windows",
+    "os_release": "11",
+    "os_version": "10.0.26200",
+    "runner_image": "local-windows-11-workstation-build-26200",
+    "rustc_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "source_revision": "b2ddb5b0ea6ea9b98e213619dccf65a5326b1505",
+    "target_state": "empty-per-cold-sample; retained-for-warm-samples"
+  },
+  "raw_sample_count": 75,
+  "raw_samples_sha256": "076b6057413375b74d49f0c5bed1abfea08cbddba6841e278ee56f21aca82515",
+  "schema": "nara.reference-game.first-playable-local-run-v1",
+  "source_revision": "b2ddb5b0ea6ea9b98e213619dccf65a5326b1505",
+  "source_worktree_clean": true,
+  "started_at_utc": "2026-07-29T18:05:05.966964Z",
+  "status": "automatic_slice_complete"
+}

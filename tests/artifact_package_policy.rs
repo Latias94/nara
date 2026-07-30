@@ -84,6 +84,16 @@ fn run(command: &mut Command) -> Output {
         .expect("test command must start successfully")
 }
 
+fn run_smoke_inline(script: &str) -> Output {
+    let smoke = smoke_script();
+    let tool_directory = smoke.parent().expect("smoke script must have a parent");
+    run(Command::new("python").arg("-B").arg("-c").arg(script).arg(
+        tool_directory
+            .to_str()
+            .expect("tool directory must be UTF-8"),
+    ))
+}
+
 fn run_package(
     repository: &Path,
     headless: &Path,
@@ -525,10 +535,6 @@ fn consumer_rejects_unsafe_or_manifest_inconsistent_archives_before_extraction()
 
 #[test]
 fn smoke_runner_enforces_output_and_time_limits_while_the_process_is_live() {
-    let smoke_script = smoke_script();
-    let tool_directory = smoke_script
-        .parent()
-        .expect("smoke script must have a parent");
     let script = r#"
 import os
 from pathlib import Path
@@ -544,7 +550,7 @@ with tempfile.TemporaryDirectory(prefix="nara-smoke-runner-policy-") as temporar
     isolated_root = cwd / "isolated"
     isolated_root.mkdir()
     isolated_environment, isolated_cwd = smoke.smoke_environment(isolated_root, {})
-    assert isolated_cwd == isolated_root / "random-cwd"
+    assert isolated_cwd == isolated_root / "cwd"
     assert "CARGO_HOME" not in isolated_environment
     assert ".cargo" not in isolated_environment["PATH"].lower()
 
@@ -573,15 +579,153 @@ with tempfile.TemporaryDirectory(prefix="nara-smoke-runner-policy-") as temporar
     else:
         raise AssertionError("timeout fixture exceeded the limit without rejection")
 "#;
-    let result = run(Command::new("python").arg("-B").arg("-c").arg(script).arg(
-        tool_directory
-            .to_str()
-            .expect("tool directory must be UTF-8"),
-    ));
+    let result = run_smoke_inline(script);
 
     assert!(
         result.status.success(),
         "bounded smoke runner contract failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn smoke_runs_use_unique_roots_with_state_outside_the_extracted_package() {
+    let script = r#"
+from pathlib import Path
+import sys
+import tempfile
+
+sys.path.insert(0, sys.argv[1])
+import smoke_artifact as smoke
+
+with tempfile.TemporaryDirectory(prefix="nara-smoke-root-policy-") as temporary:
+    work_parent = Path(temporary).resolve()
+    roots = [smoke.create_smoke_root(work_parent) for _ in range(2)]
+    assert roots[0] != roots[1]
+    for root in roots:
+        assert root.parent == work_parent
+        assert root.name.startswith(".nara-smoke-")
+        environment, cwd = smoke.smoke_environment(root, {})
+        package_root = root / "consumer" / "nara-reference-game"
+        state_paths = {
+            Path(environment["HOME"]),
+            Path(environment["TEMP"]),
+            Path(environment["TMP"]),
+            Path(environment["TMPDIR"]),
+            cwd,
+        }
+        assert state_paths == {root / "home", root / "tmp", root / "cwd"}
+        assert all(path.is_dir() for path in state_paths)
+        assert all(not smoke.package.path_is_within(path, package_root) for path in state_paths)
+"#;
+    let result = run_smoke_inline(script);
+
+    assert!(
+        result.status.success(),
+        "unique smoke-root contract failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn smoke_runner_uses_the_formal_desktop_and_retires_unique_work_roots() {
+    let script = r#"
+import json
+from pathlib import Path
+import sys
+import tempfile
+from types import SimpleNamespace
+
+sys.path.insert(0, sys.argv[1])
+import smoke_artifact as smoke
+
+validated = SimpleNamespace(
+    archive_sha256="0" * 64,
+    archive_size_bytes=1,
+    layout=SimpleNamespace(package_root="nara-reference-game"),
+    manifest={
+        "package": {
+            "platform": "windows-x86_64",
+            "version": "0.1.0",
+        },
+        "source_revision": "0" * 40,
+        "limits": {
+            "file_count": 3,
+            "expanded_bytes": 3,
+        },
+        "layout": {
+            "headless": "bin/headless.exe",
+            "desktop": "bin/desktop.exe",
+            "desktop_probe": "tools/desktop-render-probe.exe",
+        }
+    },
+)
+smoke.extract_archive = lambda *args, **kwargs: validated
+commands = []
+
+def run_fixture(command, cwd, environment, subject):
+    command = tuple(str(part) for part in command)
+    commands.append((command, subject))
+    if subject == "headless candidate":
+        return json.dumps({"schema": smoke.HEADLESS_SUMMARY_SCHEMA}).encode("ascii")
+    if any("desktop-render-probe" in part for part in command):
+        return smoke.DESKTOP_PROBE_SUCCESS
+    if subject == "desktop candidate":
+        assert Path(command[-2]).name == "desktop.exe", command
+        assert command[-1] == "--candidate-smoke", command
+        raise smoke.ArtifactError("damaged formal desktop")
+    raise AssertionError((command, subject))
+
+smoke.run_bounded = run_fixture
+with tempfile.TemporaryDirectory(prefix="nara-formal-desktop-policy-") as temporary:
+    work_parent = Path(temporary)
+    try:
+        smoke.smoke_candidate(Path("unused.zip"), work_parent, "[]", [])
+    except smoke.ArtifactError as error:
+        assert str(error) == "damaged formal desktop", str(error)
+    else:
+        raise AssertionError("a working legacy probe masked the damaged formal desktop")
+    assert not any(work_parent.iterdir()), "failed smoke must retire its unique work root"
+
+    def successful_run_fixture(command, cwd, environment, subject):
+        if subject == "headless candidate":
+            return json.dumps({"schema": smoke.HEADLESS_SUMMARY_SCHEMA}).encode("ascii")
+        if subject == "desktop candidate":
+            return smoke.DESKTOP_SMOKE_SUCCESS
+        raise AssertionError((command, subject))
+
+    smoke.run_bounded = successful_run_fixture
+    result = smoke.smoke_candidate(Path("unused.zip"), work_parent, "[]", [])
+    assert result["desktop"] == "candidate-smoke-completed", result
+    assert not any(work_parent.iterdir()), "successful smoke must retire its unique work root"
+
+    remove_temporary = smoke.safe_remove_temporary
+    smoke.safe_remove_temporary = lambda *args, **kwargs: False
+    try:
+        smoke.smoke_candidate(Path("unused.zip"), work_parent, "[]", [])
+    except smoke.ArtifactError as error:
+        assert str(error) == "smoke work root could not be retired", str(error)
+    else:
+        raise AssertionError("cleanup failure must reject candidate smoke")
+    finally:
+        smoke.safe_remove_temporary = remove_temporary
+        abandoned_roots = list(work_parent.iterdir())
+        assert len(abandoned_roots) == 1, abandoned_roots
+        assert remove_temporary(
+            abandoned_roots[0], work_parent, smoke.SMOKE_TEMPORARY_PREFIX
+        )
+
+assert any(subject == "desktop candidate" for _, subject in commands)
+assert all(
+    not any("desktop-render-probe" in part for part in command)
+    for command, _ in commands
+)
+"#;
+    let result = run_smoke_inline(script);
+
+    assert!(
+        result.status.success(),
+        "formal desktop smoke contract failed: {}",
         String::from_utf8_lossy(&result.stderr)
     );
 }

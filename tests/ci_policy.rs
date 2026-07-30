@@ -464,6 +464,44 @@ fn policy_rejects_skipped_matrix_entries_and_masked_commands() {
     );
     assert_policy_rejects(&selective_tests, "exact ordered run commands");
 
+    let architecture_governance_step = concat!(
+        "      - name: Test architecture governance\n",
+        "        run: cargo nextest run --locked -p nara --test architecture_docs --test-threads=1\n",
+    );
+
+    let mut missing_architecture_governance = PolicyFixture::committed();
+    replace_first(
+        &mut missing_architecture_governance.workflow,
+        architecture_governance_step,
+        "",
+    );
+    assert_policy_rejects(
+        &missing_architecture_governance,
+        "exact ordered run commands",
+    );
+
+    let mut replaced_architecture_governance = PolicyFixture::committed();
+    replace_first(
+        &mut replaced_architecture_governance.workflow,
+        "cargo nextest run --locked -p nara --test architecture_docs --test-threads=1",
+        "cargo nextest run --locked -p nara --test ci_policy --test-threads=1",
+    );
+    assert_policy_rejects(
+        &replaced_architecture_governance,
+        "exact ordered run commands",
+    );
+
+    let mut duplicated_architecture_governance = PolicyFixture::committed();
+    replace_first(
+        &mut duplicated_architecture_governance.workflow,
+        architecture_governance_step,
+        &format!("{architecture_governance_step}{architecture_governance_step}"),
+    );
+    assert_policy_rejects(
+        &duplicated_architecture_governance,
+        "exact ordered run commands",
+    );
+
     let mut non_failing_shell = PolicyFixture::committed();
     replace_first(
         &mut non_failing_shell.workflow,
@@ -757,7 +795,7 @@ fn validate_evidence_ingest_concurrency(concurrency: Option<&Yaml>, violations: 
         violations.push("evidence-ingest concurrency must be workflow- and ref-scoped".to_owned());
     }
     if field(concurrency, "cancel-in-progress").and_then(Yaml::as_bool) != Some(false) {
-        violations.push("evidence-ingest concurrency must preserve an authorized run".to_owned());
+        violations.push("evidence-ingest concurrency must preserve one run identity".to_owned());
     }
 }
 
@@ -1203,7 +1241,7 @@ fn validate_candidate_concurrency(concurrency: Option<&Yaml>, violations: &mut V
         violations.push("candidate concurrency must be workflow- and ref-scoped".to_owned());
     }
     if field(concurrency, "cancel-in-progress").and_then(Yaml::as_bool) != Some(false) {
-        violations.push("candidate concurrency must preserve an authorized run".to_owned());
+        violations.push("candidate concurrency must preserve one run identity".to_owned());
     }
 }
 
@@ -1293,7 +1331,7 @@ fn validate_rerun_rejection_job(
         &["name", "run"],
         violations,
     );
-    if scalar_str(field(step, "name")) != Some("Reject rerun without new authorization")
+    if scalar_str(field(step, "name")) != Some("Reject reused workflow artifact identity")
         || scalar_str(field(step, "run")) != Some("exit 1")
     {
         violations.push(format!(
@@ -2054,6 +2092,7 @@ fn required_step_pipeline(job_name: &str) -> &'static [&'static str] {
             "run:cargo fmt --all -- --check",
             "run:cargo check --workspace --locked --all-targets",
             "run:cargo check -p nara --locked --no-default-features --lib\ncargo check -p nara --locked --no-default-features --features runtime-core --lib\ncargo check -p nara --locked --no-default-features --features runtime-2d --lib\ncargo check -p nara --locked --no-default-features --features runtime-ui --lib\ncargo check -p nara --locked --no-default-features --features tooling --lib\ncargo check -p nara --locked --no-default-features --features asset-watch --lib\ncargo check -p nara --locked --no-default-features --features desktop-winit --lib\ncargo check -p nara --locked --no-default-features --features render-wgpu --lib\ncargo check -p nara --locked --no-default-features --features tooling-egui --lib\ncargo check -p nara --locked --no-default-features --features serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-core,serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-2d,serde --lib\ncargo check -p nara --locked --no-default-features --features runtime-ui,serde --lib\ncargo check -p nara --locked --no-default-features --features tooling,runtime-2d,serde --lib\ncargo check -p nara --locked --no-default-features --features desktop-winit,render-wgpu --example windowed_clear\ncargo check -p nara --locked --no-default-features --features runtime-2d,desktop-winit,render-wgpu --example windowed_sprites\ncargo check -p nara --locked --no-default-features --features runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel\ncargo check --workspace --locked --all-features --all-targets|shell:bash",
+            "run:cargo nextest run --locked -p nara --test architecture_docs --test-threads=1",
             "run:cargo nextest run --workspace --locked -E 'not binary(architecture_docs)' --test-threads=1\nif [[ \"$RUNNER_OS\" == \"Linux\" ]]; then\n  NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args=\"-screen 0 1280x720x24\" cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1\nelse\n  NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1\nfi|shell:bash",
         ],
         "reference-game" => &[

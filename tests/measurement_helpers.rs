@@ -155,6 +155,38 @@ fn run_helper_strings(arguments: &[&str]) -> Output {
     run(&mut command)
 }
 
+fn historical_archive_path() -> PathBuf {
+    repository_root().join("docs/benchmarks/data/runs/v1/rgd-u9-b2ddb5b")
+}
+
+fn copy_historical_archive(destination: &Path) {
+    fs::create_dir(destination).expect("historical archive fixture must be creatable");
+    for entry in fs::read_dir(historical_archive_path())
+        .expect("committed historical archive must be readable")
+    {
+        let entry = entry.expect("historical archive entry must be readable");
+        let file_type = entry
+            .file_type()
+            .expect("historical archive entry type must be readable");
+        assert!(file_type.is_file(), "historical archive must remain flat");
+        fs::copy(entry.path(), destination.join(entry.file_name()))
+            .expect("historical archive entry must be copyable");
+    }
+}
+
+fn mutate_historical_receipt(archive: &Path, mutation: impl FnOnce(&mut Value)) {
+    let receipt_path = archive.join("import-receipt.json");
+    let mut receipt: Value = serde_json::from_slice(
+        &fs::read(&receipt_path).expect("historical receipt must be readable"),
+    )
+    .expect("historical receipt must be JSON");
+    mutation(&mut receipt);
+    let mut encoded =
+        serde_json::to_vec_pretty(&receipt).expect("mutated historical receipt must encode");
+    encoded.push(b'\n');
+    fs::write(receipt_path, encoded).expect("historical receipt must be writable");
+}
+
 fn git_status(subject: &Path) -> String {
     String::from_utf8(run_git(subject, &["status", "--porcelain=v1"]).stdout)
         .expect("git status must be UTF-8")
@@ -445,6 +477,164 @@ fn plan_ignores_git_environment_overrides_when_proving_its_subject() {
 }
 
 #[test]
+fn committed_historical_archive_preserves_its_exact_transport_without_closing_u9() {
+    let archive = historical_archive_path();
+    let result = run_helper(&[
+        Path::new("verify-historical"),
+        Path::new("--archive"),
+        &archive,
+    ]);
+
+    assert!(
+        result.status.success(),
+        "historical archive verification failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        result.stdout.is_empty(),
+        "archive verification is a gate, not a result claim"
+    );
+}
+
+#[test]
+fn historical_archive_verification_rejects_a_changed_semantic_copy() {
+    let temporary = TemporaryDirectory::new("historical-archive-tamper");
+    let archive = temporary.path().join("archive");
+    copy_historical_archive(&archive);
+    fs::write(
+        archive.join("measurement-plan.json"),
+        b"tampered historical evidence\n",
+    )
+    .expect("historical archive fixture must be writable");
+
+    let result = run_helper(&[
+        Path::new("verify-historical"),
+        Path::new("--archive"),
+        &archive,
+    ]);
+
+    assert!(
+        !result.status.success(),
+        "tampered historical evidence must reject"
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("semantic copy digest did not match"),
+        "tamper rejection must identify the failed digest boundary: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn historical_archive_verification_binds_semantic_and_transport_copies() {
+    let temporary = TemporaryDirectory::new("historical-archive-divergence");
+    let archive = temporary.path().join("archive");
+    copy_historical_archive(&archive);
+    let script = r#"
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+archive = Path(sys.argv[1])
+semantic = archive / "raw-samples.jsonl"
+records = semantic.read_bytes().splitlines(keepends=True)
+semantic.write_bytes(b"".join(records[:-1]))
+receipt_path = archive / "import-receipt.json"
+receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+for entry in receipt["files"]:
+    if entry["logical_name"] == "raw-samples.jsonl":
+        entry["semantic_copy_sha256"] = hashlib.sha256(semantic.read_bytes()).hexdigest()
+        break
+else:
+    raise AssertionError("raw sample receipt entry is missing")
+receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+"#;
+    let mutation = run(Command::new("python")
+        .arg("-B")
+        .arg("-c")
+        .arg(script)
+        .arg(&archive));
+    assert!(
+        mutation.status.success(),
+        "divergent archive fixture must be created: {}",
+        String::from_utf8_lossy(&mutation.stderr)
+    );
+
+    let result = run_helper(&[
+        Path::new("verify-historical"),
+        Path::new("--archive"),
+        &archive,
+    ]);
+
+    assert!(
+        !result.status.success(),
+        "independently rehashed but divergent evidence must reject"
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains("semantic copy diverged from its original transport"),
+        "representation mismatch must identify the failed binding: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn historical_archive_verification_requires_the_complete_file_set() {
+    let temporary = TemporaryDirectory::new("historical-archive-file-set");
+    let archive = temporary.path().join("archive");
+    copy_historical_archive(&archive);
+    mutate_historical_receipt(&archive, |receipt| {
+        receipt["files"]
+            .as_array_mut()
+            .expect("historical files must be an array")
+            .retain(|entry| entry["logical_name"] != "measurement-plan.json");
+    });
+
+    let result = run_helper(&[
+        Path::new("verify-historical"),
+        Path::new("--archive"),
+        &archive,
+    ]);
+
+    assert!(
+        !result.status.success(),
+        "an incomplete archive must reject"
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("invalid contract"),
+        "incomplete archive rejection must identify the receipt contract: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn historical_archive_verification_preserves_non_completion_claims() {
+    let temporary = TemporaryDirectory::new("historical-archive-claims");
+    let archive = temporary.path().join("archive");
+    copy_historical_archive(&archive);
+    mutate_historical_receipt(&archive, |receipt| {
+        receipt["claims"]["rgd_u9_complete"] = Value::Bool(true);
+        receipt["claims"]["u11_dependency_satisfied"] = Value::Bool(true);
+    });
+
+    let result = run_helper(&[
+        Path::new("verify-historical"),
+        Path::new("--archive"),
+        &archive,
+    ]);
+
+    assert!(
+        !result.status.success(),
+        "a historical archive cannot promote its own completion status"
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("invalid contract"),
+        "claim rejection must identify the receipt contract: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
 fn helper_is_stdlib_only_and_exposes_no_result_claim_before_collection() {
     let source = fs::read_to_string(helper_path()).expect("measurement helper must exist");
 
@@ -470,6 +660,7 @@ fn helper_is_stdlib_only_and_exposes_no_result_claim_before_collection() {
         "key.upper().startswith(\"GIT_\")",
         "reference-game-first-playable.json",
         "minimum_samples",
+        "verify-historical",
     ] {
         assert!(
             source.contains(required),

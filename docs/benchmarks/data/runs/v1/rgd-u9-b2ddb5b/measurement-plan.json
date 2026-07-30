@@ -1,0 +1,360 @@
+{
+  "blocked_workflows": [
+    {
+      "id": "module_addition",
+      "kind": "blocked",
+      "metric_ids": [
+        "module.add.time_ns",
+        "module.add.success"
+      ],
+      "reason": "The canonical protocol names this public task, but the current reference-game documentation has no committed module-addition task definition or public completion command."
+    },
+    {
+      "id": "window_slot_configuration",
+      "kind": "blocked",
+      "metric_ids": [
+        "slot.configure.time_ns",
+        "slot.configure.success"
+      ],
+      "reason": "The canonical protocol names this public task, but the current reference-game documentation has no committed window-slot configuration task definition or public completion command."
+    },
+    {
+      "id": "desktop_pressure_telemetry",
+      "kind": "blocked",
+      "metric_ids": [
+        "frame.p99_ns",
+        "runtime.gpu_resource_bytes",
+        "runtime.memory_bytes"
+      ],
+      "reason": "The public desktop product does not yet expose the bounded telemetry required by these canonical metrics."
+    }
+  ],
+  "decision": "not_evaluated",
+  "environment_fields": [
+    "os_name",
+    "os_release",
+    "runner_image",
+    "rustc_version",
+    "cargo_version",
+    "cpu_model",
+    "build_profile",
+    "desktop_adapter_or_software_profile",
+    "collector_revision"
+  ],
+  "format_version": 1,
+  "isolation": {
+    "home_directory": "do not infer or create a default home directory; later collection must configure an explicit isolated home under output",
+    "source_mutation": "forbidden",
+    "target_directory": "place Cargo targets under that detached worktree",
+    "worktree": "create a detached Git worktree under the output directory only when collection is admitted"
+  },
+  "metric_catalog": {
+    "collector": "u14",
+    "path": "docs/benchmarks/data/protocol/v1/reference-game-first-playable.json",
+    "requirements": [
+      {
+        "id": "build.cold_ns",
+        "minimum_samples": 5,
+        "subject": "u14.headless_iteration",
+        "workload_id": "locked_reference_game_workspace_v1"
+      },
+      {
+        "id": "build.incremental_ns",
+        "minimum_samples": 5,
+        "subject": "u14.headless_iteration",
+        "workload_id": "locked_reference_game_workspace_v1"
+      },
+      {
+        "id": "frame.p99_ns",
+        "minimum_samples": 1000,
+        "subject": "u14.desktop_product",
+        "workload_id": "reference_game_pressure_frame_1080p_v1"
+      },
+      {
+        "id": "gameplay.desktop_playable_success",
+        "minimum_samples": 1,
+        "subject": "u14.desktop_product",
+        "workload_id": "manual_reference_wave_v1"
+      },
+      {
+        "id": "gameplay.headless_wave_success",
+        "minimum_samples": 1,
+        "subject": "u14.headless_iteration",
+        "workload_id": "deterministic_headless_reference_wave_v1"
+      },
+      {
+        "id": "iteration.body.p50_ns",
+        "minimum_samples": 10,
+        "subject": "u14.headless_iteration",
+        "workload_id": "compatible_rust_body_edit_v1"
+      },
+      {
+        "id": "iteration.body.p95_ns",
+        "minimum_samples": 10,
+        "subject": "u14.headless_iteration",
+        "workload_id": "compatible_rust_body_edit_v1"
+      },
+      {
+        "id": "iteration.data.p50_ns",
+        "minimum_samples": 10,
+        "subject": "u14.headless_iteration",
+        "workload_id": "persistent_component_data_edit_v1"
+      },
+      {
+        "id": "iteration.data.p95_ns",
+        "minimum_samples": 10,
+        "subject": "u14.headless_iteration",
+        "workload_id": "persistent_component_data_edit_v1"
+      },
+      {
+        "id": "iteration.structural.p50_ns",
+        "minimum_samples": 10,
+        "subject": "u14.headless_iteration",
+        "workload_id": "rust_structural_schema_edit_v1"
+      },
+      {
+        "id": "iteration.structural.p95_ns",
+        "minimum_samples": 10,
+        "subject": "u14.headless_iteration",
+        "workload_id": "rust_structural_schema_edit_v1"
+      },
+      {
+        "id": "journey.clean_to_desktop_playable_ns",
+        "minimum_samples": 3,
+        "subject": "u14.desktop_product",
+        "workload_id": "docs_only_clean_desktop_journey_v1"
+      },
+      {
+        "id": "journey.clean_to_headless_wave_ns",
+        "minimum_samples": 3,
+        "subject": "u14.headless_iteration",
+        "workload_id": "docs_only_clean_headless_journey_v1"
+      },
+      {
+        "id": "module.add.success",
+        "minimum_samples": 3,
+        "subject": "u14.headless_iteration",
+        "workload_id": "documented_add_module_task_v1"
+      },
+      {
+        "id": "module.add.time_ns",
+        "minimum_samples": 3,
+        "subject": "u14.headless_iteration",
+        "workload_id": "documented_add_module_task_v1"
+      },
+      {
+        "id": "public.production.coverage_basis_points",
+        "minimum_samples": 1,
+        "subject": "u14.headless_iteration",
+        "workload_id": "frozen_public_production_slice_v1"
+      },
+      {
+        "id": "runtime.gpu_resource_bytes",
+        "minimum_samples": 10,
+        "subject": "u14.desktop_product",
+        "workload_id": "reference_game_pressure_wave_v1"
+      },
+      {
+        "id": "runtime.memory_bytes",
+        "minimum_samples": 10,
+        "subject": "u14.desktop_product",
+        "workload_id": "reference_game_pressure_wave_v1"
+      },
+      {
+        "id": "slot.configure.success",
+        "minimum_samples": 3,
+        "subject": "u14.desktop_product",
+        "workload_id": "documented_window_slot_task_v1"
+      },
+      {
+        "id": "slot.configure.time_ns",
+        "minimum_samples": 3,
+        "subject": "u14.desktop_product",
+        "workload_id": "documented_window_slot_task_v1"
+      }
+    ]
+  },
+  "non_claims": [
+    "This file is a prepared local collection plan, not a benchmark result.",
+    "This helper does not evaluate protocol ranges or emit Continue, Redirect, or Stop.",
+    "Desktop manual playability requires an explicit human observation and cannot be inferred from a process exit.",
+    "Unavailable measurements require a concrete tracer decision before they can enter a baseline."
+  ],
+  "raw_sample_fields": [
+    "metric_id",
+    "sample_index",
+    "sample_value",
+    "value_unit",
+    "population",
+    "mechanism",
+    "start_boundary",
+    "end_boundary",
+    "started_at_utc",
+    "completed_at_utc",
+    "exit_status",
+    "environment_fingerprint",
+    "source_revision",
+    "failure_output_reference"
+  ],
+  "schema": "nara.reference-game.first-playable-plan-v1",
+  "source": {
+    "required_paths": [
+      "Cargo.toml",
+      "reference-game/Cargo.toml",
+      "reference-game/Cargo.lock",
+      "reference-game/src/bin/headless.rs",
+      "reference-game/src/bin/desktop.rs",
+      "reference-game/src/bin/desktop_render_probe.rs",
+      "reference-game/src/systems.rs",
+      "reference-game/scenes/startup.scene.json",
+      "reference-game/tests/public_surface.rs",
+      "docs/benchmarks/data/protocol/v1/reference-game-first-playable.json"
+    ],
+    "revision": "b2ddb5b0ea6ea9b98e213619dccf65a5326b1505"
+  },
+  "status": "prepared_not_executed",
+  "steps": [
+    {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--bins"
+      ],
+      "entry_point": "reference-game/Cargo.toml",
+      "id": "build_timings",
+      "isolation": "collect one cold build with an empty detached-worktree target and one warm incremental build with its retained target",
+      "kind": "automatic",
+      "metric_ids": [
+        "build.cold_ns",
+        "build.incremental_ns"
+      ],
+      "success": "both public binary builds succeed with monotonic command-boundary samples",
+      "working_directory": "reference-game"
+    },
+    {
+      "command": [
+        "cargo",
+        "run",
+        "--locked",
+        "--bin",
+        "headless",
+        "--",
+        "--max-ticks",
+        "96"
+      ],
+      "entry_point": "reference-game/src/bin/headless.rs",
+      "id": "clean_headless_wave",
+      "kind": "automatic",
+      "metric_ids": [
+        "journey.clean_to_headless_wave_ns",
+        "gameplay.headless_wave_success"
+      ],
+      "success": "one terminal nara-reference-game.wave-summary-v1 JSON record",
+      "working_directory": "reference-game"
+    },
+    {
+      "entry_point": "reference-game/src/systems.rs",
+      "id": "body_edit_reload",
+      "kind": "automatic",
+      "metric_ids": [
+        "iteration.body.p50_ns",
+        "iteration.body.p95_ns"
+      ],
+      "mutation": "apply and revert one reviewed compatible Rust body-only edit in the isolated worktree",
+      "success": "a fresh rebuilt headless runtime reaches one terminal wave after the body edit",
+      "working_directory": "reference-game"
+    },
+    {
+      "entry_point": "reference-game/scenes/startup.scene.json",
+      "id": "data_edit_reload",
+      "kind": "automatic",
+      "metric_ids": [
+        "iteration.data.p50_ns",
+        "iteration.data.p95_ns"
+      ],
+      "mutation": "apply and revert one reviewed data-only change in the isolated worktree",
+      "success": "the headless public entry point reaches one terminal wave after the data change",
+      "working_directory": "reference-game"
+    },
+    {
+      "entry_point": "reference-game/src/systems.rs",
+      "id": "structural_rust_edit",
+      "kind": "automatic",
+      "metric_ids": [
+        "iteration.structural.p50_ns",
+        "iteration.structural.p95_ns"
+      ],
+      "mutation": "apply and revert one reviewed behavior-neutral Rust source edit in the isolated worktree",
+      "success": "a fresh rebuilt headless runtime reaches one terminal wave",
+      "working_directory": "reference-game"
+    },
+    {
+      "command": [
+        "cargo",
+        "run",
+        "--locked",
+        "--features",
+        "desktop",
+        "--bin",
+        "desktop"
+      ],
+      "entry_point": "reference-game/src/bin/desktop.rs",
+      "id": "desktop_manual_playthrough",
+      "kind": "manual",
+      "metric_ids": [
+        "journey.clean_to_desktop_playable_ns",
+        "gameplay.desktop_playable_success"
+      ],
+      "success": "a human confirms visible movement, HUD updates, terminal state, Enter retry, and normal close",
+      "working_directory": "reference-game"
+    },
+    {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--test",
+        "public_surface"
+      ],
+      "entry_point": "reference-game/tests/public_surface.rs",
+      "id": "public_production_coverage",
+      "kind": "automatic",
+      "metric_ids": [
+        "public.production.coverage_basis_points"
+      ],
+      "success": "the documented public surface succeeds without a private measurement hook",
+      "working_directory": "reference-game"
+    }
+  ],
+  "unavailable_measurements": [
+    {
+      "id": "frame.p99_ns",
+      "reason": "The public desktop product emits no bounded frame-time sample stream."
+    },
+    {
+      "id": "runtime.memory_bytes",
+      "reason": "No cross-platform public process-memory collector is selected for this product path."
+    },
+    {
+      "id": "runtime.gpu_resource_bytes",
+      "reason": "Backend cache statistics are not exposed by the public desktop product entry point."
+    },
+    {
+      "id": "render.packet.batch_count",
+      "reason": "Sprite and UI batch statistics are not exported by the public desktop product entry point."
+    },
+    {
+      "id": "render.packet.instance_count",
+      "reason": "Sprite and UI instance counts are not exported by the public desktop product entry point."
+    },
+    {
+      "id": "render.packet.retained_bytes",
+      "reason": "The current RenderFramePacket is topology-only and does not publish retained payload bytes."
+    },
+    {
+      "id": "render.packet.clone_bytes",
+      "reason": "The current renderer does not publish packet clone or allocation counters."
+    }
+  ]
+}

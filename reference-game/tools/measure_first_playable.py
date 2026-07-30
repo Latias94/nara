@@ -4,6 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -18,6 +22,49 @@ PLAN_SCHEMA = "nara.reference-game.first-playable-plan-v1"
 PLAN_FILENAME = "measurement-plan.json"
 MAX_GIT_OUTPUT_BYTES = 64 * 1024
 MAX_METRIC_CATALOG_BYTES = 256 * 1024
+MAX_HISTORICAL_RECEIPT_BYTES = 64 * 1024
+MAX_HISTORICAL_FILE_BYTES = 1024 * 1024
+HISTORICAL_IMPORT_SCHEMA = "nara.reference-game.first-playable-historical-import-v1"
+HISTORICAL_IMPORT_STATUS = "historical_transport_preserved_u9_repair_pending"
+HISTORICAL_SOURCE_REVISION = "b2ddb5b0ea6ea9b98e213619dccf65a5326b1505"
+HISTORICAL_MANIFEST_NAME = "run-manifest.json"
+HISTORICAL_RAW_SAMPLES_NAME = "raw-samples.jsonl"
+HISTORICAL_FILE_PATHS = {
+    "measurement-plan.json": (
+        "measurement-plan.json",
+        "measurement-plan.original.base64",
+    ),
+    HISTORICAL_RAW_SAMPLES_NAME: (
+        HISTORICAL_RAW_SAMPLES_NAME,
+        "raw-samples.original.base64",
+    ),
+    HISTORICAL_MANIFEST_NAME: (
+        HISTORICAL_MANIFEST_NAME,
+        "run-manifest.original.base64",
+    ),
+    "preflight-failures.jsonl": (
+        "preflight-failures.jsonl",
+        "preflight-failures.original.base64",
+    ),
+}
+HISTORICAL_REQUIRED_ORIGINALS = frozenset(
+    (HISTORICAL_MANIFEST_NAME, HISTORICAL_RAW_SAMPLES_NAME)
+)
+HISTORICAL_COLLECTOR = {
+    "sha256": "c70aea68f493ca3874e4beb25ad78b4183407d0e200c925b5951e286fe899cf4",
+    "committed_at_collection_time": False,
+    "archived_here": False,
+    "reason": (
+        "The one-run collector contained host-specific absolute paths and is not a "
+        "reproducible repository instruction."
+    ),
+}
+HISTORICAL_CLAIMS = {
+    "historical_samples_preserved": True,
+    "historical_collector_reproducible": False,
+    "rgd_u9_complete": False,
+    "u11_dependency_satisfied": False,
+}
 GIT_INSPECTION_TIMEOUT_SECONDS = 10.0
 GIT_OUTPUT_DRAIN_TIMEOUT_SECONDS = 1.0
 GIT_POLL_INTERVAL_SECONDS = 0.01
@@ -221,6 +268,162 @@ UNAVAILABLE_MEASUREMENTS = (
 
 class MeasurementError(RuntimeError):
     """A stable, actionable refusal while preparing local measurement work."""
+
+
+def read_bounded(path: Path, limit: int, purpose: str) -> bytes:
+    try:
+        with path.open("rb") as source:
+            encoded = source.read(limit + 1)
+    except OSError as error:
+        raise MeasurementError(f"The {purpose} could not be read: {error}") from error
+    if len(encoded) > limit:
+        raise MeasurementError(f"The {purpose} exceeded its bounded byte limit.")
+    return encoded
+
+
+def sha256(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def historical_file(archive: Path, name: object, purpose: str) -> Path:
+    if not isinstance(name, str) or not name or Path(name).name != name:
+        raise MeasurementError(f"The historical {purpose} path is invalid.")
+    path = resolve_path(archive / name, f"historical {purpose}")
+    if not is_within(path, archive):
+        raise MeasurementError(f"The historical {purpose} escaped its archive.")
+    return path
+
+
+def verify_historical_archive(archive_argument: Path) -> None:
+    archive = resolve_path(archive_argument, "historical measurement archive")
+    try:
+        if not archive.is_dir():
+            raise MeasurementError("The historical measurement archive must be a directory.")
+    except OSError as error:
+        raise MeasurementError(f"The historical archive could not be inspected: {error}") from error
+
+    receipt_bytes = read_bounded(
+        archive / "import-receipt.json",
+        MAX_HISTORICAL_RECEIPT_BYTES,
+        "historical import receipt",
+    )
+    try:
+        receipt = json.loads(receipt_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        raise MeasurementError("The historical import receipt is invalid JSON.") from error
+    if not isinstance(receipt, dict):
+        raise MeasurementError("The historical import receipt is not an object.")
+    files = receipt.get("files")
+    if (
+        set(receipt) != {
+            "schema",
+            "source_revision",
+            "status",
+            "collector",
+            "files",
+            "claims",
+        }
+        or receipt.get("schema") != HISTORICAL_IMPORT_SCHEMA
+        or receipt.get("source_revision") != HISTORICAL_SOURCE_REVISION
+        or receipt.get("status") != HISTORICAL_IMPORT_STATUS
+        or receipt.get("collector") != HISTORICAL_COLLECTOR
+        or receipt.get("claims") != HISTORICAL_CLAIMS
+        or not isinstance(files, list)
+        or len(files) != len(HISTORICAL_FILE_PATHS)
+    ):
+        raise MeasurementError("The historical import receipt has an invalid contract.")
+
+    original_by_name: dict[str, bytes] = {}
+    seen: set[str] = set()
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise MeasurementError("The historical file entry is invalid.")
+        logical_name = entry.get("logical_name")
+        if (
+            set(entry)
+            != {
+                "logical_name",
+                "semantic_copy",
+                "semantic_copy_sha256",
+                "original_transport_base64",
+                "original_sha256",
+            }
+            or not isinstance(logical_name, str)
+            or logical_name in seen
+            or logical_name not in HISTORICAL_FILE_PATHS
+            or (
+                entry.get("semantic_copy"),
+                entry.get("original_transport_base64"),
+            )
+            != HISTORICAL_FILE_PATHS[logical_name]
+        ):
+            raise MeasurementError("The historical file identity is invalid or duplicated.")
+        seen.add(logical_name)
+        semantic_path = historical_file(archive, entry.get("semantic_copy"), "semantic copy")
+        transport_path = historical_file(
+            archive,
+            entry.get("original_transport_base64"),
+            "transport copy",
+        )
+        semantic = read_bounded(semantic_path, MAX_HISTORICAL_FILE_BYTES, "semantic copy")
+        if sha256(semantic) != entry.get("semantic_copy_sha256"):
+            raise MeasurementError("A historical semantic copy digest did not match.")
+        encoded = read_bounded(
+            transport_path,
+            MAX_HISTORICAL_FILE_BYTES * 2,
+            "Base64 transport copy",
+        )
+        try:
+            original = base64.b64decode(b"".join(encoded.split()), validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise MeasurementError("A historical Base64 transport is invalid.") from error
+        if len(original) > MAX_HISTORICAL_FILE_BYTES:
+            raise MeasurementError("A decoded historical transport exceeded its byte limit.")
+        if sha256(original) != entry.get("original_sha256"):
+            raise MeasurementError("A historical transport digest did not match.")
+        try:
+            normalized_original = (
+                original.decode("utf-8")
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .encode("utf-8")
+            )
+        except UnicodeDecodeError as error:
+            raise MeasurementError(
+                "A historical transport is not valid UTF-8 text."
+            ) from error
+        if semantic != normalized_original:
+            raise MeasurementError(
+                "A historical semantic copy diverged from its original transport."
+            )
+        if logical_name in HISTORICAL_REQUIRED_ORIGINALS:
+            original_by_name[logical_name] = original
+
+    if seen != frozenset(HISTORICAL_FILE_PATHS):
+        raise MeasurementError("The historical file set is incomplete.")
+
+    try:
+        manifest = json.loads(original_by_name[HISTORICAL_MANIFEST_NAME])
+        raw = original_by_name[HISTORICAL_RAW_SAMPLES_NAME]
+    except (KeyError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        raise MeasurementError("The historical run manifest or raw samples are invalid.") from error
+    if manifest.get("raw_samples_sha256") != sha256(raw):
+        raise MeasurementError("The historical manifest does not bind the raw sample bytes.")
+    raw_sample_count = sum(
+        1 for line in io.BytesIO(raw) if line.rstrip(b"\r\n")
+    )
+    if manifest.get("raw_sample_count") != raw_sample_count:
+        raise MeasurementError("The historical manifest does not bind the raw sample count.")
+    for line in io.BytesIO(raw):
+        line = line.rstrip(b"\r\n")
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+            raise MeasurementError("A historical raw sample is invalid JSON.") from error
+        if not isinstance(record, dict):
+            raise MeasurementError("A historical raw sample is not an object.")
 
 
 class BoundedOutputReader(threading.Thread):
@@ -544,6 +747,11 @@ def parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--subject", type=Path, required=True, help="clean repository root to inspect")
     plan.add_argument("--output", type=Path, required=True, help="new directory outside the subject")
+    historical = commands.add_parser(
+        "verify-historical",
+        help="verify one preserved historical raw-sample archive without upgrading its status",
+    )
+    historical.add_argument("--archive", type=Path, required=True)
     return parser
 
 
@@ -552,6 +760,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
     try:
         if options.command == "plan":
             create_plan(options.subject, options.output)
+            return 0
+        if options.command == "verify-historical":
+            verify_historical_archive(options.archive)
             return 0
     except MeasurementError as error:
         print(f"measurement-helper: {error}", file=sys.stderr)

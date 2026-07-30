@@ -18,7 +18,7 @@ use nara::{
     image::PreparedImageResource,
     prelude::{App, CoreStage, FixedTime, Plugin, Res, ResMut, Resource},
     project_host::{DesktopRun, DesktopRunOutcome},
-    render::{PreparedRenderResources, RenderFrame, RenderFrameState},
+    render::{PreparedRenderResources, RenderFrame},
     render_wgpu::WgpuRenderBackend,
     sprite_render::SpriteBatches,
     window::{
@@ -31,9 +31,11 @@ use nara_reference_game::{
     WaveSnapshot, movement_command, retry_command, wave_desktop_intent,
 };
 
+mod desktop_support;
 mod startup_marker;
 mod support;
 
+use desktop_support::submitted_product_frame;
 use startup_marker::StartupMarker;
 use support::project_root::open_project_root;
 
@@ -327,18 +329,6 @@ fn observe_startup_present(
         probe.evidence.timed_out.store(true, Ordering::SeqCst);
         exit.request_exit();
     }
-}
-
-fn submitted_product_frame(frame: &RenderFrame, backend: &WgpuRenderBackend) -> bool {
-    let transaction = backend.frame_transaction_stats();
-    frame.state == RenderFrameState::Submitted
-        && transaction.frame_index() == Some(frame.index)
-        && transaction.packet_admissions() == 1
-        && transaction.packet_rejections() == 0
-        && transaction.surface_acquire_attempts() == 1
-        && transaction.surface_acquires() == 1
-        && transaction.queue_submissions() == 1
-        && transaction.presents() == 1
 }
 
 fn capture_continuity(inputs: &ProductRenderInputs<'_, '_>) -> Option<ProductContinuity> {

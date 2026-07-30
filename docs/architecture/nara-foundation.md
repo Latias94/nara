@@ -715,13 +715,16 @@ second real adapter or stronger isolation pressure.
   reference-game CI checks all targets and runs complete default and all-feature suites with the
   supported Linux X11/Vulkan profile; the module consumer compiles all targets and runs its complete
   suite. Exact policy tests reject selective replacements for these commands. The integrated
-  six-cell matrix passes at `ef8f300` through GitHub Actions run `30462379022` after the later
-  Rust, product-content, policy-test, workflow, strict-filesystem, canonical-fixture,
-  cross-platform budget, and software-GPU repairs. RGD-U9 now records the current Windows automatic
-  baseline at `b2ddb5b` with 10 admitted passing metrics, 10 missing required metrics, and a
-  deterministic `Redirect`; the earlier baseline remains historical. RGD-U10 closes the refreshed
-  checkout-free candidate gate at `fafc949` through protected run `30510353046`, with both platform
-  builds and no-checkout consumers green. See ADR
+  six-cell matrix passed at `ef8f300` through GitHub Actions run `30462379022` after the later Rust,
+  product-content, policy-test, workflow, strict-filesystem, canonical-fixture, cross-platform
+  budget, and software-GPU repairs. That U8 run is historical for the current workflow because the
+  explicit `architecture_docs` governance gate has since been restored. The surviving RGD-U9
+  Windows capture at `b2ddb5b` preserves 10 passing observations and 10 missing required metrics,
+  so its historical outcome remains `Redirect`; U9 is evidence-repair pending because the executed
+  collector was not committed. Protected run `30510353046` remains a real checkout-free U10
+  observation at `fafc949`, but it ran the desktop probe instead of the packaged desktop entry and
+  used fixed environment paths, so U10 is reopened. U11 remains blocked until fresh U8, reproducible
+  U9, and corrected U10 evidence exist. See ADR
   [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md), the
   [final hosted verification](../knowledge/engineering/verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md),
   the [refreshed candidate verification](../knowledge/engineering/verification/2026-07/2026-07-30T034418Z-rgd-u10-refreshed-standalone-candidate-completion-verification-ecd70107315740eab6c580f18eca4dd0.md),

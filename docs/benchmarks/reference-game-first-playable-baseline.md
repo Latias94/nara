@@ -2,10 +2,16 @@
 
 ## Status
 
-RGD-U9 recollected the automatic Windows slice of the first-playable baseline at source revision
-`b2ddb5b0ea6ea9b98e213619dccf65a5326b1505`. The protocol verdict is **Redirect**: all 10 admitted
-required metrics passed their frozen targets, but 10 other required metrics have no complete
-admissible population. No observed hard-stop metric failed, so this is not `Stop`.
+The surviving RGD-U9 Windows capture at source revision
+`b2ddb5b0ea6ea9b98e213619dccf65a5326b1505` supports a historical **Redirect** observation: 10
+recorded metrics passed their frozen targets, while 10 required metrics have no complete population.
+No observed hard-stop metric failed, so the historical observation does not support `Stop`.
+
+RGD-U9 is nevertheless **evidence-repair pending**. The executed one-run collector was not committed
+and was modified after its first preflight failure, so the repository cannot independently replay
+the capture from reviewed instructions. The samples remain useful context, and the missing metrics
+still imply `Redirect`, but this document no longer claims a reproducible U9 completion or satisfies
+RGD-U11's U9 dependency.
 
 The local-preparation snapshot correctly stated, "No first-playable baseline or product decision has been recorded yet."
 That sentence describes the pre-U8 state only. It is retained here to make the distinction between
@@ -31,6 +37,9 @@ the non-executing planner and this later collection explicit.
   `076b6057413375b74d49f0c5bed1abfea08cbddba6841e278ee56f21aca82515`.
 - Run-manifest SHA-256:
   `7b8d587af8eb3a9f7cd0b4484a32a20edd3d441c62be4866d6b049b4b59ef527`.
+- Historical archive:
+  [`data/runs/v1/rgd-u9-b2ddb5b/import-receipt.json`](data/runs/v1/rgd-u9-b2ddb5b/import-receipt.json),
+  with LF-normalized semantic copies and exact original transports encoded separately.
 
 The planner and collector operated on a clean detached worktree. Cargo targets, HOME, and temporary
 files were placed under the external collection root. Cargo used one build job and offline
@@ -40,9 +49,11 @@ HOME, USERPROFILE, TEMP, TMP, APPDATA, and LOCALAPPDATA also resolved under the 
 only the stable Cargo, rustc, and rustdoc executables were read from their installed toolchain.
 The active source checkout and detached source bytes were unchanged after collection.
 
-The raw JSONL and per-command logs remain local audit support rather than a canonical evidence
-envelope. The complete normalized numeric populations are reproduced below so this committed
-baseline does not depend on the local collection directory.
+The plan, raw JSONL, run manifest, and preflight failure now have repository-addressable historical
+copies. The original transport bytes are recoverable from their Base64 records and retain the
+published SHA-256 values. Per-command logs remain local support and were not individually bound by
+the original manifest, so they are not claimed as canonical evidence. The complete normalized
+numeric populations are also reproduced below.
 
 ## Environment
 
@@ -198,9 +209,9 @@ OQ-007's optional gameplay-language feasibility ladder explicitly requires a fir
 standalone candidate work because U14 names bottlenecks rather than requiring a fabricated
 performance pass.
 
-## Reproduction
+## Evidence Repair
 
-Generate the committed, non-executing collection plan from a clean source revision:
+The committed helper can still generate a non-executing plan from a clean source revision:
 
 ```text
 python reference-game/tools/measure_first_playable.py plan \
@@ -208,15 +219,16 @@ python reference-game/tools/measure_first_playable.py plan \
   --output <new-directory-outside-the-repository>
 ```
 
-Then create one detached worktree under the output root, use empty target directories for cold
-populations and one retained target for warm populations, set one Cargo build job, copy only the
-required crates.io registry into an isolated Cargo home, redirect every writable home and temporary
-environment path under the output root, and execute the mechanisms and exact edit identities above.
-Preserve every raw record and failed attempt. Do not collect from the active source checkout or
-combine another environment with this Windows population.
+That planner is not a collector. RGD-U9 remains open until a parameterized `collect`/`verify` path is
+committed and tested, then used at the integrated source revision to create a fresh bounded raw
+record set and manifest. The collector must own detached-worktree creation, empty and retained
+targets, one-job Cargo execution, isolated dependency/home/temp paths, exact edit/revert checks,
+bounded logs, raw-record validation, and manifest hashing. Manual reconstruction from the prose
+above cannot close the gate.
 
 ## Non-Claims
 
+- This historical capture is not a reproducible RGD-U9 completion and does not unblock RGD-U11.
 - This is not a Linux timing baseline; hosted Ubuntu CI is compatibility evidence only.
 - It does not yet prove current-revision manual desktop playability or clean desktop journey time.
 - It does not measure frame P99, process memory, GPU memory, driver residency, or packet transfer

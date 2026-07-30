@@ -60,10 +60,13 @@ nara-reference-game/
     schema/
 ```
 
-Packaged executables resolve only the sibling `project/` directory. The desktop render probe is a
-bounded, credential-free candidate verification utility; it is not a second gameplay entry point.
-The archive consumer verifies the fixed entry table, regular-file modes, byte budgets, manifest,
-and every file digest before extracting into a new directory.
+Packaged executables resolve only the sibling `project/` directory. Candidate consumers execute the
+formal `bin/desktop[.exe] --candidate-smoke` entry, which runs the normal desktop product recipe and
+exits only after a bounded submitted product frame. The desktop render probe remains a
+measurement-only utility; it cannot substitute for the formal desktop smoke. Each consumer run
+creates an isolated extraction, home, working-directory, and temporary root beneath the supplied
+safe work parent. The archive consumer verifies the fixed entry table, regular-file modes, byte
+budgets, manifest, and every file digest before extraction.
 
 No public candidate has been published yet. A local archive is preparation evidence only until the
 documented hosted Windows and Linux candidate and no-checkout consumer jobs pass.

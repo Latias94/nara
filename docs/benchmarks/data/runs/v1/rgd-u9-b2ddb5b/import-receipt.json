@@ -1,0 +1,47 @@
+{
+  "schema": "nara.reference-game.first-playable-historical-import-v1",
+  "source_revision": "b2ddb5b0ea6ea9b98e213619dccf65a5326b1505",
+  "status": "historical_transport_preserved_u9_repair_pending",
+  "collector": {
+    "sha256": "c70aea68f493ca3874e4beb25ad78b4183407d0e200c925b5951e286fe899cf4",
+    "committed_at_collection_time": false,
+    "archived_here": false,
+    "reason": "The one-run collector contained host-specific absolute paths and is not a reproducible repository instruction."
+  },
+  "files": [
+    {
+      "logical_name": "measurement-plan.json",
+      "semantic_copy": "measurement-plan.json",
+      "semantic_copy_sha256": "a41c43a9873820de79f1ee1aef63e8393127a94abe70eb85f78fc3f1102f4121",
+      "original_transport_base64": "measurement-plan.original.base64",
+      "original_sha256": "a41c43a9873820de79f1ee1aef63e8393127a94abe70eb85f78fc3f1102f4121"
+    },
+    {
+      "logical_name": "raw-samples.jsonl",
+      "semantic_copy": "raw-samples.jsonl",
+      "semantic_copy_sha256": "076b6057413375b74d49f0c5bed1abfea08cbddba6841e278ee56f21aca82515",
+      "original_transport_base64": "raw-samples.original.base64",
+      "original_sha256": "076b6057413375b74d49f0c5bed1abfea08cbddba6841e278ee56f21aca82515"
+    },
+    {
+      "logical_name": "run-manifest.json",
+      "semantic_copy": "run-manifest.json",
+      "semantic_copy_sha256": "7b8d587af8eb3a9f7cd0b4484a32a20edd3d441c62be4866d6b049b4b59ef527",
+      "original_transport_base64": "run-manifest.original.base64",
+      "original_sha256": "7b8d587af8eb3a9f7cd0b4484a32a20edd3d441c62be4866d6b049b4b59ef527"
+    },
+    {
+      "logical_name": "preflight-failures.jsonl",
+      "semantic_copy": "preflight-failures.jsonl",
+      "semantic_copy_sha256": "d298057804996303b5b50249ec2df431bd5e897ad3f419af1ec752147a714fa6",
+      "original_transport_base64": "preflight-failures.original.base64",
+      "original_sha256": "d298057804996303b5b50249ec2df431bd5e897ad3f419af1ec752147a714fa6"
+    }
+  ],
+  "claims": {
+    "historical_samples_preserved": true,
+    "historical_collector_reproducible": false,
+    "rgd_u9_complete": false,
+    "u11_dependency_satisfied": false
+  }
+}

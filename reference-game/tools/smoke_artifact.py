@@ -24,9 +24,12 @@ import package
 
 
 HEADLESS_SUMMARY_SCHEMA = "nara-reference-game.wave-summary-v1"
+DESKTOP_SMOKE_SUCCESS = b"desktop_candidate_smoke: ok\n"
 DESKTOP_PROBE_SUCCESS = b"desktop_render_probe: ok\n"
 MAX_PROCESS_OUTPUT_BYTES = 64 * 1024
 MAX_PROCESS_TIMEOUT_SECONDS = 60
+ARTIFACT_TEMPORARY_PREFIX = ".nara-artifact-"
+SMOKE_TEMPORARY_PREFIX = ".nara-smoke-"
 MAX_BUNDLE_ENTRY_COUNT = 16
 
 
@@ -626,18 +629,23 @@ def assert_extracted_layout(root: Path, validated: ValidatedArchive) -> None:
         raise ArtifactError("extracted candidate has missing or unexpected files")
 
 
-def safe_remove_temporary(path: Path, parent: Path) -> None:
+def safe_remove_temporary(path: Path, parent: Path, expected_prefix: str) -> bool:
     try:
         resolved_parent = parent.resolve(strict=True)
         resolved_path = path.resolve(strict=True)
     except OSError:
-        return
+        return False
     if (
         package.path_is_within(resolved_path, resolved_parent)
         and resolved_path != resolved_parent
-        and resolved_path.name.startswith(".nara-artifact-")
+        and resolved_path.name.startswith(expected_prefix)
     ):
-        shutil.rmtree(resolved_path, ignore_errors=True)
+        try:
+            shutil.rmtree(resolved_path)
+        except OSError:
+            return False
+        return True
+    return False
 
 
 def extract_archive(
@@ -649,7 +657,9 @@ def extract_archive(
     validated = validate_archive(archive_path, expected_platform, expected_revision)
     archive_path = require_regular_archive(archive_path, validated.layout.limits)
     destination = require_new_destination(destination)
-    temporary = Path(tempfile.mkdtemp(prefix=".nara-artifact-", dir=destination.parent))
+    temporary = Path(
+        tempfile.mkdtemp(prefix=ARTIFACT_TEMPORARY_PREFIX, dir=destination.parent)
+    )
     try:
         package_root = temporary / validated.layout.package_root
         package_root.mkdir()
@@ -688,7 +698,9 @@ def extract_archive(
             raise ArtifactError("candidate archive changed during extraction")
         os.replace(temporary, destination)
     except Exception:
-        safe_remove_temporary(temporary, destination.parent)
+        safe_remove_temporary(
+            temporary, destination.parent, ARTIFACT_TEMPORARY_PREFIX
+        )
         raise
     return validated
 
@@ -718,7 +730,10 @@ def parse_environment(values: Sequence[str]) -> dict[str, str]:
             or not key.replace("_", "A").isalnum()
             or not key[0].isalpha()
             or len(raw_value) > 1024
-            or key.startswith(("CARGO_", "RUST", "GIT_", "HOME", "USERPROFILE"))
+            or key.startswith(
+                ("CARGO_", "RUST", "GIT_", "HOME", "USERPROFILE", "XDG_")
+            )
+            or key in {"TMP", "TEMP", "TMPDIR"}
         ):
             raise ArtifactError("desktop environment override is invalid")
         if key in environment:
@@ -727,10 +742,27 @@ def parse_environment(values: Sequence[str]) -> dict[str, str]:
     return environment
 
 
-def smoke_environment(work_root: Path, overrides: dict[str, str]) -> tuple[dict[str, str], Path]:
-    home = work_root / "home"
-    cwd = work_root / "random-cwd"
-    temporary = work_root / "tmp"
+def create_smoke_root(work_parent: Path) -> Path:
+    try:
+        package.require_directory(work_parent, "smoke work parent")
+        work_parent = work_parent.resolve(strict=True)
+        smoke_root = Path(
+            tempfile.mkdtemp(prefix=SMOKE_TEMPORARY_PREFIX, dir=work_parent)
+        ).resolve(strict=True)
+    except package.PackageError as error:
+        raise fail_from_package(error) from error
+    except OSError as error:
+        raise ArtifactError("smoke work root could not be created") from error
+    if smoke_root.parent != work_parent:
+        safe_remove_temporary(smoke_root, work_parent, SMOKE_TEMPORARY_PREFIX)
+        raise ArtifactError("smoke work root escaped its authorized parent")
+    return smoke_root
+
+
+def smoke_environment(smoke_root: Path, overrides: dict[str, str]) -> tuple[dict[str, str], Path]:
+    home = smoke_root / "home"
+    cwd = smoke_root / "cwd"
+    temporary = smoke_root / "tmp"
     home.mkdir()
     cwd.mkdir()
     temporary.mkdir()
@@ -761,6 +793,8 @@ def smoke_environment(work_root: Path, overrides: dict[str, str]) -> tuple[dict[
             "XDG_CONFIG_HOME": str(home / "config"),
             "XDG_CACHE_HOME": str(home / "cache"),
             "XDG_DATA_HOME": str(home / "data"),
+            "TEMP": str(temporary),
+            "TMP": str(temporary),
             "TMPDIR": str(temporary),
         }
     )
@@ -872,23 +906,50 @@ def run_bounded(
 
 def smoke_candidate(
     archive_path: Path,
-    work_root: Path,
+    work_parent: Path,
     desktop_launcher_json: str,
     desktop_environment: Sequence[str],
 ) -> dict[str, object]:
+    smoke_root = create_smoke_root(work_parent)
+    cleanup_parent = smoke_root.parent
     try:
-        package.require_directory(work_root, "smoke work root")
-        work_root = work_root.resolve(strict=True)
-    except package.PackageError as error:
-        raise fail_from_package(error) from error
-    except OSError as error:
-        raise ArtifactError("smoke work root could not be resolved") from error
-    destination = work_root / "consumer"
+        result = smoke_candidate_in_root(
+            archive_path,
+            smoke_root,
+            desktop_launcher_json,
+            desktop_environment,
+        )
+    except Exception:
+        safe_remove_temporary(smoke_root, cleanup_parent, SMOKE_TEMPORARY_PREFIX)
+        raise
+    if not safe_remove_temporary(
+        smoke_root, cleanup_parent, SMOKE_TEMPORARY_PREFIX
+    ):
+        raise ArtifactError("smoke work root could not be retired")
+    return result
+
+
+def smoke_candidate_in_root(
+    archive_path: Path,
+    smoke_root: Path,
+    desktop_launcher_json: str,
+    desktop_environment: Sequence[str],
+) -> dict[str, object]:
+    destination = smoke_root / "consumer"
     validated = extract_archive(archive_path, destination)
     launcher = parse_launcher(desktop_launcher_json)
     overrides = parse_environment(desktop_environment)
-    environment, cwd = smoke_environment(work_root, overrides)
+    environment, cwd = smoke_environment(smoke_root, overrides)
     package_root = destination / validated.layout.package_root
+    isolated_paths = {
+        Path(environment["HOME"]),
+        Path(environment["TEMP"]),
+        Path(environment["TMP"]),
+        Path(environment["TMPDIR"]),
+        cwd,
+    }
+    if any(package.path_is_within(path, package_root) for path in isolated_paths):
+        raise ArtifactError("smoke process state overlaps the extracted package")
     headless = package_root / validated.manifest["layout"]["headless"]
     headless_stdout = run_bounded(
         [str(headless), "--max-ticks", "96"], cwd, environment, "headless candidate"
@@ -899,15 +960,18 @@ def smoke_candidate(
         raise ArtifactError("headless candidate did not emit its stable JSON summary") from error
     if not isinstance(summary, dict) or summary.get("schema") != HEADLESS_SUMMARY_SCHEMA:
         raise ArtifactError("headless candidate emitted an unexpected summary")
-    desktop_probe = package_root / validated.manifest["layout"]["desktop_probe"]
+    desktop = package_root / validated.manifest["layout"]["desktop"]
     desktop_stdout = run_bounded(
-        [*launcher, str(desktop_probe)], cwd, environment, "desktop candidate",
+        [*launcher, str(desktop), "--candidate-smoke"],
+        cwd,
+        environment,
+        "desktop candidate",
     )
-    if desktop_stdout != DESKTOP_PROBE_SUCCESS:
-        raise ArtifactError("desktop candidate did not complete its bounded probe")
+    if desktop_stdout != DESKTOP_SMOKE_SUCCESS:
+        raise ArtifactError("desktop candidate did not complete its bounded product smoke")
     result = receipt(validated)
     result["headless_summary_schema"] = HEADLESS_SUMMARY_SCHEMA
-    result["desktop_probe"] = "completed"
+    result["desktop"] = "candidate-smoke-completed"
     return result
 
 
@@ -923,7 +987,7 @@ def parse_arguments(arguments: Sequence[str]) -> argparse.Namespace:
     extract.add_argument("--destination", required=True)
     smoke = commands.add_parser("smoke", help="verify, extract, and run bounded candidate probes")
     smoke.add_argument("--archive", required=True)
-    smoke.add_argument("--work-root", required=True)
+    smoke.add_argument("--work-root", required=True, help="safe parent for a unique smoke root")
     smoke.add_argument("--desktop-launcher-json", default="[]")
     smoke.add_argument("--desktop-environment", action="append", default=[])
     bundle_verify = commands.add_parser(
@@ -936,7 +1000,9 @@ def parse_arguments(arguments: Sequence[str]) -> argparse.Namespace:
         "bundle-smoke", help="verify a transport bundle then run bounded candidate probes"
     )
     bundle_smoke.add_argument("--bundle", required=True)
-    bundle_smoke.add_argument("--work-root", required=True)
+    bundle_smoke.add_argument(
+        "--work-root", required=True, help="safe parent for a unique smoke root"
+    )
     bundle_smoke.add_argument("--expected-platform")
     bundle_smoke.add_argument("--expected-source-revision")
     bundle_smoke.add_argument("--desktop-launcher-json", default="[]")

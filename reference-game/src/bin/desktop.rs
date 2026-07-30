@@ -1,21 +1,57 @@
 use std::{
+    env,
+    ffi::OsString,
     io::{self, Write},
     process::ExitCode,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use nara::{
+    app::{
+        AppExitRequests, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
+        PluginError, PluginId,
+    },
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
-    project_host::DesktopRunOutcome,
+    image::PreparedImageResource,
+    prelude::{App, CoreStage, Plugin, Res, ResMut, Resource},
+    project_host::{DesktopRun, DesktopRunOutcome},
+    render::{PreparedRenderResources, RenderFrame},
+    render_wgpu::WgpuRenderBackend,
+    sprite_render::SpriteBatches,
 };
-use nara_reference_game::bundled_desktop_run;
+use nara_reference_game::{
+    REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, bundled_desktop_run, wave_desktop_intent,
+};
 
+mod desktop_support;
 mod support;
+use desktop_support::submitted_product_frame;
 use support::project_root::open_project_root;
 
 const CLEANUP_DEADLINE: Duration = Duration::from_secs(5);
+const CANDIDATE_SMOKE_DEADLINE: Duration = Duration::from_secs(30);
+const CANDIDATE_SMOKE_ARGUMENT: &str = "--candidate-smoke";
+const CANDIDATE_SMOKE_SUCCESS: &str = "desktop_candidate_smoke: ok";
+const CANDIDATE_SMOKE_PLUGIN_ID: PluginId = PluginId::new("reference-game.desktop-candidate-smoke");
+const CANDIDATE_SMOKE_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("reference-game.desktop-candidate-smoke", 1);
+const CANDIDATE_SMOKE_REQUIREMENTS: &[PluginId] = &[REFERENCE_DESKTOP_PLUGIN_ID];
+const CANDIDATE_SMOKE_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(CANDIDATE_SMOKE_PLUGIN_ID, PluginCategory::Tooling)
+        .requires_plugins(CANDIDATE_SMOKE_REQUIREMENTS);
 
 fn main() -> ExitCode {
+    let mode = match DesktopMode::parse(env::args_os().skip(1)) {
+        Ok(mode) => mode,
+        Err(diagnostic) => {
+            emit_static_error(&diagnostic.code, &diagnostic.summary);
+            return ExitCode::FAILURE;
+        }
+    };
     let project_root = match open_project_root() {
         Ok(project_root) => project_root,
         Err(error) => {
@@ -24,14 +60,125 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut run = bundled_desktop_run(project_root);
-    drive_desktop_process(
+    let (mut run, candidate_smoke) = desktop_run(project_root, mode);
+    let exit = drive_desktop_process(
         || lower_run_report(&run.execute()),
         Instant::now,
         std::thread::park_timeout,
         emit_static_error,
-    )
-    .exit_code()
+    );
+    if exit != DesktopProcessExit::Success {
+        return exit.exit_code();
+    }
+    let Some(candidate_smoke) = candidate_smoke else {
+        return exit.exit_code();
+    };
+    if !candidate_smoke.completed.load(Ordering::SeqCst) {
+        emit_static_error(
+            "reference-game.desktop.candidate-smoke-failed",
+            "Desktop candidate did not submit its bounded product frame",
+        );
+        return ExitCode::FAILURE;
+    }
+    println!("{CANDIDATE_SMOKE_SUCCESS}");
+    exit.exit_code()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DesktopMode {
+    Interactive,
+    CandidateSmoke,
+}
+
+impl DesktopMode {
+    fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Self, ProcessDiagnostic> {
+        let mut arguments = arguments.into_iter();
+        match (arguments.next(), arguments.next()) {
+            (None, None) => Ok(Self::Interactive),
+            (Some(argument), None) if argument == CANDIDATE_SMOKE_ARGUMENT => {
+                Ok(Self::CandidateSmoke)
+            }
+            _ => Err(ProcessDiagnostic {
+                code: "reference-game.desktop.arguments-invalid".to_owned(),
+                summary: "Desktop product arguments are invalid".to_owned(),
+            }),
+        }
+    }
+}
+
+fn desktop_run(
+    project_root: nara::fs::DirectoryCapability,
+    mode: DesktopMode,
+) -> (DesktopRun, Option<Arc<CandidateSmokeEvidence>>) {
+    match mode {
+        DesktopMode::Interactive => (bundled_desktop_run(project_root), None),
+        DesktopMode::CandidateSmoke => {
+            let evidence = Arc::new(CandidateSmokeEvidence::default());
+            let plugin_evidence = Arc::clone(&evidence);
+            let probe = PluginDefinition::infallible::<CandidateSmokePlugin, _>(
+                CANDIDATE_SMOKE_DEFINITION_ID,
+                b"reference-game-desktop-candidate-smoke-v1",
+                move || CandidateSmokePlugin {
+                    evidence: Arc::clone(&plugin_evidence),
+                },
+            );
+            let intent = wave_desktop_intent().insert_after::<ReferenceDesktopPlugin>(probe);
+            (DesktopRun::new(project_root, intent), Some(evidence))
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct CandidateSmokeEvidence {
+    completed: AtomicBool,
+}
+
+#[derive(Debug)]
+struct CandidateSmokePlugin {
+    evidence: Arc<CandidateSmokeEvidence>,
+}
+
+impl Plugin for CandidateSmokePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &CANDIDATE_SMOKE_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.insert_resource(CandidateSmokeState {
+            evidence: Arc::clone(&self.evidence),
+            deadline: Instant::now() + CANDIDATE_SMOKE_DEADLINE,
+        })?
+        .add_systems(CoreStage::Cleanup, observe_candidate_frame)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Resource)]
+struct CandidateSmokeState {
+    evidence: Arc<CandidateSmokeEvidence>,
+    deadline: Instant,
+}
+
+fn observe_candidate_frame(
+    prepared: Res<PreparedRenderResources<PreparedImageResource>>,
+    batches: Res<SpriteBatches>,
+    frame: Res<RenderFrame>,
+    backend: Res<WgpuRenderBackend>,
+    state: Res<CandidateSmokeState>,
+    mut exit: ResMut<AppExitRequests>,
+) {
+    let product_frame_ready = !prepared.is_empty()
+        && batches
+            .as_slice()
+            .iter()
+            .any(|batch| batch.material.image.is_some())
+        && submitted_product_frame(&frame, &backend);
+    if product_frame_ready {
+        state.evidence.completed.store(true, Ordering::SeqCst);
+        exit.request_exit();
+    } else if Instant::now() >= state.deadline {
+        exit.request_exit();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +211,9 @@ impl DesktopProcessExit {
 
 fn lower_run_report(report: &nara::project_host::DesktopRunReport) -> DesktopProcessStep {
     match report.outcome() {
+        DesktopRunOutcome::Completed(_) if report.diagnostics().has_errors() => {
+            DesktopProcessStep::Failed(first_error_diagnostic(report.diagnostics()))
+        }
         DesktopRunOutcome::Completed(_) => DesktopProcessStep::Completed,
         DesktopRunOutcome::Failed => {
             DesktopProcessStep::Failed(first_error_diagnostic(report.diagnostics()))
@@ -163,6 +313,33 @@ fn write_static_error(mut writer: impl Write, code: &str, summary: &str) -> Resu
 mod tests {
     use super::*;
     use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+
+    #[test]
+    fn desktop_arguments_select_only_the_interactive_or_bounded_candidate_mode() {
+        assert_eq!(
+            DesktopMode::parse(std::iter::empty()),
+            Ok(DesktopMode::Interactive)
+        );
+        assert_eq!(
+            DesktopMode::parse([OsString::from(CANDIDATE_SMOKE_ARGUMENT)]),
+            Ok(DesktopMode::CandidateSmoke)
+        );
+        for arguments in [
+            vec![OsString::from("--unknown")],
+            vec![
+                OsString::from(CANDIDATE_SMOKE_ARGUMENT),
+                OsString::from("extra"),
+            ],
+        ] {
+            assert_eq!(
+                DesktopMode::parse(arguments).unwrap_err(),
+                ProcessDiagnostic {
+                    code: "reference-game.desktop.arguments-invalid".to_owned(),
+                    summary: "Desktop product arguments are invalid".to_owned(),
+                }
+            );
+        }
+    }
 
     fn diagnostic(code: &str, summary: &str) -> ProcessDiagnostic {
         ProcessDiagnostic {

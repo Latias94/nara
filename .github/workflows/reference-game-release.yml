@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
-      - name: Reject rerun without reusing publication authority
+      - name: Reject reused publication attempt identity
         run: exit 1
 
   immutable-policy:
@@ -598,7 +598,7 @@ jobs:
                   run.display_title === `Reference Game Release ${tagName}`
               )
             ) {
-              fail("this tag already consumed a release workflow authorization");
+              fail("this tag already has another publication attempt");
             }
 
             const tagRef = await requestJson(

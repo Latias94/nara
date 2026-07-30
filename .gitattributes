@@ -15,4 +15,6 @@ reference-game/assets/**/*.meta text eol=lf
 
 # Canonical U22 evidence is hashed byte-for-byte.
 docs/benchmarks/data/**/*.json text eol=lf
+docs/benchmarks/data/**/*.jsonl text eol=lf
 docs/benchmarks/data/**/*.blake3 text eol=lf
+docs/benchmarks/data/**/*.base64 text eol=lf

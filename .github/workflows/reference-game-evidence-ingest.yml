@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
-      - name: Reject rerun without new authorization
+      - name: Reject reused workflow artifact identity
         run: exit 1
 
   policy:
