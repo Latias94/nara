@@ -1030,9 +1030,11 @@ fn delayed_cleanup_preserves_plugin_shutdown_failure_until_terminal_result() {
     assert!(host.has_cleanup_owner());
 
     control.release();
-    assert!(matches!(
-        host.drive_cleanup_once(),
-        CleanupDriveOutcome::Complete { failed: true, .. }
+    let (failed, diagnostics) = drive_host_cleanup_to_completion(&mut host);
+    assert!(failed);
+    assert!(report_has_code(
+        &diagnostics,
+        "project.run.cleanup-plugin-shutdown"
     ));
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
 }
@@ -1614,16 +1616,28 @@ fn close_host(host: &mut ProjectHost) {
 }
 
 fn drain_host_cleanup(host: &mut ProjectHost) {
+    if host.has_cleanup_owner() {
+        let _ = drive_host_cleanup_to_completion(host);
+    }
+    assert!(matches!(host.slot, ProjectHostSlot::Empty));
+}
+
+fn drive_host_cleanup_to_completion(host: &mut ProjectHost) -> (bool, DiagnosticReport) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while host.has_cleanup_owner() {
+    loop {
+        if let CleanupDriveOutcome::Complete {
+            failed,
+            diagnostics,
+        } = host.drive_cleanup_once()
+        {
+            return (failed, diagnostics);
+        }
         assert!(
             std::time::Instant::now() < deadline,
             "Host cleanup did not finish"
         );
-        host.drive_cleanup_once();
         std::thread::yield_now();
     }
-    assert!(matches!(host.slot, ProjectHostSlot::Empty));
 }
 
 fn first_code(report: &DiagnosticReport) -> &str {
