@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b4d0dbda403a7d4f8cc8e189da1780a9dbeffdebe4178b74d82917975aca3f7e"
+source_fingerprint: "3e25ec5f27181fb39803c49e94e12a263954bc8f70367db338c7d47d261317aa"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "b4d0dbda403a7d4f8cc8e189da1780a9dbeffdebe4178b74d82917975ac
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b4d0dbda403a7d4f8cc8e189da1780a9dbeffdebe4178b74d82917975aca3f7e`
-- Immutable records: 293
+- Source fingerprint: `3e25ec5f27181fb39803c49e94e12a263954bc8f70367db338c7d47d261317aa`
+- Immutable records: 295
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game delivery hardening: U9 baseline refreshed](registry/2026-07/2026-07-29T182757Z-engine-foundation-contract-completion-codex-root-74e04edd91fb4dd38af9264a5f5cc97e.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game delivery hardening: U10 candidates refreshed](registry/2026-07/2026-07-30T034420Z-engine-foundation-contract-completion-codex-root-97da745387c9468d98777ad1535b9bb1.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGD-U10 refreshed standalone candidate completion verification](verification/2026-07/2026-07-30T034418Z-rgd-u10-refreshed-standalone-candidate-completion-verification-ecd70107315740eab6c580f18eca4dd0.md) - Closes immutable checkout-free Windows and Linux candidates at fafc949 with exact hosted identities, bounded contents, and successful headless/desktop consumption.
 - **Verification Evidence**: [RGD-U9 refreshed first-playable product baseline verification](verification/2026-07/2026-07-29T182729Z-rgd-u9-refreshed-first-playable-product-baseline-verification-406733392389447c879f6de86245151e.md) - Records the current isolated Windows first-playable population, deterministic Redirect verdict, missing product evidence, and non-claims.
 - **Verification Evidence**: [RGD-U8 final hosted three-workspace CI refresh](verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md) - Closes the final-revision Windows/Linux root, reference-game, and module-consumer CI matrix at ef8f300.
 - **Verification Evidence**: [RGD-U7 refreshed runtime and host authority verification](verification/2026-07/2026-07-28T232042Z-rgd-u7-refreshed-runtime-and-host-authority-verification-82512f2b3f4d4887bef7431f1b703e7d.md) - Closes the refreshed Runtime-first and dependent Host compatibility review after the direct fault-bridge bypass repair.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Verification: RGD-U11 bounded asset reload terminality verified at 46d8c55; paused-input reten](logs/2026-07/2026-07-28T130433Z-verification-rgd-u11-bounded-asset-reload-terminality-verified-at-46d8c55-paused-input-reten-c255bd33cb384fe6b6ad29586b4162e1.md) - RGD-U11 bounded asset reload terminality verified at 46d8c55; paused-input retention remains the only source correction blocker.
 - **Verification Evidence**: [RGD-U11 bounded asset reload terminality](verification/2026-07/2026-07-28T130156Z-rgd-u11-bounded-asset-reload-terminality-a915d41a753d47369d2a22e202cb5d59.md) - Verifies bounded source-change, reload-request, watcher, event-observation, and image publication terminality.
 - **Verification Evidence**: [RGD-U11 verified editor persistence authority](verification/2026-07/2026-07-28T025934Z-rgd-u11-verified-editor-persistence-authority-ecc563c521db4408a236fe8caa4a17fe.md) - Closes the receipt-forgery source gate with workspace-bound linear authority and post-publication content verification.
-- **Verification Evidence**: [RGD-U11 schema owner-lineage implementation](verification/2026-07/2026-07-27T165100Z-rgd-u11-schema-owner-lineage-implementation-f5b88b88b9dd4a7daab0d6adf0a5cac6.md) - Verifies owner-local schema lineage, atomic runtime composition, typed identities, and optional-owner reactivation under ADR 0098.
 
 # Integration Notes
 

@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-07-30
+* **Work Registration**: [Reference-game delivery hardening: U10 candidates refreshed](registry/2026-07/2026-07-30T034420Z-engine-foundation-contract-completion-codex-root-97da745387c9468d98777ad1535b9bb1.md) - Closes current-revision standalone candidates and records U11 evidence ingest as the next separately authorized delivery gate.
+* **Verification Evidence**: [RGD-U10 refreshed standalone candidate completion verification](verification/2026-07/2026-07-30T034418Z-rgd-u10-refreshed-standalone-candidate-completion-verification-ecd70107315740eab6c580f18eca4dd0.md) - Closes immutable checkout-free Windows and Linux candidates at fafc949 with exact hosted identities, bounded contents, and successful headless/desktop consumption.
+
 ## 2026-07-29
 * **Work Registration**: [Reference-game delivery hardening: U9 baseline refreshed](registry/2026-07/2026-07-29T182757Z-engine-foundation-contract-completion-codex-root-74e04edd91fb4dd38af9264a5f5cc97e.md) - Closes the current first-playable baseline with an isolated Windows population and Redirect verdict; records U10 as the next separately authorized delivery gate.
 * **Verification Evidence**: [RGD-U9 refreshed first-playable product baseline verification](verification/2026-07/2026-07-29T182729Z-rgd-u9-refreshed-first-playable-product-baseline-verification-406733392389447c879f6de86245151e.md) - Records the current isolated Windows first-playable population, deterministic Redirect verdict, missing product evidence, and non-claims.
@@ -139,5 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U18](registry/2026-07/2026-07-20T022923Z-reference-game-foundation-rgf-u18-codex-root-ff9c13e50df34a868c59c4ebd5435375.md) - Close locked direct nara_scene module consumption at implementation commit de4834e.
 * **Verification Evidence**: [RGF-U18 direct scene module consumption verification](verification/2026-07/2026-07-20T022758Z-rgf-u18-direct-scene-module-consumption-verification-9355fcb8e3be465f8178562d1a60bc8b.md) - Commit de4834e proves locked direct nara_scene consumption through documented public prerequisites without the root facade.
 * **Work Registration**: [Reference-game-driven foundation refactor: RGF-U18](registry/2026-07/2026-07-20T002242Z-reference-game-foundation-rgf-u18-codex-root-ac914628924f41afb7aad4f1bacd4cd3.md) - Activate the locked direct nara_scene module consumer and public boundary proof.
-* **Work Registration**: [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-20T000516Z-reference-game-foundation-rgf-u19-codex-root-b395ac7f13cf4a0cbf6addc4ac712d20.md) - Close bounded ADR catalogue, ledger, relationship, authority, and draft-governance validation at implementation commit 347015e.
-* **Verification Evidence**: [RGF-U19 bounded ADR governance verification](verification/2026-07/2026-07-20T000516Z-rgf-u19-bounded-adr-governance-verification-2249e99c53684f7ca9b292f893c168e0.md) - Commit 347015e derives governance membership dynamically and rejects bounded authority, relationship, evidence, and draft-role drift.
