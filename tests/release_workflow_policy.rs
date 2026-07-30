@@ -10,10 +10,13 @@ const SETUP_PYTHON: &str = "actions/setup-python@83679a892e2d95755f2dac6acb0bfd1
 const DOWNLOAD_ARTIFACT: &str =
     "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
 const UPLOAD_ARTIFACT: &str = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
-const REVIEWED_RELEASE_VERIFIER_REVISION: &str = "45b8fcdd0dd8c471d60b2879ff9e94c395bfb489";
+const REVIEWED_RELEASE_SOURCE_REVISION: &str = "835ff33fc4ca7e6293b59cc2642d66f8e239bb9a";
 const RELEASE_VERIFIER_BLOB: &str = "5cb02772173ca8b2d28c86e7937a0b4305b5ba2d";
 const RELEASE_VERIFIER_SHA256: &str =
     "eb38257a003b069dde54177bc61b8b01a703608f729df3b28d646af5205254fd";
+const RELEASE_SMOKE_HELPER_BLOB: &str = "c2d7b544efd5c472881943e311a32fd2baba5899";
+const RELEASE_SMOKE_HELPER_SHA256: &str =
+    "a42edd4bc6d65253cc54a290603c6e4bf0ec7f01182ecdd06782d14b87776586";
 const APPROVAL_SCHEMA_BLOB: &str = "9dd8e042571032f9fb518e2e79d8deb50d0242e2";
 const APPROVAL_SCHEMA_SHA256: &str =
     "edbf17d7092fbc24dc395add86a51c3e6d8a91b9d0497ee44d4734ce4c5f746f";
@@ -154,7 +157,7 @@ fn release_policy_rejects_credential_leakage_checkout_and_candidate_execution_ac
     let mut reviewed_revision = ReleasePolicyFixture::committed();
     replace_once(
         &mut reviewed_revision.workflow,
-        REVIEWED_RELEASE_VERIFIER_REVISION,
+        REVIEWED_RELEASE_SOURCE_REVISION,
         "0000000000000000000000000000000000000000",
     );
     assert_rejects(
@@ -183,6 +186,35 @@ fn release_policy_rejects_credential_leakage_checkout_and_candidate_execution_ac
         &layout_sha256,
         "must pin PACKAGE_LAYOUT_SHA256 to the reviewed value",
     );
+
+    let mut smoke_blob = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut smoke_blob.workflow,
+        RELEASE_SMOKE_HELPER_BLOB,
+        "0000000000000000000000000000000000000000",
+    );
+    assert_rejects(
+        &smoke_blob,
+        "must pin SMOKE_HELPER_BLOB to the reviewed value",
+    );
+
+    let mut smoke_sha256 = ReleasePolicyFixture::committed();
+    replace_once(
+        &mut smoke_sha256.workflow,
+        RELEASE_SMOKE_HELPER_SHA256,
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    );
+    assert_rejects(
+        &smoke_sha256,
+        "must pin SMOKE_HELPER_SHA256 to the reviewed value",
+    );
+
+    let mut probe_only_smoke = ReleasePolicyFixture::committed();
+    probe_only_smoke.workflow = probe_only_smoke.workflow.replace(
+        "result.get(\"desktop\") != \"candidate-smoke-completed\"",
+        "result.get(\"desktop_probe\") != \"completed\"",
+    );
+    assert_rejects(&probe_only_smoke, "smoke must isolate candidate execution");
 
     let mut write_checkout = ReleasePolicyFixture::committed();
     replace_once(
@@ -995,9 +1027,11 @@ fn validate_verifier(job: &Hash, violations: &mut Vec<String>) {
         || content.contains("bundle-smoke")
         || content.contains(" smoke --")
         || !content.contains("REVIEWED_SOURCE_REVISION")
-        || !content.contains(REVIEWED_RELEASE_VERIFIER_REVISION)
+        || !content.contains(REVIEWED_RELEASE_SOURCE_REVISION)
         || !content.contains(RELEASE_VERIFIER_BLOB)
         || !content.contains(RELEASE_VERIFIER_SHA256)
+        || !content.contains(RELEASE_SMOKE_HELPER_BLOB)
+        || !content.contains(RELEASE_SMOKE_HELPER_SHA256)
         || !content.contains(APPROVAL_SCHEMA_BLOB)
         || !content.contains(APPROVAL_SCHEMA_SHA256)
         || !content.contains(PACKAGE_LAYOUT_BLOB)
@@ -1086,12 +1120,11 @@ fn validate_verifier(job: &Hash, violations: &mut Vec<String>) {
         violations,
     );
     for (key, expected) in [
-        (
-            "REVIEWED_SOURCE_REVISION",
-            REVIEWED_RELEASE_VERIFIER_REVISION,
-        ),
+        ("REVIEWED_SOURCE_REVISION", REVIEWED_RELEASE_SOURCE_REVISION),
         ("VERIFIER_BLOB", RELEASE_VERIFIER_BLOB),
         ("VERIFIER_SHA256", RELEASE_VERIFIER_SHA256),
+        ("SMOKE_HELPER_BLOB", RELEASE_SMOKE_HELPER_BLOB),
+        ("SMOKE_HELPER_SHA256", RELEASE_SMOKE_HELPER_SHA256),
         ("APPROVAL_SCHEMA_BLOB", APPROVAL_SCHEMA_BLOB),
         ("APPROVAL_SCHEMA_SHA256", APPROVAL_SCHEMA_SHA256),
         ("PACKAGE_LAYOUT_BLOB", PACKAGE_LAYOUT_BLOB),
@@ -1189,6 +1222,10 @@ fn validate_draft_smoke(job: &Hash, violations: &mut Vec<String>) {
         || !content.contains("env -i")
         || !content.contains("Remove-Item Env:GITHUB_TOKEN")
         || !content.contains("nara-release-draft-assets")
+        || !content.contains(
+            "result.get(\"headless_summary_schema\") != \"nara-reference-game.wave-summary-v1\"",
+        )
+        || !content.contains("result.get(\"desktop\") != \"candidate-smoke-completed\"")
         || expressions.contains("github[")
         || expressions.contains("secrets[")
     {
@@ -1277,6 +1314,10 @@ fn validate_public_smoke(job: &Hash, violations: &mut Vec<String>) {
         || !content.contains("smoke_artifact.py")
         || !content.contains("env -i")
         || !content.contains("Remove-Item Env:GITHUB_TOKEN")
+        || !content.contains(
+            "result.get(\"headless_summary_schema\") != \"nara-reference-game.wave-summary-v1\"",
+        )
+        || !content.contains("result.get(\"desktop\") != \"candidate-smoke-completed\"")
     {
         violations
             .push("anonymous public smoke must not receive an authorization credential".to_owned());
