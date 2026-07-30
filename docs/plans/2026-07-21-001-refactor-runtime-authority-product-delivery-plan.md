@@ -530,6 +530,8 @@ U9-U12 may land local tools, policy tests, and workflows after U7, but they cann
 
 - **Entry status (2026-07-30):** Blocked on refreshed U8, reproducible U9, and corrected U10. The
   preparation-only evidence workflow must not be dispatched as a substitute for any predecessor.
+  The immutable [delivery evidence correction](../knowledge/engineering/verification/2026-07/2026-07-30T101248Z-rgd-delivery-evidence-correction-after-formal-product-review-4cf635ad00a744f59b2999d2cbeae8be.md)
+  merges the prior blocked/completed U10 sibling records and owns this reopened dependency state.
 
 ### U12. Publish the Evidence-Approved Immutable GitHub Pre-release
 

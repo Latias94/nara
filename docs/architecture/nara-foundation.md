@@ -727,7 +727,7 @@ second real adapter or stronger isolation pressure.
   U9, and corrected U10 evidence exist. See ADR
   [0055](adr/0055-feature-matrix-boundary-checks-and-compatibility-fixtures.md), the
   [final hosted verification](../knowledge/engineering/verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md),
-  the [refreshed candidate verification](../knowledge/engineering/verification/2026-07/2026-07-30T034418Z-rgd-u10-refreshed-standalone-candidate-completion-verification-ecd70107315740eab6c580f18eca4dd0.md),
+  the [delivery evidence correction](../knowledge/engineering/verification/2026-07/2026-07-30T101248Z-rgd-delivery-evidence-correction-after-formal-product-review-4cf635ad00a744f59b2999d2cbeae8be.md),
   and [refreshed baseline verification](../knowledge/engineering/verification/2026-07/2026-07-29T182729Z-rgd-u9-refreshed-first-playable-product-baseline-verification-406733392389447c879f6de86245151e.md).
 
 ## Non-Authoritative Trigger Index
