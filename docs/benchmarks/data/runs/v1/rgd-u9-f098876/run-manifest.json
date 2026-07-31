@@ -1,0 +1,57 @@
+{
+  "base_terminal_summary": {
+    "enemies_remaining": 0,
+    "outcome": "completed",
+    "player_hit_points": 20,
+    "projectiles_remaining": 4,
+    "schema": "nara-reference-game.wave-summary-v1",
+    "score": 300,
+    "tick": 49
+  },
+  "base_terminal_summary_digest": "77819d5cac39ab3e25d9e9537e09995480e96d0e9488515cb480c7d50dba5169",
+  "checks": {
+    "public_surface": {
+      "diagnostic_log": "logs/public-surface-check.log",
+      "exit_code": 0,
+      "metric_admitted": false,
+      "output_overflowed": false,
+      "reason": "A passing static public-surface test is not an executed production-call denominator.",
+      "timed_out": false
+    }
+  },
+  "collector_sha256": "51f1b0b7bb5738548540d0f391e0bc052317d3b1242d80bd9a0bb9f0f7a956b7",
+  "completed_at_utc": "2026-07-31T13:40:19.986624Z",
+  "diagnostic_logs": {
+    "canonical": false,
+    "directory": "logs"
+  },
+  "environment": {
+    "build_profile": "debug",
+    "cargo_build_jobs": 1,
+    "cargo_network": "offline_after_fetch",
+    "cargo_version": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "cpu_model": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "desktop_adapter_or_software_profile": "not_collected",
+    "os_name": "Windows",
+    "os_release": "11",
+    "runner_image": "local",
+    "rustc_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.97.1\nLLVM version: 22.1.6"
+  },
+  "failure": null,
+  "metric_catalog_sha256": "e55fe4205584b801e3e3301e391b23e86b2f9ded1e04e4936c92436da1c988c2",
+  "non_claims": [
+    "This local run does not grant release or publication authority.",
+    "Missing manual or telemetry metrics remain missing; process exit is not substituted.",
+    "Diagnostic logs are non-canonical and are not integrity evidence.",
+    "Rust policy and oracle code owns environment compatibility, aggregation, and verdicts."
+  ],
+  "raw_samples": {
+    "count": 74,
+    "path": "raw-samples.jsonl",
+    "sha256": "040a9779de7c4f4d915f101626a832618e9e9d98b679e57bd7ba651782de3f80"
+  },
+  "schema": "nara.reference-game.first-playable-collection-transport-v1",
+  "source_revision": "f09887600d2161144b920b6e2618fc8151dad4fa",
+  "started_at_utc": "2026-07-31T13:18:27.275845Z",
+  "status": "collected"
+}
