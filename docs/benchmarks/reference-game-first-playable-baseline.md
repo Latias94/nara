@@ -211,19 +211,32 @@ performance pass.
 
 ## Evidence Repair
 
-The committed helper can still generate a non-executing plan from a clean source revision:
+The committed helper now exposes a narrow, one-shot collection boundary from a clean source
+revision:
 
 ```text
-python reference-game/tools/measure_first_playable.py plan \
+python reference-game/tools/measure_first_playable.py collect \
   --subject <clean-repository-root> \
   --output <new-directory-outside-the-repository>
+
+python reference-game/tools/measure_first_playable.py verify \
+  --subject <clean-repository-root> \
+  --run <existing-collection-directory-outside-the-repository>
 ```
 
-That planner is not a collector. RGD-U9 remains open until a parameterized `collect`/`verify` path is
-committed and tested, then used at the integrated source revision to create a fresh bounded raw
-record set and manifest. The collector must own detached-worktree creation, empty and retained
-targets, one-job Cargo execution, isolated dependency/home/temp paths, exact edit/revert checks,
-bounded logs, raw-record validation, and manifest hashing. Manual reconstruction from the prose
+The helper owns detached-worktree isolation, one-job Cargo execution, isolated dependency/home/temp
+paths, exact edit/revert checks, bounded command output, raw-record transport, and a compact
+manifest. It must execute from the measured subject and byte-match the helper blob at that
+subject's HEAD; `.gitattributes` pins the helper to LF so this check is stable across checkouts. The
+manifest digest covers those executed bytes.
+Diagnostic logs are non-canonical troubleshooting material: deleting or changing a log does not
+change the raw transport result.
+
+The helper does not decide environment compatibility, interpret the metric catalogue, aggregate
+samples, or produce a product verdict. Those responsibilities remain in the Rust policy and oracle.
+RGD-U9 remains open until this committed collector is run at the post-U8 integrated source revision
+and its raw records are evaluated through that Rust path. These gaps are named bottlenecks; they are
+not reasons to grow a second evidence framework in Python. Manual reconstruction from the prose
 above cannot close the gate.
 
 ## Non-Claims

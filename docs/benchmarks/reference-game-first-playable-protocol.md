@@ -176,19 +176,19 @@ The canonical calibration envelope is
 the three source approvals, source/review identities and digests, source revision, and
 `target_results_seen = false`; it contains no U4-or-later sample.
 
-The collector/evaluator boundary is intentional. Future U14 and U20 collection helpers collect raw
-typed records only; they do not implement percentile, environment, invalidation, or decision rules.
-Their Rust policy tests reuse `tests/support/first_playable_evidence.rs` as the collector-neutral
-oracle through a test-only module include, then feed validated records to the same aggregation and
-suite decision functions used here. U25 and U26 use the same route. This avoids both a second
-decision implementation and a premature production evidence crate or CLI.
+The collector/evaluator boundary is intentional. RGD-U9's committed
+`reference-game/tools/measure_first_playable.py collect` command creates an isolated worktree,
+executes the bounded automatic measurements, and writes raw sample and diagnostic-log transports.
+Its `verify` command checks only local source identity, byte budgets, digests, and the minimal
+transport shape. The executing helper must come from the measured subject and byte-match the helper
+blob at HEAD; `.gitattributes` pins the helper to LF so this check is stable across checkouts. The
+collector digest covers those executed bytes.
+Diagnostic logs are explicitly non-canonical and are not part of the integrity graph.
 
-RGD-U9's `reference-game/tools/measure_first_playable.py plan` is earlier, local preparation for
-that collector. It writes no evidence envelope and makes no protocol decision: it only validates a
-clean subject, reads the committed U14 per-metric sample requirements, records the concrete public
-workflow, and names blocked workflows or missing product telemetry. A later collector may turn
-admissible raw samples into protocol records only after its own environment, source, and hosted-CI
-prerequisites are satisfied.
+Rust policy and oracle code owns environment compatibility, metric-catalog interpretation,
+aggregation, invalidation, and the final `Continue` / `Redirect` / `Stop` verdict. U25 and U26 reuse
+that Rust route. The Python helper does not accept evidence or implement a second decision protocol;
+it remains a one-shot collection tool rather than a production benchmark framework or CLI.
 
 ## Non-Claims
 

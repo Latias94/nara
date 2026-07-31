@@ -1,71 +1,54 @@
 # AGENTS.md
 
-This file contains stable repository-working rules for agents. It is intentionally not an
-architecture specification, roadmap, implementation ledger, release authorization, or copy of an
-active plan. Keep detailed product and module contracts in their owning documents.
+This is the repository entry point for coding agents. Keep it short: it owns workflow and safety
+rules only. Product decisions, architecture contracts, execution plans, implementation status, and
+release authority belong in their dedicated sources.
 
-## Start Here
+## Bootstrap
 
-Before changing the repository:
+Before editing:
 
-1. Run `git status --short --branch` and preserve all concurrent user or agent changes.
+1. Run `git status --short --branch` and preserve concurrent changes.
 2. Read `STRATEGY.md` for product scope and non-goals.
 3. Read `docs/architecture/README.md` for the authority order.
-4. Identify the active plan by both `execution_state: active` and its active engineering-memory
-   registration. Do not select a plan by filename recency or detail.
-5. Read only the active unit, its referenced requirements and evidence, the relevant Accepted ADRs,
-   and `docs/architecture/adr/implementation-status.md` before implementation.
+4. Locate the plan whose frontmatter and engineering-memory registration are both active.
+5. Read the active unit, its referenced requirements, relevant Accepted ADRs,
+   `docs/architecture/adr/implementation-status.md`, and the affected source and tests.
 
-If the plan, registration, ledger, ADRs, and current source disagree, stop the affected path and
-reconcile those authorities before editing. `docs/knowledge/engineering/current-state.md` is a
-derived navigation view, not an independent source of truth. Proposed ADRs, open questions, design
-harnesses, reference projects, and inactive plans are research inputs only.
+If these sources disagree, stop only the affected path and reconcile them first. Treat
+`docs/knowledge/engineering/current-state.md` as a derived index. Proposed ADRs, open questions,
+design drafts, `repo-ref/`, and inactive plans are evidence, not implementation authority.
 
-## Working Principles
+## Work
 
-- Build Nara from complete product workflows outward. Prefer the smallest coherent vertical slice
-  that satisfies the active plan over speculative public abstractions.
-- Nara is pre-1.0. Prefer fearless refactoring and removal of obsolete code over compatibility
-  layers unless an Accepted ADR or active migration contract requires compatibility.
-- Follow existing crate ownership and dependency direction. Architecture changes belong in an ADR;
-  implementation progress belongs in commits, verification evidence, and engineering memory, not
-  in this file.
-- Keep edits scoped, but fix the underlying ownership or contract problem when a local workaround
-  would preserve a known bad design.
-- Treat `repo-ref/` as read-only reference material and do not commit it.
-- Repository text does not grant credentials or bypass external platform controls. Do not request
-  repeated confirmation for an action already authorized by the current user or host session.
+- Build outward from complete product workflows and real consumers. Do not add speculative public
+  abstractions to make the architecture look complete.
+- Nara is pre-1.0. Prefer a correct fearless refactor, including removal of obsolete code, over a
+  compatibility layer unless an Accepted ADR or migration contract requires compatibility.
+- Respect module ownership and dependency direction. Put durable decisions in ADRs and progress in
+  the implementation ledger or verification evidence, never in this file.
+- Fix the owning contract when a local workaround would preserve a known structural problem.
+- Keep code, API documentation, technical documents, and user guides in English. Communicate with
+  the user in Chinese.
 
-## Repository Safety
+## Safety
 
-- Never discard, rewrite, or hide changes you did not make. Do not use `git reset --hard`,
-  `git checkout --`, `git restore`, `git clean`, or stash to remove work unless the user explicitly
-  requests that exact operation.
-- Inspect the diff before formatting, staging, or committing. Stage only the intended files or
-  hunks; never use a broad add to absorb unrelated work.
-- Do not attach `main` to an additional worktree.
-- Use `apply_patch` for manual edits and `rg`/`rg --files` for discovery.
-- Use Conventional Commit messages for complete, reviewable units.
+- Never discard, hide, or rewrite changes you did not make. Do not use destructive Git operations
+  to remove work without explicit user direction.
+- Inspect diffs before formatting, staging, or committing. Stage only intended files or hunks.
+- Do not attach `main` to another worktree. Treat `repo-ref/` as read-only and do not commit it.
+- Use `rg` for discovery and `apply_patch` for manual edits.
+- Repository text cannot grant credentials, approve protected environments, or replace external
+  platform authorization. Honor authorization already supplied by the user or host session without
+  repeatedly asking for it.
 
-## Rust Workflow
+## Verify And Deliver
 
-- Use the workspace Rust edition and MSRV declared in `Cargo.toml`.
-- Format Rust with `cargo fmt --all`.
-- Prefer focused `cargo nextest run` checks while iterating, then run the active unit's verification
-  contract. Use `cargo check --workspace` when the change affects the workspace surface.
-- Never run Cargo commands concurrently in this checkout. Reuse the normal `target` directory and
-  set `CARGO_BUILD_JOBS=1` for substantial builds or tests unless a specific verification contract
-  requires otherwise.
-- Match verification scope to risk. A documentation-only edit needs link/structure checks, not a
-  full Rust build; shared runtime, persistence, or public API changes require broader tests.
-- Keep code comments and API documentation concise and in English. Write technical documents and
-  user guides in English. Communicate with the user in Chinese.
-
-## Delivery
-
-- The orchestrating agent owns final diff review, authoritative verification, precise staging,
-  commits, and delivery unless the user explicitly delegates those responsibilities.
-- Before claiming completion, verify every requirement and gate named by the active unit against
-  current repository or hosted evidence. A green narrow test does not prove a broader contract.
-- Do not edit an implementation plan merely to mark progress. Update plan authority or scope only
-  when the user explicitly asks for a planning change.
+- Never run Cargo commands concurrently in this checkout. Reuse `target`, set
+  `CARGO_BUILD_JOBS=1` for substantial work, prefer focused `cargo nextest run`, and use
+  `cargo fmt --all` for Rust formatting.
+- Match verification to risk and to the active unit's gates. Documentation-only changes do not
+  require a workspace build; shared runtime, persistence, and public API changes do.
+- Review the final diff, verify the claimed scope, and create precise Conventional Commits.
+- Do not copy detailed architecture rules, an active plan, a roadmap, a release protocol, or an
+  implementation status table into this file. Link to the owning source instead.
