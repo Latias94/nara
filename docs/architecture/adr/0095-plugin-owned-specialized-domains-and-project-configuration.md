@@ -260,8 +260,12 @@ and hides the source/data migration that different implementations require.
   universal provider contract.
 - ADR 0016 and ADR 0042 continue to govern persistent/native ownership and lifecycle safety, but no
   longer imply cross-implementation authoring APIs or a mandatory four-layer topology.
-- ADR 0046's direct `add_plugins` freedom is the ordinary ecosystem path. Stable slots remain bundle
-  editing identities and do not become universal provider roles.
+- ADR 0046's direct `add_plugins` freedom remains the ordinary direct-App path. The RPR-U3 root
+  `ProductRecipe` additionally gives file-backed products one typed replayable configuration path,
+  while `SchemaContribution` keeps a schema-owning plugin and its provider definitions together at
+  the caller. Stable slots remain bundle editing identities and do not become universal provider
+  roles. This first-party trial does not admit a package kernel or universal provider model; OQ-045
+  remains open until an external contribution and reference-game tracer complete.
 - Existing manifest-visible backend names require a later migration before that vocabulary is
   treated as stable project data.
 - Omitting a plugin from one composed recipe changes the composition fingerprint; it is not evidence

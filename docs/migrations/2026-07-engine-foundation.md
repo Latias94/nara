@@ -46,6 +46,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U13-1 | RGF-U13 | `198a680` | `rust-api/behavior` | Managed runtime driver access, physical button transitions, App-exit propagation, and desktop frame/shutdown semantics | Replace generic driver World/resource access with typed resource-local ports, propagate fallible button-edge admission, and handle the one-target desktop result/close contract. |
 | RGF-U8-1 | RGF-U8 | `60292e7` | `rust-api/behavior` | Task-update set ownership, ordered task result polling, and filesystem watcher admission/observability | Import asset phases from `nara_asset`, capture a task-pool completion cutoff before consuming ordered results, and send watcher batches through the bounded non-blocking sender while handling sticky `RescanRequired`. |
 | RGD-U8-2 | RGD-U8 refresh | `be9b264` | `rust-api/behavior` | `FsError` forward compatibility and strict Unix traversal rejection classification | Add a wildcard arm to external `FsError` matches. Treat exact platform rejection variants as diagnostic detail: all strict Unix adapters reject a symlink leaf, while Linux currently reports `SymbolicLinkTraversal`. |
+| RPR-U3-1 | RPR-U3 | `676d030` | `rust-api` | Ordinary product composition and file-backed run setup | Replace normal caller use of definition IDs, slot edits, and parallel provider lists with `ProductRecipe` and `SchemaContribution`; keep raw one-shot plugins on direct `App` composition. |
 
 ## Entry Contract
 
@@ -2203,6 +2204,33 @@ correction.
 
 **Compatibility window**: none (pre-1.0). The abandoned portable physics/audio and fixed render-
 cache contracts had no implementation to preserve.
+
+## RPR-U3: Ordinary Rust Product Recipes
+
+`ProductRecipe` is the current ordinary Rust composition path for a product. It holds only
+replayable plugin factories and typed canonical configuration. A schema-owning extension exposes
+one `SchemaContribution`, which binds its plugin and the exact schema-provider definitions at the
+extension boundary. The direct `App` path remains available for raw one-shot plugin values.
+
+**User action**: move normal file-backed headless, desktop, and editor setup to one recipe. Use
+`add_plugin` or `add_configured_plugin` for runtime-only entries, and let a schema-owning crate
+return `SchemaContribution` rather than accepting a separate provider list. Use
+`HeadlessRun::from_recipe`, `DesktopRun::from_recipe`, or
+`EditorProjectIntent::new().with_recipe(...)` for product Hosts. Keep `PluginDefinition`, raw slot
+edits, candidates, and lifecycle control to explicit advanced embedding code.
+
+**Source action**: no project, scene, prefab, asset, or save format changes. Recipe configuration
+is compiled Rust data, not a new `nara.toml` extension or package wire format.
+
+**Cache action**: keep; rebuild Rust artifacts after changing recipe code.
+
+**Compatibility window**: none for the new ordinary API. Existing advanced Host composition remains
+temporarily available only while RPR-U4 migrates real consumers; it is not the normal author path.
+
+**Verification anchors**: `tests/plugin_composition.rs`, `tests/project_runtime_boot.rs`,
+`tests/workspace_play_runtime.rs`, and the public-prelude fixture prove pure replacement,
+direct/file-backed schema parity, headless and Editor execution, and the ordinary public compile
+surface.
 
 ## Persistent Format Matrix
 

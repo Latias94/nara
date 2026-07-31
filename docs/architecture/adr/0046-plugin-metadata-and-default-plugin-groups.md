@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-08-01
 **Refines**: ADR 0003, ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement; ADR 0095: Plugin-Owned Specialized Domains and
@@ -20,6 +20,22 @@ disable before adding another plugin.
 `PluginServiceId` closes a declared presence requirement only. It does not choose an owner, imply
 exclusivity, or dispatch calls. A shared domain service ID is valid only after an Accepted protocol
 defines its semantics; otherwise plugins use plugin-specific identities and concrete conflicts.
+
+## RPR-U3 Trial Implementation Note
+
+The root facade now provides a pure `ProductRecipe` for normal product composition. A runtime-only
+entry owns a typed reconstructible factory and canonical configuration identity; a
+`SchemaContribution` binds one replayable schema-owning plugin to its exact declared provider
+definitions. The recipe lowers to the existing plan/closed-commit machinery and can also be passed
+to direct `App::add_plugins` as a normal group. The contribution installs the same provider
+authority before its plugin builds in a direct App that the file-backed Host preloads during
+admission. It does not make `PluginDefinition`, slot edits, schema-provider parallel lists,
+candidates, runners, or shutdown authority ordinary authoring concepts.
+
+This is a first-party implementation trial. Raw one-shot plugin values remain valid only for direct
+`App` composition. The renamed-root external contribution and reference-game migrations remain the
+OQ-045 evidence gate; no package manager, generic package definition, or provider registry is
+admitted by this helper.
 
 ## Context
 

@@ -804,6 +804,15 @@ flowchart LR
 - **Vocabulary boundary**: The candidate `package(config)` helper is a narrow compiled Rust root
   contribution for one Plugin plus Schema closure. It is not the OQ-031 Product Package, Package
   Manager, installation identity, managed/native loader, or multi-role activation contract.
+- **RPR-U3 trial evidence**: Root `ProductRecipe` now carries replayable runtime-only entries and
+  `SchemaContribution` binds one schema-owning plugin to its declared provider definitions. The
+  file-backed resolver consumes those definitions during the existing frozen-registry admission,
+  while direct `App` composition installs the same authority before the schema-owning plugin builds
+  through the normal `PluginGroup` path. Focused first-party tests prove fresh reconstruction,
+  typed configuration replacement, duplicate rejection before App mutation, divergent-receipt
+  rejection, and direct/file-backed schema-fingerprint parity; the headless and Editor facades run
+  the same recipe, and the desktop facade enters the same shared start path. This is implementation
+  trial evidence, not external-package admission.
 - **Leading trial hypothesis**:
   - Keep ordinary runtime-only extension exactly on the `Plugin` / `PluginGroup` / tuple path. A
     plugin that owns no persistent schema must not learn a package vocabulary.
