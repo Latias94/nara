@@ -21,16 +21,16 @@ import time
 from typing import Any, Sequence
 
 
-PLAN_SCHEMA = "nara.reference-game.first-playable-plan-v1"
-RUN_SCHEMA = "nara.reference-game.first-playable-local-run-v2"
-PLAN_FILENAME = "measurement-plan.json"
+RUN_SCHEMA = "nara.reference-game.first-playable-collection-transport-v1"
 RUN_FILENAME = "run-manifest.json"
 RAW_FILENAME = "raw-samples.jsonl"
 CATALOG_PATH = "docs/benchmarks/data/protocol/v1/reference-game-first-playable.json"
+HELPER_PATH = "reference-game/tools/measure_first_playable.py"
 COLLECTOR_ID = "u14"
 
-MAX_GIT_OUTPUT = 64 * 1024
+MAX_GIT_OUTPUT = 256 * 1024
 MAX_COMMAND_OUTPUT = 1024 * 1024
+MAX_DIAGNOSTIC_LOG_BYTES = 64 * 1024 * 1024
 MAX_CATALOG_BYTES = 256 * 1024
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_RAW_BYTES = 4 * 1024 * 1024
@@ -52,6 +52,7 @@ REQUIRED_PATHS = (
     "reference-game/src/systems.rs",
     "reference-game/scenes/startup.scene.json",
     "reference-game/tests/public_surface.rs",
+    HELPER_PATH,
     CATALOG_PATH,
 )
 
@@ -69,195 +70,28 @@ AUTOMATIC_METRICS = frozenset(
         "journey.clean_to_headless_wave_ns",
     }
 )
-MANUAL_METRICS = frozenset(
-    {
-        "gameplay.desktop_playable_success",
-        "journey.clean_to_desktop_playable_ns",
-    }
+COVERAGE_NON_CLAIM = (
+    "A passing static public-surface test is not an executed production-call denominator."
 )
-UNAVAILABLE_REASONS = {
-    "frame.p99_ns": "The public desktop product emits no bounded frame-time sample stream.",
-    "module.add.success": "No committed public module-addition task exists.",
-    "module.add.time_ns": "No committed public module-addition task exists.",
-    "public.production.coverage_basis_points": (
-        "A passing static public-surface test is not an executed production-call denominator."
-    ),
-    "runtime.gpu_resource_bytes": (
-        "Backend cache statistics are not exposed by the public desktop product entry point."
-    ),
-    "runtime.memory_bytes": (
-        "No cross-platform public process-memory collector is selected for this product path."
-    ),
-    "slot.configure.success": "No committed public window-slot task exists.",
-    "slot.configure.time_ns": "No committed public window-slot task exists.",
-}
-CATALOG_METRICS = AUTOMATIC_METRICS | MANUAL_METRICS | frozenset(UNAVAILABLE_REASONS)
 TWIN_METRICS = (
     ("iteration.body.p50_ns", "iteration.body.p95_ns"),
     ("iteration.data.p50_ns", "iteration.data.p95_ns"),
     ("iteration.structural.p50_ns", "iteration.structural.p95_ns"),
 )
-SEMANTIC_METRICS = frozenset(
-    {
-        "gameplay.headless_wave_success",
-        "journey.clean_to_headless_wave_ns",
-        "iteration.body.p50_ns",
-        "iteration.body.p95_ns",
-        "iteration.data.p50_ns",
-        "iteration.data.p95_ns",
-        "iteration.structural.p50_ns",
-        "iteration.structural.p95_ns",
-    }
-)
-EXTRA_UNAVAILABLE = (
-    {
-        "id": "render.packet.batch_count",
-        "reason": "The public desktop path exports no render-packet batch counter.",
-    },
-    {
-        "id": "render.packet.instance_count",
-        "reason": "The public desktop path exports no render-packet instance counter.",
-    },
-    {
-        "id": "render.packet.retained_bytes",
-        "reason": "The current packet does not publish retained payload bytes.",
-    },
-    {
-        "id": "render.packet.clone_bytes",
-        "reason": "The current renderer exports no packet clone or allocation counter.",
-    },
-)
-
 BUILD_ARGS = ("build", "--locked", "--bins", "--jobs", "1")
 HEADLESS_ARGS = ("run", "--locked", "--bin", "headless", "--", "--max-ticks", "96")
 PUBLIC_SURFACE_ARGS = ("test", "--locked", "--test", "public_surface", "--jobs", "1")
 
-STEPS = (
-    {
-        "id": "build_timings",
-        "kind": "automatic",
-        "command": ["cargo", *BUILD_ARGS],
-        "metric_ids": ["build.cold_ns", "build.incremental_ns"],
-    },
-    {
-        "id": "clean_headless_wave",
-        "kind": "automatic",
-        "command": ["cargo", *HEADLESS_ARGS],
-        "metric_ids": [
-            "journey.clean_to_headless_wave_ns",
-            "gameplay.headless_wave_success",
-        ],
-    },
-    {
-        "id": "body_edit_reload",
-        "kind": "automatic",
-        "mutation": "toggle one reviewed behavior-neutral Rust body edit",
-        "metric_ids": ["iteration.body.p50_ns", "iteration.body.p95_ns"],
-    },
-    {
-        "id": "data_edit_reload",
-        "kind": "automatic",
-        "mutation": "toggle Player hit-points through parsed scene JSON",
-        "metric_ids": ["iteration.data.p50_ns", "iteration.data.p95_ns"],
-    },
-    {
-        "id": "structural_rust_edit",
-        "kind": "automatic",
-        "mutation": "toggle one private behavior-neutral Rust field",
-        "metric_ids": [
-            "iteration.structural.p50_ns",
-            "iteration.structural.p95_ns",
-        ],
-    },
-    {
-        "id": "desktop_manual_playthrough",
-        "kind": "manual",
-        "command": [
-            "cargo",
-            "run",
-            "--locked",
-            "--features",
-            "desktop",
-            "--bin",
-            "desktop",
-        ],
-        "metric_ids": sorted(MANUAL_METRICS),
-    },
-    {
-        "id": "public_production_coverage",
-        "kind": "check_only",
-        "command": ["cargo", *PUBLIC_SURFACE_ARGS],
-        "metric_ids": ["public.production.coverage_basis_points"],
-    },
-)
-BLOCKED_WORKFLOWS = (
-    {
-        "id": "module_addition",
-        "metric_ids": ["module.add.time_ns", "module.add.success"],
-        "reason": UNAVAILABLE_REASONS["module.add.time_ns"],
-    },
-    {
-        "id": "window_slot_configuration",
-        "metric_ids": ["slot.configure.time_ns", "slot.configure.success"],
-        "reason": UNAVAILABLE_REASONS["slot.configure.time_ns"],
-    },
-    {
-        "id": "desktop_pressure_telemetry",
-        "metric_ids": [
-            "frame.p99_ns",
-            "runtime.gpu_resource_bytes",
-            "runtime.memory_bytes",
-        ],
-        "reason": "The public desktop product lacks the required bounded telemetry.",
-    },
-)
-
-RAW_FIELDS = (
-    "metric_id",
-    "sample_index",
-    "sample_value",
-    "value_unit",
-    "population",
-    "mechanism",
-    "start_boundary",
-    "end_boundary",
-    "started_at_utc",
-    "completed_at_utc",
-    "exit_status",
-    "environment_fingerprint",
-    "source_revision",
-    "command_output_reference",
-    "result_digest",
-)
-RAW_FIELD_SET = frozenset(RAW_FIELDS)
-ENVIRONMENT_FIELDS = (
-    "os_name",
-    "os_release",
-    "runner_image",
-    "rustc_version",
-    "cargo_version",
-    "cpu_model",
-    "build_profile",
-    "desktop_adapter_or_software_profile",
-    "collector_revision",
-)
 REQUIREMENT_FIELDS = (
     "id",
     "minimum_samples",
-    "subject",
-    "workload_id",
-    "value_kind",
-    "population",
-    "start_boundary_id",
-    "end_boundary_id",
-    "method_id",
-    "environment_class",
 )
-SCRATCH_DIRECTORIES = ("target", "cargo-home", "home", "temp")
+SCRATCH_DIRECTORIES = ("worktree", "target", "cargo-home", "home", "temp")
 RUN_NON_CLAIMS = (
     "This local run does not grant release or publication authority.",
     "Missing manual or telemetry metrics remain missing; process exit is not substituted.",
-    "The verifier checks integrity and shape, not performance targets or product verdicts.",
+    "Diagnostic logs are non-canonical and are not integrity evidence.",
+    "Rust policy and oracle code owns environment compatibility, aggregation, and verdicts.",
 )
 
 BODY_BASE = b"""pub(crate) fn tick_project_weapons(mut weapons: Query<&mut Weapon, With<SceneEntitySource>>) {
@@ -313,6 +147,18 @@ class CommandResult:
     @property
     def failed(self) -> bool:
         return self.returncode != 0 or self.timed_out or self.overflowed
+
+
+@dataclass(frozen=True)
+class EditScenario:
+    label: str
+    path: Path
+    base: bytes
+    variant: bytes
+    metric_ids: tuple[str, str]
+    build: bool
+    incremental_metric: str | None = None
+    variant_summary_updates: tuple[tuple[str, int], ...] = ()
 
 
 class OutputReader(threading.Thread):
@@ -509,6 +355,16 @@ def write_json(path: Path, value: Any) -> None:
         raise MeasurementError(f"The `{path.name}` artifact could not be written: {error}") from error
 
 
+class DiagnosticLogs:
+    def __init__(self, byte_budget: int) -> None:
+        self.remaining = byte_budget
+
+    def write(self, path: Path, output: bytes) -> None:
+        retained = output[: self.remaining]
+        self.remaining -= len(retained)
+        write_bytes(path, retained, "bounded command log")
+
+
 def stop_process(process: subprocess.Popen[bytes], windows_job: WindowsJob | None) -> None:
     group_error: OSError | MeasurementError | None = None
     if windows_job is not None:
@@ -533,7 +389,7 @@ def stop_process(process: subprocess.Popen[bytes], windows_job: WindowsJob | Non
     except subprocess.TimeoutExpired as error:
         raise MeasurementError("A bounded process did not stop within its deadline.") from error
     if group_error is not None:
-        raise MeasurementError(f"A bounded process tree could not be stopped: {group_error}")
+        raise MeasurementError(f"A bounded process group could not be stopped: {group_error}")
 
 
 def run_process(
@@ -544,6 +400,7 @@ def run_process(
     *,
     output_limit: int = MAX_COMMAND_OUTPUT,
     log_path: Path | None = None,
+    diagnostic_logs: DiagnosticLogs | None = None,
 ) -> CommandResult:
     started_at = utc_now()
     started = time.monotonic_ns()
@@ -612,13 +469,16 @@ def run_process(
             reader.error is not None and not timed_out and not reader.overflowed
         ):
             raise MeasurementError("A bounded process output reader did not finish cleanly.")
-        # The command owns its whole process tree, including children that detached their output.
+        # Retire the Windows job or original POSIX process group after every command.
         stop_process(process, windows_job)
         completed_monotonic_ns = time.monotonic_ns()
         completed_at = utc_now()
         output = bytes(reader.output)
         if log_path is not None:
-            write_bytes(log_path, output, "bounded command log")
+            if diagnostic_logs is None:
+                write_bytes(log_path, output, "bounded command log")
+            else:
+                diagnostic_logs.write(log_path, output)
         return CommandResult(
             returncode=process.returncode if process.returncode is not None else -1,
             output=output,
@@ -648,13 +508,18 @@ def git_environment(optional_locks: str) -> dict[str, str]:
     return environment
 
 
-def run_git(subject: Path, arguments: Sequence[str]) -> bytes:
+def run_git(
+    subject: Path,
+    arguments: Sequence[str],
+    *,
+    output_limit: int = MAX_GIT_OUTPUT,
+) -> bytes:
     result = run_process(
         ["git", "-C", os.fspath(subject), *arguments],
         subject,
         git_environment("0"),
         GIT_TIMEOUT_SECONDS,
-        output_limit=MAX_GIT_OUTPUT,
+        output_limit=output_limit,
     )
     if result.failed:
         detail = result.output.decode("utf-8", errors="replace").strip()
@@ -662,7 +527,7 @@ def run_git(subject: Path, arguments: Sequence[str]) -> bytes:
     return result.output
 
 
-def clean_subject(argument: Path) -> tuple[Path, str]:
+def clean_subject(argument: Path) -> tuple[Path, str, str]:
     try:
         if not argument.is_dir():
             raise MeasurementError("The measurement subject must be an existing directory.")
@@ -684,7 +549,18 @@ def clean_subject(argument: Path) -> tuple[Path, str]:
     ]
     if missing:
         raise MeasurementError(f"The measurement subject lacks required public paths: {', '.join(missing)}")
-    return subject, revision
+    helper = resolve(subject / HELPER_PATH, "measurement helper")
+    if resolve(Path(__file__), "executing measurement helper") != helper:
+        raise MeasurementError("The executing helper must come from the measurement subject.")
+    helper_bytes = read_bounded(helper, MAX_SOURCE_BYTES, "measurement helper")
+    committed = run_git(
+        subject,
+        ["show", f"{revision}:{HELPER_PATH}"],
+        output_limit=MAX_SOURCE_BYTES,
+    )
+    if committed != helper_bytes:
+        raise MeasurementError("The executing helper bytes must match the subject HEAD blob.")
+    return subject, revision, digest(helper_bytes)
 
 
 def new_output(subject: Path, argument: Path) -> Path:
@@ -698,7 +574,7 @@ def new_output(subject: Path, argument: Path) -> Path:
     return output
 
 
-def load_requirements(subject: Path) -> tuple[list[dict[str, Any]], str]:
+def load_requirements(subject: Path) -> tuple[dict[str, dict[str, Any]], str]:
     catalog_path = subject / CATALOG_PATH
     catalog_bytes = read_bounded(catalog_path, MAX_CATALOG_BYTES, "metric catalog")
     try:
@@ -722,85 +598,18 @@ def load_requirements(subject: Path) -> tuple[list[dict[str, Any]], str]:
             or isinstance(minimum, bool)
             or minimum <= 0
             or minimum > MAX_RAW_SAMPLES
-            or any(
-                not isinstance(metric.get(field), str) or not metric[field]
-                for field in REQUIREMENT_FIELDS
-                if field not in {"id", "minimum_samples"}
-            )
             or metric_id in requirements
         ):
             raise MeasurementError("The metric catalog contains an invalid U14 requirement.")
         requirements[metric_id] = {field: metric[field] for field in REQUIREMENT_FIELDS}
-    if set(requirements) != CATALOG_METRICS:
-        raise MeasurementError("The metric catalog and the prepared U14 workflow disagree.")
+    if not AUTOMATIC_METRICS.issubset(requirements):
+        raise MeasurementError("The metric catalog lacks an automatic U14 metric.")
     for left, right in TWIN_METRICS:
         if requirements[left]["minimum_samples"] != requirements[right]["minimum_samples"]:
             raise MeasurementError("A P50/P95 metric pair has different sample floors.")
     if sum(requirements[metric]["minimum_samples"] for metric in AUTOMATIC_METRICS) > MAX_RAW_SAMPLES:
         raise MeasurementError("The automatic measurement population exceeds its sample budget.")
-    return (
-        [requirements[metric_id] for metric_id in sorted(requirements)],
-        digest(catalog_bytes),
-    )
-
-
-def unavailable_measurements() -> list[dict[str, str]]:
-    return [
-        *(
-            {"id": metric_id, "reason": reason}
-            for metric_id, reason in sorted(UNAVAILABLE_REASONS.items())
-        ),
-        *EXTRA_UNAVAILABLE,
-    ]
-
-
-def plan_payload(
-    revision: str,
-    requirements: list[dict[str, Any]],
-    catalog_sha256: str,
-) -> dict[str, Any]:
-    return {
-        "schema": PLAN_SCHEMA,
-        "format_version": 1,
-        "status": "prepared_not_executed",
-        "decision": "not_evaluated",
-        "source": {"revision": revision, "required_paths": list(REQUIRED_PATHS)},
-        "metric_catalog": {
-            "path": CATALOG_PATH,
-            "collector": COLLECTOR_ID,
-            "sha256": catalog_sha256,
-            "requirements": requirements,
-        },
-        "raw_sample_fields": list(RAW_FIELDS),
-        "environment_fields": list(ENVIRONMENT_FIELDS),
-        "steps": list(STEPS),
-        "blocked_workflows": list(BLOCKED_WORKFLOWS),
-        "unavailable_measurements": unavailable_measurements(),
-        "isolation": {
-            "worktree": "detached under the external output root",
-            "home": "isolated under the external output root",
-            "cargo": "one build job; offline after isolated fetch",
-            "source_mutation": "forbidden",
-        },
-        "non_claims": [
-            "This plan contains no measurements or product decision.",
-            "Manual and unavailable metrics remain missing until directly observed.",
-        ],
-    }
-
-
-def create_plan(subject_argument: Path, output_argument: Path) -> None:
-    subject, revision = clean_subject(subject_argument)
-    output = new_output(subject, output_argument)
-    requirements, catalog_sha256 = load_requirements(subject)
-    try:
-        output.mkdir()
-    except OSError as error:
-        raise MeasurementError(f"The measurement output could not be created: {error}") from error
-    write_json(
-        output / PLAN_FILENAME,
-        plan_payload(revision, requirements, catalog_sha256),
-    )
+    return requirements, digest(catalog_bytes)
 
 
 def isolated_environment(output: Path, target: Path) -> dict[str, str]:
@@ -985,6 +794,41 @@ def remove_owned_directory(path: Path, owner: Path) -> None:
         raise MeasurementError(f"A measurement scratch directory could not be removed: {error}") from error
 
 
+def cleanup_worktree(
+    subject: Path,
+    worktree: Path,
+    output: Path,
+    diagnostic_logs: DiagnosticLogs,
+) -> None:
+    registered = run_git(subject, ["worktree", "list", "--porcelain"])
+    paths = []
+    for line in registered.decode("utf-8", errors="strict").splitlines():
+        if line.startswith("worktree "):
+            paths.append(resolve(Path(line.removeprefix("worktree ")), "registered worktree"))
+    resolved_worktree = resolve(worktree, "measurement worktree")
+    if resolved_worktree in paths:
+        removal = run_process(
+            [
+                "git",
+                "-C",
+                os.fspath(subject),
+                "worktree",
+                "remove",
+                "--force",
+                os.fspath(worktree),
+            ],
+            subject,
+            git_environment("1"),
+            60.0,
+            output_limit=MAX_GIT_OUTPUT,
+            log_path=output / "logs/cleanup-worktree.log",
+            diagnostic_logs=diagnostic_logs,
+        )
+        if removal.failed:
+            raise MeasurementError("The detached worktree could not be removed.")
+    remove_owned_directory(worktree, output)
+
+
 class Collector:
     def __init__(
         self,
@@ -994,8 +838,8 @@ class Collector:
         environment: dict[str, str],
         timeout: float,
         revision: str,
-        environment_fingerprint: str,
         requirements: dict[str, dict[str, Any]],
+        diagnostic_logs: DiagnosticLogs,
     ) -> None:
         self.game = game
         self.output = output
@@ -1003,8 +847,8 @@ class Collector:
         self.environment = environment
         self.timeout = timeout
         self.revision = revision
-        self.environment_fingerprint = environment_fingerprint
         self.requirements = requirements
+        self.diagnostic_logs = diagnostic_logs
         self.records: list[dict[str, Any]] = []
         self.indices: dict[str, int] = {}
 
@@ -1023,6 +867,7 @@ class Collector:
             self.environment,
             self.timeout,
             log_path=self.output / reference,
+            diagnostic_logs=self.diagnostic_logs,
         )
         return result, reference
 
@@ -1038,7 +883,6 @@ class Collector:
     ) -> None:
         failed = result.failed or semantic_failure or value is None
         for metric_id in metric_ids:
-            requirement = self.requirements[metric_id]
             index = self.indices.get(metric_id, 0) + 1
             self.indices[metric_id] = index
             self.records.append(
@@ -1046,17 +890,15 @@ class Collector:
                     "metric_id": metric_id,
                     "sample_index": index,
                     "sample_value": None if failed else value,
-                    "value_unit": requirement["value_kind"],
-                    "population": requirement["population"],
-                    "mechanism": requirement["method_id"],
-                    "start_boundary": requirement["start_boundary_id"],
-                    "end_boundary": requirement["end_boundary_id"],
                     "started_at_utc": result.started_at_utc,
                     "completed_at_utc": result.completed_at_utc,
-                    "exit_status": result.returncode,
-                    "environment_fingerprint": self.environment_fingerprint,
                     "source_revision": self.revision,
-                    "command_output_reference": log_reference,
+                    "command": {
+                        "exit_code": result.returncode,
+                        "timed_out": result.timed_out,
+                        "output_overflowed": result.overflowed,
+                        "diagnostic_log": log_reference,
+                    },
                     "result_digest": result_digest,
                 }
             )
@@ -1072,67 +914,70 @@ def measured_from(result: CommandResult, started_at: str, started_ns: int) -> Co
 
 def collect_edit_population(
     collector: Collector,
-    label: str,
-    path: Path,
-    base: bytes,
-    variant: bytes,
-    metric_ids: tuple[str, str],
+    scenario: EditScenario,
     baseline: dict[str, Any],
-    *,
-    build: bool,
 ) -> None:
-    count = collector.count(*metric_ids)
-    if label == "body":
-        count = max(count, collector.count("build.incremental_ns"))
+    count = collector.count(*scenario.metric_ids)
+    if scenario.incremental_metric is not None:
+        count = max(count, collector.count(scenario.incremental_metric))
     try:
         for sample in range(1, count + 1):
             use_variant = sample % 2 == 1
-            write_bytes(path, variant if use_variant else base, f"{label} edit")
+            write_bytes(
+                scenario.path,
+                scenario.variant if use_variant else scenario.base,
+                f"{scenario.label} edit",
+            )
             started_at = utc_now()
             started_ns = time.monotonic_ns()
-            if build:
+            if scenario.build:
                 build_result, build_log = collector.command(
                     BUILD_ARGS,
-                    f"{label}-build-{sample:02}.log",
+                    f"{scenario.label}-build-{sample:02}.log",
                 )
-                if label == "body" and sample <= collector.count("build.incremental_ns"):
+                if (
+                    scenario.incremental_metric is not None
+                    and sample <= collector.count(scenario.incremental_metric)
+                ):
                     collector.record(
-                        ("build.incremental_ns",),
+                        (scenario.incremental_metric,),
                         build_result,
                         build_result.duration_ns,
                         build_log,
                     )
                 if build_result.failed:
                     collector.record(
-                        metric_ids,
+                        scenario.metric_ids,
                         measured_from(build_result, started_at, started_ns),
                         None,
                         build_log,
                     )
-                    raise MeasurementError(f"The {label}-edit build failed.")
+                    raise MeasurementError(f"The {scenario.label}-edit build failed.")
             headless, headless_log = collector.command(
                 HEADLESS_ARGS,
-                f"{label}-headless-{sample:02}.log",
+                f"{scenario.label}-headless-{sample:02}.log",
             )
             measured = measured_from(headless, started_at, started_ns)
             if headless.failed:
                 collector.record(
-                    metric_ids,
+                    scenario.metric_ids,
                     measured,
                     None,
                     headless_log,
                 )
-                raise MeasurementError(f"The {label}-edit headless run failed.")
+                raise MeasurementError(f"The {scenario.label}-edit headless run failed.")
             try:
                 summary, summary_digest = terminal_summary(headless.output)
                 expected = dict(baseline)
-                if label == "data" and use_variant:
-                    expected["player_hit_points"] = 21
+                if use_variant:
+                    expected.update(scenario.variant_summary_updates)
                 if summary != expected:
-                    raise MeasurementError(f"The {label} edit changed an unexpected game result.")
+                    raise MeasurementError(
+                        f"The {scenario.label} edit changed an unexpected game result."
+                    )
             except MeasurementError:
                 collector.record(
-                    metric_ids,
+                    scenario.metric_ids,
                     measured,
                     None,
                     headless_log,
@@ -1140,14 +985,18 @@ def collect_edit_population(
                 )
                 raise
             collector.record(
-                metric_ids,
+                scenario.metric_ids,
                 measured,
                 measured.duration_ns,
                 headless_log,
                 result_digest=summary_digest,
             )
     finally:
-        write_bytes(path, base, f"{label} edit restoration")
+        write_bytes(
+            scenario.path,
+            scenario.base,
+            f"{scenario.label} edit restoration",
+        )
 
 
 def command_error(result: CommandResult) -> str | None:
@@ -1166,22 +1015,17 @@ def collect_first_playable(
     cargo: str,
     timeout: float,
 ) -> None:
-    subject, revision = clean_subject(subject_argument)
+    subject, revision, collector_sha256 = clean_subject(subject_argument)
     output = new_output(subject, output_argument)
-    requirement_list, catalog_sha256 = load_requirements(subject)
-    requirements = {item["id"]: item for item in requirement_list}
+    requirements, catalog_sha256 = load_requirements(subject)
     try:
         output.mkdir()
         (output / "logs").mkdir()
     except OSError as error:
         raise MeasurementError(f"The measurement output could not be created: {error}") from error
-    write_json(
-        output / PLAN_FILENAME,
-        plan_payload(revision, requirement_list, catalog_sha256),
-    )
-
     worktree = output / "worktree"
     target = output / "target"
+    diagnostic_logs = DiagnosticLogs(MAX_DIAGNOSTIC_LOG_BYTES)
     environment: dict[str, str] = {}
     originals: dict[Path, bytes] = {}
     records: list[dict[str, Any]] = []
@@ -1190,7 +1034,6 @@ def collect_first_playable(
     baseline: dict[str, Any] | None = None
     baseline_digest: str | None = None
     collector: Collector | None = None
-    worktree_added = False
     collection_error: MeasurementError | None = None
     started_at = utc_now()
 
@@ -1203,10 +1046,10 @@ def collect_first_playable(
             60.0,
             output_limit=MAX_GIT_OUTPUT,
             log_path=output / "logs/setup-worktree.log",
+            diagnostic_logs=diagnostic_logs,
         )
         if add.failed:
             raise MeasurementError("The detached measurement worktree could not be created.")
-        worktree_added = True
         game = worktree / "reference-game"
         systems = game / "src/systems.rs"
         scene = game / "scenes/startup.scene.json"
@@ -1224,6 +1067,7 @@ def collect_first_playable(
             environment,
             timeout,
             log_path=output / "logs/setup-cargo-fetch.log",
+            diagnostic_logs=diagnostic_logs,
         )
         if fetch.failed:
             raise MeasurementError("The isolated dependency fetch failed.")
@@ -1234,6 +1078,7 @@ def collect_first_playable(
             environment,
             30.0,
             log_path=output / "logs/environment-cargo-version.log",
+            diagnostic_logs=diagnostic_logs,
         )
         rustc_version = run_process(
             ["rustc", "--version", "--verbose"],
@@ -1241,6 +1086,7 @@ def collect_first_playable(
             environment,
             30.0,
             log_path=output / "logs/environment-rustc-version.log",
+            diagnostic_logs=diagnostic_logs,
         )
         if cargo_version.failed or rustc_version.failed:
             raise MeasurementError("The isolated toolchain identity could not be inspected.")
@@ -1257,12 +1103,9 @@ def collect_first_playable(
             ),
             "build_profile": "debug",
             "desktop_adapter_or_software_profile": "not_collected",
-            "collector_revision": digest(read_bounded(Path(__file__), MAX_SOURCE_BYTES, "collector")),
             "cargo_build_jobs": 1,
             "cargo_network": "offline_after_fetch",
         }
-        fingerprint = digest(canonical_json(environment_record))
-        environment_record["fingerprint"] = fingerprint
         collector = Collector(
             game,
             output,
@@ -1270,8 +1113,8 @@ def collect_first_playable(
             environment,
             timeout,
             revision,
-            fingerprint,
             requirements,
+            diagnostic_logs,
         )
 
         cold_count = collector.count("build.cold_ns")
@@ -1362,43 +1205,56 @@ def collect_first_playable(
 
         collect_edit_population(
             collector,
-            "body",
-            systems,
-            originals[systems],
-            body,
-            ("iteration.body.p50_ns", "iteration.body.p95_ns"),
+            EditScenario(
+                label="body",
+                path=systems,
+                base=originals[systems],
+                variant=body,
+                metric_ids=("iteration.body.p50_ns", "iteration.body.p95_ns"),
+                build=True,
+                incremental_metric="build.incremental_ns",
+            ),
             baseline,
-            build=True,
         )
         collect_edit_population(
             collector,
-            "data",
-            scene,
-            originals[scene],
-            data,
-            ("iteration.data.p50_ns", "iteration.data.p95_ns"),
+            EditScenario(
+                label="data",
+                path=scene,
+                base=originals[scene],
+                variant=data,
+                metric_ids=("iteration.data.p50_ns", "iteration.data.p95_ns"),
+                build=False,
+                variant_summary_updates=(("player_hit_points", 21),),
+            ),
             baseline,
-            build=False,
         )
         collect_edit_population(
             collector,
-            "structural",
-            systems,
-            originals[systems],
-            structural,
-            ("iteration.structural.p50_ns", "iteration.structural.p95_ns"),
+            EditScenario(
+                label="structural",
+                path=systems,
+                base=originals[systems],
+                variant=structural,
+                metric_ids=(
+                    "iteration.structural.p50_ns",
+                    "iteration.structural.p95_ns",
+                ),
+                build=True,
+            ),
             baseline,
-            build=True,
         )
         coverage, coverage_log = collector.command(
             PUBLIC_SURFACE_ARGS,
             "public-surface-check.log",
         )
         checks["public_surface"] = {
-            "exit_status": coverage.returncode,
-            "log": coverage_log,
+            "exit_code": coverage.returncode,
+            "timed_out": coverage.timed_out,
+            "output_overflowed": coverage.overflowed,
+            "diagnostic_log": coverage_log,
             "metric_admitted": False,
-            "reason": UNAVAILABLE_REASONS["public.production.coverage_basis_points"],
+            "reason": COVERAGE_NON_CLAIM,
         }
         if coverage.failed:
             raise MeasurementError("The public-surface check failed.")
@@ -1414,28 +1270,22 @@ def collect_first_playable(
                 path.write_bytes(contents)
             except OSError as error:
                 cleanup_error = MeasurementError(f"An isolated edit could not be restored: {error}")
-        if worktree_added:
-            try:
-                removal = run_process(
-                    ["git", "-C", os.fspath(subject), "worktree", "remove", os.fspath(worktree)],
-                    subject,
-                    git_environment("1"),
-                    60.0,
-                    output_limit=MAX_GIT_OUTPUT,
-                    log_path=output / "logs/cleanup-worktree.log",
-                )
-                if removal.failed:
-                    cleanup_error = MeasurementError("The detached worktree could not be removed.")
-            except MeasurementError as error:
-                cleanup_error = error
+        try:
+            cleanup_worktree(subject, worktree, output, diagnostic_logs)
+        except (UnicodeDecodeError, MeasurementError) as error:
+            cleanup_error = MeasurementError(f"The detached worktree cleanup failed: {error}")
         for name in SCRATCH_DIRECTORIES:
             try:
                 remove_owned_directory(output / name, output)
             except MeasurementError as error:
                 cleanup_error = error
         try:
-            clean_after, revision_after = clean_subject(subject)
-            if clean_after != subject or revision_after != revision:
+            clean_after, revision_after, collector_after = clean_subject(subject)
+            if (
+                clean_after != subject
+                or revision_after != revision
+                or collector_after != collector_sha256
+            ):
                 cleanup_error = MeasurementError("The source repository changed during collection.")
         except MeasurementError as error:
             cleanup_error = error
@@ -1446,75 +1296,39 @@ def collect_first_playable(
         if len(records) > MAX_RAW_SAMPLES or len(raw) > MAX_RAW_BYTES:
             collection_error = MeasurementError("The raw sample budget was exceeded.")
         write_bytes(output / RAW_FILENAME, raw, "raw sample artifact")
-        observed: dict[str, int] = {}
-        for record in records:
-            if record["sample_value"] is not None:
-                metric = record["metric_id"]
-                observed[metric] = observed.get(metric, 0) + 1
-        missing = build_missing_metrics(requirements, observed)
         write_json(
             output / RUN_FILENAME,
             {
                 "schema": RUN_SCHEMA,
-                "format_version": 2,
-                "status": "collection_failed" if collection_error else "automatic_slice_complete",
-                "decision": "not_evaluated",
+                "status": "failed" if collection_error else "collected",
                 "source_revision": revision,
+                "collector_sha256": collector_sha256,
                 "started_at_utc": started_at,
                 "completed_at_utc": utc_now(),
                 "environment": environment_record,
-                "raw_sample_count": len(records),
-                "raw_samples_sha256": digest(raw),
+                "metric_catalog_sha256": catalog_sha256,
+                "raw_samples": {
+                    "path": RAW_FILENAME,
+                    "count": len(records),
+                    "sha256": digest(raw),
+                },
+                "diagnostic_logs": {"directory": "logs", "canonical": False},
                 "base_terminal_summary": baseline,
                 "base_terminal_summary_digest": baseline_digest,
-                "observed_sample_counts": observed,
-                "missing_metrics": missing,
                 "checks": checks,
                 "failure": str(collection_error) if collection_error else None,
                 "non_claims": list(RUN_NON_CLAIMS),
             },
         )
+    verify_transport(
+        subject,
+        revision,
+        collector_sha256,
+        catalog_sha256,
+        output,
+    )
     if collection_error is not None:
         raise collection_error
-
-
-def missing_reason(metric: str) -> str:
-    if metric == "gameplay.desktop_playable_success":
-        return "Manual desktop playability was not inferred from process exit."
-    if metric == "journey.clean_to_desktop_playable_ns":
-        return "No current human-timed clean desktop journey was supplied."
-    return UNAVAILABLE_REASONS.get(
-        metric,
-        "The automatic collection did not reach the metric's required sample count.",
-    )
-
-
-def build_missing_metrics(
-    requirements: dict[str, dict[str, Any]], observed: dict[str, int]
-) -> list[dict[str, Any]]:
-    return [
-        {
-            "id": metric,
-            "required_samples": requirement["minimum_samples"],
-            "observed_samples": observed.get(metric, 0),
-            "reason": missing_reason(metric),
-        }
-        for metric, requirement in sorted(requirements.items())
-        if observed.get(metric, 0) < requirement["minimum_samples"]
-    ]
-
-
-def verify_log(run: Path, reference: object) -> str:
-    if not isinstance(reference, str) or not reference.startswith("logs/"):
-        raise MeasurementError("A raw sample has an invalid log reference.")
-    relative = Path(reference)
-    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != reference:
-        raise MeasurementError("A raw sample log reference escaped the run.")
-    path = resolve(run / relative, "sample log")
-    if not within(path, run) or not path.is_file() or path.is_symlink():
-        raise MeasurementError("A raw sample log is not a regular run-owned file.")
-    read_bounded(path, MAX_COMMAND_OUTPUT, "sample log")
-    return reference
 
 
 def is_sha256(value: object) -> bool:
@@ -1525,259 +1339,129 @@ def is_sha256(value: object) -> bool:
     )
 
 
-def collector_repository() -> Path:
-    collector = resolve(Path(__file__), "collector")
-    try:
-        repository = collector.parents[2]
-    except IndexError as error:
-        raise MeasurementError("The collector is not inside its repository layout.") from error
-    if not (repository / CATALOG_PATH).is_file():
-        raise MeasurementError("The collector cannot locate its committed metric catalog.")
-    return repository
-
-
-def verify_environment(environment: object, *, complete: bool, has_records: bool) -> str | None:
-    if not isinstance(environment, dict):
-        raise MeasurementError("The run environment is not an object.")
-    if not environment:
-        if complete or has_records:
-            raise MeasurementError("A completed or sampled run lacks its environment.")
-        return None
-    expected_fields = {
-        *ENVIRONMENT_FIELDS,
-        "cargo_build_jobs",
-        "cargo_network",
-        "fingerprint",
-    }
-    if set(environment) != expected_fields:
-        raise MeasurementError("The run environment has an invalid field set.")
-    if any(
-        not isinstance(environment[field], str) or not environment[field].strip()
-        for field in ENVIRONMENT_FIELDS
-    ):
-        raise MeasurementError("The run environment has an empty identity field.")
-    if environment["cargo_build_jobs"] != 1 or environment["cargo_network"] != "offline_after_fetch":
-        raise MeasurementError("The run environment changed its Cargo isolation contract.")
-    collector_sha256 = digest(read_bounded(Path(__file__), MAX_SOURCE_BYTES, "collector"))
-    if environment["collector_revision"] != collector_sha256:
-        raise MeasurementError("The run was produced by a different collector revision.")
-    fingerprint = environment["fingerprint"]
-    fingerprint_input = dict(environment)
-    fingerprint_input.pop("fingerprint")
-    if not is_sha256(fingerprint) or fingerprint != digest(canonical_json(fingerprint_input)):
-        raise MeasurementError("The run environment fingerprint does not match.")
-    return fingerprint
-
-
-def verify_run(argument: Path) -> None:
-    run = resolve(argument, "measurement run")
-    if not run.is_dir():
-        raise MeasurementError("The measurement run must be a directory.")
-    manifest = read_json(run / RUN_FILENAME, MAX_MANIFEST_BYTES, "run manifest")
-    plan = read_json(run / PLAN_FILENAME, MAX_MANIFEST_BYTES, "measurement plan")
-    raw = read_bounded(run / RAW_FILENAME, MAX_RAW_BYTES, "raw samples")
-    status = manifest.get("status")
+def read_raw_records(run: Path, descriptor: object, revision: str) -> list[dict[str, Any]]:
     if (
-        set(manifest)
-        != {
-            "schema",
-            "format_version",
-            "status",
-            "decision",
-            "source_revision",
-            "started_at_utc",
-            "completed_at_utc",
-            "environment",
-            "raw_sample_count",
-            "raw_samples_sha256",
-            "base_terminal_summary",
-            "base_terminal_summary_digest",
-            "observed_sample_counts",
-            "missing_metrics",
-            "checks",
-            "failure",
-            "non_claims",
-        }
-        or manifest.get("schema") != RUN_SCHEMA
-        or manifest.get("format_version") != 2
-        or status not in {"automatic_slice_complete", "collection_failed"}
-        or manifest.get("decision") != "not_evaluated"
+        not isinstance(descriptor, dict)
+        or set(descriptor) != {"path", "count", "sha256"}
+        or descriptor.get("path") != RAW_FILENAME
+        or not isinstance(descriptor.get("count"), int)
+        or isinstance(descriptor.get("count"), bool)
+        or not 0 <= descriptor["count"] <= MAX_RAW_SAMPLES
+        or not is_sha256(descriptor.get("sha256"))
     ):
-        raise MeasurementError("The run manifest has an invalid contract.")
-    failure = manifest.get("failure")
-    if (status == "collection_failed") != (isinstance(failure, str) and bool(failure)):
-        raise MeasurementError("The run status and failure do not agree.")
-    revision = manifest.get("source_revision")
-    if (
-        not isinstance(revision, str)
-        or len(revision) != 40
-        or any(character not in "0123456789abcdef" for character in revision)
-    ):
-        raise MeasurementError("The run lacks one full source revision.")
-    expected_requirements, catalog_sha256 = load_requirements(collector_repository())
-    if plan != plan_payload(revision, expected_requirements, catalog_sha256):
-        raise MeasurementError("The run plan does not match the committed protocol.")
-    requirements = {item["id"]: item for item in expected_requirements}
-    if manifest.get("raw_samples_sha256") != digest(raw):
-        raise MeasurementError("The manifest does not bind the raw samples.")
+        raise MeasurementError("The raw-sample descriptor is invalid.")
+    raw = read_bounded(run / RAW_FILENAME, MAX_RAW_BYTES, "raw sample artifact")
+    if digest(raw) != descriptor["sha256"]:
+        raise MeasurementError("The raw-sample digest does not match.")
     lines = raw.splitlines()
-    if len(lines) > MAX_RAW_SAMPLES or manifest.get("raw_sample_count") != len(lines):
-        raise MeasurementError("The manifest does not bind the raw sample count.")
-    fingerprint = verify_environment(
-        manifest.get("environment"),
-        complete=status == "automatic_slice_complete",
-        has_records=bool(lines),
-    )
-
-    observed: dict[str, int] = {}
-    indices: dict[str, int] = {}
-    series: dict[str, list[tuple[object, object, object]]] = {}
-    verified_logs: set[str] = set()
+    if len(lines) != descriptor["count"] or any(not line for line in lines):
+        raise MeasurementError("The raw-sample count does not match.")
+    records = []
     for line in lines:
-        if not line or len(line) > MAX_RAW_LINE_BYTES:
-            raise MeasurementError("A raw sample is empty or oversized.")
+        if len(line) > MAX_RAW_LINE_BYTES:
+            raise MeasurementError("A raw-sample line exceeded its byte budget.")
         try:
             record = json.loads(line)
         except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
-            raise MeasurementError("A raw sample is invalid JSON.") from error
-        if not isinstance(record, dict) or set(record) != RAW_FIELD_SET:
-            raise MeasurementError("A raw sample has an invalid field set.")
-        metric = record["metric_id"]
-        if metric not in requirements:
-            raise MeasurementError("A raw sample names an unknown metric.")
-        expected_index = indices.get(metric, 0) + 1
+            raise MeasurementError("A raw-sample line is not valid JSON.") from error
+        if not isinstance(record, dict) or record.get("source_revision") != revision:
+            raise MeasurementError("A raw sample has an invalid source identity.")
+        metric_id = record.get("metric_id")
+        sample_index = record.get("sample_index")
+        sample_value = record.get("sample_value")
+        command = record.get("command")
         if (
-            not isinstance(record["sample_index"], int)
-            or isinstance(record["sample_index"], bool)
-            or record["sample_index"] != expected_index
-        ):
-            raise MeasurementError("Raw sample indices are not contiguous.")
-        indices[metric] = expected_index
-        value = record["sample_value"]
-        exit_status = record["exit_status"]
-        if (
-            not isinstance(exit_status, int)
-            or isinstance(exit_status, bool)
+            not isinstance(metric_id, str)
+            or not metric_id
+            or not isinstance(sample_index, int)
+            or isinstance(sample_index, bool)
+            or sample_index <= 0
             or (
-                value is not None
+                sample_value is not None
                 and (
-                    not isinstance(value, int)
-                    or isinstance(value, bool)
-                    or value < 0
+                    not isinstance(sample_value, int)
+                    or isinstance(sample_value, bool)
+                    or sample_value < 0
                 )
             )
+            or not isinstance(command, dict)
+            or set(command)
+            != {"exit_code", "timed_out", "output_overflowed", "diagnostic_log"}
+            or not isinstance(command.get("exit_code"), int)
+            or isinstance(command.get("exit_code"), bool)
+            or not isinstance(command.get("timed_out"), bool)
+            or not isinstance(command.get("output_overflowed"), bool)
+            or not isinstance(command.get("diagnostic_log"), str)
+            or not command["diagnostic_log"].startswith("logs/")
         ):
-            raise MeasurementError("A raw sample has an invalid numeric field.")
-        if requirements[metric]["value_kind"] == "boolean" and value not in {None, 0, 1}:
-            raise MeasurementError("A boolean raw sample is not zero or one.")
-        if metric == "gameplay.headless_wave_success" and value not in {None, 1}:
-            raise MeasurementError("The headless success metric contains an explicit false value.")
-        for field in (
-            "started_at_utc",
-            "completed_at_utc",
-        ):
-            if not isinstance(record[field], str) or not record[field]:
-                raise MeasurementError(f"A raw sample has an invalid `{field}` field.")
-        requirement = requirements[metric]
-        if (
-            record["value_unit"] != requirement["value_kind"]
-            or record["population"] != requirement["population"]
-            or record["mechanism"] != requirement["method_id"]
-            or record["start_boundary"] != requirement["start_boundary_id"]
-            or record["end_boundary"] != requirement["end_boundary_id"]
-        ):
-            raise MeasurementError("A raw sample does not match its metric protocol.")
-        if record["source_revision"] != revision or record["environment_fingerprint"] != fingerprint:
-            raise MeasurementError("A raw sample does not belong to this run.")
-        log = record["command_output_reference"]
-        if not isinstance(log, str):
-            raise MeasurementError("A raw sample has an invalid log reference.")
-        if log not in verified_logs:
-            verify_log(run, log)
-            verified_logs.add(log)
-        failed = value is None or exit_status != 0
-        result_digest = record["result_digest"]
-        if result_digest is not None and not is_sha256(result_digest):
-            raise MeasurementError("A raw sample result digest is invalid.")
-        if not failed and metric in SEMANTIC_METRICS and not is_sha256(result_digest):
-            raise MeasurementError("A semantic raw sample lacks its result digest.")
-        if not failed:
-            observed[metric] = observed.get(metric, 0) + 1
-        series.setdefault(metric, []).append((value, exit_status, result_digest))
-    if manifest.get("observed_sample_counts") != observed:
-        raise MeasurementError("The manifest sample counts do not match the raw samples.")
-    for left, right in TWIN_METRICS:
-        if series.get(left) != series.get(right):
-            raise MeasurementError("A P50/P95 pair does not share one raw population.")
-    if status == "automatic_slice_complete" and any(
-        observed.get(metric, 0) < requirements[metric]["minimum_samples"]
-        for metric in AUTOMATIC_METRICS
+            raise MeasurementError("A raw sample has an invalid transport shape.")
+        records.append(record)
+    return records
+
+
+def verify_transport(
+    subject: Path,
+    revision: str,
+    collector_sha256: str,
+    catalog_sha256: str,
+    argument: Path,
+) -> None:
+    if argument.is_symlink():
+        raise MeasurementError("The measurement run must not be a symbolic link.")
+    run = resolve(argument, "measurement run")
+    if within(run, subject) or not run.is_dir():
+        raise MeasurementError("The measurement run must be an external regular directory.")
+    manifest = read_json(run / RUN_FILENAME, MAX_MANIFEST_BYTES, "run manifest")
+    expected_fields = {
+        "schema",
+        "status",
+        "source_revision",
+        "collector_sha256",
+        "started_at_utc",
+        "completed_at_utc",
+        "environment",
+        "metric_catalog_sha256",
+        "raw_samples",
+        "diagnostic_logs",
+        "base_terminal_summary",
+        "base_terminal_summary_digest",
+        "checks",
+        "failure",
+        "non_claims",
+    }
+    status = manifest.get("status")
+    failure = manifest.get("failure")
+    diagnostic_logs = manifest.get("diagnostic_logs")
+    if (
+        set(manifest) != expected_fields
+        or manifest.get("schema") != RUN_SCHEMA
+        or status not in {"collected", "failed"}
+        or manifest.get("source_revision") != revision
+        or manifest.get("collector_sha256") != collector_sha256
+        or not isinstance(manifest.get("environment"), dict)
+        or not isinstance(manifest.get("checks"), dict)
+        or not isinstance(manifest.get("non_claims"), list)
+        or not all(isinstance(item, str) for item in manifest["non_claims"])
+        or diagnostic_logs != {"directory": "logs", "canonical": False}
+        or (status == "collected" and failure is not None)
+        or (status == "failed" and (not isinstance(failure, str) or not failure))
     ):
-        raise MeasurementError("The completed automatic slice lacks required samples.")
-    missing = build_missing_metrics(requirements, observed)
-    if manifest.get("missing_metrics") != missing:
-        raise MeasurementError("The manifest does not truthfully name missing metrics.")
-    if manifest.get("non_claims") != list(RUN_NON_CLAIMS):
-        raise MeasurementError("The run changed its non-claims.")
-    summary = manifest.get("base_terminal_summary")
-    if summary is not None:
-        _, summary_digest = terminal_summary(canonical_json(summary) + b"\n")
-        if manifest.get("base_terminal_summary_digest") != summary_digest:
-            raise MeasurementError("The terminal summary digest does not match.")
-        data_variant = dict(summary)
-        data_variant["player_hit_points"] = 21
-        data_variant_digest = digest(canonical_json(data_variant))
-        for metric in (
-            "gameplay.headless_wave_success",
-            "journey.clean_to_headless_wave_ns",
-        ):
-            if any(
-                value is not None and exit_status == 0 and result != summary_digest
-                for value, exit_status, result in series.get(metric, ())
-            ):
-                raise MeasurementError("A base-wave sample changed its terminal result.")
-        for metric, records in series.items():
-            if metric.startswith("iteration.body.") or metric.startswith(
-                "iteration.structural."
-            ):
-                if any(
-                    value is not None and exit_status == 0 and result != summary_digest
-                    for value, exit_status, result in records
-                ):
-                    raise MeasurementError("A behavior-neutral edit changed its terminal result.")
-            elif metric.startswith("iteration.data."):
-                for index, (value, exit_status, result) in enumerate(records, start=1):
-                    expected = summary_digest if index % 2 == 0 else data_variant_digest
-                    if value is not None and exit_status == 0 and result != expected:
-                        raise MeasurementError("A data edit result does not match its variant.")
-    elif status == "automatic_slice_complete":
-        raise MeasurementError("A completed run lacks its terminal summary.")
-    checks = manifest.get("checks")
-    if not isinstance(checks, dict) or not set(checks).issubset({"public_surface"}):
-        raise MeasurementError("The run checks are not an object.")
-    public_surface = checks.get("public_surface")
-    if public_surface is not None:
-        expected_fields = {"exit_status", "log", "metric_admitted", "reason"}
-        if (
-            not isinstance(public_surface, dict)
-            or set(public_surface) != expected_fields
-            or not isinstance(public_surface.get("exit_status"), int)
-            or isinstance(public_surface.get("exit_status"), bool)
-            or public_surface.get("log") != "logs/public-surface-check.log"
-            or public_surface.get("metric_admitted") is not False
-            or public_surface.get("reason")
-            != UNAVAILABLE_REASONS["public.production.coverage_basis_points"]
-        ):
-            raise MeasurementError("The public-surface check has an invalid contract.")
-        verify_log(run, public_surface["log"])
-    if status == "automatic_slice_complete":
-        if public_surface is None or public_surface["exit_status"] != 0:
-            raise MeasurementError("The completed run lacks its public-surface check.")
-    elif failure == "The public-surface check failed.":
-        if public_surface is None or public_surface["exit_status"] == 0:
-            raise MeasurementError("The failed public-surface check lost its evidence.")
-    elif public_surface is not None and public_surface["exit_status"] != 0:
-        raise MeasurementError("The run failure does not match its public-surface check.")
+        raise MeasurementError("The run manifest has an invalid transport contract.")
+    if manifest.get("metric_catalog_sha256") != catalog_sha256:
+        raise MeasurementError("The run uses a different metric catalog.")
+    read_raw_records(run, manifest.get("raw_samples"), revision)
+
+
+def verify_run(subject_argument: Path, argument: Path) -> None:
+    subject, revision, collector_sha256 = clean_subject(subject_argument)
+    _, catalog_sha256 = load_requirements(subject)
+    verify_transport(
+        subject,
+        revision,
+        collector_sha256,
+        catalog_sha256,
+        argument,
+    )
 
 
 def positive_seconds(value: str) -> float:
@@ -1798,9 +1482,6 @@ def parser() -> argparse.ArgumentParser:
         )
     )
     commands = result.add_subparsers(dest="command", required=True)
-    plan = commands.add_parser("plan", help="write a non-executing collection plan")
-    plan.add_argument("--subject", type=Path, required=True)
-    plan.add_argument("--output", type=Path, required=True)
     collect = commands.add_parser("collect", help="collect the automatic slice")
     collect.add_argument("--subject", type=Path, required=True)
     collect.add_argument("--output", type=Path, required=True)
@@ -1810,7 +1491,8 @@ def parser() -> argparse.ArgumentParser:
         type=positive_seconds,
         default=DEFAULT_COMMAND_TIMEOUT_SECONDS,
     )
-    verify = commands.add_parser("verify", help="verify one fresh local run")
+    verify = commands.add_parser("verify", help="verify one bounded local transport")
+    verify.add_argument("--subject", type=Path, required=True)
     verify.add_argument("--run", type=Path, required=True)
     return result
 
@@ -1818,9 +1500,7 @@ def parser() -> argparse.ArgumentParser:
 def main(arguments: Sequence[str] | None = None) -> int:
     options = parser().parse_args(arguments)
     try:
-        if options.command == "plan":
-            create_plan(options.subject, options.output)
-        elif options.command == "collect":
+        if options.command == "collect":
             collect_first_playable(
                 options.subject,
                 options.output,
@@ -1828,7 +1508,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 options.command_timeout_seconds,
             )
         elif options.command == "verify":
-            verify_run(options.run)
+            verify_run(options.subject, options.run)
         else:
             raise AssertionError(f"unhandled command: {options.command}")
     except MeasurementError as error:
