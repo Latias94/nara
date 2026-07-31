@@ -328,21 +328,41 @@ fn git_status(subject: &Path) -> String {
 }
 
 fn run_collection(subject: &Path, output: &Path) -> Output {
-    run_collection_with_timeout(subject, output, "10")
+    run_collection_with_environment(subject, output, &[])
 }
 
 fn run_collection_with_timeout(subject: &Path, output: &Path, timeout: &str) -> Output {
-    run_helper(&[
-        Path::new("collect"),
-        Path::new("--subject"),
-        subject,
-        Path::new("--output"),
-        output,
-        Path::new("--cargo"),
-        Path::new("python"),
-        Path::new("--command-timeout-seconds"),
-        Path::new(timeout),
-    ])
+    run_collection_with_environment_and_timeout(subject, output, timeout, &[])
+}
+
+fn run_collection_with_environment(
+    subject: &Path,
+    output: &Path,
+    environment: &[(&str, &Path)],
+) -> Output {
+    run_collection_with_environment_and_timeout(subject, output, "10", environment)
+}
+
+fn run_collection_with_environment_and_timeout(
+    subject: &Path,
+    output: &Path,
+    timeout: &str,
+    environment: &[(&str, &Path)],
+) -> Output {
+    run_helper_with_environment(
+        &[
+            Path::new("collect"),
+            Path::new("--subject"),
+            subject,
+            Path::new("--output"),
+            output,
+            Path::new("--cargo"),
+            Path::new("python"),
+            Path::new("--command-timeout-seconds"),
+            Path::new(timeout),
+        ],
+        environment,
+    )
 }
 
 fn assert_collection_scratch_removed(output: &Path) {
@@ -781,6 +801,50 @@ fn collect_and_verify_use_an_isolated_worktree_and_restore_every_edit() {
         String::from_utf8_lossy(&verify.stderr)
     );
     assert_collection_scratch_removed(&output);
+}
+
+#[test]
+fn collection_preserves_explicit_compiler_environment() {
+    let temporary = TemporaryDirectory::new("compiler-environment");
+    let subject = create_collection_subject(temporary.path(), "subject", CollectionFailure::None);
+    fs::write(
+        subject.join("reference-game/build"),
+        r#"import os
+print(f"compiler-lib={os.environ.get('LIB', '')}")
+print(f"compiler-include={os.environ.get('INCLUDE', '')}")
+"#,
+    )
+    .expect("fake Cargo build command must be writable");
+    run_git(&subject, &["add", "reference-game/build"]);
+    run_git(
+        &subject,
+        &["commit", "--quiet", "-m", "record compiler environment"],
+    );
+    let output = temporary.path().join("measurement-output");
+    let library_path = temporary.path().join("compiler-library");
+    let include_path = temporary.path().join("compiler-include");
+
+    let result = run_collection_with_environment(
+        &subject,
+        &output,
+        &[("LIB", &library_path), ("INCLUDE", &include_path)],
+    );
+
+    assert!(
+        result.status.success(),
+        "collection failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let cold_build_log = fs::read_to_string(output.join("logs/cold-build-01.log"))
+        .expect("the first cold build log must exist");
+    assert!(
+        cold_build_log.contains(&format!("compiler-lib={}", library_path.display())),
+        "the isolated command must retain the explicit compiler library path"
+    );
+    assert!(
+        cold_build_log.contains(&format!("compiler-include={}", include_path.display())),
+        "the isolated command must retain the explicit compiler include path"
+    );
 }
 
 #[test]
