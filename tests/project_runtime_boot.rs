@@ -14,6 +14,7 @@ use std::{
 };
 
 use nara::{
+    ProductRecipe,
     app::{
         App, AppExitRequests, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginCategory,
         PluginDeclaration, PluginDefinition, PluginDefinitionId, PluginError, PluginId,
@@ -219,6 +220,31 @@ fn execute_to_terminal(run: &mut HeadlessRun<BootOutcome>) -> HeadlessRunReport<
         assert!(Instant::now() < deadline, "product cleanup did not finish");
         std::thread::yield_now();
     }
+}
+
+#[test]
+fn ordinary_recipe_headless_facade_owns_project_start_and_close() {
+    let project = TestProject::with_prefab_startup();
+    select_local_headless_profile(&project);
+    let recipe = ProductRecipe::new()
+        .add_plugin::<BootOutcomePlugin>()
+        .unwrap();
+    let mut run = HeadlessRun::from_recipe(
+        project.root_capability(),
+        recipe,
+        NonZeroU32::new(1).unwrap(),
+        Vec::new(),
+    );
+
+    let report = execute_to_terminal(&mut run);
+
+    assert_eq!(
+        report.outcome(),
+        &HeadlessRunOutcome::Completed(BootOutcome {
+            tick: 1,
+            scene_entities: vec!["enemy-anchor".to_owned(), "enemy-anchor/enemy".to_owned()],
+        })
+    );
 }
 
 fn select_local_headless_profile(project: &TestProject) {

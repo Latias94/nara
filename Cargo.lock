@@ -1577,6 +1577,7 @@ dependencies = [
  "serde_json",
  "static_assertions",
  "syn",
+ "thiserror 2.0.18",
  "toml",
  "tracing",
  "trybuild",

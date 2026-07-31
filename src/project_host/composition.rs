@@ -6,8 +6,8 @@ use std::{
 };
 
 use nara_app::{
-    EditedPluginGroup, EditedPluginGroupMarker, Plugin, PluginDefinition, PluginGroup, PluginId,
-    PluginPlan, PluginPlanError, PluginProductCapability, PluginSchemaProviderId, Plugins,
+    EditedPluginGroup, Plugin, PluginDefinition, PluginGroup, PluginGroupBuilder, PluginGroupId,
+    PluginId, PluginPlan, PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
 };
 use nara_fs::FileIdentity;
 use nara_project::{EffectiveProjectSettings, ProductCapability, ProductCapabilitySet};
@@ -158,6 +158,22 @@ impl fmt::Debug for ProjectSettingsCandidate {
 pub struct ProjectRuntimePlugins {
     lineage: ProjectSettingsLineage,
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
+    recipe: crate::ProductRecipe,
+}
+
+struct ProjectRuntimeAppPlugins {
+    plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
+    recipe: crate::ProductRecipe,
+}
+
+impl PluginGroup for ProjectRuntimeAppPlugins {
+    const ID: PluginGroupId = PluginGroupId::new("nara.plugins.project-runtime-app");
+
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::new()
+            .add_edited_group(self.plugins)
+            .add_group(self.recipe)
+    }
 }
 
 impl fmt::Debug for ProjectRuntimePlugins {
@@ -165,6 +181,7 @@ impl fmt::Debug for ProjectRuntimePlugins {
         formatter
             .debug_struct("ProjectRuntimePlugins")
             .field("lineage", &self.lineage)
+            .field("recipe", &self.recipe)
             .finish_non_exhaustive()
     }
 }
@@ -175,6 +192,7 @@ impl ProjectRuntimePlugins {
         Self {
             lineage: self.lineage,
             plugins: self.plugins.disable::<P>(),
+            recipe: self.recipe,
         }
     }
 
@@ -183,6 +201,7 @@ impl ProjectRuntimePlugins {
         Self {
             lineage: self.lineage,
             plugins: self.plugins.configure(definition),
+            recipe: self.recipe,
         }
     }
 
@@ -191,6 +210,7 @@ impl ProjectRuntimePlugins {
         Self {
             lineage: self.lineage,
             plugins: self.plugins.insert_after::<P>(definition),
+            recipe: self.recipe,
         }
     }
 
@@ -199,7 +219,15 @@ impl ProjectRuntimePlugins {
         Self {
             lineage: self.lineage,
             plugins: self.plugins.insert_before::<P>(definition),
+            recipe: self.recipe,
         }
+    }
+
+    /// Attaches the ordinary-author product recipe to this advanced project request.
+    #[must_use]
+    pub fn with_recipe(mut self, recipe: crate::ProductRecipe) -> Self {
+        self.recipe = recipe;
+        self
     }
 
     /// Returns this project recipe as ordinary `App::add_plugins` input.
@@ -209,8 +237,11 @@ impl ProjectRuntimePlugins {
     /// plan-local frozen registry definition, so callers must not compare this raw recipe's
     /// configuration fingerprint with an admitted plan and treat them as interchangeable.
     #[must_use]
-    pub fn into_app_plugins(self) -> impl Plugins<EditedPluginGroupMarker> {
-        self.plugins
+    pub fn into_app_plugins(self) -> impl PluginGroup {
+        ProjectRuntimeAppPlugins {
+            plugins: self.plugins,
+            recipe: self.recipe,
+        }
     }
 }
 
@@ -517,7 +548,29 @@ pub fn project_runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectR
             candidate.normalized_capabilities(),
         )
         .edit(),
+        recipe: crate::ProductRecipe::new(),
     }
+}
+
+/// Builds the file-backed project request for one ordinary product recipe.
+#[must_use]
+pub fn project_runtime_plugins_with_recipe(
+    candidate: &ProjectSettingsCandidate,
+    recipe: crate::ProductRecipe,
+) -> ProjectRuntimePlugins {
+    project_runtime_plugins(candidate).with_recipe(recipe)
+}
+
+/// Resolves one ordinary product recipe before creating an `App` or acquiring runtime authority.
+pub fn resolve_product_recipe(
+    candidate: &ProjectSettingsCandidate,
+    recipe: crate::ProductRecipe,
+) -> Result<RuntimePlan, RuntimePlanError> {
+    resolve_runtime_plan(
+        candidate,
+        project_runtime_plugins_with_recipe(candidate, recipe),
+        built_in_schema_providers(),
+    )
 }
 
 /// Resolves one project request without creating an `App` or acquiring runtime authority.
@@ -535,13 +588,17 @@ pub fn resolve_runtime_plan(
         return Err(CompositionError::ProjectLineageMismatch.into());
     }
 
+    let recipe_providers = request.recipe.schema_providers().collect::<Vec<_>>();
     let snapshot_cell = Arc::new(OnceLock::new());
     let request = request.configure(preloaded_component_registry_plugin(Arc::clone(
         &snapshot_cell,
     )));
-    let plugin_plan = PluginPlan::resolve(request.plugins)?;
+    let plugin_plan = PluginPlan::resolve((request.plugins, request.recipe))?;
     let required = resolve_product_requirements(candidate, &plugin_plan)?;
-    let schema_validation = resolve_schema_validation(&plugin_plan, known_providers)?;
+    let schema_validation = resolve_schema_validation(
+        &plugin_plan,
+        known_providers.into_iter().chain(recipe_providers),
+    )?;
     snapshot_cell
         .set(schema_validation.snapshot().clone())
         .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;

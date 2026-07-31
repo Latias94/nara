@@ -30,9 +30,10 @@ use nara_tooling::{
 };
 use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 
+use crate::ProductRecipe;
 use crate::project_host::{
     ProjectContentLoader, ProjectRuntimePlugins, built_in_schema_providers,
-    ingest_project_manifest, project_runtime_plugins, resolve_runtime_plan,
+    ingest_project_manifest, project_runtime_plugins_with_recipe, resolve_runtime_plan,
 };
 
 use super::{
@@ -286,6 +287,7 @@ fn apply_runtime_edit(
 pub struct EditorProjectIntent {
     profile: Option<String>,
     cleanup_policy: RuntimeClosePolicy,
+    recipe: ProductRecipe,
     plugin_edits: Vec<EditorPluginEdit>,
     schema_providers: Vec<ComponentSchemaProviderDefinition>,
 }
@@ -296,6 +298,7 @@ impl fmt::Debug for EditorProjectIntent {
             .debug_struct("EditorProjectIntent")
             .field("profile_present", &self.profile.is_some())
             .field("cleanup_policy", &self.cleanup_policy)
+            .field("recipe", &self.recipe)
             .field("plugin_edit_count", &self.plugin_edits.len())
             .field("schema_provider_count", &self.schema_providers.len())
             .finish_non_exhaustive()
@@ -314,6 +317,7 @@ impl EditorProjectIntent {
         Self {
             profile: None,
             cleanup_policy: RuntimeClosePolicy::default(),
+            recipe: ProductRecipe::new(),
             plugin_edits: Vec::new(),
             schema_providers: Vec::new(),
         }
@@ -328,6 +332,13 @@ impl EditorProjectIntent {
     #[must_use]
     pub fn with_cleanup_timeout(mut self, timeout: Duration) -> Self {
         self.cleanup_policy = RuntimeClosePolicy::new(timeout);
+        self
+    }
+
+    /// Uses one pure product recipe for this Editor project session.
+    #[must_use]
+    pub fn with_recipe(mut self, recipe: ProductRecipe) -> Self {
+        self.recipe = recipe;
         self
     }
 
@@ -489,6 +500,7 @@ impl EditorProjectSession {
         let EditorProjectIntent {
             profile,
             cleanup_policy,
+            recipe,
             plugin_edits,
             schema_providers,
         } = intent;
@@ -505,7 +517,7 @@ impl EditorProjectSession {
             })?;
         drop(manifest);
 
-        let mut request = project_runtime_plugins(&candidate);
+        let mut request = project_runtime_plugins_with_recipe(&candidate, recipe);
         for edit in plugin_edits {
             request = edit(request);
         }

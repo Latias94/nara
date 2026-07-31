@@ -92,7 +92,11 @@ pub use product::ToolingPlugins;
 #[cfg(feature = "render-wgpu")]
 pub use product::WgpuBackendPlugins;
 #[cfg(feature = "runtime-core")]
-pub use product::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
+pub use product::{
+    HeadlessRuntimePlugins, MinimalPlugins, ProductConfiguration, ProductRecipe,
+    ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,
+    ServerPlugins,
+};
 
 #[cfg(feature = "runtime-core")]
 pub mod prelude {
@@ -100,11 +104,15 @@ pub mod prelude {
     pub use crate::Runtime2dPlugins;
     #[cfg(feature = "runtime-ui")]
     pub use crate::RuntimeUiPlugins;
-    pub use crate::{HeadlessRuntimePlugins, MinimalPlugins, ServerPlugins};
+    pub use crate::{
+        HeadlessRuntimePlugins, MinimalPlugins, ProductConfiguration, ProductRecipe,
+        ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,
+        ServerPlugins,
+    };
     pub use nara_app::{
         AddPluginsError, App, AppExit, AppRunError, CoreStage, FixedCatchUpPolicy, FixedTime,
-        FixedUpdateSet, Plugin, PluginError, PluginGroup, RealTime, RuntimeTimeSettings,
-        StartupStage, VirtualTime,
+        FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginGroup,
+        PluginId, RealTime, RuntimeTimeSettings, StartupStage, VirtualTime,
     };
     pub use nara_asset::{
         Asset, AssetId, AssetPath, AssetRef, AssetServer, Assets, Handle, StableAssetId,

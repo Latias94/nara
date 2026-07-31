@@ -21,7 +21,7 @@ pub use composition::{
     CompiledProductCapabilities, CompositionError, ProjectRuntimePlugins, ProjectSettingsCandidate,
     ProjectSettingsLineage, RuntimePlan, RuntimePlanError, SchemaValidationInput,
     built_in_schema_providers, compiled_product_capabilities, project_runtime_plugins,
-    resolve_runtime_plan,
+    project_runtime_plugins_with_recipe, resolve_product_recipe, resolve_runtime_plan,
 };
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
 #[cfg(all(

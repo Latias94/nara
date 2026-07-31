@@ -141,6 +141,7 @@ nara_ui = { workspace = true, optional = true }
 nara_ui_render = { workspace = true, optional = true }
 nara_window = { workspace = true, optional = true }
 nara_winit = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 
 [dev-dependencies]
 bevy_ecs.workspace = true
@@ -175,6 +176,7 @@ runtime-core = [
     "dep:nara_tasks",
     "dep:nara_transform",
     "dep:nara_window",
+    "dep:thiserror",
 ]
 runtime-2d = [
     "runtime-core",

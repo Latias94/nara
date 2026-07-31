@@ -13,6 +13,7 @@ use std::{
 };
 
 use nara::{
+    ProductConfiguration, ProductRecipe,
     app::{
         App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
         PluginError, PluginId, PluginShutdownContext, PluginShutdownObligationId,
@@ -65,6 +66,14 @@ const RUNTIME_SERVICE_SESSION_DECLARATION: PluginDeclaration =
 
 static NEXT_RUNTIME_SERVICE_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
+struct RuntimeServiceSessionConfiguration(mpsc::SyncSender<u64>);
+
+impl ProductConfiguration for RuntimeServiceSessionConfiguration {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        output.extend_from_slice(b"editor-runtime-service-session-v1");
+    }
+}
+
 #[derive(Debug)]
 struct RuntimeServiceSessionPlugin {
     observations: mpsc::SyncSender<u64>,
@@ -112,6 +121,17 @@ fn runtime_service_session_definition(observations: mpsc::SyncSender<u64>) -> Pl
             observations: observations.clone(),
         },
     )
+}
+
+fn runtime_service_session_recipe(observations: mpsc::SyncSender<u64>) -> ProductRecipe {
+    ProductRecipe::new()
+        .add_configured_plugin(
+            RuntimeServiceSessionConfiguration(observations),
+            |configuration: &RuntimeServiceSessionConfiguration| RuntimeServiceSessionPlugin {
+                observations: configuration.0.clone(),
+            },
+        )
+        .unwrap()
 }
 
 #[derive(Debug)]
@@ -374,6 +394,45 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
             ..
         })
     ));
+}
+
+#[test]
+fn editor_product_recipe_runs_the_same_replayable_runtime_plugin() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let (observations, receiver) = mpsc::sync_channel(1);
+    let mut editor = EditorProjectSession::open(
+        project.root_capability(),
+        EditorProjectIntent::new().with_recipe(runtime_service_session_recipe(observations)),
+    )
+    .unwrap();
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Play),
+        EditorPlayRequestResult::Accepted
+    );
+    for _ in 0..32 {
+        if editor.play_view().state() == EditorPlayState::Running {
+            break;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::yield_now();
+    }
+
+    assert_eq!(editor.play_view().state(), EditorPlayState::Running);
+    assert!(receiver.recv_timeout(Duration::from_secs(1)).is_ok());
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Stop),
+        EditorPlayRequestResult::Accepted
+    );
+    for _ in 0..32 {
+        if editor.play_view().state() == EditorPlayState::Empty {
+            break;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::yield_now();
+    }
+    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
 }
 
 #[test]

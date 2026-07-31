@@ -321,7 +321,10 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
 #[test]
 fn public_prelude_is_gameplay_first() {
     check_public_prelude_fixture("gameplay-pass", true, None);
+    check_public_prelude_fixture("recipe-pass", true, None);
+    check_public_prelude_fixture("one-shot-direct-pass", true, None);
     check_public_prelude_fixture("explicit-surfaces-pass", true, None);
+    check_public_prelude_fixture("recipe-one-shot-fail", false, None);
     for (binary, symbol) in [
         ("backend-fail", "WindowEvents"),
         ("tooling-fail", "SceneInspectorState"),

@@ -105,6 +105,10 @@ const STARTUP_FAILURE_DEFINITION_ID: PluginDefinitionId =
 const STARTUP_FAILURE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(STARTUP_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[CLOSE_PROBE_PLUGIN_ID]);
+const RECIPE_STARTUP_FAILURE_PLUGIN_ID: PluginId =
+    PluginId::new("nara.test.product-recipe-startup-failure");
+const RECIPE_STARTUP_FAILURE_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(RECIPE_STARTUP_FAILURE_PLUGIN_ID, PluginCategory::Runtime);
 const BLOCKING_TASK_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-blocking-task");
 const BLOCKING_TASK_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.project-blocking-task", 1);
@@ -301,6 +305,20 @@ struct StartupFailurePlugin;
 impl Plugin for StartupFailurePlugin {
     fn declaration() -> &'static PluginDeclaration {
         &STARTUP_FAILURE_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(StartupStage::Runtime, fail_project_startup)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct RecipeStartupFailurePlugin;
+
+impl Plugin for RecipeStartupFailurePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &RECIPE_STARTUP_FAILURE_DECLARATION
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -1133,6 +1151,29 @@ fn desktop_product_report_preserves_a_real_candidate_startup_failure() {
     }));
     assert_eq!(builds.load(Ordering::SeqCst), 1);
     assert_eq!(closes.load(Ordering::SeqCst), 1);
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+#[test]
+fn desktop_recipe_facade_reports_startup_failure_before_opening_a_window() {
+    let project = TestProject::new("desktop-recipe-startup-failure");
+    let recipe = crate::ProductRecipe::new()
+        .add_plugin::<RecipeStartupFailurePlugin>()
+        .unwrap();
+    let mut run = DesktopRun::from_recipe(project.capability(), recipe);
+
+    let report = (0..8)
+        .find_map(|_| {
+            let report = run.execute();
+            (report.outcome() != DesktopRunOutcome::CleanupIncomplete).then_some(report)
+        })
+        .expect("desktop recipe startup failure should reach a bounded terminal report");
+
+    assert_eq!(report.outcome(), DesktopRunOutcome::Failed);
+    assert!(report.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.run.startup-failed"
+            && diagnostic.summary().as_str() == "Project runtime startup failed"
+    }));
 }
 
 #[test]

@@ -1,12 +1,14 @@
 use std::{
     fs::{self, File},
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 
 use nara::{
+    MinimalPlugins, ProductConfiguration, ProductRecipe, ProductRecipeEntryKind,
+    ProductRecipeError, SchemaContribution,
     app::{
         AddPluginsError, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError,
         PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
@@ -16,7 +18,8 @@ use nara::{
     project::ProductCapability,
     project_host::{
         CompositionError, ProjectRuntimePlugins, RuntimePlanError, built_in_schema_providers,
-        ingest_project_manifest, project_runtime_plugins, resolve_runtime_plan,
+        ingest_project_manifest, project_runtime_plugins, resolve_product_recipe,
+        resolve_runtime_plan,
     },
     reflect::{
         ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
@@ -98,6 +101,10 @@ const TEST_SCHEMA_PROVIDER_BINDING_ID: ComponentSchemaProviderBindingId =
 const TEST_SCHEMA_PROVIDER_SECOND_BINDING_ID: ComponentSchemaProviderBindingId =
     ComponentSchemaProviderBindingId::new("test.schema-provider.components.alternate", 1);
 const TEST_COUNTED_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.counted-schema-provider");
+const TEST_CONFIGURED_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.configured-schema-provider");
+const TEST_CONTRIBUTION_OWNED_SCHEMA_PLUGIN_ID: PluginId =
+    PluginId::new("test.contribution-owned-schema-provider");
+const TEST_DIVERGENT_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.divergent-schema-provider");
 const TEST_COUNTED_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
     PluginSchemaProviderId::new("test.counted-schema-provider.components");
 const TEST_COUNTED_SCHEMA_OWNER_ID: ComponentSchemaOwnerId =
@@ -108,10 +115,79 @@ const TEST_COUNTED_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(TEST_COUNTED_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
         .provides_schema(&[TEST_COUNTED_SCHEMA_PROVIDER_ID]);
+const TEST_CONFIGURED_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TEST_CONFIGURED_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
+        .provides_schema(&[TEST_COUNTED_SCHEMA_PROVIDER_ID]);
+const TEST_CONTRIBUTION_OWNED_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(
+        TEST_CONTRIBUTION_OWNED_SCHEMA_PLUGIN_ID,
+        PluginCategory::Runtime,
+    )
+    .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
+    .provides_schema(&[TEST_COUNTED_SCHEMA_PROVIDER_ID]);
+const TEST_DIVERGENT_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TEST_DIVERGENT_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
+        .provides_schema(&[TEST_COUNTED_SCHEMA_PROVIDER_ID]);
+
+const TEST_RECIPE_PLUGIN_ID: PluginId = PluginId::new("test.product-recipe.runtime");
+const TEST_RECIPE_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TEST_RECIPE_PLUGIN_ID, PluginCategory::Runtime);
+const TEST_DEFAULT_RECIPE_PLUGIN_ID: PluginId =
+    PluginId::new("test.product-recipe.default-runtime");
+const TEST_DEFAULT_RECIPE_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TEST_DEFAULT_RECIPE_PLUGIN_ID, PluginCategory::Runtime);
 
 static COUNTED_PROVIDER_VALIDATIONS: AtomicUsize = AtomicUsize::new(0);
 static COUNTED_PROVIDER_REGISTRATIONS: AtomicUsize = AtomicUsize::new(0);
 static COUNTED_PROVIDER_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+struct RecipeProbeConfiguration(u32);
+
+impl ProductConfiguration for RecipeProbeConfiguration {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        output.extend_from_slice(&self.0.to_le_bytes());
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, nara::ecs::Resource)]
+struct RecipeProbe {
+    value: u32,
+    instance: usize,
+}
+
+struct RecipeProbePlugin {
+    value: u32,
+    instance: usize,
+}
+
+impl Plugin for RecipeProbePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_RECIPE_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
+        app.world_mut()?.insert_resource(RecipeProbe {
+            value: self.value,
+            instance: self.instance,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct DefaultRecipePlugin;
+
+impl Plugin for DefaultRecipePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_DEFAULT_RECIPE_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, _app: &mut nara::app::App) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
 
 fn empty_schema_catalog_source()
 -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
@@ -306,6 +382,81 @@ impl Plugin for CountedSchemaProviderPlugin {
     }
 }
 
+#[derive(Default)]
+struct ContributionOwnedSchemaProviderPlugin;
+
+impl Plugin for ContributionOwnedSchemaProviderPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_CONTRIBUTION_OWNED_SCHEMA_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, _app: &mut nara::app::App) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct DivergentSchemaProviderPlugin;
+
+impl Plugin for DivergentSchemaProviderPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_DIVERGENT_SCHEMA_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
+        nara::reflect::register_schema_provider_for_plugin(
+            app,
+            TEST_DIVERGENT_SCHEMA_PLUGIN_ID,
+            TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+            &alternate_counted_schema_provider(),
+        )
+    }
+}
+
+struct ConfiguredSchemaProviderPlugin {
+    value: u32,
+}
+
+impl Plugin for ConfiguredSchemaProviderPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_CONFIGURED_SCHEMA_PLUGIN_DECLARATION
+    }
+
+    fn preflight(
+        &self,
+        context: &nara::app::PluginPreflightContext<'_>,
+    ) -> Result<(), PluginError> {
+        let registry = nara::reflect::registry_for_plugin_preflight(
+            context,
+            TEST_CONFIGURED_SCHEMA_PLUGIN_ID,
+            TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+        )?;
+        counted_schema_provider()
+            .preflight(registry)
+            .map_err(|error| {
+                PluginError::component_registration(
+                    TEST_CONFIGURED_SCHEMA_PLUGIN_ID,
+                    TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+                    error,
+                )
+            })
+    }
+
+    fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
+        nara::reflect::register_schema_provider_for_plugin(
+            app,
+            TEST_CONFIGURED_SCHEMA_PLUGIN_ID,
+            TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
+            &counted_schema_provider(),
+        )?;
+        app.world_mut()?.insert_resource(RecipeProbe {
+            value: self.value,
+            instance: 0,
+        });
+        Ok(())
+    }
+}
+
 struct ReceiptValidatingSchemaProviderPlugin {
     provider: ComponentSchemaProviderDefinition,
 }
@@ -370,6 +521,287 @@ impl Plugin for ReentrantProjectRequestPlugin {
         ));
         Ok(())
     }
+}
+
+#[test]
+fn product_recipe_configuration_replaces_typed_entry_and_reconstructs_fresh_plugins() {
+    let instances = Arc::new(AtomicUsize::new(0));
+    let first_instances = Arc::clone(&instances);
+    let recipe = ProductRecipe::new()
+        .add_configured_plugin(
+            RecipeProbeConfiguration(7),
+            move |configuration: &RecipeProbeConfiguration| RecipeProbePlugin {
+                value: configuration.0,
+                instance: first_instances.fetch_add(1, Ordering::SeqCst),
+            },
+        )
+        .unwrap();
+    let first_fingerprint = recipe.entries().next().unwrap().configuration_fingerprint();
+    let replacement_instances = Arc::clone(&instances);
+    let recipe = recipe
+        .configure_plugin(
+            RecipeProbeConfiguration(11),
+            move |configuration: &RecipeProbeConfiguration| RecipeProbePlugin {
+                value: configuration.0,
+                instance: replacement_instances.fetch_add(1, Ordering::SeqCst),
+            },
+        )
+        .unwrap();
+    let entry = recipe.entries().next().unwrap();
+    assert_eq!(recipe.len(), 1);
+    assert_eq!(entry.plugin_id(), TEST_RECIPE_PLUGIN_ID);
+    assert_eq!(entry.kind(), ProductRecipeEntryKind::RuntimePlugin);
+    assert_ne!(entry.configuration_fingerprint(), first_fingerprint);
+
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let first = resolve_product_recipe(&candidate, recipe.clone()).unwrap();
+    let second = resolve_product_recipe(&candidate, recipe).unwrap();
+    let independently_reconstructed_instances = Arc::new(AtomicUsize::new(0));
+    let independently_reconstructed_counter = Arc::clone(&independently_reconstructed_instances);
+    let independently_reconstructed = ProductRecipe::new()
+        .add_configured_plugin(
+            RecipeProbeConfiguration(11),
+            move |configuration: &RecipeProbeConfiguration| RecipeProbePlugin {
+                value: configuration.0,
+                instance: independently_reconstructed_counter.fetch_add(1, Ordering::SeqCst),
+            },
+        )
+        .unwrap();
+    let independently_reconstructed =
+        resolve_product_recipe(&candidate, independently_reconstructed).unwrap();
+    let first_key = first
+        .plugin_plan()
+        .entries()
+        .iter()
+        .find(|entry| entry.plugin_id() == TEST_RECIPE_PLUGIN_ID)
+        .unwrap()
+        .definition_key();
+    let second_key = second
+        .plugin_plan()
+        .entries()
+        .iter()
+        .find(|entry| entry.plugin_id() == TEST_RECIPE_PLUGIN_ID)
+        .unwrap()
+        .definition_key();
+    let independently_reconstructed_key = independently_reconstructed
+        .plugin_plan()
+        .entries()
+        .iter()
+        .find(|entry| entry.plugin_id() == TEST_RECIPE_PLUGIN_ID)
+        .unwrap()
+        .definition_key();
+    assert_eq!(first_key, second_key);
+    assert_eq!(first_key, independently_reconstructed_key);
+
+    let first_app = first.plugin_plan().instantiate().unwrap();
+    let second_app = second.plugin_plan().instantiate().unwrap();
+    assert_eq!(
+        first_app.world().resource::<RecipeProbe>(),
+        &RecipeProbe {
+            value: 11,
+            instance: 0,
+        }
+    );
+    assert_eq!(
+        second_app.world().resource::<RecipeProbe>(),
+        &RecipeProbe {
+            value: 11,
+            instance: 1,
+        }
+    );
+}
+
+#[test]
+fn schema_contribution_binds_provider_once_with_direct_and_file_backed_parity() {
+    let _guard = COUNTED_PROVIDER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let contribution = SchemaContribution::<ContributionOwnedSchemaProviderPlugin>::for_default([
+        counted_schema_provider(),
+    ])
+    .unwrap();
+    let recipe = ProductRecipe::new().add_contribution(contribution).unwrap();
+    let recipe_entry = recipe.entries().next().unwrap();
+    assert_eq!(
+        recipe_entry.kind(),
+        ProductRecipeEntryKind::SchemaContribution
+    );
+    assert_eq!(
+        recipe_entry.schema_provider_ids(),
+        &[TEST_COUNTED_SCHEMA_PROVIDER_ID]
+    );
+
+    COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
+    COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let file_plan = resolve_product_recipe(&candidate, recipe.clone()).unwrap();
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+    let file_app = file_plan.plugin_plan().instantiate().unwrap();
+    assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+    let file_registry = nara::reflect::component_registry(file_app.world()).unwrap();
+    let file_fingerprint = file_registry
+        .snapshot()
+        .unwrap()
+        .schema_composition_fingerprint()
+        .unwrap();
+
+    COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
+    COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
+    let mut direct_app = nara::app::App::new();
+    direct_app
+        .add_plugins((MinimalPlugins, recipe.clone()))
+        .unwrap();
+    let direct_app = direct_app.seal().unwrap();
+    assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
+    assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+    let direct_registry = nara::reflect::component_registry(direct_app.world()).unwrap();
+    assert_eq!(
+        direct_registry
+            .snapshot()
+            .unwrap()
+            .schema_composition_fingerprint()
+            .unwrap(),
+        file_fingerprint
+    );
+    assert_eq!(
+        file_plan.schema_validation().composition_fingerprint(),
+        file_fingerprint
+    );
+    let file_entry = file_plan
+        .plugin_plan()
+        .entries()
+        .iter()
+        .find(|entry| entry.plugin_id() == TEST_CONTRIBUTION_OWNED_SCHEMA_PLUGIN_ID)
+        .unwrap();
+    assert_eq!(
+        file_entry
+            .definition_key()
+            .unwrap()
+            .configuration()
+            .as_bytes(),
+        recipe_entry.configuration_fingerprint()
+    );
+}
+
+#[test]
+fn schema_contribution_rejects_divergent_plugin_receipts_in_direct_and_file_backed_apps() {
+    let _guard = COUNTED_PROVIDER_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let recipe = ProductRecipe::new()
+        .add_contribution(
+            SchemaContribution::<DivergentSchemaProviderPlugin>::for_default([
+                counted_schema_provider(),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+
+    let mut direct_app = nara::app::App::new();
+    let Err(direct_error) = direct_app.add_plugins((MinimalPlugins, recipe.clone())) else {
+        panic!("direct recipe composition must reject a divergent provider receipt");
+    };
+    assert!(matches!(
+        direct_error,
+        AddPluginsError::Plugin(PluginError::ComponentRegistrationFailed {
+            plugin: TEST_DIVERGENT_SCHEMA_PLUGIN_ID,
+            ..
+        })
+    ));
+    assert!(
+        direct_error
+            .to_string()
+            .contains("different executable behavior receipt")
+    );
+
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let file_plan = resolve_product_recipe(&candidate, recipe).unwrap();
+    let mut file_failure = file_plan.plugin_plan().instantiate_retained().unwrap_err();
+    let file_error = file_failure.error().clone();
+    while file_failure.retirement_state() != RuntimeCandidateRetirementState::Retired {
+        file_failure.drive_retirement();
+    }
+    assert!(matches!(
+        file_error,
+        PluginInstantiationError::Plugin(PluginError::ComponentRegistrationFailed {
+            plugin: TEST_DIVERGENT_SCHEMA_PLUGIN_ID,
+            ..
+        })
+    ));
+    assert!(
+        file_error
+            .to_string()
+            .contains("different executable behavior receipt")
+    );
+}
+
+#[test]
+fn schema_contribution_configuration_replaces_the_replayable_plugin_entry() {
+    let contribution = SchemaContribution::<ConfiguredSchemaProviderPlugin>::configured(
+        RecipeProbeConfiguration(3),
+        |configuration: &RecipeProbeConfiguration| ConfiguredSchemaProviderPlugin {
+            value: configuration.0,
+        },
+        [counted_schema_provider()],
+    )
+    .unwrap();
+    let recipe = ProductRecipe::new().add_contribution(contribution).unwrap();
+    let first_fingerprint = recipe.entries().next().unwrap().configuration_fingerprint();
+    let replacement = SchemaContribution::<ConfiguredSchemaProviderPlugin>::configured(
+        RecipeProbeConfiguration(9),
+        |configuration: &RecipeProbeConfiguration| ConfiguredSchemaProviderPlugin {
+            value: configuration.0,
+        },
+        [counted_schema_provider()],
+    )
+    .unwrap();
+    let recipe = recipe.configure_contribution(replacement).unwrap();
+    let entry = recipe.entries().next().unwrap();
+    assert_eq!(entry.kind(), ProductRecipeEntryKind::SchemaContribution);
+    assert_ne!(entry.configuration_fingerprint(), first_fingerprint);
+
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_product_recipe(&candidate, recipe).unwrap();
+    let app = plan.plugin_plan().instantiate().unwrap();
+    assert_eq!(
+        app.world().resource::<RecipeProbe>(),
+        &RecipeProbe {
+            value: 9,
+            instance: 0,
+        }
+    );
+}
+
+#[test]
+fn product_recipe_rejects_duplicate_plugins_and_mismatched_provider_declarations() {
+    let error = ProductRecipe::new()
+        .add_plugin::<DefaultRecipePlugin>()
+        .unwrap()
+        .add_plugin::<DefaultRecipePlugin>()
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ProductRecipeError::DuplicatePlugin {
+            plugin: TEST_DEFAULT_RECIPE_PLUGIN_ID,
+        }
+    );
+
+    let error = SchemaContribution::<CountedSchemaProviderPlugin>::for_default([
+        nara::transform::TRANSFORM_SCHEMA_PROVIDER,
+    ])
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        ProductRecipeError::SchemaProviderMismatch {
+            plugin: TEST_COUNTED_SCHEMA_PLUGIN_ID,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -1484,6 +1916,20 @@ fn counted_schema_provider() -> ComponentSchemaProviderDefinition {
         TEST_COUNTED_SCHEMA_OWNER_ID,
         TEST_COUNTED_SCHEMA_PROVIDER_ID,
         TEST_COUNTED_SCHEMA_PROVIDER_BINDING_ID,
+        empty_schema_catalog_source,
+        counted_schema_provider_validation,
+        counted_schema_provider_registration,
+    )
+}
+
+fn alternate_counted_schema_provider() -> ComponentSchemaProviderDefinition {
+    ComponentSchemaProviderDefinition::with_validation(
+        TEST_COUNTED_SCHEMA_OWNER_ID,
+        TEST_COUNTED_SCHEMA_PROVIDER_ID,
+        ComponentSchemaProviderBindingId::new(
+            "test.counted-schema-provider.components.alternate",
+            1,
+        ),
         empty_schema_catalog_source,
         counted_schema_provider_validation,
         counted_schema_provider_registration,

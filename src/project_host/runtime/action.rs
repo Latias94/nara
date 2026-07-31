@@ -15,7 +15,7 @@ use nara_winit::{WinitControlFlow, WinitRunner};
 
 use super::super::{
     ProjectCandidateError, ProjectContentLoader, ProjectRuntimePlugins, built_in_schema_providers,
-    ingest_project_manifest, project_runtime_plugins, resolve_runtime_plan,
+    ingest_project_manifest, project_runtime_plugins_with_recipe, resolve_runtime_plan,
 };
 use super::{
     CleanupDriveOutcome, HostFault, PROJECT_MANIFEST, ProjectHost, RuntimeStartAttempt,
@@ -23,6 +23,7 @@ use super::{
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::{attach_identifier, failure_diagnostic, runtime_fault_kind_id, single_diagnostic};
+use crate::ProductRecipe;
 
 type RuntimePluginEdit =
     Box<dyn FnOnce(ProjectRuntimePlugins) -> ProjectRuntimePlugins + Send + 'static>;
@@ -36,6 +37,7 @@ pub struct HeadlessRunIntent<O> {
     profile: Option<String>,
     fixed_ticks: NonZeroU32,
     cleanup_policy: RuntimeClosePolicy,
+    recipe: ProductRecipe,
     plugin_edits: Vec<RuntimePluginEdit>,
     schema_providers: Vec<ComponentSchemaProviderDefinition>,
     terminal_predicate: Option<TerminalPredicate<O>>,
@@ -48,6 +50,7 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
             .field("profile_present", &self.profile.is_some())
             .field("fixed_ticks", &self.fixed_ticks)
             .field("cleanup_policy", &self.cleanup_policy)
+            .field("recipe", &self.recipe)
             .field("plugin_edit_count", &self.plugin_edits.len())
             .field("schema_provider_count", &self.schema_providers.len())
             .field(
@@ -65,6 +68,7 @@ impl<O> HeadlessRunIntent<O> {
             profile: None,
             fixed_ticks,
             cleanup_policy: RuntimeClosePolicy::default(),
+            recipe: ProductRecipe::new(),
             plugin_edits: Vec::new(),
             schema_providers: Vec::new(),
             terminal_predicate: None,
@@ -80,6 +84,13 @@ impl<O> HeadlessRunIntent<O> {
     #[must_use]
     pub fn with_cleanup_timeout(mut self, timeout: Duration) -> Self {
         self.cleanup_policy = RuntimeClosePolicy::new(timeout);
+        self
+    }
+
+    /// Uses one pure product recipe for this project run.
+    #[must_use]
+    pub fn with_recipe(mut self, recipe: ProductRecipe) -> Self {
+        self.recipe = recipe;
         self
     }
 
@@ -168,6 +179,7 @@ impl<O> HeadlessRunReport<O> {
 pub struct DesktopRunIntent {
     profile: Option<String>,
     cleanup_policy: RuntimeClosePolicy,
+    recipe: ProductRecipe,
     plugin_edits: Vec<RuntimePluginEdit>,
     schema_providers: Vec<ComponentSchemaProviderDefinition>,
     runner: WinitRunner,
@@ -180,6 +192,7 @@ impl fmt::Debug for DesktopRunIntent {
             .debug_struct("DesktopRunIntent")
             .field("profile_present", &self.profile.is_some())
             .field("cleanup_policy", &self.cleanup_policy)
+            .field("recipe", &self.recipe)
             .field("plugin_edit_count", &self.plugin_edits.len())
             .field("schema_provider_count", &self.schema_providers.len())
             .field("runner", &self.runner)
@@ -201,6 +214,7 @@ impl DesktopRunIntent {
         Self {
             profile: None,
             cleanup_policy: RuntimeClosePolicy::default(),
+            recipe: ProductRecipe::new(),
             plugin_edits: Vec::new(),
             schema_providers: Vec::new(),
             runner: WinitRunner::default(),
@@ -216,6 +230,13 @@ impl DesktopRunIntent {
     #[must_use]
     pub fn with_cleanup_timeout(mut self, timeout: Duration) -> Self {
         self.cleanup_policy = RuntimeClosePolicy::new(timeout);
+        self
+    }
+
+    /// Uses one pure product recipe for this desktop run.
+    #[must_use]
+    pub fn with_recipe(mut self, recipe: ProductRecipe) -> Self {
+        self.recipe = recipe;
         self
     }
 
@@ -309,6 +330,12 @@ impl fmt::Debug for DesktopRun {
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 impl DesktopRun {
+    /// Creates the ordinary desktop product action from one recipe.
+    #[must_use]
+    pub fn from_recipe(project_root: DirectoryCapability, recipe: ProductRecipe) -> Self {
+        Self::new(project_root, DesktopRunIntent::new().with_recipe(recipe))
+    }
+
     #[must_use]
     pub fn new(project_root: DirectoryCapability, intent: DesktopRunIntent) -> Self {
         Self {
@@ -380,6 +407,7 @@ impl DesktopRun {
         let DesktopRunIntent {
             profile,
             cleanup_policy,
+            recipe,
             plugin_edits,
             schema_providers,
             runner,
@@ -392,6 +420,7 @@ impl DesktopRun {
             project_root,
             profile,
             cleanup_policy,
+            recipe,
             plugin_edits,
             schema_providers,
             Vec::new(),
@@ -920,6 +949,21 @@ impl<O> HeadlessRun<O>
 where
     O: Resource + Clone,
 {
+    /// Creates the ordinary bounded headless product action from one recipe.
+    #[must_use]
+    pub fn from_recipe(
+        project_root: DirectoryCapability,
+        recipe: ProductRecipe,
+        fixed_ticks: NonZeroU32,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Self {
+        Self::new(
+            project_root,
+            HeadlessRunIntent::new(fixed_ticks).with_recipe(recipe),
+            commands,
+        )
+    }
+
     /// Creates a product run from an already-owned semantic-command buffer.
     ///
     /// Ownership does not bypass admission: every submission is still validated by the runtime
@@ -1169,6 +1213,7 @@ fn prepare_start<O>(inputs: HeadlessRunInputs<O>) -> Result<PreparedStart<O>, Ho
         profile,
         fixed_ticks,
         cleanup_policy,
+        recipe,
         plugin_edits,
         schema_providers,
         terminal_predicate,
@@ -1177,6 +1222,7 @@ fn prepare_start<O>(inputs: HeadlessRunInputs<O>) -> Result<PreparedStart<O>, Ho
         project_root,
         profile,
         cleanup_policy,
+        recipe,
         plugin_edits,
         schema_providers,
         commands,
@@ -1194,6 +1240,7 @@ fn prepare_project_start(
     project_root: DirectoryCapability,
     profile: Option<String>,
     cleanup_policy: RuntimeClosePolicy,
+    recipe: ProductRecipe,
     plugin_edits: Vec<RuntimePluginEdit>,
     schema_providers: Vec<ComponentSchemaProviderDefinition>,
     commands: Vec<GameplayCommandSubmission>,
@@ -1207,7 +1254,7 @@ fn prepare_project_start(
         .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
     drop(manifest);
 
-    let mut request = project_runtime_plugins(&candidate);
+    let mut request = project_runtime_plugins_with_recipe(&candidate, recipe);
     for edit in plugin_edits {
         request = edit(request);
     }
