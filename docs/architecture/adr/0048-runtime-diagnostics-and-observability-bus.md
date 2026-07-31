@@ -5,7 +5,8 @@
 **Refines**: ADR 0009, ADR 0036, ADR 0042
 **Refined By**: ADR 0052: Task Backpressure, Cancellation, and Long-Running Diagnostics;
 ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0068: Global Resource Budgets,
-Metrics, and Diagnostic Privacy; ADR 0080: Domain-Owned TaskUpdate Integration Sets
+Metrics, and Diagnostic Privacy; ADR 0080: Domain-Owned TaskUpdate Integration Sets; ADR 0099:
+Decision-Local Product Evidence and Publication Admission
 
 ## Context
 
@@ -59,11 +60,11 @@ Rules:
   two-times-live bound between operations.
 - Consumers can iterate, filter, or obtain a bounded serialization-only snapshot. There is no public
   arbitrary `clear` API.
-- RGF-U22 offline evidence envelopes are a separate trust and retention domain. A collector may
-  lower selected diagnostic or pressure observations into the protocol's preclassified typed
-  fields, but a runtime snapshot is never itself an evidence envelope. Offline evidence does not
-  write back into this bus, participate in gameplay or overload decisions, or move evidence
-  ownership into `nara_diagnostic`.
+- Offline product observations are a separate trust and retention domain. A collector may lower a
+  selected diagnostic or pressure observation into a decision-local fixture, but a runtime snapshot
+  is never itself product evidence. Offline observations do not write back into this bus,
+  participate in gameplay or overload decisions, or move evidence ownership into
+  `nara_diagnostic`. ADR 0099 retired RGF-U22's reusable evidence envelope and publication model.
 - A tracing sink emits one safe entry or only entries after a caller-owned cursor. The bus does not
   offer an emit-entire-history loop that repeats retained events on every frame, and field values are
   not logged.
@@ -122,8 +123,8 @@ errors depend upward.
 - A named successor workflow may add and verify a producer bridge after its typed outcomes
   stabilize; the legacy U31 backlog is not an unconditional implementation sequence.
 - Metrics and pressure values remain outside the event buffer under ADR 0068.
-- Offline product evidence remains outside both runtime observation resources and crosses its own
-  bounded expected-identity boundary before trusted publication.
+- Offline product evidence remains outside both runtime observation resources and follows the
+  decision-local admission policy in ADR 0099.
 
 ## Success Metrics
 

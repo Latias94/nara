@@ -144,3 +144,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md): Evidence-Gated Render Scaling and Upload Policy
 - [ADR 0097](0097-future-capable-2d-3d-spatial-transform-model.md): Future-Capable 2D and 3D Spatial Transform Model
 - [ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md): Schema Owner Lineage and Active Runtime Composition
+- [ADR 0099](0099-decision-local-product-evidence-and-publication-admission.md): Decision-Local Product Evidence and Publication Admission

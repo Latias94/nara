@@ -326,11 +326,6 @@ path = "tests/measurement_policy.rs"
 required-features = ["runtime-core", "serde"]
 
 [[test]]
-name = "evidence_envelope"
-path = "tests/evidence_envelope.rs"
-required-features = ["runtime-core", "serde"]
-
-[[test]]
 name = "scene_authoring_session"
 path = "tests/scene_authoring_session.rs"
 required-features = ["runtime-core"]

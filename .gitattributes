@@ -13,11 +13,8 @@ reference-game/scenes/*.json text eol=lf
 reference-game/prefabs/*.json text eol=lf
 reference-game/assets/**/*.meta text eol=lf
 
-# Canonical U22 evidence is hashed byte-for-byte.
+# Frozen U9 measurement fixtures are hashed byte-for-byte.
 docs/benchmarks/data/**/*.json text eol=lf
 docs/benchmarks/data/**/*.jsonl text eol=lf
 docs/benchmarks/data/**/*.blake3 text eol=lf
 docs/benchmarks/data/**/*.base64 text eol=lf
-
-# The executed U9 collector must byte-match the helper blob at the measured revision.
-reference-game/tools/measure_first_playable.py text eol=lf

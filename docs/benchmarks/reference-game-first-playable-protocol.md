@@ -1,6 +1,14 @@
 # Reference-Game First-Playable Evidence Protocol
 
-This document explains the version-1 decision contract used by RGF-U22. The machine authority is
+## Status
+
+This is the frozen historical RGF-U22/U9 metric catalog, not a current reusable evidence or
+publication protocol. ADR 0099 retired the generic envelope, revision/cohort, provenance, and
+trusted-publication implementation. Current verification keeps only the committed U9 population
+and the compact deterministic oracle in `tests/measurement_policy.rs`. The later sections preserve
+the original version-1 rationale and must not be read as active implementation requirements.
+
+The frozen machine artifact is
 [`data/protocol/v1/reference-game-first-playable.json`](data/protocol/v1/reference-game-first-playable.json).
 Its canonical UTF-8 bytes include the final LF and are bound by the adjacent BLAKE3 sidecar. The
 current protocol is 50,376 bytes with digest
@@ -176,19 +184,16 @@ The canonical calibration envelope is
 the three source approvals, source/review identities and digests, source revision, and
 `target_results_seen = false`; it contains no U4-or-later sample.
 
-The collector/evaluator boundary is intentional. RGD-U9's committed
-`reference-game/tools/measure_first_playable.py collect` command creates an isolated worktree,
-executes the bounded automatic measurements, and writes raw sample and diagnostic-log transports.
-Its `verify` command checks only local source identity, byte budgets, digests, and the minimal
-transport shape. The executing helper must come from the measured subject and byte-match the helper
-blob at HEAD; `.gitattributes` pins the helper to LF so this check is stable across checkouts. The
-collector digest covers those executed bytes.
-Diagnostic logs are explicitly non-canonical and are not part of the integrity graph.
+The collector/evaluator boundary was intentional for the historical RGD-U9 experiment. At its
+evidence-bound revision, the collector created an isolated worktree, executed bounded automatic
+measurements, and wrote raw sample and diagnostic-log transports. The executable collector and its
+collector-specific process/transport tests were later removed from the active tree under ADR 0099;
+the exact source remains available from that Git revision. Diagnostic logs were non-canonical and
+were not part of the integrity graph.
 
-Rust policy and oracle code owns environment compatibility, metric-catalog interpretation,
-aggregation, invalidation, and the final `Continue` / `Redirect` / `Stop` verdict. U25 and U26 reuse
-that Rust route. The Python helper does not accept evidence or implement a second decision protocol;
-it remains a one-shot collection tool rather than a production benchmark framework or CLI.
+The compact Rust oracle still owns metric-catalog interpretation, aggregation, invalidation, and the
+recorded `Continue` / `Redirect` / `Stop` verdict. Current product measurements are decision-local;
+this protocol does not define a continuing collector, benchmark framework, or CLI.
 
 ## Non-Claims
 

@@ -16,9 +16,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  reject-invalid-ref:
+    name: Reject non-main workflow dispatches
+    if: "${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Reject an ineligible candidate source
+        run: exit 1
+
   reject-rerun:
     name: Reject repeated workflow attempts
-    if: "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt != '1' }}"
+    if: "${{ github.event_name == 'workflow_dispatch' && github.run_attempt != '1' }}"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

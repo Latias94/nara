@@ -149,21 +149,11 @@ Those choices need direct product evidence.
 
 ## Reproduction
 
-From an x64 Visual Studio development environment:
-
-```text
-python reference-game/tools/measure_first_playable.py collect \
-  --subject <clean-repository-root> \
-  --output <new-directory-outside-the-repository>
-
-python reference-game/tools/measure_first_playable.py verify \
-  --subject <clean-repository-root> \
-  --run <collection-directory-outside-the-repository>
-```
-
-The collector owns source binding, detached-worktree isolation, bounded commands, exact edit/revert
-checks, raw transport, and cleanup. Rust owns metric semantics, environment admission, aggregation,
-and the decision rule. Diagnostic logs are non-canonical and are intentionally not committed.
+The recorded verdict is reproduced from the committed manifest and JSONL population by
+`tests/measurement_policy.rs`. The original collector and its exact process-isolation behavior are
+available at the evidence-bound Git revision recorded above; they were removed from the active tree
+after the baseline became historical. Current product-readiness work must collect decision-local
+observations at their owning product seams instead of extending that collector.
 
 ## Non-Claims
 
@@ -177,7 +167,8 @@ and the decision rule. Diagnostic logs are non-canonical and are intentionally n
 
 ## Related Authority
 
-- `docs/plans/2026-07-21-001-refactor-runtime-authority-product-delivery-plan.md#u9-record-the-first-playable-product-baseline`
+- `docs/plans/2026-08-01-001-refactor-product-readiness-delivery-reset-plan.md#u5-re-evaluate-product-readiness`
 - `docs/benchmarks/reference-game-first-playable-protocol.md`
 - `docs/benchmarks/data/protocol/v1/reference-game-first-playable.json`
-- `tests/support/first_playable_evidence.rs`
+- `tests/measurement_policy.rs`
+- `docs/architecture/adr/0099-decision-local-product-evidence-and-publication-admission.md`

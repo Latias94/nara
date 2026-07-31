@@ -6,7 +6,7 @@
 **Refines**: ADR 0006, ADR 0007, ADR 0009, ADR 0011, ADR 0043
 **Refined By**: ADR 0050: Asset Root, Symlink, Junction, and Package Trust Policy; ADR 0068: Global
 Resource Budgets, Metrics, and Diagnostic Privacy; ADR 0070: Capability-Oriented Filesystem
-Substrate
+Substrate; ADR 0099: Decision-Local Product Evidence and Publication Admission
 
 ## Context
 
@@ -125,7 +125,12 @@ inherited-visibility semantics rejects. This slice certifies only World-independ
 schema, digest, and residency truth. RGF-U29 still owns target-World hook/observer eligibility, and
 U24 owns runtime materialization without source reopen.
 
-### Implemented RGF-U22 Evidence Transfer Slice
+### Historical RGF-U22 Evidence Transfer Slice
+
+ADR 0099 retired this reusable test-only transfer and publication implementation after the U9
+product result was `Redirect`. The following paragraphs record the historical slice; they are not a
+current implementation requirement. A future external evidence reader must prove its own concrete
+ADR 0049 budgets when admitted.
 
 Offline benchmark and workflow evidence crosses an untrusted collector-to-review boundary even
 when the collector had no credentials. The version-1 evidence policy checks an encoded-byte ceiling
@@ -189,7 +194,7 @@ artifact acquisition and temporary-root handling.
 | Consistent policy | Initial load and reload use one owned request, reservation, candidate, and commit path | Integration tests |
 | No partial mutation | Budget failures leave target runtime/project state unchanged | Transaction tests |
 | Exact release | Every terminal path returns active charges to zero and reserved bytes equal released bytes | Budget snapshot tests |
-| Bounded evidence | Every envelope byte/shape/domain limit passes exactly and rejects at limit+1 before trusted publication | `tests/evidence_envelope.rs` |
+| Concrete external readers | Every admitted reader proves byte, shape, path, and publication limits for its actual transport | Reader-owned tests admitted under ADR 0099 |
 
 ## Risks and Mitigations
 

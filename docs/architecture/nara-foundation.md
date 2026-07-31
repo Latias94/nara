@@ -442,28 +442,17 @@ second real adapter or stronger isolation pressure.
   `DiagnosticsPlugin` performs retention in `CoreStage::First`, while tracing is an explicit
   cursor-based sink. `RuntimePressureSnapshots` is a separate bounded numeric resource and never
   decides producer admission, defer, coalesce, or eviction policy.
-- RGF-U22 defines a separate offline first-playable evidence contract. One canonical protocol and
-  digest bind semantic subjects, independently reviewed pre-target product constraints, sample
-  floors, cold/warm populations, environment-equivalence classes, union-based source invalidation,
-  and Stop/Redirect/Continue rules before the measured Host/runtime path exists. Empirical baselines
-  remain descriptions of observed implementations rather than retroactive sources for these
-  constraints. Its untrusted envelope checks transfer bytes
-  and digest, serde shape, pre-typed-decode record/field/raw-log budgets, independently expected
-  generator/identity/environment/raw-log values, subject-owned semantic catalogues, and canonical
-  payload digest before returning an unpublished candidate. Identifier grammar alone grants no
-  disclosure authority. Sensitive/secret markers carry no value and raw logs remain
-  retention-bounded external artifacts.
-  Cross-revision reuse is admitted only by a clean exact-root Git proof of HEAD, ancestry,
-  merge-base, and the complete NUL-delimited change manifest. The ownership suite has a dedicated
-  admission that binds the exact U26 metric denominator, U24 candidate, baseline, correctness,
-  fault, lifecycle, and reviewer digests; generic aggregation and decision paths reject it. Its
-  lifecycle graph starts at `candidate`, makes `stopped` terminal, and requires total start and
-  termination reachability.
-  Future PowerShell collectors emit typed records only; U14/U20 policy gates reuse the
-  collector-neutral test oracle for validation, aggregation, and decisions, while U24/U26 use
-  their direct focused behavior oracles. This test-only policy is
-  not a runtime diagnostics bridge, pressure histogram, production evidence facade, CLI, or
-  benchmark runner.
+- Offline product observations remain separate from runtime diagnostics and pressure state. ADR
+  0099 makes them decision-local: one product slice may own a bounded typed fixture and a small
+  deterministic oracle for the exact `Publish`, `Redirect`, or `Stop` decision it changes. Missing
+  values remain missing, and offline results never write back into gameplay or overload admission.
+  RGF-U22's reusable envelope, cross-revision cohort, provenance, and trusted-publication model was
+  retired after U9 produced a reproducible `Redirect` without an admitted publication population.
+  The U9 metric catalog, raw samples, nearest-rank aggregation, and verdict remain historical
+  product evidence; the collector source is available at its evidence-bound Git revision rather
+  than maintained as a runtime API, production evidence facade, telemetry service, or benchmark
+  framework. A future external reader must prove its concrete ADR 0049 input budgets when a real
+  `Publish` result admits it.
 - `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`,
   `RenderPassPlan`, and an owned immutable `RenderFramePacket`. The packet freezes one admitted
   runtime generation, frame, window, target, view, viewport, and phase sequence before acquisition.
