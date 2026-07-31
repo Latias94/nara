@@ -5,14 +5,15 @@ date: 2026-07-21
 deepened: 2026-07-21
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
-execution_state: active
+execution_state: superseded
 product_contract_source: active-plan-successor
 execution: code
 origin: docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md
 supersedes: docs/plans/2026-07-12-001-refactor-reference-game-driven-foundation-plan.md
+superseded_by: docs/plans/2026-08-01-001-refactor-product-readiness-delivery-reset-plan.md
 plan_id: reference-game-runtime-delivery-2026-07
 unit_namespace: RGD
-operator_execution_authority: external-control-plane
+operator_execution_authority: superseded-no-authority
 ---
 
 # Reference-Game Runtime Authority and Product Delivery - Plan
