@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "e09c81a673b84c24b3ff33183b1689d4faf9a2198a77758d51ab45f0cd4f60f1"
+source_fingerprint: "0c5fbffd7b1f373e1f7c12ebe4ed9c2bad5afe8675b648a000e9a9c795432a3b"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "e09c81a673b84c24b3ff33183b1689d4faf9a2198a77758d51ab45f0cd4
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `e09c81a673b84c24b3ff33183b1689d4faf9a2198a77758d51ab45f0cd4f60f1`
-- Immutable records: 303
+- Source fingerprint: `0c5fbffd7b1f373e1f7c12ebe4ed9c2bad5afe8675b648a000e9a9c795432a3b`
+- Immutable records: 305
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game delivery: U11 pre-publication audit](registry/2026-07/2026-07-31T154126Z-engine-foundation-contract-completion-codex-root-50820f5ae78a4b5ea5ecbce2522fc0e5.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game product readiness: RPR-U2 delivery closure retirement](registry/2026-07/2026-07-31T175046Z-engine-foundation-contract-completion-codex-root-e8662ec78e3a40878564040e8a1ec573.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RPR-U1 product-readiness authority transition](verification/2026-07/2026-07-31T174945Z-rpr-u1-product-readiness-authority-transition-b2b65048ad9f47df9a83c90c5edb5901.md) - Activates the product-readiness reset after the reproducible first-playable Redirect while preserving completed U8, U9, and U10 evidence.
 - **Verification Evidence**: [RGD-U10 corrected standalone candidate completion](verification/2026-07/2026-07-31T154041Z-rgd-u10-corrected-standalone-candidate-completion-8fde293bbf06472d827d24304ecc2b40.md) - Closes U10 with checkout-free Windows/Linux candidates that run the packaged desktop and headless product entries.
 - **Verification Evidence**: [RGD-U9 reproducible first-playable product baseline](verification/2026-07/2026-07-31T135020Z-rgd-u9-reproducible-first-playable-product-baseline-31ad7721ec874d9b862492beb7791f7a.md) - Closes U9 at f098876 with committed raw samples, a reproducible collector, and a Rust-policy Redirect verdict.
 - **Verification Evidence**: [RGD-U8 final main hosted three-workspace CI refresh](verification/2026-07/2026-07-31T134957Z-rgd-u8-final-main-hosted-three-workspace-ci-refresh-38f71939f1994eb39c2ac44d6632f008.md) - Closes the reopened U8 matrix at the merged main revision f098876 with six successful Windows/Linux jobs.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Decision**: [RGD-U7 refreshed Runtime and Host independent decision matrix](decisions/2026-07/2026-07-28T214815Z-rgd-u7-refreshed-runtime-and-host-independent-decision-matrix-cb08ecb6f5054f938f8a6d7de30941e4.md) - Records the post-registry-authority refresh ADR 0084 Runtime verdict, dependent ADR 0082 Host verdict, compatible-pair scope, and next delivery gate.
 - **Memory Event**: [completed: RGD-U2 registry authority refresh closed at b4d105c with private executable owne](logs/2026-07/2026-07-28T212547Z-completed-rgd-u2-registry-authority-refresh-closed-at-b4d105c-with-private-executable-owne-8348da1fe4f1430f8c1edc6a9aa968a9.md) - RGD-U2 registry authority refresh closed at b4d105c with private executable ownership, immutable runtime access, direct/managed sticky fault
 - **Verification Evidence**: [RGD-U2 registry authority refresh verification](verification/2026-07/2026-07-28T212146Z-rgd-u2-registry-authority-refresh-verification-054dab6712644124af153f058b763fff.md) - Refreshes frozen component behavior authority evidence after closing the public ECS resource and direct-App fault-reporting bypasses.
-- **Memory Event**: [Verification: RGD-U11 paused input retention verified at 5c9a622](logs/2026-07/2026-07-28T140835Z-verification-rgd-u11-paused-input-retention-verified-at-5c9a622-6dea28d722f3493dbe21f494523ec314.md) - All five RGD-U11 source corrections are closed; authority and delivery evidence refresh is next.
 
 # Integration Notes
 
