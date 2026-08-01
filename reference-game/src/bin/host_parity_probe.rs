@@ -32,7 +32,8 @@ use nara::{
 };
 use nara_reference_game::{
     MovementDirection, REFERENCE_WAVE_PLUGIN_ID, ReferenceWavePlugin, WaveSnapshot,
-    movement_command, wave_desktop_intent, wave_editor_intent, wave_headless_intent,
+    advanced_wave_desktop_intent_after, advanced_wave_editor_intent_after,
+    advanced_wave_headless_intent_after, movement_command,
 };
 
 mod support;
@@ -125,7 +126,8 @@ fn run_headless(
 ) -> Result<RuntimeFaultEvidence, &'static str> {
     let maximum_ticks =
         NonZeroU32::new(PARITY_FAULT_TICK as u32).expect("the parity tick limit is non-zero");
-    let intent = wave_headless_intent(maximum_ticks).insert_after::<ReferenceWavePlugin>(probe);
+    let intent =
+        advanced_wave_headless_intent_after::<ReferenceWavePlugin>(maximum_ticks, probe);
     let mut run = HeadlessRun::new(root, intent, Vec::new());
     let deadline = Instant::now() + HOST_TIMEOUT;
     let report = loop {
@@ -153,7 +155,7 @@ fn run_desktop(
     root: nara::fs::DirectoryCapability,
     probe: PluginDefinition,
 ) -> Result<RuntimeFaultEvidence, &'static str> {
-    let intent = wave_desktop_intent().insert_after::<ReferenceWavePlugin>(probe);
+    let intent = advanced_wave_desktop_intent_after::<ReferenceWavePlugin>(probe);
     let mut run = DesktopRun::new(root, intent);
     let cleanup_deadline = Instant::now() + HOST_TIMEOUT;
     let report = loop {
@@ -181,7 +183,7 @@ fn run_editor(
     root: nara::fs::DirectoryCapability,
     probe: PluginDefinition,
 ) -> Result<RuntimeFaultEvidence, &'static str> {
-    let intent = wave_editor_intent().insert_after::<ReferenceWavePlugin>(probe);
+    let intent = advanced_wave_editor_intent_after::<ReferenceWavePlugin>(probe);
     let mut session =
         EditorProjectSession::open(root, intent).map_err(|_| "host_parity_probe.editor-open")?;
     if !matches!(

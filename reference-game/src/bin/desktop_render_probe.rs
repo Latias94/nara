@@ -28,7 +28,7 @@ use nara::{
 };
 use nara_reference_game::{
     MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, WaveRunGeneration,
-    WaveSnapshot, movement_command, retry_command, wave_desktop_intent,
+    WaveSnapshot, advanced_wave_desktop_intent_after, movement_command, retry_command,
 };
 
 mod desktop_support;
@@ -69,7 +69,7 @@ fn main() -> ExitCode {
             marker: Arc::clone(&plugin_marker),
         },
     );
-    let intent = wave_desktop_intent().insert_after::<ReferenceDesktopPlugin>(probe);
+    let intent = advanced_wave_desktop_intent_after::<ReferenceDesktopPlugin>(probe);
     let mut run = DesktopRun::new(root, intent);
     let mut cleanup_deadline = None;
 

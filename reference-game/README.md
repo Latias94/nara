@@ -4,7 +4,16 @@ This small 2D game validates Nara's public headless and desktop product paths. I
 manifest loading, versioned scene and prefab data, image import, semantic gameplay commands, fixed
 ticks, sprites, input, HUD rendering, retry, runtime shutdown, and stable headless output.
 
-It is a development and release-evidence fixture, not a finished commercial game.
+It is a development and product-regression fixture, not a finished commercial game.
+
+## Rust Composition
+
+The checked-in launch entries use the same pure Rust `ProductRecipe` as the reference game's
+headless, desktop, and editor product paths. `wave_recipe()` binds the gameplay plugin and its
+schema provider once; `desktop_wave_recipe()` adds only the desktop presentation plugin. Project
+loading, runtime admission, driving, and bounded shutdown remain owned by Nara's product Hosts.
+The fixture does not assemble plugin definitions, slot edits, or parallel schema-provider lists in
+its normal launch path.
 
 ## Run From Source
 

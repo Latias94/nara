@@ -30,7 +30,7 @@ use nara_reference_game::{
     Enemy, MovementCommandError, MovementDirection, Player, Projectile, ProjectileId,
     REFERENCE_WAVE_PLUGIN_ID, ReferenceWavePlugin, WaveOutcome, WaveRetryPhase, WaveRetryStatus,
     WaveRunGeneration, WaveSnapshot, WaveSpawn, Weapon, bundled_wave_commands, bundled_wave_run,
-    movement_command, retry_command, wave_headless_intent, wave_headless_run,
+    advanced_wave_headless_intent_after, movement_command, retry_command, wave_headless_run,
 };
 use project_content_fixture::{
     headless_wave_candidate_plan_and_root, headless_wave_candidate_plan_and_root_with,
@@ -548,8 +548,10 @@ fn bundled_wave_completes_at_a_stable_tick() {
 #[test]
 fn completed_wave_retires_scene_identities_before_runtime_despawn() {
     let maximum = NonZeroU32::new(96).unwrap();
-    let intent = wave_headless_intent(maximum)
-        .insert_after::<ReferenceWavePlugin>(terminal_identity_audit_plugin());
+    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+        maximum,
+        terminal_identity_audit_plugin(),
+    );
     let run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
 
     let snapshot = complete(run);
@@ -595,8 +597,10 @@ fn movement_command_rejects_zero_ordering_values_without_panicking() {
 #[test]
 fn same_tick_player_and_final_enemy_death_resolves_to_defeat() {
     let maximum = NonZeroU32::new(4).unwrap();
-    let intent =
-        wave_headless_intent(maximum).insert_after::<ReferenceWavePlugin>(tie_setup_plugin());
+    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+        maximum,
+        tie_setup_plugin(),
+    );
     let run = HeadlessRun::new(project_root_capability(), intent, Vec::new());
 
     let snapshot = complete(run);
@@ -612,8 +616,10 @@ fn same_tick_player_and_final_enemy_death_resolves_to_defeat() {
 
 #[test]
 fn missing_wave_spawn_faults_on_the_first_tick_instead_of_timing_out() {
-    let intent = wave_headless_intent(NonZeroU32::new(4).unwrap())
-        .insert_after::<ReferenceWavePlugin>(invalid_topology_plugin());
+    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+        NonZeroU32::new(4).unwrap(),
+        invalid_topology_plugin(),
+    );
     let mut run = HeadlessRun::new(project_root_capability(), intent, Vec::new());
 
     let report = execute_to_terminal(&mut run);
@@ -622,8 +628,10 @@ fn missing_wave_spawn_faults_on_the_first_tick_instead_of_timing_out() {
 
 #[test]
 fn consume_runtime_fault_skips_the_wave_simulation_tick() {
-    let intent = wave_headless_intent(NonZeroU32::new(4).unwrap())
-        .insert_after::<ReferenceWavePlugin>(consume_fault_plugin());
+    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+        NonZeroU32::new(4).unwrap(),
+        consume_fault_plugin(),
+    );
     let mut run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
 
     let report = execute_to_terminal(&mut run);
@@ -632,8 +640,10 @@ fn consume_runtime_fault_skips_the_wave_simulation_tick() {
 
 #[test]
 fn capture_runtime_fault_prevents_wave_success() {
-    let intent = wave_headless_intent(NonZeroU32::new(4).unwrap())
-        .insert_after::<ReferenceWavePlugin>(capture_fault_plugin());
+    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+        NonZeroU32::new(4).unwrap(),
+        capture_fault_plugin(),
+    );
     let mut run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
 
     let report = execute_to_terminal(&mut run);
@@ -642,8 +652,10 @@ fn capture_runtime_fault_prevents_wave_success() {
 
 #[test]
 fn late_simulation_fault_keeps_the_last_good_snapshot() {
-    let intent = wave_headless_intent(NonZeroU32::new(4).unwrap())
-        .insert_after::<ReferenceWavePlugin>(late_simulation_fault_plugin());
+    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+        NonZeroU32::new(4).unwrap(),
+        late_simulation_fault_plugin(),
+    );
     let mut run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
 
     let report = execute_to_terminal(&mut run);

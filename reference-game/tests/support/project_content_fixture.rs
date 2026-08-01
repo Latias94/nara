@@ -28,15 +28,28 @@ use nara::{
 use nara::{gameplay::GameplayCommandPlugin, project_host::project_runtime_plugins};
 use nara_reference_game::{
     Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin,
-    ReferenceWavePlugin, WaveSpawn, Weapon, plugin, runtime_plugins, wave_plugin,
+    ReferenceWavePlugin, WaveSpawn, Weapon, advanced_project_outcome_plugin_definition,
 };
 
 #[cfg(feature = "desktop")]
 use nara::app::{RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, RuntimeState};
 #[cfg(feature = "desktop")]
-use nara_reference_game::desktop_plugin;
+use nara_reference_game::ReferenceDesktopPlugin;
 
 pub const TEXTURE_ID: &str = "f840a555-9fca-4ceb-ac1b-e03b55d2f492";
+
+fn game_plugin() -> PluginDefinition {
+    PluginDefinition::for_default::<ReferenceGamePlugin>()
+}
+
+fn wave_plugin() -> PluginDefinition {
+    PluginDefinition::for_default::<ReferenceWavePlugin>()
+}
+
+#[cfg(feature = "desktop")]
+fn desktop_plugin() -> PluginDefinition {
+    PluginDefinition::for_default::<ReferenceDesktopPlugin>()
+}
 
 #[cfg(feature = "desktop")]
 pub fn stop_runtime(mut runtime: RuntimeInstance) {
@@ -147,7 +160,7 @@ pub fn desktop_candidate_plan_and_root()
     let request = project_runtime_plugins(&candidate)
         .configure(nara::image::plugin(ImageImportLimits::default()))
         .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(plugin())
+        .insert_after::<GameplayCommandPlugin>(game_plugin())
         .insert_after::<ReferenceGamePlugin>(wave_plugin())
         .insert_after::<ReferenceWavePlugin>(desktop_plugin());
     let mut providers = built_in_schema_providers();
@@ -179,7 +192,7 @@ fn headless_wave_candidate_plan_and_root_with_test_plugin(
     let request = project_runtime_plugins(&candidate)
         .configure(nara::image::plugin(ImageImportLimits::default()))
         .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(plugin())
+        .insert_after::<GameplayCommandPlugin>(game_plugin())
         .insert_after::<ReferenceGamePlugin>(wave_plugin());
     let request = match test_plugin {
         Some(definition) => request.insert_after::<ReferenceWavePlugin>(definition),
@@ -244,7 +257,10 @@ pub fn reference_runtime_plugins(
     image_limits: ImageImportLimits,
     include_tilemap: bool,
 ) -> nara::project_host::ProjectRuntimePlugins {
-    let request = runtime_plugins(candidate).configure(nara::image::plugin(image_limits));
+    let request = project_runtime_plugins(candidate)
+        .insert_after::<GameplayCommandPlugin>(game_plugin())
+        .insert_after::<ReferenceGamePlugin>(advanced_project_outcome_plugin_definition())
+        .configure(nara::image::plugin(image_limits));
     if include_tilemap {
         request
     } else {

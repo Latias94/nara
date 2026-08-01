@@ -20,7 +20,7 @@ use nara::{
     sprite_render::SpriteBatches,
 };
 use nara_reference_game::{
-    REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, wave_desktop_intent,
+    REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, advanced_wave_desktop_intent_after,
 };
 
 use crate::desktop_support::submitted_product_frame;
@@ -57,7 +57,7 @@ pub(crate) fn candidate_smoke_run(
             completed: Arc::clone(&plugin_evidence),
         },
     );
-    let intent = wave_desktop_intent().insert_after::<ReferenceDesktopPlugin>(probe);
+    let intent = advanced_wave_desktop_intent_after::<ReferenceDesktopPlugin>(probe);
     (DesktopRun::new(project_root, intent), Some(evidence))
 }
 

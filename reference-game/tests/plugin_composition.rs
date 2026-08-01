@@ -3,11 +3,15 @@ use nara::{
     gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
     image::{IMAGE_PLUGIN_ID, ImageImportLimits},
     project::ProductCapability,
+    project_host::resolve_product_recipe,
     render::RENDER_SCHEMA_PROVIDER_ID,
     sprite::SPRITE_SCHEMA_PROVIDER_ID,
     tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_OWNER_ID, TILEMAP_SCHEMA_PROVIDER_ID},
 };
-use nara_reference_game::{REFERENCE_GAME_PLUGIN_ID, REFERENCE_GAME_SCHEMA_PROVIDER_ID};
+use nara_reference_game::{
+    REFERENCE_GAME_PLUGIN_ID, REFERENCE_GAME_SCHEMA_PROVIDER_ID, REFERENCE_PROJECT_OUTCOME_PLUGIN_ID,
+    REFERENCE_WAVE_PLUGIN_ID, project_recipe, wave_recipe,
+};
 
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
@@ -24,6 +28,40 @@ use nara_reference_game::REFERENCE_DESKTOP_PLUGIN_ID;
 use project_content_fixture::{
     desktop_candidate_plan_and_root, headless_wave_candidate_plan_and_root,
 };
+
+#[test]
+fn ordinary_recipes_bind_reference_schema_once_without_parallel_provider_lists() {
+    let limits = ImageImportLimits::default().with_max_encoded_bytes(
+        ByteLimit::new(8 * 1024 * 1024).expect("test image limit is non-zero"),
+    );
+    let (candidate, _baseline, _root) = candidate_plan_and_root(limits, false);
+
+    let wave = resolve_product_recipe(&candidate, wave_recipe().unwrap()).unwrap();
+    let project = resolve_product_recipe(&candidate, project_recipe().unwrap()).unwrap();
+
+    for (plan, expected_plugin) in [
+        (&wave, REFERENCE_WAVE_PLUGIN_ID),
+        (&project, REFERENCE_PROJECT_OUTCOME_PLUGIN_ID),
+    ] {
+        assert!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .any(|entry| entry.plugin_id() == REFERENCE_GAME_PLUGIN_ID)
+        );
+        assert!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .any(|entry| entry.plugin_id() == expected_plugin)
+        );
+        assert!(
+            plan.schema_validation()
+                .provider_ids()
+                .contains(&REFERENCE_GAME_SCHEMA_PROVIDER_ID)
+        );
+    }
+}
 
 #[test]
 fn reference_game_configures_a_repeatable_headless_product_plan() {

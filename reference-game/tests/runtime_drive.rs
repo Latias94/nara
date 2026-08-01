@@ -1,5 +1,3 @@
-#[path = "support/manual_raw_app_boot.rs"]
-mod manual_raw_app_boot;
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
@@ -15,34 +13,28 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use manual_raw_app_boot::{
-    ManualRawAppBootError, ManualRawAppFault, run_manual_raw_app_boot, run_manual_raw_app_fault,
-    run_manual_raw_app_incomplete_retirement, run_manual_raw_app_pre_owner_failure,
-};
 use nara::{
     app::{
         App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
         PluginError, PluginId,
     },
-    diagnostic::DiagnosticValueRef,
     ecs::{
         Resource,
         lifecycle::{Add, HookContext},
         observer::On,
         world::DeferredWorld,
     },
+    prelude::Vec2,
     project_host::{HeadlessRun, HeadlessRunOutcome},
     sprite::Sprite,
     tasks::{TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest},
 };
 use nara_reference_game::{
     REFERENCE_FIRST_TICK_COMMAND_SOURCE, REFERENCE_FIRST_TICK_COMMAND_TYPE,
-    REFERENCE_GAME_PLUGIN_ID, ReferenceGamePlugin, ReferenceProjectSnapshot,
-    project_first_tick_command, project_headless_intent, project_headless_run,
+    REFERENCE_GAME_PLUGIN_ID, ReferenceGamePlugin, advanced_project_headless_intent_after,
+    project_first_tick_command, project_headless_run,
 };
-use project_content_fixture::{
-    ProjectContentFixtureError, project_root_capability, try_project_root_capability_at,
-};
+use project_content_fixture::{project_root_capability, try_project_root_capability_at};
 
 const LATE_HOOK_PLUGIN_ID: PluginId = PluginId::new("reference-game.test.late-hook");
 const LATE_HOOK_DECLARATION: PluginDeclaration =
@@ -203,13 +195,8 @@ fn blocking_task_setup_failed() -> PluginError {
 }
 
 #[test]
-fn product_action_matches_the_manual_first_tick_without_rust_seed_content() {
-    let manual = run_manual_raw_app_boot().unwrap();
+fn product_action_runs_the_frozen_first_tick_without_rust_seed_content() {
     let canonical_command = project_first_tick_command();
-    assert_eq!(
-        canonical_command.command().command_type().as_str(),
-        include_str!("data/manual-first-tick.command").trim()
-    );
     assert_eq!(
         canonical_command.command().command_type().as_str(),
         REFERENCE_FIRST_TICK_COMMAND_TYPE
@@ -237,42 +224,22 @@ fn product_action_matches_the_manual_first_tick_without_rust_seed_content() {
         panic!("product run failed: {report:?}");
     };
 
-    assert_eq!(
-        snapshot,
-        &ReferenceProjectSnapshot {
-            tick: manual.first_tick.tick,
-            player_position: manual.first_tick.player_position,
-            player_hit_points: manual.first_tick.player_hit_points,
-            enemy_position: manual.first_tick.enemy_position,
-            enemy_hit_points: manual.first_tick.enemy_hit_points,
-            weapon_remaining_ticks: manual.first_tick.weapon_remaining_ticks,
-            commands_seen: manual.command_stats.admitted,
-            first_command_key: Some(expected_command_key),
-            first_command_type: Some(expected_command_type),
-            runtime_only_entities: 0,
-            unbound_gameplay_components: 0,
-        }
-    );
-    assert_eq!(manual.command_stats.accepted, 1);
-    assert_eq!(manual.command_stats.acknowledged, 1);
-    assert!(manual.command_queue_idle);
-    assert_ne!(
-        selected_plugin_plan_fingerprint(report.diagnostics()),
-        manual.plugin_plan_fingerprint,
-        "the code-first baseline and file-backed product recipe have distinct registry definitions"
-    );
+    assert_eq!(snapshot.tick, 1);
+    assert_eq!(snapshot.player_position, Vec2::ZERO);
+    assert_eq!(snapshot.player_hit_points, 20);
+    assert_eq!(snapshot.enemy_position, Vec2::new(4.5, 0.0));
+    assert_eq!(snapshot.enemy_hit_points, 10);
+    assert_eq!(snapshot.weapon_remaining_ticks, 2);
+    assert_eq!(snapshot.commands_seen, 1);
+    assert_eq!(snapshot.first_command_key, Some(expected_command_key));
+    assert_eq!(snapshot.first_command_type, Some(expected_command_type));
+    assert_eq!(snapshot.runtime_only_entities, 0);
+    assert_eq!(snapshot.unbound_gameplay_components, 0);
     assert!(!report.diagnostics().has_errors());
 }
 
 #[test]
-fn missing_manifest_fails_before_product_runtime_ownership() {
-    let manual = run_manual_raw_app_pre_owner_failure().unwrap_err();
-    assert_eq!(
-        manual.primary,
-        ManualRawAppBootError::ProjectContent(ProjectContentFixtureError::OpenManifest)
-    );
-    assert!(manual.retirement.is_none());
-
+fn missing_manifest_fails_before_product_runtime_startup() {
     let root = EmptyProjectRoot::new();
     let authority = try_project_root_capability_at(&root.path).unwrap();
     let mut product = project_headless_run(authority, NonZeroU32::new(1).unwrap());
@@ -288,11 +255,12 @@ fn missing_manifest_fails_before_product_runtime_ownership() {
 }
 
 #[test]
-fn late_persistent_hook_matches_the_manual_rejection_before_publication() {
-    let manual = run_manual_raw_app_fault(ManualRawAppFault::LatePersistentHook).unwrap();
+fn late_persistent_hook_rejects_before_scene_publication() {
     LATE_HOOK_CALLS.store(0, Ordering::SeqCst);
-    let intent = project_headless_intent(NonZeroU32::new(1).unwrap())
-        .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<LateHookPlugin>());
+    let intent = advanced_project_headless_intent_after::<ReferenceGamePlugin>(
+        NonZeroU32::new(1).unwrap(),
+        PluginDefinition::for_default::<LateHookPlugin>(),
+    );
     let mut product = HeadlessRun::new(project_root_capability(), intent, Vec::new());
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -310,10 +278,8 @@ fn late_persistent_hook_matches_the_manual_rejection_before_publication() {
         report
             .diagnostics()
             .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == manual.diagnostic_code })
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.persistent-apply-ineligible" })
     );
-    assert!(!manual.scene_published);
-    assert_eq!(manual.hook_calls, 0);
     assert_eq!(LATE_HOOK_CALLS.load(Ordering::SeqCst), 0);
 }
 
@@ -324,8 +290,10 @@ fn deferred_global_observers_reject_project_scene_before_publication() {
 }
 
 fn assert_global_observer_rejected(definition: PluginDefinition) {
-    let intent = project_headless_intent(NonZeroU32::new(1).unwrap())
-        .insert_after::<ReferenceGamePlugin>(definition);
+    let intent = advanced_project_headless_intent_after::<ReferenceGamePlugin>(
+        NonZeroU32::new(1).unwrap(),
+        definition,
+    );
     let mut product = HeadlessRun::new(project_root_capability(), intent, Vec::new());
     let deadline = Instant::now() + Duration::from_secs(5);
     let report = loop {
@@ -341,13 +309,13 @@ fn assert_global_observer_rejected(definition: PluginDefinition) {
     assert!(
         report.diagnostics().iter().any(|diagnostic| {
             diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
-        })
+        }),
+        "{report:?}"
     );
 }
 
 #[test]
 fn incomplete_retirement_stays_with_the_product_action_until_retry() {
-    let manual = run_manual_raw_app_incomplete_retirement().unwrap();
     let control = Arc::new(BlockingTaskControl::default());
     let definition_control = Arc::clone(&control);
     let blocking_task = PluginDefinition::infallible::<BlockingTaskPlugin, _>(
@@ -357,9 +325,11 @@ fn incomplete_retirement_stays_with_the_product_action_until_retry() {
             control: Arc::clone(&definition_control),
         },
     );
-    let intent = project_headless_intent(NonZeroU32::new(1).unwrap())
-        .with_cleanup_timeout(Duration::ZERO)
-        .insert_after::<ReferenceGamePlugin>(blocking_task);
+    let intent = advanced_project_headless_intent_after::<ReferenceGamePlugin>(
+        NonZeroU32::new(1).unwrap(),
+        blocking_task,
+    )
+    .with_cleanup_timeout(Duration::ZERO);
     let mut product = HeadlessRun::new(
         project_root_capability(),
         intent,
@@ -381,9 +351,6 @@ fn incomplete_retirement_stays_with_the_product_action_until_retry() {
     }));
     assert_eq!(control.builds.load(Ordering::SeqCst), 1);
     assert_eq!(control.finished.load(Ordering::SeqCst), 0);
-    assert!(manual.scene_published);
-    assert!(!manual.runtime_published);
-    assert_eq!(manual.diagnostic_class, ManualRawAppBootError::TaskShutdown);
 
     control.release();
     let cleanup_deadline = Instant::now() + Duration::from_secs(10);
@@ -401,31 +368,12 @@ fn incomplete_retirement_stays_with_the_product_action_until_retry() {
     let HeadlessRunOutcome::Completed(snapshot) = completed.outcome() else {
         panic!("product cleanup retry failed: {completed:?}");
     };
-    assert_eq!(snapshot.tick, manual.first_tick.tick);
-    assert_eq!(snapshot.player_position, manual.first_tick.player_position);
-    assert_eq!(
-        snapshot.enemy_hit_points,
-        manual.first_tick.enemy_hit_points
-    );
+    assert_eq!(snapshot.tick, 1);
+    assert_eq!(snapshot.player_position, Vec2::ZERO);
+    assert_eq!(snapshot.enemy_hit_points, 10);
     assert_eq!(snapshot.commands_seen, 1);
     assert_eq!(control.builds.load(Ordering::SeqCst), 1);
     assert_eq!(control.finished.load(Ordering::SeqCst), 1);
-}
-
-fn selected_plugin_plan_fingerprint(diagnostics: &nara::diagnostic::DiagnosticReport) -> &str {
-    let diagnostic = diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code().as_str() == "project.run.plan-selected")
-        .expect("the product report records its selected plan");
-    let field = diagnostic
-        .fields()
-        .iter()
-        .find(|field| field.key().as_str() == "plugin-plan-fingerprint")
-        .expect("the selected-plan diagnostic records its fingerprint");
-    let DiagnosticValueRef::Identifier(fingerprint) = field.value() else {
-        panic!("the selected-plan fingerprint is not a public identifier");
-    };
-    fingerprint
 }
 
 struct EmptyProjectRoot {

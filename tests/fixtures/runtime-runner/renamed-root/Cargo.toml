@@ -10,4 +10,4 @@ publish = false
 resolver = "3"
 
 [dependencies]
-engine = { package = "nara", path = "../../../..", default-features = false, features = ["runtime-core"] }
+engine = { package = "nara", path = "../../../..", default-features = false, features = ["runtime-2d", "serde"] }

@@ -1,0 +1,21 @@
+schema_version = 1
+
+[project]
+name = "Renamed Root Recipe Fixture"
+stable_id = "renamed-root-recipe-fixture"
+version = "0.1.0"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[runtime]
+preset = "local-headless"
+fixed_timestep_seconds = 0.02
+
+[capabilities]
+requested = ["runtime-2d"]

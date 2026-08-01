@@ -1279,6 +1279,7 @@ dependencies = [
  "nara_ui_render",
  "nara_window",
  "nara_winit",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -1,8 +1,8 @@
 use nara::ecs::schedule::IntoScheduleConfigs;
 use nara::{
     app::{
-        CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError,
-        PluginId, PluginProductCapability,
+        CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
+        PluginProductCapability,
     },
     asset::{AssetServer, Handle},
     core::{Color, Vec2},
@@ -86,11 +86,6 @@ impl Plugin for ReferenceDesktopPlugin {
         )?;
         Ok(())
     }
-}
-
-#[must_use]
-pub fn desktop_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<ReferenceDesktopPlugin>()
 }
 
 #[derive(Debug, Clone, Copy, Resource)]
