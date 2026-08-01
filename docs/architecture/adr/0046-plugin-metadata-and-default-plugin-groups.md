@@ -21,7 +21,7 @@ disable before adding another plugin.
 exclusivity, or dispatch calls. A shared domain service ID is valid only after an Accepted protocol
 defines its semantics; otherwise plugins use plugin-specific identities and concrete conflicts.
 
-## RPR-U3 Trial Implementation Note
+## RPR-U3/U4 Product Recipe Evidence
 
 The root facade now provides a pure `ProductRecipe` for normal product composition. A runtime-only
 entry owns a typed reconstructible factory and canonical configuration identity; a
@@ -32,10 +32,13 @@ authority before its plugin builds in a direct App that the file-backed Host pre
 admission. It does not make `PluginDefinition`, slot edits, schema-provider parallel lists,
 candidates, runners, or shutdown authority ordinary authoring concepts.
 
-This is a first-party implementation trial. Raw one-shot plugin values remain valid only for direct
-`App` composition. The renamed-root external contribution and reference-game migrations remain the
-OQ-045 evidence gate; no package manager, generic package definition, or provider registry is
-admitted by this helper.
+RPR-U4 moved the reference game to one recipe shared by headless, desktop, and Editor Hosts. An
+independently locked fixture also consumes the renamed root crate through one runtime-only plugin,
+one configured schema contribution, and `HeadlessRun`, without workspace inheritance or raw
+lifecycle assembly. Raw one-shot plugin values remain valid for direct `App` composition and
+explicit engine-owned probes, not ordinary product recipes. This evidence accepts the bounded
+compiled-Rust contribution path. It does not admit a package manager, generic package definition,
+provider registry, file-backed plugin settings, or missing-package workflow; those remain OQ-045.
 
 ## Context
 

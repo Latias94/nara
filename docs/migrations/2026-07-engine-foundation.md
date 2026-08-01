@@ -1913,8 +1913,10 @@ match run.execute_bounded().outcome() {
 ```
 
 **Affected examples and fixtures**: the independent reference-game headless binary and
-`runtime_drive` tests now use the concrete product action. The U26 manual raw-App fixture remains
-only as the frozen ownership counterfactual and is not a recommended application template.
+`runtime_drive` tests now use the concrete product action. The U26 manual raw-App fixture remained
+through the original Host comparison, then RPR-U4 removed its parallel lifecycle implementation.
+Its frozen counterfactual remains in Git history and
+`docs/benchmarks/runtime-ownership-baseline.md`, not as a current application template.
 
 **User action**: file-backed headless callers should move manifest/content/runtime lifecycle code
 behind `HeadlessRun`. Keep game configuration in Rust plugin definitions and schema providers,
@@ -1937,8 +1939,9 @@ phases, or drop an incomplete retirement owner to simulate success.
 **Verification anchors**: `tests/project_runtime_boot.rs`, `tests/project_host_boundary.rs`,
 `tests/runtime_instance.rs`, `crates/nara_app/tests/plugin_composition.rs`,
 `crates/nara_tasks/src/tests/{execution,close}.rs`, `reference-game/tests/runtime_drive.rs`, and
-`reference-game/tests/manual_raw_app_baseline.rs` prove the caller boundary, lineage/schema
-binding, failure phases, publication linearization, owner retention, and U26 outcome parity.
+the historical manual baseline at revision `f90e1b9b3235a8c5a8544eca9ba442bb7b81fd9f`
+prove the caller boundary, lineage/schema binding, failure phases, publication linearization,
+owner retention, and U26 outcome parity without retaining a second current startup path.
 
 ## RGF-U6-1: Bounded Authoritative Headless Product Contract
 

@@ -622,15 +622,18 @@ second real adapter or stronger isolation pressure.
 - The implemented RGF-U4 plugin core uses static declarations, repeatable definitions, pure data-
   only group resolution, inspectable membership/provenance, and a hook commit closed against nested
   installation/runner selection. Stable slots edit known entries; services prove presence only and
-  do not select providers. The RPR-U3 trial adds a gameplay-prelude `ProductRecipe` for replayable
+  do not select providers. RPR-U3/U4 add a gameplay-prelude `ProductRecipe` for replayable
   runtime-only entries and one `SchemaContribution` for a plugin plus its provider definitions;
   `HeadlessRun`, `DesktopRun`, and `EditorProjectIntent` consume that recipe without exposing
   candidate promotion or retirement plumbing. Direct and file-backed first-party schema admission
-  now share the same contribution identity/fingerprint checks. The external renamed-root and
-  reference-game journeys remain the OQ-045 admission gate, so advanced embedding paths are
-  retained temporarily. Default groups remain explicit product bundles, and `MinimalPlugins` stays
-  headless/minimal. See ADR [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md) and the
-  [Rust product recipe guide](../guides/rust-product-recipes.md).
+  share the same contribution identity/fingerprint checks. The reference game uses one recipe for
+  headless, desktop, and Editor paths, while an independently locked renamed-root fixture proves a
+  runtime-only plugin plus configured schema contribution through the public Host facade. Advanced
+  raw definitions remain only for explicit embedding probes and fault tests. Package installation,
+  file-backed plugin settings, and missing-package restoration remain OQ-045. Default groups remain
+  explicit product bundles, and `MinimalPlugins` stays headless/minimal. See ADR
+  [0046](adr/0046-plugin-metadata-and-default-plugin-groups.md) and the [Rust product recipe
+  guide](../guides/rust-product-recipes.md).
 - Root Cargo features form coarse compiled product-capability ceilings. The required product
   capabilities of a resolved plugin plan must fit the normalized project request, which must fit
   the compiled ceiling; plugin service requirements/conflicts close separately before any `App`

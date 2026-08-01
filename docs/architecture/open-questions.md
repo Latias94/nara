@@ -804,42 +804,20 @@ flowchart LR
 - **Vocabulary boundary**: The candidate `package(config)` helper is a narrow compiled Rust root
   contribution for one Plugin plus Schema closure. It is not the OQ-031 Product Package, Package
   Manager, installation identity, managed/native loader, or multi-role activation contract.
-- **RPR-U3 trial evidence**: Root `ProductRecipe` now carries replayable runtime-only entries and
-  `SchemaContribution` binds one schema-owning plugin to its declared provider definitions. The
-  file-backed resolver consumes those definitions during the existing frozen-registry admission,
-  while direct `App` composition installs the same authority before the schema-owning plugin builds
-  through the normal `PluginGroup` path. Focused first-party tests prove fresh reconstruction,
-  typed configuration replacement, duplicate rejection before App mutation, divergent-receipt
-  rejection, and direct/file-backed schema-fingerprint parity; the headless and Editor facades run
-  the same recipe, and the desktop facade enters the same shared start path. This is implementation
-  trial evidence, not external-package admission.
-- **Leading trial hypothesis**:
-  - Keep ordinary runtime-only extension exactly on the `Plugin` / `PluginGroup` / tuple path. A
-    plugin that owns no persistent schema must not learn a package vocabulary.
-  - Trial one narrow root-facade contribution value that pairs replayable typed plugin definitions
-    with their `ComponentSchemaProviderDefinition` values. Keep it outside `nara_app` so the App
-    layer does not depend on reflection, project ingestion, or a universal package model.
-  - Let the same opaque value lower to its runtime plugin definitions when passed to direct
-    `App::add_plugins`, and let an official project recipe consume the complete value through an
-    unordered `.add(...)`. The package author, not the game author, supplies stable definition and
-    schema-binding details.
-  - Make the official desktop combination one normal inspectable/editable recipe assembled from
-    ordinary first-party entries. Code-first and file-backed paths must lower through the same
-    recipe construction; file-backed settings add lineage and semantic capability admission rather
-    than choosing plugin/provider IDs.
-  - Keep process authority out of the recipe. A root desktop-run facade should consume the
-    configured App/recipe and hide candidate admission, winit driving, publication, and truthful
-    retirement from ordinary examples without allowing a plugin hook to select the runner.
-  - Defer a general `PackageDefinition`, multi-role contract kernel, package registry, importer or
-    tooling aggregation, and manifest extension map until a real package needs more than runtime
-    plugins plus persistent schema.
-- **Required tracer**: A renamed-dependency external crate must expose one typed `package(config)`
-  helper and pass four journeys: direct App, code-first desktop, file-backed desktop, and headless.
-  The game-authored call sites may not import the advanced prelude, construct `PluginDefinition`,
-  pass a schema provider separately, name a slot/anchor, or select a provider in `nara.toml`.
-  Runtime-only plugins must remain directly appendable without the helper. Equivalent recipes must
-  resolve the same plugin IDs, exact schema bindings, and catalog fingerprint before this question
-  can graduate.
+- **Accepted bounded decision**: RPR-U3/U4 establish `ProductRecipe` as the ordinary compiled Rust
+  composition value. Runtime-only plugins remain directly appendable; `SchemaContribution` binds
+  one replayable schema-owning plugin to its declared providers and typed configuration. Direct
+  `App`, file-backed headless, desktop, and Editor paths lower the same recipe without exposing
+  definition IDs, slot anchors, provider lists, runtime candidates, or retirement ledgers. The
+  reference game shares one recipe across those Host paths, and an independently locked fixture
+  proves a renamed root dependency, a runtime-only plugin, a configured schema contribution, and a
+  real `HeadlessRun` outside workspace inheritance. Advanced raw definitions remain available only
+  for explicit embedding probes and engine-owned fault tests.
+- **Remaining question**: A local compiled-Rust fixture does not prove package installation,
+  independently versioned external distribution, file-backed plugin settings, profile overlays,
+  or lossless missing-package round trips. Those workflows keep this question open. They must not
+  add a general `PackageDefinition`, registry, provider selector, or multi-role kernel until a real
+  package needs more than runtime plugins plus persistent schema.
 
 ## OQ-046: Canonical Authoring Serialization Format
 

@@ -1,4 +1,4 @@
-# Manual Raw-App Ownership Baseline
+# Historical Manual Raw-App Ownership Baseline
 
 ## Purpose
 
@@ -7,7 +7,11 @@ manual reference-game tracer completed at revision
 `f90e1b9b3235a8c5a8544eca9ba442bb7b81fd9f`. Git history preserves that implementation; this
 document records only the concepts and observable ownership behavior that RGF-U24 must compare.
 
-The baseline is a test and architecture reference, not a supported author-facing startup API.
+The baseline is an architecture and Git-history reference, not a supported author-facing startup
+API. RPR-U4 removed the parallel manual boot implementation after the Host-owned product path had
+preserved its success, failure, and retryable-cleanup observations. Inspect revision
+`f90e1b9b3235a8c5a8544eca9ba442bb7b81fd9f` when the historical implementation itself is needed;
+current tests deliberately do not reconstruct that lifecycle.
 
 ## Caller Work
 
@@ -57,9 +61,10 @@ The manual path never creates a `RuntimeCandidate`, `RuntimeInstance`, publicati
 | Late persistent hook | `scene.persistent-apply-ineligible` with `lifecycle-hook` / `add` | Entity count is unchanged and no scene or runtime is published. | App-owned task pools and plugins retire completely. The hook is never invoked. |
 | Stalled required task | `TaskShutdown` with the terminal incomplete phase `Join` | The same first tick and scene completed; no runtime is published. | Bounded shutdown reports timeout while `App::World` retains custody. The test releases the task, retries close, and verifies every worker joined before plugin shutdown and App drop. |
 
-The success task is fixed by the committed manifest, startup scene, prefab, image, plugin-plan,
-schema, content, and command digests asserted in
-`reference-game/tests/manual_raw_app_baseline.rs`.
+At the historical revision, the success task was fixed by the committed manifest, startup scene,
+prefab, image, plugin-plan, schema, content, and command digests asserted by
+`reference-game/tests/manual_raw_app_baseline.rs`. Current product behavior is covered directly by
+`reference-game/tests/runtime_drive.rs`.
 
 ## RGF-U24 Comparison Contract
 
@@ -86,8 +91,11 @@ product complexity are the comparison.
 - This baseline does not measure performance, prove native platform driving, or authorize a
   universal Host/factory abstraction.
 
-## Verification
+## Historical Verification
 
-```text
+The following command is valid only after checking out the historical subject revision named
+above. It is not a current repository gate.
+
+```console
 cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test manual_raw_app_baseline --test-threads=1
 ```
