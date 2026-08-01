@@ -1,12 +1,17 @@
 use std::time::Duration;
 
+use crate::{
+    ComputedUiLayouts, UiInteractionState, UiNode, UiPanel, UiPlugin, UiPointerRoute, UiRoot,
+    UiStyle, UiVal, register_ui_components,
+};
 use nara_app::App;
 use nara_asset::{
     AssetId, AssetPath, AssetRecord, AssetRef, AssetServer, AssetSourceKind, Handle,
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{Color, Vec2};
-use nara_ecs::World;
+use nara_ecs::{Entity, World};
+use nara_hierarchy::HierarchyConstructionWriter;
 use nara_input::{ButtonInput, MouseButton, PointerState};
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_reflect::{
@@ -14,24 +19,27 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_render::{Camera2d, RenderImage2d, RenderTarget, ViewportRect};
-use nara_scene::Parent;
-
-use crate::{
-    ComputedUiLayouts, UiInteractionState, UiNode, UiPanel, UiPlugin, UiPointerRoute, UiRoot,
-    UiStyle, UiVal, register_ui_components,
-};
 
 fn ui_app() -> App {
     let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
-        nara_scene::HierarchyPlugin,
+        nara_hierarchy::HierarchyPlugin,
         nara_render::RenderPlugin,
         nara_input::InputPlugin,
         UiPlugin,
     ))
     .unwrap();
     app
+}
+
+fn attach_child(app: &mut App, child: Entity, parent: Entity) {
+    HierarchyConstructionWriter::new(
+        app.world_mut()
+            .expect("app should allow hierarchy construction"),
+    )
+    .attach(child, parent)
+    .expect("test hierarchy should be valid");
 }
 
 fn frozen_ui_registry() -> ComponentRegistry {
@@ -58,15 +66,13 @@ fn root_targeting_primary_view_produces_child_rectangles() {
     let child = app
         .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(
-                UiStyle::default()
-                    .with_position(UiVal::Percent(0.5), UiVal::Px(10.0))
-                    .with_size(UiVal::Percent(0.25), UiVal::Px(20.0)),
-            ),
-            Parent(root),
+        .spawn(UiNode::new(
+            UiStyle::default()
+                .with_position(UiVal::Percent(0.5), UiVal::Px(10.0))
+                .with_size(UiVal::Percent(0.25), UiVal::Px(20.0)),
         ))
         .id();
+    attach_child(&mut app, child, root);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -226,18 +232,18 @@ fn hidden_and_zero_size_nodes_do_not_hit_test() {
         .expect("app should allow world mutation")
         .spawn(UiRoot::primary_window())
         .id();
-    app.world_mut()
+    let hidden = app
+        .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).with_visible(false),
-            Parent(root),
-        ));
-    app.world_mut()
+        .spawn(UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).with_visible(false))
+        .id();
+    attach_child(&mut app, hidden, root);
+    let zero_sized = app
+        .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(0.0, 0.0, 0.0, 100.0)),
-            Parent(root),
-        ));
+        .spawn(UiNode::new(UiStyle::absolute(0.0, 0.0, 0.0, 100.0)))
+        .id();
+    attach_child(&mut app, zero_sized, root);
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
@@ -268,21 +274,19 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
     let lower = app
         .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).with_z_index(1),
-            Parent(root),
-        ))
+        .spawn(UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).with_z_index(1))
         .id();
+    attach_child(&mut app, lower, root);
     let upper = app
         .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
+        .spawn(
             UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0))
                 .with_z_index(2)
                 .focusable(),
-            Parent(root),
-        ))
+        )
         .id();
+    attach_child(&mut app, upper, root);
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
@@ -354,19 +358,15 @@ fn routed_pointer_hits_only_matching_view_target() {
     let first = app
         .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)),
-            Parent(first_root),
-        ))
+        .spawn(UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)))
         .id();
+    attach_child(&mut app, first, first_root);
     let second = app
         .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)),
-            Parent(second_root),
-        ))
+        .spawn(UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)))
         .id();
+    attach_child(&mut app, second, second_root);
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
@@ -403,11 +403,9 @@ fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
     let button = app
         .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).focusable(),
-            Parent(root),
-        ))
+        .spawn(UiNode::new(UiStyle::absolute(0.0, 0.0, 100.0, 100.0)).focusable())
         .id();
+    attach_child(&mut app, button, root);
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<PointerState>()
@@ -467,17 +465,15 @@ fn clipped_child_does_not_hit_test_outside_parent_clip() {
     let clipped_parent = app
         .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(0.0, 0.0, 50.0, 50.0)).clipping_children(),
-            Parent(root),
-        ))
+        .spawn(UiNode::new(UiStyle::absolute(0.0, 0.0, 50.0, 50.0)).clipping_children())
         .id();
-    app.world_mut()
+    attach_child(&mut app, clipped_parent, root);
+    let clipped_child = app
+        .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(40.0, 40.0, 50.0, 50.0)),
-            Parent(clipped_parent),
-        ));
+        .spawn(UiNode::new(UiStyle::absolute(40.0, 40.0, 50.0, 50.0)))
+        .id();
+    attach_child(&mut app, clipped_child, clipped_parent);
     app.world_mut()
         .expect("app should allow world mutation")
         .resource_mut::<PointerState>()

@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 use nara_core::Vec2;
-use nara_ecs::{Entity, Query, Res, ResMut, Resource};
+use nara_ecs::{Entity, Query, Res, ResMut, Resource, Without};
+use nara_hierarchy::Children;
 use nara_render::{ExtractedViews, RenderTarget, ViewportRect};
-use nara_scene::Parent;
 
 use crate::{UiNode, UiRoot, style::resolve_ui_position, style::resolve_ui_size};
 
@@ -120,14 +118,13 @@ impl ComputedUiLayouts {
 pub fn compute_ui_layouts(
     mut computed: ResMut<ComputedUiLayouts>,
     views: Res<ExtractedViews>,
-    roots: Query<(Entity, &UiRoot, Option<&UiNode>)>,
-    nodes: Query<(Entity, &UiNode, Option<&Parent>)>,
+    roots: Query<(Entity, &UiRoot, Option<&UiNode>, Option<&Children>)>,
+    nodes: Query<(&UiNode, Option<&Children>), Without<UiRoot>>,
 ) {
     let mut layouts = Vec::new();
-    let mut by_entity = HashMap::<Entity, ComputedUiLayout>::new();
     let mut root_entries = roots
         .iter()
-        .filter_map(|(entity, root, node)| {
+        .filter_map(|(entity, root, node, _children)| {
             view_for_target(&views, root.target).map(|(view_index, viewport)| RootEntry {
                 entity,
                 root: *root,
@@ -159,56 +156,45 @@ pub fn compute_ui_layouts(
             clip_rect: None,
             clips_children: entry.node.is_some_and(|node| node.clip),
         };
-        by_entity.insert(entry.entity, layout);
         layouts.push(layout);
-    }
 
-    let mut pending = nodes
-        .iter()
-        .filter_map(|(entity, node, parent)| {
-            let parent = parent?;
-            Some(NodeEntry {
-                entity,
-                node: *node,
-                parent: parent.0,
-            })
-        })
-        .collect::<Vec<_>>();
-    pending.sort_by_key(|entry| entry.entity.to_bits());
+        let Ok((_entity, _root, _node, children)) = roots.get(entry.entity) else {
+            continue;
+        };
+        let mut pending = Vec::new();
+        if let Some(children) = children {
+            pending.extend(children.iter().rev().map(|entity| (entity, layout)));
+        }
 
-    let mut progressed = true;
-    while progressed && !pending.is_empty() {
-        progressed = false;
-        let mut next_pending = Vec::new();
-
-        for entry in pending {
-            let Some(parent) = by_entity.get(&entry.parent).copied() else {
-                next_pending.push(entry);
+        while let Some((entity, parent)) = pending.pop() {
+            let Ok((node, children)) = nodes.get(entity) else {
                 continue;
             };
-            let Some(rect) = resolve_node_rect(entry.node, parent.rect) else {
+            let Some(rect) = resolve_node_rect(*node, parent.rect) else {
                 continue;
             };
             let clip_rect = inherited_clip(parent);
-            let visible = parent.visible && entry.node.visible && rect.is_non_empty();
+            let visible = parent.visible && node.visible && rect.is_non_empty();
             let layout = ComputedUiLayout {
-                entity: entry.entity,
+                entity,
                 root: parent.root,
                 view_index: parent.view_index,
                 target: parent.target,
                 order: parent.order,
-                z_index: entry.node.z_index,
+                z_index: node.z_index,
                 rect,
                 visible,
                 clip_rect,
-                clips_children: entry.node.clip,
+                clips_children: node.clip,
             };
-            by_entity.insert(entry.entity, layout);
             layouts.push(layout);
-            progressed = true;
-        }
 
-        pending = next_pending;
+            // Each relationship edge is visited once. Collection order controls only transient
+            // traversal order; product draw and hit-test order remains explicit in `replace`.
+            if let Some(children) = children {
+                pending.extend(children.iter().rev().map(|child| (child, layout)));
+            }
+        }
     }
 
     computed.replace(layouts);
@@ -264,11 +250,4 @@ struct RootEntry {
     node: Option<UiNode>,
     view_index: usize,
     viewport: ViewportRect,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct NodeEntry {
-    entity: Entity,
-    node: UiNode,
-    parent: Entity,
 }

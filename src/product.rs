@@ -586,6 +586,7 @@ const SERVER_TIME_POLICY_DECLARATION: PluginDeclaration =
 const SLOT_COMPONENT_REGISTRY: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.component-registry");
 const SLOT_HIERARCHY: PluginSlotId = PluginSlotId::new("nara.plugins.slot.hierarchy");
+const SLOT_SCENE_COMPONENTS: PluginSlotId = PluginSlotId::new("nara.plugins.slot.scene-components");
 const SLOT_DIAGNOSTICS: PluginSlotId = PluginSlotId::new("nara.plugins.slot.diagnostics");
 const SLOT_TASKS: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tasks");
 const SLOT_ASSET: PluginSlotId = PluginSlotId::new("nara.plugins.slot.asset");
@@ -639,8 +640,15 @@ impl PluginGroup for MinimalPlugins {
                 PluginDefinition::for_default::<nara_reflect::ComponentRegistryPlugin>(),
             )
             .add_slot(
-                PluginSlot::required(SLOT_HIERARCHY, nara_scene::HIERARCHY_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_scene::HierarchyPlugin>(),
+                PluginSlot::required(SLOT_HIERARCHY, nara_hierarchy::HIERARCHY_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_hierarchy::HierarchyPlugin>(),
+            )
+            .add_slot(
+                PluginSlot::required(
+                    SLOT_SCENE_COMPONENTS,
+                    nara_scene::SCENE_COMPONENTS_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_scene::SceneComponentsPlugin>(),
             )
             .add_slot(
                 PluginSlot::required(SLOT_DIAGNOSTICS, nara_diagnostic::DIAGNOSTICS_PLUGIN_ID),
@@ -732,8 +740,15 @@ impl PluginGroup for ServerPlugins {
                 PluginDefinition::for_default::<nara_reflect::ComponentRegistryPlugin>(),
             )
             .add_slot(
-                PluginSlot::required(SLOT_HIERARCHY, nara_scene::HIERARCHY_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_scene::HierarchyPlugin>(),
+                PluginSlot::required(SLOT_HIERARCHY, nara_hierarchy::HIERARCHY_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_hierarchy::HierarchyPlugin>(),
+            )
+            .add_slot(
+                PluginSlot::required(
+                    SLOT_SCENE_COMPONENTS,
+                    nara_scene::SCENE_COMPONENTS_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_scene::SceneComponentsPlugin>(),
             )
             .add_slot(
                 PluginSlot::required(SLOT_DIAGNOSTICS, nara_diagnostic::DIAGNOSTICS_PLUGIN_ID),

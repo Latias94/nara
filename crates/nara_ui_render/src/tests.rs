@@ -7,12 +7,13 @@ use nara_asset::{
     ImportSettingsHash, ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_core::{Color, Vec2};
+use nara_ecs::Entity;
+use nara_hierarchy::HierarchyConstructionWriter;
 use nara_image::{
     ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata, image_resource_key,
 };
 use nara_material::SamplerDescriptor;
 use nara_render::{Camera2d, ViewportRect};
-use nara_scene::Parent;
 use nara_ui::{UiNode, UiPanel, UiRect, UiRoot, UiStyle};
 
 use crate::{
@@ -28,13 +29,15 @@ fn colored_panel_queues_without_image_asset() {
         .expect("app should allow world mutation")
         .spawn(UiRoot::primary_window())
         .id();
-    app.world_mut()
+    let panel = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(10.0, 20.0, 50.0, 25.0)),
             UiPanel::from_color(Color::rgb(0.8, 0.2, 0.1)),
-            Parent(root),
-        ));
+        ))
+        .id();
+    attach_child(&mut app, panel, root);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -61,13 +64,15 @@ fn image_panel_uses_prepared_image_material_key_when_ready() {
         .expect("app should allow world mutation")
         .spawn(UiRoot::primary_window())
         .id();
-    app.world_mut()
+    let panel = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0)),
             UiPanel::from_image(image).with_sampler(SamplerDescriptor::NEAREST_CLAMP),
-            Parent(root),
-        ));
+        ))
+        .id();
+    attach_child(&mut app, panel, root);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -95,13 +100,15 @@ fn missing_image_panel_queues_fallback_material_and_records_stats() {
         .expect("app should allow world mutation")
         .spawn(UiRoot::primary_window())
         .id();
-    app.world_mut()
+    let panel = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0)),
             UiPanel::from_image(missing).with_tint(Color::rgba(1.0, 1.0, 1.0, 0.25)),
-            Parent(root),
-        ));
+        ))
+        .id();
+    attach_child(&mut app, panel, root);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -124,25 +131,27 @@ fn clipping_splits_batches_with_same_material() {
     let clip_parent = app
         .world_mut()
         .expect("app should allow world mutation")
-        .spawn((
-            UiNode::new(UiStyle::absolute(0.0, 0.0, 64.0, 64.0)).clipping_children(),
-            Parent(root),
-        ))
+        .spawn(UiNode::new(UiStyle::absolute(0.0, 0.0, 64.0, 64.0)).clipping_children())
         .id();
-    app.world_mut()
+    attach_child(&mut app, clip_parent, root);
+    let clipped_panel = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(4.0, 4.0, 16.0, 16.0)),
             UiPanel::from_color(Color::WHITE),
-            Parent(clip_parent),
-        ));
-    app.world_mut()
+        ))
+        .id();
+    attach_child(&mut app, clipped_panel, clip_parent);
+    let unclipped_panel = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             UiNode::new(UiStyle::absolute(80.0, 0.0, 16.0, 16.0)),
             UiPanel::from_color(Color::WHITE),
-            Parent(root),
-        ));
+        ))
+        .id();
+    attach_child(&mut app, unclipped_panel, root);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -214,7 +223,7 @@ fn ui_app() -> App {
     let mut app = App::new();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
-        nara_scene::HierarchyPlugin,
+        nara_hierarchy::HierarchyPlugin,
         nara_render::RenderPlugin,
         nara_input::InputPlugin,
         nara_image::ImagePreparePlugin,
@@ -229,6 +238,15 @@ fn ui_app() -> App {
             ..Camera2d::default()
         });
     app
+}
+
+fn attach_child(app: &mut App, child: Entity, parent: Entity) {
+    HierarchyConstructionWriter::new(
+        app.world_mut()
+            .expect("app should allow hierarchy construction"),
+    )
+    .attach(child, parent)
+    .expect("test hierarchy should be valid");
 }
 
 fn insert_loaded_image(app: &mut App, handle: Handle<ImageAsset>) {

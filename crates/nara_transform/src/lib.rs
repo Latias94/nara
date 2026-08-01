@@ -68,9 +68,13 @@ pub const TRANSFORM_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefini
         validate_transform_components,
         register_transform_components,
     );
+const TRANSFORM_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
+    nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
+    nara_hierarchy::HIERARCHY_PLUGIN_ID,
+];
 pub const TRANSFORM_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(TRANSFORM_PLUGIN_ID, nara_app::PluginCategory::Core)
-        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .requires_plugins(TRANSFORM_PLUGIN_REQUIREMENTS)
         .provides_schema(&[TRANSFORM_SCHEMA_PROVIDER_ID]);
 
 impl Plugin for TransformPlugin {
@@ -274,8 +278,12 @@ mod tests {
     #[test]
     fn plugin_preflight_reports_component_conflicts_without_poisoning_app() {
         let mut app = App::new();
-        app.add_plugins((ComponentRegistryPlugin, ConflictingTransformPlugin))
-            .expect("the conflicting provider should install through the registry owner");
+        app.add_plugins((
+            ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            ConflictingTransformPlugin,
+        ))
+        .expect("the conflicting provider should install through the registry owner");
 
         let error = app
             .add_plugin(TransformPlugin)

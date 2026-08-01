@@ -6,7 +6,7 @@ use nara_asset::{
     ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
-use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticValueRef};
+use nara_diagnostic::{Diagnostic, DiagnosticFieldClass, DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::{
     Commands, Component, Entity, Mut, Resource, World,
     lifecycle::{Add, Despawn, HookContext, Remove},
@@ -14,6 +14,7 @@ use nara_ecs::{
     system::ResMut,
     world::DeferredWorld,
 };
+use nara_hierarchy::{Children, HierarchyConstructionWriter, Parent};
 use nara_identity::{
     EntityLookup, EntityReference, IdentityDomainError, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, SpawnedSceneInstance, TombstoneCause,
@@ -35,6 +36,12 @@ struct TestPosition {
 struct TestAssetLink {
     handle: Handle<TestAsset>,
 }
+
+#[derive(Clone, Debug, PartialEq, Component)]
+struct TestAlternateAssetLink;
+
+#[derive(Clone, Debug, PartialEq, Component)]
+struct DeferredTransform(i64);
 
 #[derive(Clone, Debug, PartialEq, Component)]
 struct TestBrokenExport;
@@ -374,12 +381,13 @@ fn scene_diagnostic_asset_refs_keep_semantic_classification() {
 }
 
 #[test]
-fn syncs_parent_child_links() {
+fn construction_writer_publishes_parent_child_links_immediately() {
     let mut world = World::new();
     let parent = world.spawn((Name::new("parent"),)).id();
-    let child = spawn_child(&mut world, parent, (Name::new("child"),));
-
-    sync_children(&mut world);
+    let child = world.spawn((Name::new("child"),)).id();
+    HierarchyConstructionWriter::new(&mut world)
+        .attach(child, parent)
+        .unwrap();
 
     let parent_ref = world.get_entity(parent).unwrap();
     let children = parent_ref.get::<Children>().unwrap();
@@ -1442,7 +1450,7 @@ fn deferred_dynamic_hook_rejects_fresh_scene_before_target_allocation() {
 }
 
 #[test]
-fn hierarchy_observer_installed_during_publication_applies_only_to_later_persistent_work() {
+fn hierarchy_observer_rejects_publication_before_candidate_mutation() {
     let registry = test_registry();
     let parent_id = scene_id("parent");
     let child_id = scene_id("child");
@@ -1463,29 +1471,27 @@ fn hierarchy_observer_installed_during_publication_applies_only_to_later_persist
         );
     });
     world.flush();
+    let baseline = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
 
     let report = spawn_scene(&mut world, &registry, &document);
 
-    assert!(!report.diagnostics.has_errors());
-    assert!(report.instance.is_some());
+    assert!(report.instance.is_none());
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.runtime-projection-ineligible"
+        })
+    );
     assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
-    world.flush();
-
-    let later_target = world.spawn_empty().id();
-    let prepared = registry
-        .preflight_component(
-            &position_type_id(),
-            &ComponentValue::map([("x", ComponentValue::I64(3))]),
-        )
-        .unwrap()
-        .unwrap();
-    let error = prepared.apply(&mut world, later_target).unwrap_err();
-    assert!(matches!(
-        error,
-        ComponentCodecError::PersistentApplyRejected { .. }
-    ));
-    assert!(world.get::<TestPosition>(later_target).is_none());
-    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline
+    );
 }
 
 #[test]
@@ -1765,6 +1771,32 @@ fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
 }
 
 #[test]
+fn empty_scene_replacement_handles_empty_and_nonempty_candidates() {
+    let registry = test_registry();
+    let empty = SceneDocument::new([]);
+    let populated_id = scene_id("populated");
+    let populated = SceneDocument::new([SceneEntityRecord::new(populated_id.clone())]);
+    let mut world = World::new();
+    let mut spawner = SceneSpawner::new();
+
+    let initial = spawner.spawn(&mut world, &registry, &empty);
+    assert!(!initial.diagnostics.has_errors());
+    let initial = spawned_instance(&initial).clone();
+
+    let empty_replacement = spawner.replace(&mut world, &registry, &empty, &initial);
+    assert!(!empty_replacement.diagnostics.has_errors());
+    assert_eq!(empty_replacement.retired_entities(), 0);
+    let empty_replacement = spawned_instance(&empty_replacement).clone();
+
+    let populated_replacement =
+        spawner.replace(&mut world, &registry, &populated, &empty_replacement);
+    assert!(!populated_replacement.diagnostics.has_errors());
+    assert_eq!(populated_replacement.retired_entities(), 0);
+    let populated_entity = spawned_entity(&world, &populated_replacement, &populated_id);
+    assert!(world.get_entity(populated_entity).is_ok());
+}
+
+#[test]
 fn individual_scene_retirement_tombstones_identity_before_despawn() {
     let registry = test_registry();
     let id = scene_id("retired");
@@ -1897,7 +1929,7 @@ fn individual_scene_retirement_rejects_parents_and_unlinks_retired_children() {
     retire_and_despawn_scene_entity(&mut world, child).unwrap();
 
     assert!(world.get_entity(child).is_err());
-    assert_eq!(world.get::<Children>(parent).unwrap().as_slice(), &[]);
+    assert!(world.get::<Children>(parent).is_none_or(Children::is_empty));
     assert!(matches!(
         instance.resolve(&world, &child_id),
         EntityLookup::Tombstoned(Some(_))
@@ -2042,6 +2074,71 @@ fn authoring_replacement_and_clear_publish_typed_tombstones() {
 }
 
 #[test]
+fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
+    let registry = test_registry();
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()),
+        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
+    ]);
+    let mut world = World::new();
+    let mut spawner = SceneSpawner::new();
+    let first = spawner.spawn(&mut world, &registry, &document);
+    assert!(!first.diagnostics.has_errors());
+    let current = spawned_instance(&first).clone();
+    let old_root = spawned_entity(&world, &first, &root_id);
+    let old_child = spawned_entity(&world, &first, &child_id);
+    let external_descendant = world.spawn_empty().id();
+    HierarchyConstructionWriter::new(&mut world)
+        .attach(external_descendant, old_child)
+        .unwrap();
+
+    let replacement = spawner.replace(&mut world, &registry, &document, &current);
+
+    assert!(!replacement.diagnostics.has_errors());
+    assert_eq!(replacement.retired_entities(), 2);
+    assert!(world.get_entity(old_root).is_err());
+    assert!(world.get_entity(old_child).is_err());
+    assert!(world.get_entity(external_descendant).is_ok());
+    assert!(world.get::<Parent>(external_descendant).is_none());
+    let new_root = spawned_entity(&world, &replacement, &root_id);
+    let new_child = spawned_entity(&world, &replacement, &child_id);
+    assert_eq!(world.get::<Parent>(new_child).unwrap().parent(), new_root);
+}
+
+#[test]
+fn hierarchy_aware_unload_detaches_external_descendants() {
+    let registry = test_registry();
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()),
+        SceneEntityRecord::new(child_id.clone()).with_parent(root_id),
+    ]);
+    let mut session = SceneAuthoringSession::new(document);
+    let mut world = World::new();
+    let sync = session.sync_world(&mut world, &registry);
+    assert!(sync.synced);
+    let live = sync.live_instance.unwrap();
+    let scene_child = match live.resolve(&world, &child_id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("scene child did not resolve: {lookup:?}"),
+    };
+    let external_descendant = world.spawn_empty().id();
+    HierarchyConstructionWriter::new(&mut world)
+        .attach(external_descendant, scene_child)
+        .unwrap();
+
+    let clear = session.clear_live_world(&mut world);
+
+    assert!(clear.cleared);
+    assert_eq!(clear.removed_entities, 2);
+    assert!(world.get_entity(external_descendant).is_ok());
+    assert!(world.get::<Parent>(external_descendant).is_none());
+}
+
+#[test]
 fn authoring_replacement_failure_keeps_the_previous_projection() {
     let registry = test_registry();
     let id = scene_id("player");
@@ -2131,8 +2228,7 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
     assert!(failed.instance.is_none());
     assert_eq!(failed.retired_entities(), 0);
     assert!(failed.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.identity-replacement-failed"
-            && diagnostic_has_text_field(diagnostic, "identity-error-kind", "lifecycle-conflict")
+        diagnostic.code().as_str() == "scene.identity-replacement-ineligible"
     }));
     assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
     assert_eq!(
@@ -2151,6 +2247,434 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
         EntityLookup::Resolved(old_entity)
     );
     assert_eq!(world.get::<TestPosition>(old_entity).unwrap().x, 1);
+}
+
+#[test]
+fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
+    let registry = test_registry();
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()),
+        SceneEntityRecord::new(child_id.clone()).with_parent(root_id),
+    ]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    let mut spawner = SceneSpawner::new();
+    let first = spawner.spawn(&mut world, &registry, &document);
+    assert!(!first.diagnostics.has_errors());
+    let current = spawned_instance(&first).clone();
+    let old_child = spawned_entity(&world, &first, &child_id);
+    world.entity_mut(old_child).observe(
+        |_: On<Remove, Parent>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
+
+    let failed = spawner.replace(&mut world, &registry, &document, &current);
+
+    assert!(failed.instance.is_none());
+    assert_eq!(failed.retired_entities(), 0);
+    assert!(failed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.identity-replacement-ineligible"
+    }));
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline_entities
+    );
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        baseline_stats
+    );
+    assert!(world.get::<Parent>(old_child).is_some());
+}
+
+#[test]
+fn children_add_observer_rejects_fresh_scene_publication() {
+    let registry = test_registry();
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(root_id),
+        SceneEntityRecord::new(child_id).with_parent(scene_id("root")),
+    ]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    world.add_observer(
+        |_: On<Add, Children>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline_entities = world.iter_entities().count();
+    let mut spawner = SceneSpawner::new();
+
+    let failed = spawner.spawn(&mut world, &registry, &document);
+
+    assert!(failed.instance.is_none());
+    assert_eq!(failed.retired_entities(), 0);
+    assert!(
+        failed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.runtime-projection-ineligible"
+        })
+    );
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert_eq!(world.iter_entities().count(), baseline_entities);
+}
+
+#[test]
+fn children_add_observer_does_not_reject_a_flat_scene() {
+    let registry = test_registry();
+    let id = scene_id("flat");
+    let document = SceneDocument::new([SceneEntityRecord::new(id.clone())]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    world.add_observer(
+        |_: On<Add, Children>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let mut spawner = SceneSpawner::new();
+
+    let report = spawner.spawn(&mut world, &registry, &document);
+
+    assert!(!report.diagnostics.has_errors());
+    assert!(report.instance.is_some());
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert!(
+        world
+            .get_entity(spawned_entity(&world, &report, &id))
+            .is_ok()
+    );
+}
+
+#[test]
+fn deferred_hierarchy_projection_rejects_every_materialization_entry_point() {
+    let registry = deferred_transform_registry();
+    let flat_id = scene_id("flat");
+    let flat_document = SceneDocument::new([SceneEntityRecord::new(flat_id)
+        .with_component(deferred_transform_type_id(), deferred_transform_record(1))]);
+    assert!(!flat_document.validate(&registry).iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
+    }));
+
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()),
+        SceneEntityRecord::new(child_id.clone())
+            .with_parent(root_id)
+            .with_component(deferred_transform_type_id(), deferred_transform_record(3)),
+    ]);
+    let has_unavailable_projection = |diagnostics: &DiagnosticReport| {
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
+                && diagnostic_has_text_field(diagnostic, "entity-id", child_id.as_str())
+        })
+    };
+
+    assert!(has_unavailable_projection(&document.validate(&registry)));
+
+    let mut direct_world = World::new();
+    let direct_baseline = direct_world.iter_entities().count();
+    let direct = SceneSpawner::new().spawn(&mut direct_world, &registry, &document);
+    assert!(direct.instance.is_none());
+    assert!(has_unavailable_projection(&direct.diagnostics));
+    assert_eq!(direct_world.iter_entities().count(), direct_baseline);
+    assert!(!direct_world.contains_resource::<WorldIdentityDomain>());
+
+    let prefab = PrefabDocument::new(document.entities.clone());
+    let mut prefab_world = World::new();
+    let prefab_baseline = prefab_world.iter_entities().count();
+    let prefab_report = SceneSpawner::new().spawn_prefab(&mut prefab_world, &registry, &prefab);
+    assert!(prefab_report.instance.is_none());
+    assert!(has_unavailable_projection(&prefab_report.diagnostics));
+    assert_eq!(prefab_world.iter_entities().count(), prefab_baseline);
+    assert!(!prefab_world.contains_resource::<WorldIdentityDomain>());
+
+    let current_id = scene_id("current");
+    let current_document = SceneDocument::new([SceneEntityRecord::new(current_id.clone())]);
+    let mut replacement_world = World::new();
+    let mut replacement_spawner = SceneSpawner::new();
+    let current = replacement_spawner.spawn(&mut replacement_world, &registry, &current_document);
+    assert!(!current.diagnostics.has_errors());
+    let current_instance = spawned_instance(&current).clone();
+    let current_entity = spawned_entity(&replacement_world, &current, &current_id);
+    let baseline_entities = replacement_world.iter_entities().count();
+    let replacement = replacement_spawner.replace(
+        &mut replacement_world,
+        &registry,
+        &document,
+        &current_instance,
+    );
+    assert!(replacement.instance.is_none());
+    assert!(has_unavailable_projection(&replacement.diagnostics));
+    assert_eq!(replacement_world.iter_entities().count(), baseline_entities);
+    assert_eq!(
+        current_instance.resolve(&replacement_world, &current_id),
+        EntityLookup::Resolved(current_entity)
+    );
+
+    let mut authoring_world = World::new();
+    let authoring_baseline = authoring_world.iter_entities().count();
+    let mut session = SceneAuthoringSession::new(document);
+    let authoring = session.sync_world(&mut authoring_world, &registry);
+    assert!(!authoring.synced);
+    assert!(authoring.live_instance.is_none());
+    assert!(has_unavailable_projection(&authoring.diagnostics));
+    assert_eq!(authoring_world.iter_entities().count(), authoring_baseline);
+    assert!(!authoring_world.contains_resource::<WorldIdentityDomain>());
+}
+
+#[test]
+fn inherited_visibility_is_rejected_by_the_shared_scene_preflight() {
+    let mut registry = ComponentRegistry::new();
+    register_scene_components(&mut registry).unwrap();
+    registry.freeze().unwrap();
+    let flat_document = SceneDocument::new([SceneEntityRecord::new(scene_id("flat"))
+        .with_component(
+            ComponentTypeId::new("nara.scene.Visibility"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("hidden".to_owned()),
+            ),
+        )]);
+    assert!(!flat_document.validate(&registry).iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
+    }));
+
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()).with_component(
+            ComponentTypeId::new("nara.scene.Visibility"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("hidden".to_owned()),
+            ),
+        ),
+        SceneEntityRecord::new(child_id.clone()).with_parent(root_id),
+    ]);
+
+    let diagnostics = document.validate(&registry);
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
+            && diagnostic_has_text_field(diagnostic, "entity-id", child_id.as_str())
+    }));
+}
+
+#[test]
+fn children_remove_observer_rejects_scene_replacement_before_detach() {
+    let registry = test_registry();
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()),
+        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
+    ]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    let mut spawner = SceneSpawner::new();
+    let first = spawner.spawn(&mut world, &registry, &document);
+    assert!(!first.diagnostics.has_errors());
+    let current = spawned_instance(&first).clone();
+    let old_root = spawned_entity(&world, &first, &root_id);
+    let old_child = spawned_entity(&world, &first, &child_id);
+    world.entity_mut(old_root).observe(
+        |_: On<Remove, Children>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
+
+    let failed = spawner.replace(&mut world, &registry, &document, &current);
+
+    assert!(failed.instance.is_none());
+    assert_eq!(failed.retired_entities(), 0);
+    assert!(failed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.identity-replacement-ineligible"
+    }));
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline_entities
+    );
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        baseline_stats
+    );
+    assert_eq!(
+        world.get::<Parent>(old_child).map(Parent::parent),
+        Some(old_root)
+    );
+    assert_eq!(
+        world.get::<Children>(old_root).map(Children::as_slice),
+        Some([old_child].as_slice())
+    );
+}
+
+#[test]
+fn children_remove_observer_rejects_authoring_unload_before_detach() {
+    let registry = test_registry();
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let mut session = SceneAuthoringSession::new(SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()),
+        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
+    ]));
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    let sync = session.sync_world(&mut world, &registry);
+    assert!(sync.synced);
+    let live = sync.live_instance.unwrap();
+    let root = match live.resolve(&world, &root_id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("authoring root did not resolve: {lookup:?}"),
+    };
+    let child = match live.resolve(&world, &child_id) {
+        EntityLookup::Resolved(entity) => entity,
+        lookup => panic!("authoring child did not resolve: {lookup:?}"),
+    };
+    world.entity_mut(root).observe(
+        |_: On<Remove, Children>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
+    let baseline_revision = session.revision();
+
+    let clear = session.clear_live_world(&mut world);
+
+    assert!(!clear.cleared);
+    assert_eq!(clear.removed_entities, 0);
+    assert_eq!(clear.live_instance.as_ref(), Some(&live));
+    assert_eq!(session.live_instance(), Some(&live));
+    assert_eq!(session.revision(), baseline_revision);
+    assert!(clear.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.lifecycle-retirement-ineligible"
+    }));
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline_entities
+    );
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        baseline_stats
+    );
+    assert_eq!(world.get::<Parent>(child).map(Parent::parent), Some(root));
+    assert_eq!(
+        world.get::<Children>(root).map(Children::as_slice),
+        Some([child].as_slice())
+    );
+}
+
+#[test]
+fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
+    let registry = test_asset_registry();
+    let root_id = scene_id("root");
+    let child_id = scene_id("root/child");
+    let current_document = SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()),
+        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
+    ]);
+    let replacement_document = SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone()),
+        SceneEntityRecord::new(child_id.clone())
+            .with_parent(root_id.clone())
+            .with_component(
+                asset_link_type_id(),
+                asset_link_record(AssetRef::path("textures/generated.png").unwrap()),
+            ),
+    ]);
+    let mut world = World::new();
+    world.init_resource::<PersistentApplyCanary>();
+    let mut spawner = SceneSpawner::new();
+    let first = spawner.spawn(&mut world, &registry, &current_document);
+    assert!(!first.diagnostics.has_errors());
+    let current = spawned_instance(&first).clone();
+    let old_root = spawned_entity(&world, &first, &root_id);
+    let old_child = spawned_entity(&world, &first, &child_id);
+    world.entity_mut(old_child).observe(
+        |_: On<Remove, Parent>, mut canary: ResMut<PersistentApplyCanary>| {
+            canary.0 += 1;
+        },
+    );
+    world.flush();
+    let baseline_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
+
+    let failed = spawner.replace(&mut world, &registry, &replacement_document, &current);
+
+    assert!(failed.instance.is_none());
+    assert_eq!(failed.retired_entities(), 0);
+    assert!(failed.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.identity-replacement-ineligible"
+    }));
+    assert_eq!(world.resource::<PersistentApplyCanary>().0, 0);
+    assert!(!world.contains_resource::<AssetServer>());
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        baseline_entities
+    );
+    assert_eq!(
+        world.resource::<WorldIdentityDomain>().stats(),
+        baseline_stats
+    );
+    assert_eq!(
+        world.get::<Parent>(old_child).map(Parent::parent),
+        Some(old_root)
+    );
+
+    let alternate_registry = alternate_asset_registry();
+    let alternate_id = scene_id("alternate");
+    let alternate_document = SceneDocument::new([SceneEntityRecord::new(alternate_id.clone())
+        .with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::path("textures/alternate.png").unwrap()),
+        )]);
+    let alternate = SceneSpawner::new().spawn(&mut world, &alternate_registry, &alternate_document);
+    assert!(!alternate.diagnostics.has_errors());
+    let alternate_entity = spawned_entity(&world, &alternate, &alternate_id);
+    assert!(
+        world
+            .get::<TestAlternateAssetLink>(alternate_entity)
+            .is_some()
+    );
 }
 
 #[test]
@@ -2467,7 +2991,7 @@ fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
 }
 
 #[test]
-fn spawns_hierarchy_records_source_and_exports_stable_document() {
+fn spawns_hierarchy_and_keeps_runtime_topology_out_of_export() {
     let registry = test_registry();
     let parent_id = scene_id("parent");
     let child_id = scene_id("parent/child");
@@ -2502,28 +3026,10 @@ fn spawns_hierarchy_records_source_and_exports_stable_document() {
 
     let export = export_scene(&world, &registry);
 
-    assert!(!export.diagnostics.has_errors());
-    let output = export.output().unwrap();
-    assert_eq!(output.document.entities.len(), 2);
-    assert_eq!(
-        export
-            .output()
-            .unwrap()
-            .document
-            .entities
-            .iter()
-            .map(|entity| entity.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["parent", "parent/child"]
-    );
-    assert_eq!(
-        output.document.entities[1]
-            .parent
-            .as_ref()
-            .unwrap()
-            .as_str(),
-        "parent"
-    );
+    assert!(export.output().is_none());
+    assert!(export.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.export-runtime-topology-unsupported"
+    }));
 }
 
 #[test]
@@ -3227,7 +3733,7 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
 }
 
 #[test]
-fn export_drops_parent_that_is_not_in_document() {
+fn export_rejects_runtime_parent_instead_of_inventing_persistent_topology() {
     let registry = test_registry();
     let mut world = World::new();
     let child_id = scene_id("child");
@@ -3239,21 +3745,16 @@ fn export_drops_parent_that_is_not_in_document() {
     );
     let child = spawned_entity(&world, &report, &child_id);
     let parent = world.spawn_empty().id();
-    world.entity_mut(child).insert(Parent(parent));
+    HierarchyConstructionWriter::new(&mut world)
+        .attach(child, parent)
+        .unwrap();
 
     let export = export_scene(&world, &registry);
-    let output = export.output().unwrap();
-
-    assert_eq!(output.document.entities.len(), 1);
-    assert_eq!(output.document.entities[0].id.as_str(), "child");
-    assert_eq!(output.document.entities[0].parent, None);
-    assert_eq!(world.get::<Parent>(child).unwrap().0, parent);
-    assert!(
-        export
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code().as_str() == "scene.export-parent-skipped")
-    );
+    assert!(export.output().is_none());
+    assert_eq!(world.get::<Parent>(child).unwrap().parent(), parent);
+    assert!(export.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.export-runtime-topology-unsupported"
+    }));
 }
 
 #[test]
@@ -3423,6 +3924,46 @@ fn test_registry() -> ComponentRegistry {
     register_test_position(&mut registry).unwrap();
     registry.freeze().unwrap();
     registry
+}
+
+fn deferred_transform_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component_with_codec::<DeferredTransform, _, _>(
+            test_component_schema(
+                deferred_transform_type_id(),
+                "Deferred transform",
+                ComponentSchemaVersion::ONE,
+                [test_component_field(
+                    "value",
+                    "Value",
+                    ComponentFieldPath::from_fields(["value"]),
+                    ComponentValueKind::I64,
+                    true,
+                )],
+            ),
+            |value| Ok(DeferredTransform(value.field_i64("value")?)),
+            |transform| {
+                Ok(ComponentValue::map([(
+                    "value",
+                    ComponentValue::I64(transform.0),
+                )]))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn deferred_transform_record(value: i64) -> SceneComponentRecord {
+    SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([("value", ComponentValue::I64(value))]),
+    )
+}
+
+fn deferred_transform_type_id() -> ComponentTypeId {
+    ComponentTypeId::new("nara.transform.Transform2d")
 }
 
 fn entity_link_registry() -> ComponentRegistry {
@@ -3644,6 +4185,34 @@ fn test_asset_registry() -> ComponentRegistry {
                     ComponentValue::U64(link.handle.id().raw()),
                 )])))
             },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn alternate_asset_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    let schema = test_component_schema(
+        asset_link_type_id(),
+        "Alternate asset link",
+        ComponentSchemaVersion::ONE,
+        [test_component_field(
+            "asset",
+            "Asset",
+            ComponentFieldPath::from_fields(["asset"]),
+            ComponentValueKind::AssetRef,
+            true,
+        )],
+    );
+    registry
+        .register_persistent_component_codec::<TestAlternateAssetLink, _, _>(
+            schema,
+            |value| {
+                let _ = read_asset_ref(value.field("asset")?, "asset")?;
+                Ok(PreparedComponentCandidate::insert(TestAlternateAssetLink))
+            },
+            |_world, _entity| Ok(None),
         )
         .unwrap();
     registry.freeze().unwrap();

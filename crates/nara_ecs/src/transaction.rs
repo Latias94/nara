@@ -3,10 +3,14 @@ use std::{collections::BTreeSet, error::Error, fmt};
 use bevy_ecs::{
     component::{Component, ComponentId},
     entity::Entity,
+    relationship::{Relationship, RelationshipTarget},
     world::World,
 };
 
-use crate::__private::{validate_entity_despawn, validate_entity_insertion};
+use crate::__private::{
+    validate_entity_despawn, validate_entity_despawn_with_non_linked_relationship,
+    validate_entity_insertion, validate_non_linked_relationship_teardown,
+};
 
 /// Rejection while preparing an exclusive despawn with no lifecycle side effects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +64,48 @@ pub fn prepare_lifecycle_free_despawn<'world, 'entities>(
     }
 
     Ok(LifecycleFreeDespawn { world, entities })
+}
+
+/// Validates a future despawn whose only provisional lifecycle work is the intrinsic teardown of
+/// one known non-linked relationship pair.
+///
+/// This function does not detach relationships or weaken the strict lifecycle-free despawn guard.
+/// The relationship owner must keep exclusive World access, apply its private prevalidated detach,
+/// and then use [`prepare_lifecycle_free_despawn`] for the final exact retirement set.
+#[doc(hidden)]
+pub(crate) fn validate_lifecycle_free_relationship_despawn<R>(
+    world: &mut World,
+    entities: &[Entity],
+    relationship_targets: &[Entity],
+) -> Result<(), LifecycleFreeDespawnError>
+where
+    R: Relationship,
+    R::RelationshipTarget: RelationshipTarget<Relationship = R>,
+{
+    let mut unique = BTreeSet::new();
+    for entity in entities.iter().copied() {
+        if !unique.insert(entity) {
+            return Err(LifecycleFreeDespawnError::DuplicateEntity);
+        }
+    }
+    world.register_component::<R>();
+    world.register_component::<R::RelationshipTarget>();
+    world.flush();
+    validate_non_linked_relationship_teardown::<R>(world, relationship_targets)
+        .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
+    for entity in entities.iter().copied() {
+        let entity_ref = world
+            .get_entity(entity)
+            .map_err(|_| LifecycleFreeDespawnError::EntityMissing)?;
+        validate_entity_despawn_with_non_linked_relationship::<R>(
+            world,
+            entity,
+            entity_ref.archetype().components(),
+        )
+        .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
+    }
+
+    Ok(())
 }
 
 /// Rejection while preparing or applying a lifecycle-free component insertion transaction.
@@ -177,8 +223,10 @@ mod tests {
     use super::*;
     use bevy_ecs::{
         component::Component,
+        entity::Entity,
         lifecycle::{Despawn, Remove},
         observer::On,
+        relationship::Relationship,
         resource::Resource,
     };
 
@@ -187,6 +235,14 @@ mod tests {
 
     #[derive(Component, Debug, PartialEq, Eq)]
     struct Value(u32);
+
+    #[derive(Component)]
+    #[relationship(relationship_target = TestChildren)]
+    struct TestParent(Entity);
+
+    #[derive(Component)]
+    #[relationship_target(relationship = TestParent)]
+    struct TestChildren(Vec<Entity>);
 
     #[derive(Resource, Default)]
     struct ObserverRuns(u32);
@@ -308,6 +364,68 @@ mod tests {
         );
         assert_eq!(observer_world.resource::<ObserverRuns>().0, 0);
         assert!(observer_world.get_entity(target).is_ok());
+    }
+
+    #[test]
+    fn relationship_retirement_detaches_non_linked_children_before_exact_despawn() {
+        let mut world = World::new();
+        let parent = world.spawn_empty().id();
+        let child = world.spawn(<TestParent as Relationship>::from(parent)).id();
+        world.flush();
+
+        assert_eq!(
+            prepare_lifecycle_free_despawn(&mut world, &[parent])
+                .err()
+                .expect("relationship hooks must remain ineligible for the strict guard"),
+            LifecycleFreeDespawnError::LifecycleWork
+        );
+
+        validate_lifecycle_free_relationship_despawn::<TestParent>(
+            &mut world,
+            &[parent],
+            &[parent, child],
+        )
+        .expect("the exact intrinsic non-linked relationship should be admitted");
+        world.entity_mut(child).remove::<TestParent>();
+        let retirement = [parent];
+        let ready = prepare_lifecycle_free_despawn(&mut world, &retirement)
+            .expect("the detached parent should now satisfy the strict guard");
+        let world = ready.commit();
+
+        assert!(world.get_entity(parent).is_err());
+        assert!(world.get_entity(child).is_ok());
+        assert!(world.get::<TestParent>(child).is_none());
+    }
+
+    #[test]
+    fn relationship_retirement_rejects_user_observers_before_detach() {
+        let mut world = World::new();
+        world.init_resource::<ObserverRuns>();
+        let parent = world.spawn_empty().id();
+        let child = world.spawn(<TestParent as Relationship>::from(parent)).id();
+        world.flush();
+        world.add_observer(
+            |_: On<Remove, TestParent>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                runs.0 += 1;
+            },
+        );
+
+        assert_eq!(
+            validate_lifecycle_free_relationship_despawn::<TestParent>(
+                &mut world,
+                &[parent],
+                &[parent, child],
+            )
+            .expect_err("a relationship observer must reject before mutation"),
+            LifecycleFreeDespawnError::LifecycleWork
+        );
+        assert_eq!(world.resource::<ObserverRuns>().0, 0);
+        assert_eq!(
+            world
+                .get::<TestParent>(child)
+                .map(|relationship| relationship.get()),
+            Some(parent)
+        );
     }
 
     #[test]

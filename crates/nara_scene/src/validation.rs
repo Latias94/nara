@@ -163,6 +163,20 @@ fn preflight_scene_with_context_options(
     }
 
     detect_parent_cycles(document, &mut diagnostics, operation_index);
+    if let Some(entity_id) = first_deferred_hierarchy_projection_entity(document, registry) {
+        push_with_operation_index(
+            &mut diagnostics,
+            with_public_locator(
+                diagnostic_error(
+                    "scene.hierarchy-projection-unavailable",
+                    "Scene hierarchy requires a runtime projection that is not implemented",
+                ),
+                "entity-id",
+                entity_id.as_str(),
+            ),
+            operation_index,
+        );
+    }
 
     let mut prepared_entities = Vec::new();
     for entity in sorted_entities(document) {
@@ -296,6 +310,34 @@ fn preflight_scene_with_context_options(
         entities: prepared_entities,
         diagnostics,
     }
+}
+
+pub(crate) fn first_deferred_hierarchy_projection_entity<'document>(
+    document: &'document SceneDocument,
+    registry: &ComponentRegistry,
+) -> Option<&'document SceneEntityId> {
+    let requires_deferred_projection = |component_id: &ComponentTypeId| {
+        matches!(
+            component_id.as_str(),
+            "nara.transform.Transform2d" | "nara.scene.Visibility"
+        ) && registry.schema(component_id).is_some()
+    };
+    let by_id = document
+        .entities
+        .iter()
+        .map(|entity| (&entity.id, entity))
+        .collect::<BTreeMap<_, _>>();
+
+    document.entities.iter().find_map(|entity| {
+        let parent_id = entity.parent.as_ref()?;
+        let parent = by_id.get(parent_id).copied();
+        let requires_deferred_projection =
+            entity.components.keys().any(requires_deferred_projection)
+                || parent.is_some_and(|parent| {
+                    parent.components.keys().any(requires_deferred_projection)
+                });
+        requires_deferred_projection.then_some(&entity.id)
+    })
 }
 
 fn component_migration_diagnostic(

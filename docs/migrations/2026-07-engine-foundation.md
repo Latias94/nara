@@ -47,6 +47,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U8-1 | RGF-U8 | `60292e7` | `rust-api/behavior` | Task-update set ownership, ordered task result polling, and filesystem watcher admission/observability | Import asset phases from `nara_asset`, capture a task-pool completion cutoff before consuming ordered results, and send watcher batches through the bounded non-blocking sender while handling sticky `RescanRequired`. |
 | RGD-U8-2 | RGD-U8 refresh | `be9b264` | `rust-api/behavior` | `FsError` forward compatibility and strict Unix traversal rejection classification | Add a wildcard arm to external `FsError` matches. Treat exact platform rejection variants as diagnostic detail: all strict Unix adapters reject a symlink leaf, while Linux currently reports `SymbolicLinkTraversal`. |
 | RPR-U3-1 | RPR-U3 | `676d030` | `rust-api` | Ordinary product composition and file-backed run setup | Replace normal caller use of definition IDs, slot edits, and parallel provider lists with `ProductRecipe` and `SchemaContribution`; keep raw one-shot plugins on direct `App` composition. |
+| RGS-U2-1 | RGS-U2 | `RGS-U2` | `rust-api/behavior` | Runtime hierarchy ownership, scene component composition, and parented spatial content admission | Import runtime relationships from `nara_hierarchy`, install `HierarchyPlugin` and `SceneComponentsPlugin` separately, and keep parented transform/visibility content fail-closed until RGS-U3. |
 
 ## Entry Contract
 
@@ -1760,8 +1761,8 @@ snapshot fields, and payload cloning.
 version-1 asset metadata, and pass the same authorized settings candidate and resolved runtime plan
 to `ProjectContentLoader`. Keep the returned snapshot alive for every consumer of its documents or
 imported values. Stable-ID-only lookup requires a future admitted index and currently rejects.
-Parented transforms and inherited visibility also reject until the hierarchy contract is
-implemented.
+Parented transforms and inherited visibility remain rejected until their completed runtime
+projections are implemented.
 
 **Source action**: `manual-rewrite` for experimental `.meta` files that do not use the canonical
 `asset_meta` envelope. Existing canonical scene/prefab files remain unchanged.
@@ -2234,6 +2235,91 @@ temporarily available only while RPR-U4 migrates real consumers; it is not the n
 `tests/workspace_play_runtime.rs`, and the public-prelude fixture prove pure replacement,
 direct/file-backed schema parity, headless and Editor execution, and the ordinary public compile
 surface.
+
+## RGS-U2-1: Runtime Hierarchy Ownership and Scene Component Separation
+
+**Removed contract**:
+
+- `nara_scene::{Parent, Children, spawn_child, sync_children}` as the runtime hierarchy authority.
+- `nara_scene::{HierarchyPlugin, HIERARCHY_PLUGIN_ID, HIERARCHY_PLUGIN_DECLARATION}` as the plugin
+  that combined runtime topology with persistent scene components.
+- Direct mutation of the derived `Children` collection through Nara's ordinary API.
+- Inferring persistent scene parent facts from runtime `Parent` components during `export_scene`.
+- Prepared Scene identity transaction ports through the ordinary `nara::identity` facade.
+- Startup publication of parented `Transform2d` or inherited `Visibility` before their runtime
+  projections are implemented.
+
+**Canonical replacement or deletion rationale**: `nara_hierarchy` now owns a custom non-linked
+Bevy relationship, bounded whole-topology validation, and construction-only mutation. Runtime
+structure does not own entity lifetime, persistence, transform math, visibility, UI layout, or
+prefab provenance. `nara_scene::SceneComponentsPlugin` separately owns the persistent `Name` and
+`Visibility` schemas. The split removes the dependency cycle that prevented `nara_transform` from
+consuming hierarchy while retaining one authoritative relationship projection. Exact Scene
+identity preparation remains a workspace-internal composition port between `nara_scene` and
+`nara_identity`; ordinary callers use `SceneSpawner` and `SceneAuthoringSession` rather than
+committing detached identity transactions.
+
+**Before**:
+
+```rust
+use nara_scene::{HierarchyPlugin, Parent, spawn_child};
+
+app.add_plugin(HierarchyPlugin)?;
+spawn_child(app.world_mut()?, child, parent);
+let parent = world.get::<Parent>(child);
+```
+
+**After**:
+
+```rust
+use nara_hierarchy::{HierarchyConstructionWriter, HierarchyPlugin, Parent};
+use nara_scene::SceneComponentsPlugin;
+
+app.add_plugin(HierarchyPlugin)?;
+app.add_plugin(SceneComponentsPlugin)?;
+HierarchyConstructionWriter::new(app.world_mut()?).attach(child, parent)?;
+app.world_mut()?.flush();
+let parent = app.world()?.get::<Parent>(child);
+```
+
+The former plugin ID `nara.scene.hierarchy` is removed. Runtime hierarchy uses `nara.hierarchy`;
+the persistent scene-component plugin uses `nara.scene.components`. The existing schema provider,
+owner, and native binding identities under `nara.scene.hierarchy.components*` intentionally remain
+stable because the persistent `Name` and `Visibility` records did not change identity or format.
+
+**Affected examples and fixtures**: root product bundles, scene spawn/replace/unload, UI hierarchy
+queries, runtime UI examples, the reference game, plugin-composition tests, and public-prelude
+compile fixtures now use the new ownership boundary.
+
+**User action**: add `nara_hierarchy` where runtime structure is required, replace removed scene
+hierarchy imports with `nara_hierarchy` imports, and install both plugins when persistent scene
+components and runtime hierarchy are needed. Do not schedule ordinary systems against the internal
+hierarchy completion set; its public placement is not yet a compatibility promise. Replace any use
+of root-facade prepared identity internals with the corresponding Scene spawn, replacement, or
+authoring operation. Keep persistent parent facts in `SceneDocument` or `ScenePatchDocument`;
+`export_scene` now rejects runtime hierarchy instead of guessing document ownership from it.
+
+**Source action**: `none` for canonical scene/prefab files; stable scene entity IDs, `parent` fields,
+component type IDs, schema versions, and canonical bytes are unchanged. Runtime-only export callers
+that previously inferred parents must move those facts into their owning document or patch. A
+project containing parented `Transform2d` or inherited `Visibility` remains rejected until RGS-U3
+publishes completed global projections and migrates every consumer.
+
+**Cache action**: `keep`; rebuild Rust artifacts and runtime plugin-plan fingerprints after the
+plugin identity split.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No aliases for the removed
+`nara_scene` hierarchy symbols or old plugin ID remain.
+
+**Rollback**: revert the RGS-U2 implementation and all migrated consumers together. Do not restore
+the frame-wide `Children` rebuild or accept parented spatial content without complete propagation.
+
+**Verification anchors**: `crates/nara_hierarchy/src/tests.rs`, `crates/nara_scene/src/tests.rs`,
+`tests/plugin_composition.rs`, `tests/product_capabilities.rs`,
+`tests/project_content_boundary.rs`, and the public-prelude compile fixtures prove topology
+validation, atomic scene replacement/unload, plugin-plan composition, fail-closed spatial
+admission, removed ordinary mutation paths, and the absence of prepared identity transactions from
+the root facade.
 
 ## Persistent Format Matrix
 

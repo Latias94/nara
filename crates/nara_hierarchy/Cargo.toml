@@ -1,0 +1,11 @@
+[package]
+name = "nara_hierarchy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+nara_app.workspace = true
+nara_ecs.workspace = true
+thiserror.workspace = true

@@ -2,22 +2,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
-use nara_ecs::{Mut, World};
-use nara_identity::{SpawnedSceneInstance, TombstoneCause, WorldIdentityDomain};
+use nara_ecs::World;
+use nara_identity::{SpawnedSceneInstance, TombstoneCause};
 use nara_reflect::ComponentRegistry;
 
 use crate::{
     PrefabSourceResolver, SceneDocument, ScenePatchDocument, ScenePatchReport, SceneSpawnReport,
     SceneSpawner,
-    diagnostics::{
-        error as diagnostic_error, info as diagnostic_info, warning as diagnostic_warning,
-        with_codec_error,
-    },
-    hierarchy::sync_children,
-    spawn::{
-        resolved_scene_targets, validate_existing_scene_persistent_apply,
-        validate_scene_identity_support,
-    },
+    diagnostics::{error as diagnostic_error, info as diagnostic_info, with_codec_error},
+    spawn::{SceneInstanceRetirementTransactionError, retire_scene_instance_exact},
 };
 
 static NEXT_AUTHORING_SOURCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -400,72 +393,47 @@ impl SceneAuthoringSession {
                 diagnostics: DiagnosticReport::default(),
             };
         };
-        if !world.contains_resource::<WorldIdentityDomain>() {
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(crate::diagnostics::with_identity_error(
-                diagnostic_error(
-                    "scene.identity-retirement-failed",
-                    "Scene identity retirement failed",
-                ),
-                &nara_identity::IdentityDomainError::WorldDomainUnavailable,
-            ));
-            return SceneAuthoringClearReport {
-                cleared: false,
-                removed_entities: 0,
-                live_instance: Some(current),
-                diagnostics,
-            };
-        }
-
-        let current_targets = resolved_scene_targets(world, &current);
-        if let Err(error) = validate_scene_identity_support(world, &current_targets) {
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(crate::diagnostics::with_identity_support_error(
-                diagnostic_error(
-                    "scene.identity-support-ineligible",
-                    "Scene identity support is ineligible for target-World apply",
-                ),
-                &error,
-            ));
-            return SceneAuthoringClearReport {
-                cleared: false,
-                removed_entities: 0,
-                live_instance: Some(current),
-                diagnostics,
-            };
-        }
-
-        if let Err(error) = validate_existing_scene_persistent_apply(world, &current_targets) {
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(with_codec_error(
-                diagnostic_error(
-                    "scene.persistent-apply-ineligible",
-                    "Persistent scene components are ineligible for target-World apply",
-                ),
-                &error,
-            ));
-            return SceneAuthoringClearReport {
-                cleared: false,
-                removed_entities: 0,
-                live_instance: Some(current),
-                diagnostics,
-            };
-        }
-
-        let retirement = world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
-            domain.retire_scene_instance(world, &current, TombstoneCause::Unloaded)
-        });
-        let retired = match retirement {
+        let retired = match retire_scene_instance_exact(world, &current, TombstoneCause::Unloaded) {
             Ok(retired) => retired,
             Err(error) => {
                 let mut diagnostics = DiagnosticReport::default();
-                diagnostics.push(crate::diagnostics::with_identity_error(
-                    diagnostic_error(
-                        "scene.identity-retirement-failed",
-                        "Scene identity retirement failed",
+                diagnostics.push(match error {
+                    SceneInstanceRetirementTransactionError::Identity(error) => {
+                        crate::diagnostics::with_identity_error(
+                            diagnostic_error(
+                                "scene.identity-retirement-failed",
+                                "Scene identity retirement failed",
+                            ),
+                            &error,
+                        )
+                    }
+                    SceneInstanceRetirementTransactionError::IdentitySupport(error) => {
+                        crate::diagnostics::with_identity_support_error(
+                            diagnostic_error(
+                                "scene.identity-support-ineligible",
+                                "Scene identity support is ineligible for retirement",
+                            ),
+                            &error,
+                        )
+                    }
+                    SceneInstanceRetirementTransactionError::PersistentApply(error) => {
+                        with_codec_error(
+                            diagnostic_error(
+                                "scene.persistent-apply-ineligible",
+                                "Persistent scene components are ineligible for retirement",
+                            ),
+                            &error,
+                        )
+                    }
+                    SceneInstanceRetirementTransactionError::Hierarchy => diagnostic_error(
+                        "scene.hierarchy-retirement-ineligible",
+                        "Scene hierarchy is ineligible for exact retirement",
                     ),
-                    &error,
-                ));
+                    SceneInstanceRetirementTransactionError::Lifecycle => diagnostic_error(
+                        "scene.lifecycle-retirement-ineligible",
+                        "Scene retirement would run unsupported lifecycle work",
+                    ),
+                });
                 return SceneAuthoringClearReport {
                     cleared: false,
                     removed_entities: 0,
@@ -475,17 +443,10 @@ impl SceneAuthoringSession {
             }
         };
 
-        let removed_entities = despawn_entities(world, &retired);
-        let mut diagnostics = DiagnosticReport::default();
-        if removed_entities != retired.len() {
-            diagnostics.push(diagnostic_warning(
-                "scene.retired-entity-already-missing",
-                "A retired scene entity was already absent",
-            ));
-        }
+        let removed_entities = retired.len();
+        let diagnostics = DiagnosticReport::default();
         self.live_instance = None;
         self.live_dirty = !self.document.entities.is_empty();
-        sync_children(world);
         SceneAuthoringClearReport {
             cleared: true,
             removed_entities,
@@ -596,12 +557,4 @@ fn history_miss_report(code: &'static str, summary: &'static str) -> ScenePatchR
         inverse: None,
         diagnostics,
     }
-}
-
-fn despawn_entities(world: &mut World, entities: &[nara_ecs::Entity]) -> usize {
-    entities
-        .iter()
-        .copied()
-        .filter(|entity| world.despawn(*entity))
-        .count()
 }

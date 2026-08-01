@@ -230,7 +230,7 @@ const UI_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
     nara_render::RENDER_PLUGIN_ID,
     nara_input::INPUT_PLUGIN_ID,
-    nara_scene::HIERARCHY_PLUGIN_ID,
+    nara_hierarchy::HIERARCHY_PLUGIN_ID,
 ];
 const UI_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
     &[nara_app::PluginProductCapability::new("runtime-ui")];

@@ -9,6 +9,8 @@ fn main() -> Result<(), AddPluginsError> {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)?;
     app.world_mut()?.spawn(Player);
+    let _: Option<Parent> = None;
+    let _: Option<Children> = None;
     let _ = movement_system;
     Ok(())
 }

@@ -11,6 +11,9 @@ use nara_ecs::{
     system::ResMut,
 };
 
+use crate::domain::{
+    prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
+};
 use crate::{
     EntityLookup, EntityReference, EntityReferenceRemap, IdentityAllocationError,
     IdentityDomainError, IdentityRemapError, MonotonicNonZeroU64Allocator, PersistentRuntimeId,
@@ -763,6 +766,89 @@ fn scene_instance_replacement_retires_the_old_group_and_publishes_the_new_group(
             EntityLookup::Resolved(new_token.entity())
         );
     });
+}
+
+#[test]
+fn prepared_exact_scene_replacement_preserves_authority_until_commit() {
+    let mut world = world_with_domain(16, 8);
+    let old_token = spawn_token(&mut world);
+    let new_token = spawn_token(&mut world);
+    let entity_id = scene_id("entity");
+    let current = with_domain(&mut world, |world, domain| {
+        domain
+            .register_new_scene_instance(world, [(entity_id.clone(), old_token)])
+            .unwrap()
+    });
+    let old_reference = current.runtime_reference(&entity_id).unwrap();
+    let before = world.resource::<WorldIdentityDomain>().stats();
+
+    let prepared = prepare_exact_scene_instance_replacement(
+        &mut world,
+        &current,
+        &[(entity_id.clone(), new_token)],
+        TombstoneCause::Replaced,
+    )
+    .unwrap();
+
+    assert_eq!(prepared.retiring_entities(), [old_token.entity()]);
+    {
+        let domain = world.resource::<WorldIdentityDomain>();
+        assert_eq!(domain.stats(), before);
+        assert_eq!(
+            domain.lookup(&world, &old_reference),
+            EntityLookup::Resolved(old_token.entity())
+        );
+        assert_eq!(domain.locators_for_token(&world, new_token).unwrap(), None);
+    }
+
+    let (replacement, retired) = with_domain(&mut world, |_world, domain| prepared.commit(domain));
+    assert_eq!(retired, [old_token.entity()]);
+    assert!(world.get_entity(old_token.entity()).is_ok());
+    assert!(world.get_entity(new_token.entity()).is_ok());
+    let domain = world.resource::<WorldIdentityDomain>();
+    assert!(matches!(
+        domain.lookup(&world, &old_reference),
+        EntityLookup::Tombstoned(Some(_))
+    ));
+    assert_eq!(
+        domain.lookup(&world, &replacement.runtime_reference(&entity_id).unwrap()),
+        EntityLookup::Resolved(new_token.entity())
+    );
+}
+
+#[test]
+fn prepared_exact_scene_retirement_preserves_authority_until_commit() {
+    let mut world = world_with_domain(16, 8);
+    let token = spawn_token(&mut world);
+    let entity_id = scene_id("entity");
+    let current = with_domain(&mut world, |world, domain| {
+        domain
+            .register_new_scene_instance(world, [(entity_id.clone(), token)])
+            .unwrap()
+    });
+    let reference = current.runtime_reference(&entity_id).unwrap();
+
+    let prepared =
+        prepare_exact_scene_instance_retirement(&mut world, &current, TombstoneCause::Unloaded)
+            .unwrap();
+
+    assert_eq!(prepared.retiring_entities(), [token.entity()]);
+    assert_eq!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .lookup(&world, &reference),
+        EntityLookup::Resolved(token.entity())
+    );
+
+    let retired = with_domain(&mut world, |_world, domain| prepared.commit(domain));
+    assert_eq!(retired, [token.entity()]);
+    assert!(world.get_entity(token.entity()).is_ok());
+    assert!(matches!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .lookup(&world, &reference),
+        EntityLookup::Tombstoned(Some(_))
+    ));
 }
 
 #[derive(Resource, Default)]

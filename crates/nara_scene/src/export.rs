@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use nara_asset::AssetRefExportPolicy;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, World};
+use nara_hierarchy::Parent;
 use nara_identity::{
     EntityLookup, EntityReference, RuntimeEntityReference, SceneInstanceId, WorldEntityLocator,
     WorldIdentityDomain, WorldIdentityDomainId,
@@ -15,10 +16,9 @@ use nara_reflect::{
 use crate::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     diagnostics::{
-        error as diagnostic_error, warning as diagnostic_warning, with_codec_error,
-        with_entity_reference_rewrite_error, with_public_locator,
+        error as diagnostic_error, with_codec_error, with_entity_reference_rewrite_error,
+        with_public_locator,
     },
-    hierarchy::Parent,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,14 +233,11 @@ pub fn export_scene_with_options(
         ComponentEncodeContext::new().with_asset_ref_export_policy(options.asset_ref_export_policy);
     let mut records = Vec::with_capacity(export_entities.len());
     for (export_entity, id) in export_entities.iter().zip(assigned_ids) {
-        let parent = world
-            .get::<Parent>(export_entity.entity)
-            .and_then(|parent| id_by_entity.get(&parent.0).cloned());
-        if world.get::<Parent>(export_entity.entity).is_some() && parent.is_none() {
+        if world.get::<Parent>(export_entity.entity).is_some() {
             diagnostics.push(with_public_locator(
-                diagnostic_warning(
-                    "scene.export-parent-skipped",
-                    "Parent entity is not exported with this scene",
+                diagnostic_error(
+                    "scene.export-runtime-topology-unsupported",
+                    "Scene export cannot infer persistent topology from runtime hierarchy",
                 ),
                 "entity-id",
                 id.as_str(),
@@ -323,7 +320,7 @@ pub fn export_scene_with_options(
 
         records.push(SceneEntityRecord {
             id,
-            parent,
+            parent: None,
             components,
             prefab: None,
         });

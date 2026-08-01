@@ -7,10 +7,10 @@ use nara::{
     asset::{AssetServer, Handle},
     core::{Color, Vec2},
     ecs::{Commands, Component, Entity, Query, Res, ResMut, Resource, World},
+    hierarchy::HierarchyConstructionWriter,
     image::ImageAsset,
     material::SamplerDescriptor,
     render::Camera2d,
-    scene::Parent,
     sprite::{Sprite, TextureRegion},
     transform::Transform2d,
     ui::{UiNode, UiPanel, UiRoot, UiStyle, UiVal},
@@ -138,12 +138,16 @@ fn spawn_desktop_view(
             UiPanel::from_color(Color::rgba(0.12, 0.14, 0.15, 0.94)),
         ))
         .id();
-    world.spawn((
-        Parent(health_root),
-        UiNode::new(UiStyle::absolute(0.0, 0.0, HUD_BAR_WIDTH, 16.0)).with_z_index(1),
-        UiPanel::from_color(Color::rgba(0.18, 0.78, 0.42, 1.0)),
-        ReferenceHudElement::HealthFill,
-    ));
+    let health_fill = world
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, HUD_BAR_WIDTH, 16.0)).with_z_index(1),
+            UiPanel::from_color(Color::rgba(0.18, 0.78, 0.42, 1.0)),
+            ReferenceHudElement::HealthFill,
+        ))
+        .id();
+    HierarchyConstructionWriter::new(world)
+        .attach(health_fill, health_root)
+        .map_err(|_| setup_error("health HUD hierarchy was rejected"))?;
 
     let progress_root = world
         .spawn((
@@ -152,12 +156,16 @@ fn spawn_desktop_view(
             UiPanel::from_color(Color::rgba(0.12, 0.14, 0.15, 0.94)),
         ))
         .id();
-    world.spawn((
-        Parent(progress_root),
-        UiNode::new(UiStyle::absolute(0.0, 0.0, 0.0, 8.0)).with_z_index(1),
-        UiPanel::from_color(Color::rgba(0.95, 0.69, 0.22, 1.0)),
-        ReferenceHudElement::ProgressFill,
-    ));
+    let progress_fill = world
+        .spawn((
+            UiNode::new(UiStyle::absolute(0.0, 0.0, 0.0, 8.0)).with_z_index(1),
+            UiPanel::from_color(Color::rgba(0.95, 0.69, 0.22, 1.0)),
+            ReferenceHudElement::ProgressFill,
+        ))
+        .id();
+    HierarchyConstructionWriter::new(world)
+        .attach(progress_fill, progress_root)
+        .map_err(|_| setup_error("progress HUD hierarchy was rejected"))?;
 
     world.spawn((
         UiRoot::primary_window().with_order(10),

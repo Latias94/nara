@@ -18,10 +18,6 @@ pub(crate) fn error(code: &'static str, summary: &'static str) -> Diagnostic {
     Diagnostic::error(diagnostic_code(code), safe_summary(summary))
 }
 
-pub(crate) fn warning(code: &'static str, summary: &'static str) -> Diagnostic {
-    Diagnostic::warning(diagnostic_code(code), safe_summary(summary))
-}
-
 pub(crate) fn info(code: &'static str, summary: &'static str) -> Diagnostic {
     Diagnostic::info(diagnostic_code(code), safe_summary(summary))
 }

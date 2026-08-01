@@ -203,19 +203,18 @@ impl ProjectContentSnapshot {
             nara_scene::PrefabExpansionOptions::default(),
         );
         let expanded = expansion.document.ok_or_else(|| {
-            ProjectContentError::with_report(
+            map_scene_diagnostics(
                 ProjectContentErrorKind::PrefabExpansion,
                 expansion.diagnostics,
             )
         })?;
         let diagnostics = expanded.validate(registry);
         if diagnostics.has_errors() {
-            return Err(ProjectContentError::with_report(
+            return Err(map_scene_diagnostics(
                 ProjectContentErrorKind::ScenePublication,
                 diagnostics,
             ));
         }
-        reject_unsupported_hierarchy(&expanded, registry)?;
         Ok(expanded)
     }
 }
@@ -626,12 +625,11 @@ impl<'a> LoadContext<'a> {
                 .with_limits(self.loader.limits.prefab_expansion()),
         );
         let expanded = expansion.document.ok_or_else(|| {
-            ProjectContentError::with_report(
+            map_scene_diagnostics(
                 ProjectContentErrorKind::PrefabExpansion,
                 expansion.diagnostics,
             )
         })?;
-        reject_unsupported_hierarchy(&expanded, self.validation.registry())?;
         let expanded_retained = scene_retained_bytes(&expanded)?;
         self.commit_work_as_retained(work_before, expanded_retained)?;
 
@@ -1323,10 +1321,25 @@ fn decode_prefab_candidate(
 fn map_scene_publication_error(
     error: nara_scene::SceneFilePublicationError,
 ) -> ProjectContentError {
-    ProjectContentError::with_report(
+    map_scene_diagnostics(
         ProjectContentErrorKind::ScenePublication,
         error.into_diagnostics(),
     )
+}
+
+fn map_scene_diagnostics(
+    default_kind: ProjectContentErrorKind,
+    diagnostics: DiagnosticReport,
+) -> ProjectContentError {
+    let kind = if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable")
+    {
+        ProjectContentErrorKind::UnsupportedHierarchySemantics
+    } else {
+        default_kind
+    };
+    ProjectContentError::with_report(kind, diagnostics)
 }
 
 struct LoadedPrefabResolver<'a> {
@@ -1346,44 +1359,6 @@ impl PrefabSourceResolver for LoadedPrefabResolver<'_> {
         };
         self.prefabs.get(path).map(Arc::as_ref)
     }
-}
-
-fn reject_unsupported_hierarchy(
-    document: &SceneDocument,
-    registry: &nara_reflect::ComponentRegistry,
-) -> Result<(), ProjectContentError> {
-    let transform_id = registry
-        .schema_for_type::<nara_scene::Transform2d>()
-        .map(nara_reflect::ComponentSchema::id);
-    let visibility_id = registry
-        .schema_for_type::<nara_scene::Visibility>()
-        .map(nara_reflect::ComponentSchema::id);
-    let depends_on_propagation = |component: &nara_reflect::ComponentTypeId| {
-        transform_id == Some(component) || visibility_id == Some(component)
-    };
-    let by_id = document
-        .entities
-        .iter()
-        .map(|entity| (&entity.id, entity))
-        .collect::<BTreeMap<_, _>>();
-    for entity in &document.entities {
-        let Some(parent_id) = &entity.parent else {
-            continue;
-        };
-        let parent = by_id.get(parent_id).copied();
-        let depends_on_propagation = entity.components.keys().any(depends_on_propagation)
-            || parent.is_some_and(|parent| parent.components.keys().any(depends_on_propagation));
-        if depends_on_propagation {
-            return Err(ProjectContentError::with_identifier(
-                ProjectContentErrorKind::UnsupportedHierarchySemantics,
-                "project.content.hierarchy-semantics-unsupported",
-                "Project content requires transform or visibility propagation",
-                "entity",
-                entity.id.as_str(),
-            ));
-        }
-    }
-    Ok(())
 }
 
 #[derive(Default)]

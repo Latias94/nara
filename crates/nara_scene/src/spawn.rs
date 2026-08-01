@@ -2,12 +2,25 @@ use std::{collections::BTreeMap, error::Error, fmt};
 
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
-use nara_ecs::{Component, Entity, Mut, World};
+use nara_ecs::{
+    __private::{
+        validate_lifecycle_free_relationship_despawn, validate_non_linked_relationship_insertion,
+        validate_non_linked_relationship_teardown, validate_registered_persistent_component_apply,
+    },
+    Component, Entity, LifecycleFreeDespawnError, Mut, World, prepare_lifecycle_free_despawn,
+};
+use nara_hierarchy::{
+    Children, HierarchyConstructionEdge, HierarchyConstructionWriter, Parent, validate_hierarchy,
+};
 use nara_identity::{
-    __private::{IdentitySupportTopologyError, validate_identity_support_topology},
-    EntityLookup, IdentityDomainError, RuntimeEntityReference, SceneInstanceId,
-    SpawnedSceneInstance, TombstoneCause, WorldEntityToken, WorldIdentityDomain,
-    WorldIdentityDomainSettings,
+    __private::{
+        IdentitySupportTopologyError, PreparedSceneInstanceRegistration,
+        PreparedSceneInstanceReplacement, prepare_exact_scene_instance_registration,
+        prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
+        validate_identity_support_topology,
+    },
+    IdentityDomainError, RuntimeEntityReference, SceneInstanceId, SpawnedSceneInstance,
+    TombstoneCause, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
 };
 use nara_reflect::{
     __private::{
@@ -21,7 +34,6 @@ use crate::{
     PrefabDocument, PrefabExpansionReport, PrefabSourceResolver, SceneDocument, SceneEntityId,
     ScenePatchDocument,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
-    hierarchy::{Parent, sync_children},
     validation::{PreparedScene, preflight_scene_with_context},
 };
 
@@ -80,6 +92,107 @@ pub struct SceneSpawner;
 enum SceneIdentityCommit<'a> {
     Register,
     Replace(&'a SpawnedSceneInstance),
+}
+
+enum PreparedSceneIdentityCommit {
+    Register {
+        domain: Option<WorldIdentityDomain>,
+        registration: PreparedSceneInstanceRegistration,
+    },
+    Replace {
+        replacement: PreparedSceneInstanceReplacement,
+        hierarchy: PreparedSceneHierarchyDetach,
+    },
+}
+
+impl PreparedSceneIdentityCommit {
+    const fn instance_id(&self) -> SceneInstanceId {
+        match self {
+            Self::Register { registration, .. } => registration.instance_id(),
+            Self::Replace { replacement, .. } => replacement.instance_id(),
+        }
+    }
+
+    fn retiring_entities(&self) -> &[Entity] {
+        match self {
+            Self::Register { .. } => &[],
+            Self::Replace { replacement, .. } => replacement.retiring_entities(),
+        }
+    }
+}
+
+enum PrepareSceneIdentityCommitError {
+    Identity(IdentityDomainError),
+    Hierarchy,
+}
+
+#[derive(Debug)]
+enum SceneHierarchyDetachError {
+    MissingEntity,
+    Invalid,
+}
+
+struct PreparedSceneHierarchyDetach {
+    detached_children: Vec<Entity>,
+    affected_entities: Vec<Entity>,
+}
+
+impl PreparedSceneHierarchyDetach {
+    fn affected_entities(&self) -> &[Entity] {
+        &self.affected_entities
+    }
+
+    fn commit(self, world: &mut World) {
+        let mut commands = world.commands();
+        for child in self.detached_children {
+            commands.entity(child).remove::<Parent>();
+        }
+    }
+}
+
+fn prepare_scene_hierarchy_detach(
+    world: &World,
+    retirements: &[Entity],
+) -> Result<PreparedSceneHierarchyDetach, SceneHierarchyDetachError> {
+    if retirements.is_empty() {
+        return Ok(PreparedSceneHierarchyDetach {
+            detached_children: Vec::new(),
+            affected_entities: Vec::new(),
+        });
+    }
+    if retirements
+        .iter()
+        .any(|entity| world.get_entity(*entity).is_err())
+    {
+        return Err(SceneHierarchyDetachError::MissingEntity);
+    }
+    validate_hierarchy(world).map_err(|_| SceneHierarchyDetachError::Invalid)?;
+
+    let mut detached_children = Vec::new();
+    let mut affected_entities = Vec::new();
+    for entity in retirements.iter().copied() {
+        if let Some(parent) = world.get::<Parent>(entity).map(Parent::parent) {
+            detached_children.push(entity);
+            affected_entities.push(entity);
+            affected_entities.push(parent);
+        }
+        if let Some(children) = world.get::<Children>(entity) {
+            for child in children.iter() {
+                detached_children.push(child);
+                affected_entities.push(child);
+                affected_entities.push(entity);
+            }
+        }
+    }
+
+    detached_children.sort_unstable_by_key(|entity| entity.to_bits());
+    detached_children.dedup();
+    affected_entities.sort_unstable_by_key(|entity| entity.to_bits());
+    affected_entities.dedup();
+    Ok(PreparedSceneHierarchyDetach {
+        detached_children,
+        affected_entities,
+    })
 }
 
 impl SceneSpawner {
@@ -260,15 +373,7 @@ impl SceneSpawner {
         ) {
             return persistent_apply_rejection(diagnostics, &error);
         }
-        let current_instance = match commit {
-            SceneIdentityCommit::Register => None,
-            SceneIdentityCommit::Replace(current) => Some(current),
-        };
-        let current_targets =
-            current_instance.map(|current| resolved_scene_targets(world, current));
-        if let Err(error) =
-            validate_scene_identity_support(world, current_targets.as_deref().unwrap_or_default())
-        {
+        if let Err(error) = validate_scene_identity_support(world, &[]) {
             diagnostics.push(crate::diagnostics::with_identity_support_error(
                 diagnostic_error(
                     "scene.identity-support-ineligible",
@@ -282,9 +387,7 @@ impl SceneSpawner {
                 retired_entities: 0,
             };
         }
-        if let Err(error) =
-            validate_scene_persistent_apply(world, &preflight, current_targets.as_deref())
-        {
+        if let Err(error) = validate_scene_persistent_apply(world, &preflight, None) {
             return persistent_apply_rejection(diagnostics, &error);
         }
         if let Err(error) = component_batch.validate_commit(world) {
@@ -327,7 +430,7 @@ impl SceneSpawner {
             };
         let mut spawned_by_id = BTreeMap::new();
         let mut spawned_entities = Vec::new();
-        let mut parent_links = Vec::new();
+        let mut hierarchy_edges = Vec::new();
         for entity in &preflight.entities {
             let runtime_entity = world.spawn_empty().id();
             spawned_entities.push(runtime_entity);
@@ -399,10 +502,23 @@ impl SceneSpawner {
                 };
             }
 
-            if let Some(parent_id) = entity.parent
-                && let Some(parent_entity) = spawned_by_id.get(&parent_id)
-            {
-                parent_links.push((runtime_entity, *parent_entity));
+            if let Some(parent_id) = entity.parent {
+                match spawned_by_id.get(&parent_id).copied() {
+                    Some(parent_entity) => hierarchy_edges.push(HierarchyConstructionEdge::new(
+                        runtime_entity,
+                        parent_entity,
+                    )),
+                    None => {
+                        diagnostics.push(with_public_locator(
+                            diagnostic_error(
+                                "scene.internal-missing-parent-remap",
+                                "Validated scene parent was not mapped to a runtime entity",
+                            ),
+                            "entity-id",
+                            entity.id.as_str(),
+                        ));
+                    }
+                }
             }
         }
 
@@ -431,24 +547,6 @@ impl SceneSpawner {
             };
         }
 
-        // No component-bearing operation runs between the fresh-target guard and this commit.
-        // Parent and scene-source projections are installed only after persistent publication so
-        // their runtime observers cannot invalidate the guarded persistent insertion.
-        if let Err(error) = component_batch.commit(world) {
-            diagnostics.push(with_codec_error(
-                diagnostic_error(
-                    "scene.component-apply-commit-failed",
-                    "Prepared scene components could not be committed",
-                ),
-                &error,
-            ));
-            rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
-                instance: None,
-                diagnostics,
-                retired_entities: 0,
-            };
-        }
         if let Err(error) =
             declare_persistent_apply_targets(world, spawned_entities.iter().copied())
         {
@@ -494,14 +592,15 @@ impl SceneSpawner {
                 };
             }
         };
-        // Persistent components and private receipt state are complete before identity markers are
-        // adopted. Both support topologies were checked before allocation, so the remaining
-        // identity commit cannot install a new matching observer before retirement.
-        let identity_commit =
-            commit_scene_identity(world, &identity_tokens, commit, new_identity_domain);
-        let (instance, retired) = match identity_commit {
-            Ok(result) => result,
-            Err(error) => {
+
+        let prepared_identity = match prepare_scene_identity_commit(
+            world,
+            &identity_tokens,
+            commit,
+            new_identity_domain,
+        ) {
+            Ok(prepared) => prepared,
+            Err(PrepareSceneIdentityCommitError::Identity(error)) => {
                 diagnostics.push(crate::diagnostics::with_identity_error(
                     match commit {
                         SceneIdentityCommit::Register => diagnostic_error(
@@ -522,19 +621,172 @@ impl SceneSpawner {
                     retired_entities: 0,
                 };
             }
+            Err(PrepareSceneIdentityCommitError::Hierarchy) => {
+                diagnostics.push(diagnostic_error(
+                    "scene.hierarchy-retirement-ineligible",
+                    "Scene hierarchy could not be prepared for exact retirement",
+                ));
+                rollback_spawn_transaction(world, &spawned_entities);
+                return SceneSpawnReport {
+                    instance: None,
+                    diagnostics,
+                    retired_entities: 0,
+                };
+            }
         };
 
-        let retired_entities = retired.len();
-        for (entity, parent) in parent_links {
-            world.entity_mut(entity).insert(Parent(parent));
+        let retired_entities = prepared_identity.retiring_entities().to_vec();
+        if let Err(error) = validate_scene_identity_support(world, &retired_entities) {
+            diagnostics.push(crate::diagnostics::with_identity_support_error(
+                diagnostic_error(
+                    "scene.identity-support-ineligible",
+                    "Scene identity support is ineligible for target-World apply",
+                ),
+                &error,
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
         }
+        if let Err(error) = validate_existing_scene_persistent_apply(world, &retired_entities) {
+            let report = persistent_apply_rejection(diagnostics, &error);
+            rollback_spawn_transaction(world, &spawned_entities);
+            return report;
+        }
+
+        let mut candidate_hierarchy_targets = hierarchy_edges
+            .iter()
+            .flat_map(|edge| [edge.child(), edge.parent()])
+            .collect::<Vec<_>>();
+        candidate_hierarchy_targets.sort_unstable_by_key(|entity| entity.to_bits());
+        candidate_hierarchy_targets.dedup();
+        let hierarchy_projection_ineligible = !hierarchy_edges.is_empty()
+            && (validate_non_linked_relationship_insertion::<Parent>(
+                world,
+                hierarchy_edges
+                    .iter()
+                    .map(|edge| (edge.child(), edge.parent())),
+            )
+            .is_err()
+                || validate_non_linked_relationship_teardown::<Parent>(
+                    world,
+                    &candidate_hierarchy_targets,
+                )
+                .is_err());
+        if hierarchy_projection_ineligible
+            || validate_scene_source_support(world, &spawned_entities).is_err()
+        {
+            diagnostics.push(diagnostic_error(
+                "scene.runtime-projection-ineligible",
+                "Scene runtime projections would run unsupported lifecycle work",
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
+        }
+
+        if let PreparedSceneIdentityCommit::Replace {
+            replacement,
+            hierarchy,
+        } = &prepared_identity
+            && validate_prepared_scene_retirement(world, replacement.retiring_entities(), hierarchy)
+                .is_err()
+        {
+            diagnostics.push(diagnostic_error(
+                "scene.identity-replacement-ineligible",
+                "Scene replacement would run unsupported lifecycle work",
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
+        }
+
+        if HierarchyConstructionWriter::new(world)
+            .attach_batch(&hierarchy_edges)
+            .is_err()
+        {
+            diagnostics.push(diagnostic_error(
+                "scene.hierarchy-publication-failed",
+                "Validated scene hierarchy could not be published",
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
+        }
+        world.flush();
+
+        if let Err(error) = component_batch.commit(world) {
+            diagnostics.push(with_codec_error(
+                diagnostic_error(
+                    "scene.component-apply-commit-failed",
+                    "Prepared scene components could not be committed",
+                ),
+                &error,
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
+        }
+
+        let instance_id = prepared_identity.instance_id();
         for (entity_id, runtime_entity) in &spawned_by_id {
             world.entity_mut(*runtime_entity).insert(SceneEntitySource {
-                instance_id: instance.instance_id(),
+                instance_id,
                 entity_id: entity_id.clone(),
             });
         }
-        sync_children(world);
+
+        let (instance, retired) = match prepared_identity {
+            PreparedSceneIdentityCommit::Register {
+                domain,
+                registration,
+            } => {
+                let instance = match domain {
+                    Some(mut domain) => {
+                        let instance = registration.commit(&mut domain);
+                        world.insert_resource(domain);
+                        instance
+                    }
+                    None => world.resource_scope(|_world, mut domain: Mut<WorldIdentityDomain>| {
+                        registration.commit(&mut domain)
+                    }),
+                };
+                (instance, Vec::new())
+            }
+            PreparedSceneIdentityCommit::Replace {
+                replacement,
+                hierarchy,
+            } => {
+                hierarchy.commit(world);
+                let mut domain = world
+                    .remove_resource::<WorldIdentityDomain>()
+                    .expect("prepared scene replacement requires its identity domain");
+                let retirement = prepare_lifecycle_free_despawn(world, &retired_entities).expect(
+                    "prevalidated hierarchy detach must leave exact retirement lifecycle-free",
+                );
+                let result = replacement.commit(&mut domain);
+                let world = retirement.commit();
+                world.insert_resource(domain);
+                result
+            }
+        };
+
+        let retired_entities = retired.len();
 
         SceneSpawnReport {
             instance: Some(instance),
@@ -683,15 +935,57 @@ pub(crate) fn validate_scene_identity_support(
     validate_identity_support_topology(world, targets.iter().copied())
 }
 
-pub(crate) fn resolved_scene_targets(world: &World, current: &SpawnedSceneInstance) -> Vec<Entity> {
-    current
-        .entity_ids()
-        .iter()
-        .filter_map(|entity_id| match current.resolve(world, entity_id) {
-            EntityLookup::Resolved(entity) => Some(entity),
-            _ => None,
-        })
-        .collect()
+pub(crate) enum SceneInstanceRetirementTransactionError {
+    Identity(IdentityDomainError),
+    IdentitySupport(IdentitySupportTopologyError),
+    PersistentApply(ComponentCodecError),
+    Hierarchy,
+    Lifecycle,
+}
+
+pub(crate) fn retire_scene_instance_exact(
+    world: &mut World,
+    current: &SpawnedSceneInstance,
+    cause: TombstoneCause,
+) -> Result<Vec<Entity>, SceneInstanceRetirementTransactionError> {
+    let prepared = prepare_exact_scene_instance_retirement(world, current, cause)
+        .map_err(SceneInstanceRetirementTransactionError::Identity)?;
+    let retirements = prepared.retiring_entities().to_vec();
+    validate_scene_identity_support(world, &retirements)
+        .map_err(SceneInstanceRetirementTransactionError::IdentitySupport)?;
+    validate_existing_scene_persistent_apply(world, &retirements)
+        .map_err(SceneInstanceRetirementTransactionError::PersistentApply)?;
+    let hierarchy = prepare_scene_hierarchy_detach(world, &retirements)
+        .map_err(|_| SceneInstanceRetirementTransactionError::Hierarchy)?;
+    validate_prepared_scene_retirement(world, &retirements, &hierarchy)
+        .map_err(|_| SceneInstanceRetirementTransactionError::Lifecycle)?;
+    hierarchy.commit(world);
+    let mut domain = world
+        .remove_resource::<WorldIdentityDomain>()
+        .expect("prepared scene retirement requires its identity domain");
+    let retirement = prepare_lifecycle_free_despawn(world, &retirements)
+        .expect("prevalidated hierarchy detach must leave exact retirement lifecycle-free");
+    let retired = prepared.commit(&mut domain);
+    let world = retirement.commit();
+    world.insert_resource(domain);
+    Ok(retired)
+}
+
+fn validate_prepared_scene_retirement(
+    world: &mut World,
+    retirements: &[Entity],
+    hierarchy: &PreparedSceneHierarchyDetach,
+) -> Result<(), LifecycleFreeDespawnError> {
+    if hierarchy.affected_entities().is_empty() {
+        let _ = prepare_lifecycle_free_despawn(world, retirements)?.cancel();
+        Ok(())
+    } else {
+        validate_lifecycle_free_relationship_despawn::<Parent>(
+            world,
+            retirements,
+            hierarchy.affected_entities(),
+        )
+    }
 }
 
 fn persistent_apply_rejection(
@@ -713,11 +1007,44 @@ fn persistent_apply_rejection(
 }
 
 fn rollback_spawn_transaction(world: &mut World, spawned_entities: &[Entity]) {
-    for entity in spawned_entities.iter().rev().copied() {
-        if world.get_entity(entity).is_ok() {
-            world.despawn(entity);
-        }
+    let live_entities = spawned_entities
+        .iter()
+        .copied()
+        .filter(|entity| world.get_entity(*entity).is_ok())
+        .collect::<Vec<_>>();
+    if live_entities.is_empty() {
+        return;
     }
+
+    let has_relationship = live_entities.iter().copied().any(|entity| {
+        world.get::<Parent>(entity).is_some() || world.get::<Children>(entity).is_some()
+    });
+    if has_relationship {
+        let hierarchy = prepare_scene_hierarchy_detach(world, &live_entities)
+            .expect("scene candidate hierarchy rollback must remain prevalidated");
+        validate_lifecycle_free_relationship_despawn::<Parent>(
+            world,
+            &live_entities,
+            hierarchy.affected_entities(),
+        )
+        .expect("scene candidate relationship rollback must remain lifecycle-free");
+        hierarchy.commit(world);
+    }
+    let retirement = prepare_lifecycle_free_despawn(world, &live_entities)
+        .expect("scene candidate rollback must remain lifecycle-free");
+    let _ = retirement.commit();
+}
+
+fn validate_scene_source_support(
+    world: &mut World,
+    targets: &[Entity],
+) -> Result<(), nara_ecs::__private::PersistentComponentMetadataError> {
+    world.register_component::<SceneEntitySource>();
+    world.flush();
+    for target in targets {
+        validate_registered_persistent_component_apply::<SceneEntitySource>(world, Some(*target))?;
+    }
+    Ok(())
 }
 
 fn prepare_scene_identity_tokens(
@@ -781,40 +1108,53 @@ fn prepare_scene_identity(
     Ok(Some(domain))
 }
 
-fn commit_scene_identity(
+fn prepare_scene_identity_commit(
     world: &mut World,
     identity_tokens: &BTreeMap<SceneEntityId, WorldEntityToken>,
     commit: SceneIdentityCommit<'_>,
     new_domain: Option<WorldIdentityDomain>,
-) -> Result<(SpawnedSceneInstance, Vec<Entity>), IdentityDomainError> {
+) -> Result<PreparedSceneIdentityCommit, PrepareSceneIdentityCommitError> {
     let entries = identity_tokens
         .iter()
         .map(|(entity_id, token)| (entity_id.clone(), *token))
         .collect::<Vec<_>>();
     match commit {
         SceneIdentityCommit::Register => {
-            if let Some(mut domain) = new_domain {
+            if let Some(domain) = new_domain {
                 debug_assert!(!world.contains_resource::<WorldIdentityDomain>());
-                let instance = domain.register_new_scene_instance(world, entries)?;
-                world.insert_resource(domain);
-                return Ok((instance, Vec::new()));
+                let registration =
+                    prepare_exact_scene_instance_registration(&domain, world, &entries)
+                        .map_err(PrepareSceneIdentityCommitError::Identity)?;
+                return Ok(PreparedSceneIdentityCommit::Register {
+                    domain: Some(domain),
+                    registration,
+                });
             }
-            world.resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
-                domain
-                    .register_new_scene_instance(world, entries)
-                    .map(|instance| (instance, Vec::new()))
+            world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
+                let registration =
+                    prepare_exact_scene_instance_registration(&domain, world, &entries)
+                        .map_err(PrepareSceneIdentityCommitError::Identity)?;
+                Ok(PreparedSceneIdentityCommit::Register {
+                    domain: None,
+                    registration,
+                })
             })
         }
         SceneIdentityCommit::Replace(current) => {
             debug_assert!(new_domain.is_none());
-            let retirements = resolved_scene_targets(world, current);
-            WorldIdentityDomain::replace_scene_instance_and_despawn(
+            let replacement = prepare_exact_scene_instance_replacement(
                 world,
                 current,
                 &entries,
-                &retirements,
                 TombstoneCause::Replaced,
             )
+            .map_err(PrepareSceneIdentityCommitError::Identity)?;
+            let hierarchy = prepare_scene_hierarchy_detach(world, replacement.retiring_entities())
+                .map_err(|_| PrepareSceneIdentityCommitError::Hierarchy)?;
+            Ok(PreparedSceneIdentityCommit::Replace {
+                replacement,
+                hierarchy,
+            })
         }
     }
 }
@@ -828,9 +1168,8 @@ pub fn retire_and_despawn_scene_entity(
         return Err(SceneEntityRetirementError::NotSceneEntity);
     };
     if world
-        .query::<&Parent>()
-        .iter(world)
-        .any(|parent| parent.0 == entity)
+        .get::<Children>(entity)
+        .is_some_and(|children| !children.is_empty())
     {
         return Err(SceneEntityRetirementError::HasChildren);
     }
@@ -853,7 +1192,6 @@ pub fn retire_and_despawn_scene_entity(
     if !world.despawn(entity) {
         return Err(SceneEntityRetirementError::DespawnFailed);
     }
-    sync_children(world);
     Ok(())
 }
 

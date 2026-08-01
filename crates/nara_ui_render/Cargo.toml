@@ -17,6 +17,6 @@ nara_render.workspace = true
 nara_ui.workspace = true
 
 [dev-dependencies]
+nara_hierarchy.workspace = true
 nara_input.workspace = true
 nara_reflect.workspace = true
-nara_scene.workspace = true

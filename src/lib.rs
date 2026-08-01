@@ -17,7 +17,26 @@ pub use nara_fs as fs;
 #[cfg(feature = "runtime-core")]
 pub use nara_gameplay as gameplay;
 #[cfg(feature = "runtime-core")]
-pub use nara_identity as identity;
+pub use nara_hierarchy as hierarchy;
+#[cfg(feature = "runtime-core")]
+pub mod identity {
+    //! Stable identity surface exposed by the Nara product facade.
+    //!
+    //! Workspace-internal prepared transaction ports remain owned by the engine crates and are
+    //! intentionally not reachable through this ordinary facade.
+
+    pub use nara_identity::{
+        EntityIdentityAxis, EntityLookup, EntityReference, EntityReferenceRemap,
+        IdentityAllocationError, IdentityDomainError, IdentityDomainStats, IdentityRemapError,
+        IdentityTombstone, IdentityTombstoneSubject, PersistentRuntimeId, PersistentRuntimeIdError,
+        PersistentRuntimeNamespaceId, PersistentRuntimeNamespaceIdError,
+        PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId, SceneEntityIdError,
+        SceneIdentitySnapshot, SceneInstanceId, SpawnedSceneInstance, TombstoneCause,
+        WorldEntityLocator, WorldEntityLocatorRemap, WorldEntityLocators, WorldEntityToken,
+        WorldIdentityDomain, WorldIdentityDomainId, WorldIdentityDomainSettings,
+        WorldIdentitySettingsError, resolve_in_world, spawn_identity_entity,
+    };
+}
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 pub use nara_image as image;
 #[cfg(feature = "runtime-core")]
@@ -125,6 +144,7 @@ pub mod prelude {
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
         GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
     };
+    pub use nara_hierarchy::{Children, HierarchyPlugin, Parent};
     pub use nara_identity::{
         EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
         PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId,
@@ -141,9 +161,9 @@ pub mod prelude {
         ComponentTypeId, ComponentValue, PersistentComponent, PersistentComponentProvider,
     };
     pub use nara_scene::{
-        Children, HierarchyPlugin, Name, Parent, PrefabDocument, SceneAuthoringSession,
-        SceneComponentRecord, SceneDocument, SceneEntityRecord, ScenePatchDocument,
-        ScenePatchOperation, SceneSpawner, Visibility, export_scene, spawn_prefab, spawn_scene,
+        Name, PrefabDocument, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, SceneSpawner, Visibility,
+        export_scene, spawn_prefab, spawn_scene,
     };
     pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
 

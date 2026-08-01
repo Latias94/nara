@@ -203,6 +203,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         "nara_ecs_derive",
         "nara_fs",
         "nara_gameplay",
+        "nara_hierarchy",
         "nara_identity",
         "nara_input",
         "nara_project",
@@ -325,6 +326,31 @@ fn public_prelude_is_gameplay_first() {
     check_public_prelude_fixture("one-shot-direct-pass", true, None);
     check_public_prelude_fixture("explicit-surfaces-pass", true, None);
     check_public_prelude_fixture("recipe-one-shot-fail", false, None);
+    check_public_prelude_fixture("hierarchy-construction-fail", false, None);
+    check_public_prelude_fixture("hierarchy-children-mutation-fail", false, None);
+    check_public_prelude_fixture("hierarchy-retirement-path-fail", false, None);
+    check_public_prelude_fixture(
+        "hierarchy-set-fail",
+        false,
+        Some(PublicPreludeFailure::Private("HierarchySet")),
+    );
+    check_public_prelude_fixture(
+        "scene-hierarchy-path-fail",
+        false,
+        Some(PublicPreludeFailure::Missing("Parent")),
+    );
+    check_public_prelude_fixture(
+        "identity-internal-path-fail",
+        false,
+        Some(PublicPreludeFailure::Missing("__private")),
+    );
+    check_public_prelude_fixture(
+        "identity-prepared-method-fail",
+        false,
+        Some(PublicPreludeFailure::Private(
+            "prepare_exact_scene_instance_replacement",
+        )),
+    );
     for (binary, symbol) in [
         ("backend-fail", "WindowEvents"),
         ("tooling-fail", "SceneInspectorState"),
@@ -332,8 +358,14 @@ fn public_prelude_is_gameplay_first() {
         ("queue-lifecycle-fail", "GameplayCommandQueue"),
         ("project-host-fail", "ProjectSettingsCandidate"),
     ] {
-        check_public_prelude_fixture(binary, false, Some(symbol));
+        check_public_prelude_fixture(binary, false, Some(PublicPreludeFailure::Missing(symbol)));
     }
+}
+
+#[derive(Clone, Copy)]
+enum PublicPreludeFailure<'a> {
+    Missing(&'a str),
+    Private(&'a str),
 }
 
 fn cargo_metadata() -> Value {
@@ -409,7 +441,11 @@ fn internal_nara_packages(tree: &str) -> BTreeSet<&str> {
         .collect()
 }
 
-fn check_public_prelude_fixture(binary: &str, should_succeed: bool, symbol: Option<&str>) {
+fn check_public_prelude_fixture(
+    binary: &str,
+    should_succeed: bool,
+    failure: Option<PublicPreludeFailure<'_>>,
+) {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repository
         .join("tests")
@@ -433,12 +469,19 @@ fn check_public_prelude_fixture(binary: &str, should_succeed: bool, symbol: Opti
         "unexpected compile result for public prelude fixture {binary}\nstdout:\n{}\nstderr:\n{stderr}",
         String::from_utf8_lossy(&output.stdout)
     );
-    if let Some(symbol) = symbol {
-        assert!(
-            (stderr.contains("unresolved import") || stderr.contains("cannot find type"))
-                && stderr.contains(symbol),
-            "{binary} must fail because {symbol} is absent from nara::prelude\n{stderr}"
-        );
+    if let Some(failure) = failure {
+        match failure {
+            PublicPreludeFailure::Missing(symbol) => assert!(
+                (stderr.contains("unresolved import") || stderr.contains("cannot find type"))
+                    && stderr.contains(symbol),
+                "{binary} must fail because {symbol} is absent from the ordinary facade\n{stderr}"
+            ),
+            PublicPreludeFailure::Private(symbol) => assert!(
+                (stderr.contains("is private") || stderr.contains("private associated function"))
+                    && stderr.contains(symbol),
+                "{binary} must fail because {symbol} is private to its owning crate\n{stderr}"
+            ),
+        }
     }
 }
 

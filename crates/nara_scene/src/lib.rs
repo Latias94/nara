@@ -1,4 +1,4 @@
-//! Scene runtime hierarchy components and persistent scene document data.
+//! Persistent scene documents, authoring operations, and runtime materialization.
 
 mod authoring;
 mod diagnostics;
@@ -6,11 +6,11 @@ mod document;
 mod export;
 #[cfg(feature = "serde")]
 mod format;
-mod hierarchy;
 #[cfg(feature = "serde")]
 mod migration;
 mod patch;
 mod prefab;
+mod scene_components;
 mod spawn;
 mod validation;
 
@@ -33,17 +33,18 @@ pub use format::{
     SceneFileBudgetKind, SceneFileEncoding, SceneFileLimits, SceneFilePublicationError,
     SceneFormatError, ScenePatchDocumentCandidate,
 };
-pub use hierarchy::{
-    Children, HIERARCHY_PLUGIN_DECLARATION, HIERARCHY_PLUGIN_ID, HIERARCHY_SCHEMA_PROVIDER,
-    HIERARCHY_SCHEMA_PROVIDER_ID, HierarchyPlugin, Name, Parent, Transform2d, Visibility,
-    register_scene_components, spawn_child, sync_children,
-};
 pub use nara_identity::{SceneEntityId, SceneEntityIdError, SceneInstanceId, SpawnedSceneInstance};
 pub use patch::{ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport};
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabExpansionBudgetKind, PrefabExpansionLimits,
     PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
     PrefabSourceResolver,
+};
+pub use scene_components::{
+    Name, SCENE_COMPONENTS_PLUGIN_DECLARATION, SCENE_COMPONENTS_PLUGIN_ID,
+    SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
+    SCENE_COMPONENTS_SCHEMA_PROVIDER_ID, SceneComponentsPlugin, Visibility,
+    register_scene_components,
 };
 pub use spawn::{
     SceneEntityRetirementError, SceneEntitySource, SceneSpawnReport, SceneSpawner,

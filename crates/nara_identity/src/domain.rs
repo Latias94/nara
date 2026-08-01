@@ -10,7 +10,7 @@ use nara_ecs::{
         validate_registered_persistent_component_apply, validate_resource_insertion,
         validate_resource_scope,
     },
-    Component, Entity, Resource, World, prepare_lifecycle_free_despawn,
+    Component, Entity, Mut, Resource, World, prepare_lifecycle_free_despawn,
     world::WorldId,
 };
 use thiserror::Error;
@@ -424,6 +424,114 @@ struct PreparedRetirement {
     tombstones: Vec<(IdentityTombstoneSubject, IdentityTombstone)>,
 }
 
+/// Fully prevalidated identity registration for one unpublished Scene Instance candidate.
+#[doc(hidden)]
+pub struct PreparedSceneInstanceRegistration {
+    domain: WorldIdentityDomainId,
+    instance: SceneInstanceId,
+    entries: Vec<(SceneEntityId, WorldEntityToken)>,
+}
+
+/// Fully prevalidated identity replacement whose commit mutates only the detached domain state.
+///
+/// The scene owner must retain exclusive World access between preparation and commit. This type is
+/// workspace-internal because it deliberately does not define a general scene-session API.
+#[doc(hidden)]
+pub struct PreparedSceneInstanceReplacement {
+    domain: WorldIdentityDomainId,
+    instance: SceneInstanceId,
+    entries: Vec<(SceneEntityId, WorldEntityToken)>,
+    retirement: PreparedRetirement,
+}
+
+/// Fully prevalidated exact Scene Instance retirement used by the scene owner for unload.
+#[doc(hidden)]
+pub struct PreparedSceneInstanceRetirement {
+    domain: WorldIdentityDomainId,
+    retirement: PreparedRetirement,
+}
+
+impl PreparedSceneInstanceRetirement {
+    #[must_use]
+    pub fn retiring_entities(&self) -> &[Entity] {
+        &self.retirement.entities
+    }
+
+    #[must_use]
+    pub fn commit(self, domain: &mut WorldIdentityDomain) -> Vec<Entity> {
+        assert_eq!(
+            domain.id, self.domain,
+            "prepared scene retirement must commit to the same identity domain"
+        );
+        domain.commit_retirement(self.retirement)
+    }
+}
+
+impl PreparedSceneInstanceRegistration {
+    /// Returns the Scene Instance identity reserved by this preparation.
+    #[must_use]
+    pub const fn instance_id(&self) -> SceneInstanceId {
+        self.instance
+    }
+
+    /// Publishes the fully prevalidated Scene Instance to the same identity domain.
+    #[must_use]
+    pub fn commit(self, domain: &mut WorldIdentityDomain) -> SpawnedSceneInstance {
+        assert_eq!(
+            domain.id, self.domain,
+            "prepared scene registration must commit to the same identity domain"
+        );
+        let allocated = domain
+            .scene_instance_allocator
+            .allocate()
+            .expect("scene registration allocation was prevalidated");
+        assert_eq!(
+            allocated,
+            self.instance.non_zero(),
+            "identity domain changed after scene registration preparation"
+        );
+        domain.commit_scene_instance(self.instance, self.entries)
+    }
+}
+
+impl PreparedSceneInstanceReplacement {
+    /// Returns the Scene Instance identity reserved for the replacement candidate.
+    #[must_use]
+    pub const fn instance_id(&self) -> SceneInstanceId {
+        self.instance
+    }
+
+    /// Returns the exact active Scene Instance membership proven during preparation.
+    #[must_use]
+    pub fn retiring_entities(&self) -> &[Entity] {
+        &self.retirement.entities
+    }
+
+    /// Commits the already-prevalidated allocator, retirement, and replacement state.
+    ///
+    /// No recoverable validation remains. The caller owns the exclusive World transaction and
+    /// reinserts the domain after the exact old membership is despawned.
+    #[must_use]
+    pub fn commit(self, domain: &mut WorldIdentityDomain) -> (SpawnedSceneInstance, Vec<Entity>) {
+        assert_eq!(
+            domain.id, self.domain,
+            "prepared scene replacement must commit to the same identity domain"
+        );
+        let allocated = domain
+            .scene_instance_allocator
+            .allocate()
+            .expect("scene replacement allocation was prevalidated");
+        assert_eq!(
+            allocated,
+            self.instance.non_zero(),
+            "identity domain changed after scene replacement preparation"
+        );
+        let retired = domain.commit_retirement(self.retirement);
+        let replacement = domain.commit_scene_instance(self.instance, self.entries);
+        (replacement, retired)
+    }
+}
+
 #[derive(Debug)]
 struct SceneIdentityGroupEntry {
     entity_id: SceneEntityId,
@@ -557,6 +665,33 @@ impl WorldIdentityDomain {
         self.preflight_scene_entry_count(instance, entity_count)
     }
 
+    /// Prepares the complete identity publication for one unpublished Scene Instance candidate.
+    #[doc(hidden)]
+    pub(crate) fn prepare_exact_scene_instance_registration(
+        &self,
+        world: &World,
+        entries: &[(SceneEntityId, WorldEntityToken)],
+    ) -> Result<PreparedSceneInstanceRegistration, IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        let instance = SceneInstanceId::from_non_zero(
+            self.scene_instance_allocator
+                .peek()
+                .map_err(|_| IdentityDomainError::SceneInstanceExhausted)?,
+        );
+        let maximum_entries = self.scene_entry_capacity(instance)?;
+        let entries = collect_scene_entries(
+            entries.iter().cloned(),
+            maximum_entries,
+            self.settings.lifetime_claims.get(),
+        )?;
+        self.preflight_scene_instance(world, instance, &entries)?;
+        Ok(PreparedSceneInstanceRegistration {
+            domain: self.id,
+            instance,
+            entries,
+        })
+    }
+
     /// Returns a validated handle for one scene instance that is currently active in this World.
     ///
     /// The returned membership reflects the entities that remain active at the time of capture.
@@ -603,6 +738,63 @@ impl WorldIdentityDomain {
             .peek()
             .map(SceneInstanceId::from_non_zero)
             .map_err(|_| IdentityDomainError::SceneInstanceExhausted)
+    }
+
+    /// Prepares the complete identity half of one exact Scene Instance replacement.
+    ///
+    /// This validates the concrete entries and current live membership rather than only their
+    /// counts. It leaves the installed domain authoritative until the scene owner enters its
+    /// relationship-detach commit tail.
+    #[doc(hidden)]
+    pub(crate) fn prepare_exact_scene_instance_replacement(
+        world: &mut World,
+        current: &SpawnedSceneInstance,
+        entries: &[(SceneEntityId, WorldEntityToken)],
+        cause: TombstoneCause,
+    ) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
+        validate_identity_support_topology(world, entries.iter().map(|(_, token)| token.entity()))
+            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+        world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
+            domain.validate_world_binding(world)?;
+            let instance = SceneInstanceId::from_non_zero(
+                domain
+                    .scene_instance_allocator
+                    .peek()
+                    .map_err(|_| IdentityDomainError::SceneInstanceExhausted)?,
+            );
+            let maximum_entries = domain.scene_entry_capacity(instance)?;
+            let entries = collect_scene_entries(
+                entries.iter().cloned(),
+                maximum_entries,
+                domain.settings.lifetime_claims.get(),
+            )?;
+            domain.preflight_scene_instance(world, instance, &entries)?;
+            let retirement = domain.prepare_scene_instance_retirement(world, current, cause)?;
+            Ok(PreparedSceneInstanceReplacement {
+                domain: domain.id,
+                instance,
+                entries,
+                retirement,
+            })
+        })
+    }
+
+    /// Prepares the complete identity half of one exact Scene Instance unload.
+    #[doc(hidden)]
+    pub(crate) fn prepare_exact_scene_instance_retirement(
+        world: &mut World,
+        current: &SpawnedSceneInstance,
+        cause: TombstoneCause,
+    ) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
+        validate_identity_support_topology(world, std::iter::empty())
+            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+        world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
+            let retirement = domain.prepare_scene_instance_retirement(world, current, cause)?;
+            Ok(PreparedSceneInstanceRetirement {
+                domain: domain.id,
+                retirement,
+            })
+        })
     }
 
     /// Replaces one scene identity group and retires its prior runtime entities atomically.
@@ -1469,6 +1661,37 @@ impl WorldIdentityDomain {
         self.retirement_sequence = MonotonicNonZeroU64Allocator::from_next_raw(raw)?;
         Ok(())
     }
+}
+
+/// Workspace-internal preparation for one unpublished Scene Instance registration.
+#[doc(hidden)]
+pub fn prepare_exact_scene_instance_registration(
+    domain: &WorldIdentityDomain,
+    world: &World,
+    entries: &[(SceneEntityId, WorldEntityToken)],
+) -> Result<PreparedSceneInstanceRegistration, IdentityDomainError> {
+    domain.prepare_exact_scene_instance_registration(world, entries)
+}
+
+/// Workspace-internal preparation for one exact Scene Instance replacement.
+#[doc(hidden)]
+pub fn prepare_exact_scene_instance_replacement(
+    world: &mut World,
+    current: &SpawnedSceneInstance,
+    entries: &[(SceneEntityId, WorldEntityToken)],
+    cause: TombstoneCause,
+) -> Result<PreparedSceneInstanceReplacement, IdentityDomainError> {
+    WorldIdentityDomain::prepare_exact_scene_instance_replacement(world, current, entries, cause)
+}
+
+/// Workspace-internal preparation for one exact Scene Instance retirement.
+#[doc(hidden)]
+pub fn prepare_exact_scene_instance_retirement(
+    world: &mut World,
+    current: &SpawnedSceneInstance,
+    cause: TombstoneCause,
+) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
+    WorldIdentityDomain::prepare_exact_scene_instance_retirement(world, current, cause)
 }
 
 #[must_use]

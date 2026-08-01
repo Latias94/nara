@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use image::ImageEncoder;
+use nara::hierarchy::HierarchyCommandsExt;
 use nara::{advanced_prelude::*, backend_prelude::*};
 
 #[path = "support/runtime_retirement.rs"]
@@ -53,28 +54,34 @@ fn setup_scene(
     let root = commands
         .spawn((Name::new("ui root"), UiRoot::primary_window()))
         .id();
-    commands.spawn((
-        Name::new("panel background"),
-        UiNode::new(UiStyle::absolute(32.0, 32.0, 320.0, 160.0))
-            .with_z_index(0)
-            .clipping_children(),
-        UiPanel::from_color(Color::rgba(0.12, 0.14, 0.16, 0.92)),
-        Parent(root),
-    ));
-    commands.spawn((
-        Name::new("accent image"),
-        UiNode::new(UiStyle::absolute(56.0, 56.0, 96.0, 96.0)).with_z_index(1),
-        UiPanel::from_image(image).with_sampler(SamplerDescriptor::NEAREST_CLAMP),
-        Parent(root),
-    ));
-    commands.spawn((
-        Name::new("status strip"),
-        UiNode::new(UiStyle::absolute(168.0, 72.0, 152.0, 48.0))
-            .with_z_index(2)
-            .focusable(),
-        UiPanel::from_color(Color::rgba(0.22, 0.58, 0.86, 0.88)),
-        Parent(root),
-    ));
+    let background = commands
+        .spawn((
+            Name::new("panel background"),
+            UiNode::new(UiStyle::absolute(32.0, 32.0, 320.0, 160.0))
+                .with_z_index(0)
+                .clipping_children(),
+            UiPanel::from_color(Color::rgba(0.12, 0.14, 0.16, 0.92)),
+        ))
+        .id();
+    commands.attach_hierarchy_child(background, root);
+    let accent = commands
+        .spawn((
+            Name::new("accent image"),
+            UiNode::new(UiStyle::absolute(56.0, 56.0, 96.0, 96.0)).with_z_index(1),
+            UiPanel::from_image(image).with_sampler(SamplerDescriptor::NEAREST_CLAMP),
+        ))
+        .id();
+    commands.attach_hierarchy_child(accent, root);
+    let status = commands
+        .spawn((
+            Name::new("status strip"),
+            UiNode::new(UiStyle::absolute(168.0, 72.0, 152.0, 48.0))
+                .with_z_index(2)
+                .focusable(),
+            UiPanel::from_color(Color::rgba(0.22, 0.58, 0.86, 0.88)),
+        ))
+        .id();
+    commands.attach_hierarchy_child(status, root);
 }
 
 fn import_ui_texture(

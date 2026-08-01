@@ -18,6 +18,7 @@ members = [
     "crates/nara_ecs",
     "crates/nara_ecs_derive",
     "crates/nara_fs",
+    "crates/nara_hierarchy",
     "crates/nara_image",
     "crates/nara_identity",
     "crates/nara_input",
@@ -57,6 +58,7 @@ nara_diagnostic = { path = "crates/nara_diagnostic" }
 nara_ecs = { path = "crates/nara_ecs" }
 nara_ecs_derive = { path = "crates/nara_ecs_derive" }
 nara_fs = { path = "crates/nara_fs" }
+nara_hierarchy = { path = "crates/nara_hierarchy" }
 nara_image = { path = "crates/nara_image" }
 nara_identity = { path = "crates/nara_identity" }
 nara_input = { path = "crates/nara_input" }
@@ -120,6 +122,7 @@ nara_core = { workspace = true, optional = true }
 nara_diagnostic = { workspace = true, optional = true }
 nara_ecs = { workspace = true, optional = true }
 nara_fs = { workspace = true, optional = true }
+nara_hierarchy = { workspace = true, optional = true }
 nara_image = { workspace = true, optional = true }
 nara_identity = { workspace = true, optional = true }
 nara_input = { workspace = true, optional = true }
@@ -168,6 +171,7 @@ runtime-core = [
     "dep:nara_ecs",
     "dep:nara_fs",
     "dep:nara_gameplay",
+    "dep:nara_hierarchy",
     "dep:nara_identity",
     "dep:nara_input",
     "dep:nara_project",

@@ -15,6 +15,7 @@ use nara::{
         PluginProductCapability, PluginSchemaProviderId, RuntimeCandidateRetirementState,
     },
     fs::{FileCapability, TrustMode},
+    hierarchy::HIERARCHY_PLUGIN_ID,
     project::ProductCapability,
     project_host::{
         CompositionError, ProjectRuntimePlugins, RuntimePlanError, built_in_schema_providers,
@@ -27,7 +28,7 @@ use nara::{
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId,
     },
-    scene::HIERARCHY_SCHEMA_PROVIDER_ID,
+    scene::{SCENE_COMPONENTS_PLUGIN_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER_ID},
     transform::{TRANSFORM_SCHEMA_PROVIDER_ID, TransformPlugin},
 };
 
@@ -866,7 +867,21 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
     );
     assert_eq!(
         first.schema_validation().provider_ids(),
-        [HIERARCHY_SCHEMA_PROVIDER_ID, TRANSFORM_SCHEMA_PROVIDER_ID]
+        [
+            SCENE_COMPONENTS_SCHEMA_PROVIDER_ID,
+            TRANSFORM_SCHEMA_PROVIDER_ID
+        ]
+    );
+    let plugin_entries = first.plugin_plan().entries();
+    assert!(
+        plugin_entries
+            .iter()
+            .any(|entry| entry.plugin_id() == HIERARCHY_PLUGIN_ID)
+    );
+    assert!(
+        plugin_entries
+            .iter()
+            .any(|entry| entry.plugin_id() == SCENE_COMPONENTS_PLUGIN_ID)
     );
 
     let app = first.plugin_plan().instantiate().unwrap();

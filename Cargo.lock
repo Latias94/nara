@@ -1550,6 +1550,7 @@ dependencies = [
  "nara_ecs",
  "nara_fs",
  "nara_gameplay",
+ "nara_hierarchy",
  "nara_identity",
  "nara_image",
  "nara_input",
@@ -1691,6 +1692,15 @@ dependencies = [
  "nara_input",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "nara_hierarchy"
+version = "0.1.0"
+dependencies = [
+ "nara_app",
+ "nara_ecs",
  "thiserror 2.0.18",
 ]
 
@@ -1846,9 +1856,9 @@ dependencies = [
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_identity",
  "nara_reflect",
- "nara_transform",
  "ron",
  "serde",
  "serde_json",
@@ -1949,6 +1959,7 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_reflect",
  "serde",
 ]
@@ -1962,12 +1973,12 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_image",
  "nara_input",
  "nara_material",
  "nara_reflect",
  "nara_render",
- "nara_scene",
  "serde",
 ]
 
@@ -1980,12 +1991,12 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_image",
  "nara_input",
  "nara_material",
  "nara_reflect",
  "nara_render",
- "nara_scene",
  "nara_ui",
 ]
 

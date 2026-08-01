@@ -11,12 +11,12 @@ nara_app.workspace = true
 nara_asset.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
+nara_hierarchy.workspace = true
 nara_image.workspace = true
 nara_input.workspace = true
 nara_material.workspace = true
 nara_reflect.workspace = true
 nara_render.workspace = true
-nara_scene.workspace = true
 serde = { workspace = true, optional = true }
 
 [features]
@@ -28,5 +28,4 @@ serde = [
     "nara_image/serde",
     "nara_material/serde",
     "nara_render/serde",
-    "nara_scene/serde",
 ]

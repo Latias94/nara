@@ -519,7 +519,7 @@ impl From<PluginPlanError> for RuntimePlanError {
 pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
     #[allow(unused_mut)]
     let mut providers = vec![
-        nara_scene::HIERARCHY_SCHEMA_PROVIDER,
+        nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
         nara_transform::TRANSFORM_SCHEMA_PROVIDER,
     ];
     #[cfg(feature = "runtime-2d")]

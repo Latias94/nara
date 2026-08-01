@@ -681,6 +681,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara_hierarchy"
+version = "0.1.0"
+dependencies = [
+ "nara_app",
+ "nara_ecs",
+ "thiserror",
+]
+
+[[package]]
 name = "nara_identity"
 version = "0.1.0"
 dependencies = [
@@ -730,9 +739,9 @@ dependencies = [
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_identity",
  "nara_reflect",
- "nara_transform",
  "ron",
  "serde",
  "serde_json",
@@ -746,18 +755,6 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
-]
-
-[[package]]
-name = "nara_transform"
-version = "0.1.0"
-dependencies = [
- "bevy_ecs",
- "nara_app",
- "nara_core",
- "nara_ecs",
- "nara_reflect",
- "serde",
 ]
 
 [[package]]

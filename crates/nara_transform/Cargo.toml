@@ -10,6 +10,7 @@ bevy_ecs.workspace = true
 nara_app.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
+nara_hierarchy.workspace = true
 nara_reflect.workspace = true
 serde = { workspace = true, optional = true }
 

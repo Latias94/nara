@@ -5,6 +5,7 @@ use bevy_ecs::{
     entity::Entity,
     event::EventKey,
     lifecycle::{ADD, ComponentHooks, DESPAWN, DISCARD, HookContext, INSERT, REMOVE},
+    relationship::{Relationship, RelationshipAccessor, RelationshipTarget},
     resource::{IS_RESOURCE, IsResource, Resource},
     world::{DeferredWorld, World},
 };
@@ -133,7 +134,183 @@ pub fn validate_entity_despawn(
         }
     }
 
-    for (event, event_key) in EVENTS {
+    validate_entity_despawn_observers(world, target, component_ids)
+}
+
+/// Validates a despawn while allowing only the intrinsic hooks of one known non-linked
+/// relationship pair.
+///
+/// This is intentionally coupled to the selected Bevy ECS version. It accepts the exact hook and
+/// relationship metadata generated for `R` and its target, while continuing to reject additional
+/// hooks or lifecycle observers.
+pub fn validate_entity_despawn_with_non_linked_relationship<R: Relationship>(
+    world: &World,
+    target: Entity,
+    component_ids: &[ComponentId],
+) -> Result<(), PersistentComponentMetadataError>
+where
+    R::RelationshipTarget: RelationshipTarget<Relationship = R>,
+{
+    let (source_id, relationship_target_id) =
+        validate_non_linked_relationship_metadata::<R>(world)?;
+
+    for component_id in component_ids {
+        if *component_id == source_id || *component_id == relationship_target_id {
+            continue;
+        }
+        let info = world
+            .components()
+            .get_info(*component_id)
+            .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+        for event in [
+            PersistentLifecycleEvent::Discard,
+            PersistentLifecycleEvent::Remove,
+            PersistentLifecycleEvent::Despawn,
+        ] {
+            if hook_is_registered(info.hooks(), event) {
+                return Err(PersistentComponentMetadataError::LifecycleHook(event));
+            }
+        }
+    }
+
+    validate_entity_despawn_observers(world, target, component_ids)
+}
+
+/// Validates every lifecycle observer that relationship teardown could reach on `targets`.
+pub fn validate_non_linked_relationship_teardown<R: Relationship>(
+    world: &World,
+    targets: &[Entity],
+) -> Result<(), PersistentComponentMetadataError>
+where
+    R::RelationshipTarget: RelationshipTarget<Relationship = R>,
+{
+    let (source_id, relationship_target_id) =
+        validate_non_linked_relationship_metadata::<R>(world)?;
+    for target in targets {
+        validate_component_observers(world, source_id, Some(*target))?;
+        validate_component_observers(world, relationship_target_id, Some(*target))?;
+    }
+    Ok(())
+}
+
+/// Validates the insertion work reachable while constructing one known non-linked relationship
+/// pair.
+///
+/// Component registration and the existing deferred baseline are completed before the proof is
+/// returned. The caller must retain exclusive World access until every edge is inserted.
+pub fn validate_non_linked_relationship_insertion<R: Relationship>(
+    world: &mut World,
+    edges: impl IntoIterator<Item = (Entity, Entity)>,
+) -> Result<(), PersistentComponentMetadataError>
+where
+    R::RelationshipTarget: RelationshipTarget<Relationship = R>,
+{
+    world.register_component::<R>();
+    world.register_component::<R::RelationshipTarget>();
+    world.flush();
+
+    let (source_id, relationship_target_id) =
+        validate_non_linked_relationship_metadata::<R>(world)?;
+    for (child, parent) in edges {
+        validate_entity_insertion_observers(world, child, &[source_id])?;
+        validate_entity_insertion_observers(world, parent, &[relationship_target_id])?;
+    }
+    Ok(())
+}
+
+fn validate_non_linked_relationship_metadata<R: Relationship>(
+    world: &World,
+) -> Result<(ComponentId, ComponentId), PersistentComponentMetadataError>
+where
+    R::RelationshipTarget: RelationshipTarget<Relationship = R>,
+{
+    let source_id = world
+        .component_id::<R>()
+        .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+    let relationship_target_id = world
+        .component_id::<R::RelationshipTarget>()
+        .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+    let source = world
+        .components()
+        .get_info(source_id)
+        .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+    let relationship_target = world
+        .components()
+        .get_info(relationship_target_id)
+        .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+
+    if source.required_components().iter_ids().next().is_some()
+        || relationship_target
+            .required_components()
+            .iter_ids()
+            .next()
+            .is_some()
+    {
+        return Err(PersistentComponentMetadataError::RequiredComponents);
+    }
+
+    match source.relationship_accessor() {
+        Some(RelationshipAccessor::Relationship {
+            linked_spawn: false,
+            allow_self_referential: false,
+            relationship_target,
+            ..
+        }) if *relationship_target == relationship_target_id => {}
+        _ => return Err(PersistentComponentMetadataError::ComponentMissing),
+    }
+    match relationship_target.relationship_accessor() {
+        Some(RelationshipAccessor::RelationshipTarget {
+            linked_spawn: false,
+            allow_self_referential: false,
+            relationship,
+            ..
+        }) if *relationship == source_id => {}
+        _ => return Err(PersistentComponentMetadataError::ComponentMissing),
+    }
+
+    validate_exact_hooks(
+        source.hooks(),
+        &[
+            PersistentLifecycleEvent::Insert,
+            PersistentLifecycleEvent::Discard,
+        ],
+    )?;
+    validate_exact_hooks(
+        relationship_target.hooks(),
+        &[PersistentLifecycleEvent::Discard],
+    )?;
+
+    Ok((source_id, relationship_target_id))
+}
+
+fn validate_exact_hooks(
+    hooks: &ComponentHooks,
+    expected: &[PersistentLifecycleEvent],
+) -> Result<(), PersistentComponentMetadataError> {
+    for event in [
+        PersistentLifecycleEvent::Add,
+        PersistentLifecycleEvent::Insert,
+        PersistentLifecycleEvent::Discard,
+        PersistentLifecycleEvent::Remove,
+        PersistentLifecycleEvent::Despawn,
+    ] {
+        if hook_is_registered(hooks, event) != expected.contains(&event) {
+            return Err(PersistentComponentMetadataError::LifecycleHook(event));
+        }
+    }
+    Ok(())
+}
+
+fn validate_entity_despawn_observers(
+    world: &World,
+    target: Entity,
+    component_ids: &[ComponentId],
+) -> Result<(), PersistentComponentMetadataError> {
+    for (event, event_key) in [
+        (PersistentLifecycleEvent::Discard, DISCARD),
+        (PersistentLifecycleEvent::Remove, REMOVE),
+        (PersistentLifecycleEvent::Despawn, DESPAWN),
+    ] {
         let Some(observers) = world.observers().try_get_observers(event_key) else {
             continue;
         };
@@ -206,7 +383,18 @@ pub fn validate_entity_insertion(
         }
     }
 
-    for (event, event_key) in EVENTS {
+    validate_entity_insertion_observers(world, target, component_ids)
+}
+
+fn validate_entity_insertion_observers(
+    world: &World,
+    target: Entity,
+    component_ids: &[ComponentId],
+) -> Result<(), PersistentComponentMetadataError> {
+    for (event, event_key) in [
+        (PersistentLifecycleEvent::Add, ADD),
+        (PersistentLifecycleEvent::Insert, INSERT),
+    ] {
         let Some(observers) = world.observers().try_get_observers(event_key) else {
             continue;
         };
@@ -251,6 +439,23 @@ pub fn validate_entity_insertion(
     }
 
     Ok(())
+}
+
+/// Validates exact retirement after a known non-linked relationship owner preflights detach.
+pub fn validate_lifecycle_free_relationship_despawn<R>(
+    world: &mut World,
+    entities: &[Entity],
+    relationship_targets: &[Entity],
+) -> Result<(), crate::LifecycleFreeDespawnError>
+where
+    R: Relationship,
+    R::RelationshipTarget: RelationshipTarget<Relationship = R>,
+{
+    crate::transaction::validate_lifecycle_free_relationship_despawn::<R>(
+        world,
+        entities,
+        relationship_targets,
+    )
 }
 
 fn validate_resource_metadata(
@@ -407,6 +612,14 @@ mod tests {
     #[derive(Component)]
     #[component(on_add = intrinsic_add)]
     struct Hooked;
+
+    #[derive(Component)]
+    #[relationship(relationship_target = TestChildren)]
+    struct TestParent(Entity);
+
+    #[derive(Component)]
+    #[relationship_target(relationship = TestParent)]
+    struct TestChildren(Vec<Entity>);
 
     #[derive(Resource)]
     struct PlainResource;
@@ -599,6 +812,33 @@ mod tests {
             Err(PersistentComponentMetadataError::Observer {
                 event: PersistentLifecycleEvent::Remove,
                 scope: PersistentObserverScope::EntityComponent,
+            })
+        );
+    }
+
+    #[test]
+    fn relationship_insertion_probe_accepts_intrinsic_hooks_and_rejects_observers() {
+        let mut plain = World::new();
+        let parent = plain.spawn_empty().id();
+        let child = plain.spawn_empty().id();
+        assert_eq!(
+            validate_non_linked_relationship_insertion::<TestParent>(&mut plain, [(child, parent)],),
+            Ok(())
+        );
+
+        let mut observed = World::new();
+        let parent = observed.spawn_empty().id();
+        let child = observed.spawn_empty().id();
+        observed.add_observer(|_: On<Add, TestParent>| {});
+        observed.flush();
+        assert_eq!(
+            validate_non_linked_relationship_insertion::<TestParent>(
+                &mut observed,
+                [(child, parent)],
+            ),
+            Err(PersistentComponentMetadataError::Observer {
+                event: PersistentLifecycleEvent::Add,
+                scope: PersistentObserverScope::ComponentGlobal,
             })
         );
     }
