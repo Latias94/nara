@@ -16,6 +16,11 @@ relationship substrate cannot maintain the required structural facts and determi
 **Proposed Refinement Under Evaluation**: If accepted, this ADR refines ADR 0038 by defining
 ordered document hierarchy and instance-override-owned authoring provenance. ADR 0038 remains
 authoritative while this ADR is Proposed.
+**Accepted Extracted Slice**: [ADR 0100](0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md)
+accepts only the dedicated non-linked runtime structural ownership boundary, one-way document
+lowering, distinct local/global 2D authority, and completed-consumer invariant. This ADR remains
+Proposed for persistent order, runtime/editor reparent semantics, visibility, prefab provenance,
+UI projection details, physics, and 3D.
 **Transform Model Authority**: ADR 0097 is Accepted and owns separate 2D/3D base TRS plus
 post-affine residual semantics. This Proposed ADR may define hierarchy transactions only in terms
 of that accepted transform model.
@@ -549,8 +554,10 @@ If accepted:
 - no public component name, document field representation, or migration is authorized until this
   ADR is Accepted and an active implementation plan admits the corresponding unit.
 
-No old ADR becomes superseded while this proposal remains non-authoritative. Acceptance must add
-reciprocal refinement metadata and record component/format breaks in the migration guide.
+ADR 0100 extracts the current runtime hierarchy and 2D completion invariant without accepting this
+proposal's broader authoring and multi-domain contract. No old ADR becomes superseded while the
+remaining proposal is non-authoritative. Later acceptance must add reciprocal refinement metadata
+and record component/format breaks in the migration guide.
 
 ## Admission Evidence
 

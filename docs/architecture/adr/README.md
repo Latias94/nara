@@ -145,3 +145,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0097](0097-future-capable-2d-3d-spatial-transform-model.md): Future-Capable 2D and 3D Spatial Transform Model
 - [ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md): Schema Owner Lineage and Active Runtime Composition
 - [ADR 0099](0099-decision-local-product-evidence-and-publication-admission.md): Decision-Local Product Evidence and Publication Admission
+- [ADR 0100](0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md): Runtime Structural Hierarchy and Completed 2D Transform Projection

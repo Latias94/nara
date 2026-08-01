@@ -14,6 +14,11 @@
 [ADR 0085](0085-hierarchy-transform-and-visibility-semantics.md) (Proposed),
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md), and
 [OQ-035](../open-questions.md#oq-035-spatial-world-partition-streaming-and-origin-policy)
+**Current 2D Completion Refinement**:
+[ADR 0100](0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md) accepts the
+dedicated non-linked runtime hierarchy ownership and completed `Transform2d` projection required by
+the current product. This ADR remains authoritative for its broader post-affine and future 3D
+ceiling, whose mechanisms stay evidence-gated.
 
 ## Context
 

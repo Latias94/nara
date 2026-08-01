@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "d6f164d2b51ebc70f900606d8b3837a0d8249ca0a2cef00664103236f32e487e"
+source_fingerprint: "b6da96360acfc9ea5146cd5e633f75b8785615e5b2c2e2fbcf23f41eb8b1046b"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "d6f164d2b51ebc70f900606d8b3837a0d8249ca0a2cef00664103236f32
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `d6f164d2b51ebc70f900606d8b3837a0d8249ca0a2cef00664103236f32e487e`
-- Immutable records: 314
+- Source fingerprint: `b6da96360acfc9ea5146cd5e633f75b8785615e5b2c2e2fbcf23f41eb8b1046b`
+- Immutable records: 316
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Reference-game product readiness: RPR-U5 Redirect recorded](registry/2026-08/2026-08-01T032439Z-engine-foundation-contract-completion-codex-root-1db6cd904ee445db8fbb69c9fe38434c.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Reference-game spatial authority: RGS-U1 active](registry/2026-08/2026-08-01T072620Z-engine-foundation-contract-completion-codex-root-510bd4496c5b48fb9b411b5d06b10ea2.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RGS-U1 spatial authority activation](verification/2026-08/2026-08-01T072032Z-rgs-u1-spatial-authority-activation-c4ec02d7fb954a00b5ee25e148c7e3c4.md) - Verifies activation of the focused runtime hierarchy and completed 2D transform product slice without reviving retired product-evidence infrastructure.
 - **Verification Evidence**: [RPR-U5 current product-readiness Redirect](verification/2026-08/2026-08-01T032222Z-rpr-u5-current-product-readiness-redirect-c064db2329544a5da5c02a6eb8183db5.md) - Records bounded current-revision product observations, exact cross-platform candidates, missing required evidence, and the resulting Redirect without a reusable evidence framework.
 - **Memory Event**: [completed: Completed RPR-U4 ordinary author-path dogfood and activated RPR-U5 product-readi](logs/2026-08/2026-08-01T010359Z-completed-completed-rpr-u4-ordinary-author-path-dogfood-and-activated-rpr-u5-product-readi-54f85e6eb48e4ee68ce3ff79a159ab1e.md) - Completed RPR-U4 ordinary author-path dogfood and activated RPR-U5 product-readiness re-evaluation.
 - **Verification Evidence**: [RPR-U4 ordinary author-path dogfood](verification/2026-08/2026-08-01T010241Z-rpr-u4-ordinary-author-path-dogfood-1976e4407ec94d3e9b79d31fe4ce5306.md) - Records reference-game and renamed-root adoption of the public product recipe plus local no-checkout candidate smoke.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGD-U8 final main hosted three-workspace CI refresh](verification/2026-07/2026-07-31T134957Z-rgd-u8-final-main-hosted-three-workspace-ci-refresh-38f71939f1994eb39c2ac44d6632f008.md) - Closes the reopened U8 matrix at the merged main revision f098876 with six successful Windows/Linux jobs.
 - **Verification Evidence**: [RGD delivery evidence correction after formal product review](verification/2026-07/2026-07-30T101248Z-rgd-delivery-evidence-correction-after-formal-product-review-4cf635ad00a744f59b2999d2cbeae8be.md) - Reconciles U8/U9/U10 claims at the reviewed delivery revision, invalidates the probe-only U10 completion, and blocks U11 pending refreshed evidence.
 - **Verification Evidence**: [RGD-U10 refreshed standalone candidate completion verification](verification/2026-07/2026-07-30T034418Z-rgd-u10-refreshed-standalone-candidate-completion-verification-ecd70107315740eab6c580f18eca4dd0.md) - Closes immutable checkout-free Windows and Linux candidates at fafc949 with exact hosted identities, bounded contents, and successful headless/desktop consumption.
-- **Verification Evidence**: [RGD-U9 refreshed first-playable product baseline verification](verification/2026-07/2026-07-29T182729Z-rgd-u9-refreshed-first-playable-product-baseline-verification-406733392389447c879f6de86245151e.md) - Records the current isolated Windows first-playable population, deterministic Redirect verdict, missing product evidence, and non-claims.
 
 # Integration Notes
 
