@@ -208,7 +208,7 @@ fn candidate_dispatch_builds_and_smokes_real_no_checkout_products() {
     assert_eq!(
         action_names(consumer),
         string_set(["actions/download-artifact", "actions/setup-python"]),
-        "the candidate consumer may only prepare Python and download the candidate bundle"
+        "the candidate consumer may only prepare Python and download the candidate transport"
     );
     assert_has_action(build, "actions/setup-python", "candidate-build");
     assert_has_action(build, "actions/upload-artifact", "candidate-build");
@@ -220,9 +220,9 @@ fn candidate_dispatch_builds_and_smokes_real_no_checkout_products() {
         &build_script,
         &[
             "cargo build --manifest-path reference-game/Cargo.toml --locked --release --bin headless",
-            "cargo build --manifest-path reference-game/Cargo.toml --locked --release --features desktop --bin desktop --bin desktop_render_probe",
+            "cargo build --manifest-path reference-game/Cargo.toml --locked --release --features desktop --bin desktop",
             "reference-game/tools/package.py create",
-            "reference-game/tools/package.py bundle",
+            "reference-game/tools/package.py transport",
         ],
         "candidate build",
     );
@@ -230,8 +230,7 @@ fn candidate_dispatch_builds_and_smokes_real_no_checkout_products() {
     assert_contains_all(
         &consumer_script,
         &[
-            "smoke_artifact.py\" bundle-verify",
-            "smoke_artifact.py\" bundle-smoke",
+            "smoke_artifact.py\" smoke",
             "--expected-source-revision \"${{ github.sha }}\"",
             "NARA_WGPU_FORCE_FALLBACK=1",
         ],

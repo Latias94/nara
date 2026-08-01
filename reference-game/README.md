@@ -59,8 +59,6 @@ nara-reference-game/
   bin/
     headless[.exe]
     desktop[.exe]
-  tools/
-    desktop-render-probe[.exe]
   project/
     nara.toml
     assets/
@@ -71,9 +69,9 @@ nara-reference-game/
 
 Packaged executables resolve only the sibling `project/` directory. Candidate consumers execute the
 formal `bin/desktop[.exe] --candidate-smoke` entry, which runs the normal desktop product recipe and
-exits only after a bounded submitted product frame. The desktop render probe remains a
-measurement-only utility; it cannot substitute for the formal desktop smoke. Each consumer run
-creates an isolated extraction, home, working-directory, and temporary root beneath the supplied
+exits only after a bounded submitted product frame. The source-only desktop render probe remains a
+focused renderer test utility and is not part of the candidate package. Each consumer run creates
+an isolated extraction, home, working-directory, and temporary root beneath the supplied
 safe work parent. The archive consumer verifies the fixed entry table, regular-file modes, byte
 budgets, manifest, and every file digest before extraction.
 

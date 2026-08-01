@@ -66,17 +66,17 @@ jobs:
           rustup default 1.95.0
       - name: Build headless product
         run: cargo build --manifest-path reference-game/Cargo.toml --locked --release --bin headless
-      - name: Build desktop product and probe
-        run: cargo build --manifest-path reference-game/Cargo.toml --locked --release --features desktop --bin desktop --bin desktop_render_probe
+      - name: Build desktop product
+        run: cargo build --manifest-path reference-game/Cargo.toml --locked --release --features desktop --bin desktop
       - name: Create bounded candidate
-        run: python -B reference-game/tools/package.py create --repository-root . --platform "${{ matrix.platform }}" --version 0.1.0 --source-revision "${{ github.sha }}" --headless-binary "reference-game/target/release/headless${{ matrix.binary_suffix }}" --desktop-binary "reference-game/target/release/desktop${{ matrix.binary_suffix }}" --desktop-probe-binary "reference-game/target/release/desktop_render_probe${{ matrix.binary_suffix }}" --output "${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.zip" --receipt "${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.json"
+        run: python -B reference-game/tools/package.py create --repository-root . --platform "${{ matrix.platform }}" --version 0.1.0 --source-revision "${{ github.sha }}" --headless-binary "reference-game/target/release/headless${{ matrix.binary_suffix }}" --desktop-binary "reference-game/target/release/desktop${{ matrix.binary_suffix }}" --output "${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.zip"
       - name: Create no-checkout transport
-        run: python -B reference-game/tools/package.py bundle --repository-root . --archive "${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.zip" --receipt "${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.json" --output "${{ runner.temp }}/candidate-bundle-${{ matrix.platform }}"
+        run: python -B reference-game/tools/package.py transport --repository-root . --archive "${{ runner.temp }}/nara-reference-game-${{ matrix.platform }}.zip" --output "${{ runner.temp }}/candidate-transport-${{ matrix.platform }}"
       - name: Upload candidate transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "nara-reference-game-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          path: "${{ runner.temp }}/candidate-bundle-${{ matrix.platform }}"
+          path: "${{ runner.temp }}/candidate-transport-${{ matrix.platform }}"
           if-no-files-found: error
           retention-days: "14"
           compression-level: "0"
@@ -107,9 +107,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: "nara-reference-game-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          path: "${{ runner.temp }}/candidate-bundle"
-      - name: Verify candidate transport before extraction
-        run: python -B "${{ runner.temp }}/candidate-bundle/verification/reference-game/tools/smoke_artifact.py" bundle-verify --bundle "${{ runner.temp }}/candidate-bundle" --expected-platform "${{ matrix.platform }}" --expected-source-revision "${{ github.sha }}"
+          path: "${{ runner.temp }}/candidate-transport"
       - name: Install Linux X11 and Vulkan software profile
         if: "${{ runner.os == 'Linux' }}"
         run: |
@@ -117,7 +115,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxkbcommon0 libxkbcommon-x11-0 mesa-vulkan-drivers vulkan-tools xauth xvfb
       - name: Smoke Linux candidate
         if: "${{ runner.os == 'Linux' }}"
-        run: python -B "${{ runner.temp }}/candidate-bundle/verification/reference-game/tools/smoke_artifact.py" bundle-smoke --bundle "${{ runner.temp }}/candidate-bundle" --work-root "${{ runner.temp }}" --expected-platform "${{ matrix.platform }}" --expected-source-revision "${{ github.sha }}" --desktop-launcher-json '["xvfb-run","--auto-servernum","--server-args=-screen 0 1280x720x24"]' --desktop-environment NARA_WGPU_FORCE_FALLBACK=1
+        run: python -B "${{ runner.temp }}/candidate-transport/verification/reference-game/tools/smoke_artifact.py" smoke --archive "${{ runner.temp }}/candidate-transport/candidate/candidate.zip" --work-root "${{ runner.temp }}" --expected-platform "${{ matrix.platform }}" --expected-source-revision "${{ github.sha }}" --desktop-launcher-json '["xvfb-run","--auto-servernum","--server-args=-screen 0 1280x720x24"]' --desktop-environment NARA_WGPU_FORCE_FALLBACK=1
       - name: Smoke Windows candidate
         if: "${{ runner.os == 'Windows' }}"
-        run: python -B "${{ runner.temp }}/candidate-bundle/verification/reference-game/tools/smoke_artifact.py" bundle-smoke --bundle "${{ runner.temp }}/candidate-bundle" --work-root "${{ runner.temp }}" --expected-platform "${{ matrix.platform }}" --expected-source-revision "${{ github.sha }}" --desktop-environment NARA_WGPU_FORCE_FALLBACK=1
+        run: python -B "${{ runner.temp }}/candidate-transport/verification/reference-game/tools/smoke_artifact.py" smoke --archive "${{ runner.temp }}/candidate-transport/candidate/candidate.zip" --work-root "${{ runner.temp }}" --expected-platform "${{ matrix.platform }}" --expected-source-revision "${{ github.sha }}" --desktop-environment NARA_WGPU_FORCE_FALLBACK=1

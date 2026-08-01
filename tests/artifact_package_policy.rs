@@ -10,7 +10,7 @@ use serde_json::Value;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-const PACKAGE_SCHEMA: &str = "nara.reference-game.candidate-package-v1";
+const PACKAGE_SCHEMA: &str = "nara.reference-game.candidate-package-v2";
 const PLATFORM: &str = "windows-x86_64";
 const SOURCE_REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 
@@ -94,64 +94,39 @@ fn run_smoke_inline(script: &str) -> Output {
     ))
 }
 
-fn run_package(
-    repository: &Path,
-    headless: &Path,
-    desktop: &Path,
-    desktop_probe: &Path,
-    output: &Path,
-) -> Output {
-    run_package_with_receipt(repository, headless, desktop, desktop_probe, output, None)
-}
-
-fn run_package_with_receipt(
-    repository: &Path,
-    headless: &Path,
-    desktop: &Path,
-    desktop_probe: &Path,
-    output: &Path,
-    receipt: Option<&Path>,
-) -> Output {
-    let mut command = Command::new("python");
-    command.arg("-B").arg(package_script()).args([
-        "create",
-        "--repository-root",
-        repository.to_str().expect("fixture path must be UTF-8"),
-        "--platform",
-        PLATFORM,
-        "--version",
-        "0.1.0",
-        "--source-revision",
-        SOURCE_REVISION,
-        "--headless-binary",
-        headless.to_str().expect("fixture path must be UTF-8"),
-        "--desktop-binary",
-        desktop.to_str().expect("fixture path must be UTF-8"),
-        "--desktop-probe-binary",
-        desktop_probe.to_str().expect("fixture path must be UTF-8"),
-        "--output",
-        output.to_str().expect("fixture path must be UTF-8"),
-    ]);
-    if let Some(receipt) = receipt {
-        command
-            .arg("--receipt")
-            .arg(receipt.to_str().expect("fixture path must be UTF-8"));
-    }
-    run(&mut command)
-}
-
-fn run_bundle(repository: &Path, archive: &Path, receipt: &Path, output: &Path) -> Output {
+fn run_package(repository: &Path, headless: &Path, desktop: &Path, output: &Path) -> Output {
     run(Command::new("python")
         .arg("-B")
         .arg(package_script())
         .args([
-            "bundle",
+            "create",
+            "--repository-root",
+            repository.to_str().expect("fixture path must be UTF-8"),
+            "--platform",
+            PLATFORM,
+            "--version",
+            "0.1.0",
+            "--source-revision",
+            SOURCE_REVISION,
+            "--headless-binary",
+            headless.to_str().expect("fixture path must be UTF-8"),
+            "--desktop-binary",
+            desktop.to_str().expect("fixture path must be UTF-8"),
+            "--output",
+            output.to_str().expect("fixture path must be UTF-8"),
+        ]))
+}
+
+fn run_transport(repository: &Path, archive: &Path, output: &Path) -> Output {
+    run(Command::new("python")
+        .arg("-B")
+        .arg(package_script())
+        .args([
+            "transport",
             "--repository-root",
             repository.to_str().expect("fixture path must be UTF-8"),
             "--archive",
             archive.to_str().expect("fixture path must be UTF-8"),
-            "--receipt",
-            receipt.to_str().expect("fixture path must be UTF-8"),
             "--output",
             output.to_str().expect("fixture path must be UTF-8"),
         ]))
@@ -187,7 +162,7 @@ fn write_fixture_file(root: &Path, relative: &str, contents: &[u8]) {
     fs::write(path, contents).expect("fixture source file must be writable");
 }
 
-fn create_repository_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+fn create_repository_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let repository = root.join("repository");
     fs::create_dir(&repository).expect("fixture repository must be creatable");
 
@@ -215,31 +190,19 @@ fn create_repository_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf
     fs::create_dir(&binaries).expect("fixture binary directory must be creatable");
     let headless = binaries.join("headless.exe");
     let desktop = binaries.join("desktop.exe");
-    let desktop_probe = binaries.join("desktop_render_probe.exe");
     fs::write(&headless, b"headless binary").expect("headless fixture must be writable");
     fs::write(&desktop, b"desktop binary").expect("desktop fixture must be writable");
-    fs::write(&desktop_probe, b"desktop probe binary")
-        .expect("desktop probe fixture must be writable");
 
-    (repository, headless, desktop, desktop_probe)
+    (repository, headless, desktop)
 }
 
 #[test]
 fn package_creates_a_fixed_checkout_free_payload() {
     let temporary = TemporaryDirectory::new("valid-package");
-    let (repository, headless, desktop, desktop_probe) =
-        create_repository_fixture(temporary.path());
+    let (repository, headless, desktop) = create_repository_fixture(temporary.path());
     let archive = temporary.path().join("candidate.zip");
-    let package_receipt = temporary.path().join("candidate-receipt.json");
 
-    let packaged = run_package_with_receipt(
-        &repository,
-        &headless,
-        &desktop,
-        &desktop_probe,
-        &archive,
-        Some(&package_receipt),
-    );
+    let packaged = run_package(&repository, &headless, &desktop, &archive);
 
     assert!(
         packaged.status.success(),
@@ -247,10 +210,6 @@ fn package_creates_a_fixed_checkout_free_payload() {
         String::from_utf8_lossy(&packaged.stderr)
     );
     assert!(archive.is_file(), "package creation must write one archive");
-    assert!(
-        package_receipt.is_file(),
-        "package creation must write its requested receipt"
-    );
 
     let verify = run_smoke(&[
         Path::new("verify"),
@@ -294,11 +253,6 @@ fn package_creates_a_fixed_checkout_free_payload() {
     let package_root = consumer_root.join("nara-reference-game");
     assert!(package_root.join("bin/headless.exe").is_file());
     assert!(package_root.join("bin/desktop.exe").is_file());
-    assert!(
-        package_root
-            .join("tools/desktop-render-probe.exe")
-            .is_file()
-    );
     assert!(package_root.join("project/nara.toml").is_file());
     assert!(package_root.join("README.md").is_file());
     assert!(package_root.join("LICENSE-MIT").is_file());
@@ -318,126 +272,85 @@ fn package_creates_a_fixed_checkout_free_payload() {
         "the extracted candidate must not carry a source checkout"
     );
 
-    let bundle = temporary.path().join("candidate-bundle");
-    let bundled = run_bundle(&repository, &archive, &package_receipt, &bundle);
+    let transport = temporary.path().join("candidate-transport");
+    let transported = run_transport(&repository, &archive, &transport);
     assert!(
-        bundled.status.success(),
+        transported.status.success(),
         "candidate transport creation failed: {}",
-        String::from_utf8_lossy(&bundled.stderr)
+        String::from_utf8_lossy(&transported.stderr)
     );
     assert!(
-        bundle
+        transport
             .join("verification/reference-game/tools/smoke_artifact.py")
             .is_file()
     );
     assert!(
-        bundle
+        transport
             .join("verification/reference-game/packaging/package-layout-v1.json")
             .is_file()
     );
-    let bundled_archive = bundle.join("candidate/candidate.zip");
-    assert!(bundled_archive.is_file());
-    let bundle_verify = run_smoke(&[
-        Path::new("bundle-verify"),
-        Path::new("--bundle"),
-        &bundle,
-        Path::new("--expected-platform"),
-        Path::new(PLATFORM),
-        Path::new("--expected-source-revision"),
-        Path::new(SOURCE_REVISION),
-    ]);
+    assert!(!transport.join("bundle-manifest.json").exists());
+    assert!(!transport.join("candidate/receipt.json").exists());
+    let transported_archive = transport.join("candidate/candidate.zip");
+    assert!(transported_archive.is_file());
+    let transported_smoke = transport.join("verification/reference-game/tools/smoke_artifact.py");
+    let transport_verify = run(Command::new("python")
+        .arg("-B")
+        .arg(transported_smoke)
+        .args([
+            "verify",
+            "--archive",
+            transported_archive
+                .to_str()
+                .expect("transport archive path must be UTF-8"),
+            "--expected-platform",
+            PLATFORM,
+            "--expected-source-revision",
+            SOURCE_REVISION,
+        ]));
     assert!(
-        bundle_verify.status.success(),
-        "candidate transport verification failed: {}",
-        String::from_utf8_lossy(&bundle_verify.stderr)
+        transport_verify.status.success(),
+        "checkout-free transport verification failed: {}",
+        String::from_utf8_lossy(&transport_verify.stderr)
     );
 }
 
 #[test]
-fn consumer_rejects_transport_provenance_or_file_tampering() {
-    let temporary = TemporaryDirectory::new("tampered-transport");
-    let (repository, headless, desktop, desktop_probe) =
-        create_repository_fixture(temporary.path());
+fn transported_archive_identity_is_checked_by_the_archive_itself() {
+    let temporary = TemporaryDirectory::new("transported-archive-identity");
+    let (repository, headless, desktop) = create_repository_fixture(temporary.path());
     let archive = temporary.path().join("candidate.zip");
-    let receipt = temporary.path().join("candidate-receipt.json");
-    let package = run_package_with_receipt(
-        &repository,
-        &headless,
-        &desktop,
-        &desktop_probe,
-        &archive,
-        Some(&receipt),
-    );
+    let packaged = run_package(&repository, &headless, &desktop, &archive);
     assert!(
-        package.status.success(),
+        packaged.status.success(),
         "valid package creation failed: {}",
-        String::from_utf8_lossy(&package.stderr)
-    );
-    let bundle = temporary.path().join("candidate-bundle");
-    let bundled = run_bundle(&repository, &archive, &receipt, &bundle);
-    assert!(
-        bundled.status.success(),
-        "valid transport creation failed: {}",
-        String::from_utf8_lossy(&bundled.stderr)
+        String::from_utf8_lossy(&packaged.stderr)
     );
 
-    let bundle_manifest = bundle.join("bundle-manifest.json");
-    let original_manifest = fs::read(&bundle_manifest).expect("bundle manifest must be readable");
-    let mut decoded: Value =
-        serde_json::from_slice(&original_manifest).expect("bundle manifest must be valid JSON");
-    decoded["source_revision"] =
-        Value::String("fedcba9876543210fedcba9876543210fedcba98".to_owned());
-    fs::write(
-        &bundle_manifest,
-        serde_json::to_vec(&decoded).expect("mutated manifest must encode"),
-    )
-    .expect("mutated manifest must be writable");
-    let provenance_rejection = run_smoke(&[
-        Path::new("bundle-verify"),
-        Path::new("--bundle"),
-        &bundle,
+    let wrong_revision = run_smoke(&[
+        Path::new("verify"),
+        Path::new("--archive"),
+        &archive,
         Path::new("--expected-platform"),
         Path::new(PLATFORM),
         Path::new("--expected-source-revision"),
-        Path::new(SOURCE_REVISION),
+        Path::new("fedcba9876543210fedcba9876543210fedcba98"),
     ]);
-    assert!(!provenance_rejection.status.success());
+    assert!(!wrong_revision.status.success());
     assert!(
-        String::from_utf8_lossy(&provenance_rejection.stderr).contains("revision does not match"),
-        "unexpected provenance rejection: {}",
-        String::from_utf8_lossy(&provenance_rejection.stderr)
-    );
-
-    fs::write(&bundle_manifest, original_manifest).expect("bundle manifest must be restorable");
-    let helper = bundle.join("verification/reference-game/tools/package.py");
-    let mut helper_contents = fs::read(&helper).expect("verification helper must be readable");
-    helper_contents.extend_from_slice(b"\n# transport tamper\n");
-    fs::write(&helper, helper_contents).expect("verification helper must be writable");
-    let digest_rejection = run_smoke(&[
-        Path::new("bundle-verify"),
-        Path::new("--bundle"),
-        &bundle,
-        Path::new("--expected-platform"),
-        Path::new(PLATFORM),
-        Path::new("--expected-source-revision"),
-        Path::new(SOURCE_REVISION),
-    ]);
-    assert!(!digest_rejection.status.success());
-    assert!(
-        String::from_utf8_lossy(&digest_rejection.stderr).contains("does not match its manifest"),
-        "unexpected digest rejection: {}",
-        String::from_utf8_lossy(&digest_rejection.stderr)
+        String::from_utf8_lossy(&wrong_revision.stderr).contains("revision does not match"),
+        "unexpected archive identity rejection: {}",
+        String::from_utf8_lossy(&wrong_revision.stderr)
     );
 }
 
 #[test]
 fn package_rejects_output_inside_the_source_checkout() {
     let temporary = TemporaryDirectory::new("output-inside-source");
-    let (repository, headless, desktop, desktop_probe) =
-        create_repository_fixture(temporary.path());
+    let (repository, headless, desktop) = create_repository_fixture(temporary.path());
     let archive = repository.join("candidate.zip");
 
-    let packaged = run_package(&repository, &headless, &desktop, &desktop_probe, &archive);
+    let packaged = run_package(&repository, &headless, &desktop, &archive);
 
     assert!(!packaged.status.success());
     assert!(
@@ -451,19 +364,12 @@ fn package_rejects_output_inside_the_source_checkout() {
 #[test]
 fn package_rejects_non_regular_binary_inputs_before_writing_an_archive() {
     let temporary = TemporaryDirectory::new("non-regular-binary");
-    let (repository, _headless, desktop, desktop_probe) =
-        create_repository_fixture(temporary.path());
+    let (repository, _headless, desktop) = create_repository_fixture(temporary.path());
     let headless_directory = temporary.path().join("not-a-binary");
     fs::create_dir(&headless_directory).expect("fixture directory must be creatable");
     let archive = temporary.path().join("candidate.zip");
 
-    let packaged = run_package(
-        &repository,
-        &headless_directory,
-        &desktop,
-        &desktop_probe,
-        &archive,
-    );
+    let packaged = run_package(&repository, &headless_directory, &desktop, &archive);
 
     assert!(!packaged.status.success());
     assert!(
@@ -480,16 +386,9 @@ fn package_rejects_non_regular_binary_inputs_before_writing_an_archive() {
 #[test]
 fn consumer_rejects_unsafe_or_manifest_inconsistent_archives_before_extraction() {
     let temporary = TemporaryDirectory::new("adversarial-archives");
-    let (repository, headless, desktop, desktop_probe) =
-        create_repository_fixture(temporary.path());
+    let (repository, headless, desktop) = create_repository_fixture(temporary.path());
     let valid_archive = temporary.path().join("valid.zip");
-    let packaged = run_package(
-        &repository,
-        &headless,
-        &desktop,
-        &desktop_probe,
-        &valid_archive,
-    );
+    let packaged = run_package(&repository, &headless, &desktop, &valid_archive);
     assert!(
         packaged.status.success(),
         "valid package creation failed: {}",
@@ -672,7 +571,6 @@ validated = SimpleNamespace(
         "layout": {
             "headless": "bin/headless.exe",
             "desktop": "bin/desktop.exe",
-            "desktop_probe": "tools/desktop-render-probe.exe",
         }
     },
 )
@@ -684,8 +582,6 @@ def run_fixture(command, cwd, environment, subject):
     commands.append((command, subject))
     if subject == "headless candidate":
         return json.dumps({"schema": smoke.HEADLESS_SUMMARY_SCHEMA}).encode("ascii")
-    if any("desktop-render-probe" in part for part in command):
-        return smoke.DESKTOP_PROBE_SUCCESS
     if subject == "desktop candidate":
         assert Path(command[-2]).name == "desktop.exe", command
         assert command[-1] == "--candidate-smoke", command

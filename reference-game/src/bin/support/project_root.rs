@@ -113,7 +113,6 @@ mod tests {
         for executable in [
             Path::new("C:/candidate/nara-reference-game/bin/headless.exe"),
             Path::new("C:/candidate/nara-reference-game/bin/desktop.exe"),
-            Path::new("C:/candidate/nara-reference-game/tools/desktop-render-probe.exe"),
         ] {
             assert_eq!(
                 project_root_from_executable(executable, development_root).unwrap(),

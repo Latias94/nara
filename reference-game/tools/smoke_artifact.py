@@ -25,12 +25,10 @@ import package
 
 HEADLESS_SUMMARY_SCHEMA = "nara-reference-game.wave-summary-v1"
 DESKTOP_SMOKE_SUCCESS = b"desktop_candidate_smoke: ok\n"
-DESKTOP_PROBE_SUCCESS = b"desktop_render_probe: ok\n"
 MAX_PROCESS_OUTPUT_BYTES = 64 * 1024
 MAX_PROCESS_TIMEOUT_SECONDS = 60
 ARTIFACT_TEMPORARY_PREFIX = ".nara-artifact-"
 SMOKE_TEMPORARY_PREFIX = ".nara-smoke-"
-MAX_BUNDLE_ENTRY_COUNT = 16
 
 
 class ArtifactError(Exception):
@@ -63,15 +61,6 @@ def require_regular_archive(path: Path, limits: package.PackageLimits) -> Path:
     if size > limits.max_encoded_bytes:
         raise ArtifactError("candidate archive exceeds the encoded-byte limit")
     return resolved
-
-
-def sha256_and_size(stream: BinaryIO) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    size = 0
-    while chunk := stream.read(package.CHUNK_SIZE):
-        digest.update(chunk)
-        size += len(chunk)
-    return digest.hexdigest(), size
 
 
 def file_sha256_and_size(path: Path, maximum_bytes: int | None = None) -> tuple[str, int]:
@@ -141,6 +130,25 @@ def read_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> 
     return contents
 
 
+def digest_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> tuple[str, int]:
+    if info.file_size > limit:
+        raise ArtifactError("candidate archive entry exceeds its byte limit")
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with archive.open(info, "r") as stream:
+            while chunk := stream.read(package.CHUNK_SIZE):
+                size += len(chunk)
+                if size > limit:
+                    raise ArtifactError("candidate archive entry size is inconsistent")
+                digest.update(chunk)
+    except (OSError, zipfile.BadZipFile) as error:
+        raise ArtifactError("candidate archive entry could not be read") from error
+    if size != info.file_size:
+        raise ArtifactError("candidate archive entry size is inconsistent")
+    return digest.hexdigest(), size
+
+
 def validate_manifest_shape(
     manifest: object, layout: package.Layout, expected_platform: str | None, expected_revision: str | None
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
@@ -182,7 +190,6 @@ def validate_manifest_shape(
         "root",
         "headless",
         "desktop",
-        "desktop_probe",
         "project",
     }:
         raise ArtifactError("candidate manifest layout is invalid")
@@ -191,7 +198,6 @@ def validate_manifest_shape(
         "root": layout.package_root,
         "headless": f"bin/headless{suffix}",
         "desktop": f"bin/desktop{suffix}",
-        "desktop_probe": f"tools/desktop-render-probe{suffix}",
         "project": "project",
     }
     if layout_value != expected_layout:
@@ -248,7 +254,6 @@ def validate_manifest_shape(
     expected_executables = {
         f"bin/headless{suffix}",
         f"bin/desktop{suffix}",
-        f"tools/desktop-render-probe{suffix}",
     }
     if any(
         descriptor["executable"] != (relative in expected_executables)
@@ -331,10 +336,10 @@ def validate_archive(
                 expected_mode = 0o100755 if descriptor["executable"] else 0o100644
                 if (info.external_attr >> 16) != expected_mode:
                     raise ArtifactError("candidate archive entry mode does not match the manifest")
-                contents = read_member(archive, info, layout.limits.max_file_bytes)
-                if hashlib.sha256(contents).hexdigest() != descriptor["sha256"]:
+                digest, size = digest_member(archive, info, layout.limits.max_file_bytes)
+                if digest != descriptor["sha256"]:
                     raise ArtifactError("candidate archive entry digest does not match the manifest")
-                aggregate += len(contents)
+                aggregate += size
             if aggregate != manifest["limits"]["expanded_bytes"]:
                 raise ArtifactError("candidate archive expanded-byte total is inconsistent")
     except (OSError, zipfile.BadZipFile) as error:
@@ -363,208 +368,6 @@ def receipt(validated: ValidatedArchive) -> dict[str, object]:
         "file_count": validated.manifest["limits"]["file_count"],
         "expanded_bytes": validated.manifest["limits"]["expanded_bytes"],
     }
-
-
-def load_json_file(path: Path, subject: str, maximum_bytes: int) -> object:
-    try:
-        raw = package.read_file_bounded(path, subject, maximum_bytes)
-    except package.PackageError as error:
-        raise fail_from_package(error) from error
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
-        raise ArtifactError(f"{subject} is not valid JSON") from error
-
-
-def validate_bundle_file_descriptor(value: object) -> tuple[str, int, str]:
-    if not isinstance(value, dict) or set(value) != {"path", "size_bytes", "sha256"}:
-        raise ArtifactError("candidate transport file descriptor is invalid")
-    try:
-        relative = package.parse_relative_path(value["path"], "candidate transport path")
-    except package.PackageError as error:
-        raise fail_from_package(error) from error
-    size = value["size_bytes"]
-    digest = value["sha256"]
-    if (
-        not isinstance(size, int)
-        or isinstance(size, bool)
-        or size < 0
-        or not isinstance(digest, str)
-        or len(digest) != 64
-        or not all(character in "0123456789abcdef" for character in digest)
-    ):
-        raise ArtifactError("candidate transport file descriptor has invalid values")
-    return relative, size, digest
-
-
-def validate_transport_bundle(
-    bundle_root: Path,
-    expected_platform: str | None = None,
-    expected_revision: str | None = None,
-) -> tuple[ValidatedArchive, Path]:
-    try:
-        package.require_directory(bundle_root, "candidate transport bundle")
-        bundle_root = bundle_root.resolve(strict=True)
-    except package.PackageError as error:
-        raise fail_from_package(error) from error
-    except OSError as error:
-        raise ArtifactError("candidate transport bundle could not be resolved") from error
-    try:
-        layout = package.load_layout()
-    except package.PackageError as error:
-        raise fail_from_package(error) from error
-    manifest = load_json_file(
-        bundle_root / "bundle-manifest.json",
-        "candidate transport manifest",
-        package.MAX_JSON_BYTES,
-    )
-    if not isinstance(manifest, dict) or set(manifest) != {
-        "schema",
-        "format_version",
-        "platform",
-        "source_revision",
-        "archive",
-        "receipt",
-        "files",
-    }:
-        raise ArtifactError("candidate transport manifest has an unexpected shape")
-    if (
-        manifest["schema"] != package.BUNDLE_MANIFEST_SCHEMA
-        or manifest["format_version"] != package.FORMAT_VERSION
-    ):
-        raise ArtifactError("candidate transport manifest schema is unsupported")
-    try:
-        platform = package.validate_platform(manifest["platform"])
-        source_revision = package.validate_revision(manifest["source_revision"])
-        receipt_relative = package.parse_relative_path(
-            manifest["receipt"], "candidate transport receipt"
-        )
-    except package.PackageError as error:
-        raise fail_from_package(error) from error
-    if expected_platform is not None and platform != expected_platform:
-        raise ArtifactError("candidate transport platform does not match the expected platform")
-    if expected_revision is not None and source_revision != expected_revision:
-        raise ArtifactError("candidate transport revision does not match the expected revision")
-    archive_identity = manifest["archive"]
-    if not isinstance(archive_identity, dict) or set(archive_identity) != {
-        "path",
-        "filename",
-        "size_bytes",
-        "sha256",
-    }:
-        raise ArtifactError("candidate transport archive identity is invalid")
-    archive_filename = archive_identity["filename"]
-    archive_size = archive_identity["size_bytes"]
-    archive_digest = archive_identity["sha256"]
-    if (
-        not isinstance(archive_filename, str)
-        or Path(archive_filename).name != archive_filename
-        or not archive_filename.endswith(package.ARCHIVE_SUFFIX)
-        or not isinstance(archive_size, int)
-        or isinstance(archive_size, bool)
-        or archive_size <= 0
-        or archive_size > layout.limits.max_encoded_bytes
-        or not isinstance(archive_digest, str)
-        or len(archive_digest) != 64
-        or not all(character in "0123456789abcdef" for character in archive_digest)
-    ):
-        raise ArtifactError("candidate transport archive identity is invalid")
-    try:
-        archive_relative = package.parse_relative_path(
-            archive_identity["path"], "candidate transport archive"
-        )
-    except package.PackageError as error:
-        raise fail_from_package(error) from error
-    if Path(archive_relative).name != archive_filename:
-        raise ArtifactError("candidate transport archive filename is inconsistent")
-    descriptor_values = manifest["files"]
-    if (
-        not isinstance(descriptor_values, list)
-        or not descriptor_values
-        or len(descriptor_values) > MAX_BUNDLE_ENTRY_COUNT
-    ):
-        raise ArtifactError("candidate transport files must be a non-empty array")
-    descriptors: dict[str, tuple[int, str]] = {}
-    ordered_paths: list[str] = []
-    for value in descriptor_values:
-        relative, size, digest = validate_bundle_file_descriptor(value)
-        if relative in descriptors or relative.casefold() in {
-            path.casefold() for path in descriptors
-        }:
-            raise ArtifactError("candidate transport has duplicate or case-colliding paths")
-        descriptors[relative] = (size, digest)
-        ordered_paths.append(relative)
-    if ordered_paths != sorted(ordered_paths):
-        raise ArtifactError("candidate transport paths must use canonical order")
-    expected_paths = {
-        archive_relative,
-        receipt_relative,
-        "verification/reference-game/tools/package.py",
-        "verification/reference-game/tools/smoke_artifact.py",
-        "verification/reference-game/packaging/package-layout-v1.json",
-    }
-    if set(descriptors) != expected_paths:
-        raise ArtifactError("candidate transport has missing or unexpected manifest paths")
-    file_limits = {
-        archive_relative: layout.limits.max_encoded_bytes,
-        receipt_relative: package.MAX_BUNDLE_RECEIPT_BYTES,
-        "verification/reference-game/tools/package.py": package.MAX_BUNDLE_HELPER_BYTES,
-        "verification/reference-game/tools/smoke_artifact.py": package.MAX_BUNDLE_HELPER_BYTES,
-        "verification/reference-game/packaging/package-layout-v1.json": layout.limits.max_manifest_bytes,
-    }
-    if any(
-        size > file_limits[relative]
-        for relative, (size, _) in descriptors.items()
-    ):
-        raise ArtifactError("candidate transport file exceeds its byte limit")
-    actual_paths: set[str] = set()
-    actual_entry_count = 0
-    for candidate in bundle_root.rglob("*"):
-        actual_entry_count += 1
-        if actual_entry_count > MAX_BUNDLE_ENTRY_COUNT:
-            raise ArtifactError("candidate transport exceeds its entry-count limit")
-        if package.path_has_link_or_reparse_point(candidate):
-            raise ArtifactError("candidate transport contains a link or reparse point")
-        try:
-            metadata = candidate.stat()
-        except OSError as error:
-            raise ArtifactError("candidate transport could not be inspected") from error
-        if stat.S_ISDIR(metadata.st_mode):
-            continue
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ArtifactError("candidate transport contains a special file")
-        actual_paths.add(candidate.relative_to(bundle_root).as_posix())
-    if actual_paths != expected_paths | {"bundle-manifest.json"}:
-        raise ArtifactError("candidate transport contains missing or unexpected files")
-    for relative, (expected_size, expected_digest) in descriptors.items():
-        digest, size = file_sha256_and_size(
-            bundle_root / relative, file_limits[relative]
-        )
-        if size != expected_size or digest != expected_digest:
-            raise ArtifactError("candidate transport file does not match its manifest")
-    try:
-        receipt_value = package.load_candidate_receipt(bundle_root / receipt_relative)
-    except package.PackageError as error:
-        raise fail_from_package(error) from error
-    if (
-        receipt_value["platform"] != platform
-        or receipt_value["source_revision"] != source_revision
-        or receipt_value["archive"]
-        != {
-            "filename": archive_identity["filename"],
-            "size_bytes": archive_identity["size_bytes"],
-            "sha256": archive_identity["sha256"],
-        }
-    ):
-        raise ArtifactError("candidate receipt does not match the transport manifest")
-    archive_path = bundle_root / archive_relative
-    validated = validate_archive(archive_path, platform, source_revision)
-    if (
-        validated.archive_size_bytes != archive_identity["size_bytes"]
-        or validated.archive_sha256 != archive_identity["sha256"]
-    ):
-        raise ArtifactError("candidate archive does not match the transport manifest")
-    return validated, archive_path
 
 
 def require_new_destination(destination: Path) -> Path:
@@ -911,6 +714,8 @@ def smoke_candidate(
     work_parent: Path,
     desktop_launcher_json: str,
     desktop_environment: Sequence[str],
+    expected_platform: str | None = None,
+    expected_revision: str | None = None,
 ) -> dict[str, object]:
     smoke_root = create_smoke_root(work_parent)
     cleanup_parent = smoke_root.parent
@@ -920,6 +725,8 @@ def smoke_candidate(
             smoke_root,
             desktop_launcher_json,
             desktop_environment,
+            expected_platform,
+            expected_revision,
         )
     except Exception:
         safe_remove_temporary(smoke_root, cleanup_parent, SMOKE_TEMPORARY_PREFIX)
@@ -936,9 +743,13 @@ def smoke_candidate_in_root(
     smoke_root: Path,
     desktop_launcher_json: str,
     desktop_environment: Sequence[str],
+    expected_platform: str | None = None,
+    expected_revision: str | None = None,
 ) -> dict[str, object]:
     destination = smoke_root / "consumer"
-    validated = extract_archive(archive_path, destination)
+    validated = extract_archive(
+        archive_path, destination, expected_platform, expected_revision
+    )
     launcher = parse_launcher(desktop_launcher_json)
     overrides = parse_environment(desktop_environment)
     environment, cwd = smoke_environment(smoke_root, overrides)
@@ -990,25 +801,10 @@ def parse_arguments(arguments: Sequence[str]) -> argparse.Namespace:
     smoke = commands.add_parser("smoke", help="verify, extract, and run bounded candidate probes")
     smoke.add_argument("--archive", required=True)
     smoke.add_argument("--work-root", required=True, help="safe parent for a unique smoke root")
+    smoke.add_argument("--expected-platform")
+    smoke.add_argument("--expected-source-revision")
     smoke.add_argument("--desktop-launcher-json", default="[]")
     smoke.add_argument("--desktop-environment", action="append", default=[])
-    bundle_verify = commands.add_parser(
-        "bundle-verify", help="verify one no-checkout candidate transport bundle"
-    )
-    bundle_verify.add_argument("--bundle", required=True)
-    bundle_verify.add_argument("--expected-platform")
-    bundle_verify.add_argument("--expected-source-revision")
-    bundle_smoke = commands.add_parser(
-        "bundle-smoke", help="verify a transport bundle then run bounded candidate probes"
-    )
-    bundle_smoke.add_argument("--bundle", required=True)
-    bundle_smoke.add_argument(
-        "--work-root", required=True, help="safe parent for a unique smoke root"
-    )
-    bundle_smoke.add_argument("--expected-platform")
-    bundle_smoke.add_argument("--expected-source-revision")
-    bundle_smoke.add_argument("--desktop-launcher-json", default="[]")
-    bundle_smoke.add_argument("--desktop-environment", action="append", default=[])
     return parser.parse_args(arguments)
 
 
@@ -1029,25 +825,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 Path(parsed.work_root),
                 parsed.desktop_launcher_json,
                 parsed.desktop_environment,
-            )
-        elif parsed.command == "bundle-verify":
-            validated, _ = validate_transport_bundle(
-                Path(parsed.bundle),
                 parsed.expected_platform,
                 parsed.expected_source_revision,
-            )
-            result = receipt(validated)
-        elif parsed.command == "bundle-smoke":
-            _, archive_path = validate_transport_bundle(
-                Path(parsed.bundle),
-                parsed.expected_platform,
-                parsed.expected_source_revision,
-            )
-            result = smoke_candidate(
-                archive_path,
-                Path(parsed.work_root),
-                parsed.desktop_launcher_json,
-                parsed.desktop_environment,
             )
         else:
             raise ArtifactError("artifact command is unsupported")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create one bounded, checkout-free reference-game candidate ZIP archive."""
+"""Create one bounded reference-game candidate and its CI transport directory."""
 
 from __future__ import annotations
 
@@ -14,19 +14,17 @@ import shutil
 import stat
 import sys
 import tempfile
-from typing import Any, BinaryIO, Iterable, Sequence
+from typing import BinaryIO, Iterable, Sequence
 import zipfile
 
 
-PACKAGE_MANIFEST_SCHEMA = "nara.reference-game.candidate-package-v1"
-BUNDLE_MANIFEST_SCHEMA = "nara.reference-game.candidate-transport-bundle-v1"
+PACKAGE_MANIFEST_SCHEMA = "nara.reference-game.candidate-package-v2"
 LAYOUT_SCHEMA = "nara.reference-game.package-layout-v1"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 ARCHIVE_SUFFIX = ".zip"
 MANIFEST_NAME = "manifest.json"
 CHUNK_SIZE = 64 * 1024
-MAX_BUNDLE_HELPER_BYTES = 512 * 1024
-MAX_BUNDLE_RECEIPT_BYTES = 64 * 1024
+MAX_TRANSPORT_HELPER_BYTES = 512 * 1024
 MAX_JSON_BYTES = 64 * 1024
 MAX_PATH_BYTES = 512
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
@@ -239,7 +237,7 @@ def load_layout() -> Layout:
         set(folded_destinations)
     ):
         raise PackageError("package layout has duplicate or case-colliding destinations")
-    if len(destinations) + 4 > limits.max_file_count:
+    if len(destinations) + 3 > limits.max_file_count:
         raise PackageError("package layout cannot fit within its file-count limit")
     return Layout(
         package_root=package_root,
@@ -257,7 +255,6 @@ def package_destinations(layout: Layout, platform: str) -> tuple[str, ...]:
         (
             f"bin/headless{suffix}",
             f"bin/desktop{suffix}",
-            f"tools/desktop-render-probe{suffix}",
         )
     )
     return tuple(sorted(destinations))
@@ -312,26 +309,6 @@ def normalized_output_path(value: str, repository_root: Path) -> Path:
     return output
 
 
-def normalized_new_file_path(
-    value: str, repository_root: Path, subject: str, suffix: str
-) -> Path:
-    output = Path(value)
-    if output.suffix.lower() != suffix:
-        raise PackageError(f"{subject} must use the fixed {suffix} suffix")
-    if os.path.lexists(output):
-        raise PackageError(f"{subject} must not already exist")
-    parent = output.parent
-    require_directory(parent, f"{subject} parent")
-    try:
-        resolved_parent = parent.resolve(strict=True)
-    except OSError as error:
-        raise PackageError(f"{subject} parent could not be resolved") from error
-    output = resolved_parent / output.name
-    if path_is_within(output, repository_root):
-        raise PackageError(f"{subject} must be outside the repository root")
-    return output
-
-
 def normalized_new_directory_path(value: str, repository_root: Path, subject: str) -> Path:
     output = Path(value)
     if os.path.lexists(output):
@@ -354,13 +331,11 @@ def source_files(
     platform: str,
     headless_binary: Path,
     desktop_binary: Path,
-    desktop_probe_binary: Path,
 ) -> tuple[StagedFile, ...]:
     suffix = PLATFORM_SUFFIXES[platform]
     for binary, subject in (
         (headless_binary, "headless binary"),
         (desktop_binary, "desktop binary"),
-        (desktop_probe_binary, "desktop probe binary"),
     ):
         require_regular_file(binary, subject)
     staged: list[StagedFile] = []
@@ -374,7 +349,6 @@ def source_files(
         (
             StagedFile(headless_binary, f"bin/headless{suffix}", True),
             StagedFile(desktop_binary, f"bin/desktop{suffix}", True),
-            StagedFile(desktop_probe_binary, f"tools/desktop-render-probe{suffix}", True),
         )
     )
     destinations = [entry.destination for entry in staged]
@@ -484,11 +458,6 @@ def build_manifest(
             "desktop": next(
                 descriptor.path for descriptor in entries if descriptor.path.startswith("bin/desktop")
             ),
-            "desktop_probe": next(
-                descriptor.path
-                for descriptor in entries
-                if descriptor.path.startswith("tools/desktop-render-probe")
-            ),
             "project": "project",
         },
         "limits": {
@@ -548,35 +517,6 @@ def write_archive(
         raise PackageError("candidate archive could not be written") from error
 
 
-def remove_owned_output(path: Path) -> None:
-    try:
-        if path.exists() and not path_has_link_or_reparse_point(path):
-            path.unlink()
-    except OSError:
-        pass
-
-
-def file_sha256(path: Path) -> str:
-    try:
-        with path.open("rb") as stream:
-            digest, _ = sha256_and_size(stream)
-    except OSError as error:
-        raise PackageError("candidate archive could not be read") from error
-    return digest
-
-
-def canonical_json_bytes(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
-
-
-def write_new_file(path: Path, contents: bytes, subject: str) -> None:
-    try:
-        with path.open("xb") as output:
-            output.write(contents)
-    except OSError as error:
-        raise PackageError(f"{subject} could not be written") from error
-
-
 def publish_new_file(source: Path, destination: Path, subject: str) -> None:
     try:
         os.link(source, destination)
@@ -591,20 +531,12 @@ def create_candidate(arguments: argparse.Namespace) -> dict[str, object]:
     source_revision = validate_revision(arguments.source_revision)
     repository_root = normalized_repository_root(arguments.repository_root)
     output = normalized_output_path(arguments.output, repository_root)
-    receipt_path = (
-        normalized_new_file_path(
-            arguments.receipt, repository_root, "candidate receipt", ".json"
-        )
-        if arguments.receipt is not None
-        else None
-    )
     sources = source_files(
         layout,
         repository_root,
         platform,
         Path(arguments.headless_binary),
         Path(arguments.desktop_binary),
-        Path(arguments.desktop_probe_binary),
     )
     with tempfile.TemporaryDirectory(
         prefix=".nara-reference-game-package-", dir=output.parent
@@ -627,110 +559,25 @@ def create_candidate(arguments: argparse.Namespace) -> dict[str, object]:
             raise PackageError("candidate archive size could not be read") from error
         if encoded_bytes > layout.limits.max_encoded_bytes:
             raise PackageError("candidate archive exceeds the encoded-byte limit")
-        receipt = {
-            "schema": PACKAGE_MANIFEST_SCHEMA,
-            "format_version": FORMAT_VERSION,
-            "platform": platform,
-            "source_revision": source_revision,
-            "archive": {
-                "filename": output.name,
-                "size_bytes": encoded_bytes,
-                "sha256": file_sha256(temporary_archive),
-            },
-        }
+        summary = {"archive": output.name, "size_bytes": encoded_bytes}
         publish_new_file(temporary_archive, output, "candidate archive")
-    if receipt_path is not None:
-        try:
-            write_new_file(receipt_path, canonical_json_bytes(receipt), "candidate receipt")
-        except PackageError:
-            remove_owned_output(output)
-            raise
-    return receipt
+    return summary
 
 
-def load_candidate_receipt(path: Path) -> dict[str, Any]:
-    raw = read_file_bounded(path, "candidate receipt", MAX_BUNDLE_RECEIPT_BYTES)
-    try:
-        receipt = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
-        raise PackageError("candidate receipt is not valid JSON") from error
-    if not isinstance(receipt, dict) or set(receipt) != {
-        "schema",
-        "format_version",
-        "platform",
-        "source_revision",
-        "archive",
-    }:
-        raise PackageError("candidate receipt has an unexpected shape")
-    if (
-        receipt["schema"] != PACKAGE_MANIFEST_SCHEMA
-        or receipt["format_version"] != FORMAT_VERSION
-    ):
-        raise PackageError("candidate receipt schema is unsupported")
-    validate_platform(receipt["platform"])
-    validate_revision(receipt["source_revision"])
-    archive = receipt["archive"]
-    if not isinstance(archive, dict) or set(archive) != {
-        "filename",
-        "size_bytes",
-        "sha256",
-    }:
-        raise PackageError("candidate receipt archive identity is invalid")
-    filename = archive["filename"]
-    size = archive["size_bytes"]
-    digest = archive["sha256"]
-    if (
-        not isinstance(filename, str)
-        or Path(filename).name != filename
-        or not filename.endswith(ARCHIVE_SUFFIX)
-        or not isinstance(size, int)
-        or isinstance(size, bool)
-        or size <= 0
-        or not isinstance(digest, str)
-        or len(digest) != 64
-        or not all(character in "0123456789abcdef" for character in digest)
-    ):
-        raise PackageError("candidate receipt archive identity is invalid")
-    return receipt
-
-
-def bundle_file_descriptor(root: Path, relative: str) -> dict[str, object]:
-    path = root / relative
-    require_regular_file(path, "candidate transport file")
-    try:
-        with path.open("rb") as stream:
-            digest, size = sha256_and_size(stream)
-    except OSError as error:
-        raise PackageError("candidate transport file could not be read") from error
-    return {"path": relative, "size_bytes": size, "sha256": digest}
-
-
-def bundle_candidate(arguments: argparse.Namespace) -> dict[str, object]:
+def create_transport(arguments: argparse.Namespace) -> dict[str, object]:
     repository_root = normalized_repository_root(arguments.repository_root)
     layout = load_layout()
     archive = Path(arguments.archive)
-    receipt_path = Path(arguments.receipt)
     require_regular_file(archive, "candidate archive")
-    receipt = load_candidate_receipt(receipt_path)
     try:
         archive = archive.resolve(strict=True)
-    except OSError as error:
-        raise PackageError("candidate archive could not be resolved") from error
-    archive_identity = receipt["archive"]
-    if archive.name != archive_identity["filename"]:
-        raise PackageError("candidate archive filename does not match its receipt")
-    try:
         archive_size = archive.stat().st_size
     except OSError as error:
-        raise PackageError("candidate archive size could not be read") from error
-    if (
-        archive_size > layout.limits.max_encoded_bytes
-        or archive_size != archive_identity["size_bytes"]
-        or file_sha256(archive) != archive_identity["sha256"]
-    ):
-        raise PackageError("candidate archive does not match its receipt")
+        raise PackageError("candidate archive could not be inspected") from error
+    if archive_size > layout.limits.max_encoded_bytes:
+        raise PackageError("candidate archive exceeds the encoded-byte limit")
     output = normalized_new_directory_path(
-        arguments.output, repository_root, "candidate transport bundle"
+        arguments.output, repository_root, "candidate transport directory"
     )
     helper_sources = (
         (
@@ -749,67 +596,29 @@ def bundle_candidate(arguments: argparse.Namespace) -> dict[str, object]:
     for source, _ in helper_sources:
         require_regular_file(source, "candidate verification helper")
     with tempfile.TemporaryDirectory(
-        prefix=".nara-candidate-bundle-", dir=output.parent
+        prefix=".nara-candidate-transport-", dir=output.parent
     ) as temporary:
         temporary_root = Path(temporary)
-        archive_relative = f"candidate/{archive.name}"
-        receipt_relative = "candidate/receipt.json"
+        archive_relative = "candidate/candidate.zip"
         copy_file(
             archive,
             temporary_root / archive_relative,
             layout.limits.max_encoded_bytes,
         )
-        copy_file(
-            receipt_path,
-            temporary_root / receipt_relative,
-            MAX_BUNDLE_RECEIPT_BYTES,
-        )
         for source, relative in helper_sources:
             limit = (
                 MAX_JSON_BYTES
                 if relative.endswith("package-layout-v1.json")
-                else MAX_BUNDLE_HELPER_BYTES
+                else MAX_TRANSPORT_HELPER_BYTES
             )
             copy_file(source, temporary_root / relative, limit)
-        relative_files = tuple(
-            sorted(
-                (
-                    archive_relative,
-                    receipt_relative,
-                    *(relative for _, relative in helper_sources),
-                )
-            )
-        )
-        descriptors = tuple(
-            bundle_file_descriptor(temporary_root, relative) for relative in relative_files
-        )
-        bundle_manifest = {
-            "schema": BUNDLE_MANIFEST_SCHEMA,
-            "format_version": FORMAT_VERSION,
-            "platform": receipt["platform"],
-            "source_revision": receipt["source_revision"],
-            "archive": {
-                "path": archive_relative,
-                **archive_identity,
-            },
-            "receipt": receipt_relative,
-            "files": descriptors,
-        }
-        write_new_file(
-            temporary_root / "bundle-manifest.json",
-            canonical_json_bytes(bundle_manifest),
-            "candidate transport manifest",
-        )
         try:
             os.replace(temporary_root, output)
         except OSError as error:
-            raise PackageError("candidate transport bundle could not be published") from error
+            raise PackageError("candidate transport directory could not be published") from error
     return {
-        "schema": BUNDLE_MANIFEST_SCHEMA,
-        "format_version": FORMAT_VERSION,
-        "platform": receipt["platform"],
-        "source_revision": receipt["source_revision"],
-        "archive": archive_identity,
+        "archive": archive_relative,
+        "file_count": len(helper_sources) + 1,
     }
 
 
@@ -823,16 +632,13 @@ def parse_arguments(arguments: Sequence[str]) -> argparse.Namespace:
     create.add_argument("--source-revision", required=True)
     create.add_argument("--headless-binary", required=True)
     create.add_argument("--desktop-binary", required=True)
-    create.add_argument("--desktop-probe-binary", required=True)
     create.add_argument("--output", required=True)
-    create.add_argument("--receipt")
-    bundle = commands.add_parser(
-        "bundle", help="create one fixed no-checkout consumer transport directory"
+    transport = commands.add_parser(
+        "transport", help="stage one no-checkout CI transport directory"
     )
-    bundle.add_argument("--repository-root", required=True)
-    bundle.add_argument("--archive", required=True)
-    bundle.add_argument("--receipt", required=True)
-    bundle.add_argument("--output", required=True)
+    transport.add_argument("--repository-root", required=True)
+    transport.add_argument("--archive", required=True)
+    transport.add_argument("--output", required=True)
     return parser.parse_args(arguments)
 
 
@@ -840,15 +646,15 @@ def main(arguments: Sequence[str] | None = None) -> int:
     try:
         parsed = parse_arguments(sys.argv[1:] if arguments is None else arguments)
         if parsed.command == "create":
-            receipt = create_candidate(parsed)
-        elif parsed.command == "bundle":
-            receipt = bundle_candidate(parsed)
+            summary = create_candidate(parsed)
+        elif parsed.command == "transport":
+            summary = create_transport(parsed)
         else:
             raise PackageError("package command is unsupported")
     except PackageError as error:
         print(f"package: {error}", file=sys.stderr)
         return 1
-    print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+    print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
     return 0
 
 
