@@ -89,7 +89,8 @@ flowchart TD
     Facade --> Identity[nara_identity: world-scoped identity + remaps]
     App --> Asset[nara_asset: AssetServer + Handle + AssetRef + reload scheduling]
     AssetWatch[nara_asset_watch: optional filesystem watcher adapter] --> Asset
-    App --> Scene[nara_scene: runtime hierarchy + scene documents]
+    App --> Hierarchy[nara_hierarchy: non-linked runtime structure]
+    App --> Scene[nara_scene: scene documents + materialization]
     App --> Input[nara_input: retained input + action outcomes]
     App --> Gameplay[nara_gameplay: gameplay command stream]
     App --> Render[nara_render: render data + backend seam]
@@ -102,6 +103,8 @@ flowchart TD
     App -->|models and observations| Tooling[nara_tooling: commands, views, inspector, and transitional Play model]
     Tooling --> EguiTooling[nara_tooling_egui: egui editor/debug adapter]
     Scene --> Identity
+    Scene --> Hierarchy
+    Transform --> Hierarchy
     Gameplay --> Identity
     Tooling --> Identity
     Render --> SpriteRender
@@ -111,10 +114,10 @@ flowchart TD
     Tooling --> DebugUi[future dear-imgui / nara UI adapters]
 ```
 
-ADR 0100 accepts a not-yet-implemented target that moves the runtime structural relation from
-`nara_scene` into a future `nara_hierarchy` crate consumed by scene, transform, and UI. The diagram
-above remains the current dependency map until RGS-U2 lands; the implementation ledger is the
-authority for target status.
+RGS-U2 implements the ADR 0100 runtime ownership boundary: `nara_hierarchy` owns the non-linked
+runtime relation and completion validation, while scene, transform, and UI consume it without
+gaining lifecycle authority. The completed 2D global projection and render-consumer migration remain
+RGS-U3 work; the implementation ledger is the authority for slice status.
 
 ## Crate Boundaries
 
@@ -126,17 +129,17 @@ authority for target status.
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
 | `nara_fs` | Host-issued `DirectoryCapability`/`FileCapability`, checked `limit + 1` bounded reads, validated relative components, scoped live-object identity, digest/lock/temp/replace/sync primitives and non-cloneable typed guarantee receipts | Windows handle-relative NT opens/rename, Linux `openat2`, fail-closed proof tiers, and no authorization-bearing raw paths; replacement evidence distinguishes bytes written through the temporary capability from identity-bound bytes observed after publication; unsupported platform primitives remain explicit |
-| `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule`, `ScheduleLabel`, and `SystemSet`; advanced lifecycle-free insertion/despawn preparation | Product-facing ECS conventions over `bevy_ecs`, facade-safe derive exports for root-only and renamed dependencies, and private/version-coupled hook/observer probes used only to reject persistent transactions that cannot remain atomic |
+| `nara_ecs` | `bevy_ecs` re-export boundary: `World`, `Entity`, `Component`, `Resource`, `Bundle`, `Commands`, `Query`, `Schedule`, `ScheduleLabel`, and `SystemSet`; advanced lifecycle-free insertion/despawn preparation | Product-facing ECS conventions over `bevy_ecs`, facade-safe derive exports for root-only and renamed dependencies, and private/version-coupled hook/observer plus non-linked relationship probes used only to reject transactions that cannot remain atomic |
 | `nara_ecs_derive` | `Component`, `Resource`, `ScheduleLabel`, and `SystemSet` derives behind the `nara_ecs` and root facade exports | Proc-macro dependency isolation, Bevy-compatible expansion, declaration diagnostics, and renamed-package path resolution |
-| `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, and stable non-`Entity` observation vocabulary |
-| `nara_hierarchy` | Accepted ADR 0100 target: one Nara-owned non-linked runtime parent relation, derived reverse projection, query-oriented access, and a semantic completion boundary | Bevy relationship maintenance, supported-generation validation, and provisional construction internals; no persistent schema, lifecycle ownership, UI layout, transform math, or general provider Interface |
+| `nara_identity` | `WorldIdentityDomain`, `WorldIdentityDomainId`, `SceneInstanceId`, `PersistentRuntimeId`, structured entity references, tombstones, and remaps | World-scoped runtime claims/indexes, atomic spawn/fork/restore identity transactions, lookup validation, retirement, stable non-`Entity` observation vocabulary, and workspace-internal prepared Scene transactions excluded from the root facade |
+| `nara_hierarchy` | One Nara-owned non-linked runtime parent relation, relationship-maintained read-only reverse projection, query-oriented access, construction-only writers, and a semantic completion boundary | Bevy relationship maintenance, dirty-generation validation with retained scratch, and provisional construction internals; no persistent schema, lifecycle ownership, UI layout, transform math, sibling order, reparent API, or general provider Interface |
 | `nara_transform` | Current: `Transform2d`, `GlobalTransform2d`; accepted ADR 0100 target: completed 2D local-to-global projection; accepted ADR 0097 ceiling: separate 2D/3D base TRS, optional typed post-affine residuals, and opaque derived global affines | 2D completion and consumer freshness first; later post-affine, exact reparent lowering, 3D propagation, and domain admission remain evidence-gated |
 | `nara_reflect` | `ComponentRegistry`, stable `ComponentTypeId`/`ComponentFieldId`, explicit `ComponentSchemaOwnerId`, owner-local `ComponentSchemaCatalog` lineage, typed semantic/executable composition fingerprints, schema versions, `ComponentValue`, field capability metadata, component codecs, `ComponentDecodeContext`, `ComponentEncodeContext`, declared asset-reference traversal | Split value/path/schema/codec/migration/registry/format modules, separate native bindings, private failure-atomic owner candidates, known inactive-owner claim reservation, atomic Building-to-Frozen publication, exact direct/managed snapshot authority, asset-aware scene preflight, schema/capability export, and migrations |
 | `nara_reflect_derive` | `PersistentComponent` derive and generated native `PersistentComponentProvider` | Proc-macro dependency isolation, schema/codec declaration diagnostics, and direct/renamed dependency resolution |
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, `TypedImporter<T>`, `ImportJobInput`, bounded `AssetSourceChanges`, bounded `AssetReloadRequests`, and bounded `AssetEvents` | Import cache records, O(1) state and persistent slot revisions, dependency-aware reload generations, private typed consumer authority, same-frame terminal rejection, and sticky full-rescan observation recovery |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, bounded semantic watch event queue, runtime status/diagnostics, source-change translator, and downstream admission observation | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
-| `nara_scene` | Current prototype: `Name`, `Parent`, `Children`; durable ownership: bounded `SceneDocument`/`PrefabDocument` candidates, stable parent facts, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, scene materialization/export, and documented direct use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware validation, patch transactions, undo/redo, prefab expansion, and one-way lowering into the ADR 0100 runtime hierarchy; the current scene-owned runtime relation and transform re-exports are transitional, and direct-module evidence does not promise arbitrary module or cross-engine compatibility |
+| `nara_scene` | Bounded `SceneDocument`/`PrefabDocument` candidates, stable parent facts, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, `Name`/`Visibility` schemas, scene materialization/export, and documented direct use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware validation, patch transactions, undo/redo, prefab expansion, one-way lowering into `nara_hierarchy`, failure-atomic exact-membership replacement/unload, and rejection of runtime topology export; no runtime relation ownership or transform re-export |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, `ExtractedView`, owned topology-only `RenderFramePacket`, `RenderFrame`, static `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data and the admitted generation-stamped one-window/one-target/one-view topology; stock pass order, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary; no arbitrary external pass/phase promise |
 | `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, async image reload jobs, candidate-owned publication, last-good reload preservation, and backend-neutral image content preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, `Material2dKey` | Backend-neutral 2D material intent shared by sprites, tilemaps, runtime UI images, and future material assets |
