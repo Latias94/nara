@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-29
+**Last Revised**: 2026-08-02
 **Owner**: `nara_app` and concrete executable hosts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
 process-global runtime contention, and proved three-Host parity, external Runner authority, and
@@ -336,6 +336,9 @@ operation result: Pending | Applied | Failed
 
 - The first structured runtime fault is sticky. Later observations may add bounded diagnostics but
   do not replace fault provenance.
+- Engine-owned fallible execution may attach a validated static diagnostic code, safe summary, and
+  producer origin to that fault. Unknown third-party errors retain only the generic fault kind and
+  source; arbitrary error text and dynamic scheduler context are not runtime diagnostic authority.
 - Gameplay ingress poison, active-batch invariant failure, admission/acknowledgement failure,
   fallible system failure, required task integration failure, and required service failure move the
   runtime to `Faulted`; they are not discarded or represented only by logs.
@@ -501,6 +504,11 @@ separate fault-bridge bypass described above; it is historical review input, not
 The repaired matrix and verification at `27cbd12` independently retain the Runtime, Host, and
 compatible-pair verdicts. Hosted CI, baseline, candidate, and publication evidence remain separate
 downstream gates; this decision does not authorize them.
+
+SRT-U3 at `05c67b6` implements the bounded engine-classified fault detail above and proves that
+classified product Startup failure remains inside the unpublished candidate, prevents Host
+publication, and retains its owner through finite retirement. This is an implementation refinement
+of the accepted sticky-fault and startup-publication boundary, not a new Host or Runner role.
 
 ## Citations
 

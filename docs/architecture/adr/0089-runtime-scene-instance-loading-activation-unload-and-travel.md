@@ -34,19 +34,21 @@ SceneTree, UObject lifetime, or garbage collector.
 ### Focused Startup and Retry Trial
 
 The reference game's first topology-preserving Retry has created narrower evidence than this ADR's
-full admission trigger. Project Host already materializes the exact expanded startup document into
-an unpublished runtime candidate, but it discards the successful instance receipt before product
-Startup. The existing private scene-replacement transaction can preserve hierarchy and identity,
-but cannot yet compose product-owned runtime component initialization or an exact bounded set of
-additional runtime entities to retire. Reconstructing from the live `World` loses authored facts
-and inferring ownership from component types can retire unrelated entities.
+full admission trigger. SRT-U3 now materializes the exact retained startup document inside an
+unpublished runtime candidate and keeps its matching successful instance receipt under one private
+root owner through product Startup and retirement. The existing private scene-replacement
+transaction can preserve hierarchy and identity, but cannot yet compose product-owned runtime
+component initialization or an exact bounded set of additional runtime entities to retire.
+Reconstructing from the live `World` loses authored facts and inferring ownership from component
+types can retire unrelated entities.
 
 The active SRT plan may therefore Trial only these provisional contracts:
 
 - retain the exact document used for one startup materialization together with its successful
   `SpawnedSceneInstance` receipt, under an explicit memory lease;
-- publish that pair once inside the unpublished runtime candidate before Startup so a product
-  plugin can consume it without changing `ProductRecipe` into a Host callback registry;
+- promote that pair once into a private root owner inside the unpublished runtime candidate before
+  Startup so a product plugin can inspect a read-only view without changing `ProductRecipe` into a
+  Host callback registry or taking the retention guard;
 - let one advanced, scoped replacement transaction accept owned runtime-component insertions keyed
   by stable scene entity ID plus an exact bounded additional-retirement set;
 - validate mapping, duplicate components, lifecycle eligibility, hierarchy teardown, identity,

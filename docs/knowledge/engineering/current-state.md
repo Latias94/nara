@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "1301e66fb146c8de44a499101609ddf1f6cebdfd587215552da048d6eae64185"
+source_fingerprint: "1c160a9660b0282198be8eabc618c1eb9cf2134becf945ea669dfc85d94d9839"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "1301e66fb146c8de44a499101609ddf1f6cebdfd587215552da048d6eae
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `1301e66fb146c8de44a499101609ddf1f6cebdfd587215552da048d6eae64185`
-- Immutable records: 326
+- Source fingerprint: `1c160a9660b0282198be8eabc618c1eb9cf2134becf945ea669dfc85d94d9839`
+- Immutable records: 328
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Startup scene activation and atomic Retry: SRT-U3 active](registry/2026-08/2026-08-02T144237Z-engine-foundation-contract-completion-codex-root-355831744b4143b5a9173f29d2213c47.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Startup scene activation and atomic Retry: SRT-U4 active](registry/2026-08/2026-08-02T194646Z-engine-foundation-contract-completion-codex-root-fd1daaea2e6a41648b4dbbe11e75473d.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [SRT-U3 bounded startup activation and runtime fault detail](verification/2026-08/2026-08-02T194244Z-srt-u3-bounded-startup-activation-and-runtime-fault-detail-3b4d5b25813f420d8f0e62f478576077.md) - Verifies exact retained startup source and receipt ownership, ordered unpublished Startup activation, bounded runtime fault metadata, and finite lease retirement.
 - **Verification Evidence**: [SRT-U2 exact image revision and invalidation correction](verification/2026-08/2026-08-02T143954Z-srt-u2-exact-image-revision-and-invalidation-correction-a45da756131c43c7a3632928e8cd4d4a.md) - Verifies exact image slot identity, bounded immutable RGBA storage, transient prepare-to-submit races, and removal of duplicate invalidation authority.
 - **Verification Evidence**: [SRT-U1 focused startup and Retry Trial activation](verification/2026-08/2026-08-02T120006Z-srt-u1-focused-startup-retry-trial-activation-17ad79c7bdfd417d90ee3d524909b120.md) - Verifies the RGS stop condition, the narrow ADR 0089 Trial boundary, reviewed successor execution order, and truthful active authority.
 - **Memory Event**: [Verification: RGS-U3 completed and verified at fb4fdc7; RGS-U4 is now the sole active implemen](logs/2026-08/2026-08-02T091933Z-verification-rgs-u3-completed-and-verified-at-fb4fdc7-rgs-u4-is-now-the-sole-active-implemen-06e8903eeeed4badb27f557a676f9393.md) - RGS-U3 completed and verified at fb4fdc7; RGS-U4 is now the sole active implementation unit.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [completed: Completed RPR-U4 ordinary author-path dogfood and activated RPR-U5 product-readi](logs/2026-08/2026-08-01T010359Z-completed-completed-rpr-u4-ordinary-author-path-dogfood-and-activated-rpr-u5-product-readi-54f85e6eb48e4ee68ce3ff79a159ab1e.md) - Completed RPR-U4 ordinary author-path dogfood and activated RPR-U5 product-readiness re-evaluation.
 - **Verification Evidence**: [RPR-U4 ordinary author-path dogfood](verification/2026-08/2026-08-01T010241Z-rpr-u4-ordinary-author-path-dogfood-1976e4407ec94d3e9b79d31fe4ce5306.md) - Records reference-game and renamed-root adoption of the public product recipe plus local no-checkout candidate smoke.
 - **Verification Evidence**: [RPR-U3 ordinary Rust product recipe](verification/2026-07/2026-07-31T225013Z-rpr-u3-ordinary-rust-product-recipe-89d7024a938641059b801c05c3e13d72.md) - Verifies one replayable Rust product recipe, typed schema contribution, and shared Host facades without adding another evidence framework.
-- **Verification Evidence**: [RPR-U2 speculative delivery closure retirement](verification/2026-07/2026-07-31T185033Z-rpr-u2-speculative-delivery-closure-retirement-274bbbb52a674e439cd5b6998467d9eb.md) - Retires the unused evidence and release supply chain while preserving bounded checkout-free candidate verification.
 
 # Integration Notes
 

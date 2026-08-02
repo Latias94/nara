@@ -125,8 +125,8 @@ authority for slice status.
 
 | Crate | Interface | Hidden Implementation Direction |
 |---|---|---|
-| `nara` | Facade, layered preludes, authorized project ingest/composition, immutable startup-content publication, and concrete `HeadlessRun`/`DesktopRun` product actions | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs; root-owned content loading plus a private `ProjectHost` start/publication/retirement state machine over opaque filesystem authority; Winit remains the selected desktop parent rather than a universal Host Interface |
-| `nara_app` | Gameplay authoring through `App`, Plugin declarations/definitions/plans, schedules, time, and frame outcomes; advanced `SealedApp`, `RuntimeCandidate`, `RuntimeInstance`, and typed control/fault/close values | Data-only group/slot resolution, private preparation, closed hook commit, explicit move-only shutdown obligations, reverse once-only shutdown, raw-runner versus managed-runtime exclusion, safe-point driving, exact fixed-tick execution, sticky fault authority, retryable finite close, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary; ADR 0084 accepts thin lifecycle ownership but not a universal Runner API |
+| `nara` | Facade, layered preludes, authorized project ingest/composition, immutable startup-content publication, provisional read-only startup activation, and concrete `HeadlessRun`/`DesktopRun` product actions | Gameplay-first backend-free root prelude; advanced, backend, and tooling preludes for lower-level APIs; root-owned content loading plus a private `ProjectHost` start/publication/retirement state machine over opaque filesystem authority; a private owner retains the exact startup source, receipt, and content lease; Winit remains the selected desktop parent rather than a universal Host Interface |
+| `nara_app` | Gameplay authoring through `App`, Plugin declarations/definitions/plans, schedules, time, and frame outcomes; advanced `SealedApp`, `RuntimeCandidate`, `RuntimeInstance`, and typed control/fault/close values | Data-only group/slot resolution, private preparation, closed hook commit, explicit move-only shutdown obligations, reverse once-only shutdown, raw-runner versus managed-runtime exclusion, safe-point driving, exact fixed-tick execution, sticky fault authority with bounded static engine detail and generic third-party fallback, retryable finite close, atomic frame planning, per-tick clock advancement, explicit discard/preserve debt, and Bevy tracker boundary; ADR 0084 accepts thin lifecycle ownership but not a universal Runner API |
 | `nara_project` | `ProjectManifest`, profile overlays, validated `EffectiveProjectSettings`, project path validation, runtime/task/window/input/diagnostic value lowering | Side-effect-free `nara.toml` authority with fallible duration/limit conversion, nested bounded task settings, and enforced headless/server/editor/dev/release profile invariants |
 | `nara_tasks` | Bounded `TaskPools`, `TaskPoolConfig`, `TaskSpawnOutcome`, typed `TaskHandle<T>` terminals, `TaskOrderKey`, `OrderedTaskResults<T>`, shutdown reports and stats | Threaded std worker facades with move-only worker owners, pending-only coalescing, panic isolation, first-terminal cancellation, pollable/retryable finite drain/cancel/join, process-retained abnormal Drop quarantine, standalone `shutdown_blocking`, and an explicitly test-only inline driver |
 | `nara_core` | `Color`, math re-exports, non-zero item/byte/depth/time limit scalars, persistent envelope metadata, serde shape preflight | Core primitives and unit-safe values that do not own domain overload policy or file-kind semantics |
@@ -345,8 +345,11 @@ second real adapter or stronger isolation pressure.
   reporter and handler authority around healthy operations. An unhandled fallible system or
   observer that reaches that fallback records the first sticky fault and makes the scope return
   `RuntimeScopeError::Faulted`; an explicit per-system or per-observer error handler is instead the
-  caller's handling boundary. Candidate mutation rejects an existing fault, while a published
-  faulted runtime keeps its driver scope available for retirement work until it reaches `Stopped`.
+  caller's handling boundary. Engine-owned fallible execution may attach only a validated static
+  diagnostic code, safe summary, and producer origin; unknown third-party errors retain the generic
+  fault identity without arbitrary error or scheduler-context text. Candidate mutation rejects an
+  existing fault, while a published faulted runtime keeps its driver scope available for retirement
+  work until it reaches `Stopped`.
   Abnormal Drop of an admission failure, startup failure, or published runtime begins one bounded
   close pass and retains an unfinished `App`, `World`, and obligation ledger in an observable,
   owner-thread-affine quarantine. The quarantine has per-thread and process ceilings, exposes
@@ -376,7 +379,9 @@ second real adapter or stronger isolation pressure.
   private `ProjectHost` reuses the immutable plan/content values only when lineage and schema
   fingerprints match, creates one fresh App and obligation ledger, commits and seals the resolved
   plugin plan, transfers ownership into an unpublished `RuntimeCandidate`, repeats registry and
-  U29 target-World eligibility checks, materializes startup content, and completes startup before
+  U29 target-World eligibility checks, materializes the exact retained startup source, privately
+  owns its matching receipt and content lease, exposes only a read-only activation view to ordered
+  product Startup, and completes startup before
   one reporter-lock-linearized `RuntimePublicationSlot` move makes the `RuntimeInstance` visible.
   Failed preparation, admission, startup, publication, runtime drive, or close retains the same
   owner through bounded retirement; incomplete cleanup blocks replacement and is retried by later
