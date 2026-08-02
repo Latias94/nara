@@ -2,7 +2,7 @@
 
 **Status**: Proposed
 **Date**: 2026-07-13
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-08-02
 **Owner**: `nara_scene`, `nara_identity`, executable runtimes, and scene-consuming services
 **Admission Trigger**: A reference game proves asynchronous additive load, safe-point activation,
 precise unload, last-good replace travel, multi-instance identity, and bounded service retirement in
@@ -30,6 +30,38 @@ references cross-world problems. Inserting partially loaded entities into the ac
 instead require every system to filter provisional state. Mature engines demonstrate the need for
 explicit level/scene activation and travel, but Nara should not copy an object hierarchy, global
 SceneTree, UObject lifetime, or garbage collector.
+
+### Focused Startup and Retry Trial
+
+The reference game's first topology-preserving Retry has created narrower evidence than this ADR's
+full admission trigger. Project Host already materializes the exact expanded startup document into
+an unpublished runtime candidate, but it discards the successful instance receipt before product
+Startup. The existing private scene-replacement transaction can preserve hierarchy and identity,
+but cannot yet compose product-owned runtime component initialization or an exact bounded set of
+additional runtime entities to retire. Reconstructing from the live `World` loses authored facts
+and inferring ownership from component types can retire unrelated entities.
+
+The active SRT plan may therefore Trial only these provisional contracts:
+
+- retain the exact document used for one startup materialization together with its successful
+  `SpawnedSceneInstance` receipt, under an explicit memory lease;
+- publish that pair once inside the unpublished runtime candidate before Startup so a product
+  plugin can consume it without changing `ProductRecipe` into a Host callback registry;
+- let one advanced, scoped replacement transaction accept owned runtime-component insertions keyed
+  by stable scene entity ID plus an exact bounded additional-retirement set;
+- validate mapping, duplicate components, lifecycle eligibility, hierarchy teardown, identity,
+  scene membership, and additional retirements while the old instance remains authoritative;
+- commit candidate runtime values, hierarchy detach, identity replacement, exact old membership,
+  and exact additional retirements without a recoverable failure after authority changes;
+- use the reference game's existing pre-simulation fixed-step boundary for Retry and use the same
+  product initializer for Direct App, headless, desktop, and Editor Play.
+
+This Trial does not change this ADR's `Proposed` status and does not accept asynchronous loading,
+additive scenes, multiple active instances, a public scene manager/session, a provider registry,
+active-set revisions, retained-entity travel, or scene-scoped service retirement. Scratch entities
+may continue to exist only inside an exclusive, unpublished `World` transaction; that is not the
+World-free asynchronous candidate described by the broader proposal. Full ADR acceptance still
+requires all Admission Evidence below.
 
 ## Decision
 
