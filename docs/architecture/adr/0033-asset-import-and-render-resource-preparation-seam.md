@@ -49,8 +49,8 @@ Rules:
 - Image assets describe image content and import identity only. Sampler, alpha, tint, and material
   policy live above images in `nara_material`.
 - `nara_render` owns the backend-neutral render resource preparation interface and frame phase
-  vocabulary: asset versions, render resource descriptors, prepare invalidation, and prepare/queue
-  ordering.
+  vocabulary: loader versions, exact asset-slot revisions, render resource descriptors, snapshot
+  cache identity, and prepare/queue ordering.
 - `nara_render_wgpu` owns the wgpu GPU resource cache. It consumes backend-neutral imported assets
   and render resource descriptors, then creates textures, buffers, samplers, bind groups, and
   pipelines.
@@ -58,15 +58,15 @@ Rules:
   not GPU handles.
 - Hot reload updates asset versions and dependency graph state behind stable handles. Render
   backends invalidate and rebuild their GPU resource cache from the prepared asset/resource data.
-- Phase 1 can keep file IO and importing synchronous internally, but public load states and render
-  prepare invalidation must leave room for async task-pool integration.
+- Phase 1 can keep file IO and importing synchronous internally, but public load states and exact
+  prepare snapshot identity must leave room for async task-pool integration.
 
 The first implementation slice after scene/prefab serialization should therefore combine:
 
 1. source-side `.meta` identity and stable `AssetRef::StableId` resolution;
 2. an importer registry and imported artifact cache model;
 3. image import and texture descriptor assets;
-4. render resource preparation state/events in `nara_render`;
+4. render resource preparation state in `nara_render`;
 5. material-aware sprite/tilemap usage through typed handles and prepared render resources;
 6. wgpu image texture caches plus sampler/material bind-group caches in `nara_render_wgpu`.
 
@@ -144,8 +144,8 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   `AssetTaskUpdateSet::ApplyResults`, and then updates backend-neutral `PreparedImageResources` in
   `CoreStage::Prepare`.
 - `ImagePlugin` composes `ImagePreparePlugin` rather than registering a parallel prepare path. This
-  keeps prepare stats and render-resource invalidation single-pass even when sprite rendering also
-  depends on image preparation.
+  keeps prepare stats and render-resource snapshot replacement single-pass even when sprite
+  rendering also depends on image preparation.
 - `ImageBytesImportRequest` owns a fixed-length `Box<[u8]>`; file requests own an admitted
   host-issued `FileCapability`. `ImageImporter::{import_image, admit_file}` privately capture the
   target stable binding, expected version, O(1) `AssetStateRevision`, and persistent
@@ -159,7 +159,9 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   intentionally invalidates version-1 image artifacts. The importer does not read ambient paths or
   create GPU resources.
 - Image reload preserves stable handles while changing `AssetVersion`, `LoadState`, asset events,
-  prepared-resource invalidation, and source dependency edges behind those handles.
+  exact `AssetSlotRevision`, prepared-resource snapshots, and source dependency edges behind those
+  handles. Direct slot mutation is observable through the same exact revision even when loader
+  metadata is unchanged.
 - Removed source assets clear `Assets<ImageAsset>` state and prepared image resources. Failed first
   loads and failed reloads update asset state without inventing a replacement backend resource.
 - `nara_asset_watch` is the optional desktop filesystem adapter. It owns `notify` and converts raw
