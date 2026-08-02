@@ -48,6 +48,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGD-U8-2 | RGD-U8 refresh | `be9b264` | `rust-api/behavior` | `FsError` forward compatibility and strict Unix traversal rejection classification | Add a wildcard arm to external `FsError` matches. Treat exact platform rejection variants as diagnostic detail: all strict Unix adapters reject a symlink leaf, while Linux currently reports `SymbolicLinkTraversal`. |
 | RPR-U3-1 | RPR-U3 | `676d030` | `rust-api` | Ordinary product composition and file-backed run setup | Replace normal caller use of definition IDs, slot edits, and parallel provider lists with `ProductRecipe` and `SchemaContribution`; keep raw one-shot plugins on direct `App` composition. |
 | RGS-U2-1 | RGS-U2 | `51b3fe4` | `rust-api/behavior` | Runtime hierarchy ownership, scene component composition, and parented spatial content admission | Import runtime relationships from `nara_hierarchy`, install `HierarchyPlugin` and `SceneComponentsPlugin` separately, and keep parented transform/visibility content fail-closed until RGS-U3. |
+| RGS-U3-1 | RGS-U3 | `fb4fdc7` | `rust-api/behavior` | Completed global 2D projection and world-space camera/sprite/tilemap extraction | Treat `GlobalTransform2d` as an opaque immutable derived component, give every world-space renderable an explicit `Transform2d`, and pass completed globals to extraction helpers without local/identity fallback. |
 
 ## Entry Contract
 
@@ -2301,9 +2302,9 @@ authoring operation. Keep persistent parent facts in `SceneDocument` or `ScenePa
 
 **Source action**: `none` for canonical scene/prefab files; stable scene entity IDs, `parent` fields,
 component type IDs, schema versions, and canonical bytes are unchanged. Runtime-only export callers
-that previously inferred parents must move those facts into their owning document or patch. A
-project containing parented `Transform2d` or inherited `Visibility` remains rejected until RGS-U3
-publishes completed global projections and migrates every consumer.
+that previously inferred parents must move those facts into their owning document or patch. RGS-U2
+initially rejected parented `Transform2d` and inherited `Visibility`; RGS-U3 admits the former after
+completing global projection, while inherited visibility remains unavailable.
 
 **Cache action**: `keep`; rebuild Rust artifacts and runtime plugin-plan fingerprints after the
 plugin identity split.
@@ -2320,6 +2321,77 @@ the frame-wide `Children` rebuild or accept parented spatial content without com
 validation, atomic scene replacement/unload, plugin-plan composition, fail-closed spatial
 admission, removed ordinary mutation paths, and the absence of prepared identity transactions from
 the root facade.
+
+## RGS-U3-1: Completed Global 2D Projection and Render Consumption
+
+**Removed contract**:
+
+- Public tuple construction and field access through `GlobalTransform2d(pub Mat3)`.
+- `Clone`, `Copy`, and `Default` construction of `GlobalTransform2d` by ordinary callers.
+- Sprite and tilemap extraction from `Option<&Transform2d>` with implicit identity fallback.
+- Camera extraction from an optional local transform with implicit origin fallback.
+- The temporary rejection of parented `Transform2d` content after Scene/Prefab preflight.
+
+**Canonical replacement or deletion rationale**: `Transform2d` remains authored mutable local
+state. `GlobalTransform2d` is now an immutable, opaque runtime projection produced only by
+`nara_transform` after the current hierarchy generation completes. World-space camera, sprite, and
+tilemap consumers require both explicit local participation and the completed global projection;
+they do not walk parent chains or invent local/identity fallbacks. This creates one freshness and
+failure boundary across Direct App, managed runtimes, Project Host, paused Editor Play, and render
+extraction.
+
+**Before**:
+
+```rust
+let global = GlobalTransform2d::default();
+let matrix = global.0;
+let extracted = extract_sprite(entity, &sprite, Some(&local), 0);
+```
+
+**After**:
+
+```rust
+let global = world
+    .get::<GlobalTransform2d>(entity)
+    .expect("transform completion must precede world-space consumption");
+let matrix = global.matrix();
+let extracted = extract_sprite(entity, &sprite, global, 0);
+```
+
+Ordinary systems read `GlobalTransform2d` only after their product's declared completion boundary.
+The internal completion set and generation token remain provisional first-party integration
+details, not a new general scheduling API.
+
+**Affected examples and fixtures**: camera setup, runtime UI fixtures, image/render tests, root
+Project Content and Editor Play tests, the reference game's desktop projection, and all sprite/
+tilemap extraction callers now install the hierarchy/transform plugins and provide explicit local
+transforms.
+
+**User action**: remove direct construction, mutation, cloning, or defaulting of
+`GlobalTransform2d`. Keep authored state in `Transform2d`, query the completed global by reference,
+and call `.matrix()` or `.translation()` for read access. Add an explicit identity `Transform2d` to
+world-space cameras, sprites, and tilemaps that previously relied on absence. Update direct calls to
+`extract_sprite` and `extract_tile_cell` to pass `&GlobalTransform2d`.
+
+**Source action**: `none`; canonical Scene/Prefab parent and Transform records retain their format
+and stable identities. Parented `Transform2d` now loads; inherited `Visibility` remains rejected
+until its own product slice.
+
+**Cache action**: `keep` for content/import caches; rebuild Rust artifacts and product-plan
+fingerprints after the plugin dependency and public API change.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No public constructor, mutable
+field, or local/identity extraction fallback remains.
+
+**Rollback**: revert `fb4fdc7` and its migrated consumers together, then restore the parented-
+Transform admission rejection. Do not retain parented content while reverting propagation or any
+world-space consumer.
+
+**Verification anchors**: `crates/nara_transform/src/lib.rs`,
+`crates/nara_transform/src/propagation.rs`, `crates/nara_render/src/lib.rs`,
+`crates/nara_sprite_render/src/tests.rs`, `tests/project_content_boundary.rs`,
+`tests/workspace_play_runtime.rs`, `reference-game/tests/desktop_render.rs`, and
+`docs/knowledge/engineering/verification/2026-08/2026-08-02T084559Z-rgs-u3-completed-2d-global-transform-projection-1fa10428b5e240acbade0440cc25ae75.md`.
 
 ## Persistent Format Matrix
 

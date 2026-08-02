@@ -59,7 +59,8 @@ flowchart LR
   candidate publication. Runtime relation state never writes topology back into a document or
   advances a saved revision.
 - `Transform2d` is the only authored and runtime-local 2D spatial authority. `GlobalTransform2d` is
-  runtime-only derived state produced by the transform Module from a continuous 2D transform chain.
+  an immutable, opaque, runtime-only derived component produced by the transform Module from a
+  continuous 2D transform chain. Ordinary ECS queries can read it but cannot obtain mutable access.
 - Consumers that require current world-space data run only after a named semantic completion
   boundary. They do not independently walk parent chains or silently fall back to local or identity
   transforms.
@@ -107,9 +108,9 @@ authoring and 3D decisions open.
   and lifecycle domains consume them without transferring authority.
 - `nara_transform` owns propagation and completion of the 2D global projection. Render and snapshot
   consumers migrate from local transforms to completed globals.
-- The current full-scan child rebuild, independently mutable child collection, scene transform
-  re-export, and reference-game position-copy path are transitional code to remove without
-  compatibility aliases.
+- RGS-U2 removes the full-scan child rebuild, independently mutable child collection, and scene
+  transform re-export. RGS-U3 completes global propagation and render consumption; the
+  reference-game aggregate-to-Transform projection remains transitional until RGS-U4.
 - Concrete construction writers, schedule-set names, generation counters, traversal storage, and
   ordinary/advanced/private API placement remain provisional until the reference-game workflow has
   exercised them.
@@ -122,7 +123,7 @@ authoring and 3D decisions open.
 | Lifecycle separation | Parent loss detaches children; current Scene Instance replacement retires exact membership and never hierarchy closure | Scene replacement/unload fixtures |
 | Publication atomicity | Invalid stable-ID topology publishes no partial runtime instance | Scene/prefab hostile fixtures |
 | 2D projection correctness | Nested globals equal ordered affine composition before every declared fresh consumer | Transform and extraction tests |
-| Static-frame cost | No hierarchy scan or transform traversal when the supported generations are unchanged | Focused visit-count instrumentation |
+| Static-frame cost | No hierarchy validation, graph rebuild, parent/child traversal, or derived write when unchanged; one allocation-free `Transform2d` change-tick scan remains while ordinary mutable ECS authoring is supported | Focused scan/traversal instrumentation |
 | Product proof | One authored reference-game child follows its parent across headless, desktop, and editor paths | Reference-game product tests and bounded manual journey |
 
 ## Risks and Mitigations
