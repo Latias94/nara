@@ -91,6 +91,9 @@ mod project_diagnostic_ids;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 mod project_content;
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+mod startup_scene;
+
 #[cfg(feature = "runtime-core")]
 #[doc(hidden)]
 pub mod __macro_support {
@@ -271,6 +274,13 @@ pub mod advanced_prelude {
         TaskPoolStats, TaskPools, TaskReadySnapshotError, TaskRejectReason, TaskRejection,
         TaskShutdownPolicy, TaskShutdownReport, TaskSpawnOutcome, TaskSpawnRequest, TaskStats,
         TaskTerminal, TaskTerminalState,
+    };
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub use crate::startup_scene::{
+        StartupSceneActivation, StartupSceneActivationPlugin, StartupSceneActivationSet,
+        StartupSceneMaterializeError, StartupSceneSource, StartupSceneSourceError,
+        materialize_startup_scene,
     };
 
     #[cfg(feature = "asset-watch")]

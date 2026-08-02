@@ -40,8 +40,10 @@ use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 use crate::project_host::{
     ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, SchemaValidationInput,
 };
+use crate::startup_scene::StartupSceneSource;
 
-use budget::{BudgetTicket, ProjectContentLease};
+use budget::BudgetTicket;
+pub(crate) use budget::ProjectContentLease;
 pub use budget::{
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentLimits,
@@ -189,11 +191,20 @@ impl ProjectContentSnapshot {
             .and_then(|content| content.image.share_retained())
     }
 
+    pub(crate) fn startup_scene_source(&self) -> StartupSceneSource {
+        StartupSceneSource::from_project_content(
+            Arc::clone(&self.inner.expanded_startup_scene),
+            self.inner._lease.clone(),
+            startup_scene_retained_bytes(&self.inner.expanded_startup_scene)
+                .expect("an admitted startup scene already has a valid retained-byte plan"),
+        )
+    }
+
     pub(crate) fn prepare_editor_startup_scene(
         &self,
         document: &SceneDocument,
         registry: &nara_reflect::ComponentRegistry,
-    ) -> Result<SceneDocument, ProjectContentError> {
+    ) -> Result<StartupSceneSource, ProjectContentError> {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
         };
@@ -215,7 +226,17 @@ impl ProjectContentSnapshot {
                 diagnostics,
             ));
         }
-        Ok(expanded)
+        let retained_bytes = editor_startup_scene_retained_bytes(&expanded)?;
+        let lease = self
+            .inner
+            ._lease
+            .reserve_retained(retained_bytes)
+            .map_err(ProjectContentError::budget)?;
+        Ok(StartupSceneSource::from_project_content(
+            Arc::new(expanded),
+            lease,
+            retained_bytes,
+        ))
     }
 }
 
@@ -1590,8 +1611,30 @@ fn prefab_expansion_work_plan(
     )
 }
 
-fn scene_retained_bytes(document: &SceneDocument) -> Result<usize, ProjectContentError> {
+pub(crate) fn startup_scene_retained_bytes(
+    document: &SceneDocument,
+) -> Result<usize, ProjectContentError> {
     document_retained_bytes(size_of::<SceneDocument>(), &document.entities)
+}
+
+pub(crate) fn direct_startup_scene_retained_bytes(
+    document: &SceneDocument,
+) -> Result<usize, ProjectContentError> {
+    startup_scene_retained_bytes(document)?
+        .checked_add(ARC_CONTROL_BLOCK_BYTES)
+        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
+}
+
+fn editor_startup_scene_retained_bytes(
+    document: &SceneDocument,
+) -> Result<usize, ProjectContentError> {
+    direct_startup_scene_retained_bytes(document)?
+        .checked_add(SNAPSHOT_LEASE_OVERHEAD)
+        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
+}
+
+fn scene_retained_bytes(document: &SceneDocument) -> Result<usize, ProjectContentError> {
+    startup_scene_retained_bytes(document)
 }
 
 fn prefab_retained_bytes(document: &PrefabDocument) -> Result<usize, ProjectContentError> {

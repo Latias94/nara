@@ -70,20 +70,24 @@ presentation, makes first startup differ from Retry, and can remove unrelated en
   and the matching successful `SpawnedSceneInstance`; it never reconstructs either from the live
   `World` or silently substitutes bundled content for the Editor's current Play document. Only one
   sealed materialize operation may consume a retained source and produce this unforgeable pair.
-- R4. Retained source memory is explicit and bounded. Bundled startup reuses the snapshot-owned
+- R4. Retained source memory is explicit and bounded by the deterministic logical accounting model.
+  Bundled startup reuses the snapshot-owned
   allocation and lease. Editor expansion receives its own checked retained-memory charge and lease
   before runtime admission; rejection publishes no candidate or uncharged retained document. A
   root-product activation resource owns the private lease guard for the complete candidate/run
   lifetime, including failed Startup, incomplete cleanup, Stop, and retirement; `nara_scene` never
   depends on Project Content budgeting.
-- R5. Project Host inserts one engine-owned activation input into the unpublished candidate after
-  scene materialization and before Startup. A fallible product Startup system may consume it;
-  failure prevents managed runtime publication and retires the candidate. Consumption, dependent
-  initialization, and unconsumed-input finalization use three ordered provisional sets inside the
-  existing `StartupStage::Runtime`; publication never retains an unconsumed activation input.
-- R6. The activation input is a provisional advanced scene/product seam, not an ordinary prelude
+- R5. Project Host inserts one private engine-owned activation input into the unpublished candidate
+  after scene materialization and before Startup. The root product adapter promotes it into the
+  read-only active startup authority; fallible product Startup systems consume that authority as an
+  input without taking its retention guard. Failure prevents managed runtime publication and
+  retires the candidate. Promotion, dependent initialization, and pending-input finalization use
+  three ordered provisional sets inside the existing `StartupStage::Runtime`; publication never
+  retains the private one-shot input, while the active authority retains the exact source and
+  receipt for the complete run.
+- R6. The startup activation boundary is a provisional advanced scene/product seam, not an ordinary prelude
   type, global resource locator, plugin provider, or `ProductRecipe` callback. Direct App callers
-  construct a bounded retained source through the same advanced root materialize operation; they
+  construct a logically bounded retained source through the same advanced root materialize operation; they
   cannot spawn document A and later pair its receipt with document B. Their explicit source limit
   does not claim a `ProjectContentBudgetHost` lease.
 
@@ -158,7 +162,7 @@ presentation, makes first startup differ from Retry, and can remove unrelated en
 
 ### Acceptance Examples
 
-- AE1. A bundled project publishes one activation input whose source pointer shares the retained
+- AE1. A bundled project publishes one active startup authority whose source pointer shares the retained
   snapshot allocation and whose receipt resolves every spawned stable scene ID.
 - AE2. Editor Play changes a child local transform in memory, starts without saving, retries, and
   restores the edited Play source rather than the bundled source.
@@ -226,11 +230,13 @@ presentation, makes first startup differ from Retry, and can remove unrelated en
   product Startup. Direct App uses the same operation with an explicit retained-byte limit. Retry
   never re-expands bundled content or reverse-exports the live `World`; `nara_scene` remains
   independent of root budgeting.
-- KTD4. **Use Startup as the initial product boundary.** Candidate admission installs scene and
-  activation input; existing managed Startup runs while the runtime is still unpublished. A
-  fallible game Startup system consumes the input and initializes private state. Provisional
-  `Consume -> Dependents -> Finalize` sets in `StartupStage::Runtime` order use and reject any
-  unconsumed input before later Startup stages. No new App stage is required.
+- KTD4. **Use Startup as the initial product boundary.** Candidate admission installs the scene and
+  a private activation input; existing managed Startup runs while the runtime is still unpublished.
+  The root product adapter promotes that input in `Consume`, fallible game initialization reads the
+  active authority in `Dependents`, and `Finalize` rejects any private input that was not promoted.
+  The active authority remains root-owned so an empty recipe or Editor session does not need a
+  boilerplate ownership-transfer system and cannot accidentally drop the retention guard. No new
+  App stage is required.
 - KTD5. **Expose intent, not the candidate World.** A scoped overlay writer offers only typed owned
   insertion by stable scene ID. It lowers immediately into the Scene transaction's owned insertion
   plan and cannot escape the call. Overlay types must already be registered by sealed plugin
@@ -294,8 +300,8 @@ sequenceDiagram
 
     Host->>Scene: materialize exact retained source
     Scene-->>Host: successful instance receipt
-    Host->>Startup: one-shot source + receipt input
-    Startup->>Run: derive and publish runtime-only state
+    Host->>Startup: promote source + receipt into root authority
+    Startup->>Run: read authority; derive and publish runtime-only state
     Note over Host,Run: managed runtime is still unpublished
     Run->>Scene: Retry(source, receipt, overlay, exact retirements)
     Scene->>Scene: preflight while old instance is authoritative
@@ -312,7 +318,7 @@ sequenceDiagram
 | Extra retirement invalidates hierarchy/identity proof | Reject any scene/persistent identity or structural link through owner-defined preflight and validate the union under one exclusive transaction. |
 | Product inputs exceed retained transaction memory | Require separate overlay/retirement limits, enforce engine ceilings before scratch spawn, and test zero/exact/plus-one boundaries. |
 | Scene commit gains a second implementation | Refactor spawn/replace around one private kernel; public wrappers supply policy only. |
-| Startup input becomes a permanent service locator | Make it one-shot/provisional, keep it out of ordinary prelude, and require product consumption tests. |
+| Startup authority becomes a general scene service locator | Keep the private input one-shot, expose only source/receipt views through the provisional advanced surface, and reserve replacement ownership for the focused transaction. |
 | Scratch entities are mistaken for async World-free candidates | Document that they are exclusive unpublished-World state; retain ADR 0089's broader admission trigger. |
 | Reference-game schema reset silently loses old fields | Classify every old ID first and add explicit migration/tombstone/rejection fixtures before rewriting content. |
 
@@ -367,11 +373,14 @@ sequenceDiagram
   inseparable one-shot activation only after success. Install provisional ordered Startup consume,
   dependent, and finalizer sets. Carry engine-classified static diagnostic code/summary/origin
   through managed Startup and runtime fault conversion while retaining a generic third-party
-  fallback. Prove that the guard survives candidate failure and incomplete cleanup until finite
-  retirement.
+  fallback. Derive the executable component registry only from the candidate World, permanently
+  close materialization at Startup finalization, and prove that the guard survives candidate
+  failure and incomplete cleanup until finite retirement.
 - **Test scenarios:** Bundled pointer sharing; Editor retained-byte exact limit/limit-plus-one and
-  release; Direct App source/receipt cannot be mismatched; input is visible in the consume set and
-  removed by finalization; dependent ordering; invalid product Startup prevents publication and
+  release; Direct App source/receipt cannot be mismatched or materialized against a foreign
+  component registry; late materialization after Startup is rejected without World mutation;
+  private input is promoted before the
+  dependent set and absent by finalization; dependent ordering; invalid product Startup prevents publication and
   preserves its safe diagnostic detail; generic third-party fallback; lease retention through
   cleanup-incomplete/retirement; no recipe callback or ordinary-prelude export.
 - **Verification:** Focused project-content, project-runtime boot, workspace Play, and scene suites;
@@ -436,6 +445,9 @@ sequenceDiagram
 - **Approach:** Run Edit/Play/Retry/Stop/Reopen using current Editor content and the ordinary desktop
   facade. Classify activation/replacement symbols as advanced or private from actual use. Record
   focused Trial evidence as partial implementation only; do not accept broad scene lifecycle.
+  Resolve the provisional activation feature boundary from actual consumers: serialization must not
+  alter product plugin composition, and any retained Direct App surface that remains public must be
+  available from its semantic runtime ceiling rather than through an unrelated `serde` gate.
 - **Test scenarios:** Unsaved admitted Editor edit retained through Retry; saved offset survives
   close/reopen; Play state does not dirty authoring; packaged headless/desktop arbitrary cwd/home;
   overlapping input and focus release; terminal/Retry presentation; public-surface negative audit.

@@ -22,7 +22,9 @@ use super::{
     runtime_plan_failure_report, runtime_plan_selected_report, single_error,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-use super::{attach_identifier, failure_diagnostic, runtime_fault_kind_id, single_diagnostic};
+use super::{
+    attach_identifier, runtime_fault_diagnostic, runtime_fault_kind_id, single_diagnostic,
+};
 use crate::ProductRecipe;
 
 type RuntimePluginEdit =
@@ -607,11 +609,12 @@ fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
         AppRunError::ManagedRuntime { .. } => "managed-runtime",
         AppRunError::Shutdown { .. } => "shutdown",
     };
-    let diagnostic = failure_diagnostic(
+    let diagnostic = runtime_fault_diagnostic(
+        error.runtime_fault_detail(),
         "project.desktop.runner-failed",
         "Desktop project runner failed",
-        reason,
     );
+    let diagnostic = attach_identifier(diagnostic, "reason", reason);
     let diagnostic = match runtime_fault(error) {
         Some((kind, source)) => {
             let diagnostic =
@@ -626,8 +629,12 @@ fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 fn runtime_fault(error: &AppRunError) -> Option<(RuntimeFaultKind, &'static str)> {
     match error {
-        AppRunError::DirectRuntime { kind, fault_source }
-        | AppRunError::ManagedRuntime { kind, fault_source } => Some((*kind, *fault_source)),
+        AppRunError::DirectRuntime {
+            kind, fault_source, ..
+        }
+        | AppRunError::ManagedRuntime {
+            kind, fault_source, ..
+        } => Some((*kind, *fault_source)),
         AppRunError::RunnerTeardown { prior, teardown } => {
             runtime_fault(prior).or_else(|| runtime_fault(teardown))
         }

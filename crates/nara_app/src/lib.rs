@@ -187,11 +187,13 @@ pub enum AppRunError {
     DirectRuntime {
         kind: RuntimeFaultKind,
         fault_source: &'static str,
+        detail: Option<RuntimeFaultDetail>,
     },
     #[error("managed runtime faulted: kind={kind:?}, source={fault_source}")]
     ManagedRuntime {
         kind: RuntimeFaultKind,
         fault_source: &'static str,
+        detail: Option<RuntimeFaultDetail>,
     },
     #[error("app shutdown reported plugin cleanup failures")]
     Shutdown {
@@ -242,6 +244,7 @@ impl AppRunError {
         Self::ManagedRuntime {
             kind,
             fault_source: source,
+            detail: None,
         }
     }
 
@@ -250,6 +253,60 @@ impl AppRunError {
         Self::DirectRuntime {
             kind,
             fault_source: source,
+            detail: None,
+        }
+    }
+
+    /// Converts a canonical runtime fault into a managed-runtime app error without losing its
+    /// validated diagnostic metadata.
+    #[must_use]
+    pub const fn managed_runtime_fault(fault: &RuntimeFault) -> Self {
+        Self::ManagedRuntime {
+            kind: fault.kind(),
+            fault_source: fault.source(),
+            detail: fault.detail(),
+        }
+    }
+
+    /// Converts a canonical runtime fault into a direct-runtime app error without losing its
+    /// validated diagnostic metadata.
+    #[must_use]
+    pub const fn direct_runtime_fault(fault: &RuntimeFault) -> Self {
+        Self::DirectRuntime {
+            kind: fault.kind(),
+            fault_source: fault.source(),
+            detail: fault.detail(),
+        }
+    }
+
+    /// Returns validated engine-owned diagnostic metadata retained by a runtime failure.
+    #[must_use]
+    pub fn runtime_fault_detail(&self) -> Option<RuntimeFaultDetail> {
+        self.runtime_fault_parts().and_then(|(_, _, detail)| detail)
+    }
+
+    pub(crate) fn runtime_fault_parts(
+        &self,
+    ) -> Option<(RuntimeFaultKind, &'static str, Option<RuntimeFaultDetail>)> {
+        match self {
+            Self::DirectRuntime {
+                kind,
+                fault_source,
+                detail,
+            }
+            | Self::ManagedRuntime {
+                kind,
+                fault_source,
+                detail,
+            } => Some((*kind, *fault_source, *detail)),
+            Self::RunnerTeardown { prior, teardown } => prior
+                .runtime_fault_parts()
+                .or_else(|| teardown.runtime_fault_parts()),
+            Self::RunnerAuthority { runner, authority } => authority
+                .runtime_fault_parts()
+                .or_else(|| runner.runtime_fault_parts()),
+            Self::Shutdown { prior, .. } => prior.as_deref().and_then(Self::runtime_fault_parts),
+            Self::Plugin { .. } | Self::Runner { .. } | Self::Time { .. } => None,
         }
     }
 
@@ -2118,8 +2175,8 @@ impl App {
         if !Arc::ptr_eq(&self.instance_identity, &boundary.app_identity) {
             let fault = runtime::record_app_instance_authority_fault(&boundary.reporter);
             return Err(match boundary.generation {
-                Some(_) => AppRunError::managed_runtime(fault.kind(), fault.source()),
-                None => AppRunError::direct_runtime(fault.kind(), fault.source()),
+                Some(_) => AppRunError::managed_runtime_fault(&fault),
+                None => AppRunError::direct_runtime_fault(&fault),
             });
         }
         self.validate_runtime_authority_boundary_parts(
@@ -2200,8 +2257,8 @@ impl App {
     ) -> AppRunError {
         let fault = runtime::record_runtime_fault_bridge_authority_fault(reporter);
         match generation {
-            Some(_) => AppRunError::managed_runtime(fault.kind(), fault.source()),
-            None => AppRunError::direct_runtime(fault.kind(), fault.source()),
+            Some(_) => AppRunError::managed_runtime_fault(&fault),
+            None => AppRunError::direct_runtime_fault(&fault),
         }
     }
 

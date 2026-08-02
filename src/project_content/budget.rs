@@ -548,13 +548,24 @@ impl Drop for BudgetTicket {
 }
 
 #[derive(Clone)]
-pub(super) struct ProjectContentLease {
+pub(crate) struct ProjectContentLease {
     inner: Arc<ProjectContentLeaseInner>,
 }
 
 struct ProjectContentLeaseInner {
     host: ProjectContentBudgetHost,
     charge: [usize; TRACKED_KIND_COUNT],
+}
+
+impl ProjectContentLease {
+    pub(crate) fn reserve_retained(
+        &self,
+        retained_bytes: usize,
+    ) -> Result<Self, ProjectContentBudgetError> {
+        let mut ticket = self.inner.host.reserve();
+        ticket.set(ProjectContentBudgetKind::RetainedBytes, retained_bytes)?;
+        ticket.into_lease()
+    }
 }
 
 impl Drop for ProjectContentLeaseInner {

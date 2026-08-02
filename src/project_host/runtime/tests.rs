@@ -21,19 +21,19 @@ use nara_app::{
     PluginError, PluginId, PluginPrepareFailure, PluginShutdownContext, PluginShutdownObligationId,
     RuntimeAdmissionReservation, RuntimeCloseContext, RuntimeCloseParticipant,
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress, RuntimeFault,
-    RuntimeFaultKind, RuntimeFaultReporter, StartupStage, drive_runtime_quarantine,
-    runtime_quarantine_status,
+    RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter, StartupStage,
+    drive_runtime_quarantine, runtime_quarantine_status,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_app::{RuntimeControl, RuntimeControlRequestResult};
 use nara_asset::{AssetMeta, AssetPath, AssetRef, StableAssetId};
 use nara_diagnostic::DiagnosticValueRef;
-use nara_ecs::{Resource, error::BevyError};
+use nara_ecs::{Res, Resource, error::BevyError, schedule::IntoScheduleConfigs};
 use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
-use nara_identity::WorldIdentityDomain;
+use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_image::PreparedImageResource;
 use nara_reflect::{
     ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
@@ -48,10 +48,15 @@ use nara_tasks::{
 #[cfg(feature = "tooling")]
 use nara_tooling::{EditorPersistenceCommand, EditorPersistenceResult, EditorWorkspaceCommand};
 
-use crate::project_content::ProjectContentLoader;
+use crate::project_content::{
+    ProjectContentBudgetKind, ProjectContentLimits, ProjectContentLoader,
+};
 use crate::project_host::{
     built_in_schema_providers, ingest_project_manifest, project_runtime_plugins,
     resolve_runtime_plan,
+};
+use crate::startup_scene::{
+    StartupSceneActivation, StartupSceneActivationOwner, StartupSceneActivationSet,
 };
 
 use super::*;
@@ -105,6 +110,21 @@ const STARTUP_FAILURE_DEFINITION_ID: PluginDefinitionId =
 const STARTUP_FAILURE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(STARTUP_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[CLOSE_PROBE_PLUGIN_ID]);
+const ACTIVATION_PROBE_PLUGIN_ID: PluginId = PluginId::new("nara.test.startup-activation-probe");
+const ACTIVATION_PROBE_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.startup-activation-probe", 1);
+const ACTIVATION_PROBE_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(ACTIVATION_PROBE_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_plugins(&[crate::startup_scene::STARTUP_SCENE_ACTIVATION_PLUGIN_ID]);
+const CLASSIFIED_STARTUP_FAILURE_PLUGIN_ID: PluginId =
+    PluginId::new("nara.test.classified-startup-failure");
+const CLASSIFIED_STARTUP_FAILURE_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.classified-startup-failure", 1);
+const CLASSIFIED_STARTUP_FAILURE_DECLARATION: PluginDeclaration = PluginDeclaration::new(
+    CLASSIFIED_STARTUP_FAILURE_PLUGIN_ID,
+    PluginCategory::Runtime,
+)
+.requires_plugins(&[crate::startup_scene::STARTUP_SCENE_ACTIVATION_PLUGIN_ID]);
 const RECIPE_STARTUP_FAILURE_PLUGIN_ID: PluginId =
     PluginId::new("nara.test.product-recipe-startup-failure");
 const RECIPE_STARTUP_FAILURE_DECLARATION: PluginDeclaration =
@@ -311,6 +331,64 @@ impl Plugin for StartupFailurePlugin {
         app.add_systems(StartupStage::Runtime, fail_project_startup)?;
         Ok(())
     }
+}
+
+#[derive(Resource)]
+struct ActivationProbe(Arc<AtomicUsize>);
+
+#[derive(Debug)]
+struct ActivationProbePlugin {
+    observations: Arc<AtomicUsize>,
+}
+
+impl Plugin for ActivationProbePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &ACTIVATION_PROBE_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.insert_resource(ActivationProbe(Arc::clone(&self.observations)))?
+            .add_systems(
+                StartupStage::Runtime,
+                observe_startup_activation.in_set(StartupSceneActivationSet::Dependents),
+            )?;
+        Ok(())
+    }
+}
+
+fn observe_startup_activation(activation: StartupSceneActivation<'_>, probe: Res<ActivationProbe>) {
+    assert_eq!(
+        activation.source().entities.len(),
+        activation.receipt().len()
+    );
+    probe.0.fetch_add(1, Ordering::SeqCst);
+}
+
+#[derive(Debug, Default)]
+struct ClassifiedStartupFailurePlugin;
+
+impl Plugin for ClassifiedStartupFailurePlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &CLASSIFIED_STARTUP_FAILURE_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(
+            StartupStage::Runtime,
+            fail_classified_startup.in_set(StartupSceneActivationSet::Dependents),
+        )?;
+        Ok(())
+    }
+}
+
+fn fail_classified_startup(_activation: StartupSceneActivation<'_>) -> Result<(), BevyError> {
+    let detail = RuntimeFaultDetail::new(
+        "nara.test.startup-configuration-invalid",
+        "Startup configuration is invalid",
+        "nara.test.product-startup",
+    )
+    .expect("test diagnostic metadata is valid");
+    Err(detail.into_bevy_error())
 }
 
 #[derive(Debug, Default)]
@@ -779,6 +857,244 @@ fn sequential_starts_share_immutable_authority_and_rebuild_runtime_sessions() {
     assert_eq!(first.plan_fingerprint, stable_plan);
     assert_eq!(second.plan_fingerprint, stable_plan);
     close_host(&mut host);
+}
+
+#[test]
+fn bundled_startup_activation_shares_the_spawned_source_and_resolves_its_receipt() {
+    let project = TestProject::new("startup-activation-source");
+    let (snapshot, plan) = project.snapshot_and_plan(false);
+    let source_pointer = snapshot.expanded_startup_scene() as *const SceneDocument;
+    let source_entity_ids = snapshot
+        .expanded_startup_scene()
+        .entities
+        .iter()
+        .map(|entity| entity.id.clone())
+        .collect::<Vec<_>>();
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    host.complete_start(&mut attempt).unwrap();
+
+    let ProjectHostSlot::Running(published) = &host.slot else {
+        panic!("runtime is not visible in the Host slot");
+    };
+    let world = published.runtime().world();
+    let activation = world.resource::<StartupSceneActivationOwner>();
+    assert_eq!(activation.source() as *const SceneDocument, source_pointer);
+    assert_eq!(activation.receipt().entity_ids(), source_entity_ids);
+    for entity_id in &source_entity_ids {
+        assert!(matches!(
+            activation.receipt().resolve(world, entity_id),
+            EntityLookup::Resolved(entity) if world.get_entity(entity).is_ok()
+        ));
+    }
+
+    close_host(&mut host);
+}
+
+#[test]
+fn product_dependents_observe_the_promoted_startup_activation() {
+    let project = TestProject::new("startup-activation-order");
+    let observations = Arc::new(AtomicUsize::new(0));
+    let (snapshot, plan) =
+        project.snapshot_and_plan_with_plugin(activation_probe_definition(&observations));
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    host.complete_start(&mut attempt).unwrap();
+
+    assert_eq!(observations.load(Ordering::SeqCst), 1);
+    close_host(&mut host);
+}
+
+#[test]
+fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
+    let project = TestProject::new("editor-startup-source-budget");
+    let (snapshot, plan, loader) =
+        project.snapshot_plan_and_loader_with_limits(ProjectContentLimits::default());
+    let budget_host = loader.budget_host();
+    let baseline = budget_host
+        .snapshot()
+        .active(ProjectContentBudgetKind::RetainedBytes);
+
+    let source = snapshot
+        .prepare_editor_startup_scene(
+            snapshot.expanded_startup_scene(),
+            plan.schema_validation().registry(),
+        )
+        .unwrap();
+    let source_charge = source.retained_bytes();
+    assert_eq!(
+        budget_host
+            .snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes),
+        baseline + source_charge
+    );
+    assert_eq!(budget_host.snapshot().active_reservations(), 2);
+    drop(source);
+    assert_eq!(
+        budget_host
+            .snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes),
+        baseline
+    );
+    drop(snapshot);
+    assert_eq!(
+        budget_host
+            .snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes),
+        0
+    );
+    drop((plan, loader));
+
+    let exact_total = baseline.checked_add(source_charge).unwrap();
+    let exact_limits = ProjectContentLimits::default()
+        .with_limit(ProjectContentBudgetKind::RetainedBytes, exact_total)
+        .unwrap();
+    let (snapshot, plan, loader) = project.snapshot_plan_and_loader_with_limits(exact_limits);
+    let exact_budget = loader.budget_host();
+    let source = snapshot
+        .prepare_editor_startup_scene(
+            snapshot.expanded_startup_scene(),
+            plan.schema_validation().registry(),
+        )
+        .unwrap();
+    assert_eq!(
+        exact_budget
+            .snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes),
+        exact_total
+    );
+    drop((source, snapshot));
+    assert_eq!(
+        exact_budget
+            .snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes),
+        0
+    );
+    drop((plan, loader));
+
+    let rejected_limits = ProjectContentLimits::default()
+        .with_limit(
+            ProjectContentBudgetKind::RetainedBytes,
+            exact_total.checked_sub(1).unwrap(),
+        )
+        .unwrap();
+    let (snapshot, plan, loader) = project.snapshot_plan_and_loader_with_limits(rejected_limits);
+    let rejected_budget = loader.budget_host();
+    let result = snapshot.prepare_editor_startup_scene(
+        snapshot.expanded_startup_scene(),
+        plan.schema_validation().registry(),
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        rejected_budget
+            .snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes),
+        baseline
+    );
+    assert_eq!(rejected_budget.snapshot().active_reservations(), 1);
+    drop(snapshot);
+    assert_eq!(
+        rejected_budget
+            .snapshot()
+            .active(ProjectContentBudgetKind::RetainedBytes),
+        0
+    );
+}
+
+#[test]
+fn classified_product_startup_failure_preserves_detail_and_prevents_publication() {
+    let project = TestProject::new("classified-startup-failure");
+    let (snapshot, plan) =
+        project.snapshot_and_plan_with_plugin(classified_startup_failure_definition());
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+
+    let error = host.complete_start(&mut attempt).unwrap_err();
+
+    let diagnostic = error
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "nara.test.startup-configuration-invalid")
+        .expect("the classified startup diagnostic reaches Project Host");
+    assert_eq!(
+        diagnostic.summary().as_str(),
+        "Startup configuration is invalid"
+    );
+    assert_eq!(
+        identifier_field(
+            &error.diagnostics,
+            "nara.test.startup-configuration-invalid",
+            "fault-origin",
+        ),
+        Some("nara.test.product-startup")
+    );
+    assert!(!matches!(host.slot, ProjectHostSlot::Running(_)));
+    drain_host_cleanup(&mut host);
+}
+
+#[test]
+fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishes() {
+    let project = TestProject::new("editor-startup-cleanup-lease");
+    let root = project.capability();
+    let manifest = root
+        .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    drop(manifest);
+    let control = Arc::new(CloseFailureControl::new(false));
+    let builds = Arc::new(AtomicUsize::new(0));
+    let closes = Arc::new(AtomicUsize::new(0));
+    let request = project_runtime_plugins(&candidate)
+        .insert_after::<GameplayCommandPlugin>(close_probe_definition(&builds, &closes))
+        .insert_after::<CloseProbePlugin>(close_failure_definition(&control, false, false))
+        .insert_after::<CloseFailurePlugin>(classified_startup_failure_definition());
+    let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let budget_host = loader.budget_host();
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+    let source = snapshot
+        .prepare_editor_startup_scene(
+            snapshot.expanded_startup_scene(),
+            plan.schema_validation().registry(),
+        )
+        .unwrap();
+    let editor_source_charge = source.retained_bytes();
+    assert_eq!(budget_host.snapshot().active_reservations(), 2);
+    drop(loader);
+
+    let mut host = ProjectHost::new(RuntimeClosePolicy::new(Duration::ZERO));
+    let mut attempt = host
+        .begin_editor_start(snapshot, plan, source, Vec::new())
+        .unwrap();
+    let error = host.complete_start(&mut attempt).unwrap_err();
+    let failure_code = first_code(&error.diagnostics).to_owned();
+    let runtime_was_visible = matches!(host.slot, ProjectHostSlot::Running(_));
+    let retained_after_failure = budget_host
+        .snapshot()
+        .active(ProjectContentBudgetKind::RetainedBytes);
+    let cleanup_outcome = host.drive_cleanup_once();
+    let retained_during_incomplete_cleanup = budget_host
+        .snapshot()
+        .active(ProjectContentBudgetKind::RetainedBytes);
+    let reservations_during_incomplete_cleanup = budget_host.snapshot().active_reservations();
+
+    control.release();
+    drain_host_cleanup(&mut host);
+    let released = budget_host.snapshot();
+
+    assert_eq!(failure_code, "nara.test.startup-configuration-invalid");
+    assert!(!runtime_was_visible);
+    assert_eq!(retained_after_failure, editor_source_charge);
+    assert!(matches!(
+        cleanup_outcome,
+        CleanupDriveOutcome::Retiring | CleanupDriveOutcome::RetirementIncomplete
+    ));
+    assert_eq!(retained_during_incomplete_cleanup, editor_source_charge);
+    assert_eq!(reservations_during_incomplete_cleanup, 1);
+    assert_eq!(released.active(ProjectContentBudgetKind::RetainedBytes), 0);
+    assert_eq!(released.active_reservations(), 0);
 }
 
 #[test]
@@ -1581,6 +1897,25 @@ fn startup_failure_definition() -> PluginDefinition {
     )
 }
 
+fn activation_probe_definition(observations: &Arc<AtomicUsize>) -> PluginDefinition {
+    let observations = Arc::clone(observations);
+    PluginDefinition::infallible::<ActivationProbePlugin, _>(
+        ACTIVATION_PROBE_DEFINITION_ID,
+        b"startup-activation-probe-v1",
+        move || ActivationProbePlugin {
+            observations: Arc::clone(&observations),
+        },
+    )
+}
+
+fn classified_startup_failure_definition() -> PluginDefinition {
+    PluginDefinition::infallible::<ClassifiedStartupFailurePlugin, _>(
+        CLASSIFIED_STARTUP_FAILURE_DEFINITION_ID,
+        b"classified-startup-failure-v1",
+        ClassifiedStartupFailurePlugin::default,
+    )
+}
+
 fn close_failure_definition(
     control: &Arc<CloseFailureControl>,
     report_fault: bool,
@@ -1817,6 +2152,27 @@ requested = ["runtime-2d"]
         let loader = ProjectContentLoader::new(root).unwrap();
         let snapshot = loader.load(&candidate, &plan).unwrap();
         (snapshot, plan)
+    }
+
+    fn snapshot_plan_and_loader_with_limits(
+        &self,
+        limits: ProjectContentLimits,
+    ) -> (ProjectContentSnapshot, RuntimePlan, ProjectContentLoader) {
+        let root = self.capability();
+        let manifest = root
+            .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
+            .unwrap();
+        let candidate = ingest_project_manifest(&manifest, None).unwrap();
+        drop(manifest);
+        let plan = resolve_runtime_plan(
+            &candidate,
+            project_runtime_plugins(&candidate),
+            built_in_schema_providers(),
+        )
+        .unwrap();
+        let loader = ProjectContentLoader::with_limits(root, limits).unwrap();
+        let snapshot = loader.load(&candidate, &plan).unwrap();
+        (snapshot, plan, loader)
     }
 
     fn snapshot_and_plan_with_plugin(

@@ -1,0 +1,25 @@
+error[E0277]: `StartupSceneActivation<'static>` is not a `Resource`
+ --> tests/ui/startup_scene/activation_view_not_resource.rs:4:32
+  |
+4 |     commands.remove_resource::<StartupSceneActivation<'static>>();
+  |              ---------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ invalid `Resource`
+  |              |
+  |              required by a bound introduced by this call
+  |
+  = help: the trait `Resource` is not implemented for `StartupSceneActivation<'static>`
+  = note: consider annotating `StartupSceneActivation<'static>` with `#[derive(Resource)]`
+  = help: the following other types implement trait `Resource`:
+            ActionCommandMap
+            ActionMap
+            ActionOutcomes
+            AppTypeRegistry
+            AssetDependencyGraph
+            AssetEvents
+            AssetLoadGenerations
+            AssetReloadDiagnostics
+          and $N others
+note: required by a bound in `Commands::<'w, 's>::remove_resource`
+ --> $CARGO/bevy_ecs-$VERSION/src/system/commands/mod.rs
+  |
+  |     pub fn remove_resource<R: Resource>(&mut self) {
+  |                               ^^^^^^^^ required by this bound in `Commands::<'w, 's>::remove_resource`

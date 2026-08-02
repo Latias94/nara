@@ -1,0 +1,5 @@
+error[E0432]: unresolved import `nara::prelude::StartupSceneActivation`
+ --> tests/ui/startup_scene/ordinary_prelude.rs:1:5
+  |
+1 | use nara::prelude::StartupSceneActivation;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `StartupSceneActivation` in `prelude`

@@ -6,6 +6,11 @@ use std::{
     time::Duration,
 };
 
+use super::{
+    CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
+    RuntimePlan, RuntimePlanError,
+};
+use crate::startup_scene::{StartupSceneSource, materialize_startup_scene};
 use nara_app::{
     AppExit, PluginError, PluginHook, PluginHookMutation, PluginInstantiationError,
     PluginPlanError, PluginPrepareError, RuntimeAdmissionError, RuntimeAdmissionReservation,
@@ -13,8 +18,9 @@ use nara_app::{
     RuntimeCloseErrorDisposition, RuntimeCloseEvidence, RuntimeCloseParticipantPhase,
     RuntimeClosePolicy, RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
     RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket, RuntimeFault,
-    RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance, RuntimeObligationLedger,
-    RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement, RuntimeState,
+    RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance,
+    RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement,
+    RuntimeState,
 };
 use nara_asset::{
     AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, Handle,
@@ -29,12 +35,6 @@ use nara_image::ImageAsset;
 use nara_reflect::{
     ComponentRegistrySnapshot, SchemaCompositionFingerprint, component_registry,
     validate_component_registry_authority,
-};
-use nara_scene::{SceneDocument, spawn_scene};
-
-use super::{
-    CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
-    RuntimePlan, RuntimePlanError,
 };
 
 const PROJECT_MANIFEST: &str = "nara.toml";
@@ -60,7 +60,7 @@ struct RuntimeStartAttempt {
 struct RuntimeStartInputs {
     snapshot: ProjectContentSnapshot,
     plan: RuntimePlan,
-    startup_scene: Option<Arc<SceneDocument>>,
+    startup_scene: StartupSceneSource,
     commands: Vec<GameplayCommandSubmission>,
     obligations: RuntimeObligationLedger,
 }
@@ -450,24 +450,25 @@ impl ProjectHost {
         plan: RuntimePlan,
         commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
-        self.begin_start_with_scene(snapshot, plan, None, commands)
+        let startup_scene = snapshot.startup_scene_source();
+        self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
     }
 
     fn begin_editor_start(
         &mut self,
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
-        startup_scene: SceneDocument,
+        startup_scene: StartupSceneSource,
         commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
-        self.begin_start_with_scene(snapshot, plan, Some(Arc::new(startup_scene)), commands)
+        self.begin_start_with_scene(snapshot, plan, startup_scene, commands)
     }
 
     fn begin_start_with_scene(
         &mut self,
         snapshot: ProjectContentSnapshot,
         plan: RuntimePlan,
-        startup_scene: Option<Arc<SceneDocument>>,
+        startup_scene: StartupSceneSource,
         commands: Vec<GameplayCommandSubmission>,
     ) -> Result<RuntimeStartAttempt, HostFault> {
         if !matches!(self.slot, ProjectHostSlot::Empty) || self.start_claim.any_active() {
@@ -562,7 +563,7 @@ impl ProjectHost {
                     world,
                     &admission_plan,
                     &admission_snapshot,
-                    startup_scene.as_deref(),
+                    startup_scene,
                     commands,
                 );
                 assert!(
@@ -920,7 +921,7 @@ fn materialize_project_runtime(
     world: &mut World,
     plan: &RuntimePlan,
     snapshot: &ProjectContentSnapshot,
-    startup_scene: Option<&SceneDocument>,
+    startup_scene: StartupSceneSource,
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<DiagnosticReport, HostFault> {
     verify_runtime_registry(world, plan)?;
@@ -933,15 +934,8 @@ fn materialize_project_runtime(
     world.insert_resource(plan.settings().runtime.runtime_time_settings());
     world.insert_resource(plan.settings().runtime.fixed_time());
 
-    let scene = spawn_scene(
-        world,
-        plan.schema_validation().registry(),
-        startup_scene.unwrap_or_else(|| snapshot.expanded_startup_scene()),
-    );
-    if scene.diagnostics.has_errors() || scene.instance.is_none() {
-        return Err(HostFault::new(scene.diagnostics));
-    }
-    let diagnostics = scene.diagnostics;
+    let diagnostics = materialize_startup_scene(world, startup_scene)
+        .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
     publish_snapshot_images(world, snapshot)?;
     let faults = world
         .get_resource::<RuntimeFaultReporter>()
@@ -1415,17 +1409,18 @@ fn runtime_faulted_report() -> DiagnosticReport {
 }
 
 fn runtime_scope_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
-    let diagnostic = if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
-        Diagnostic::error(
-            diagnostic_code("project.run.runtime-authority-invalid"),
-            safe_summary("Project runtime authority is invalid"),
+    let (code, summary) = if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
+        (
+            "project.run.runtime-authority-invalid",
+            "Project runtime authority is invalid",
         )
     } else {
-        Diagnostic::error(
-            diagnostic_code("project.run.runtime-faulted"),
-            safe_summary("Project runtime reported a fault before product completion"),
+        (
+            "project.run.runtime-faulted",
+            "Project runtime reported a fault before product completion",
         )
     };
+    let diagnostic = runtime_fault_diagnostic(fault.detail(), code, summary);
     let diagnostic = attach_identifier(
         diagnostic,
         "fault-kind",
@@ -1455,10 +1450,55 @@ fn runtime_startup_failure_report(fault: &RuntimeFault) -> DiagnosticReport {
     if fault.kind() == RuntimeFaultKind::RuntimeAuthority {
         return runtime_authority_invalid_report();
     }
-    single_error(
+    let diagnostic = runtime_fault_diagnostic(
+        fault.detail(),
         "project.run.startup-failed",
         "Project runtime startup failed",
-    )
+    );
+    let diagnostic = attach_identifier(
+        diagnostic,
+        "fault-kind",
+        runtime_fault_kind_id(fault.kind()),
+    );
+    let diagnostic = attach_identifier(diagnostic, "fault-source", fault.source());
+    single_diagnostic(diagnostic)
+}
+
+fn runtime_fault_diagnostic(
+    detail: Option<RuntimeFaultDetail>,
+    fallback_code: &'static str,
+    fallback_summary: &'static str,
+) -> Diagnostic {
+    let Some(detail) = detail else {
+        return Diagnostic::error(
+            diagnostic_code(fallback_code),
+            safe_summary(fallback_summary),
+        );
+    };
+    let Ok(code) = DiagnosticCode::new(detail.code()) else {
+        return Diagnostic::error(
+            diagnostic_code(fallback_code),
+            safe_summary(fallback_summary),
+        );
+    };
+    let Ok(summary) = SafeSummary::new(detail.summary()) else {
+        return Diagnostic::error(
+            diagnostic_code(fallback_code),
+            safe_summary(fallback_summary),
+        );
+    };
+    let Ok(origin) = PublicDiagnosticIdentifier::new(detail.origin()) else {
+        return Diagnostic::error(
+            diagnostic_code(fallback_code),
+            safe_summary(fallback_summary),
+        );
+    };
+    Diagnostic::error(code, summary)
+        .try_with_field(DiagnosticField::public_identifier(
+            field_key("fault-origin"),
+            origin,
+        ))
+        .expect("one classified runtime fault has one bounded origin")
 }
 
 fn runtime_authority_invalid_report() -> DiagnosticReport {

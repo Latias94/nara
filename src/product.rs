@@ -622,6 +622,9 @@ const SLOT_WINDOW: PluginSlotId = PluginSlotId::new("nara.plugins.slot.window");
 const SLOT_WGPU_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.render-wgpu");
 #[cfg(feature = "tooling")]
 const SLOT_TOOLING: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tooling");
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+const SLOT_STARTUP_SCENE_ACTIVATION: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.startup-scene-activation");
 
 /// Minimal runtime defaults for headless examples and code-first games.
 #[derive(Debug, Default, Clone, Copy)]
@@ -1001,6 +1004,15 @@ impl PluginGroup for ProjectProfilePlugins {
         } else {
             builder
         };
+
+        #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+        let builder = builder.add_slot(
+            PluginSlot::required(
+                SLOT_STARTUP_SCENE_ACTIVATION,
+                crate::startup_scene::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
+            ),
+            PluginDefinition::for_default::<crate::startup_scene::StartupSceneActivationPlugin>(),
+        );
 
         builder
     }

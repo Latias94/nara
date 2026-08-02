@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bevy_ecs::error::{ErrorHandler, FallbackErrorHandler};
+use bevy_ecs::error::{BevyError, ErrorHandler, FallbackErrorHandler};
 use nara_ecs::{
     Command, Mut, Resource, World, change_detection::Tick, component::Mutable,
     lifecycle::HookContext, world::DeferredWorld,
@@ -150,7 +150,7 @@ pub(crate) fn validate_managed_fault_boundary(
         generation,
         authority,
     )
-    .map_err(|fault| AppRunError::managed_runtime(fault.kind(), fault.source()))
+    .map_err(|fault| AppRunError::managed_runtime_fault(&fault))
 }
 
 pub(crate) fn validate_managed_runtime_authority(
@@ -197,7 +197,7 @@ pub(crate) fn validate_direct_authority_boundary(
         expected_bridge,
         authority,
     )
-    .map_err(|fault| AppRunError::direct_runtime(fault.kind(), fault.source()))
+    .map_err(|fault| AppRunError::direct_runtime_fault(&fault))
 }
 
 pub(crate) fn record_app_instance_authority_fault(reporter: &RuntimeFaultReporter) -> RuntimeFault {
@@ -320,11 +320,176 @@ pub enum RuntimeFaultKind {
     RequiredService,
 }
 
+/// Validation failure for source-authored runtime fault metadata.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeFaultDetailError {
+    #[error("runtime fault code is invalid")]
+    InvalidCode,
+    #[error("runtime fault summary is invalid")]
+    InvalidSummary,
+    #[error("runtime fault origin is invalid")]
+    InvalidOrigin,
+}
+
+/// Bounded, source-authored diagnostic metadata for an engine-owned runtime fault.
+///
+/// All fields are static so runtime values, paths, credentials, and third-party error text cannot
+/// be retained accidentally. Construction also rejects oversized values, invalid identifiers,
+/// control and formatting characters, absolute paths, URLs, and secret-shaped text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RuntimeFaultDetail {
+    code: &'static str,
+    summary: &'static str,
+    origin: &'static str,
+}
+
+impl RuntimeFaultDetail {
+    /// The maximum encoded byte length accepted for a diagnostic code.
+    pub const MAX_CODE_BYTES: usize = 96;
+    /// The maximum encoded byte length accepted for a diagnostic summary.
+    pub const MAX_SUMMARY_BYTES: usize = 1_024;
+    /// The maximum encoded byte length accepted for a producer origin.
+    pub const MAX_ORIGIN_BYTES: usize = 96;
+
+    /// Creates validated metadata from source-authored static strings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeFaultDetailError`] when any field violates its bounded public-data
+    /// contract.
+    pub fn new(
+        code: &'static str,
+        summary: &'static str,
+        origin: &'static str,
+    ) -> Result<Self, RuntimeFaultDetailError> {
+        if !is_valid_runtime_fault_identifier(code, Self::MAX_CODE_BYTES, false) {
+            return Err(RuntimeFaultDetailError::InvalidCode);
+        }
+        if !is_valid_runtime_fault_summary(summary) {
+            return Err(RuntimeFaultDetailError::InvalidSummary);
+        }
+        if !is_valid_runtime_fault_identifier(origin, Self::MAX_ORIGIN_BYTES, true) {
+            return Err(RuntimeFaultDetailError::InvalidOrigin);
+        }
+        Ok(Self {
+            code,
+            summary,
+            origin,
+        })
+    }
+
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        self.code
+    }
+
+    #[must_use]
+    pub const fn summary(self) -> &'static str {
+        self.summary
+    }
+
+    #[must_use]
+    pub const fn origin(self) -> &'static str {
+        self.origin
+    }
+
+    /// Converts this validated metadata into a non-panicking Bevy system error.
+    #[must_use]
+    pub fn into_bevy_error(self) -> BevyError {
+        BevyError::error(RuntimeExecutionError { detail: self })
+    }
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[error("engine-owned runtime execution failed")]
+pub(crate) struct RuntimeExecutionError {
+    detail: RuntimeFaultDetail,
+}
+
+impl RuntimeExecutionError {
+    #[must_use]
+    pub(crate) const fn detail(self) -> RuntimeFaultDetail {
+        self.detail
+    }
+}
+
+fn is_valid_runtime_fault_identifier(
+    value: &str,
+    maximum_bytes: usize,
+    reject_sensitive_shape: bool,
+) -> bool {
+    let Some(first) = value.bytes().next() else {
+        return false;
+    };
+    value.len() <= maximum_bytes
+        && value.is_ascii()
+        && (first.is_ascii_lowercase() || first.is_ascii_digit())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b'_')
+        })
+        && (!reject_sensitive_shape || !contains_runtime_fault_sensitive_shape(value))
+}
+
+fn is_valid_runtime_fault_summary(value: &'static str) -> bool {
+    !value.is_empty()
+        && value.len() <= RuntimeFaultDetail::MAX_SUMMARY_BYTES
+        && !value.chars().any(char::is_control)
+        && !value.chars().any(is_runtime_fault_unsafe_format_character)
+        && !contains_runtime_fault_sensitive_shape(value)
+        && !resembles_runtime_fault_absolute_path(value)
+}
+
+fn contains_runtime_fault_sensitive_shape(value: &str) -> bool {
+    let lowercase = value.to_ascii_lowercase();
+    lowercase.contains("bearer")
+        || lowercase.contains("token")
+        || lowercase.contains("password")
+        || lowercase.contains("credential")
+        || lowercase.contains("secret")
+        || lowercase.contains("api_key")
+        || lowercase.contains("api-key")
+        || lowercase.contains("://")
+}
+
+fn resembles_runtime_fault_absolute_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    value.starts_with('/')
+        || value.starts_with("\\\\")
+        || value.starts_with("//")
+        || (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/'))
+}
+
+fn is_runtime_fault_unsafe_format_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{00ad}'
+            | '\u{034f}'
+            | '\u{061c}'
+            | '\u{115f}'
+            | '\u{1160}'
+            | '\u{17b4}'
+            | '\u{17b5}'
+            | '\u{180b}'..='\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0000}'..='\u{e007f}'
+    )
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeFault {
     kind: RuntimeFaultKind,
     source: &'static str,
-    app_error: Option<AppRunError>,
+    detail: Option<RuntimeFaultDetail>,
+    app_error: Option<Box<AppRunError>>,
 }
 
 impl RuntimeFault {
@@ -333,16 +498,38 @@ impl RuntimeFault {
         Self {
             kind,
             source,
+            detail: None,
+            app_error: None,
+        }
+    }
+
+    /// Creates an engine fault carrying validated, source-authored diagnostic metadata.
+    #[must_use]
+    pub const fn engine_with_detail(
+        kind: RuntimeFaultKind,
+        source: &'static str,
+        detail: RuntimeFaultDetail,
+    ) -> Self {
+        Self {
+            kind,
+            source,
+            detail: Some(detail),
             app_error: None,
         }
     }
 
     #[must_use]
     pub(crate) fn app(error: AppRunError) -> Self {
+        let (kind, source, detail) = error.runtime_fault_parts().unwrap_or((
+            RuntimeFaultKind::AppFrame,
+            "nara.app.frame",
+            None,
+        ));
         Self {
-            kind: RuntimeFaultKind::AppFrame,
-            source: "nara.app.frame",
-            app_error: Some(error),
+            kind,
+            source,
+            detail,
+            app_error: Some(Box::new(error)),
         }
     }
 
@@ -357,8 +544,13 @@ impl RuntimeFault {
     }
 
     #[must_use]
-    pub const fn app_error(&self) -> Option<&AppRunError> {
-        self.app_error.as_ref()
+    pub const fn detail(&self) -> Option<RuntimeFaultDetail> {
+        self.detail
+    }
+
+    #[must_use]
+    pub fn app_error(&self) -> Option<&AppRunError> {
+        self.app_error.as_deref()
     }
 }
 

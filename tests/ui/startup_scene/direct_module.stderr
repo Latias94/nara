@@ -1,0 +1,13 @@
+error[E0603]: module `startup_scene` is private
+ --> tests/ui/startup_scene/direct_module.rs:1:11
+  |
+1 | use nara::startup_scene::StartupSceneActivation;
+  |           ^^^^^^^^^^^^^  ---------------------- struct `StartupSceneActivation` is not publicly re-exported
+  |           |
+  |           private module
+  |
+note: the module `startup_scene` is defined here
+ --> src/lib.rs
+  |
+  | mod startup_scene;
+  | ^^^^^^^^^^^^^^^^^

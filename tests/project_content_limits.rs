@@ -22,7 +22,7 @@ const PORTABLE_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 10] = [
     (ProjectContentBudgetKind::QueuedJobs, 1),
     (ProjectContentBudgetKind::InFlightJobs, 1),
     (ProjectContentBudgetKind::DependencyEdges, 2),
-    (ProjectContentBudgetKind::EncodedBytes, 16_780_307),
+    (ProjectContentBudgetKind::EncodedBytes, 16_782_411),
     (ProjectContentBudgetKind::ArtifactBytes, 4),
 ];
 
@@ -30,16 +30,16 @@ const PORTABLE_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 10] = [
 #[cfg(all(target_pointer_width = "64", target_os = "windows"))]
 const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
     (ProjectContentBudgetKind::WorkBytes, 393_075_070),
-    (ProjectContentBudgetKind::RetainedBytes, 3_944),
-    (ProjectContentBudgetKind::AggregateBytes, 393_078_159),
+    (ProjectContentBudgetKind::RetainedBytes, 5_888),
+    (ProjectContentBudgetKind::AggregateBytes, 393_080_749),
 ];
 
 #[cfg(all(target_pointer_width = "64", target_os = "linux"))]
 const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
     (ProjectContentBudgetKind::WorkBytes, 393_075_070),
-    (ProjectContentBudgetKind::RetainedBytes, 3_936),
+    (ProjectContentBudgetKind::RetainedBytes, 5_880),
     // The aggregate peak precedes final retained publication for this fixture.
-    (ProjectContentBudgetKind::AggregateBytes, 393_078_159),
+    (ProjectContentBudgetKind::AggregateBytes, 393_080_749),
 ];
 
 #[test]

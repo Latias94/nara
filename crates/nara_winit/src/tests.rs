@@ -44,7 +44,8 @@ fn runtime_scope_fault_preserves_managed_runtime_identity() {
         error,
         AppRunError::ManagedRuntime {
             kind: RuntimeFaultKind::RequiredService,
-            fault_source: "nara.test.winit-service"
+            fault_source: "nara.test.winit-service",
+            ..
         }
     ));
 }

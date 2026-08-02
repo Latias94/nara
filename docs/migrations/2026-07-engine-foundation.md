@@ -2473,6 +2473,63 @@ without a bounded production consumer.
 `crates/nara_sprite_render/src/tests.rs`, `crates/nara_ui_render/src/tests.rs`, and
 `src/project_host/runtime/tests.rs`.
 
+## SRT-U3-1: Bounded Startup Activation and Classified Runtime Faults
+
+**Changed contract**:
+
+- File-backed Project Profiles now install the provisional startup-scene activation plugin. Direct
+  managed-App integrations must install `StartupSceneActivationPlugin` explicitly before sealing.
+- Project Host materialization consumes one move-only `StartupSceneSource`, spawns that exact
+  document, and creates the matching `SpawnedSceneInstance` internally. The resulting
+  `StartupSceneActivation` is a read-only advanced `SystemParam`; an unnameable root resource owns
+  the source, receipt, and retention guard for the candidate and runtime lifetime.
+- The materializer derives the frozen component registry from the candidate `World`; callers can no
+  longer provide a separate registry. Startup finalization permanently closes the materialization
+  window, so a published Direct App cannot inject a late startup scene.
+- `AppRunError::DirectRuntime` and `AppRunError::ManagedRuntime` now include an optional validated
+  `detail` field. Exhaustive matches must use `..` or match that field.
+- Engine-owned fallible systems may return `RuntimeFaultDetail::into_bevy_error()`; the private
+  carrier forces non-panicking Bevy severity, while unclassified third-party errors continue to
+  expose only generic fault kind and source.
+
+**Canonical usage**:
+
+```rust
+use nara::advanced_prelude::{
+    StartupSceneActivation, StartupSceneActivationPlugin, StartupSceneActivationSet,
+};
+
+// Install the plugin during direct managed-App composition. Product initialization systems run in
+// StartupSceneActivationSet::Dependents and borrow StartupSceneActivation read-only.
+```
+
+Project-backed callers do not construct a source or activation. Bundled content shares the exact
+snapshot `Arc` and lease; Editor Play receives a separately charged retained source. Direct
+managed-App callers use `StartupSceneSource::direct(document, retained_byte_limit)` and pass it to
+`materialize_startup_scene`; source/receipt pairs cannot be assembled independently. The direct
+limit uses Nara's deterministic logical retained-byte model, not allocator capacity or RSS. Direct
+materialization runs only inside the sealed candidate's admission scope, after the component
+registry authority exists and before `complete_startup`.
+
+**User action**: update exhaustive `AppRunError` patterns, add the activation plugin only to custom
+direct managed-App compositions that call the advanced materializer, and place product Startup
+initialization in `StartupSceneActivationSet::Dependents`. Do not move startup materialization into
+`ProductRecipe`, reconstruct the source from the live `World`, or retain arbitrary third-party
+error text.
+
+**Source action**: none. Scene, Prefab, AssetMeta, and project manifest formats are unchanged.
+
+**Cache action**: keep content/import caches; rebuild Rust artifacts and product-plan fingerprints
+because the Project Profile plugin composition changed.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). Startup activation remains a
+provisional advanced contract and is not re-exported from the ordinary prelude.
+
+**Verification anchors**: `src/startup_scene.rs`, `src/project_content.rs`,
+`src/project_host/runtime.rs`, `crates/nara_app/src/runtime/fault_route.rs`,
+`src/project_host/runtime/tests.rs`, `tests/startup_scene_public_surface.rs`, and
+`tests/workspace_play_runtime.rs`.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

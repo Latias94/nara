@@ -1318,6 +1318,7 @@ mod tests {
             AppRunError::DirectRuntime {
                 kind: RuntimeFaultKind::LocalIntentLoss,
                 fault_source: "nara.gameplay.local-action",
+                detail: None,
             }
         );
 
@@ -1503,6 +1504,7 @@ mod tests {
             AppRunError::DirectRuntime {
                 kind: RuntimeFaultKind::GameplayLifecycle,
                 fault_source: "nara.gameplay.fixed-admit",
+                detail: None,
             }
         );
 

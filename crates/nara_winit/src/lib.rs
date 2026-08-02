@@ -850,7 +850,7 @@ fn runtime_scope_error(error: RuntimeScopeError) -> AppRunError {
 }
 
 fn runtime_fault_error(fault: &RuntimeFault) -> AppRunError {
-    AppRunError::managed_runtime(fault.kind(), fault.source())
+    AppRunError::managed_runtime_fault(fault)
 }
 
 fn release_all_input(

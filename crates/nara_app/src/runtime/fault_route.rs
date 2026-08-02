@@ -2,7 +2,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use bevy_ecs::error::{BevyError, ErrorContext, ErrorHandler, Severity, match_severity};
 
-use super::{RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter};
+use super::{RuntimeExecutionError, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter};
 
 pub(super) const RUNTIME_FAULT_ROUTE_CAPACITY: usize =
     super::MAX_QUARANTINED_RUNTIME_OWNERS_PER_PROCESS + 3;
@@ -317,9 +317,17 @@ fn route_error<const SLOT: usize>(error: BevyError, context: ErrorContext) {
             ErrorContext::Command { .. } => RuntimeFaultKind::Command,
             ErrorContext::Observer { .. } => RuntimeFaultKind::Observer,
         };
-        handler
-            .reporter
-            .report(RuntimeFault::engine(kind, "nara.ecs.fallible-execution"));
+        let fault = error
+            .downcast_ref::<RuntimeExecutionError>()
+            .map(|classified| {
+                RuntimeFault::engine_with_detail(
+                    kind,
+                    "nara.ecs.fallible-execution",
+                    classified.detail(),
+                )
+            })
+            .unwrap_or_else(|| RuntimeFault::engine(kind, "nara.ecs.fallible-execution"));
+        handler.reporter.report(fault);
         return;
     }
     match_severity(error, context);
@@ -343,6 +351,16 @@ static RUNTIME_ERROR_HANDLERS: [ErrorHandler; RUNTIME_FAULT_ROUTE_CAPACITY] = ro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AppRunError, RuntimeFaultDetail, RuntimeFaultDetailError};
+    use thiserror::Error;
+
+    #[derive(Debug, Error)]
+    #[error("Bearer private-token from C:\\Users\\private")]
+    struct UnknownThirdPartyFault;
+
+    fn command_context(name: &'static str) -> ErrorContext {
+        ErrorContext::Command { name: name.into() }
+    }
 
     #[test]
     fn capacity_covers_quarantine_overlap_and_one_pending_reservation() {
@@ -428,5 +446,102 @@ mod tests {
         assert_eq!(lock_slot(token.slot).executor_in_flight, 0);
         drop(lease);
         assert_eq!(lock_slot(token.slot).phase, FaultRoutePhase::Quiescent);
+    }
+
+    #[test]
+    fn runtime_fault_detail_rejects_unbounded_or_sensitive_metadata() {
+        let maximum_code = Box::leak(
+            "a".repeat(RuntimeFaultDetail::MAX_CODE_BYTES)
+                .into_boxed_str(),
+        );
+        let oversized_code = Box::leak(
+            "a".repeat(RuntimeFaultDetail::MAX_CODE_BYTES + 1)
+                .into_boxed_str(),
+        );
+        let maximum_summary = Box::leak(
+            "a".repeat(RuntimeFaultDetail::MAX_SUMMARY_BYTES)
+                .into_boxed_str(),
+        );
+        let oversized_summary = Box::leak(
+            "a".repeat(RuntimeFaultDetail::MAX_SUMMARY_BYTES + 1)
+                .into_boxed_str(),
+        );
+
+        assert!(RuntimeFaultDetail::new(maximum_code, maximum_summary, "nara.test").is_ok());
+        assert_eq!(
+            RuntimeFaultDetail::new(oversized_code, "safe summary", "nara.test"),
+            Err(RuntimeFaultDetailError::InvalidCode)
+        );
+        assert_eq!(
+            RuntimeFaultDetail::new("nara.test", oversized_summary, "nara.test"),
+            Err(RuntimeFaultDetailError::InvalidSummary)
+        );
+        for summary in [
+            "Bearer test-token",
+            "https://user:password@example.invalid/path",
+            "C:\\Users\\private",
+            "unsafe\u{202e}summary",
+        ] {
+            assert_eq!(
+                RuntimeFaultDetail::new("nara.test", summary, "nara.test"),
+                Err(RuntimeFaultDetailError::InvalidSummary)
+            );
+        }
+        assert_eq!(
+            RuntimeFaultDetail::new("nara.test", "safe summary", "secret-origin"),
+            Err(RuntimeFaultDetailError::InvalidOrigin)
+        );
+    }
+
+    #[test]
+    fn classified_system_error_preserves_validated_detail_through_app_error_conversion() {
+        let detail = RuntimeFaultDetail::new(
+            "nara.test.startup-failed",
+            "Startup initialization failed",
+            "nara.test.startup",
+        )
+        .expect("test metadata is valid");
+        let reporter = RuntimeFaultReporter::new();
+        let lease = FaultRouteReservation::try_acquire()
+            .expect("one route is available")
+            .activate(reporter.clone());
+
+        (lease.handler())(
+            detail.into_bevy_error(),
+            command_context("private::system::name"),
+        );
+
+        let fault = reporter.fault().expect("classified fault is retained");
+        assert_eq!(fault.kind(), RuntimeFaultKind::Command);
+        assert_eq!(fault.source(), "nara.ecs.fallible-execution");
+        assert_eq!(fault.detail(), Some(detail));
+
+        let app_error = AppRunError::managed_runtime_fault(&fault);
+        assert_eq!(app_error.runtime_fault_detail(), Some(detail));
+        let rebound = RuntimeFault::app(app_error);
+        assert_eq!(rebound.kind(), RuntimeFaultKind::Command);
+        assert_eq!(rebound.source(), "nara.ecs.fallible-execution");
+        assert_eq!(rebound.detail(), Some(detail));
+    }
+
+    #[test]
+    fn unknown_third_party_error_retains_no_dynamic_error_or_context_text() {
+        let reporter = RuntimeFaultReporter::new();
+        let lease = FaultRouteReservation::try_acquire()
+            .expect("one route is available")
+            .activate(reporter.clone());
+
+        (lease.handler())(
+            BevyError::error(UnknownThirdPartyFault),
+            command_context("C:\\Users\\private\\system"),
+        );
+
+        let fault = reporter.fault().expect("generic fault is retained");
+        assert_eq!(fault.kind(), RuntimeFaultKind::Command);
+        assert_eq!(fault.source(), "nara.ecs.fallible-execution");
+        assert_eq!(fault.detail(), None);
+        let retained = format!("{fault:?}");
+        assert!(!retained.contains("private-token"));
+        assert!(!retained.contains("Users"));
     }
 }

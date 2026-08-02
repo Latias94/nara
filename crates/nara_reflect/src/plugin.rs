@@ -815,6 +815,7 @@ mod tests {
             AppRunError::DirectRuntime {
                 kind: RuntimeFaultKind::RuntimeAuthority,
                 fault_source: "nara.app.instance-authority",
+                ..
             }
         ));
     }

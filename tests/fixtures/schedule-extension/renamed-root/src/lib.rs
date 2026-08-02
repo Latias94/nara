@@ -327,6 +327,7 @@ mod tests {
             AppRunError::DirectRuntime {
                 kind: RuntimeFaultKind::GameplayLifecycle,
                 fault_source: "nara.gameplay.fixed-acknowledge",
+                ..
             }
         );
 

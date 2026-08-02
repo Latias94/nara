@@ -845,6 +845,7 @@ dependencies = [
  "nara_ecs",
  "nara_hierarchy",
  "nara_reflect",
+ "thiserror",
 ]
 
 [[package]]
