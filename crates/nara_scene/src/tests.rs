@@ -2360,7 +2360,7 @@ fn children_add_observer_does_not_reject_a_flat_scene() {
 }
 
 #[test]
-fn deferred_hierarchy_projection_rejects_every_materialization_entry_point() {
+fn parented_transform_materializes_through_every_entry_point() {
     let registry = deferred_transform_registry();
     let flat_id = scene_id("flat");
     let flat_document = SceneDocument::new([SceneEntityRecord::new(flat_id)
@@ -2374,7 +2374,7 @@ fn deferred_hierarchy_projection_rejects_every_materialization_entry_point() {
     let document = SceneDocument::new([
         SceneEntityRecord::new(root_id.clone()),
         SceneEntityRecord::new(child_id.clone())
-            .with_parent(root_id)
+            .with_parent(root_id.clone())
             .with_component(deferred_transform_type_id(), deferred_transform_record(3)),
     ]);
     let has_unavailable_projection = |diagnostics: &DiagnosticReport| {
@@ -2384,24 +2384,36 @@ fn deferred_hierarchy_projection_rejects_every_materialization_entry_point() {
         })
     };
 
-    assert!(has_unavailable_projection(&document.validate(&registry)));
+    assert!(!has_unavailable_projection(&document.validate(&registry)));
 
     let mut direct_world = World::new();
-    let direct_baseline = direct_world.iter_entities().count();
     let direct = SceneSpawner::new().spawn(&mut direct_world, &registry, &document);
-    assert!(direct.instance.is_none());
-    assert!(has_unavailable_projection(&direct.diagnostics));
-    assert_eq!(direct_world.iter_entities().count(), direct_baseline);
-    assert!(!direct_world.contains_resource::<WorldIdentityDomain>());
+    assert!(!direct.diagnostics.has_errors());
+    let direct_root = spawned_entity(&direct_world, &direct, &root_id);
+    let direct_child = spawned_entity(&direct_world, &direct, &child_id);
+    assert_eq!(
+        direct_world.get::<Parent>(direct_child).map(Parent::parent),
+        Some(direct_root)
+    );
+    assert_eq!(
+        direct_world.get::<DeferredTransform>(direct_child),
+        Some(&DeferredTransform(3))
+    );
 
     let prefab = PrefabDocument::new(document.entities.clone());
     let mut prefab_world = World::new();
-    let prefab_baseline = prefab_world.iter_entities().count();
     let prefab_report = SceneSpawner::new().spawn_prefab(&mut prefab_world, &registry, &prefab);
-    assert!(prefab_report.instance.is_none());
-    assert!(has_unavailable_projection(&prefab_report.diagnostics));
-    assert_eq!(prefab_world.iter_entities().count(), prefab_baseline);
-    assert!(!prefab_world.contains_resource::<WorldIdentityDomain>());
+    assert!(!prefab_report.diagnostics.has_errors());
+    let prefab_root = spawned_entity(&prefab_world, &prefab_report, &root_id);
+    let prefab_child = spawned_entity(&prefab_world, &prefab_report, &child_id);
+    assert_eq!(
+        prefab_world.get::<Parent>(prefab_child).map(Parent::parent),
+        Some(prefab_root)
+    );
+    assert_eq!(
+        prefab_world.get::<DeferredTransform>(prefab_child),
+        Some(&DeferredTransform(3))
+    );
 
     let current_id = scene_id("current");
     let current_document = SceneDocument::new([SceneEntityRecord::new(current_id.clone())]);
@@ -2411,30 +2423,44 @@ fn deferred_hierarchy_projection_rejects_every_materialization_entry_point() {
     assert!(!current.diagnostics.has_errors());
     let current_instance = spawned_instance(&current).clone();
     let current_entity = spawned_entity(&replacement_world, &current, &current_id);
-    let baseline_entities = replacement_world.iter_entities().count();
     let replacement = replacement_spawner.replace(
         &mut replacement_world,
         &registry,
         &document,
         &current_instance,
     );
-    assert!(replacement.instance.is_none());
-    assert!(has_unavailable_projection(&replacement.diagnostics));
-    assert_eq!(replacement_world.iter_entities().count(), baseline_entities);
+    assert!(!replacement.diagnostics.has_errors());
+    assert_eq!(replacement.retired_entities(), 1);
+    assert!(replacement_world.get_entity(current_entity).is_err());
+    let replacement_root = spawned_entity(&replacement_world, &replacement, &root_id);
+    let replacement_child = spawned_entity(&replacement_world, &replacement, &child_id);
     assert_eq!(
-        current_instance.resolve(&replacement_world, &current_id),
-        EntityLookup::Resolved(current_entity)
+        replacement_world
+            .get::<Parent>(replacement_child)
+            .map(Parent::parent),
+        Some(replacement_root)
     );
 
     let mut authoring_world = World::new();
-    let authoring_baseline = authoring_world.iter_entities().count();
     let mut session = SceneAuthoringSession::new(document);
     let authoring = session.sync_world(&mut authoring_world, &registry);
-    assert!(!authoring.synced);
-    assert!(authoring.live_instance.is_none());
-    assert!(has_unavailable_projection(&authoring.diagnostics));
-    assert_eq!(authoring_world.iter_entities().count(), authoring_baseline);
-    assert!(!authoring_world.contains_resource::<WorldIdentityDomain>());
+    assert!(authoring.synced);
+    assert!(!authoring.diagnostics.has_errors());
+    let authoring_instance = authoring.live_instance.as_ref().unwrap();
+    let authoring_root = match authoring_instance.resolve(&authoring_world, &root_id) {
+        EntityLookup::Resolved(entity) => entity,
+        resolution => panic!("unexpected root resolution: {resolution:?}"),
+    };
+    let authoring_child = match authoring_instance.resolve(&authoring_world, &child_id) {
+        EntityLookup::Resolved(entity) => entity,
+        resolution => panic!("unexpected child resolution: {resolution:?}"),
+    };
+    assert_eq!(
+        authoring_world
+            .get::<Parent>(authoring_child)
+            .map(Parent::parent),
+        Some(authoring_root)
+    );
 }
 
 #[test]

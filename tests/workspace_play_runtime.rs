@@ -15,24 +15,26 @@ use std::{
 use nara::{
     ProductConfiguration, ProductRecipe,
     app::{
-        App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
-        PluginError, PluginId, PluginShutdownContext, PluginShutdownObligationId,
-        RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-        RuntimeCloseParticipantId, RuntimeCloseProgress, StartupStage,
+        App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+        PluginDefinitionId, PluginError, PluginId, PluginShutdownContext,
+        PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
+        RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
+        StartupStage,
     },
-    ecs::Resource,
+    ecs::{Query, Res, Resource, schedule::IntoScheduleConfigs},
     gameplay::GameplayCommandPlugin,
     project_host::{EditorProjectIntent, EditorProjectSession},
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
-        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-        ScenePatchOperation,
+        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+        ScenePatchDocument, ScenePatchOperation,
     },
     tooling::{
         EditorPlayCommand, EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult,
         EditorPlayRejection, EditorPlayRequestResult, EditorPlayState, EditorWorkspaceIntent,
         EditorWorkspaceIntentRequestResult,
     },
+    transform::GlobalTransform2d,
 };
 use project_content_fixture::TestProject;
 
@@ -63,6 +65,14 @@ const RUNTIME_SERVICE_SESSION_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.editor-runtime-service-session", 1);
 const RUNTIME_SERVICE_SESSION_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(RUNTIME_SERVICE_SESSION_PLUGIN_ID, PluginCategory::Service);
+const SPATIAL_OBSERVATION_PLUGIN_ID: PluginId =
+    PluginId::new("nara.test.editor-spatial-observation");
+const SPATIAL_OBSERVATION_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.test.editor-spatial-observation", 1);
+const SPATIAL_OBSERVATION_REQUIREMENTS: &[PluginId] = &[nara::transform::TRANSFORM_PLUGIN_ID];
+const SPATIAL_OBSERVATION_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(SPATIAL_OBSERVATION_PLUGIN_ID, PluginCategory::Tooling)
+        .requires_plugins(SPATIAL_OBSERVATION_REQUIREMENTS);
 
 static NEXT_RUNTIME_SERVICE_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -132,6 +142,64 @@ fn runtime_service_session_recipe(observations: mpsc::SyncSender<u64>) -> Produc
             },
         )
         .unwrap()
+}
+
+#[derive(Debug)]
+struct SpatialObservationPlugin {
+    target: SceneEntityId,
+    observations: mpsc::SyncSender<nara::prelude::Vec2>,
+}
+
+impl Plugin for SpatialObservationPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &SPATIAL_OBSERVATION_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.insert_resource(SpatialObservation {
+            target: self.target.clone(),
+            observations: self.observations.clone(),
+        })?
+        .add_systems(
+            CoreStage::Extract,
+            observe_spatial_projection.after(nara::transform::__private::TransformSet::Propagate),
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Resource)]
+struct SpatialObservation {
+    target: SceneEntityId,
+    observations: mpsc::SyncSender<nara::prelude::Vec2>,
+}
+
+fn observe_spatial_projection(
+    observation: Res<SpatialObservation>,
+    transforms: Query<(&SceneEntitySource, &GlobalTransform2d)>,
+) {
+    let global = transforms
+        .iter()
+        .find_map(|(source, global)| (source.entity_id == observation.target).then_some(global))
+        .expect("the spatial probe target remains in the active scene");
+    observation
+        .observations
+        .try_send(global.translation())
+        .expect("the bounded spatial observation channel remains within its test budget");
+}
+
+fn spatial_observation_definition(
+    target: SceneEntityId,
+    observations: mpsc::SyncSender<nara::prelude::Vec2>,
+) -> PluginDefinition {
+    PluginDefinition::infallible::<SpatialObservationPlugin, _>(
+        SPATIAL_OBSERVATION_DEFINITION_ID,
+        b"editor-spatial-observation-v1",
+        move || SpatialObservationPlugin {
+            target: target.clone(),
+            observations: observations.clone(),
+        },
+    )
 }
 
 #[derive(Debug)]
@@ -522,6 +590,95 @@ fn runtime_edit_is_generation_and_safe_point_bound() {
 }
 
 #[test]
+fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
+    let root_id = SceneEntityId::new("root").unwrap();
+    let child_id = SceneEntityId::new("root/child").unwrap();
+    project.write_scene_source(&SceneDocument::new([
+        SceneEntityRecord::new(root_id.clone())
+            .with_component(transform_id.clone(), transform_record(10.0, 20.0)),
+        SceneEntityRecord::new(child_id.clone())
+            .with_parent(root_id.clone())
+            .with_component(transform_id.clone(), transform_record(3.0, 4.0)),
+    ]));
+    let (observations, receiver) = mpsc::sync_channel(128);
+    let intent = EditorProjectIntent::new().insert_after::<GameplayCommandPlugin>(
+        spatial_observation_definition(child_id, observations),
+    );
+    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Play),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::Running, 32);
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        latest_spatial_observation(&receiver),
+        nara::prelude::Vec2::new(13.0, 24.0)
+    );
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Pause),
+        EditorPlayRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(
+        latest_spatial_observation(&receiver),
+        nara::prelude::Vec2::new(13.0, 24.0)
+    );
+
+    editor
+        .request_runtime_edit(
+            root_id,
+            transform_id,
+            ComponentSchemaVersion::ONE,
+            ComponentFieldId::new("translation.x"),
+            ComponentValue::f64(40.0).unwrap(),
+        )
+        .unwrap();
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.runtime_edit_result(),
+        Some(nara::tooling::EditorRuntimeEditResult::Applied(_))
+    ));
+    assert_eq!(
+        latest_spatial_observation(&receiver),
+        nara::prelude::Vec2::new(13.0, 24.0),
+        "the Last-stage edit becomes visible at the next Extract boundary"
+    );
+    assert!(editor.acknowledge_runtime_edit_result());
+
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(
+        latest_spatial_observation(&receiver),
+        nara::prelude::Vec2::new(43.0, 24.0)
+    );
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Resume),
+        EditorPlayRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.play_view().state(), EditorPlayState::Running);
+    assert_eq!(
+        latest_spatial_observation(&receiver),
+        nara::prelude::Vec2::new(43.0, 24.0),
+        "resume must not expose one frame of the prior global projection"
+    );
+
+    assert_eq!(
+        editor.request_play(EditorPlayCommand::Stop),
+        EditorPlayRequestResult::Accepted
+    );
+    drive_until(&mut editor, EditorPlayState::Empty, 32);
+}
+
+#[test]
 fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
@@ -674,6 +831,41 @@ fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() 
         ))
     );
     drive_until(&mut editor, EditorPlayState::Empty, 32);
+}
+
+fn transform_record(x: f64, y: f64) -> SceneComponentRecord {
+    SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([
+            (
+                "translation",
+                ComponentValue::map([
+                    ("x", ComponentValue::f64(x).unwrap()),
+                    ("y", ComponentValue::f64(y).unwrap()),
+                ]),
+            ),
+            ("rotation", ComponentValue::f64(0.0).unwrap()),
+            (
+                "scale",
+                ComponentValue::map([
+                    ("x", ComponentValue::f64(1.0).unwrap()),
+                    ("y", ComponentValue::f64(1.0).unwrap()),
+                ]),
+            ),
+        ]),
+    )
+}
+
+fn latest_spatial_observation(
+    receiver: &mpsc::Receiver<nara::prelude::Vec2>,
+) -> nara::prelude::Vec2 {
+    let mut latest = receiver
+        .recv_timeout(Duration::from_secs(1))
+        .expect("the Editor runtime should publish one spatial observation");
+    while let Ok(observation) = receiver.try_recv() {
+        latest = observation;
+    }
+    latest
 }
 
 #[test]

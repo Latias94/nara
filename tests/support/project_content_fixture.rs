@@ -61,17 +61,25 @@ requested = ["runtime-2d"]
         .unwrap();
 
         let source = AssetRef::path("enemy.prefab.json").unwrap();
-        let mut anchor = SceneEntityRecord::new(scene_id("enemy-anchor"));
+        let mut anchor = SceneEntityRecord::new(scene_id("enemy-anchor")).with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            identity_transform_record(),
+        );
         anchor.prefab = Some(PrefabInstance {
             source,
             overrides: nara::scene::ScenePatchDocument::default(),
         });
         let scene = SceneDocument::new([anchor]);
         let image = AssetRef::path("textures/player.png").unwrap();
-        let enemy = SceneEntityRecord::new(scene_id("enemy")).with_component(
-            ComponentTypeId::new("nara.sprite.Sprite"),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
-        );
+        let enemy = SceneEntityRecord::new(scene_id("enemy"))
+            .with_component(
+                ComponentTypeId::new("nara.transform.Transform2d"),
+                identity_transform_record(),
+            )
+            .with_component(
+                ComponentTypeId::new("nara.sprite.Sprite"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
+            );
         let prefab = PrefabDocument::new([enemy]);
         fs::write(
             root.join("scenes/startup.scene.json"),
@@ -261,6 +269,29 @@ pub fn sprite_value(image: &AssetRef) -> ComponentValue {
         ("layer", ComponentValue::I64(0)),
         ("sort_key", ComponentValue::I64(0)),
     ])
+}
+
+fn identity_transform_record() -> SceneComponentRecord {
+    SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([
+            (
+                "translation",
+                ComponentValue::map([
+                    ("x", ComponentValue::f64(0.0).unwrap()),
+                    ("y", ComponentValue::f64(0.0).unwrap()),
+                ]),
+            ),
+            ("rotation", ComponentValue::f64(0.0).unwrap()),
+            (
+                "scale",
+                ComponentValue::map([
+                    ("x", ComponentValue::f64(1.0).unwrap()),
+                    ("y", ComponentValue::f64(1.0).unwrap()),
+                ]),
+            ),
+        ]),
+    )
 }
 
 fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {

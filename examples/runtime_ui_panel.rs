@@ -44,6 +44,7 @@ fn setup_scene(
 
     commands.spawn((
         Name::new("camera"),
+        Transform2d::default(),
         Camera2d {
             clear_color: Some(Color::rgb(0.06, 0.07, 0.08)),
             viewport_height: 540.0,

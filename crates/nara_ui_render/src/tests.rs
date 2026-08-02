@@ -14,6 +14,7 @@ use nara_image::{
 };
 use nara_material::SamplerDescriptor;
 use nara_render::{Camera2d, ViewportRect};
+use nara_transform::{Transform2d, TransformPlugin};
 use nara_ui::{UiNode, UiPanel, UiRect, UiRoot, UiStyle};
 
 use crate::{
@@ -224,6 +225,7 @@ fn ui_app() -> App {
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
         nara_hierarchy::HierarchyPlugin,
+        TransformPlugin,
         nara_render::RenderPlugin,
         nara_input::InputPlugin,
         nara_image::ImagePreparePlugin,
@@ -233,10 +235,13 @@ fn ui_app() -> App {
     .unwrap();
     app.world_mut()
         .expect("app should allow world mutation")
-        .spawn(Camera2d {
-            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-            ..Camera2d::default()
-        });
+        .spawn((
+            Camera2d {
+                viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
     app
 }
 

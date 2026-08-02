@@ -4,12 +4,13 @@ use nara::ecs as bevy_ecs;
 use nara::{
     app::RuntimeFaultReporter,
     ecs::{
-        Component, Entity, LifecycleFreeInsertionPlan, With, Without, error::BevyError,
-        prepare_lifecycle_free_despawn, system::SystemParam,
+        Component, Entity, LifecycleFreeInsertionPlan, Or, With, Without, entity::EntityHashSet,
+        error::BevyError, prepare_lifecycle_free_despawn, system::SystemParam,
     },
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
+    hierarchy::Parent,
     identity::{EntityLookup, TombstoneCause, WorldIdentityDomain, spawn_identity_entity},
-    prelude::{Commands, FixedTime, Query, Res, ResMut, Vec2, World},
+    prelude::{Commands, FixedTime, Query, Res, ResMut, Transform2d, Vec2, World},
     scene::{SceneEntitySource, retire_and_despawn_scene_entity},
 };
 
@@ -24,6 +25,116 @@ use crate::{
     },
     snapshot::WaveOutcome,
 };
+
+type SpatialRoleEntity<'a> = (
+    Entity,
+    Option<&'a Player>,
+    Option<&'a Enemy>,
+    Option<&'a Projectile>,
+    Option<&'a mut Transform2d>,
+);
+type SpatialRoleFilter = Or<(With<Player>, With<Enemy>, With<Projectile>)>;
+
+pub(crate) fn bootstrap_role_transforms(world: &mut World) -> Result<(), BevyError> {
+    if nara::hierarchy::__private::completed_topology_generation(world).is_none() {
+        return Err(BevyError::error(
+            ReferenceSimulationError::InvalidSpatialHierarchy,
+        ));
+    }
+
+    let mut roles = world.query_filtered::<
+        (
+            Entity,
+            Option<&Player>,
+            Option<&Enemy>,
+            Option<&Projectile>,
+        ),
+        Or<(With<Player>, With<Enemy>, With<Projectile>)>,
+    >();
+    let mut projected = Vec::new();
+    for (entity, player, enemy, projectile) in roles.iter(world) {
+        if projected.len() >= MAX_WAVE_SCENE_ENTITIES {
+            return Err(BevyError::error(
+                ReferenceSimulationError::TooManySceneEntities,
+            ));
+        }
+        if let Some(transform) = projected_role_transform(player, enemy, projectile) {
+            projected.push((entity, transform));
+        }
+    }
+    projected.sort_unstable_by_key(|(entity, _)| entity.to_bits());
+
+    let mut identity_ancestors = EntityHashSet::default();
+    for (entity, _) in &projected {
+        let mut path = EntityHashSet::default();
+        let mut cursor = *entity;
+        while let Some(parent) = world.get::<Parent>(cursor).map(Parent::parent) {
+            if !path.insert(cursor) || world.get_entity(parent).is_err() {
+                return Err(BevyError::error(
+                    ReferenceSimulationError::InvalidSpatialHierarchy,
+                ));
+            }
+            if world.get::<Transform2d>(parent).is_none() {
+                identity_ancestors.insert(parent);
+                if projected.len().saturating_add(identity_ancestors.len())
+                    > MAX_WAVE_SCENE_ENTITIES
+                {
+                    return Err(BevyError::error(
+                        ReferenceSimulationError::TooManySceneEntities,
+                    ));
+                }
+            }
+            cursor = parent;
+        }
+    }
+
+    let mut identity_ancestors = identity_ancestors.into_iter().collect::<Vec<_>>();
+    identity_ancestors.sort_unstable_by_key(|entity| entity.to_bits());
+    for entity in identity_ancestors {
+        world.entity_mut(entity).insert(Transform2d::IDENTITY);
+    }
+    for (entity, transform) in projected {
+        world.entity_mut(entity).insert(transform);
+    }
+    Ok(())
+}
+
+pub(crate) fn project_role_transforms(
+    mut commands: Commands,
+    mut entities: Query<SpatialRoleEntity<'_>, SpatialRoleFilter>,
+) {
+    for (entity, player, enemy, projectile, current) in &mut entities {
+        let Some(projected) = projected_role_transform(player, enemy, projectile) else {
+            continue;
+        };
+
+        if let Some(mut current) = current {
+            if *current != projected {
+                *current = projected;
+            }
+        } else {
+            commands.entity(entity).insert(projected);
+        }
+    }
+}
+
+fn projected_role_transform(
+    player: Option<&Player>,
+    enemy: Option<&Enemy>,
+    projectile: Option<&Projectile>,
+) -> Option<Transform2d> {
+    if let Some(player) = player {
+        Some(Transform2d::from_translation(player.position))
+    } else if let Some(enemy) = enemy {
+        Some(Transform2d::from_translation(enemy.position))
+    } else {
+        projectile.map(|projectile| Transform2d {
+            translation: projectile.position,
+            rotation: projectile.velocity.y.atan2(projectile.velocity.x),
+            ..Transform2d::IDENTITY
+        })
+    }
+}
 
 pub(crate) fn move_project_players(mut players: Query<&mut Player, With<SceneEntitySource>>) {
     for mut player in &mut players {
@@ -1118,6 +1229,7 @@ enum ReferenceSimulationError {
     OrphanProjectileIdentity,
     TooManyEnemies,
     TooManyProjectiles,
+    InvalidSpatialHierarchy,
 }
 
 impl fmt::Display for ReferenceSimulationError {
@@ -1158,6 +1270,9 @@ impl fmt::Display for ReferenceSimulationError {
             }
             Self::TooManyEnemies => "reference wave enemy limit was exceeded",
             Self::TooManyProjectiles => "reference wave projectile limit was exceeded",
+            Self::InvalidSpatialHierarchy => {
+                "reference game spatial hierarchy is incomplete or invalid"
+            }
         })
     }
 }

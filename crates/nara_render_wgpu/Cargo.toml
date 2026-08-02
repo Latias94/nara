@@ -23,7 +23,9 @@ wgpu.workspace = true
 
 [dev-dependencies]
 nara_core.workspace = true
+nara_hierarchy.workspace = true
 nara_reflect.workspace = true
+nara_transform.workspace = true
 nara_ui.workspace = true
 raw-window-handle.workspace = true
 

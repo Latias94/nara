@@ -19,6 +19,9 @@ nara_reflect.workspace = true
 nara_render.workspace = true
 serde = { workspace = true, optional = true }
 
+[dev-dependencies]
+nara_transform.workspace = true
+
 [features]
 default = []
 serde = [

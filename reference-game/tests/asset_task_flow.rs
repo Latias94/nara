@@ -5,7 +5,10 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use nara::{advanced_prelude::*, asset::AssetPlugin, reflect::ComponentRegistryPlugin};
+use nara::{
+    advanced_prelude::*, asset::AssetPlugin, hierarchy::HierarchyPlugin,
+    reflect::ComponentRegistryPlugin, transform::TransformPlugin,
+};
 
 const TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const TEXTURE_BYTES: &[u8] = include_bytes!("../assets/textures/player.png");
@@ -29,12 +32,17 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
         ComponentRegistryPlugin,
         TaskPlugin::default(),
         AssetPlugin,
+        HierarchyPlugin,
+        TransformPlugin,
         RenderPlugin,
         ImagePreparePlugin,
+    ))
+    .unwrap();
+    app.add_plugin(
         ImagePlugin::with_limits(limits)
             .unwrap()
             .with_source_directory(image_source_directory(temp.path())),
-    ))
+    )
     .unwrap();
     app.world_mut()
         .unwrap()

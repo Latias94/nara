@@ -13,6 +13,7 @@ nara_ecs.workspace = true
 nara_hierarchy.workspace = true
 nara_reflect.workspace = true
 serde = { workspace = true, optional = true }
+thiserror.workspace = true
 
 [features]
 default = []

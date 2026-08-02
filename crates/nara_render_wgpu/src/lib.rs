@@ -587,7 +587,10 @@ mod tests {
             return;
         }
         injection.0 = true;
-        commands.spawn(nara_render::Camera2d::default());
+        commands.spawn((
+            nara_render::Camera2d::default(),
+            nara_transform::Transform2d::default(),
+        ));
     }
 
     #[test]
@@ -599,6 +602,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_transform::TransformPlugin,
             nara_render::RenderPlugin,
             WgpuRenderPlugin,
         ))
@@ -623,6 +628,8 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((
                 nara_reflect::ComponentRegistryPlugin,
+                nara_hierarchy::HierarchyPlugin,
+                nara_transform::TransformPlugin,
                 nara_render::RenderPlugin,
                 WgpuRenderPlugin,
             ))
@@ -638,6 +645,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_transform::TransformPlugin,
             nara_render::RenderPlugin,
             WgpuRenderPlugin,
         ))
@@ -659,6 +668,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_transform::TransformPlugin,
             nara_render::RenderPlugin,
             WgpuRenderPlugin,
         ))
@@ -691,6 +702,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_transform::TransformPlugin,
             nara_window::WindowPlugin::default(),
             nara_render::RenderPlugin,
             WgpuRenderPlugin,
@@ -698,9 +711,10 @@ mod tests {
         .unwrap();
         app.insert_resource(SecondCameraInjection::default())
             .unwrap();
-        app.world_mut()
-            .unwrap()
-            .spawn(nara_render::Camera2d::default());
+        app.world_mut().unwrap().spawn((
+            nara_render::Camera2d::default(),
+            nara_transform::Transform2d::default(),
+        ));
         app.add_systems(
             CoreStage::Render,
             inject_second_camera_after_capture
@@ -747,6 +761,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_transform::TransformPlugin,
             nara_render::RenderPlugin,
             WgpuRenderPlugin,
         ))

@@ -11,12 +11,14 @@ nara_app.workspace = true
 nara_asset.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
+nara_hierarchy.workspace = true
 nara_image.workspace = true
 nara_material.workspace = true
 nara_render.workspace = true
 nara_sprite.workspace = true
 nara_tilemap.workspace = true
 nara_transform.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 nara_reflect.workspace = true

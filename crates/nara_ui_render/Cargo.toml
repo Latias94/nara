@@ -20,3 +20,4 @@ nara_ui.workspace = true
 nara_hierarchy.workspace = true
 nara_input.workspace = true
 nara_reflect.workspace = true
+nara_transform.workspace = true

@@ -264,42 +264,49 @@ fn strict_content_loader_rejects_a_symlinked_source_before_publication() {
 }
 
 #[test]
-fn parented_transform_and_visibility_content_fail_closed() {
+fn parented_transform_loads_while_inherited_visibility_remains_fail_closed() {
     let transform_project = TestProject::with_prefab_startup();
     let (candidate, plan, root) = transform_project.candidate_plan_and_root();
-    let parent = SceneEntityRecord::new(scene_id("parent"));
+    let transform_record = |x: f64, y: f64| {
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([
+                (
+                    "translation",
+                    ComponentValue::map([
+                        ("x", ComponentValue::f64(x).unwrap()),
+                        ("y", ComponentValue::f64(y).unwrap()),
+                    ]),
+                ),
+                ("rotation", ComponentValue::f64(0.0).unwrap()),
+                (
+                    "scale",
+                    ComponentValue::map([
+                        ("x", ComponentValue::f64(1.0).unwrap()),
+                        ("y", ComponentValue::f64(1.0).unwrap()),
+                    ]),
+                ),
+            ]),
+        )
+    };
+    let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
+    let parent = SceneEntityRecord::new(scene_id("parent"))
+        .with_component(transform_id.clone(), transform_record(10.0, 20.0));
     let child = SceneEntityRecord::new(scene_id("child"))
         .with_parent(scene_id("parent"))
-        .with_component(
-            ComponentTypeId::new("nara.transform.Transform2d"),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::map([
-                    (
-                        "translation",
-                        ComponentValue::map([
-                            ("x", ComponentValue::f64(0.0).unwrap()),
-                            ("y", ComponentValue::f64(0.0).unwrap()),
-                        ]),
-                    ),
-                    ("rotation", ComponentValue::f64(0.0).unwrap()),
-                    (
-                        "scale",
-                        ComponentValue::map([
-                            ("x", ComponentValue::f64(1.0).unwrap()),
-                            ("y", ComponentValue::f64(1.0).unwrap()),
-                        ]),
-                    ),
-                ]),
-            ),
-        );
+        .with_component(transform_id.clone(), transform_record(3.0, 4.0));
     transform_project.write_scene_source(&SceneDocument::new([parent, child]));
     let loader = ProjectContentLoader::new(root).unwrap();
-    let error = loader.load(&candidate, &plan).unwrap_err();
-    assert_eq!(
-        error.kind(),
-        ProjectContentErrorKind::UnsupportedHierarchySemantics
-    );
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+    let expanded = snapshot.expanded_startup_scene();
+    let child = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("child"))
+        .unwrap();
+    assert_eq!(child.parent.as_ref(), Some(&scene_id("parent")));
+    assert!(child.components.contains_key(&transform_id));
+    drop(snapshot);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 
     let visibility_project = TestProject::with_prefab_startup();

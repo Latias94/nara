@@ -1495,6 +1495,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_reflect",
  "nara_transform",
  "nara_window",
@@ -1564,12 +1565,14 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_image",
  "nara_material",
  "nara_render",
  "nara_sprite",
  "nara_tilemap",
  "nara_transform",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1624,6 +1627,7 @@ dependencies = [
  "nara_hierarchy",
  "nara_reflect",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

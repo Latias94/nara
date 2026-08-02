@@ -15,7 +15,7 @@ use nara::{
     ProductRecipe, ProductRecipeError, SchemaContribution,
     app::{
         PluginCategory, PluginDeclaration, PluginDefinition, PluginError, PluginId,
-        PluginPreflightContext, PluginSchemaProviderId,
+        PluginPreflightContext, PluginSchemaProviderId, StartupStage,
     },
     ecs::{SystemSet, schedule::IntoScheduleConfigs},
     fs::DirectoryCapability,
@@ -32,8 +32,8 @@ use nara::{
     },
     project_host::{HeadlessRun, HeadlessRunIntent},
     reflect::{
-        COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentCatalogFileLimits, ComponentCodecError,
-        ComponentFieldPath, ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaOwnerId,
+        ComponentCatalogFileLimits, ComponentCodecError, ComponentFieldPath,
+        ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaOwnerId,
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     },
@@ -52,9 +52,7 @@ pub use resources::{
 };
 pub use snapshot::{EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot};
 #[cfg(feature = "desktop")]
-pub use ui::{
-    REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, ReferenceHudProjection,
-};
+pub use ui::{REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, ReferenceHudProjection};
 
 pub const REFERENCE_GAME_PLUGIN_ID: PluginId = PluginId::new("reference-game.gameplay");
 pub const REFERENCE_WAVE_PLUGIN_ID: PluginId = PluginId::new("reference-game.wave");
@@ -76,9 +74,13 @@ pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
         register_reference_game_components,
     )
     .with_predecessor(reference_game_schema_v2);
+const REFERENCE_GAME_REQUIREMENTS: &[PluginId] = &[
+    nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID,
+    nara::transform::TRANSFORM_PLUGIN_ID,
+];
 pub const REFERENCE_GAME_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_GAME_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .requires_plugins(REFERENCE_GAME_REQUIREMENTS)
         .provides_schema(&[REFERENCE_GAME_SCHEMA_PROVIDER_ID]);
 const REFERENCE_WAVE_REQUIREMENTS: &[PluginId] = &[
     REFERENCE_GAME_PLUGIN_ID,
@@ -99,6 +101,12 @@ const REFERENCE_PROJECT_OUTCOME_DECLARATION: PluginDeclaration =
 enum ReferenceWaveCaptureSet {
     Snapshot,
     Presentation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+enum ReferenceSpatialSet {
+    Mutate,
+    Project,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -132,7 +140,24 @@ impl Plugin for ReferenceGamePlugin {
             REFERENCE_GAME_PLUGIN_ID,
             REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
             &REFERENCE_GAME_SCHEMA_PROVIDER,
-        )
+        )?;
+        app.configure_sets(
+            CoreStage::FixedUpdate,
+            (ReferenceSpatialSet::Mutate, ReferenceSpatialSet::Project)
+                .chain()
+                .in_set(FixedUpdateSet::Simulate),
+        )?
+        .add_systems(
+            StartupStage::Tooling,
+            systems::bootstrap_role_transforms
+                .after(nara::hierarchy::__private::HierarchySet::ValidateAndComplete)
+                .before(nara::transform::__private::TransformSet::Propagate),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            systems::project_role_transforms.in_set(ReferenceSpatialSet::Project),
+        )?;
+        Ok(())
     }
 }
 
@@ -191,7 +216,7 @@ impl Plugin for ReferenceWavePlugin {
                 )
                     .chain()
                     .after(GameplayCommandSet::Consume)
-                    .in_set(FixedUpdateSet::Simulate),
+                    .in_set(ReferenceSpatialSet::Mutate),
             )?
             .add_systems(
                 CoreStage::FixedUpdate,
@@ -219,7 +244,7 @@ impl Plugin for ReferenceProjectOutcomePlugin {
                     systems::tick_project_weapons,
                 )
                     .chain()
-                    .in_set(FixedUpdateSet::Simulate),
+                    .in_set(ReferenceSpatialSet::Mutate),
             )?
             .add_systems(
                 CoreStage::FixedUpdate,
@@ -243,8 +268,7 @@ pub fn advanced_project_outcome_plugin_definition() -> PluginDefinition {
 }
 
 fn reference_game_contribution()
-    -> Result<SchemaContribution<ReferenceGamePlugin>, ProductRecipeError>
-{
+-> Result<SchemaContribution<ReferenceGamePlugin>, ProductRecipeError> {
     SchemaContribution::<ReferenceGamePlugin>::for_default([REFERENCE_GAME_SCHEMA_PROVIDER])
 }
 
@@ -377,14 +401,20 @@ pub fn wave_desktop_intent() -> DesktopRunIntent {
 /// This helper intentionally keeps one-shot plugin definitions out of that ordinary path.
 #[cfg(feature = "desktop")]
 #[doc(hidden)]
-pub fn advanced_wave_desktop_intent_after<P: Plugin>(definition: PluginDefinition) -> DesktopRunIntent {
+pub fn advanced_wave_desktop_intent_after<P: Plugin>(
+    definition: PluginDefinition,
+) -> DesktopRunIntent {
     DesktopRunIntent::new()
         .with_profile("desktop")
         .configure(nara::image::plugin(ImageImportLimits::default()))
         .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(PluginDefinition::for_default::<ReferenceGamePlugin>())
+        .insert_after::<GameplayCommandPlugin>(
+            PluginDefinition::for_default::<ReferenceGamePlugin>(),
+        )
         .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
-        .insert_after::<ReferenceWavePlugin>(PluginDefinition::for_default::<ReferenceDesktopPlugin>())
+        .insert_after::<ReferenceWavePlugin>(
+            PluginDefinition::for_default::<ReferenceDesktopPlugin>(),
+        )
         .insert_after::<P>(definition)
         .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
 }
@@ -393,8 +423,7 @@ pub fn advanced_wave_desktop_intent_after<P: Plugin>(definition: PluginDefinitio
 #[cfg(feature = "editor")]
 #[must_use]
 pub fn wave_editor_intent() -> EditorProjectIntent {
-    EditorProjectIntent::new()
-        .with_recipe(wave_recipe_or_panic())
+    EditorProjectIntent::new().with_recipe(wave_recipe_or_panic())
 }
 
 /// Builds an explicit raw extension path for Nara-owned Editor probes and regression tests.
@@ -402,11 +431,15 @@ pub fn wave_editor_intent() -> EditorProjectIntent {
 /// Normal Editor sessions must use [`wave_editor_intent`], which carries the ordinary wave recipe.
 #[cfg(feature = "editor")]
 #[doc(hidden)]
-pub fn advanced_wave_editor_intent_after<P: Plugin>(definition: PluginDefinition) -> EditorProjectIntent {
+pub fn advanced_wave_editor_intent_after<P: Plugin>(
+    definition: PluginDefinition,
+) -> EditorProjectIntent {
     EditorProjectIntent::new()
         .configure(nara::image::plugin(ImageImportLimits::default()))
         .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(PluginDefinition::for_default::<ReferenceGamePlugin>())
+        .insert_after::<GameplayCommandPlugin>(
+            PluginDefinition::for_default::<ReferenceGamePlugin>(),
+        )
         .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
         .insert_after::<P>(definition)
         .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
@@ -430,7 +463,9 @@ pub fn advanced_wave_headless_intent_after<P: Plugin>(
     HeadlessRunIntent::new(maximum_fixed_ticks)
         .configure(nara::image::plugin(ImageImportLimits::default()))
         .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(PluginDefinition::for_default::<ReferenceGamePlugin>())
+        .insert_after::<GameplayCommandPlugin>(
+            PluginDefinition::for_default::<ReferenceGamePlugin>(),
+        )
         .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
         .insert_after::<P>(definition)
         .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
@@ -448,8 +483,7 @@ fn wave_headless_intent_with_completed_tick_observer(
 }
 
 fn base_wave_headless_intent(maximum_fixed_ticks: NonZeroU32) -> HeadlessRunIntent<WaveSnapshot> {
-    HeadlessRunIntent::new(maximum_fixed_ticks)
-        .with_recipe(wave_recipe_or_panic())
+    HeadlessRunIntent::new(maximum_fixed_ticks).with_recipe(wave_recipe_or_panic())
 }
 
 /// Returns the semantic movement task bundled into the first headless playable.
@@ -552,7 +586,9 @@ pub fn advanced_project_headless_intent_after<P: Plugin>(
     HeadlessRunIntent::new(fixed_ticks)
         .configure(nara::image::plugin(ImageImportLimits::default()))
         .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(PluginDefinition::for_default::<ReferenceGamePlugin>())
+        .insert_after::<GameplayCommandPlugin>(
+            PluginDefinition::for_default::<ReferenceGamePlugin>(),
+        )
         .insert_after::<ReferenceGamePlugin>(advanced_project_outcome_plugin_definition())
         .insert_after::<P>(definition)
         .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)

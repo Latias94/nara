@@ -110,6 +110,10 @@ impl ExtractedSprites {
         self.sprites.push(sprite);
     }
 
+    pub(crate) fn replace(&mut self, candidate: &mut Vec<ExtractedSprite>) {
+        std::mem::swap(&mut self.sprites, candidate);
+    }
+
     #[must_use]
     pub fn as_slice(&self) -> &[ExtractedSprite] {
         &self.sprites

@@ -163,7 +163,7 @@ fn preflight_scene_with_context_options(
     }
 
     detect_parent_cycles(document, &mut diagnostics, operation_index);
-    if let Some(entity_id) = first_deferred_hierarchy_projection_entity(document, registry) {
+    if let Some(entity_id) = first_unavailable_hierarchy_projection_entity(document, registry) {
         push_with_operation_index(
             &mut diagnostics,
             with_public_locator(
@@ -312,15 +312,12 @@ fn preflight_scene_with_context_options(
     }
 }
 
-pub(crate) fn first_deferred_hierarchy_projection_entity<'document>(
+pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(
     document: &'document SceneDocument,
     registry: &ComponentRegistry,
 ) -> Option<&'document SceneEntityId> {
-    let requires_deferred_projection = |component_id: &ComponentTypeId| {
-        matches!(
-            component_id.as_str(),
-            "nara.transform.Transform2d" | "nara.scene.Visibility"
-        ) && registry.schema(component_id).is_some()
+    let requires_unavailable_projection = |component_id: &ComponentTypeId| {
+        component_id.as_str() == "nara.scene.Visibility" && registry.schema(component_id).is_some()
     };
     let by_id = document
         .entities
@@ -331,12 +328,17 @@ pub(crate) fn first_deferred_hierarchy_projection_entity<'document>(
     document.entities.iter().find_map(|entity| {
         let parent_id = entity.parent.as_ref()?;
         let parent = by_id.get(parent_id).copied();
-        let requires_deferred_projection =
-            entity.components.keys().any(requires_deferred_projection)
-                || parent.is_some_and(|parent| {
-                    parent.components.keys().any(requires_deferred_projection)
-                });
-        requires_deferred_projection.then_some(&entity.id)
+        let requires_unavailable_projection = entity
+            .components
+            .keys()
+            .any(requires_unavailable_projection)
+            || parent.is_some_and(|parent| {
+                parent
+                    .components
+                    .keys()
+                    .any(requires_unavailable_projection)
+            });
+        requires_unavailable_projection.then_some(&entity.id)
     })
 }
 

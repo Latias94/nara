@@ -20,7 +20,9 @@ serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 image.workspace = true
+nara_hierarchy.workspace = true
 nara_reflect.workspace = true
+nara_transform.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 

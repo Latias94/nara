@@ -7,13 +7,16 @@ use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext, Runt
 use nara_asset::Handle;
 pub use nara_core::Color;
 use nara_core::Vec2;
-use nara_ecs::{Component, Entity, Query, Res, ResMut, Resource};
+use nara_ecs::{
+    Component, Entity, Query, Res, ResMut, Resource, error::BevyError,
+    schedule::IntoScheduleConfigs,
+};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
-use nara_transform::Transform2d;
+use nara_transform::{GlobalTransform2d, Transform2d};
 use nara_window::{PresentMode, PrimaryWindowId, Window, WindowId, WindowResolution};
 
 pub use pass_plan::{
@@ -27,6 +30,17 @@ pub use prepare::{
     RenderPrepareInvalidationReason, RenderPrepareInvalidations, RenderPrepareStatus,
     RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
 };
+
+#[doc(hidden)]
+pub mod __private {
+    use nara_ecs::SystemSet;
+
+    /// Provisional first-party ordering boundary after camera extraction completes.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+    pub enum RenderExtractSet {
+        Views,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -207,6 +221,10 @@ impl ExtractedViews {
         self.views.push(view);
     }
 
+    fn replace(&mut self, candidate: &mut Vec<ExtractedView>) {
+        std::mem::swap(&mut self.views, candidate);
+    }
+
     #[must_use]
     pub fn as_slice(&self) -> &[ExtractedView] {
         &self.views
@@ -221,6 +239,26 @@ impl ExtractedViews {
     pub fn len(&self) -> usize {
         self.views.len()
     }
+}
+
+#[derive(Debug, Default, Resource)]
+struct ExtractedViewScratch(Vec<ExtractedView>);
+
+/// Failure to publish the world-space camera projection for one frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum RenderViewExtractionError {
+    #[error("the completed 2D transform projection is unavailable")]
+    ProjectionIncomplete,
+    #[error("camera entity {entity:?} is missing its authored Transform2d")]
+    MissingLocalTransform { entity: Entity },
+    #[error("camera entity {entity:?} is missing its completed GlobalTransform2d")]
+    MissingGlobalTransform { entity: Entity },
+    #[error("camera entity {entity:?} has a non-finite completed transform")]
+    NonFiniteTransform { entity: Entity },
+    #[error("camera entity {entity:?} has a singular completed linear transform")]
+    SingularTransform { entity: Entity },
+    #[error("camera entity {entity:?} has a non-identity completed linear transform")]
+    UnsupportedLinearTransform { entity: Entity },
 }
 
 /// Immutable window state admitted for one render-frame submission.
@@ -541,9 +579,13 @@ pub const RENDER_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinitio
         validate_render_components,
         register_render_components,
     );
+const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
+    nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
+    nara_transform::TRANSFORM_PLUGIN_ID,
+];
 pub const RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
-        .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .requires_plugins(RENDER_PLUGIN_REQUIREMENTS)
         .provides_schema(&[RENDER_SCHEMA_PROVIDER_ID]);
 
 impl Plugin for RenderPlugin {
@@ -573,11 +615,17 @@ impl Plugin for RenderPlugin {
         )?;
         app.init_resource::<ClearColor>()?;
         app.init_resource::<ExtractedViews>()?;
+        app.init_resource::<ExtractedViewScratch>()?;
         app.init_resource::<RenderFrame>()?;
         app.init_resource::<FrameStats>()?;
         app.init_resource::<RenderBackendStatus>()?;
         app.init_resource::<RenderPrepareInvalidations>()?;
-        app.add_systems(CoreStage::Extract, extract_views)?;
+        app.add_systems(
+            CoreStage::Extract,
+            extract_views
+                .after(nara_transform::__private::TransformSet::Propagate)
+                .in_set(__private::RenderExtractSet::Views),
+        )?;
         app.add_systems(CoreStage::Render, begin_render_frame)?;
         Ok(())
     }
@@ -810,20 +858,48 @@ fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, Comp
         .transpose()
 }
 
-pub fn extract_views(
+fn extract_views(
     mut frame: ResMut<RenderFrame>,
     mut extracted_views: ResMut<ExtractedViews>,
+    mut scratch: ResMut<ExtractedViewScratch>,
     clear_color: Res<ClearColor>,
+    completed_projection: Option<Res<nara_transform::__private::CompletedTransformProjection>>,
+    completed_hierarchy: Option<Res<nara_hierarchy::__private::CompletedHierarchyProjection>>,
     primary_window_id: Option<Res<PrimaryWindowId>>,
     windows: Query<&Window>,
-    cameras: Query<(Entity, &Camera2d, Option<&Transform2d>)>,
-) {
-    frame.begin_extract();
-    extracted_views.clear();
+    cameras: Query<(
+        Entity,
+        &Camera2d,
+        Option<&Transform2d>,
+        Option<&GlobalTransform2d>,
+    )>,
+) -> Result<(), BevyError> {
+    let completed_projection = completed_projection
+        .ok_or(RenderViewExtractionError::ProjectionIncomplete)
+        .map_err(BevyError::error)?;
+    let completed_hierarchy = completed_hierarchy
+        .ok_or(RenderViewExtractionError::ProjectionIncomplete)
+        .map_err(BevyError::error)?;
+    if completed_projection.hierarchy_generation() != completed_hierarchy.generation() {
+        return Err(BevyError::error(
+            RenderViewExtractionError::ProjectionIncomplete,
+        ));
+    }
+    scratch.0.clear();
 
     let primary_window_id = primary_window_id.map(|resource| resource.0);
 
-    for (camera_entity, camera, transform) in cameras.iter() {
+    for (camera_entity, camera, local, global) in cameras.iter() {
+        local
+            .ok_or(RenderViewExtractionError::MissingLocalTransform {
+                entity: camera_entity,
+            })
+            .map_err(BevyError::error)?;
+        let global = global
+            .ok_or(RenderViewExtractionError::MissingGlobalTransform {
+                entity: camera_entity,
+            })
+            .map_err(BevyError::error)?;
         let Some(viewport) = camera
             .viewport
             .or_else(|| viewport_for_target(camera.target, primary_window_id, &windows))
@@ -831,16 +907,51 @@ pub fn extract_views(
             continue;
         };
 
-        extracted_views.push(ExtractedView {
+        let world_position =
+            camera_world_position(camera_entity, global).map_err(BevyError::error)?;
+        scratch.0.push(ExtractedView {
             camera_entity,
             target: camera.target,
             viewport,
-            world_position: transform.map_or(Vec2::ZERO, |transform| transform.translation),
+            world_position,
             viewport_height: camera.viewport_height,
             order: camera.order,
             clear_color: camera.clear_color.unwrap_or(clear_color.0),
         });
     }
+
+    scratch
+        .0
+        .sort_unstable_by_key(|view| (view.order, view.camera_entity.to_bits()));
+    extracted_views.replace(&mut scratch.0);
+    frame.begin_extract();
+    Ok(())
+}
+
+const CAMERA_LINEAR_TOLERANCE: f32 = 1.0e-5;
+
+fn camera_world_position(
+    entity: Entity,
+    global: &GlobalTransform2d,
+) -> Result<Vec2, RenderViewExtractionError> {
+    let matrix = global.matrix();
+    if !matrix.is_finite() {
+        return Err(RenderViewExtractionError::NonFiniteTransform { entity });
+    }
+
+    let x_axis = matrix.x_axis.truncate();
+    let y_axis = matrix.y_axis.truncate();
+    let determinant = x_axis.perp_dot(y_axis);
+    if determinant.abs() <= CAMERA_LINEAR_TOLERANCE {
+        return Err(RenderViewExtractionError::SingularTransform { entity });
+    }
+    if !x_axis.abs_diff_eq(Vec2::X, CAMERA_LINEAR_TOLERANCE)
+        || !y_axis.abs_diff_eq(Vec2::Y, CAMERA_LINEAR_TOLERANCE)
+    {
+        return Err(RenderViewExtractionError::UnsupportedLinearTransform { entity });
+    }
+
+    Ok(matrix.transform_point2(Vec2::ZERO))
 }
 
 pub fn begin_render_frame(mut frame: ResMut<RenderFrame>) {
@@ -865,12 +976,47 @@ mod tests {
     use std::time::Duration;
 
     use nara_app::{
-        App, RuntimeAdmissionReservation, RuntimeCandidateRetirementState, RuntimeClosePolicy,
-        RuntimeObligationLedger,
+        App, CoreStage, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
+        RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
     };
     use nara_asset::AssetId;
+    use nara_ecs::{Resource, World, schedule::IntoScheduleConfigs};
+    use nara_hierarchy::{HierarchyConstructionWriter, HierarchyPlugin};
     use nara_reflect::ComponentRegistryPlugin;
+    use nara_transform::TransformPlugin;
     use nara_window::WindowPlugin;
+
+    fn render_app(with_window: bool) -> App {
+        let mut app = App::new();
+        app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
+            .unwrap();
+        if with_window {
+            app.add_plugin(WindowPlugin::default()).unwrap();
+        }
+        app.add_plugin(RenderPlugin).unwrap();
+        app
+    }
+
+    fn start_runtime(app: App) -> RuntimeInstance {
+        RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                app.seal().unwrap(),
+                RuntimeObligationLedger::new(),
+                RuntimeClosePolicy::default(),
+            )
+            .unwrap()
+            .complete_startup()
+            .unwrap()
+            .promote()
+    }
+
+    fn retire_runtime(runtime: RuntimeInstance) {
+        let mut retirement = runtime.begin_retirement();
+        while retirement.retirement_state() != RuntimeCandidateRetirementState::Retired {
+            retirement.drive_retirement();
+        }
+    }
 
     #[test]
     fn default_camera_targets_primary_window() {
@@ -1014,13 +1160,10 @@ mod tests {
 
     #[test]
     fn extracts_primary_window_camera_view() {
-        let mut app = App::new();
-        app.add_plugin(ComponentRegistryPlugin).unwrap();
-        app.add_plugin(WindowPlugin::default()).unwrap();
-        app.add_plugin(RenderPlugin).unwrap();
+        let mut app = render_app(true);
         app.world_mut()
             .expect("app should allow world mutation")
-            .spawn(Camera2d::default());
+            .spawn((Camera2d::default(), Transform2d::default()));
 
         app.run_once(Duration::ZERO).unwrap();
 
@@ -1069,17 +1212,18 @@ mod tests {
 
     #[test]
     fn extracts_explicit_image_target_view_without_window() {
-        let mut app = App::new();
-        app.add_plugin(ComponentRegistryPlugin).unwrap();
-        app.add_plugin(RenderPlugin).unwrap();
+        let mut app = render_app(false);
         app.world_mut()
             .expect("app should allow world mutation")
-            .spawn(Camera2d {
-                target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
-                viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-                clear_color: Some(Color::WHITE),
-                ..Camera2d::default()
-            });
+            .spawn((
+                Camera2d {
+                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
+                    clear_color: Some(Color::WHITE),
+                    ..Camera2d::default()
+                },
+                Transform2d::default(),
+            ));
 
         app.run_once(Duration::ZERO).unwrap();
 
@@ -1094,9 +1238,7 @@ mod tests {
 
     #[test]
     fn extraction_clears_stale_views_when_camera_or_window_is_missing() {
-        let mut app = App::new();
-        app.add_plugin(ComponentRegistryPlugin).unwrap();
-        app.add_plugin(RenderPlugin).unwrap();
+        let mut app = render_app(false);
         app.world_mut()
             .expect("app should allow world mutation")
             .resource_mut::<ExtractedViews>()
@@ -1113,6 +1255,269 @@ mod tests {
         app.run_once(Duration::ZERO).unwrap();
 
         assert!(app.world().resource::<ExtractedViews>().is_empty());
+    }
+
+    #[test]
+    fn parented_camera_extracts_completed_world_translation() {
+        let mut app = render_app(false);
+        let world = app.world_mut().unwrap();
+        let root = world
+            .spawn(Transform2d::from_translation(Vec2::new(100.0, 40.0)))
+            .id();
+        let camera = world
+            .spawn((
+                Camera2d {
+                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
+                    ..Camera2d::default()
+                },
+                Transform2d::from_translation(Vec2::new(10.0, -5.0)),
+            ))
+            .id();
+        HierarchyConstructionWriter::new(world)
+            .attach(camera, root)
+            .unwrap();
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let views = app.world().resource::<ExtractedViews>();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views.as_slice()[0].world_position, Vec2::new(110.0, 35.0));
+    }
+
+    #[test]
+    fn missing_camera_transform_faults_without_replacing_prior_views() {
+        let mut app = render_app(false);
+        let prior = test_extracted_view();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ExtractedViews>()
+            .push(prior);
+        app.world_mut().unwrap().spawn(Camera2d {
+            target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+            viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
+            ..Camera2d::default()
+        });
+
+        let mut runtime = start_runtime(app);
+        runtime
+            .drive(Duration::ZERO)
+            .expect_err("world-space cameras require explicit local and completed transforms");
+
+        assert_eq!(
+            runtime.world().resource::<ExtractedViews>().as_slice(),
+            &[prior]
+        );
+        retire_runtime(runtime);
+    }
+
+    #[test]
+    fn unsupported_camera_linear_transform_faults_without_partial_publication() {
+        let mut app = render_app(false);
+        let prior = test_extracted_view();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ExtractedViews>()
+            .push(prior);
+        app.world_mut().unwrap().spawn((
+            Camera2d {
+                target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
+                ..Camera2d::default()
+            },
+            Transform2d {
+                rotation: 0.25,
+                ..Transform2d::default()
+            },
+        ));
+
+        let mut runtime = start_runtime(app);
+        runtime
+            .drive(Duration::ZERO)
+            .expect_err("camera rotation must reject frame extraction");
+
+        assert_eq!(
+            runtime.world().resource::<ExtractedViews>().as_slice(),
+            &[prior]
+        );
+        retire_runtime(runtime);
+    }
+
+    #[test]
+    fn parented_camera_shear_faults_without_partial_publication() {
+        let mut app = render_app(false);
+        let prior = test_extracted_view();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ExtractedViews>()
+            .push(prior);
+        let world = app.world_mut().unwrap();
+        let parent = world
+            .spawn(Transform2d {
+                scale: Vec2::new(2.0, 1.0),
+                ..Transform2d::default()
+            })
+            .id();
+        let camera = world
+            .spawn((
+                Camera2d {
+                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
+                    ..Camera2d::default()
+                },
+                Transform2d {
+                    rotation: std::f32::consts::FRAC_PI_4,
+                    ..Transform2d::default()
+                },
+            ))
+            .id();
+        HierarchyConstructionWriter::new(world)
+            .attach(camera, parent)
+            .unwrap();
+
+        let mut runtime = start_runtime(app);
+        runtime
+            .drive(Duration::ZERO)
+            .expect_err("camera shear must reject frame extraction");
+
+        assert_eq!(
+            runtime.world().resource::<ExtractedViews>().as_slice(),
+            &[prior]
+        );
+        retire_runtime(runtime);
+    }
+
+    #[test]
+    fn missing_camera_global_transform_faults_without_replacing_prior_views() {
+        let mut app = render_app(false);
+        let prior = test_extracted_view();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ExtractedViews>()
+            .push(prior);
+        let camera = app
+            .world_mut()
+            .unwrap()
+            .spawn((
+                Camera2d {
+                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
+                    ..Camera2d::default()
+                },
+                Transform2d::default(),
+            ))
+            .id();
+        app.insert_resource(RemoveCameraGlobal(camera)).unwrap();
+        app.add_systems(
+            CoreStage::Extract,
+            remove_camera_global
+                .after(nara_transform::__private::TransformSet::Propagate)
+                .before(__private::RenderExtractSet::Views),
+        )
+        .unwrap();
+
+        let mut runtime = start_runtime(app);
+        runtime
+            .drive(Duration::ZERO)
+            .expect_err("a camera without its completed global projection must fault");
+
+        assert_eq!(
+            runtime.world().resource::<ExtractedViews>().as_slice(),
+            &[prior]
+        );
+        retire_runtime(runtime);
+    }
+
+    #[test]
+    fn camera_linear_validation_distinguishes_singular_and_non_identity() {
+        let mut app = App::new();
+        app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
+            .unwrap();
+        let (singular, rotated) = {
+            let world = app.world_mut().unwrap();
+            let singular = world
+                .spawn(Transform2d {
+                    scale: Vec2::ZERO,
+                    ..Transform2d::default()
+                })
+                .id();
+            let rotated = world
+                .spawn(Transform2d {
+                    rotation: 0.25,
+                    ..Transform2d::default()
+                })
+                .id();
+            (singular, rotated)
+        };
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(
+            camera_world_position(
+                singular,
+                app.world().get::<GlobalTransform2d>(singular).unwrap()
+            ),
+            Err(RenderViewExtractionError::SingularTransform { entity: singular })
+        );
+        assert_eq!(
+            camera_world_position(
+                rotated,
+                app.world().get::<GlobalTransform2d>(rotated).unwrap()
+            ),
+            Err(RenderViewExtractionError::UnsupportedLinearTransform { entity: rotated })
+        );
+    }
+
+    #[test]
+    fn camera_linear_validation_uses_one_fixed_engine_tolerance() {
+        let mut app = App::new();
+        app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
+            .unwrap();
+        let (within_tolerance, outside_tolerance) = {
+            let world = app.world_mut().unwrap();
+            let within_tolerance = world
+                .spawn(Transform2d {
+                    scale: Vec2::new(1.0 + CAMERA_LINEAR_TOLERANCE * 0.5, 1.0),
+                    ..Transform2d::default()
+                })
+                .id();
+            let outside_tolerance = world
+                .spawn(Transform2d {
+                    scale: Vec2::new(1.0 + CAMERA_LINEAR_TOLERANCE * 2.0, 1.0),
+                    ..Transform2d::default()
+                })
+                .id();
+            (within_tolerance, outside_tolerance)
+        };
+        app.run_once(Duration::ZERO).unwrap();
+
+        assert_eq!(
+            camera_world_position(
+                within_tolerance,
+                app.world()
+                    .get::<GlobalTransform2d>(within_tolerance)
+                    .unwrap()
+            ),
+            Ok(Vec2::ZERO)
+        );
+        assert_eq!(
+            camera_world_position(
+                outside_tolerance,
+                app.world()
+                    .get::<GlobalTransform2d>(outside_tolerance)
+                    .unwrap()
+            ),
+            Err(RenderViewExtractionError::UnsupportedLinearTransform {
+                entity: outside_tolerance,
+            })
+        );
+    }
+
+    #[derive(Resource)]
+    struct RemoveCameraGlobal(Entity);
+
+    fn remove_camera_global(world: &mut World) {
+        let camera = world.resource::<RemoveCameraGlobal>().0;
+        world.entity_mut(camera).remove::<GlobalTransform2d>();
     }
 
     #[test]

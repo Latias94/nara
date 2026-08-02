@@ -19,12 +19,14 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_render::{Camera2d, RenderImage2d, RenderTarget, ViewportRect};
+use nara_transform::{Transform2d, TransformPlugin};
 
 fn ui_app() -> App {
     let mut app = App::new();
     app.add_plugins((
         ComponentRegistryPlugin,
         nara_hierarchy::HierarchyPlugin,
+        TransformPlugin,
         nara_render::RenderPlugin,
         nara_input::InputPlugin,
         UiPlugin,
@@ -54,10 +56,13 @@ fn root_targeting_primary_view_produces_child_rectangles() {
     let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
-        .spawn(Camera2d {
-            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-            ..Camera2d::default()
-        });
+        .spawn((
+            Camera2d {
+                viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
     let root = app
         .world_mut()
         .expect("app should allow world mutation")
@@ -223,10 +228,13 @@ fn hidden_and_zero_size_nodes_do_not_hit_test() {
     let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
-        .spawn(Camera2d {
-            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-            ..Camera2d::default()
-        });
+        .spawn((
+            Camera2d {
+                viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
     let root = app
         .world_mut()
         .expect("app should allow world mutation")
@@ -262,10 +270,13 @@ fn overlapping_nodes_choose_highest_order_and_focus_on_press() {
     let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
-        .spawn(Camera2d {
-            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-            ..Camera2d::default()
-        });
+        .spawn((
+            Camera2d {
+                viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
     let root = app
         .world_mut()
         .expect("app should allow world mutation")
@@ -325,20 +336,26 @@ fn routed_pointer_hits_only_matching_view_target() {
     let second_target = render_image_target(2);
     app.world_mut()
         .expect("app should allow world mutation")
-        .spawn(Camera2d {
-            target: first_target,
-            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-            order: 0,
-            ..Camera2d::default()
-        });
+        .spawn((
+            Camera2d {
+                target: first_target,
+                viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+                order: 0,
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
     app.world_mut()
         .expect("app should allow world mutation")
-        .spawn(Camera2d {
-            target: second_target,
-            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-            order: 1,
-            ..Camera2d::default()
-        });
+        .spawn((
+            Camera2d {
+                target: second_target,
+                viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+                order: 1,
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
     let first_root = app
         .world_mut()
         .expect("app should allow world mutation")
@@ -391,10 +408,13 @@ fn pressed_node_remains_captured_until_release_after_pointer_leaves_rect() {
     let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
-        .spawn(Camera2d {
-            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-            ..Camera2d::default()
-        });
+        .spawn((
+            Camera2d {
+                viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
     let root = app
         .world_mut()
         .expect("app should allow world mutation")
@@ -453,10 +473,13 @@ fn clipped_child_does_not_hit_test_outside_parent_clip() {
     let mut app = ui_app();
     app.world_mut()
         .expect("app should allow world mutation")
-        .spawn(Camera2d {
-            viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
-            ..Camera2d::default()
-        });
+        .spawn((
+            Camera2d {
+                viewport: Some(ViewportRect::new(0, 0, 200, 100).unwrap()),
+                ..Camera2d::default()
+            },
+            Transform2d::default(),
+        ));
     let root = app
         .world_mut()
         .expect("app should allow world mutation")

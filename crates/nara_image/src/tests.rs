@@ -2779,9 +2779,13 @@ fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {
         )
         .unwrap();
     let mut app = App::new();
-    app.add_plugin(nara_reflect::ComponentRegistryPlugin)
-        .unwrap();
-    app.add_plugin(nara_render::RenderPlugin).unwrap();
+    app.add_plugins((
+        nara_reflect::ComponentRegistryPlugin,
+        nara_hierarchy::HierarchyPlugin,
+        nara_transform::TransformPlugin,
+        nara_render::RenderPlugin,
+    ))
+    .unwrap();
     app.add_plugin(ImagePreparePlugin).unwrap();
     app.world_mut().unwrap().insert_resource(server);
     app.world_mut().unwrap().insert_resource(images);
@@ -2870,6 +2874,8 @@ fn app_with_image_plugin_configuration(
         nara_reflect::ComponentRegistryPlugin,
         nara_tasks::TaskPlugin::default(),
         nara_asset::AssetPlugin,
+        nara_hierarchy::HierarchyPlugin,
+        nara_transform::TransformPlugin,
         nara_render::RenderPlugin,
         ImagePreparePlugin,
         plugin.with_source_directory(image_source_directory(asset_root)),

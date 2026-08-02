@@ -1729,9 +1729,11 @@ dependencies = [
  "nara_diagnostic",
  "nara_ecs",
  "nara_fs",
+ "nara_hierarchy",
  "nara_reflect",
  "nara_render",
  "nara_tasks",
+ "nara_transform",
  "png",
  "serde",
  "serde_json",
@@ -1815,6 +1817,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_reflect",
  "nara_transform",
  "nara_window",
@@ -1832,11 +1835,13 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_image",
  "nara_material",
  "nara_reflect",
  "nara_render",
  "nara_sprite_render",
+ "nara_transform",
  "nara_ui",
  "nara_ui_render",
  "nara_window",
@@ -1888,6 +1893,7 @@ dependencies = [
  "nara_asset",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_image",
  "nara_material",
  "nara_reflect",
@@ -1895,6 +1901,7 @@ dependencies = [
  "nara_sprite",
  "nara_tilemap",
  "nara_transform",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1962,6 +1969,7 @@ dependencies = [
  "nara_hierarchy",
  "nara_reflect",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1979,6 +1987,7 @@ dependencies = [
  "nara_material",
  "nara_reflect",
  "nara_render",
+ "nara_transform",
  "serde",
 ]
 
@@ -1997,6 +2006,7 @@ dependencies = [
  "nara_material",
  "nara_reflect",
  "nara_render",
+ "nara_transform",
  "nara_ui",
 ]
 

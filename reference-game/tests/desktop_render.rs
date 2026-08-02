@@ -13,12 +13,14 @@ use nara::{
     app::{
         RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
     },
+    hierarchy::Parent,
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     material::SamplerDescriptor,
     prelude::{FixedTime, Vec2},
     project_host::ProjectContentLoader,
     scene::spawn_scene,
     sprite_render::{ExtractedSprites, TextureUvRect},
+    transform::{GlobalTransform2d, Transform2d},
     ui_render::UiBatches,
 };
 use nara_reference_game::{Enemy, Player, ReferenceHudProjection, WaveOutcome};
@@ -86,8 +88,35 @@ fn desktop_first_frame_projects_exact_atlas_regions_before_a_fixed_tick() {
         .iter()
         .find(|sprite| sprite.entity == enemy_entity)
         .expect("the first frame must extract an enemy");
+    let player_position = world.get::<Player>(player_entity).unwrap().position;
+    let enemy_position = world.get::<Enemy>(enemy_entity).unwrap().position;
+    let enemy_parent = world
+        .get::<Parent>(enemy_entity)
+        .expect("the expanded prefab enemy should retain its runtime anchor")
+        .parent();
     let atlas_tile_size = Vec2::new(1.0 / 12.0, 1.0 / 11.0);
 
+    assert_eq!(
+        world
+            .get::<GlobalTransform2d>(player_entity)
+            .expect("startup must complete the player transform")
+            .translation(),
+        player_position,
+    );
+    assert_eq!(
+        world
+            .get::<GlobalTransform2d>(enemy_entity)
+            .expect("startup must complete the expanded enemy transform")
+            .translation(),
+        enemy_position,
+    );
+    assert_eq!(
+        world.get::<Transform2d>(enemy_parent),
+        Some(&Transform2d::IDENTITY),
+        "the prefab anchor must explicitly participate in the continuous transform chain",
+    );
+    assert_eq!(player.world_center, player_position);
+    assert_eq!(enemy.world_center, enemy_position);
     assert_eq!(
         player.texture_region,
         TextureUvRect::new(Vec2::new(0.0, 8.0 / 11.0), atlas_tile_size),
@@ -179,6 +208,11 @@ fn render_terminal(
         .iter()
         .find(|sprite| sprite.entity == player_entity)
         .expect("the player must be extracted as a sprite");
+    assert_eq!(
+        player_sprite.world_center,
+        world.get::<Player>(player_entity).unwrap().position,
+        "same-frame extraction must consume the transform projected after gameplay mutation",
+    );
     let enemy_sprite = enemy_entity.and_then(|enemy_entity| {
         extracted
             .as_slice()

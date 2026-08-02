@@ -124,11 +124,14 @@ fn spawn_desktop_view(
     atlas_texture: Handle<ImageAsset>,
 ) -> Result<(), PluginError> {
     let world = app.world_mut()?;
-    world.spawn(Camera2d {
-        viewport_height: 18.0,
-        clear_color: Some(Color::rgba(0.025, 0.035, 0.045, 1.0)),
-        ..Camera2d::default()
-    });
+    world.spawn((
+        Transform2d::default(),
+        Camera2d {
+            viewport_height: 18.0,
+            clear_color: Some(Color::rgba(0.025, 0.035, 0.045, 1.0)),
+            ..Camera2d::default()
+        },
+    ));
     spawn_arena(world, atlas_texture);
 
     let health_root = world
@@ -231,10 +234,8 @@ fn project_desktop_sprites(
     entities: Query<DesktopProjectionEntity<'_>>,
 ) {
     for (entity, player, enemy, projectile, spawn) in &entities {
-        let presentation = if let Some(player) = player {
-            Some((
-                player.position,
-                0.0,
+        let sprite = if player.is_some() {
+            Some(
                 atlas_sprite(
                     assets.atlas_texture,
                     PLAYER_ATLAS_TILE,
@@ -242,13 +243,11 @@ fn project_desktop_sprites(
                     Color::rgba(0.58, 0.84, 1.0, 1.0),
                 )
                 .with_sort_key(20),
-            ))
+            )
         } else if let Some(enemy) = enemy {
             let active =
                 spawn.is_some_and(|spawn| spawn.tick <= snapshot.tick) && enemy.hit_points > 0;
-            Some((
-                enemy.position,
-                0.0,
+            Some(
                 atlas_sprite(
                     assets.atlas_texture,
                     ENEMY_ATLAS_TILE,
@@ -260,28 +259,17 @@ fn project_desktop_sprites(
                     Color::rgba(1.0, 0.74, 0.74, 1.0),
                 )
                 .with_sort_key(10),
-            ))
+            )
         } else {
-            projectile.map(|projectile| {
-                (
-                    projectile.position,
-                    projectile.velocity.y.atan2(projectile.velocity.x),
-                    Sprite::from_color(Vec2::new(0.62, 0.24), Color::rgba(1.0, 0.86, 0.2, 1.0))
-                        .with_sort_key(30),
-                )
+            projectile.map(|_| {
+                Sprite::from_color(Vec2::new(0.62, 0.24), Color::rgba(1.0, 0.86, 0.2, 1.0))
+                    .with_sort_key(30)
             })
         };
-        let Some((position, rotation, sprite)) = presentation else {
+        let Some(sprite) = sprite else {
             continue;
         };
-        commands.entity(entity).insert((
-            Transform2d {
-                translation: position,
-                rotation,
-                ..Transform2d::IDENTITY
-            },
-            sprite,
-        ));
+        commands.entity(entity).insert(sprite);
     }
 }
 

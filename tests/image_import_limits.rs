@@ -101,6 +101,8 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         nara::reflect::ComponentRegistryPlugin,
         nara::tasks::TaskPlugin::default(),
         nara::asset::AssetPlugin,
+        nara::hierarchy::HierarchyPlugin,
+        nara::transform::TransformPlugin,
         nara::render::RenderPlugin,
         ImagePreparePlugin,
         ImagePlugin::with_limits(limits)
