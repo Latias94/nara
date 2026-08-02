@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::quad::WgpuQuadMaterialKey;
-use nara_asset::{Assets, Handle};
+use nara_asset::{AssetSlotRevision, Assets, Handle};
 use nara_image::{ImageAsset, ImageColorSpace, ImageFormat, PreparedImageResource};
 use nara_material::{AddressMode, FilterMode, SamplerDescriptor};
 use nara_render::{
@@ -163,30 +163,18 @@ impl WgpuSpriteTextureCache {
         let key = material
             .image
             .ok_or(WgpuSpriteTextureError::MissingMaterialImage)?;
-        if key.kind() != RenderResourceKind::IMAGE_2D {
-            return Err(WgpuSpriteTextureError::WrongResourceKind {
-                key,
-                kind: key.kind().as_str(),
-            });
-        }
-
-        let (snapshot, prepared) = prepared_image_record(key, prepared_images)?;
-        let handle = Handle::<ImageAsset>::new(key.asset_id());
-        let image = images
-            .get(handle)
-            .ok_or(WgpuSpriteTextureError::MissingImageAsset { key })?;
-        validate_prepared_image_matches_asset(key, image, prepared)?;
-
-        let upload_action = texture_upload_action(
-            self.images.get(&key).map(|existing| existing.snapshot),
-            snapshot,
-        );
+        let (snapshot, image, upload_action) = prepare_image_texture_submission(
+            key,
+            images,
+            prepared_images,
+            self.images.get(&key).map(|existing| &existing.snapshot),
+        )?;
         if upload_action.requires_upload() {
             let texture = create_image_texture_resource(device, queue, key, image)?;
             self.images.insert(
                 key,
                 WgpuImageTextureResource {
-                    snapshot,
+                    snapshot: snapshot.clone(),
                     texture,
                     last_used_frame: frame_index,
                 },
@@ -208,7 +196,7 @@ impl WgpuSpriteTextureCache {
         let binding_needs_update = self
             .image_bindings
             .get(&material)
-            .map(|existing| existing.snapshot != snapshot)
+            .map(|existing| &existing.snapshot != snapshot)
             .unwrap_or(true);
         if binding_needs_update {
             let binding = {
@@ -225,7 +213,7 @@ impl WgpuSpriteTextureCache {
             self.image_bindings.insert(
                 material,
                 WgpuSpriteImageBinding {
-                    snapshot,
+                    snapshot: snapshot.clone(),
                     binding,
                     last_used_frame: frame_index,
                 },
@@ -313,6 +301,8 @@ pub(crate) enum WgpuSpriteTextureError {
     },
     #[error("sprite texture {key:?} has no loaded image asset")]
     MissingImageAsset { key: RenderResourceKey },
+    #[error("sprite texture {key:?} changed after its prepared snapshot was published")]
+    PreparedSlotRevisionMismatch { key: RenderResourceKey },
     #[error(
         "sprite texture {key:?} has invalid pixel data length: expected {expected} bytes, got {actual}"
     )]
@@ -329,10 +319,16 @@ pub(crate) enum WgpuSpriteTextureError {
     PreparedColorSpaceMismatch { key: RenderResourceKey },
 }
 
+impl WgpuSpriteTextureError {
+    pub(crate) const fn is_transient_resource_rejection(&self) -> bool {
+        matches!(self, Self::PreparedSlotRevisionMismatch { .. })
+    }
+}
+
 fn prepared_image_record(
     key: RenderResourceKey,
     prepared_images: &PreparedRenderResources<PreparedImageResource>,
-) -> Result<(RenderResourceSnapshot, &PreparedImageResource), WgpuSpriteTextureError> {
+) -> Result<(&RenderResourceSnapshot, &PreparedImageResource), WgpuSpriteTextureError> {
     let record = prepared_images
         .get(key)
         .ok_or(WgpuSpriteTextureError::MissingPreparedResource { key })?;
@@ -349,6 +345,47 @@ fn prepared_image_record(
         }
     };
     Ok((snapshot, prepared))
+}
+
+fn validate_prepared_slot_revision(
+    key: RenderResourceKey,
+    snapshot: &RenderResourceSnapshot,
+    current: &AssetSlotRevision,
+) -> Result<(), WgpuSpriteTextureError> {
+    if snapshot.slot_revision() != current {
+        return Err(WgpuSpriteTextureError::PreparedSlotRevisionMismatch { key });
+    }
+    Ok(())
+}
+
+fn prepare_image_texture_submission<'a>(
+    key: RenderResourceKey,
+    images: &'a Assets<ImageAsset>,
+    prepared_images: &'a PreparedRenderResources<PreparedImageResource>,
+    existing: Option<&RenderResourceSnapshot>,
+) -> Result<
+    (
+        &'a RenderResourceSnapshot,
+        &'a ImageAsset,
+        TextureUploadAction,
+    ),
+    WgpuSpriteTextureError,
+> {
+    if key.kind() != RenderResourceKind::IMAGE_2D {
+        return Err(WgpuSpriteTextureError::WrongResourceKind {
+            key,
+            kind: key.kind().as_str(),
+        });
+    }
+
+    let (snapshot, prepared) = prepared_image_record(key, prepared_images)?;
+    let handle = Handle::<ImageAsset>::new(key.asset_id());
+    validate_prepared_slot_revision(key, snapshot, &images.slot_revision(handle))?;
+    let image = images
+        .get(handle)
+        .ok_or(WgpuSpriteTextureError::MissingImageAsset { key })?;
+    validate_prepared_image_matches_asset(key, image, prepared)?;
+    Ok((snapshot, image, texture_upload_action(existing, snapshot)))
 }
 
 fn create_image_texture_resource(
@@ -544,8 +581,8 @@ impl TextureUploadAction {
 }
 
 fn texture_upload_action(
-    existing: Option<RenderResourceSnapshot>,
-    incoming: RenderResourceSnapshot,
+    existing: Option<&RenderResourceSnapshot>,
+    incoming: &RenderResourceSnapshot,
 ) -> TextureUploadAction {
     match existing {
         None => TextureUploadAction::UploadNew,
@@ -557,7 +594,13 @@ fn texture_upload_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_asset::{AssetId, AssetVersion, ImportArtifactDigest};
+    use nara_asset::{
+        ArtifactFormatVersion, ArtifactLabel, AssetId, AssetPath, AssetVersion,
+        ImportArtifactDigest, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest,
+        ImportProfile, ImportSettingsHash, ImportedAssetType, ImporterId, ImporterVersion,
+        SourceHash, StableAssetId,
+    };
+    use nara_image::{ImageExtent, ImageSourceMetadata};
 
     #[test]
     fn texture_format_matches_image_color_space() {
@@ -628,34 +671,192 @@ mod tests {
 
     #[test]
     fn texture_upload_action_tracks_snapshot_changes() {
-        let first = snapshot(1, 1, b"descriptor-a");
-        let same = snapshot(1, 1, b"descriptor-a");
-        let new_version = snapshot(1, 2, b"descriptor-a");
-        let new_descriptor = snapshot(1, 1, b"descriptor-b");
+        let handle = Handle::<()>::new(AssetId::from_raw(1));
+        let mut assets = Assets::default();
+        assets.insert(handle, ());
+        let revision = assets.slot_revision(handle);
+        let first = snapshot(1, 1, revision.clone(), b"descriptor-a");
+        let same = snapshot(1, 1, revision.clone(), b"descriptor-a");
+        let new_version = snapshot(1, 2, revision.clone(), b"descriptor-a");
+        let new_descriptor = snapshot(1, 1, revision, b"descriptor-b");
+        assert!(assets.get_mut(handle).is_some());
+        let new_slot = snapshot(1, 1, assets.slot_revision(handle), b"descriptor-a");
 
         assert_eq!(
-            texture_upload_action(None, first),
+            texture_upload_action(None, &first),
             TextureUploadAction::UploadNew
         );
         assert_eq!(
-            texture_upload_action(Some(first), same),
+            texture_upload_action(Some(&first), &same),
             TextureUploadAction::ReuseExisting
         );
         assert_eq!(
-            texture_upload_action(Some(first), new_version),
+            texture_upload_action(Some(&first), &new_version),
             TextureUploadAction::ReuploadChangedSnapshot
         );
         assert_eq!(
-            texture_upload_action(Some(first), new_descriptor),
+            texture_upload_action(Some(&first), &new_descriptor),
+            TextureUploadAction::ReuploadChangedSnapshot
+        );
+        assert_eq!(
+            texture_upload_action(Some(&first), &new_slot),
             TextureUploadAction::ReuploadChangedSnapshot
         );
     }
 
-    fn snapshot(asset_id: u64, version: u64, descriptor: &[u8]) -> RenderResourceSnapshot {
+    #[test]
+    fn prepared_snapshot_rejects_an_asset_mutated_after_prepare() {
+        let key = RenderResourceKey::new(AssetId::from_raw(9), RenderResourceKind::IMAGE_2D);
+        let handle = Handle::<()>::new(key.asset_id());
+        let mut assets = Assets::default();
+        assets.insert(handle, ());
+        let snapshot = RenderResourceSnapshot::new(
+            key,
+            AssetVersion::from_raw(1),
+            assets.slot_revision(handle),
+            ImportArtifactDigest::from_bytes(b"descriptor"),
+        );
+
+        assert_eq!(
+            validate_prepared_slot_revision(key, &snapshot, &assets.slot_revision(handle)),
+            Ok(())
+        );
+        assert!(assets.get_mut(handle).is_some());
+        assert_eq!(
+            validate_prepared_slot_revision(key, &snapshot, &assets.slot_revision(handle)),
+            Err(WgpuSpriteTextureError::PreparedSlotRevisionMismatch { key })
+        );
+    }
+
+    #[test]
+    fn image_submission_rejects_stale_pixels_then_reuploads_once_and_reuses() {
+        let handle = Handle::<ImageAsset>::new(AssetId::from_raw(11));
+        let key = RenderResourceKey::for_asset(handle, RenderResourceKind::IMAGE_2D);
+        let version = AssetVersion::from_raw(1);
+        let descriptor = ImportArtifactDigest::from_bytes(b"same-descriptor");
+        let mut images = Assets::default();
+        images.insert(handle, test_image([255, 0, 0, 255]));
+        let first_snapshot =
+            RenderResourceSnapshot::new(key, version, images.slot_revision(handle), descriptor);
+        let mut prepared = PreparedRenderResources::default();
+        prepared.insert_ready(
+            first_snapshot.clone(),
+            PreparedImageResource::from_image(images.get(handle).unwrap()),
+        );
+
+        let (published, first_image, action) =
+            prepare_image_texture_submission(key, &images, &prepared, None).unwrap();
+        assert_eq!(first_image.pixels(), &[255, 0, 0, 255]);
+        assert_eq!(action, TextureUploadAction::UploadNew);
+        let cached_snapshot = published.clone();
+        assert_eq!(
+            prepare_image_texture_submission(key, &images, &prepared, Some(&cached_snapshot))
+                .unwrap()
+                .2,
+            TextureUploadAction::ReuseExisting
+        );
+
+        images.insert(handle, test_image([0, 0, 255, 255]));
+        assert!(matches!(
+            prepare_image_texture_submission(
+                key,
+                &images,
+                &prepared,
+                Some(&cached_snapshot)
+            ),
+            Err(WgpuSpriteTextureError::PreparedSlotRevisionMismatch { key: actual })
+                if actual == key
+        ));
+
+        let replacement_snapshot =
+            RenderResourceSnapshot::new(key, version, images.slot_revision(handle), descriptor);
+        prepared.insert_ready(
+            replacement_snapshot.clone(),
+            PreparedImageResource::from_image(images.get(handle).unwrap()),
+        );
+        let (published, replacement_image, action) =
+            prepare_image_texture_submission(key, &images, &prepared, Some(&cached_snapshot))
+                .unwrap();
+        assert_eq!(replacement_image.pixels(), &[0, 0, 255, 255]);
+        assert_eq!(action, TextureUploadAction::ReuploadChangedSnapshot);
+        let cached_snapshot = published.clone();
+        assert_eq!(
+            prepare_image_texture_submission(key, &images, &prepared, Some(&cached_snapshot))
+                .unwrap()
+                .2,
+            TextureUploadAction::ReuseExisting
+        );
+    }
+
+    fn test_image(pixels: [u8; 4]) -> ImageAsset {
+        let stable_id = StableAssetId::parse_str("ce2ab2f8-c58b-48e3-b94e-9465340262a1").unwrap();
+        let source_hash = SourceHash::from_bytes(b"test image");
+        let key = ImportArtifactKey::new(
+            stable_id,
+            source_hash,
+            ImportDependencyDigest::empty(),
+            ImporterId::new("nara-image").unwrap(),
+            ImporterVersion::new(1),
+            ImportSettingsHash::default(),
+            ImportProfile::default(),
+            ImportedAssetType::new("image").unwrap(),
+            ArtifactLabel::default(),
+            ArtifactFormatVersion::new(1),
+        );
+        let source = ImageSourceMetadata::new(
+            stable_id,
+            AssetPath::new("textures/test.png").unwrap(),
+            source_hash,
+            ImportArtifactRecord::new(key).unwrap(),
+        );
+        ImageAsset::new(
+            source,
+            ImageExtent::new(1, 1),
+            ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
+            pixels.to_vec(),
+        )
+        .unwrap()
+    }
+
+    fn snapshot(
+        asset_id: u64,
+        version: u64,
+        slot_revision: AssetSlotRevision,
+        descriptor: &[u8],
+    ) -> RenderResourceSnapshot {
         RenderResourceSnapshot::new(
             RenderResourceKey::new(AssetId::from_raw(asset_id), RenderResourceKind::IMAGE_2D),
             AssetVersion::from_raw(version),
+            slot_revision,
             ImportArtifactDigest::from_bytes(descriptor),
         )
+    }
+
+    #[test]
+    fn image_submission_classifies_deletion_after_prepare_as_a_transient_resource_change() {
+        let handle = Handle::<ImageAsset>::new(AssetId::from_raw(12));
+        let key = RenderResourceKey::for_asset(handle, RenderResourceKind::IMAGE_2D);
+        let mut images = Assets::default();
+        images.insert(handle, test_image([255, 255, 255, 255]));
+        let snapshot = RenderResourceSnapshot::new(
+            key,
+            AssetVersion::from_raw(1),
+            images.slot_revision(handle),
+            ImportArtifactDigest::from_bytes(b"descriptor"),
+        );
+        let mut prepared = PreparedRenderResources::default();
+        prepared.insert_ready(
+            snapshot.clone(),
+            PreparedImageResource::from_image(images.get(handle).unwrap()),
+        );
+
+        assert!(images.remove(handle).is_some());
+
+        assert!(matches!(
+            prepare_image_texture_submission(key, &images, &prepared, Some(&snapshot)),
+            Err(WgpuSpriteTextureError::PreparedSlotRevisionMismatch { key: actual })
+                if actual == key
+        ));
     }
 }

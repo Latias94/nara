@@ -2,8 +2,7 @@ use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::{AssetStates, Assets, Handle, ImportArtifactDigest, LoadState, SourceHash};
 use nara_ecs::{Res, ResMut, Resource};
 use nara_render::{
-    PreparedRenderResources, RenderPrepareApplyResult, RenderPrepareInvalidationReason,
-    RenderPrepareInvalidations, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
+    PreparedRenderResources, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
 };
 
 use crate::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
@@ -68,7 +67,6 @@ pub struct ImagePrepareStats {
     pub removed: u32,
     pub skipped_missing_state: u32,
     pub skipped_not_loaded: u32,
-    pub stale_results: u32,
 }
 
 #[derive(Debug, Default)]
@@ -88,7 +86,6 @@ impl Plugin for ImagePreparePlugin {
         app.init_resource::<Assets<ImageAsset>>()?;
         app.init_resource::<AssetStates>()?;
         app.init_resource::<PreparedRenderResources<PreparedImageResource>>()?;
-        app.init_resource::<RenderPrepareInvalidations>()?;
         app.init_resource::<ImagePrepareStats>()?;
         app.add_systems(CoreStage::Prepare, prepare_images)?;
         Ok(())
@@ -99,7 +96,6 @@ pub fn prepare_images(
     images: Res<Assets<ImageAsset>>,
     states: Res<AssetStates>,
     mut prepared_images: ResMut<PreparedRenderResources<PreparedImageResource>>,
-    mut invalidations: ResMut<RenderPrepareInvalidations>,
     mut stats: ResMut<ImagePrepareStats>,
 ) {
     *stats = ImagePrepareStats::default();
@@ -115,14 +111,7 @@ pub fn prepare_images(
         })
         .collect::<Vec<_>>();
     for key in removed_keys {
-        if prepared_images
-            .remove(
-                key,
-                &mut invalidations,
-                RenderPrepareInvalidationReason::AssetRemoved,
-            )
-            .is_some()
-        {
+        if prepared_images.remove(key).is_some() {
             stats.removed += 1;
         }
     }
@@ -138,23 +127,19 @@ pub fn prepare_images(
         }
 
         let key = image_resource_key(handle);
-        let snapshot =
-            RenderResourceSnapshot::new(key, state.version(), image_descriptor_hash(image));
-
-        prepared_images.invalidate_if_snapshot_changed(
-            snapshot,
-            &mut invalidations,
-            RenderPrepareInvalidationReason::DescriptorChanged,
+        let snapshot = RenderResourceSnapshot::new(
+            key,
+            state.version(),
+            images.slot_revision(handle),
+            image_descriptor_hash(image),
         );
 
-        if !prepared_images.needs_prepare(snapshot) {
+        if !prepared_images.needs_prepare(&snapshot) {
             continue;
         }
 
-        match prepared_images.insert_ready(snapshot, PreparedImageResource::from_image(image)) {
-            RenderPrepareApplyResult::Applied => stats.prepared += 1,
-            RenderPrepareApplyResult::DiscardedStale { .. } => stats.stale_results += 1,
-        }
+        prepared_images.insert_ready(snapshot, PreparedImageResource::from_image(image));
+        stats.prepared += 1;
     }
 }
 

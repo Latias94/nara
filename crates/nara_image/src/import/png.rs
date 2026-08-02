@@ -175,7 +175,11 @@ impl ImageImporter {
             ImageFormat::Rgba8,
             self.color_space,
             rgba,
-        );
+        )
+        .map_err(|_| ImageImportError::Png {
+            stage: ImageImportStage::Finalize,
+            kind: ImagePngFailureKind::DecoderContract,
+        })?;
         Ok((image, memory_plan))
     }
 

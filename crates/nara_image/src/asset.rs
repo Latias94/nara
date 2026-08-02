@@ -1,6 +1,7 @@
 use std::{
     any::Any,
-    fmt::{self, Formatter},
+    error::Error,
+    fmt::{self, Display, Formatter},
     sync::Arc,
 };
 
@@ -86,35 +87,39 @@ impl ImageSourceMetadata {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ImageAsset {
     source: ImageSourceMetadata,
     extent: ImageExtent,
     format: ImageFormat,
     color_space: ImageColorSpace,
-    #[cfg_attr(feature = "serde", serde(with = "shared_bytes"))]
-    pixels: Arc<Vec<u8>>,
+    #[cfg_attr(feature = "serde", serde(serialize_with = "shared_bytes::serialize"))]
+    pixels: Arc<Box<[u8]>>,
     #[cfg_attr(feature = "serde", serde(skip))]
     retention: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl ImageAsset {
-    #[must_use]
+    /// Constructs an immutable RGBA image after validating its extent and exact byte length.
+    ///
+    /// Pixel storage is normalized to a fixed-size shared allocation, so retained-memory
+    /// accounting cannot be bypassed through unused `Vec` capacity.
     pub fn new(
         source: ImageSourceMetadata,
         extent: ImageExtent,
         format: ImageFormat,
         color_space: ImageColorSpace,
         pixels: Vec<u8>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ImageAssetCreateError> {
+        Self::validate_rgba_bytes(extent, format, pixels.len())?;
+        Ok(Self {
             source,
             extent,
             format,
             color_space,
-            pixels: Arc::new(pixels),
+            pixels: Arc::new(pixels.into_boxed_slice()),
             retention: None,
-        }
+        })
     }
 
     /// Installs the owner that accounts for this shared pixel allocation.
@@ -167,9 +172,78 @@ impl ImageAsset {
 
     #[must_use]
     pub fn pixels(&self) -> &[u8] {
-        self.pixels.as_slice()
+        self.pixels.as_ref().as_ref()
+    }
+
+    fn validate_rgba_bytes(
+        extent: ImageExtent,
+        format: ImageFormat,
+        actual: usize,
+    ) -> Result<(), ImageAssetCreateError> {
+        if extent.width == 0 || extent.height == 0 {
+            return Err(ImageAssetCreateError::ZeroExtent { extent });
+        }
+
+        let expected = match format {
+            ImageFormat::Rgba8 => u64::from(extent.width)
+                .checked_mul(u64::from(extent.height))
+                .and_then(|pixels| pixels.checked_mul(4))
+                .and_then(|bytes| usize::try_from(bytes).ok())
+                .ok_or(ImageAssetCreateError::ByteLengthOverflow { extent })?,
+        };
+        if actual != expected {
+            return Err(ImageAssetCreateError::PixelLengthMismatch {
+                extent,
+                expected,
+                actual,
+            });
+        }
+        Ok(())
     }
 }
+
+/// Failure to construct an [`ImageAsset`] with a valid fixed-size pixel allocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageAssetCreateError {
+    /// At least one image dimension was zero.
+    ZeroExtent { extent: ImageExtent },
+    /// The required RGBA byte length overflowed `u64` or the current platform's `usize`.
+    ByteLengthOverflow { extent: ImageExtent },
+    /// The supplied bytes did not exactly cover the RGBA extent.
+    PixelLengthMismatch {
+        extent: ImageExtent,
+        expected: usize,
+        actual: usize,
+    },
+}
+
+impl Display for ImageAssetCreateError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroExtent { extent } => write!(
+                formatter,
+                "image extent must be non-zero, got {}x{}",
+                extent.width, extent.height
+            ),
+            Self::ByteLengthOverflow { extent } => write!(
+                formatter,
+                "RGBA byte length for image extent {}x{} is not representable",
+                extent.width, extent.height
+            ),
+            Self::PixelLengthMismatch {
+                extent,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "image extent {}x{} requires {expected} RGBA bytes, got {actual}",
+                extent.width, extent.height
+            ),
+        }
+    }
+}
+
+impl Error for ImageAssetCreateError {}
 
 impl PartialEq for ImageAsset {
     fn eq(&self, other: &Self) -> bool {
@@ -187,20 +261,40 @@ impl Eq for ImageAsset {}
 mod shared_bytes {
     use std::sync::Arc;
 
-    use serde::{Deserialize, Serialize};
+    use serde::Serialize;
 
-    pub fn serialize<S>(value: &Arc<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &Arc<Box<[u8]>>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        value.as_slice().serialize(serializer)
+        value.as_ref().as_ref().serialize(serializer)
     }
+}
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<Vec<u8>>, D::Error>
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ImageAsset {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        Vec::<u8>::deserialize(deserializer).map(Arc::new)
+        #[derive(serde::Deserialize)]
+        struct ImageAssetWire {
+            source: ImageSourceMetadata,
+            extent: ImageExtent,
+            format: ImageFormat,
+            color_space: ImageColorSpace,
+            pixels: Vec<u8>,
+        }
+
+        let wire = <ImageAssetWire as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(
+            wire.source,
+            wire.extent,
+            wire.format,
+            wire.color_space,
+            wire.pixels,
+        )
+        .map_err(serde::de::Error::custom)
     }
 }
 

@@ -4,7 +4,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_asset::{AssetId, AssetVersion, Handle, ImportArtifactDigest};
+use nara_asset::{AssetId, AssetSlotRevision, AssetVersion, Handle, ImportArtifactDigest};
 use nara_ecs::Resource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -58,10 +58,15 @@ impl RenderResourceKey {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Complete backend-neutral identity of one prepared asset value.
+///
+/// The slot revision binds the snapshot to the exact value stored in [`nara_asset::Assets`], even
+/// when a direct replacement does not advance loader-owned [`AssetVersion`] metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderResourceSnapshot {
     key: RenderResourceKey,
     asset_version: AssetVersion,
+    slot_revision: AssetSlotRevision,
     descriptor_hash: ImportArtifactDigest,
 }
 
@@ -70,27 +75,35 @@ impl RenderResourceSnapshot {
     pub const fn new(
         key: RenderResourceKey,
         asset_version: AssetVersion,
+        slot_revision: AssetSlotRevision,
         descriptor_hash: ImportArtifactDigest,
     ) -> Self {
         Self {
             key,
             asset_version,
+            slot_revision,
             descriptor_hash,
         }
     }
 
     #[must_use]
-    pub const fn key(self) -> RenderResourceKey {
+    pub const fn key(&self) -> RenderResourceKey {
         self.key
     }
 
     #[must_use]
-    pub const fn asset_version(self) -> AssetVersion {
+    pub const fn asset_version(&self) -> AssetVersion {
         self.asset_version
     }
 
     #[must_use]
-    pub const fn descriptor_hash(self) -> ImportArtifactDigest {
+    /// Returns the exact typed-asset slot mutation admitted by this snapshot.
+    pub const fn slot_revision(&self) -> &AssetSlotRevision {
+        &self.slot_revision
+    }
+
+    #[must_use]
+    pub const fn descriptor_hash(&self) -> ImportArtifactDigest {
         self.descriptor_hash
     }
 }
@@ -159,8 +172,8 @@ impl<T: PreparedRenderResource> PreparedRenderResourceRecord<T> {
     }
 
     #[must_use]
-    pub const fn snapshot(&self) -> RenderResourceSnapshot {
-        self.snapshot
+    pub const fn snapshot(&self) -> &RenderResourceSnapshot {
+        &self.snapshot
     }
 
     #[must_use]
@@ -172,15 +185,6 @@ impl<T: PreparedRenderResource> PreparedRenderResourceRecord<T> {
     pub fn resource(&self) -> Option<&T> {
         self.resource.as_ref()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RenderPrepareApplyResult {
-    Applied,
-    DiscardedStale {
-        current: AssetVersion,
-        attempted: AssetVersion,
-    },
 }
 
 #[derive(Debug, Resource)]
@@ -202,36 +206,18 @@ impl<T: PreparedRenderResource> PreparedRenderResources<T> {
         Self::default()
     }
 
-    pub fn insert_ready(
-        &mut self,
-        snapshot: RenderResourceSnapshot,
-        resource: T,
-    ) -> RenderPrepareApplyResult {
-        if let Some(result) = self.stale_result(snapshot) {
-            return result;
-        }
-
+    pub fn insert_ready(&mut self, snapshot: RenderResourceSnapshot, resource: T) {
         self.records.insert(
             snapshot.key(),
             PreparedRenderResourceRecord::ready(snapshot, resource),
         );
-        RenderPrepareApplyResult::Applied
     }
 
-    pub fn record_failed(
-        &mut self,
-        snapshot: RenderResourceSnapshot,
-        error: RenderPrepareError,
-    ) -> RenderPrepareApplyResult {
-        if let Some(result) = self.stale_result(snapshot) {
-            return result;
-        }
-
+    pub fn record_failed(&mut self, snapshot: RenderResourceSnapshot, error: RenderPrepareError) {
         self.records.insert(
             snapshot.key(),
             PreparedRenderResourceRecord::failed(snapshot, error),
         );
-        RenderPrepareApplyResult::Applied
     }
 
     #[must_use]
@@ -254,7 +240,7 @@ impl<T: PreparedRenderResource> PreparedRenderResources<T> {
     }
 
     #[must_use]
-    pub fn needs_prepare(&self, snapshot: RenderResourceSnapshot) -> bool {
+    pub fn needs_prepare(&self, snapshot: &RenderResourceSnapshot) -> bool {
         let Some(record) = self.records.get(&snapshot.key()) else {
             return true;
         };
@@ -262,34 +248,8 @@ impl<T: PreparedRenderResource> PreparedRenderResources<T> {
         record.snapshot() != snapshot || record.status() != &RenderPrepareStatus::Ready
     }
 
-    pub fn invalidate_if_snapshot_changed(
-        &mut self,
-        snapshot: RenderResourceSnapshot,
-        invalidations: &mut RenderPrepareInvalidations,
-        reason: RenderPrepareInvalidationReason,
-    ) -> bool {
-        let changed = self
-            .records
-            .get(&snapshot.key())
-            .is_some_and(|record| record.snapshot() != snapshot);
-        if changed {
-            self.records.remove(&snapshot.key());
-            invalidations.push(snapshot.key(), reason);
-        }
-        changed
-    }
-
-    pub fn remove(
-        &mut self,
-        key: RenderResourceKey,
-        invalidations: &mut RenderPrepareInvalidations,
-        reason: RenderPrepareInvalidationReason,
-    ) -> Option<PreparedRenderResourceRecord<T>> {
-        let removed = self.records.remove(&key);
-        if removed.is_some() {
-            invalidations.push(key, reason);
-        }
-        removed
+    pub fn remove(&mut self, key: RenderResourceKey) -> Option<PreparedRenderResourceRecord<T>> {
+        self.records.remove(&key)
     }
 
     #[must_use]
@@ -301,116 +261,52 @@ impl<T: PreparedRenderResource> PreparedRenderResources<T> {
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
-
-    fn stale_result(&self, snapshot: RenderResourceSnapshot) -> Option<RenderPrepareApplyResult> {
-        let current = self.records.get(&snapshot.key())?.snapshot();
-        if current.asset_version() > snapshot.asset_version() {
-            return Some(RenderPrepareApplyResult::DiscardedStale {
-                current: current.asset_version(),
-                attempted: snapshot.asset_version(),
-            });
-        }
-        None
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RenderPrepareInvalidationReason {
-    AssetModified,
-    AssetRemoved,
-    DescriptorChanged,
-    Manual,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RenderPrepareInvalidation {
-    key: RenderResourceKey,
-    reason: RenderPrepareInvalidationReason,
-}
-
-impl RenderPrepareInvalidation {
-    #[must_use]
-    pub const fn new(key: RenderResourceKey, reason: RenderPrepareInvalidationReason) -> Self {
-        Self { key, reason }
-    }
-
-    #[must_use]
-    pub const fn key(self) -> RenderResourceKey {
-        self.key
-    }
-
-    #[must_use]
-    pub const fn reason(self) -> RenderPrepareInvalidationReason {
-        self.reason
-    }
-}
-
-#[derive(Debug, Default, Resource)]
-pub struct RenderPrepareInvalidations {
-    invalidations: Vec<RenderPrepareInvalidation>,
-}
-
-impl RenderPrepareInvalidations {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn push(&mut self, key: RenderResourceKey, reason: RenderPrepareInvalidationReason) {
-        self.invalidations
-            .push(RenderPrepareInvalidation::new(key, reason));
-    }
-
-    #[must_use]
-    pub fn iter(&self) -> impl Iterator<Item = &RenderPrepareInvalidation> {
-        self.invalidations.iter()
-    }
-
-    pub fn drain(&mut self) -> Vec<RenderPrepareInvalidation> {
-        std::mem::take(&mut self.invalidations)
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.invalidations.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.invalidations.is_empty()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_asset::Assets;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct MockPreparedResource(&'static str);
 
-    fn key() -> RenderResourceKey {
-        RenderResourceKey::new(AssetId::from_raw(7), RenderResourceKind::new("mock"))
+    fn handle() -> Handle<String> {
+        Handle::new(AssetId::from_raw(7))
     }
 
-    fn snapshot(version: u64, hash: &[u8]) -> RenderResourceSnapshot {
+    fn key() -> RenderResourceKey {
+        RenderResourceKey::for_asset(handle(), RenderResourceKind::new("mock"))
+    }
+
+    fn snapshot(
+        version: u64,
+        slot_revision: AssetSlotRevision,
+        hash: &[u8],
+    ) -> RenderResourceSnapshot {
         RenderResourceSnapshot::new(
             key(),
             AssetVersion::from_raw(version),
+            slot_revision,
             ImportArtifactDigest::from_bytes(hash),
         )
+    }
+
+    fn assets() -> Assets<String> {
+        let mut assets = Assets::default();
+        assets.insert(handle(), String::from("source"));
+        assets
     }
 
     #[test]
     fn ready_resources_are_keyed_by_snapshot() {
         let mut resources = PreparedRenderResources::<MockPreparedResource>::default();
-        let snapshot = snapshot(1, b"descriptor");
+        let assets = assets();
+        let snapshot = snapshot(1, assets.slot_revision(handle()), b"descriptor");
 
-        assert_eq!(
-            resources.insert_ready(snapshot, MockPreparedResource("ready")),
-            RenderPrepareApplyResult::Applied
-        );
+        resources.insert_ready(snapshot.clone(), MockPreparedResource("ready"));
 
-        assert!(!resources.needs_prepare(snapshot));
+        assert!(!resources.needs_prepare(&snapshot));
         assert_eq!(
             resources.get_ready(key()),
             Some(&MockPreparedResource("ready"))
@@ -418,41 +314,18 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_or_version_changes_invalidate_existing_resource() {
+    fn descriptor_or_version_changes_replace_the_snapshot_cache_record() {
         let mut resources = PreparedRenderResources::<MockPreparedResource>::default();
-        let mut invalidations = RenderPrepareInvalidations::default();
-        let old_snapshot = snapshot(1, b"old");
-        let new_snapshot = snapshot(2, b"new");
+        let assets = assets();
+        let revision = assets.slot_revision(handle());
+        let old_snapshot = snapshot(1, revision.clone(), b"old");
+        let new_snapshot = snapshot(2, revision, b"new");
         resources.insert_ready(old_snapshot, MockPreparedResource("old"));
 
-        assert!(resources.invalidate_if_snapshot_changed(
-            new_snapshot,
-            &mut invalidations,
-            RenderPrepareInvalidationReason::DescriptorChanged
-        ));
-
-        assert!(resources.get_ready(key()).is_none());
-        assert_eq!(
-            invalidations.drain(),
-            vec![RenderPrepareInvalidation::new(
-                key(),
-                RenderPrepareInvalidationReason::DescriptorChanged
-            )]
-        );
-    }
-
-    #[test]
-    fn stale_prepare_results_do_not_overwrite_newer_resources() {
-        let mut resources = PreparedRenderResources::<MockPreparedResource>::default();
-        resources.insert_ready(snapshot(2, b"new"), MockPreparedResource("new"));
-
-        assert_eq!(
-            resources.insert_ready(snapshot(1, b"old"), MockPreparedResource("old")),
-            RenderPrepareApplyResult::DiscardedStale {
-                current: AssetVersion::from_raw(2),
-                attempted: AssetVersion::from_raw(1),
-            }
-        );
+        assert!(resources.needs_prepare(&new_snapshot));
+        resources.insert_ready(new_snapshot.clone(), MockPreparedResource("new"));
+        assert!(!resources.needs_prepare(&new_snapshot));
+        assert_eq!(resources.len(), 1);
         assert_eq!(
             resources.get_ready(key()),
             Some(&MockPreparedResource("new"))
@@ -460,43 +333,74 @@ mod tests {
     }
 
     #[test]
+    fn slot_revision_changes_prepare_identity_without_version_or_descriptor_changes() {
+        let mut resources = PreparedRenderResources::<MockPreparedResource>::default();
+        let mut assets = assets();
+        let old_snapshot = snapshot(1, assets.slot_revision(handle()), b"same-descriptor");
+        resources.insert_ready(old_snapshot.clone(), MockPreparedResource("old"));
+
+        assets.get_mut(handle()).unwrap().push_str("-changed");
+        let changed_snapshot = snapshot(1, assets.slot_revision(handle()), b"same-descriptor");
+
+        assert_ne!(old_snapshot, changed_snapshot);
+        assert!(resources.needs_prepare(&changed_snapshot));
+    }
+
+    #[test]
+    fn current_synchronous_prepare_replaces_a_prior_loader_version() {
+        let mut resources = PreparedRenderResources::<MockPreparedResource>::default();
+        let first_assets = assets();
+        resources.insert_ready(
+            snapshot(2, first_assets.slot_revision(handle()), b"old-store"),
+            MockPreparedResource("old-store"),
+        );
+        let replacement_assets = assets();
+        let replacement = snapshot(
+            1,
+            replacement_assets.slot_revision(handle()),
+            b"replacement-store",
+        );
+
+        resources.insert_ready(
+            replacement.clone(),
+            MockPreparedResource("replacement-store"),
+        );
+
+        assert!(!resources.needs_prepare(&replacement));
+        assert_eq!(
+            resources.get_ready(key()),
+            Some(&MockPreparedResource("replacement-store"))
+        );
+    }
+
+    #[test]
     fn failed_prepare_records_status_without_panicking() {
         let mut resources = PreparedRenderResources::<MockPreparedResource>::default();
-        let snapshot = snapshot(1, b"bad");
+        let assets = assets();
+        let snapshot = snapshot(1, assets.slot_revision(handle()), b"bad");
 
-        assert_eq!(
-            resources.record_failed(snapshot, RenderPrepareError::new("out of memory")),
-            RenderPrepareApplyResult::Applied
-        );
+        resources.record_failed(snapshot.clone(), RenderPrepareError::new("out of memory"));
 
         let record = resources.get(key()).unwrap();
         assert!(matches!(
             record.status(),
             RenderPrepareStatus::Failed(error) if error.message() == "out of memory"
         ));
-        assert!(resources.needs_prepare(snapshot));
+        assert!(resources.needs_prepare(&snapshot));
     }
 
     #[test]
-    fn resources_can_be_removed_with_invalidation_event() {
+    fn resources_can_be_removed_without_retaining_a_second_event_log() {
         let mut resources = PreparedRenderResources::<MockPreparedResource>::default();
-        let mut invalidations = RenderPrepareInvalidations::default();
-        resources.insert_ready(snapshot(1, b"descriptor"), MockPreparedResource("ready"));
-
-        let removed = resources.remove(
-            key(),
-            &mut invalidations,
-            RenderPrepareInvalidationReason::AssetRemoved,
+        let assets = assets();
+        resources.insert_ready(
+            snapshot(1, assets.slot_revision(handle()), b"descriptor"),
+            MockPreparedResource("ready"),
         );
+
+        let removed = resources.remove(key());
 
         assert!(removed.is_some());
         assert!(resources.is_empty());
-        assert_eq!(
-            invalidations.drain(),
-            vec![RenderPrepareInvalidation::new(
-                key(),
-                RenderPrepareInvalidationReason::AssetRemoved
-            )]
-        );
     }
 }

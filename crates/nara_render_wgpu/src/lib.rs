@@ -459,6 +459,16 @@ fn handle_wgpu_render_error(
         return;
     }
 
+    if error.is_transient_resource_rejection() {
+        status.clear_skip();
+        status.mark_skipped_with_message(
+            frame_index,
+            RenderFrameSkipReason::ResourceChanged,
+            error.to_string(),
+        );
+        return;
+    }
+
     let message = backend.mark_error(&error);
     status.mark_unavailable(WGPU_RENDER_BACKEND, message.clone());
     status.mark_skipped_with_message(frame_index, RenderFrameSkipReason::BackendError, message);
@@ -871,5 +881,28 @@ mod tests {
     #[test]
     fn base_submitter_input_has_no_phase_work() {
         assert!(WgpuFramePayload::default().phase_inputs().is_empty());
+    }
+
+    #[test]
+    fn resource_change_after_prepare_skips_one_frame_without_poisoning_the_backend() {
+        let mut backend = WgpuRenderBackend::default();
+        let initial_backend_state = backend.state();
+        let mut status = RenderBackendStatus::default();
+        status.mark_ready(WGPU_RENDER_BACKEND);
+
+        handle_wgpu_render_error(
+            &mut backend,
+            WgpuRenderError::ResourceChangedAfterPrepare,
+            7,
+            &mut status,
+            None,
+        );
+
+        assert_eq!(backend.state(), initial_backend_state);
+        assert_eq!(status.state(), RenderBackendState::Ready);
+        assert_eq!(status.last_error(), None);
+        let skip = status.last_skip().unwrap();
+        assert_eq!(skip.frame_index(), 7);
+        assert_eq!(skip.reason(), RenderFrameSkipReason::ResourceChanged);
     }
 }

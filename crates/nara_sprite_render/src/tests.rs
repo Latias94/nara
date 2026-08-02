@@ -870,6 +870,7 @@ fn test_image() -> ImageAsset {
         ImageColorSpace::Srgb,
         vec![255; 16],
     )
+    .unwrap()
 }
 
 fn material_key(image: Option<nara_render::RenderResourceKey>) -> SpriteMaterialKey {

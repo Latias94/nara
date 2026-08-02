@@ -7,7 +7,10 @@ mod limits;
 mod prepare;
 mod reload;
 
-pub use asset::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata};
+pub use asset::{
+    ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageExtent, ImageFormat,
+    ImageSourceMetadata,
+};
 pub use budget::{ImageImportBudgetHost, ImageImportBudgetSnapshot};
 pub use import::{
     AdmittedImageImport, ImageBytesImportRequest, ImageFileImportRequest, ImageImportError,

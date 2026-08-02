@@ -839,8 +839,14 @@ impl WgpuRenderBackend {
                 resources.prepared_images,
                 frame_index,
             )
-            .map_err(|error| WgpuRenderError::QuadTexture {
-                message: error.to_string(),
+            .map_err(|error| {
+                if error.is_transient_resource_rejection() {
+                    WgpuRenderError::ResourceChangedAfterPrepare
+                } else {
+                    WgpuRenderError::QuadTexture {
+                        message: error.to_string(),
+                    }
+                }
             })?;
             Ok(PreparedSubmitterDraw {
                 pipelines,

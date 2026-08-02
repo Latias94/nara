@@ -49,6 +49,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RPR-U3-1 | RPR-U3 | `676d030` | `rust-api` | Ordinary product composition and file-backed run setup | Replace normal caller use of definition IDs, slot edits, and parallel provider lists with `ProductRecipe` and `SchemaContribution`; keep raw one-shot plugins on direct `App` composition. |
 | RGS-U2-1 | RGS-U2 | `51b3fe4` | `rust-api/behavior` | Runtime hierarchy ownership, scene component composition, and parented spatial content admission | Import runtime relationships from `nara_hierarchy`, install `HierarchyPlugin` and `SceneComponentsPlugin` separately, and keep parented transform/visibility content fail-closed until RGS-U3. |
 | RGS-U3-1 | RGS-U3 | `fb4fdc7` | `rust-api/behavior` | Completed global 2D projection and world-space camera/sprite/tilemap extraction | Treat `GlobalTransform2d` as an opaque immutable derived component, give every world-space renderable an explicit `Transform2d`, and pass completed globals to extraction helpers without local/identity fallback. |
+| SRT-U2-1 | SRT-U2 | `SRT-U2` | `rust-api/behavior/safety` | Image construction, render prepare snapshot identity, and prepare invalidation | Handle fallible `ImageAsset` construction, capture `AssetSlotRevision` in each prepare snapshot, borrow non-`Copy` snapshots, and remove the unconsumed invalidation event log. |
 
 ## Entry Contract
 
@@ -2392,6 +2393,85 @@ world-space consumer.
 `crates/nara_sprite_render/src/tests.rs`, `tests/project_content_boundary.rs`,
 `tests/workspace_play_runtime.rs`, `reference-game/tests/desktop_render.rs`, and
 `docs/knowledge/engineering/verification/2026-08/2026-08-02T084559Z-rgs-u3-completed-2d-global-transform-projection-1fa10428b5e240acbade0440cc25ae75.md`.
+
+## SRT-U2-1: Exact Image Revision and Snapshot-Owned Invalidation
+
+**Removed contract**:
+
+- Infallible `ImageAsset::new` construction that accepted zero extents or mismatched RGBA bytes.
+- `RenderResourceSnapshot::new(key, version, descriptor_hash)` and the snapshot's `Copy`-by-value
+  accessors.
+- `PreparedRenderResources::invalidate_if_snapshot_changed`, removal with an invalidation reason,
+  the unused asynchronous `RenderPrepareApplyResult` arbitration, and the public
+  `RenderPrepareInvalidation`, `RenderPrepareInvalidationReason`, and
+  `RenderPrepareInvalidations` event-log types.
+- Exhaustive matches that assumed the previous closed sets of `RenderFrameSkipReason` or
+  `WgpuRenderError` variants.
+
+**Canonical replacement or deletion rationale**: `ImageAsset::new` now validates one exact,
+non-zero RGBA allocation and returns `Result`. Each backend-neutral prepare snapshot includes the
+existing opaque `AssetSlotRevision`, so direct `Assets::insert` or mutable access invalidates cached
+content even when loader-owned version and metadata stay unchanged. Snapshot comparison, prepared
+record replacement, and backend frame-age eviction already own cache invalidation; retaining a
+second unbounded event log created duplicate authority and had no production consumer. A slot
+change between Prepare and WGPU submission skips that frame as `ResourceChanged` without poisoning
+the backend; the next Prepare observes the new revision.
+
+**Before**:
+
+```rust
+let image = ImageAsset::new(source, extent, format, color_space, pixels);
+let snapshot = RenderResourceSnapshot::new(key, asset_version, descriptor_hash);
+prepared.remove(key, &mut invalidations, RenderPrepareInvalidationReason::AssetRemoved);
+```
+
+**After**:
+
+```rust
+let image = ImageAsset::new(source, extent, format, color_space, pixels)?;
+let snapshot = RenderResourceSnapshot::new(
+    key,
+    asset_version,
+    images.slot_revision(handle),
+    descriptor_hash,
+);
+let removed = prepared.remove(key);
+```
+
+Callers that inspect snapshots now borrow them through `record.snapshot()` and pass
+`&RenderResourceSnapshot` to `needs_prepare`. There is no replacement invalidation event stream;
+observe the current prepared record or backend cache statistics when product telemetry is required.
+Exhaustive enum matches must handle `RenderFrameSkipReason::ResourceChanged` and
+`WgpuRenderError::ResourceChangedAfterPrepare`; both identify a retryable frame-local asset race,
+not a device or backend failure.
+
+**Affected examples and fixtures**: image import and serde tests, sprite/UI test images, prepared
+render-resource tests, WGPU texture-cache tests, and the Project Host retained-image publication
+fixture use the fallible constructor and exact slot revision.
+
+**User action**: propagate or explicitly handle `ImageAssetCreateError`, obtain the slot revision
+from the same `Assets<ImageAsset>` store whose value is being prepared, update snapshot access to
+borrowed values, and delete invalidation-event consumers. Do not replace the removed log with a
+parallel queue or hash complete pixels every frame.
+
+**Source action**: `none`; serialized image bytes and project source formats are unchanged, while
+serde input now rejects values that were never valid RGBA images.
+
+**Cache action**: `keep`; rebuild Rust artifacts and restart runtimes so ephemeral prepared/GPU
+caches are reconstructed with slot revisions.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No deprecated constructor,
+snapshot overload, or invalidation aliases remain.
+
+**Rollback**: revert the image, prepare, WGPU, and migrated caller changes together. Do not restore
+direct asset replacement without an exact content revision, and do not restore the invalidation log
+without a bounded production consumer.
+
+**Verification anchors**: `crates/nara_asset/src/storage.rs#tests`,
+`crates/nara_render/src/prepare.rs#tests`, `crates/nara_image/src/tests.rs`,
+`crates/nara_image/tests/image_import_limits.rs`, `crates/nara_render_wgpu/src/texture.rs#tests`,
+`crates/nara_sprite_render/src/tests.rs`, `crates/nara_ui_render/src/tests.rs`, and
+`src/project_host/runtime/tests.rs`.
 
 ## Persistent Format Matrix
 

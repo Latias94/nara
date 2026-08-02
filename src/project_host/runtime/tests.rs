@@ -1769,6 +1769,10 @@ requested = ["runtime-2d"]
         let image = AssetRef::path("textures/player.png").unwrap();
         let entity = SceneEntityRecord::new(nara_identity::SceneEntityId::new("player").unwrap())
             .with_component(
+                ComponentTypeId::new("nara.transform.Transform2d"),
+                identity_transform_record(),
+            )
+            .with_component(
                 ComponentTypeId::new("nara.sprite.Sprite"),
                 SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
             );
@@ -1947,6 +1951,29 @@ fn sprite_value(image: &AssetRef) -> ComponentValue {
         ("layer", ComponentValue::I64(0)),
         ("sort_key", ComponentValue::I64(0)),
     ])
+}
+
+fn identity_transform_record() -> SceneComponentRecord {
+    SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([
+            (
+                "translation",
+                ComponentValue::map([
+                    ("x", ComponentValue::f64(0.0).unwrap()),
+                    ("y", ComponentValue::f64(0.0).unwrap()),
+                ]),
+            ),
+            ("rotation", ComponentValue::f64(0.0).unwrap()),
+            (
+                "scale",
+                ComponentValue::map([
+                    ("x", ComponentValue::f64(1.0).unwrap()),
+                    ("y", ComponentValue::f64(1.0).unwrap()),
+                ]),
+            ),
+        ]),
+    )
 }
 
 impl Drop for TestProject {

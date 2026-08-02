@@ -24,9 +24,7 @@ use nara_diagnostic::{
 };
 use nara_ecs::{ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
-use nara_render::{
-    PreparedRenderResources, RenderPrepareInvalidationReason, RenderPrepareInvalidations,
-};
+use nara_render::PreparedRenderResources;
 use nara_tasks::{
     TaskCancellation, TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey,
     TaskCompletionCutoffError, TaskFailure, TaskHandle, TaskKindConfig, TaskOverloadPolicy,
@@ -1244,19 +1242,88 @@ fn prepare_system_writes_backend_neutral_image_resource() {
 }
 
 #[test]
-fn prepare_system_invalidates_when_image_descriptor_changes() {
+fn unchanged_image_snapshot_reuses_the_prepared_resource() {
     let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
     app.update().unwrap();
-    app.world_mut()
+    let first = app
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get(image_resource_key(handle))
         .unwrap()
-        .resource_mut::<RenderPrepareInvalidations>()
-        .drain();
-    let old_snapshot = app
+        .snapshot()
+        .clone();
+
+    app.update().unwrap();
+
+    let second = app
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>()
         .get(image_resource_key(handle))
         .unwrap()
         .snapshot();
+    assert_eq!(&first, second);
+    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 0);
+}
+
+#[test]
+fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unchanged() {
+    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+    app.update().unwrap();
+    let first = app
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get(image_resource_key(handle))
+        .unwrap()
+        .snapshot()
+        .clone();
+    let version = first.asset_version();
+    let descriptor = first.descriptor_hash();
+    let source = app
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .unwrap()
+        .source()
+        .clone();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<Assets<ImageAsset>>()
+        .insert(
+            handle,
+            ImageAsset::new(
+                source,
+                ImageExtent::new(1, 1),
+                ImageFormat::Rgba8,
+                ImageColorSpace::Srgb,
+                vec![255, 0, 255, 255],
+            )
+            .unwrap(),
+        );
+
+    app.update().unwrap();
+
+    let prepared = app
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>();
+    let second = prepared.get(image_resource_key(handle)).unwrap().snapshot();
+    assert_eq!(second.asset_version(), version);
+    assert_eq!(second.descriptor_hash(), descriptor);
+    assert_ne!(second.slot_revision(), first.slot_revision());
+    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    assert_eq!(prepared.len(), 1);
+}
+
+#[test]
+fn prepare_system_invalidates_when_image_descriptor_changes() {
+    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+    app.update().unwrap();
+    let old_snapshot = app
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get(image_resource_key(handle))
+        .unwrap()
+        .snapshot()
+        .clone();
 
     let changed_importer = ImageImporter::default().with_color_space(ImageColorSpace::Linear);
     let record = image_record("textures/player.png");
@@ -1303,32 +1370,24 @@ fn prepare_system_invalidates_when_image_descriptor_changes() {
     let prepared = app
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>();
-    let new_snapshot = prepared.get(image_resource_key(handle)).unwrap().snapshot();
+    let new_snapshot = prepared
+        .get(image_resource_key(handle))
+        .unwrap()
+        .snapshot()
+        .clone();
     assert_ne!(old_snapshot, new_snapshot);
     assert_eq!(
         new_snapshot.asset_version().raw(),
         expected_version.raw() + 1
     );
     assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
-    assert!(
-        app.world()
-            .resource::<RenderPrepareInvalidations>()
-            .iter()
-            .any(
-                |invalidation| invalidation.key() == image_resource_key(handle)
-                    && invalidation.reason() == RenderPrepareInvalidationReason::DescriptorChanged
-            )
-    );
+    assert_eq!(prepared.len(), 1);
 }
 
 #[test]
 fn prepare_system_removes_prepared_resources_for_removed_images() {
     let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
     app.update().unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<RenderPrepareInvalidations>()
-        .drain();
     assert!(
         app.world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
@@ -1363,12 +1422,8 @@ fn prepare_system_removes_prepared_resources_for_removed_images() {
     assert_eq!(app.world().resource::<ImagePrepareStats>().removed, 1);
     assert!(
         app.world()
-            .resource::<RenderPrepareInvalidations>()
-            .iter()
-            .any(
-                |invalidation| invalidation.key() == image_resource_key(handle)
-                    && invalidation.reason() == RenderPrepareInvalidationReason::AssetRemoved
-            )
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .is_empty()
     );
 }
 
@@ -1409,10 +1464,6 @@ fn image_plugin_loads_and_reloads_image_through_task_update() {
             .is_some()
     );
 
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<RenderPrepareInvalidations>()
-        .drain();
     fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
     app.world_mut()
         .unwrap()
@@ -1435,14 +1486,12 @@ fn image_plugin_loads_and_reloads_image_through_task_update() {
             .high_water_publication_overlap_bytes(),
         image.pixels().len()
     );
-    assert!(
+    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    assert_eq!(
         app.world()
-            .resource::<RenderPrepareInvalidations>()
-            .iter()
-            .any(
-                |invalidation| invalidation.key() == image_resource_key(handle)
-                    && invalidation.reason() == RenderPrepareInvalidationReason::DescriptorChanged
-            )
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .len(),
+        1
     );
     assert_app_image_budget_released(&app);
 
@@ -2591,10 +2640,6 @@ fn image_plugin_removes_runtime_and_prepared_image() {
         .modified(record.path().clone())
         .unwrap();
     drive_image_jobs(&mut app);
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<RenderPrepareInvalidations>()
-        .drain();
 
     app.world_mut()
         .unwrap()
@@ -2625,12 +2670,8 @@ fn image_plugin_removes_runtime_and_prepared_image() {
     );
     assert!(
         app.world()
-            .resource::<RenderPrepareInvalidations>()
-            .iter()
-            .any(
-                |invalidation| invalidation.key() == image_resource_key(handle)
-                    && invalidation.reason() == RenderPrepareInvalidationReason::AssetRemoved
-            )
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .is_empty()
     );
 
     remove_temp_root(&temp_root);
@@ -2654,6 +2695,67 @@ fn descriptor_hash_changes_when_content_descriptor_changes() {
     );
 }
 
+fn direct_image_source() -> ImageSourceMetadata {
+    let record = image_record("textures/direct-image.png");
+    let source_bytes = b"direct image source";
+    let artifact = ImageImporter::default()
+        .import(request(&record, source_bytes))
+        .unwrap();
+    ImageSourceMetadata::new(
+        record.stable_id(),
+        record.path().clone(),
+        SourceHash::from_bytes(source_bytes),
+        artifact,
+    )
+}
+
+#[test]
+fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
+    for extent in [ImageExtent::new(0, 1), ImageExtent::new(1, 0)] {
+        assert_eq!(
+            ImageAsset::new(
+                direct_image_source(),
+                extent,
+                ImageFormat::Rgba8,
+                ImageColorSpace::Srgb,
+                Vec::new(),
+            )
+            .unwrap_err(),
+            ImageAssetCreateError::ZeroExtent { extent }
+        );
+    }
+    assert_eq!(
+        ImageAsset::new(
+            direct_image_source(),
+            ImageExtent::new(u32::MAX, u32::MAX),
+            ImageFormat::Rgba8,
+            ImageColorSpace::Srgb,
+            Vec::new(),
+        )
+        .unwrap_err(),
+        ImageAssetCreateError::ByteLengthOverflow {
+            extent: ImageExtent::new(u32::MAX, u32::MAX),
+        }
+    );
+    for (pixels, expected, actual) in [(vec![0; 3], 4, 3), (vec![0; 5], 4, 5)] {
+        assert_eq!(
+            ImageAsset::new(
+                direct_image_source(),
+                ImageExtent::new(1, 1),
+                ImageFormat::Rgba8,
+                ImageColorSpace::Srgb,
+                pixels,
+            )
+            .unwrap_err(),
+            ImageAssetCreateError::PixelLengthMismatch {
+                extent: ImageExtent::new(1, 1),
+                expected,
+                actual,
+            }
+        );
+    }
+}
+
 #[test]
 fn image_asset_reuses_the_admitted_pixel_allocation() {
     let record = image_record("textures/player.png");
@@ -2675,7 +2777,8 @@ fn image_asset_reuses_the_admitted_pixel_allocation() {
         ImageFormat::Rgba8,
         ImageColorSpace::Srgb,
         pixels,
-    );
+    )
+    .unwrap();
 
     assert_eq!(image.pixels().as_ptr(), admitted_allocation);
 }
@@ -2727,6 +2830,41 @@ fn shared_image_pixels_keep_the_canonical_byte_content_wire_shape() {
     assert_eq!(decoded, image);
     assert_eq!(decoded.pixels(), &[24, 120, 220, 255]);
     assert!(!std::ptr::eq(decoded.pixels(), image.pixels()));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_asset_deserialization_reuses_the_constructor_validation() {
+    let image = ImageAsset::new(
+        direct_image_source(),
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        ImageColorSpace::Srgb,
+        vec![24, 120, 220, 255],
+    )
+    .unwrap();
+    let valid = serde_json::to_value(image).unwrap();
+
+    let mut zero = valid.clone();
+    zero["extent"]["width"] = serde_json::json!(0);
+    assert!(serde_json::from_value::<ImageAsset>(zero).is_err());
+
+    let mut zero = valid.clone();
+    zero["extent"]["height"] = serde_json::json!(0);
+    assert!(serde_json::from_value::<ImageAsset>(zero).is_err());
+
+    let mut overflow = valid.clone();
+    overflow["extent"]["width"] = serde_json::json!(u32::MAX);
+    overflow["extent"]["height"] = serde_json::json!(u32::MAX);
+    assert!(serde_json::from_value::<ImageAsset>(overflow).is_err());
+
+    let mut undersized = valid.clone();
+    undersized["pixels"] = serde_json::json!([24, 120, 220]);
+    assert!(serde_json::from_value::<ImageAsset>(undersized).is_err());
+
+    let mut oversized = valid;
+    oversized["pixels"] = serde_json::json!([24, 120, 220, 255, 0]);
+    assert!(serde_json::from_value::<ImageAsset>(oversized).is_err());
 }
 
 #[test]

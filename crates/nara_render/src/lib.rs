@@ -26,9 +26,8 @@ pub use pass_plan::{
 };
 pub use prepare::{
     PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
-    RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
-    RenderPrepareInvalidationReason, RenderPrepareInvalidations, RenderPrepareStatus,
-    RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
+    RenderPrepareError, RenderPrepareStatus, RenderResourceKey, RenderResourceKind,
+    RenderResourceSnapshot,
 };
 
 #[doc(hidden)]
@@ -436,6 +435,7 @@ pub enum RenderFrameSkipReason {
     NoViews,
     InvalidTopology,
     NoRenderableTarget,
+    ResourceChanged,
     SurfaceUnavailable,
     BackendError,
 }
@@ -619,7 +619,6 @@ impl Plugin for RenderPlugin {
         app.init_resource::<RenderFrame>()?;
         app.init_resource::<FrameStats>()?;
         app.init_resource::<RenderBackendStatus>()?;
-        app.init_resource::<RenderPrepareInvalidations>()?;
         app.add_systems(
             CoreStage::Extract,
             extract_views

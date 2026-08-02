@@ -168,7 +168,9 @@ pub mod prelude {
     pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
 
     #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
-    pub use nara_image::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin};
+    pub use nara_image::{
+        ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin,
+    };
     #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
     pub use nara_material::{
         AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, SamplerDescriptor,
@@ -298,9 +300,8 @@ pub mod advanced_prelude {
         Extent2d, ExtractedView, ExtractedViews, FrameStats, PreparedRenderResource,
         PreparedRenderResourceRecord, PreparedRenderResources, RenderBackendState,
         RenderBackendStatus, RenderFrame, RenderFrameSkip, RenderFrameSkipReason, RenderFrameState,
-        RenderPhaseLabel, RenderPrepareApplyResult, RenderPrepareError, RenderPrepareInvalidation,
-        RenderPrepareInvalidationReason, RenderPrepareInvalidations, RenderPrepareStatus,
-        RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, ViewportRect,
+        RenderPhaseLabel, RenderPrepareError, RenderPrepareStatus, RenderResourceKey,
+        RenderResourceKind, RenderResourceSnapshot, ViewportRect,
     };
     #[cfg(feature = "runtime-2d")]
     pub use nara_sprite_render::{

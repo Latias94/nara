@@ -23,6 +23,8 @@ pub enum WgpuRenderError {
     StaleFrameGeneration { expected: u64, actual: u64 },
     #[error("render frame {frame_index} was already consumed")]
     FrameAlreadyConsumed { frame_index: u64 },
+    #[error("render resources changed after preparation; retry on the next frame")]
+    ResourceChangedAfterPrepare,
     #[error("wgpu surface creation failed for window {window_id:?}: {message}")]
     SurfaceCreation {
         window_id: WindowId,
@@ -53,5 +55,10 @@ impl WgpuRenderError {
             self,
             Self::StaleFrameGeneration { .. } | Self::FrameAlreadyConsumed { .. }
         )
+    }
+
+    #[must_use]
+    pub(crate) const fn is_transient_resource_rejection(&self) -> bool {
+        matches!(self, Self::ResourceChangedAfterPrepare)
     }
 }

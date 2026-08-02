@@ -308,4 +308,5 @@ fn test_image() -> ImageAsset {
         ImageColorSpace::Srgb,
         vec![255; 16],
     )
+    .unwrap()
 }
