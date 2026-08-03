@@ -91,7 +91,10 @@ mod project_diagnostic_ids;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 mod project_content;
 
-#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+#[cfg(feature = "runtime-core")]
+mod scene_retention;
+
+#[cfg(feature = "runtime-core")]
 mod startup_scene;
 
 #[cfg(feature = "runtime-core")]
@@ -265,7 +268,7 @@ pub mod advanced_prelude {
         ComponentMigrationError, ComponentRegistryError, ComponentValueError, ComponentValueKind,
         MigratedComponentValue, PreparedComponent, PreparedComponentCandidate,
     };
-    pub use nara_scene::{
+    pub use nara_scene::advanced::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
         replace_scene_with_product,
     };
@@ -280,7 +283,7 @@ pub mod advanced_prelude {
         TaskTerminal, TaskTerminalState,
     };
 
-    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[cfg(feature = "runtime-core")]
     pub use crate::startup_scene::{
         STARTUP_SCENE_ACTIVATION_PLUGIN_ID, StartupSceneActivation, StartupSceneActivationPlugin,
         StartupSceneActivationSet, StartupSceneMaterializeError, StartupSceneSource,

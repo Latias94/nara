@@ -164,7 +164,7 @@ impl Plugin for ReferenceGamePlugin {
             .insert_resource(WaveSnapshot::default())?
             .add_systems(
                 StartupStage::Runtime,
-                systems::initialize_reference_run.in_set(StartupSceneActivationSet::Dependents),
+                systems::initialize_reference_run.in_set(StartupSceneActivationSet),
             )?;
         app.configure_sets(
             CoreStage::FixedUpdate,

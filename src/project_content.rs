@@ -6,7 +6,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     error::Error,
     fmt::{self, Display, Formatter},
-    mem::{size_of, size_of_val},
+    mem::size_of,
     sync::Arc,
 };
 
@@ -32,13 +32,17 @@ use nara_reflect::{
     collect_declared_asset_references,
 };
 use nara_scene::{
-    PrefabDocument, PrefabDocumentCandidate, PrefabInstance, PrefabSourceResolver, SceneDocument,
+    PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver, SceneDocument,
     SceneDocumentCandidate, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
 };
 
 use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 use crate::project_host::{
     ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, SchemaValidationInput,
+};
+use crate::scene_retention::{
+    ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, STRING_ALLOCATION_OVERHEAD,
+    VALUE_NODE_ALLOCATION_BYTES,
 };
 use crate::startup_scene::StartupSceneSource;
 
@@ -1504,14 +1508,10 @@ fn string_work_bytes(value: &str) -> Result<usize, ProjectContentError> {
         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))
 }
 
-const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
-const BTREE_ENTRY_OVERHEAD: usize = 6 * size_of::<usize>();
-const ARC_CONTROL_BLOCK_BYTES: usize = 4 * size_of::<usize>();
 const SNAPSHOT_LEASE_OVERHEAD: usize = 128;
 const IMAGE_RETENTION_OWNER_OVERHEAD: usize =
     ARC_CONTROL_BLOCK_BYTES + size_of::<ProjectContentLease>();
 const IMAGE_METADATA_OVERHEAD: usize = 256;
-const VALUE_NODE_ALLOCATION_BYTES: usize = 32;
 const ENTITY_WORK_BYTES: usize = 128;
 const COMPONENT_WORK_BYTES: usize = 96;
 const PREFAB_INSTANCE_WORK_BYTES: usize = 128;
@@ -1614,21 +1614,15 @@ fn prefab_expansion_work_plan(
 pub(crate) fn startup_scene_retained_bytes(
     document: &SceneDocument,
 ) -> Result<usize, ProjectContentError> {
-    document_retained_bytes(size_of::<SceneDocument>(), &document.entities)
-}
-
-pub(crate) fn direct_startup_scene_retained_bytes(
-    document: &SceneDocument,
-) -> Result<usize, ProjectContentError> {
-    startup_scene_retained_bytes(document)?
-        .checked_add(ARC_CONTROL_BLOCK_BYTES)
-        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
+    crate::scene_retention::scene_retained_bytes(document)
+        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
 fn editor_startup_scene_retained_bytes(
     document: &SceneDocument,
 ) -> Result<usize, ProjectContentError> {
-    direct_startup_scene_retained_bytes(document)?
+    crate::scene_retention::direct_startup_scene_retained_bytes(document)
+        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?
         .checked_add(SNAPSHOT_LEASE_OVERHEAD)
         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
@@ -1638,199 +1632,21 @@ fn scene_retained_bytes(document: &SceneDocument) -> Result<usize, ProjectConten
 }
 
 fn prefab_retained_bytes(document: &PrefabDocument) -> Result<usize, ProjectContentError> {
-    document_retained_bytes(size_of::<PrefabDocument>(), &document.entities)
+    crate::scene_retention::prefab_retained_bytes(document)
+        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
-fn document_retained_bytes(
-    document_bytes: usize,
-    entities: &[SceneEntityRecord],
+#[cfg(test)]
+fn patch_retained_bytes(
+    patch: &nara_scene::ScenePatchDocument,
 ) -> Result<usize, ProjectContentError> {
-    let mut total = checked_plan_sum(
-        ProjectContentBudgetKind::RetainedBytes,
-        [
-            document_bytes,
-            checked_plan_product(
-                ProjectContentBudgetKind::RetainedBytes,
-                entities.len(),
-                size_of::<SceneEntityRecord>(),
-            )?,
-        ],
-    )?;
-    for entity in entities {
-        checked_add_to(
-            &mut total,
-            entity_dynamic_bytes(entity)?,
-            ProjectContentBudgetKind::RetainedBytes,
-        )?;
-    }
-    Ok(total)
-}
-
-fn entity_dynamic_bytes(entity: &SceneEntityRecord) -> Result<usize, ProjectContentError> {
-    let mut total = string_retained_bytes(entity.id.as_str())?;
-    if let Some(parent) = &entity.parent {
-        checked_add_to(
-            &mut total,
-            string_retained_bytes(parent.as_str())?,
-            ProjectContentBudgetKind::RetainedBytes,
-        )?;
-    }
-    for (id, record) in &entity.components {
-        checked_add_to(
-            &mut total,
-            checked_plan_sum(
-                ProjectContentBudgetKind::RetainedBytes,
-                [
-                    size_of_val(id),
-                    size_of_val(record),
-                    BTREE_ENTRY_OVERHEAD,
-                    string_retained_bytes(id.as_str())?,
-                    component_value_retained_bytes(&record.value)?,
-                ],
-            )?,
-            ProjectContentBudgetKind::RetainedBytes,
-        )?;
-    }
-    if let Some(instance) = &entity.prefab {
-        checked_add_to(
-            &mut total,
-            prefab_instance_retained_bytes(instance)?,
-            ProjectContentBudgetKind::RetainedBytes,
-        )?;
-    }
-    Ok(total)
-}
-
-fn prefab_instance_retained_bytes(instance: &PrefabInstance) -> Result<usize, ProjectContentError> {
-    let source = match &instance.source {
-        AssetRef::Path(path) => string_retained_bytes(path.as_str())?,
-        AssetRef::StableId(_) => 16,
-    };
-    checked_plan_sum(
-        ProjectContentBudgetKind::RetainedBytes,
-        [source, patch_retained_bytes(&instance.overrides)?],
-    )
-}
-
-fn patch_retained_bytes(patch: &ScenePatchDocument) -> Result<usize, ProjectContentError> {
-    let mut total = checked_plan_product(
-        ProjectContentBudgetKind::RetainedBytes,
-        patch.operations.len(),
-        size_of::<ScenePatchOperation>(),
-    )?;
-    for operation in &patch.operations {
-        let dynamic = match operation {
-            ScenePatchOperation::AddEntity { entity } => entity_dynamic_bytes(entity)?,
-            ScenePatchOperation::AddComponent {
-                entity,
-                component,
-                value,
-            }
-            | ScenePatchOperation::ReplaceComponent {
-                entity,
-                component,
-                value,
-            } => checked_plan_sum(
-                ProjectContentBudgetKind::RetainedBytes,
-                [
-                    string_retained_bytes(entity.as_str())?,
-                    string_retained_bytes(component.as_str())?,
-                    component_value_retained_bytes(&value.value)?,
-                ],
-            )?,
-            ScenePatchOperation::SetField {
-                entity,
-                component,
-                field,
-                value,
-                ..
-            } => checked_plan_sum(
-                ProjectContentBudgetKind::RetainedBytes,
-                [
-                    string_retained_bytes(entity.as_str())?,
-                    string_retained_bytes(component.as_str())?,
-                    string_retained_bytes(field.as_str())?,
-                    component_value_retained_bytes(value)?,
-                ],
-            )?,
-            ScenePatchOperation::SetAssetRefField {
-                entity,
-                component,
-                field,
-                asset_ref,
-                ..
-            } => checked_plan_sum(
-                ProjectContentBudgetKind::RetainedBytes,
-                [
-                    string_retained_bytes(entity.as_str())?,
-                    string_retained_bytes(component.as_str())?,
-                    string_retained_bytes(field.as_str())?,
-                    match asset_ref {
-                        AssetRef::Path(path) => string_retained_bytes(path.as_str())?,
-                        AssetRef::StableId(_) => 16,
-                    },
-                ],
-            )?,
-            ScenePatchOperation::RemoveEntity { entity } => string_retained_bytes(entity.as_str())?,
-            ScenePatchOperation::RemoveComponent { entity, component } => checked_plan_sum(
-                ProjectContentBudgetKind::RetainedBytes,
-                [
-                    string_retained_bytes(entity.as_str())?,
-                    string_retained_bytes(component.as_str())?,
-                ],
-            )?,
-            ScenePatchOperation::RemoveField {
-                entity,
-                component,
-                field,
-                ..
-            } => checked_plan_sum(
-                ProjectContentBudgetKind::RetainedBytes,
-                [
-                    string_retained_bytes(entity.as_str())?,
-                    string_retained_bytes(component.as_str())?,
-                    string_retained_bytes(field.as_str())?,
-                ],
-            )?,
-            ScenePatchOperation::Reparent { entity, parent } => checked_plan_sum(
-                ProjectContentBudgetKind::RetainedBytes,
-                [
-                    string_retained_bytes(entity.as_str())?,
-                    parent
-                        .as_ref()
-                        .map(|parent| string_retained_bytes(parent.as_str()))
-                        .transpose()?
-                        .unwrap_or(0),
-                ],
-            )?,
-        };
-        checked_add_to(&mut total, dynamic, ProjectContentBudgetKind::RetainedBytes)?;
-    }
-    Ok(total)
-}
-
-fn component_value_retained_bytes(
-    value: &nara_reflect::ComponentValue,
-) -> Result<usize, ProjectContentError> {
-    let cost = value.cost();
-    checked_plan_sum(
-        ProjectContentBudgetKind::RetainedBytes,
-        [
-            cost.logical_bytes(),
-            checked_plan_product(
-                ProjectContentBudgetKind::RetainedBytes,
-                cost.nodes(),
-                VALUE_NODE_ALLOCATION_BYTES,
-            )?,
-        ],
-    )
+    crate::scene_retention::patch_retained_bytes(patch)
+        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
 fn string_retained_bytes(value: &str) -> Result<usize, ProjectContentError> {
-    value
-        .len()
-        .checked_add(STRING_ALLOCATION_OVERHEAD)
-        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
+    crate::scene_retention::string_retained_bytes(value)
+        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
 fn checked_plan_product(

@@ -30,18 +30,23 @@ use nara_identity::SpawnedSceneInstance;
 use nara_reflect::{ComponentRegistry, component_registry, validate_component_registry_authority};
 use nara_scene::{SceneDocument, spawn_scene};
 
-use crate::project_content::{ProjectContentLease, direct_startup_scene_retained_bytes};
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+use crate::project_content::ProjectContentLease;
+use crate::scene_retention::direct_startup_scene_retained_bytes;
 
+/// Stable plugin identity for the provisional advanced startup-scene activation seam.
 pub const STARTUP_SCENE_ACTIVATION_PLUGIN_ID: PluginId =
     PluginId::new("nara.startup-scene-activation");
-pub(crate) const STARTUP_SCENE_ACTIVATION_PLUGIN_DECLARATION: PluginDeclaration =
+const STARTUP_SCENE_ACTIVATION_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(STARTUP_SCENE_ACTIVATION_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[nara_scene::SCENE_COMPONENTS_PLUGIN_ID]);
 
 /// Validation failure while binding a direct managed-App startup source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupSceneSourceError {
+    /// Logical retained-byte accounting overflowed `usize`.
     RetainedBytesOverflow,
+    /// The exact logical retained-byte charge exceeds the caller's declared limit.
     RetainedBytesExceeded { required: usize, limit: usize },
 }
 
@@ -59,6 +64,7 @@ impl fmt::Display for StartupSceneSourceError {
 impl Error for StartupSceneSourceError {}
 
 enum StartupSceneRetention {
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     Project {
         _lease: ProjectContentLease,
         retained_bytes: usize,
@@ -120,6 +126,7 @@ impl StartupSceneSource {
         })
     }
 
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) fn from_project_content(
         document: Arc<SceneDocument>,
         lease: ProjectContentLease,
@@ -135,21 +142,23 @@ impl StartupSceneSource {
     }
 
     #[must_use]
-    pub fn document(&self) -> &SceneDocument {
+    pub(crate) fn document(&self) -> &SceneDocument {
         &self.document
     }
 
     #[must_use]
     pub(crate) const fn retained_bytes(&self) -> usize {
         match &self.retention {
-            StartupSceneRetention::Project { retained_bytes, .. }
-            | StartupSceneRetention::Direct { retained_bytes, .. } => *retained_bytes,
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            StartupSceneRetention::Project { retained_bytes, .. } => *retained_bytes,
+            StartupSceneRetention::Direct { retained_bytes, .. } => *retained_bytes,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn direct_limit(&self) -> Option<usize> {
         match self.retention {
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             StartupSceneRetention::Project { .. } => None,
             StartupSceneRetention::Direct { _limit, .. } => Some(_limit),
         }
@@ -165,6 +174,7 @@ impl fmt::Debug for StartupSceneSource {
             .field(
                 "retention",
                 &match self.retention {
+                    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
                     StartupSceneRetention::Project { .. } => "project-content",
                     StartupSceneRetention::Direct { .. } => "direct-limit",
                 },
@@ -186,7 +196,7 @@ impl StartupSceneSourceView {
 
     /// Returns the logical retained-byte charge owned by the root activation authority.
     #[must_use]
-    pub const fn retained_bytes(&self) -> usize {
+    pub(crate) const fn retained_bytes(&self) -> usize {
         self.retained_bytes
     }
 }
@@ -219,11 +229,13 @@ pub(crate) struct StartupSceneActivationOwner {
 }
 
 impl StartupSceneActivation<'_> {
+    /// Returns the exact immutable source admitted for the active runtime.
     #[must_use]
     pub fn source(&self) -> &SceneDocument {
         self.owner.source()
     }
 
+    /// Returns the successful receipt paired with the admitted source.
     #[must_use]
     pub fn receipt(&self) -> &SpawnedSceneInstance {
         self.owner.receipt()
@@ -324,16 +336,16 @@ enum StartupSceneActivationPhase {
     Finalized,
 }
 
-/// Ordered provisional phases within [`StartupStage::Runtime`].
+/// Provisional ordering anchor for product systems that consume startup-scene activation.
 ///
-/// The root product adapter moves the one-shot materialization input into its private owner in
-/// [`Self::Consume`]. Product systems then inspect that owner through [`StartupSceneActivation`]
-/// in [`Self::Dependents`]. The finalizer closes the materialization window and rejects a candidate
-/// if the private input was not promoted.
+/// The engine promotes the one-shot input before this set and finalizes the activation window
+/// afterward. Those internal phases are deliberately not public schedule anchors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
-pub enum StartupSceneActivationSet {
+pub struct StartupSceneActivationSet;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+enum StartupSceneActivationInternalSet {
     Consume,
-    Dependents,
     Finalize,
 }
 
@@ -353,19 +365,19 @@ impl Plugin for StartupSceneActivationPlugin {
         .configure_sets(
             StartupStage::Runtime,
             (
-                StartupSceneActivationSet::Consume,
-                StartupSceneActivationSet::Dependents,
-                StartupSceneActivationSet::Finalize,
+                StartupSceneActivationInternalSet::Consume,
+                StartupSceneActivationSet,
+                StartupSceneActivationInternalSet::Finalize,
             )
                 .chain(),
         )?
         .add_systems(
             StartupStage::Runtime,
-            consume_startup_scene_activation.in_set(StartupSceneActivationSet::Consume),
+            consume_startup_scene_activation.in_set(StartupSceneActivationInternalSet::Consume),
         )?
         .add_systems(
             StartupStage::Runtime,
-            finalize_startup_scene_activation.in_set(StartupSceneActivationSet::Finalize),
+            finalize_startup_scene_activation.in_set(StartupSceneActivationInternalSet::Finalize),
         )?;
         Ok(())
     }
@@ -518,6 +530,7 @@ impl StartupSceneMaterializeError {
         Self::new(diagnostics)
     }
 
+    /// Returns the structured diagnostics that rejected materialization.
     #[must_use]
     pub fn diagnostics(&self) -> &DiagnosticReport {
         &self.diagnostics

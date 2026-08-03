@@ -43,13 +43,13 @@ impl SceneProductTransactionLimits {
 
     /// Returns the caller limit for component and resource overlay entries.
     #[must_use]
-    pub const fn overlay_writes(self) -> ItemLimit {
+    pub(crate) const fn overlay_writes(self) -> ItemLimit {
         self.overlay_writes
     }
 
     /// Returns the caller limit for additional product-owned retirement tokens.
     #[must_use]
-    pub const fn additional_retirements(self) -> ItemLimit {
+    pub(crate) const fn additional_retirements(self) -> ItemLimit {
         self.additional_retirements
     }
 }

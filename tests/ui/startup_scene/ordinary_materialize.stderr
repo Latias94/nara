@@ -1,0 +1,7 @@
+error[E0432]: unresolved imports `nara::prelude::StartupSceneSource`, `nara::prelude::materialize_startup_scene`
+ --> tests/ui/startup_scene/ordinary_materialize.rs:1:21
+  |
+1 | use nara::prelude::{StartupSceneSource, materialize_startup_scene};
+  |                     ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^ no `materialize_startup_scene` in `prelude`
+  |                     |
+  |                     no `StartupSceneSource` in `prelude`

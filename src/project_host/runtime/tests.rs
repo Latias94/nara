@@ -350,7 +350,7 @@ impl Plugin for ActivationProbePlugin {
         app.insert_resource(ActivationProbe(Arc::clone(&self.observations)))?
             .add_systems(
                 StartupStage::Runtime,
-                observe_startup_activation.in_set(StartupSceneActivationSet::Dependents),
+                observe_startup_activation.in_set(StartupSceneActivationSet),
             )?;
         Ok(())
     }
@@ -375,7 +375,7 @@ impl Plugin for ClassifiedStartupFailurePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.add_systems(
             StartupStage::Runtime,
-            fail_classified_startup.in_set(StartupSceneActivationSet::Dependents),
+            fail_classified_startup.in_set(StartupSceneActivationSet),
         )?;
         Ok(())
     }

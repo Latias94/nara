@@ -5,7 +5,7 @@ use nara::{
     app::RuntimeFaultReporter,
     ecs::{Entity, With, error::BevyError, system::SystemParam},
     prelude::{FixedTime, Query, Res, ResMut, Resource, Transform2d, Vec2},
-    scene::{SceneEntitySource, SceneProductResource},
+    scene::{SceneEntitySource, advanced::SceneProductResource},
     transform::GlobalTransform2d,
 };
 

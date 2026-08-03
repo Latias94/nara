@@ -72,15 +72,21 @@ impl Error for SceneEntityRetirementError {
     }
 }
 
+/// Runtime provenance for an entity materialized from a persistent scene record.
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
 pub struct SceneEntitySource {
+    /// Identity of the concrete materialized scene instance.
     pub instance_id: SceneInstanceId,
+    /// Stable entity identity within the persistent scene document.
     pub entity_id: SceneEntityId,
 }
 
+/// Result of one scene materialization or replacement attempt.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SceneSpawnReport {
+    /// Successful instance receipt, absent when materialization was rejected.
     pub instance: Option<SpawnedSceneInstance>,
+    /// Structured diagnostics emitted while preparing or committing the operation.
     pub diagnostics: DiagnosticReport,
     retired_entities: usize,
 }
@@ -92,6 +98,7 @@ impl SceneSpawnReport {
     }
 }
 
+/// Stateless entry point for scene materialization operations.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SceneSpawner;
 

@@ -1,0 +1,13 @@
+error[E0603]: module `product_transaction` is private
+ --> tests/ui/scene_product/private_module.rs:1:18
+  |
+1 | use nara::scene::product_transaction::SceneProductOverlayWriter;
+  |                  ^^^^^^^^^^^^^^^^^^^  ------------------------- struct `SceneProductOverlayWriter` is not publicly re-exported
+  |                  |
+  |                  private module
+  |
+note: the module `product_transaction` is defined here
+ --> crates/nara_scene/src/lib.rs
+  |
+  | mod product_transaction;
+  | ^^^^^^^^^^^^^^^^^^^^^^^

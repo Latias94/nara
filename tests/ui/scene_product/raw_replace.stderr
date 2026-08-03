@@ -1,0 +1,16 @@
+error[E0624]: method `replace` is private
+ --> tests/ui/scene_product/raw_replace.rs:4:27
+  |
+4 |       let _ = SceneSpawner::replace;
+  |                             ^^^^^^^ private method
+  |
+ ::: crates/nara_scene/src/spawn.rs
+  |
+  | /     pub(crate) fn replace(
+  | |         &mut self,
+  | |         world: &mut World,
+  | |         registry: &ComponentRegistry,
+  | |         document: &SceneDocument,
+  | |         current: &SpawnedSceneInstance,
+  | |     ) -> SceneSpawnReport {
+  | |_________________________- private method defined here

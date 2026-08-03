@@ -2501,7 +2501,7 @@ use nara::advanced_prelude::{
 };
 
 // Install the plugin during direct managed-App composition. Product initialization systems run in
-// StartupSceneActivationSet::Dependents and borrow StartupSceneActivation read-only.
+// StartupSceneActivationSet and borrow StartupSceneActivation read-only.
 ```
 
 Project-backed callers do not construct a source or activation. Bundled content shares the exact
@@ -2514,7 +2514,7 @@ registry authority exists and before `complete_startup`.
 
 **User action**: update exhaustive `AppRunError` patterns, add the activation plugin only to custom
 direct managed-App compositions that call the advanced materializer, and place product Startup
-initialization in `StartupSceneActivationSet::Dependents`. Do not move startup materialization into
+initialization in `StartupSceneActivationSet`. Do not move startup materialization into
 `ProductRecipe`, reconstruct the source from the live `World`, or retain arbitrary third-party
 error text.
 

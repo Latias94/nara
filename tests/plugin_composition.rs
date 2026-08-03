@@ -9,6 +9,7 @@ use std::{
 use nara::{
     MinimalPlugins, ProductConfiguration, ProductRecipe, ProductRecipeEntryKind,
     ProductRecipeError, SchemaContribution,
+    advanced_prelude::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
     app::{
         AddPluginsError, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginError,
         PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
@@ -882,6 +883,12 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
         plugin_entries
             .iter()
             .any(|entry| entry.plugin_id() == SCENE_COMPONENTS_PLUGIN_ID)
+    );
+    assert!(
+        plugin_entries
+            .iter()
+            .any(|entry| entry.plugin_id() == STARTUP_SCENE_ACTIVATION_PLUGIN_ID),
+        "serialization must not control the runtime startup-activation plugin graph"
     );
 
     let app = first.plugin_plan().instantiate().unwrap();

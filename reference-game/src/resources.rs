@@ -5,7 +5,7 @@ use nara::{
     ecs::Entity,
     identity::{SceneEntityId, SpawnedSceneInstance, WorldEntityToken},
     prelude::{Component, Resource, Vec2},
-    scene::{SceneEntitySource, SceneProductResource},
+    scene::{SceneEntitySource, advanced::SceneProductResource},
 };
 
 use crate::snapshot::WaveOutcome;

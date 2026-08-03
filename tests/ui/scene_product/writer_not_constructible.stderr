@@ -1,0 +1,15 @@
+error[E0624]: associated function `new` is private
+ --> tests/ui/scene_product/writer_not_constructible.rs:4:40
+  |
+4 |       let _ = SceneProductOverlayWriter::new;
+  |                                          ^^^ private associated function
+  |
+ ::: crates/nara_scene/src/product_transaction.rs
+  |
+  | /     pub(crate) fn new(
+  | |         world: &'world World,
+  | |         registry: &'world ComponentRegistry,
+  | |         scene: &PreparedScene,
+  | |         limit: ItemLimit,
+  | |     ) -> Self {
+  | |_____________- private associated function defined here

@@ -7,6 +7,7 @@ use std::{
 };
 
 use nara::{
+    app::AppExit,
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
     project_host::{DesktopRun, DesktopRunOutcome},
 };
@@ -15,7 +16,7 @@ use nara_reference_game::bundled_desktop_run;
 mod desktop_candidate_smoke;
 mod desktop_support;
 mod support;
-use desktop_candidate_smoke::{CandidateSmokeEvidence, candidate_smoke_run};
+use desktop_candidate_smoke::candidate_smoke_run;
 use support::project_root::open_project_root;
 
 const CLEANUP_DEADLINE: Duration = Duration::from_secs(5);
@@ -38,27 +39,26 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (mut run, candidate_smoke) = desktop_run(project_root, mode);
+    let mut run = desktop_run(project_root, mode);
     let exit = drive_desktop_process(
         || lower_run_report(&run.execute()),
         Instant::now,
         std::thread::park_timeout,
         emit_static_error,
     );
-    if exit != DesktopProcessExit::Success {
+    if exit == DesktopProcessExit::Failure {
         return exit.exit_code();
     }
-    let Some(candidate_smoke) = candidate_smoke else {
-        return exit.exit_code();
-    };
-    if !candidate_smoke.completed() {
-        emit_static_error(
-            "reference-game.desktop.candidate-smoke-failed",
-            "Desktop candidate did not submit its bounded product frame",
-        );
-        return ExitCode::FAILURE;
+    if mode == DesktopMode::CandidateSmoke {
+        if !mode.accepts_completion(exit) {
+            emit_static_error(
+                "reference-game.desktop.candidate-incomplete",
+                "Desktop candidate exited before submitting its bounded product frame",
+            );
+            return ExitCode::FAILURE;
+        }
+        println!("{CANDIDATE_SMOKE_SUCCESS}");
     }
-    println!("{CANDIDATE_SMOKE_SUCCESS}");
     exit.exit_code()
 }
 
@@ -82,21 +82,27 @@ impl DesktopMode {
             }),
         }
     }
+
+    const fn accepts_completion(self, exit: DesktopProcessExit) -> bool {
+        match (self, exit) {
+            (Self::Interactive, DesktopProcessExit::Success(_))
+            | (Self::CandidateSmoke, DesktopProcessExit::Success(AppExit::Success)) => true,
+            (_, DesktopProcessExit::Failure)
+            | (Self::CandidateSmoke, DesktopProcessExit::Success(AppExit::Requested)) => false,
+        }
+    }
 }
 
-fn desktop_run(
-    project_root: nara::fs::DirectoryCapability,
-    mode: DesktopMode,
-) -> (DesktopRun, Option<CandidateSmokeEvidence>) {
+fn desktop_run(project_root: nara::fs::DirectoryCapability, mode: DesktopMode) -> DesktopRun {
     match mode {
-        DesktopMode::Interactive => (bundled_desktop_run(project_root), None),
+        DesktopMode::Interactive => bundled_desktop_run(project_root),
         DesktopMode::CandidateSmoke => candidate_smoke_run(project_root),
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DesktopProcessStep {
-    Completed,
+    Completed(AppExit),
     Failed(ProcessDiagnostic),
     CleanupIncomplete(Option<ProcessDiagnostic>),
 }
@@ -109,14 +115,14 @@ struct ProcessDiagnostic {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesktopProcessExit {
-    Success,
+    Success(AppExit),
     Failure,
 }
 
 impl DesktopProcessExit {
     const fn exit_code(self) -> ExitCode {
         match self {
-            Self::Success => ExitCode::SUCCESS,
+            Self::Success(_) => ExitCode::SUCCESS,
             Self::Failure => ExitCode::FAILURE,
         }
     }
@@ -127,7 +133,7 @@ fn lower_run_report(report: &nara::project_host::DesktopRunReport) -> DesktopPro
         DesktopRunOutcome::Completed(_) if report.diagnostics().has_errors() => {
             DesktopProcessStep::Failed(first_error_diagnostic(report.diagnostics()))
         }
-        DesktopRunOutcome::Completed(_) => DesktopProcessStep::Completed,
+        DesktopRunOutcome::Completed(exit) => DesktopProcessStep::Completed(exit),
         DesktopRunOutcome::Failed => {
             DesktopProcessStep::Failed(first_error_diagnostic(report.diagnostics()))
         }
@@ -175,7 +181,7 @@ fn drive_desktop_process(
     let mut cleanup_diagnostic = None;
     loop {
         match execute() {
-            DesktopProcessStep::Completed => return DesktopProcessExit::Success,
+            DesktopProcessStep::Completed(exit) => return DesktopProcessExit::Success(exit),
             DesktopProcessStep::Failed(diagnostic) => {
                 emit(&diagnostic.code, &diagnostic.summary);
                 return DesktopProcessExit::Failure;
@@ -254,6 +260,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn candidate_mode_requires_the_probe_success_exit() {
+        assert!(
+            DesktopMode::CandidateSmoke
+                .accepts_completion(DesktopProcessExit::Success(AppExit::Success))
+        );
+        assert!(
+            !DesktopMode::CandidateSmoke
+                .accepts_completion(DesktopProcessExit::Success(AppExit::Requested))
+        );
+        assert!(
+            DesktopMode::Interactive
+                .accepts_completion(DesktopProcessExit::Success(AppExit::Requested))
+        );
+    }
+
     fn diagnostic(code: &str, summary: &str) -> ProcessDiagnostic {
         ProcessDiagnostic {
             code: code.to_owned(),
@@ -318,9 +340,10 @@ mod tests {
 
     #[test]
     fn normal_completion_has_success_exit_and_no_stderr() {
-        let (exit, emitted, waits) = run_script([DesktopProcessStep::Completed], []);
+        let (exit, emitted, waits) =
+            run_script([DesktopProcessStep::Completed(AppExit::Requested)], []);
 
-        assert_eq!(exit, DesktopProcessExit::Success);
+        assert_eq!(exit, DesktopProcessExit::Success(AppExit::Requested));
         assert_eq!(exit.exit_code(), ExitCode::SUCCESS);
         assert!(emitted.is_empty());
         assert_eq!(waits, 0);
@@ -354,12 +377,12 @@ mod tests {
         let (exit, emitted, waits) = run_script(
             [
                 DesktopProcessStep::CleanupIncomplete(None),
-                DesktopProcessStep::Completed,
+                DesktopProcessStep::Completed(AppExit::Requested),
             ],
             [first_incomplete],
         );
 
-        assert_eq!(exit, DesktopProcessExit::Success);
+        assert_eq!(exit, DesktopProcessExit::Success(AppExit::Requested));
         assert!(emitted.is_empty());
         assert_eq!(waits, 1);
     }

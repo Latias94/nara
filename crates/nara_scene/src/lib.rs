@@ -43,9 +43,16 @@ pub use prefab::{
     PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
     PrefabSourceResolver,
 };
-pub use product_transaction::{
-    SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
-};
+/// Provisional APIs for advanced product integrations.
+///
+/// These contracts have a real reference-game consumer but are not ordinary scene-authoring
+/// surface. They may change while ADR 0089 remains Proposed.
+pub mod advanced {
+    pub use crate::product_transaction::{
+        SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
+    };
+    pub use crate::spawn::replace_scene_with_product;
+}
 pub use scene_components::{
     Name, SCENE_COMPONENTS_PLUGIN_DECLARATION, SCENE_COMPONENTS_PLUGIN_ID,
     SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
@@ -54,8 +61,8 @@ pub use scene_components::{
 };
 pub use spawn::{
     SceneEntityRetirementError, SceneEntitySource, SceneSpawnReport, SceneSpawner,
-    replace_scene_with_product, retire_and_despawn_scene_entity, spawn_prefab,
-    spawn_prefab_with_asset_database, spawn_prefab_with_patch,
-    spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
-    spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
+    retire_and_despawn_scene_entity, spawn_prefab, spawn_prefab_with_asset_database,
+    spawn_prefab_with_patch, spawn_prefab_with_patch_and_asset_database, spawn_scene,
+    spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
+    spawn_scene_with_prefab_resolver_and_asset_database,
 };

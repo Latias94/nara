@@ -1,0 +1,7 @@
+error[E0432]: unresolved imports `nara::prelude::SceneProductOverlayWriter`, `nara::prelude::replace_scene_with_product`
+ --> tests/ui/scene_product/ordinary_prelude.rs:1:21
+  |
+1 | use nara::prelude::{SceneProductOverlayWriter, replace_scene_with_product};
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^ no `replace_scene_with_product` in `prelude`
+  |                     |
+  |                     no `SceneProductOverlayWriter` in `prelude`
