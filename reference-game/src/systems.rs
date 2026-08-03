@@ -341,12 +341,16 @@ fn apply_wave_reset_with_template(
             },
         );
     }
-    if insertion_plan.commit(world).is_err() {
-        rollback_reset_entities(world, &spawned);
-        return Err(BevyError::error(
-            ReferenceSimulationError::IdentityReplacement,
-        ));
-    }
+    let insertion = match insertion_plan.prepare(world) {
+        Ok(insertion) => insertion,
+        Err(_) => {
+            rollback_reset_entities(world, &spawned);
+            return Err(BevyError::error(
+                ReferenceSimulationError::IdentityReplacement,
+            ));
+        }
+    };
+    let world = insertion.commit();
     world.flush();
 
     let confirmed_instance = match world

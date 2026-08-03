@@ -59,7 +59,7 @@ pub fn validate_registered_persistent_component_apply<T: Component>(
     validate_persistent_component_apply(world, component_id, target)
 }
 
-fn validate_persistent_component_apply(
+pub(crate) fn validate_persistent_component_apply(
     world: &World,
     component_id: ComponentId,
     target: Option<Entity>,
@@ -355,35 +355,6 @@ fn validate_entity_despawn_observers(
     }
 
     Ok(())
-}
-
-/// Validates that inserting the selected components cannot run implicit lifecycle work.
-pub fn validate_entity_insertion(
-    world: &World,
-    target: Entity,
-    component_ids: &[ComponentId],
-) -> Result<(), PersistentComponentMetadataError> {
-    const EVENTS: [(PersistentLifecycleEvent, EventKey); 2] = [
-        (PersistentLifecycleEvent::Add, ADD),
-        (PersistentLifecycleEvent::Insert, INSERT),
-    ];
-
-    for component_id in component_ids {
-        let info = world
-            .components()
-            .get_info(*component_id)
-            .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
-        if info.required_components().iter_ids().next().is_some() {
-            return Err(PersistentComponentMetadataError::RequiredComponents);
-        }
-        for (event, _) in EVENTS {
-            if hook_is_registered(info.hooks(), event) {
-                return Err(PersistentComponentMetadataError::LifecycleHook(event));
-            }
-        }
-    }
-
-    validate_entity_insertion_observers(world, target, component_ids)
 }
 
 fn validate_entity_insertion_observers(

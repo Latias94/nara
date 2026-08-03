@@ -20,8 +20,8 @@ pub mod __private;
 mod transaction;
 
 pub use transaction::{
-    LifecycleFreeDespawn, LifecycleFreeDespawnError, LifecycleFreeInsertionError,
-    LifecycleFreeInsertionPlan, prepare_lifecycle_free_despawn,
+    LifecycleFreeDespawn, LifecycleFreeDespawnError, LifecycleFreeInsertion,
+    LifecycleFreeInsertionError, LifecycleFreeInsertionPlan, prepare_lifecycle_free_despawn,
 };
 
 pub mod prelude {

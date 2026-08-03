@@ -235,16 +235,13 @@ impl PersistentWorldBindings {
         Ok(())
     }
 
-    fn record(
-        &mut self,
-        receipt: &PersistentComponentApplyReceipt,
-    ) -> Result<(), ComponentCodecError> {
-        self.validate(receipt)?;
+    fn record_prevalidated(&mut self, receipt: &PersistentComponentApplyReceipt) {
+        self.validate(receipt)
+            .expect("prevalidated persistent component binding must remain conflict-free");
         self.by_stable
             .insert(receipt.component_id.clone(), receipt.runtime_component_id);
         self.by_runtime
             .insert(receipt.runtime_component_id, receipt.component_id.clone());
-        Ok(())
     }
 }
 
@@ -261,7 +258,8 @@ fn validate_persistent_apply_receipts<'a>(
         if let Some(existing) = existing {
             existing.validate(receipt)?;
         }
-        pending.record(receipt)?;
+        pending.validate(receipt)?;
+        pending.record_prevalidated(receipt);
     }
     Ok(())
 }
@@ -285,10 +283,10 @@ fn world_has_nonempty_persistent_apply_receipts(world: &World) -> bool {
 fn record_persistent_apply_receipts(
     world: &mut World,
     receipts: impl IntoIterator<Item = (Entity, PersistentComponentApplyReceipt)>,
-) -> Result<(), ComponentCodecError> {
+) {
     let receipts = receipts.into_iter().collect::<Vec<_>>();
     if receipts.is_empty() {
-        return Ok(());
+        return;
     }
     if !world.contains_resource::<PersistentWorldBindings>() {
         world.insert_resource(PersistentWorldBindings::default());
@@ -296,13 +294,13 @@ fn record_persistent_apply_receipts(
     {
         let mut bindings = world.resource_mut::<PersistentWorldBindings>();
         for (_, receipt) in &receipts {
-            bindings.record(receipt)?;
+            bindings.record_prevalidated(receipt);
         }
     }
     for (entity, receipt) in receipts {
         let mut entity = world
             .get_entity_mut(entity)
-            .map_err(|_| ComponentCodecError::EntityMissing)?;
+            .expect("prepared persistent apply target must remain alive through commit");
         if let Some(mut applied) = entity.get_mut::<PersistentApplyReceipts>() {
             applied
                 .bindings
@@ -313,7 +311,6 @@ fn record_persistent_apply_receipts(
             });
         }
     }
-    Ok(())
 }
 
 pub(crate) fn map_apply_rejection(
@@ -392,6 +389,28 @@ struct StagedComponent {
     binding: PreparedComponentBinding,
 }
 
+fn validate_component_apply_world(
+    world: &World,
+    world_id: WorldId,
+    origin_asset_server: Option<&AssetServer>,
+    asset_server_touched: bool,
+    components: &[StagedComponent],
+) -> Result<(), ComponentCodecError> {
+    if world.id() != world_id {
+        return Err(ComponentCodecError::WrongWorld);
+    }
+    if components
+        .iter()
+        .any(|component| world.get_entity(component.entity).is_err())
+    {
+        return Err(ComponentCodecError::EntityMissing);
+    }
+    if asset_server_touched && world.get_resource::<AssetServer>() != origin_asset_server {
+        return Err(ComponentCodecError::AssetServerChanged);
+    }
+    Ok(())
+}
+
 /// Stages prepared components and their scratch asset-server state for one world transaction.
 ///
 /// Staging consumes and returns the batch so a failed codec cannot leave a committable partial
@@ -403,6 +422,24 @@ pub struct ComponentApplyBatch {
     origin_asset_server: Option<AssetServer>,
     context: ComponentApplyContext,
     components: Vec<StagedComponent>,
+}
+
+/// An owned proof that a persistent component batch can be published without recoverable failure.
+///
+/// The engine may compose this token with other prevalidated, infallible candidate commits. Commit
+/// first asserts that its protected `World` facts still hold, then publishes components, scratch
+/// asset state, `World` bindings, and per-entity receipts without a recoverable error.
+#[doc(hidden)]
+#[must_use]
+pub struct PreparedComponentApplyBatch {
+    world_id: WorldId,
+    origin_asset_server: Option<AssetServer>,
+    context: ComponentApplyContext,
+    components: Vec<StagedComponent>,
+    receipts: Vec<(Entity, PersistentComponentApplyReceipt)>,
+    receipt_targets: BTreeSet<Entity>,
+    needs_binding_resource: bool,
+    needs_asset_server: bool,
 }
 
 impl ComponentApplyBatch {
@@ -451,7 +488,12 @@ impl ComponentApplyBatch {
         Ok(self)
     }
 
-    pub fn commit(self, world: &mut World) -> Result<(), ComponentCodecError> {
+    /// Prepares every registration, topology check, and receipt binding before publication.
+    #[doc(hidden)]
+    pub fn prepare(
+        self,
+        world: &mut World,
+    ) -> Result<PreparedComponentApplyBatch, ComponentCodecError> {
         self.validate_commit(world)?;
         let registered = self
             .components
@@ -479,12 +521,12 @@ impl ComponentApplyBatch {
             .iter()
             .map(|component| component.entity)
             .collect::<BTreeSet<_>>();
-        for target in receipt_targets {
+        for target in &receipt_targets {
             let entity = world
-                .get_entity(target)
+                .get_entity(*target)
                 .map_err(|_| ComponentCodecError::EntityMissing)?;
             if !entity.contains::<PersistentApplyReceipts>() {
-                validate_support_component::<PersistentApplyReceipts>(world, Some(target))?;
+                validate_support_component::<PersistentApplyReceipts>(world, Some(*target))?;
             }
         }
         if needs_binding_resource {
@@ -505,30 +547,41 @@ impl ComponentApplyBatch {
             })
             .collect::<Vec<_>>();
         validate_persistent_apply_receipts(world, receipts.iter().map(|(_, receipt)| receipt))?;
-        self.commit_validated(world);
-        record_persistent_apply_receipts(world, receipts)
+
+        Ok(PreparedComponentApplyBatch {
+            world_id: self.world_id,
+            origin_asset_server: self.origin_asset_server,
+            context: self.context,
+            components: self.components,
+            receipts,
+            receipt_targets,
+            needs_binding_resource,
+            needs_asset_server,
+        })
     }
 
-    pub fn validate_commit(&self, world: &World) -> Result<(), ComponentCodecError> {
-        if world.id() != self.world_id {
-            return Err(ComponentCodecError::WrongWorld);
-        }
-        if self
-            .components
-            .iter()
-            .any(|component| world.get_entity(component.entity).is_err())
-        {
-            return Err(ComponentCodecError::EntityMissing);
-        }
-        if self.context.asset_server_touched
-            && world.get_resource::<AssetServer>() != self.origin_asset_server.as_ref()
-        {
-            return Err(ComponentCodecError::AssetServerChanged);
-        }
+    pub fn commit(self, world: &mut World) -> Result<(), ComponentCodecError> {
+        let prepared = self.prepare(world)?;
+        prepared.commit(world);
         Ok(())
     }
 
-    fn commit_validated(self, world: &mut World) {
+    pub fn validate_commit(&self, world: &World) -> Result<(), ComponentCodecError> {
+        validate_component_apply_world(
+            world,
+            self.world_id,
+            self.origin_asset_server.as_ref(),
+            self.context.asset_server_touched,
+            &self.components,
+        )
+    }
+}
+
+impl PreparedComponentApplyBatch {
+    /// Publishes the prepared batch without a recoverable failure path.
+    pub fn commit(self, world: &mut World) {
+        self.assert_commit_invariants(world);
+
         for component in self.components {
             component.value.insert(world, component.entity);
         }
@@ -539,6 +592,54 @@ impl ComponentApplyBatch {
                 world.insert_resource(self.context.asset_server);
             }
         }
+        record_persistent_apply_receipts(world, self.receipts);
+    }
+
+    fn assert_commit_invariants(&self, world: &World) {
+        validate_component_apply_world(
+            world,
+            self.world_id,
+            self.origin_asset_server.as_ref(),
+            self.context.asset_server_touched,
+            &self.components,
+        )
+        .expect("prepared component apply World state must remain unchanged through commit");
+
+        for component in &self.components {
+            component
+                .binding
+                .validate(world, Some(component.entity))
+                .expect(
+                    "prepared persistent component topology must remain eligible through commit",
+                );
+        }
+        for target in &self.receipt_targets {
+            let entity = world
+                .get_entity(*target)
+                .expect("prepared persistent apply target must remain alive through commit");
+            if !entity.contains::<PersistentApplyReceipts>() {
+                validate_support_component::<PersistentApplyReceipts>(world, Some(*target)).expect(
+                    "prepared persistent receipt topology must remain eligible through commit",
+                );
+            }
+        }
+        if !self.components.is_empty() {
+            assert_eq!(
+                world.contains_resource::<PersistentWorldBindings>(),
+                !self.needs_binding_resource,
+                "prepared persistent binding resource state must remain unchanged through commit",
+            );
+        }
+        if self.needs_binding_resource {
+            validate_support_resource_insertion::<PersistentWorldBindings>(world)
+                .expect("prepared persistent binding topology must remain eligible through commit");
+        }
+        if self.needs_asset_server {
+            validate_support_resource_insertion::<AssetServer>(world)
+                .expect("prepared asset-server topology must remain eligible through commit");
+        }
+        validate_persistent_apply_receipts(world, self.receipts.iter().map(|(_, receipt)| receipt))
+            .expect("prepared persistent receipts must remain conflict-free through commit");
     }
 }
 
@@ -829,6 +930,16 @@ mod persistent_apply_contract_tests {
         bound_component(DirectProbe, "nara.test.DirectProbe")
     }
 
+    fn stage_scratch_asset(batch: &mut ComponentApplyBatch, path: &str) -> Handle<SupportAsset> {
+        let asset_ref = AssetRef::path(path).unwrap();
+        batch.with_decode_context(None, |context| {
+            context
+                .resolve_asset_ref::<SupportAsset>(&asset_ref)
+                .unwrap()
+                .unwrap()
+        })
+    }
+
     #[test]
     fn direct_apply_rejects_target_receipt_observer_before_component_mutation() {
         let mut world = World::new();
@@ -892,7 +1003,9 @@ mod persistent_apply_contract_tests {
     fn batch_rejects_both_directions_of_persistent_binding_conflict() {
         let mut stable_conflict = World::new();
         let target = stable_conflict.spawn_empty().id();
-        let error = ComponentApplyBatch::from_world(&stable_conflict)
+        let mut batch = ComponentApplyBatch::from_world(&stable_conflict);
+        let _ = stage_scratch_asset(&mut batch, "textures/stable-conflict.png");
+        let error = batch
             .stage(
                 target,
                 bound_component(DirectProbe, "nara.test.SharedStable"),
@@ -903,19 +1016,28 @@ mod persistent_apply_contract_tests {
                 bound_component(OtherProbe, "nara.test.SharedStable"),
             )
             .unwrap()
-            .commit(&mut stable_conflict)
-            .unwrap_err();
+            .prepare(&mut stable_conflict)
+            .err()
+            .expect("stable binding conflict must reject during prepare");
         assert!(matches!(
             error,
             ComponentCodecError::PersistentApplyBindingConflict { .. }
         ));
         assert!(stable_conflict.get::<DirectProbe>(target).is_none());
         assert!(stable_conflict.get::<OtherProbe>(target).is_none());
+        assert!(
+            stable_conflict
+                .get::<PersistentApplyReceipts>(target)
+                .is_none()
+        );
+        assert!(!stable_conflict.contains_resource::<AssetServer>());
         assert!(!stable_conflict.contains_resource::<PersistentWorldBindings>());
 
         let mut runtime_conflict = World::new();
         let target = runtime_conflict.spawn_empty().id();
-        let error = ComponentApplyBatch::from_world(&runtime_conflict)
+        let mut batch = ComponentApplyBatch::from_world(&runtime_conflict);
+        let _ = stage_scratch_asset(&mut batch, "textures/runtime-conflict.png");
+        let error = batch
             .stage(
                 target,
                 bound_component(DirectProbe, "nara.test.FirstStable"),
@@ -926,14 +1048,69 @@ mod persistent_apply_contract_tests {
                 bound_component(DirectProbe, "nara.test.SecondStable"),
             )
             .unwrap()
-            .commit(&mut runtime_conflict)
-            .unwrap_err();
+            .prepare(&mut runtime_conflict)
+            .err()
+            .expect("runtime binding conflict must reject during prepare");
         assert!(matches!(
             error,
             ComponentCodecError::PersistentApplyBindingConflict { .. }
         ));
         assert!(runtime_conflict.get::<DirectProbe>(target).is_none());
+        assert!(
+            runtime_conflict
+                .get::<PersistentApplyReceipts>(target)
+                .is_none()
+        );
+        assert!(!runtime_conflict.contains_resource::<AssetServer>());
         assert!(!runtime_conflict.contains_resource::<PersistentWorldBindings>());
+    }
+
+    #[test]
+    fn prepared_batch_commit_publishes_components_assets_bindings_and_receipts() {
+        let mut world = World::new();
+        let target = world.spawn_empty().id();
+        let mut batch = ComponentApplyBatch::from_world(&world);
+        let handle = stage_scratch_asset(&mut batch, "textures/prepared-commit.png");
+        let batch = batch
+            .stage(
+                target,
+                bound_component(ReplaceProbe(7), "nara.test.PreparedCommit"),
+            )
+            .unwrap();
+
+        let prepared = batch.prepare(&mut world).unwrap();
+
+        assert!(world.get::<ReplaceProbe>(target).is_none());
+        assert!(!world.contains_resource::<AssetServer>());
+        assert!(!world.contains_resource::<PersistentWorldBindings>());
+        assert!(world.get::<PersistentApplyReceipts>(target).is_none());
+
+        prepared.commit(&mut world);
+
+        assert_eq!(world.get::<ReplaceProbe>(target), Some(&ReplaceProbe(7)));
+        assert_eq!(
+            world.resource::<AssetServer>().path(handle.id()),
+            Some("textures/prepared-commit.png")
+        );
+        let runtime_component_id = world.component_id::<ReplaceProbe>().unwrap();
+        let bindings = world.resource::<PersistentWorldBindings>();
+        assert_eq!(
+            bindings
+                .by_stable
+                .get(&ComponentTypeId::new("nara.test.PreparedCommit")),
+            Some(&runtime_component_id)
+        );
+        assert_eq!(
+            bindings.by_runtime.get(&runtime_component_id),
+            Some(&ComponentTypeId::new("nara.test.PreparedCommit"))
+        );
+        let receipts = world.get::<PersistentApplyReceipts>(target).unwrap();
+        let receipt = receipts
+            .bindings
+            .get(&ComponentTypeId::new("nara.test.PreparedCommit"))
+            .unwrap();
+        assert_eq!(receipt.world_id, world.id());
+        assert_eq!(receipt.runtime_component_id, runtime_component_id);
     }
 
     #[test]
@@ -1089,13 +1266,22 @@ mod persistent_apply_contract_tests {
         assert!(world.remove_resource::<PersistentWorldBindings>().is_some());
         let second = world.spawn_empty().id();
 
-        let error = direct_probe().apply(&mut world, second).unwrap_err();
+        let mut batch = ComponentApplyBatch::from_world(&world);
+        let _ = stage_scratch_asset(&mut batch, "textures/missing-receipt-authority.png");
+        let error = batch
+            .stage(second, direct_probe())
+            .unwrap()
+            .prepare(&mut world)
+            .err()
+            .expect("missing receipt authority must reject during prepare");
 
         assert!(matches!(
             error,
             ComponentCodecError::PersistentApplyReceiptMissing
         ));
         assert!(world.get::<DirectProbe>(second).is_none());
+        assert!(world.get::<PersistentApplyReceipts>(second).is_none());
+        assert!(!world.contains_resource::<AssetServer>());
         assert!(!world.contains_resource::<PersistentWorldBindings>());
     }
 

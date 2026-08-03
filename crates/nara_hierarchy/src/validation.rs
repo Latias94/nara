@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use nara_ecs::{Entity, World, entity::EntityHashMap};
+use nara_ecs::{Entity, QueryState, World, entity::EntityHashMap};
 
 use crate::{Children, HierarchyError, Parent};
 
@@ -12,6 +12,8 @@ enum VisitState {
 
 #[derive(Debug, Default)]
 pub(crate) struct HierarchyValidationScratch {
+    parent_query: Option<QueryState<(Entity, &'static Parent)>>,
+    children_query: Option<QueryState<(Entity, &'static Children)>>,
     parent_edges: Vec<(Entity, Entity)>,
     parent_by_child: EntityHashMap<Entity>,
     reverse_edges: HashSet<(Entity, Entity)>,
@@ -22,7 +24,9 @@ pub(crate) struct HierarchyValidationScratch {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HierarchyPreflightStats {
     #[cfg(test)]
-    pub(crate) world_entities_scanned: usize,
+    pub(crate) parent_entities_scanned: usize,
+    #[cfg(test)]
+    pub(crate) children_entities_scanned: usize,
     #[cfg(test)]
     pub(crate) addition_edges_scanned: usize,
     #[cfg(test)]
@@ -32,10 +36,17 @@ pub(crate) struct HierarchyPreflightStats {
 }
 
 impl HierarchyPreflightStats {
-    fn record_world_entity(&mut self) {
+    fn record_parent_entity(&mut self) {
         #[cfg(test)]
         {
-            self.world_entities_scanned += 1;
+            self.parent_entities_scanned += 1;
+        }
+    }
+
+    fn record_children_entity(&mut self) {
+        #[cfg(test)]
+        {
+            self.children_entities_scanned += 1;
         }
     }
 
@@ -86,30 +97,32 @@ impl HierarchyValidationScratch {
 ///
 /// Runtime is linear in the number of forward and reverse hierarchy entries. This function does
 /// not consult the generation fast path and is reusable by publication preflight.
-pub fn validate_hierarchy(world: &World) -> Result<(), HierarchyError> {
+pub fn validate_hierarchy(world: &mut World) -> Result<(), HierarchyError> {
     let mut scratch = HierarchyValidationScratch::default();
     validate_hierarchy_with_scratch(world, &mut scratch)
 }
 
 pub(crate) fn validate_hierarchy_with_scratch(
-    world: &World,
+    world: &mut World,
     scratch: &mut HierarchyValidationScratch,
 ) -> Result<(), HierarchyError> {
     validate_hierarchy_with_additions(world, core::iter::empty(), scratch).map(|_| ())
 }
 
 pub(crate) fn validate_hierarchy_with_additions(
-    world: &World,
+    world: &mut World,
     additions: impl IntoIterator<Item = (Entity, Entity)>,
     scratch: &mut HierarchyValidationScratch,
 ) -> Result<HierarchyPreflightStats, HierarchyError> {
     scratch.clear();
     let mut stats = HierarchyPreflightStats::default();
 
-    for entity_ref in world.iter_entities() {
-        stats.record_world_entity();
-        let entity = entity_ref.id();
-        if let Some(parent) = entity_ref.get::<Parent>() {
+    {
+        let parent_query = scratch
+            .parent_query
+            .get_or_insert_with(|| world.query::<(Entity, &Parent)>());
+        for (entity, parent) in parent_query.iter(world) {
+            stats.record_parent_entity();
             let parent = parent.parent();
             if entity == parent {
                 return Err(HierarchyError::SelfParent { entity });
@@ -123,8 +136,14 @@ pub(crate) fn validate_hierarchy_with_additions(
             scratch.parent_edges.push((entity, parent));
             scratch.parent_by_child.insert(entity, parent);
         }
+    }
 
-        if let Some(children) = entity_ref.get::<Children>() {
+    {
+        let children_query = scratch
+            .children_query
+            .get_or_insert_with(|| world.query::<(Entity, &Children)>());
+        for (entity, children) in children_query.iter(world) {
+            stats.record_children_entity();
             if children.is_empty() {
                 return Err(HierarchyError::ReverseEmpty { parent: entity });
             }

@@ -163,6 +163,28 @@ pub enum IdentitySupportTopologyError {
     TargetMissing,
 }
 
+/// Failure to prove that an exact runtime retirement set has no semantic identity axes.
+#[doc(hidden)]
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum AdditionalRetirementIdentityError {
+    #[error("world has no identity domain")]
+    WorldDomainUnavailable,
+    #[error("world identity domain resource is bound to a different world")]
+    WorldBindingMismatch,
+    #[error("additional retirement contains a missing entity: {entity:?}")]
+    EntityMissing { entity: Entity },
+    #[error("additional retirement contains a duplicate entity: {entity:?}")]
+    DuplicateEntity { entity: Entity },
+    #[error("additional retirement token belongs to a different identity domain: {entity:?}")]
+    TokenWrongDomain { entity: Entity },
+    #[error("additional retirement token no longer owns its runtime entity: {entity:?}")]
+    EntityNotOwned { entity: Entity },
+    #[error("additional retirement entity has an active scene identity axis: {entity:?}")]
+    ActiveSceneAxis { entity: Entity },
+    #[error("additional retirement entity has a persistent identity axis: {entity:?}")]
+    PersistentAxis { entity: Entity },
+}
+
 #[doc(hidden)]
 pub fn validate_identity_support_topology(
     world: &mut World,
@@ -1692,6 +1714,54 @@ pub fn prepare_exact_scene_instance_retirement(
     cause: TombstoneCause,
 ) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
     WorldIdentityDomain::prepare_exact_scene_instance_retirement(world, current, cause)
+}
+
+/// Validates that every additional runtime retirement token belongs to this World and has no
+/// semantic identity axis.
+///
+/// Domain adoption alone is not a semantic identity axis, so an adopted runtime-only entity is
+/// eligible when neither a Scene nor Persistent axis is registered for it.
+///
+/// This workspace-internal preflight is read-only. The scene owner remains responsible for the
+/// bounded retirement set and for committing entity teardown under exclusive World access.
+#[doc(hidden)]
+pub fn validate_additional_retirement_identity_axes(
+    world: &World,
+    tokens: impl IntoIterator<Item = WorldEntityToken>,
+) -> Result<(), AdditionalRetirementIdentityError> {
+    let domain = world
+        .get_resource::<WorldIdentityDomain>()
+        .ok_or(AdditionalRetirementIdentityError::WorldDomainUnavailable)?;
+    domain
+        .validate_world_binding(world)
+        .map_err(|_| AdditionalRetirementIdentityError::WorldBindingMismatch)?;
+
+    let mut seen = BTreeSet::new();
+    for token in tokens {
+        let entity = token.entity();
+        if !seen.insert(entity) {
+            return Err(AdditionalRetirementIdentityError::DuplicateEntity { entity });
+        }
+        if token.domain_id() != domain.id() {
+            return Err(AdditionalRetirementIdentityError::TokenWrongDomain { entity });
+        }
+        world
+            .get_entity(entity)
+            .map_err(|_| AdditionalRetirementIdentityError::EntityMissing { entity })?;
+        if !domain.is_live_owned_entity(world, entity) {
+            return Err(AdditionalRetirementIdentityError::EntityNotOwned { entity });
+        }
+        let Some(identity) = domain.identities_by_entity.get(&entity) else {
+            continue;
+        };
+        if identity.scene.is_some() {
+            return Err(AdditionalRetirementIdentityError::ActiveSceneAxis { entity });
+        }
+        if identity.persistent.is_some() {
+            return Err(AdditionalRetirementIdentityError::PersistentAxis { entity });
+        }
+    }
+    Ok(())
 }
 
 #[must_use]

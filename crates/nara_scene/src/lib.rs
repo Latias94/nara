@@ -10,10 +10,13 @@ mod format;
 mod migration;
 mod patch;
 mod prefab;
+mod product_transaction;
 mod scene_components;
 mod spawn;
 mod validation;
 
+#[cfg(test)]
+mod product_transaction_tests;
 #[cfg(test)]
 mod tests;
 
@@ -40,6 +43,9 @@ pub use prefab::{
     PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
     PrefabSourceResolver,
 };
+pub use product_transaction::{
+    SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
+};
 pub use scene_components::{
     Name, SCENE_COMPONENTS_PLUGIN_DECLARATION, SCENE_COMPONENTS_PLUGIN_ID,
     SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
@@ -48,8 +54,8 @@ pub use scene_components::{
 };
 pub use spawn::{
     SceneEntityRetirementError, SceneEntitySource, SceneSpawnReport, SceneSpawner,
-    retire_and_despawn_scene_entity, spawn_prefab, spawn_prefab_with_asset_database,
-    spawn_prefab_with_patch, spawn_prefab_with_patch_and_asset_database, spawn_scene,
-    spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
-    spawn_scene_with_prefab_resolver_and_asset_database,
+    replace_scene_with_product, retire_and_despawn_scene_entity, spawn_prefab,
+    spawn_prefab_with_asset_database, spawn_prefab_with_patch,
+    spawn_prefab_with_patch_and_asset_database, spawn_scene, spawn_scene_with_asset_database,
+    spawn_scene_with_prefab_resolver, spawn_scene_with_prefab_resolver_and_asset_database,
 };

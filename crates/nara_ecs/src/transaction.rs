@@ -9,7 +9,7 @@ use bevy_ecs::{
 
 use crate::__private::{
     validate_entity_despawn, validate_entity_despawn_with_non_linked_relationship,
-    validate_entity_insertion, validate_non_linked_relationship_teardown,
+    validate_non_linked_relationship_teardown, validate_persistent_component_apply,
 };
 
 /// Rejection while preparing an exclusive despawn with no lifecycle side effects.
@@ -108,9 +108,10 @@ where
     Ok(())
 }
 
-/// Rejection while preparing or applying a lifecycle-free component insertion transaction.
+/// Rejection while preparing a lifecycle-free component insertion transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecycleFreeInsertionError {
+    ComponentUnregistered,
     DuplicateComponent,
     EntityMissing,
     ComponentAlreadyPresent,
@@ -120,6 +121,9 @@ pub enum LifecycleFreeInsertionError {
 impl fmt::Display for LifecycleFreeInsertionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::ComponentUnregistered => {
+                "component insertion transaction contains an unregistered component type"
+            }
             Self::DuplicateComponent => "component insertion transaction contains a duplicate",
             Self::EntityMissing => "component insertion transaction contains a missing entity",
             Self::ComponentAlreadyPresent => {
@@ -134,13 +138,22 @@ impl Error for LifecycleFreeInsertionError {}
 
 struct PlannedComponentInsertion {
     target: Entity,
-    register: fn(&mut World) -> ComponentId,
+    component_id: fn(&World) -> Option<ComponentId>,
     apply: Box<dyn FnOnce(&mut World)>,
 }
 
 /// Owned component values validated together before any insertion is applied.
 #[derive(Default)]
 pub struct LifecycleFreeInsertionPlan {
+    insertions: Vec<PlannedComponentInsertion>,
+}
+
+/// Exclusive proof that owned component values can be inserted without lifecycle side effects.
+///
+/// The guard retains the only mutable `World` borrow between validation and commit, preventing
+/// later hook, observer, or required-component registration from invalidating the proof.
+pub struct LifecycleFreeInsertion<'world> {
+    world: &'world mut World,
     insertions: Vec<PlannedComponentInsertion>,
 }
 
@@ -155,25 +168,34 @@ impl LifecycleFreeInsertionPlan {
     pub fn push<T: Component>(&mut self, target: Entity, component: T) {
         self.insertions.push(PlannedComponentInsertion {
             target,
-            register: World::register_component::<T>,
+            component_id: World::component_id::<T>,
             apply: Box::new(move |world| {
                 world.entity_mut(target).insert(component);
             }),
         });
     }
 
-    /// Flushes the pre-transaction baseline and validates every value before applying any value.
-    pub fn commit(self, world: &mut World) -> Result<&mut World, LifecycleFreeInsertionError> {
+    /// Flushes the pre-transaction baseline and validates every value without applying any value.
+    ///
+    /// Every component type must already be registered in `world`; preparation never extends the
+    /// component registry.
+    pub fn prepare<'world>(
+        self,
+        world: &'world mut World,
+    ) -> Result<LifecycleFreeInsertion<'world>, LifecycleFreeInsertionError> {
+        // Deferred work belongs to the pre-transaction baseline. It may register a component or
+        // install lifecycle behavior, so every lookup and proof must observe the flushed World.
+        world.flush();
         let mut identities = Vec::with_capacity(self.insertions.len());
         let mut unique = BTreeSet::new();
         for insertion in &self.insertions {
-            let component_id = (insertion.register)(world);
+            let component_id = (insertion.component_id)(world)
+                .ok_or(LifecycleFreeInsertionError::ComponentUnregistered)?;
             if !unique.insert((insertion.target, component_id)) {
                 return Err(LifecycleFreeInsertionError::DuplicateComponent);
             }
             identities.push((insertion.target, component_id));
         }
-        world.flush();
         for (target, component_id) in &identities {
             let entity = world
                 .get_entity(*target)
@@ -181,13 +203,26 @@ impl LifecycleFreeInsertionPlan {
             if entity.contains_id(*component_id) {
                 return Err(LifecycleFreeInsertionError::ComponentAlreadyPresent);
             }
-            validate_entity_insertion(world, *target, &[*component_id])
+            validate_persistent_component_apply(world, *component_id, Some(*target))
                 .map_err(|_| LifecycleFreeInsertionError::LifecycleWork)?;
         }
-        for insertion in self.insertions {
-            (insertion.apply)(world);
+
+        Ok(LifecycleFreeInsertion {
+            world,
+            insertions: self.insertions,
+        })
+    }
+}
+
+impl<'world> LifecycleFreeInsertion<'world> {
+    /// Inserts every prevalidated owned component value.
+    #[must_use]
+    pub fn commit(self) -> &'world mut World {
+        let Self { world, insertions } = self;
+        for insertion in insertions {
+            (insertion.apply)(&mut *world);
         }
-        Ok(world)
+        world
     }
 }
 
@@ -224,10 +259,11 @@ mod tests {
     use bevy_ecs::{
         component::Component,
         entity::Entity,
-        lifecycle::{Despawn, Remove},
+        lifecycle::{Add, Despawn, Discard, HookContext, Insert, Remove},
         observer::On,
         relationship::Relationship,
         resource::Resource,
+        world::DeferredWorld,
     };
 
     #[derive(Component)]
@@ -235,6 +271,16 @@ mod tests {
 
     #[derive(Component, Debug, PartialEq, Eq)]
     struct Value(u32);
+
+    #[derive(Component)]
+    struct Unregistered;
+
+    #[derive(Component)]
+    #[require(Required)]
+    struct RequiresRequired;
+
+    #[derive(Component, Default)]
+    struct Required;
 
     #[derive(Component)]
     #[relationship(relationship_target = TestChildren)]
@@ -246,6 +292,46 @@ mod tests {
 
     #[derive(Resource, Default)]
     struct ObserverRuns(u32);
+
+    fn lifecycle_hook(_world: DeferredWorld<'_>, _context: HookContext) {}
+
+    fn assert_insertion_hook_rejected(configure: impl FnOnce(&mut World)) {
+        let mut world = World::new();
+        world.register_component::<Probe>();
+        configure(&mut world);
+        let target = world.spawn_empty().id();
+        let mut insertion = LifecycleFreeInsertionPlan::new();
+        insertion.push(target, Probe);
+
+        assert_eq!(
+            insertion
+                .prepare(&mut world)
+                .err()
+                .expect("the lifecycle hook should reject preparation"),
+            LifecycleFreeInsertionError::LifecycleWork
+        );
+        assert!(world.get::<Probe>(target).is_none());
+    }
+
+    fn assert_insertion_observer_rejected(configure: impl FnOnce(&mut World)) {
+        let mut world = World::new();
+        world.init_resource::<ObserverRuns>();
+        world.register_component::<Probe>();
+        configure(&mut world);
+        let target = world.spawn_empty().id();
+        let mut insertion = LifecycleFreeInsertionPlan::new();
+        insertion.push(target, Probe);
+
+        assert_eq!(
+            insertion
+                .prepare(&mut world)
+                .err()
+                .expect("the lifecycle observer should reject preparation"),
+            LifecycleFreeInsertionError::LifecycleWork
+        );
+        assert!(world.get::<Probe>(target).is_none());
+        assert_eq!(world.resource::<ObserverRuns>().0, 0);
+    }
 
     #[test]
     fn commits_unique_entities_without_lifecycle_work() {
@@ -431,52 +517,190 @@ mod tests {
     #[test]
     fn insertion_plan_applies_the_complete_prevalidated_component_set() {
         let mut world = World::new();
+        world.register_component::<Probe>();
+        world.register_component::<Value>();
         let target = world.spawn_empty().id();
+        let second_target = world.spawn_empty().id();
         let mut insertion = LifecycleFreeInsertionPlan::new();
         insertion.push(target, Probe);
         insertion.push(target, Value(7));
-        let world = insertion.commit(&mut world).unwrap();
+        insertion.push(second_target, Probe);
+        let world = insertion.prepare(&mut world).unwrap().commit();
 
         assert!(world.get::<Probe>(target).is_some());
         assert_eq!(world.get::<Value>(target), Some(&Value(7)));
+        assert!(world.get::<Probe>(second_target).is_some());
+    }
+
+    #[test]
+    fn insertion_plan_rejects_unregistered_components_without_registry_mutation() {
+        let mut world = World::new();
+        let target = world.spawn_empty().id();
+        let component_count = world.components().len();
+        let mut insertion = LifecycleFreeInsertionPlan::new();
+        insertion.push(target, Unregistered);
+
+        assert_eq!(
+            insertion
+                .prepare(&mut world)
+                .err()
+                .expect("an unregistered component should reject preparation"),
+            LifecycleFreeInsertionError::ComponentUnregistered
+        );
+        assert_eq!(world.components().len(), component_count);
+        assert!(world.component_id::<Unregistered>().is_none());
+        assert!(world.get_entity(target).is_ok());
+    }
+
+    #[test]
+    fn insertion_plan_observes_component_registration_from_the_deferred_baseline() {
+        let mut world = World::new();
+        let target = world.spawn_empty().id();
+        world.commands().queue(|world: &mut World| {
+            world.register_component::<Unregistered>();
+        });
+        let mut insertion = LifecycleFreeInsertionPlan::new();
+        insertion.push(target, Unregistered);
+
+        let _ = insertion.prepare(&mut world).unwrap().commit();
+
+        assert!(world.get::<Unregistered>(target).is_some());
+    }
+
+    #[test]
+    fn insertion_plan_rejects_missing_duplicate_and_existing_components() {
+        let mut world = World::new();
+        world.register_component::<Probe>();
+
+        let missing = world.spawn_empty().id();
+        world.despawn(missing);
+        let mut missing_plan = LifecycleFreeInsertionPlan::new();
+        missing_plan.push(missing, Probe);
+        assert_eq!(
+            missing_plan
+                .prepare(&mut world)
+                .err()
+                .expect("a missing target should reject preparation"),
+            LifecycleFreeInsertionError::EntityMissing
+        );
 
         let duplicate_target = world.spawn_empty().id();
         let mut duplicate = LifecycleFreeInsertionPlan::new();
         duplicate.push(duplicate_target, Probe);
         duplicate.push(duplicate_target, Probe);
-        let error = match duplicate.commit(world) {
-            Ok(_) => panic!("duplicate component insertion should reject"),
-            Err(error) => error,
-        };
-        assert_eq!(error, LifecycleFreeInsertionError::DuplicateComponent);
+        assert_eq!(
+            duplicate
+                .prepare(&mut world)
+                .err()
+                .expect("duplicate component insertion should reject"),
+            LifecycleFreeInsertionError::DuplicateComponent
+        );
         assert!(world.get::<Probe>(duplicate_target).is_none());
+
+        let existing_target = world.spawn(Probe).id();
+        let mut existing = LifecycleFreeInsertionPlan::new();
+        existing.push(existing_target, Probe);
+        assert_eq!(
+            existing
+                .prepare(&mut world)
+                .err()
+                .expect("an existing component should reject preparation"),
+            LifecycleFreeInsertionError::ComponentAlreadyPresent
+        );
+        assert!(world.get::<Probe>(existing_target).is_some());
     }
 
     #[test]
-    fn insertion_plan_rejects_add_observers_before_component_mutation() {
+    fn insertion_plan_rejects_required_components() {
         let mut world = World::new();
-        world.init_resource::<ObserverRuns>();
+        world.register_component::<RequiresRequired>();
         let target = world.spawn_empty().id();
-        world.add_observer(
-            |_: On<bevy_ecs::lifecycle::Add, Probe>,
-             mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| { runs.0 += 1 },
-        );
         let mut insertion = LifecycleFreeInsertionPlan::new();
-        insertion.push(target, Probe);
+        insertion.push(target, RequiresRequired);
 
-        let error = match insertion.commit(&mut world) {
-            Ok(_) => panic!("the component observer should reject before insertion"),
-            Err(error) => error,
-        };
-        assert_eq!(error, LifecycleFreeInsertionError::LifecycleWork);
-        assert!(world.get::<Probe>(target).is_none());
-        assert_eq!(world.resource::<ObserverRuns>().0, 0);
+        assert_eq!(
+            insertion
+                .prepare(&mut world)
+                .err()
+                .expect("required components should reject preparation"),
+            LifecycleFreeInsertionError::LifecycleWork
+        );
+        assert!(world.get::<RequiresRequired>(target).is_none());
+        assert!(world.get::<Required>(target).is_none());
+    }
+
+    #[test]
+    fn insertion_plan_rejects_every_lifecycle_hook() {
+        assert_insertion_hook_rejected(|world| {
+            world
+                .register_component_hooks::<Probe>()
+                .on_add(lifecycle_hook);
+        });
+        assert_insertion_hook_rejected(|world| {
+            world
+                .register_component_hooks::<Probe>()
+                .on_insert(lifecycle_hook);
+        });
+        assert_insertion_hook_rejected(|world| {
+            world
+                .register_component_hooks::<Probe>()
+                .on_discard(lifecycle_hook);
+        });
+        assert_insertion_hook_rejected(|world| {
+            world
+                .register_component_hooks::<Probe>()
+                .on_remove(lifecycle_hook);
+        });
+        assert_insertion_hook_rejected(|world| {
+            world
+                .register_component_hooks::<Probe>()
+                .on_despawn(lifecycle_hook);
+        });
+    }
+
+    #[test]
+    fn insertion_plan_rejects_every_lifecycle_observer() {
+        assert_insertion_observer_rejected(|world| {
+            world.add_observer(
+                |_: On<Add, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| runs.0 += 1,
+            );
+        });
+        assert_insertion_observer_rejected(|world| {
+            world.add_observer(
+                |_: On<Insert, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                    runs.0 += 1;
+                },
+            );
+        });
+        assert_insertion_observer_rejected(|world| {
+            world.add_observer(
+                |_: On<Discard, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                    runs.0 += 1;
+                },
+            );
+        });
+        assert_insertion_observer_rejected(|world| {
+            world.add_observer(
+                |_: On<Remove, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                    runs.0 += 1;
+                },
+            );
+        });
+        assert_insertion_observer_rejected(|world| {
+            world.add_observer(
+                |_: On<Despawn, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                    runs.0 += 1;
+                },
+            );
+        });
     }
 
     #[test]
     fn insertion_plan_flushes_and_rejects_a_later_value_before_any_insertion() {
         let mut world = World::new();
         world.init_resource::<ObserverRuns>();
+        world.register_component::<Probe>();
+        world.register_component::<Value>();
         let first = world.spawn_empty().id();
         let second = world.spawn_empty().id();
         world.commands().queue(|world: &mut World| {
@@ -489,10 +713,10 @@ mod tests {
         insertion.push(first, Probe);
         insertion.push(second, Value(7));
 
-        let error = match insertion.commit(&mut world) {
-            Ok(_) => panic!("the queued observer should reject the complete insertion plan"),
-            Err(error) => error,
-        };
+        let error = insertion
+            .prepare(&mut world)
+            .err()
+            .expect("the queued observer should reject the complete insertion plan");
 
         assert_eq!(error, LifecycleFreeInsertionError::LifecycleWork);
         assert!(world.get::<Probe>(first).is_none());

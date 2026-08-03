@@ -11,6 +11,9 @@ use nara_ecs::{
     system::ResMut,
 };
 
+use crate::__private::{
+    AdditionalRetirementIdentityError, validate_additional_retirement_identity_axes,
+};
 use crate::domain::{
     prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
 };
@@ -61,6 +64,121 @@ fn with_domain<T>(
     let result = mutate(world, &mut domain);
     world.insert_resource(domain);
     result
+}
+
+#[test]
+fn additional_retirement_identity_preflight_accepts_entities_without_semantic_axes() {
+    let mut world = world_with_domain(8, 2);
+    let adopted = spawn_token(&mut world);
+
+    assert_eq!(
+        validate_additional_retirement_identity_axes(&world, [adopted]),
+        Ok(())
+    );
+}
+
+#[test]
+fn additional_retirement_identity_preflight_rejects_active_scene_axis() {
+    let mut world = world_with_domain(8, 2);
+    let token = spawn_token(&mut world);
+    with_domain(&mut world, |world, domain| {
+        domain
+            .register_new_scene_instance(world, [(scene_id("scene-owned"), token)])
+            .unwrap();
+    });
+
+    assert_eq!(
+        validate_additional_retirement_identity_axes(&world, [token]),
+        Err(AdditionalRetirementIdentityError::ActiveSceneAxis {
+            entity: token.entity(),
+        })
+    );
+}
+
+#[test]
+fn additional_retirement_identity_preflight_rejects_persistent_axis() {
+    let mut world = world_with_domain(8, 2);
+    let token = spawn_token(&mut world);
+    with_domain(&mut world, |world, domain| {
+        domain
+            .register_persistent(
+                world,
+                token,
+                persistent_ref("55555555-5555-4555-8555-555555555555"),
+            )
+            .unwrap();
+    });
+
+    assert_eq!(
+        validate_additional_retirement_identity_axes(&world, [token]),
+        Err(AdditionalRetirementIdentityError::PersistentAxis {
+            entity: token.entity(),
+        })
+    );
+}
+
+#[test]
+fn additional_retirement_identity_preflight_rejects_duplicate_and_missing_entities() {
+    let mut world = world_with_domain(8, 2);
+    let duplicate = spawn_token(&mut world);
+    let missing = spawn_token(&mut world);
+    assert!(world.despawn(missing.entity()));
+
+    assert_eq!(
+        validate_additional_retirement_identity_axes(&world, [duplicate, duplicate]),
+        Err(AdditionalRetirementIdentityError::DuplicateEntity {
+            entity: duplicate.entity(),
+        })
+    );
+    assert_eq!(
+        validate_additional_retirement_identity_axes(&world, [missing]),
+        Err(AdditionalRetirementIdentityError::EntityMissing {
+            entity: missing.entity(),
+        })
+    );
+}
+
+#[test]
+fn additional_retirement_identity_preflight_rejects_unavailable_or_foreign_world_domain() {
+    let world_without_domain = World::new();
+    let mut token_world = world_with_domain(8, 2);
+    let token = spawn_token(&mut token_world);
+    assert_eq!(
+        validate_additional_retirement_identity_axes(&world_without_domain, [token]),
+        Err(AdditionalRetirementIdentityError::WorldDomainUnavailable)
+    );
+
+    let mut source_world = world_with_domain(8, 2);
+    let target = spawn_token(&mut source_world);
+    let source_domain = source_world
+        .remove_resource::<WorldIdentityDomain>()
+        .unwrap();
+    let mut target_world = World::new();
+    let target_entity = target_world.spawn_empty().id();
+    target_world.insert_resource(source_domain);
+
+    assert_eq!(
+        validate_additional_retirement_identity_axes(&target_world, [target]),
+        Err(AdditionalRetirementIdentityError::WorldBindingMismatch)
+    );
+    assert!(target_world.get_entity(target_entity).is_ok());
+}
+
+#[test]
+fn additional_retirement_identity_preflight_rejects_a_foreign_world_token_with_matching_bits() {
+    let mut local_world = world_with_domain(8, 2);
+    let local = spawn_token(&mut local_world);
+    let mut foreign_world = world_with_domain(8, 2);
+    let foreign = spawn_token(&mut foreign_world);
+    assert_eq!(foreign.entity(), local.entity());
+
+    assert_eq!(
+        validate_additional_retirement_identity_axes(&local_world, [foreign]),
+        Err(AdditionalRetirementIdentityError::TokenWrongDomain {
+            entity: local.entity(),
+        })
+    );
+    assert!(local_world.get_entity(local.entity()).is_ok());
 }
 
 #[test]

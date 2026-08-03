@@ -83,8 +83,9 @@ pub mod __private {
         DeclaredEntityReferencePlan, plan_declared_entity_references,
     };
     pub use crate::persistent_apply::{
-        declare_persistent_apply_targets, validate_declared_persistent_apply_targets,
-        validate_fresh_persistent_component_apply, validate_persistent_apply_support_topology,
+        PreparedComponentApplyBatch, declare_persistent_apply_targets,
+        validate_declared_persistent_apply_targets, validate_fresh_persistent_component_apply,
+        validate_persistent_apply_support_topology,
     };
     pub use crate::provider::{ComponentSchemaOwnerRecord, ResolvedComponentSchemaProvider};
     pub use crate::registry::ComponentRegistrySnapshotWitness;

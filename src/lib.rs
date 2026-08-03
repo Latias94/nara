@@ -265,6 +265,10 @@ pub mod advanced_prelude {
         ComponentMigrationError, ComponentRegistryError, ComponentValueError, ComponentValueKind,
         MigratedComponentValue, PreparedComponent, PreparedComponentCandidate,
     };
+    pub use nara_scene::{
+        SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
+        replace_scene_with_product,
+    };
     pub use nara_tasks::{
         OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,
         TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey, TaskCompletionCutoff,
