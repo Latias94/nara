@@ -119,9 +119,10 @@ runtime relation and completion validation, while scene, transform, and UI consu
 gaining lifecycle authority. RGS-U3 adds the immutable completed 2D global projection and migrates
 camera, sprite, and tilemap extraction to consume it without fallback. SRT-U5 proves that a real
 reference product can keep `Transform2d` as its only authored local position and consume completed
-globals for world-space gameplay, snapshots, and extraction, including non-identity ancestors. The
-remaining Editor/desktop journey is tracked separately; the implementation ledger is the authority
-for slice status.
+globals for world-space gameplay, snapshots, and extraction, including non-identity ancestors.
+SRT-U6 proves that an admitted Editor edit survives Play and Retry, persists through Save/Reopen,
+and reaches the ordinary desktop product entry while startup/replacement mechanics remain advanced
+or private. ADR 0089 remains Proposed; the implementation ledger is the authority for slice status.
 
 ## Crate Boundaries
 
