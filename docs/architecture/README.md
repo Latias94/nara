@@ -8,8 +8,8 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The active [startup scene activation and atomic Retry
-   plan](../plans/2026-08-02-001-refactor-startup-scene-activation-and-atomic-retry-plan.md) owns
+3. The active [readable runtime UI and deterministic text
+   plan](../plans/2026-08-04-001-feat-readable-runtime-ui-and-deterministic-text-plan.md) owns
    current execution order.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and

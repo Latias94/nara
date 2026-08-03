@@ -4,11 +4,12 @@ type: refactor
 date: 2026-08-02
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
-execution_state: active
+execution_state: superseded
 product_contract_source: active-plan-stop-condition
 execution: code
 origin: docs/plans/2026-08-01-002-refactor-reference-game-2d-spatial-authority-plan.md
 supersedes: docs/plans/2026-08-01-002-refactor-reference-game-2d-spatial-authority-plan.md
+successor: docs/plans/2026-08-04-001-feat-readable-runtime-ui-and-deterministic-text-plan.md
 plan_id: startup-scene-activation-atomic-retry-2026-08
 unit_namespace: SRT
 operator_execution_authority: external-control-plane
