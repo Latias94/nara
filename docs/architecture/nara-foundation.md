@@ -117,9 +117,11 @@ flowchart TD
 RGS-U2 implements the ADR 0100 runtime ownership boundary: `nara_hierarchy` owns the non-linked
 runtime relation and completion validation, while scene, transform, and UI consume it without
 gaining lifecycle authority. RGS-U3 adds the immutable completed 2D global projection and migrates
-camera, sprite, and tilemap extraction to consume it without fallback. The reference-game spatial
-authority and complete product journey remain RGS-U4/RGS-U5 work; the implementation ledger is the
-authority for slice status.
+camera, sprite, and tilemap extraction to consume it without fallback. SRT-U5 proves that a real
+reference product can keep `Transform2d` as its only authored local position and consume completed
+globals for world-space gameplay, snapshots, and extraction, including non-identity ancestors. The
+remaining Editor/desktop journey is tracked separately; the implementation ledger is the authority
+for slice status.
 
 ## Crate Boundaries
 
@@ -414,20 +416,22 @@ second real adapter or stronger isolation pressure.
   startup scene, enemy prefab, canonical image metadata, and PNG source into one immutable content
   snapshot. Its ordinary product path now materializes that snapshot through U29's guarded apply,
   publishes one fresh managed runtime, and executes semantic movement, pursuit, automatic fire,
-  collision, damage, stable-identity retirement, score, and both terminal outcomes. The admitted
-  Enemy schema migrates from v1 to v2 by removing the old prefab-local Player target; runtime
-  systems resolve the unique Player role inside the same scene instance instead of persisting an
-  implicit outer-instance reference. The committed v1/v2/v3 catalogs retain the complete migration
-  and tombstone evidence. The tick gate prevents a command/topology/runtime failure from publishing
-  a failed-frame success snapshot; deterministic snapshots sort stable game identities and retain
-  the last good state.
+  collision, damage, stable-identity retirement, score, and both terminal outcomes. Schema
+  generation 4 replaces the old Player/Enemy/Projectile aggregates with authored roles, initial
+  values, wave timing, weapon configuration, transform, hierarchy, and Sprite facts; mutable
+  health, velocity, cooldown, damage, lifetime, and projectile identity remain runtime-only. The
+  old aggregate type IDs are explicit tombstones, and Weapon v1 migrates to v2 by removing persisted
+  cooldown state. The tick gate prevents a command/topology/runtime failure from publishing a
+  failed-frame success snapshot; deterministic snapshots sort exact current-receipt identities and
+  retain the last good state.
   The bundled headless CLI accepts only a bounded maximum tick count, emits one versioned JSON
   terminal summary, separates privacy-safe failure diagnostics onto stderr, and drives finite
   cleanup. The desktop profile now lowers ordered WASD/Enter edges into the same semantic command
   path, renders player/enemy/projectile and clipped HUD/terminal geometry through one admitted
-  Winit/wgpu transaction, and performs an observer-safe atomic wave Retry without replacing the
-  runtime, window, or device generation. Automated U13 gates are complete; the human Windows play
-  check remains the final unit-closure evidence.
+  Winit/wgpu transaction, preserves authored Sprite fields, and performs a fully prepared atomic
+  wave Retry from a weak view of the exact admitted source without replacing the runtime, window,
+  or device generation. The private root activation owner remains the sole content lease owner;
+  the product owns exact scene receipt membership and identity-bound runtime projectile tokens.
 - `nara_reflect` is split into narrow `value`, `path`, `schema`, `codec`, `migration`, and `registry` modules while preserving public re-exports.
 - `nara_identity` implements the world-scoped identity core, structured references, atomic
   fork/restore remaps, tombstone policy, root facade wiring, and scene/gameplay/reflect/tooling
@@ -444,8 +448,9 @@ second real adapter or stronger isolation pressure.
   owner replacement or remove/reinsert participate in the frozen authority revision. Plugin
   registration order and temporary public World mutation therefore cannot replace executable
   behavior and restore the old value before validation.
-- `nara_reflect_derive` supplies the first low-boilerplate native Rust authoring path. Four
-  independent reference-game components generate providers from explicit stable declarations,
+- `nara_reflect_derive` supplies the first low-boilerplate native Rust authoring path. Independent
+  reference-game components, including empty authored markers, generate providers from explicit
+  stable declarations,
   freeze against a committed predecessor catalog, round-trip through canonical scene and stable
   patch files, and sync into a live world. Runtime-only components remain ordinary ECS data. See
   [Persistent Rust Components](../guides/persistent-components.md).
