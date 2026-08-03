@@ -97,20 +97,20 @@ impl HierarchyValidationScratch {
 ///
 /// Runtime is linear in the number of forward and reverse hierarchy entries. This function does
 /// not consult the generation fast path and is reusable by publication preflight.
-pub fn validate_hierarchy(world: &mut World) -> Result<(), HierarchyError> {
+pub fn validate_hierarchy(world: &World) -> Result<(), HierarchyError> {
     let mut scratch = HierarchyValidationScratch::default();
     validate_hierarchy_with_scratch(world, &mut scratch)
 }
 
 pub(crate) fn validate_hierarchy_with_scratch(
-    world: &mut World,
+    world: &World,
     scratch: &mut HierarchyValidationScratch,
 ) -> Result<(), HierarchyError> {
     validate_hierarchy_with_additions(world, core::iter::empty(), scratch).map(|_| ())
 }
 
 pub(crate) fn validate_hierarchy_with_additions(
-    world: &mut World,
+    world: &World,
     additions: impl IntoIterator<Item = (Entity, Entity)>,
     scratch: &mut HierarchyValidationScratch,
 ) -> Result<HierarchyPreflightStats, HierarchyError> {
@@ -118,48 +118,52 @@ pub(crate) fn validate_hierarchy_with_additions(
     let mut stats = HierarchyPreflightStats::default();
 
     {
-        let parent_query = scratch
-            .parent_query
-            .get_or_insert_with(|| world.query::<(Entity, &Parent)>());
-        for (entity, parent) in parent_query.iter(world) {
-            stats.record_parent_entity();
-            let parent = parent.parent();
-            if entity == parent {
-                return Err(HierarchyError::SelfParent { entity });
+        if scratch.parent_query.is_none() {
+            scratch.parent_query = QueryState::try_new(world);
+        }
+        if let Some(parent_query) = &mut scratch.parent_query {
+            for (entity, parent) in parent_query.iter(world) {
+                stats.record_parent_entity();
+                let parent = parent.parent();
+                if entity == parent {
+                    return Err(HierarchyError::SelfParent { entity });
+                }
+                if world.get_entity(parent).is_err() {
+                    return Err(HierarchyError::MissingParent {
+                        child: entity,
+                        parent,
+                    });
+                }
+                scratch.parent_edges.push((entity, parent));
+                scratch.parent_by_child.insert(entity, parent);
             }
-            if world.get_entity(parent).is_err() {
-                return Err(HierarchyError::MissingParent {
-                    child: entity,
-                    parent,
-                });
-            }
-            scratch.parent_edges.push((entity, parent));
-            scratch.parent_by_child.insert(entity, parent);
         }
     }
 
     {
-        let children_query = scratch
-            .children_query
-            .get_or_insert_with(|| world.query::<(Entity, &Children)>());
-        for (entity, children) in children_query.iter(world) {
-            stats.record_children_entity();
-            if children.is_empty() {
-                return Err(HierarchyError::ReverseEmpty { parent: entity });
-            }
-
-            for child in children.iter() {
-                if world.get_entity(child).is_err() {
-                    return Err(HierarchyError::ReverseChildMissing {
-                        parent: entity,
-                        child,
-                    });
+        if scratch.children_query.is_none() {
+            scratch.children_query = QueryState::try_new(world);
+        }
+        if let Some(children_query) = &mut scratch.children_query {
+            for (entity, children) in children_query.iter(world) {
+                stats.record_children_entity();
+                if children.is_empty() {
+                    return Err(HierarchyError::ReverseEmpty { parent: entity });
                 }
-                if !scratch.reverse_edges.insert((entity, child)) {
-                    return Err(HierarchyError::ReverseDuplicate {
-                        parent: entity,
-                        child,
-                    });
+
+                for child in children.iter() {
+                    if world.get_entity(child).is_err() {
+                        return Err(HierarchyError::ReverseChildMissing {
+                            parent: entity,
+                            child,
+                        });
+                    }
+                    if !scratch.reverse_edges.insert((entity, child)) {
+                        return Err(HierarchyError::ReverseDuplicate {
+                            parent: entity,
+                            child,
+                        });
+                    }
                 }
             }
         }

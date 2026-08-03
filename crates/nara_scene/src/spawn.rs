@@ -1055,8 +1055,10 @@ impl SceneSpawner {
 /// private. The callback can only enqueue owned typed values through its scoped writer. All limits
 /// and additional retirement tokens are validated before candidate entities are allocated. Each
 /// token binds its entity to the active World identity domain; a bare ECS `Entity` is insufficient
-/// authority for product-owned retirement.
-#[doc(hidden)]
+/// authority for product-owned retirement. Receipt-owning product state can be held outside the
+/// World with `World::resource_scope` and updated from the successful report before the exclusive
+/// caller returns; a rejected replacement leaves that state unchanged.
+#[must_use]
 pub fn replace_scene_with_product<F>(
     world: &mut World,
     registry: &ComponentRegistry,

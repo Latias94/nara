@@ -26,7 +26,7 @@ fn construction_flushes_an_immediate_reverse_projection() {
         world.get::<Children>(parent).map(Children::as_slice),
         Some([child].as_slice())
     );
-    validate_hierarchy(&mut world).expect("the forward and reverse projections should agree");
+    validate_hierarchy(&world).expect("the forward and reverse projections should agree");
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn deep_and_wide_batches_have_linear_preflight_and_one_dirty_mark() {
         1
     );
     deep_world.flush();
-    validate_hierarchy(&mut deep_world).unwrap();
+    validate_hierarchy(&deep_world).unwrap();
 
     let mut wide_world = World::new();
     let root = wide_world.spawn_empty().id();
@@ -197,7 +197,7 @@ fn deep_and_wide_batches_have_linear_preflight_and_one_dirty_mark() {
         wide_world.get::<Children>(root).map(Children::len),
         Some(children.len())
     );
-    validate_hierarchy(&mut wide_world).unwrap();
+    validate_hierarchy(&wide_world).unwrap();
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn deep_cycle_detection_is_iterative() {
     world.flush();
 
     assert!(matches!(
-        validate_hierarchy(&mut world),
+        validate_hierarchy(&world),
         Err(HierarchyError::Cycle { .. })
     ));
 }
@@ -369,7 +369,7 @@ fn deep_missing_parent_detection_is_iterative() {
         );
 
     assert_eq!(
-        validate_hierarchy(&mut world),
+        validate_hierarchy(&world),
         Err(HierarchyError::MissingParent {
             child: entities[0],
             parent: missing,
@@ -392,7 +392,7 @@ fn deep_reverse_projection_detection_is_iterative() {
         .retain(|candidate| *candidate != child);
 
     assert_eq!(
-        validate_hierarchy(&mut world),
+        validate_hierarchy(&world),
         Err(HierarchyError::ReverseMissing { parent, child })
     );
     assert_eq!(
@@ -417,7 +417,7 @@ fn sparse_one_sided_relationships_remain_visible_to_complete_validation() {
         );
 
     assert_eq!(
-        validate_hierarchy(&mut parent_only_world),
+        validate_hierarchy(&parent_only_world),
         Err(HierarchyError::ReverseMissing { parent, child })
     );
 
@@ -432,7 +432,7 @@ fn sparse_one_sided_relationships_remain_visible_to_complete_validation() {
     children_only_world.entity_mut(parent).insert(children);
 
     assert_eq!(
-        validate_hierarchy(&mut children_only_world),
+        validate_hierarchy(&children_only_world),
         Err(HierarchyError::ReverseUnexpected {
             parent,
             child,
@@ -453,11 +453,22 @@ fn complete_validation_scans_only_hierarchy_archetypes_in_a_sparse_world() {
     let mut scratch = HierarchyValidationScratch::default();
 
     let stats =
-        validate_hierarchy_with_additions(&mut world, core::iter::empty(), &mut scratch).unwrap();
+        validate_hierarchy_with_additions(&world, core::iter::empty(), &mut scratch).unwrap();
 
     assert_eq!(stats.parent_entities_scanned, 1);
     assert_eq!(stats.children_entities_scanned, 1);
     assert_eq!(world.get::<Parent>(child).map(Parent::parent), Some(parent));
+}
+
+#[test]
+fn complete_validation_does_not_register_missing_hierarchy_components() {
+    let world = World::new();
+    let component_count = world.components().len();
+
+    assert_eq!(validate_hierarchy(&world), Ok(()));
+    assert_eq!(world.components().len(), component_count);
+    assert!(world.component_id::<Parent>().is_none());
+    assert!(world.component_id::<Children>().is_none());
 }
 
 #[test]
@@ -474,7 +485,7 @@ fn reverse_projection_corruption_reports_exact_errors() {
         .collection_mut_risky()
         .clear();
     assert_eq!(
-        validate_hierarchy(&mut empty_world),
+        validate_hierarchy(&empty_world),
         Err(HierarchyError::ReverseEmpty {
             parent: empty_parent,
         })
@@ -498,7 +509,7 @@ fn reverse_projection_corruption_reports_exact_errors() {
         .collection_mut_risky()
         .push(missing);
     assert_eq!(
-        validate_hierarchy(&mut missing_world),
+        validate_hierarchy(&missing_world),
         Err(HierarchyError::ReverseChildMissing {
             parent: missing_parent,
             child: missing,
@@ -523,7 +534,7 @@ fn reverse_projection_corruption_reports_exact_errors() {
         .collection_mut_risky()
         .push(duplicate_child);
     assert_eq!(
-        validate_hierarchy(&mut duplicate_world),
+        validate_hierarchy(&duplicate_world),
         Err(HierarchyError::ReverseDuplicate {
             parent: duplicate_parent,
             child: duplicate_child,
@@ -544,7 +555,7 @@ fn reverse_projection_corruption_reports_exact_errors() {
             RelationshipHookMode::Skip,
         );
     assert_eq!(
-        validate_hierarchy(&mut unexpected_world),
+        validate_hierarchy(&unexpected_world),
         Err(HierarchyError::ReverseUnexpected {
             parent: recorded_parent,
             child: unexpected_child,

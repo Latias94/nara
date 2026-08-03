@@ -142,6 +142,9 @@ impl<'world> SceneProductOverlayWriter<'world> {
     ///
     /// The component type must already be registered in the target World. Invalid writes are
     /// retained as a transaction rejection; no candidate or registry mutation occurs here.
+    /// Ordinary product composition is responsible for registering accepted runtime-only types
+    /// during plugin build and seal; this provisional advanced writer does not infer provenance
+    /// from an existing ECS component ID.
     pub fn insert_component<T>(&mut self, target: SceneEntityId, component: T) -> &mut Self
     where
         T: Component,
@@ -186,7 +189,10 @@ impl<'world> SceneProductOverlayWriter<'world> {
     ///
     /// Resource insertion is deliberately unsupported: plugin composition must install the
     /// resource before runtime publication, and the marker trait limits this path to downstream
-    /// product-owned types.
+    /// product-owned types. A receipt-owning run resource that needs the resulting
+    /// `SpawnedSceneInstance` remains outside this writer: hold it through an exclusive
+    /// `World::resource_scope`, then update it without failure after a successful replacement
+    /// report and before the exclusive system returns.
     pub fn replace_resource<R>(&mut self, replacement: R) -> &mut Self
     where
         R: SceneProductResource,
