@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "cbb90214e447d4477faf4f3102fa0da3b3779c03dcd93e9b45e1febcb4a9f060"
+source_fingerprint: "a086cc0164978063a3b05b72ae57bc071d831e1ce9b66d293f2e338d4b0ffb21"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "cbb90214e447d4477faf4f3102fa0da3b3779c03dcd93e9b45e1febcb4a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `cbb90214e447d4477faf4f3102fa0da3b3779c03dcd93e9b45e1febcb4a9f060`
-- Immutable records: 330
+- Source fingerprint: `a086cc0164978063a3b05b72ae57bc071d831e1ce9b66d293f2e338d4b0ffb21`
+- Immutable records: 332
 - Active lane heads: 2
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Startup scene activation and atomic Retry: SRT-U5 active](registry/2026-08/2026-08-03T053651Z-engine-foundation-contract-completion-codex-root-f86b996f972f46ad9355d3e99810080b.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Startup scene activation and atomic Retry: SRT-U5 active](registry/2026-08/2026-08-03T064907Z-engine-foundation-contract-completion-codex-root-c3ce63c20e91470a8dfdd36a1ed1961e.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration: physics replacement model](registry/2026-07/2026-07-20T045649Z-nara-deep-module-architecture-exploration-codex-root-8542b661c2704f3f92f3f5325467d95b.md): `active` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [SRT-U4 read-only validation API correction](verification/2026-08/2026-08-03T064907Z-srt-u4-read-only-validation-api-correction-164eae47e7e54ba79fd905af197dd353.md) - Supersedes the first U4 verification after detailed API review found hierarchy validation could register missing component types and the provisional replacement result was hidden and discardable.
 - **Verification Evidence**: [SRT-U4 atomic product scene replacement](verification/2026-08/2026-08-03T053651Z-srt-u4-atomic-product-scene-replacement-5175acec97f041c2af61585559c01e04.md) - Verifies bounded stable-ID candidate overlays, identity-bound exact retirement, a prepared failure-free scene commit tail, and hierarchy-only complete validation.
 - **Verification Evidence**: [SRT-U3 bounded startup activation and runtime fault detail](verification/2026-08/2026-08-02T194244Z-srt-u3-bounded-startup-activation-and-runtime-fault-detail-3b4d5b25813f420d8f0e62f478576077.md) - Verifies exact retained startup source and receipt ownership, ordered unpublished Startup activation, bounded runtime fault metadata, and finite lease retirement.
 - **Verification Evidence**: [SRT-U2 exact image revision and invalidation correction](verification/2026-08/2026-08-02T143954Z-srt-u2-exact-image-revision-and-invalidation-correction-a45da756131c43c7a3632928e8cd4d4a.md) - Verifies exact image slot identity, bounded immutable RGBA storage, transient prepare-to-submit races, and removal of duplicate invalidation authority.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RGS-U1 spatial authority activation](verification/2026-08/2026-08-01T072032Z-rgs-u1-spatial-authority-activation-c4ec02d7fb954a00b5ee25e148c7e3c4.md) - Verifies activation of the focused runtime hierarchy and completed 2D transform product slice without reviving retired product-evidence infrastructure.
 - **Verification Evidence**: [RPR-U5 current product-readiness Redirect](verification/2026-08/2026-08-01T032222Z-rpr-u5-current-product-readiness-redirect-c064db2329544a5da5c02a6eb8183db5.md) - Records bounded current-revision product observations, exact cross-platform candidates, missing required evidence, and the resulting Redirect without a reusable evidence framework.
 - **Memory Event**: [completed: Completed RPR-U4 ordinary author-path dogfood and activated RPR-U5 product-readi](logs/2026-08/2026-08-01T010359Z-completed-completed-rpr-u4-ordinary-author-path-dogfood-and-activated-rpr-u5-product-readi-54f85e6eb48e4ee68ce3ff79a159ab1e.md) - Completed RPR-U4 ordinary author-path dogfood and activated RPR-U5 product-readiness re-evaluation.
-- **Verification Evidence**: [RPR-U4 ordinary author-path dogfood](verification/2026-08/2026-08-01T010241Z-rpr-u4-ordinary-author-path-dogfood-1976e4407ec94d3e9b79d31fe4ce5306.md) - Records reference-game and renamed-root adoption of the public product recipe plus local no-checkout candidate smoke.
 
 # Integration Notes
 

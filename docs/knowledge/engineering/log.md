@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-03
+* **Work Registration**: [Startup scene activation and atomic Retry: SRT-U5 active](registry/2026-08/2026-08-03T064907Z-engine-foundation-contract-completion-codex-root-c3ce63c20e91470a8dfdd36a1ed1961e.md) - Records the reviewed U4 API correction and retains SRT-U5 as the sole active product slice.
+* **Verification Evidence**: [SRT-U4 read-only validation API correction](verification/2026-08/2026-08-03T064907Z-srt-u4-read-only-validation-api-correction-164eae47e7e54ba79fd905af197dd353.md) - Supersedes the first U4 verification after detailed API review found hierarchy validation could register missing component types and the provisional replacement result was hidden and discardable.
 * **Work Registration**: [Startup scene activation and atomic Retry: SRT-U5 active](registry/2026-08/2026-08-03T053651Z-engine-foundation-contract-completion-codex-root-f86b996f972f46ad9355d3e99810080b.md) - Closes the atomic scene replacement extension and activates the reference-game spatial authority slice.
 * **Verification Evidence**: [SRT-U4 atomic product scene replacement](verification/2026-08/2026-08-03T053651Z-srt-u4-atomic-product-scene-replacement-5175acec97f041c2af61585559c01e04.md) - Verifies bounded stable-ID candidate overlays, identity-bound exact retirement, a prepared failure-free scene commit tail, and hierarchy-only complete validation.
 
@@ -145,7 +147,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Research**: [Unity primary-source research: content and package graph](2026-07/2026-07-22T053313Z-unity-content-and-package-graph-primary-source-research-200c27a7e80c4a48b14e9206456a4f57.md) - Evidence on Unity Asset Database, import artifacts, UPM packages, extensibility, and content builds for Nara package and asset architecture decisions.
 * **Research**: [Unity 2D and 3D transform primary-source findings](2026-07/2026-07-22-unity-2d-3d-primary-source-findings.md) - Official Unity evidence for Nara's future-capable 2D and 3D spatial transform model.
 * **Decision**: [Accepted future-capable 2D and 3D spatial transform model](decisions/2026-07/2026-07-22T050917Z-accepted-future-capable-2d-and-3d-spatial-transform-model-f899dfd294e44c809cdd5e819cb8d980.md) - Decision for Accepted future-capable 2D and 3D spatial transform model.
-* **Engineering Research**: [Persistent ordered scene hierarchy and transactional reparent research](2026-07/2026-07-22T012528Z-persistent-ordered-scene-hierarchy-and-transactional-reparent-research-33acdc8ae55b463c9d0bf7e0ad2930b3.md) - Non-normative follow-up audit of persistent hierarchy authority, move transactions, prefab provenance, subtree inverse records, and Bevy/Godot reparent failure semantics.
-
-## 2026-07-21
-* **Work Registration**: [Reference-game runtime authority and delivery: RGD-U2](registry/2026-07/2026-07-21T171141Z-engine-foundation-contract-completion-codex-root-0b91543a2a524a0abf5749c95091e530.md) - Publish one frozen component behavior authority for RuntimePlan, Editor, and candidate World.

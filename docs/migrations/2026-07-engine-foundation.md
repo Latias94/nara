@@ -50,7 +50,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGS-U2-1 | RGS-U2 | `51b3fe4` | `rust-api/behavior` | Runtime hierarchy ownership, scene component composition, and parented spatial content admission | Import runtime relationships from `nara_hierarchy`, install `HierarchyPlugin` and `SceneComponentsPlugin` separately, and keep parented transform/visibility content fail-closed until RGS-U3. |
 | RGS-U3-1 | RGS-U3 | `fb4fdc7` | `rust-api/behavior` | Completed global 2D projection and world-space camera/sprite/tilemap extraction | Treat `GlobalTransform2d` as an opaque immutable derived component, give every world-space renderable an explicit `Transform2d`, and pass completed globals to extraction helpers without local/identity fallback. |
 | SRT-U2-1 | SRT-U2 | `0b5beba` | `rust-api/behavior/safety` | Image construction, render prepare snapshot identity, and prepare invalidation | Handle fallible `ImageAsset` construction, capture `AssetSlotRevision` in each prepare snapshot, borrow non-`Copy` snapshots, and remove the unconsumed invalidation event log. |
-| SRT-U4-1 | SRT-U4 | `25e7f6c` | `rust-api/behavior` | Lifecycle-free insertion preparation, complete hierarchy validation, and provisional product replacement retirement | Prepare lifecycle-free insertions before commit, pass mutable World access to complete hierarchy validation, and authorize extra retirement with `WorldEntityToken` rather than bare `Entity`. |
+| SRT-U4-1 | SRT-U4 | `25e7f6c` | `rust-api/behavior` | Lifecycle-free insertion preparation and provisional product replacement retirement | Prepare lifecycle-free insertions before commit and authorize extra retirement with `WorldEntityToken` rather than bare `Entity`; complete hierarchy validation remains read-only. |
 
 ## Entry Contract
 
@@ -2540,8 +2540,9 @@ provisional advanced contract and is not re-exported from the ordinary prelude.
   deferred baseline, resolves only already registered component IDs, and rejects required
   components, hooks, observers, missing targets, duplicates, and existing components before any
   insertion.
-- `nara_hierarchy::validate_hierarchy` now accepts `&mut World` so complete validation can use
-  filtered ECS query state and visit hierarchy participants rather than every entity in the World.
+- `nara_hierarchy::validate_hierarchy` remains an immutable `&World` validator. Its filtered query
+  state is created with `QueryState::try_new`, so validation neither visits unrelated entities nor
+  registers missing hierarchy component types.
 - The provisional advanced `replace_scene_with_product` path accepts exact additional retirement
   authority as `&[WorldEntityToken]`. Bare `Entity` values cannot authorize product-owned
   retirement across World identity domains.
@@ -2560,31 +2561,29 @@ session.
 
 ```rust
 insertion_plan.commit(&mut world)?;
-validate_hierarchy(&world)?;
 ```
 
 **After**:
 
 ```rust
 let world = insertion_plan.prepare(&mut world)?.commit();
-validate_hierarchy(world)?;
 ```
 
 Advanced product replacement callers obtain `WorldEntityToken` values from the active
 `WorldIdentityDomain`, supply explicit overlay and retirement limits, and target candidate
 components only by `SceneEntityId`. Do not reconstruct token authority from `Entity` bits.
 
-**User action**: split lifecycle-free insertion into prepare and commit, make complete hierarchy
-validation call sites provide mutable World access, and replace any provisional bare-entity extra
-retirement list with identity-domain tokens. Handle limit and preparation rejection before treating
+**User action**: split lifecycle-free insertion into prepare and commit, and replace any provisional
+bare-entity extra retirement list with identity-domain tokens. Continue calling complete hierarchy
+validation through immutable World access. Handle limit and preparation rejection before treating
 the old scene generation as changed.
 
 **Source action**: none. Scene, Prefab, component, and project manifest formats are unchanged.
 
 **Cache action**: keep; rebuild Rust artifacts because public Rust signatures changed.
 
-**Compatibility window**: none (pre-1.0 fearless replacement). No fallible insertion-commit shim,
-immutable hierarchy-validation overload, or bare-entity retirement overload remains.
+**Compatibility window**: none (pre-1.0 fearless replacement). No fallible insertion-commit shim
+or bare-entity retirement overload remains.
 
 **Rollback**: revert the ECS insertion guard, identity-token preflight, hierarchy query validation,
 and scene product transaction together. Do not restore a recoverable branch after the first scene
