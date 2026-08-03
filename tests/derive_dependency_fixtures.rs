@@ -87,6 +87,7 @@ fn canonical_project_fixtures_are_checked_out_with_lf() {
         "reference-game/schema/component-schema-v1.json",
         "reference-game/schema/component-schema-v2.json",
         "reference-game/schema/component-schema-v3.json",
+        "reference-game/schema/component-schema-v4.json",
     ];
     let output = Command::new("git")
         .current_dir(repository)

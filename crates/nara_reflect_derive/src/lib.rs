@@ -186,11 +186,19 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
     let field_schemas = persistent_fields
         .iter()
         .map(|field| field_schema(field, &support));
-    let field_encoders = persistent_fields.iter().map(|field| {
-        let ident = &field.ident;
-        let id = &field.id;
-        quote!((#id, #support::encode_persistent_field(&self.#ident)?))
-    });
+    let component_encoder = if persistent_fields.is_empty() {
+        quote!(#support::ComponentValue::map(::core::iter::empty::<(
+            &'static str,
+            #support::ComponentValue,
+        )>()))
+    } else {
+        let field_encoders = persistent_fields.iter().map(|field| {
+            let ident = &field.ident;
+            let id = &field.id;
+            quote!((#id, #support::encode_persistent_field(&self.#ident)?))
+        });
+        quote!(#support::ComponentValue::map([#(#field_encoders),*]))
+    };
     let field_decoders = persistent_fields.iter().map(|field| {
         let ident = &field.ident;
         let ty = &field.ty;
@@ -224,7 +232,7 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
             fn __encode_persistent_component(
                 &self,
             ) -> Result<#support::ComponentValue, #support::ComponentCodecError> {
-                Ok(#support::ComponentValue::map([#(#field_encoders),*]))
+                Ok(#component_encoder)
             }
         }
     })

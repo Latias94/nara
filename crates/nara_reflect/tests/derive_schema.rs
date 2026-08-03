@@ -3,8 +3,8 @@ use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PersistentComponent, PersistentComponentProvider,
+    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PersistentComponent, PersistentComponentProvider,
 };
 
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
@@ -30,6 +30,26 @@ struct GeneratedProbe {
     )]
     target: EntityReference,
 }
+
+#[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
+#[nara(
+    id = "nara.test.PlayerRole",
+    version = 1,
+    alias = "Player role",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+struct PlayerRole {}
+
+#[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
+#[nara(
+    id = "nara.test.EnemyRole",
+    version = 1,
+    alias = "Enemy role",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+struct EnemyRole {}
 
 #[derive(Component, Default)]
 struct ImplicitDependency;
@@ -150,6 +170,99 @@ fn generated_provider_registers_schema_and_round_trips_component() {
         .apply(&mut target, target_entity)
         .unwrap();
     assert_eq!(target.get::<GeneratedProbe>(target_entity), Some(&expected));
+}
+
+#[test]
+fn generated_empty_markers_register_and_round_trip_empty_maps() {
+    let player_id = ComponentTypeId::new("nara.test.PlayerRole");
+    let enemy_id = ComponentTypeId::new("nara.test.EnemyRole");
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component::<PlayerRole>()
+        .unwrap();
+    registry
+        .register_persistent_component::<EnemyRole>()
+        .unwrap();
+    registry.freeze().unwrap();
+
+    for component_id in [&player_id, &enemy_id] {
+        let schema = registry.schema(component_id).unwrap();
+        assert!(schema.has_capability(ComponentCapability::Scene));
+        assert!(schema.fields().is_empty());
+    }
+
+    let mut source = World::new();
+    let player_entity = source.spawn(PlayerRole {}).id();
+    let enemy_entity = source.spawn(EnemyRole {}).id();
+    let encoded_player = registry
+        .encode_component(&player_id, &source, player_entity)
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let encoded_enemy = registry
+        .encode_component(&enemy_id, &source, enemy_entity)
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(encoded_player, ComponentValue::Map(Default::default()));
+    assert_eq!(encoded_enemy, ComponentValue::Map(Default::default()));
+
+    let mut target = World::new();
+    let target_entity = target.spawn_empty().id();
+    registry
+        .preflight_component(&player_id, &encoded_player)
+        .unwrap()
+        .unwrap()
+        .apply(&mut target, target_entity)
+        .unwrap();
+    registry
+        .preflight_component(&enemy_id, &encoded_enemy)
+        .unwrap()
+        .unwrap()
+        .apply(&mut target, target_entity)
+        .unwrap();
+    assert_eq!(
+        target.get::<PlayerRole>(target_entity),
+        Some(&PlayerRole {})
+    );
+    assert_eq!(target.get::<EnemyRole>(target_entity), Some(&EnemyRole {}));
+
+    let unknown_value = ComponentValue::map([("unknown", ComponentValue::Bool(true))]);
+    let error = registry
+        .preflight_component(&player_id, &unknown_value)
+        .unwrap()
+        .err()
+        .expect("empty marker schemas must reject unknown values");
+    assert!(error.to_string().contains("unknown"));
+    assert!(error.to_string().contains("not declared by schema"));
+}
+
+#[test]
+fn generated_empty_marker_catalogs_preserve_lineage_and_fingerprint() {
+    let predecessor = ComponentSchemaCatalog {
+        components: vec![
+            PlayerRole::persistent_component_schema(),
+            EnemyRole::persistent_component_schema(),
+        ],
+        ..ComponentSchemaCatalog::default()
+    };
+    let predecessor_fingerprint = predecessor.fingerprint();
+    assert_ne!(
+        predecessor_fingerprint,
+        ComponentSchemaCatalog::default().fingerprint()
+    );
+
+    let mut successor = ComponentSchemaCatalog::successor_of(&predecessor).unwrap();
+    successor.components = predecessor.components.clone();
+    assert_eq!(successor.predecessor(), Some(&predecessor_fingerprint));
+    assert_eq!(successor.fingerprint(), predecessor_fingerprint);
+
+    ComponentRegistry::from_owner_catalog_candidate(
+        ComponentSchemaOwnerId::new("nara.test.empty-markers"),
+        successor,
+        Some(predecessor),
+    )
+    .expect("unchanged empty marker schemas must preserve valid owner lineage");
 }
 
 #[test]

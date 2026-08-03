@@ -615,6 +615,7 @@ dependencies = [
  "nara_ecs",
  "nara_fs",
  "nara_gameplay",
+ "nara_hierarchy",
  "nara_identity",
  "nara_input",
  "nara_project",
@@ -623,6 +624,7 @@ dependencies = [
  "nara_tasks",
  "nara_transform",
  "nara_window",
+ "thiserror",
 ]
 
 [[package]]
@@ -714,6 +716,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara_hierarchy"
+version = "0.1.0"
+dependencies = [
+ "nara_app",
+ "nara_ecs",
+ "thiserror",
+]
+
+[[package]]
 name = "nara_identity"
 version = "0.1.0"
 dependencies = [
@@ -785,9 +796,9 @@ dependencies = [
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_identity",
  "nara_reflect",
- "nara_transform",
 ]
 
 [[package]]
@@ -808,7 +819,9 @@ dependencies = [
  "nara_app",
  "nara_core",
  "nara_ecs",
+ "nara_hierarchy",
  "nara_reflect",
+ "thiserror",
 ]
 
 [[package]]

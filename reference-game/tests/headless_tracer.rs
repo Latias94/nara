@@ -43,7 +43,7 @@ fn typed_headless_run_returns_the_terminal_wave_snapshot() {
     let snapshot = terminal_snapshot.expect("typed reference-game cleanup should be bounded");
 
     assert_eq!(snapshot.outcome, WaveOutcome::Completed);
-    assert_eq!(snapshot.tick, 49);
+    assert_eq!(snapshot.tick, 50);
     assert_eq!(snapshot.score, 300);
     assert!(snapshot.enemies.is_empty());
 }
@@ -101,6 +101,37 @@ fn missing_declared_registry_plugin_fails_pure_planning_and_is_retryable() {
         PluginLifecycleState::Configuring
     );
 
-    app.add_plugins((HeadlessRuntimePlugins, ReferenceGamePlugin))
-        .unwrap();
+    app.add_plugins((
+        HeadlessRuntimePlugins,
+        nara::advanced_prelude::StartupSceneActivationPlugin,
+        ReferenceGamePlugin,
+    ))
+    .unwrap();
+}
+
+#[test]
+fn missing_startup_activation_dependency_is_rejected_before_plugin_build() {
+    let mut app = App::new();
+    app.add_plugins(HeadlessRuntimePlugins).unwrap();
+
+    let Err(error) = app.add_plugin(ReferenceGamePlugin) else {
+        panic!("reference-game plugin unexpectedly accepted a missing startup activation owner");
+    };
+    assert!(matches!(
+        error,
+        AddPluginsError::Plan(PluginPlanError::MissingPlugin { plugin, required })
+            if plugin == REFERENCE_GAME_PLUGIN_ID
+                && required
+                    == nara::advanced_prelude::STARTUP_SCENE_ACTIVATION_PLUGIN_ID
+    ));
+    assert_eq!(
+        app.plugin_lifecycle_state(),
+        PluginLifecycleState::Configuring
+    );
+
+    app.add_plugins((
+        nara::advanced_prelude::StartupSceneActivationPlugin,
+        ReferenceGamePlugin,
+    ))
+    .unwrap();
 }

@@ -6,32 +6,37 @@ mod project_content_fixture;
 #[path = "support/child_process.rs"]
 mod child_process;
 
-use std::{process::Command, time::Duration};
+use std::{process::Command, sync::Arc, time::Duration};
 
 use child_process::{ChildOutputLimits, run_child_with_timeout};
 use nara::{
+    advanced_prelude::{StartupSceneSource, materialize_startup_scene},
     app::{
         RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
     },
+    core::{ByteLimit, Color},
+    ecs::Entity,
     hierarchy::Parent,
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     material::SamplerDescriptor,
-    prelude::{FixedTime, Vec2},
+    prelude::{FixedTime, Sprite, Vec2, World},
     project_host::ProjectContentLoader,
-    scene::spawn_scene,
+    scene::SceneEntitySource,
     sprite_render::{ExtractedSprites, TextureUvRect},
     transform::{GlobalTransform2d, Transform2d},
     ui_render::UiBatches,
 };
-use nara_reference_game::{Enemy, Player, ReferenceHudProjection, WaveOutcome};
+use nara_reference_game::{
+    EnemyRole, PlayerRole, ReferenceHudProjection, WaveOutcome, WaveSnapshot, Weapon,
+};
 use project_content_fixture::{desktop_candidate_plan_and_root, stop_runtime};
 
 const DESKTOP_RENDER_PROBE_OUTPUT_LIMITS: ChildOutputLimits = ChildOutputLimits::new(1024, 4096);
 
 #[test]
 fn desktop_projection_emits_sprites_clipped_hud_and_distinct_terminal_geometry() {
-    let completed = render_terminal(WaveOutcome::Completed, 20, 3);
-    let defeated = render_terminal(WaveOutcome::Defeated, 0, 1);
+    let completed = render_terminal(WaveOutcome::Completed);
+    let defeated = render_terminal(WaveOutcome::Defeated);
 
     assert_eq!(completed.hud.health_current, 20);
     assert_eq!(completed.hud.health_maximum, 20);
@@ -53,7 +58,7 @@ fn desktop_projection_emits_sprites_clipped_hud_and_distinct_terminal_geometry()
 
 #[test]
 fn desktop_first_frame_projects_exact_atlas_regions_before_a_fixed_tick() {
-    let mut runtime = render_runtime(None, 0);
+    let mut runtime = render_runtime();
 
     runtime.drive(Duration::ZERO).unwrap();
 
@@ -70,12 +75,12 @@ fn desktop_first_frame_projects_exact_atlas_regions_before_a_fixed_tick() {
     );
     let player_entity = world
         .iter_entities()
-        .find(|entity| entity.contains::<Player>())
+        .find(|entity| entity.contains::<PlayerRole>())
         .expect("the desktop fixture must retain one player")
         .id();
     let enemy_entity = world
         .iter_entities()
-        .find(|entity| entity.contains::<Enemy>())
+        .find(|entity| entity.contains::<EnemyRole>())
         .expect("the desktop fixture must retain at least one enemy")
         .id();
     let player = extracted
@@ -88,8 +93,14 @@ fn desktop_first_frame_projects_exact_atlas_regions_before_a_fixed_tick() {
         .iter()
         .find(|sprite| sprite.entity == enemy_entity)
         .expect("the first frame must extract an enemy");
-    let player_position = world.get::<Player>(player_entity).unwrap().position;
-    let enemy_position = world.get::<Enemy>(enemy_entity).unwrap().position;
+    let player_position = world
+        .get::<Transform2d>(player_entity)
+        .expect("the player must retain its authored local transform")
+        .translation;
+    let enemy_position = world
+        .get::<Transform2d>(enemy_entity)
+        .expect("the enemy must retain its authored local transform")
+        .translation;
     let enemy_parent = world
         .get::<Parent>(enemy_entity)
         .expect("the expanded prefab enemy should retain its runtime anchor")
@@ -134,6 +145,201 @@ fn desktop_first_frame_projects_exact_atlas_regions_before_a_fixed_tick() {
 }
 
 #[test]
+fn desktop_projection_preserves_authored_actor_sprite_fields() {
+    let player_size = Vec2::new(2.4, 1.7);
+    let enemy_size = Vec2::new(1.9, 2.2);
+    let player_tint = Color::rgba(0.12, 0.34, 0.56, 0.78);
+    let enemy_tint = Color::rgba(0.81, 0.63, 0.27, 0.91);
+    let mut runtime = render_runtime_with_admission_edit(move |world| {
+        let player = scene_entity(world, "player");
+        let enemy = scene_entity(world, "enemy-anchor/enemy");
+        let mut player_sprite = world
+            .get_mut::<Sprite>(player)
+            .expect("the player should retain its authored Sprite");
+        player_sprite.texture_region = None;
+        player_sprite.size = player_size;
+        player_sprite.material.tint = player_tint;
+        player_sprite.layer = 7;
+        player_sprite.sort_key = 71;
+
+        let mut enemy_sprite = world
+            .get_mut::<Sprite>(enemy)
+            .expect("the enemy should retain its authored Sprite");
+        enemy_sprite.texture_region = None;
+        enemy_sprite.size = enemy_size;
+        enemy_sprite.material.tint = enemy_tint;
+        enemy_sprite.layer = 8;
+        enemy_sprite.sort_key = 82;
+    });
+    let timestep = runtime.world().resource::<FixedTime>().timestep();
+    runtime.drive(timestep).unwrap();
+
+    let player = scene_entity(runtime.world(), "player");
+    let enemy = scene_entity(runtime.world(), "enemy-anchor/enemy");
+
+    let player_sprite = runtime
+        .world()
+        .get::<Sprite>(player)
+        .expect("desktop projection must retain the player Sprite");
+    assert_eq!(player_sprite.texture_region, None);
+    assert_eq!(player_sprite.size, player_size);
+    assert_eq!(player_sprite.material.tint, player_tint);
+    assert_eq!(player_sprite.layer, 7);
+    assert_eq!(player_sprite.sort_key, 71);
+
+    let enemy_sprite = runtime
+        .world()
+        .get::<Sprite>(enemy)
+        .expect("desktop projection must retain the enemy Sprite");
+    assert_eq!(enemy_sprite.texture_region, None);
+    assert_eq!(enemy_sprite.size, enemy_size);
+    assert_eq!(enemy_sprite.material.tint, enemy_tint);
+    assert_eq!(enemy_sprite.layer, 8);
+    assert_eq!(enemy_sprite.sort_key, 82);
+
+    stop_runtime(runtime);
+}
+
+#[test]
+fn parented_enemy_gameplay_and_snapshot_use_completed_world_space() {
+    let mut runtime = render_runtime_with_admission_edit(|world| {
+        let anchor = scene_entity(world, "enemy-anchor");
+        world
+            .get_mut::<Transform2d>(anchor)
+            .expect("the enemy anchor should participate in the transform chain")
+            .translation = Vec2::new(-10.0, 0.0);
+    });
+    let enemy = scene_entity(runtime.world(), "enemy-anchor/enemy");
+    let enemy_local_before = runtime
+        .world()
+        .get::<Transform2d>(enemy)
+        .expect("the enemy should retain its authored local transform")
+        .translation;
+
+    let world_before = runtime
+        .world()
+        .get::<GlobalTransform2d>(enemy)
+        .expect("startup should complete the edited anchor transform")
+        .translation();
+    assert_vec2_close(world_before, enemy_local_before + Vec2::new(-10.0, 0.0));
+    assert!(world_before.x < 0.0);
+
+    let timestep = runtime.world().resource::<FixedTime>().timestep();
+    runtime.drive(timestep).unwrap();
+
+    let enemy_local_after = runtime
+        .world()
+        .get::<Transform2d>(enemy)
+        .expect("the enemy should retain a local transform after pursuit")
+        .translation;
+    let world_after = runtime
+        .world()
+        .get::<GlobalTransform2d>(enemy)
+        .expect("the fixed tick should publish the pursued enemy global")
+        .translation();
+    assert_vec2_close(enemy_local_after, enemy_local_before + Vec2::new(0.5, 0.0));
+    assert_vec2_close(world_after, world_before + Vec2::new(0.5, 0.0));
+    let snapshot_enemy = runtime
+        .world()
+        .resource::<WaveSnapshot>()
+        .enemies
+        .iter()
+        .find(|enemy| enemy.id == "enemy-anchor/enemy")
+        .expect("the current receipt enemy should be present in the snapshot");
+    assert_vec2_close(snapshot_enemy.position, world_after);
+
+    stop_runtime(runtime);
+}
+
+#[test]
+fn desktop_weapon_keeps_its_local_offset_and_follows_the_player_in_same_tick_extraction() {
+    let mut runtime = render_runtime();
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let (
+        player_entity,
+        weapon_entity,
+        player_before,
+        weapon_local_before,
+        weapon_global_before,
+        weapon_extracted_before,
+    ) = {
+        let world = runtime.world();
+        let player_entity = scene_entity(world, "player");
+        let weapon_entity = scene_entity(world, "player-weapon");
+        assert!(world.get::<PlayerRole>(player_entity).is_some());
+        assert!(world.get::<Weapon>(weapon_entity).is_some());
+        assert_eq!(
+            world
+                .get::<Parent>(weapon_entity)
+                .expect("the authored weapon must retain its runtime parent")
+                .parent(),
+            player_entity,
+        );
+        let player_before = world
+            .get::<Transform2d>(player_entity)
+            .expect("the player must retain its authored local transform")
+            .translation;
+        let weapon_local_before = *world
+            .get::<Transform2d>(weapon_entity)
+            .expect("the weapon must retain its authored local transform");
+        assert_eq!(
+            weapon_local_before,
+            Transform2d::from_translation(Vec2::new(1.2, 0.0)),
+        );
+        let weapon_global_before = world
+            .get::<GlobalTransform2d>(weapon_entity)
+            .expect("Startup must project the weapon hierarchy")
+            .translation();
+        let weapon_extracted_before = assert_extracted_sprite_matches_global(world, weapon_entity);
+        (
+            player_entity,
+            weapon_entity,
+            player_before,
+            weapon_local_before,
+            weapon_global_before,
+            weapon_extracted_before,
+        )
+    };
+
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Character('a')))
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let timestep = runtime.world().resource::<FixedTime>().timestep();
+    runtime.drive(timestep).unwrap();
+
+    let world = runtime.world();
+    assert_eq!(world.resource::<FixedTime>().tick(), 1);
+    let player_after = world
+        .get::<Transform2d>(player_entity)
+        .expect("the player must retain its authoritative transform")
+        .translation;
+    let weapon_local_after = *world
+        .get::<Transform2d>(weapon_entity)
+        .expect("the weapon must retain its authored local transform");
+    assert_eq!(weapon_local_after, weapon_local_before);
+    let player_delta = player_after - player_before;
+    assert!(player_delta.x < 0.0 && player_delta.y == 0.0);
+    let weapon_global_after = world
+        .get::<GlobalTransform2d>(weapon_entity)
+        .expect("the fixed-step completion must refresh the weapon global")
+        .translation();
+    assert_vec2_close(weapon_global_after - weapon_global_before, player_delta);
+    assert_vec2_close(
+        weapon_global_after,
+        player_after + weapon_local_after.translation,
+    );
+    let extracted_after = assert_extracted_sprite_matches_global(world, weapon_entity);
+    assert_vec2_close(extracted_after - weapon_extracted_before, player_delta);
+
+    stop_runtime(runtime);
+}
+
+#[test]
 fn desktop_product_host_prepares_and_submits_the_committed_texture() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_desktop_render_probe"));
     command.current_dir(std::env::temp_dir());
@@ -168,21 +374,30 @@ struct RenderObservation {
     terminal_half_height: f32,
 }
 
-fn render_terminal(
-    outcome: WaveOutcome,
-    hit_points: i64,
-    defeated_enemies: u64,
-) -> RenderObservation {
-    let mut runtime = render_runtime(Some(hit_points), defeated_enemies);
+fn render_terminal(outcome: WaveOutcome) -> RenderObservation {
+    let mut runtime = render_runtime();
+    let movement_key = match outcome {
+        WaveOutcome::Completed => 'a',
+        WaveOutcome::Defeated => 'd',
+        WaveOutcome::Running => panic!("render_terminal requires a terminal outcome"),
+    };
     runtime
         .with_driver_scope(|scope| {
-            apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Character('a')))
+            apply_keyboard_driver_input(
+                scope,
+                ButtonDriverInput::Press(KeyCode::Character(movement_key)),
+            )
         })
         .unwrap()
         .unwrap();
     runtime.drive(Duration::ZERO).unwrap();
     let timestep = runtime.world().resource::<FixedTime>().timestep();
-    runtime.drive(timestep).unwrap();
+    for _ in 0..96 {
+        runtime.drive(timestep).unwrap();
+        if runtime.world().resource::<ReferenceHudProjection>().outcome != WaveOutcome::Running {
+            break;
+        }
+    }
 
     let world = runtime.world();
     let hud = *world.resource::<ReferenceHudProjection>();
@@ -196,12 +411,12 @@ fn render_terminal(
         .count();
     let player_entity = world
         .iter_entities()
-        .find(|entity| entity.contains::<Player>())
+        .find(|entity| entity.contains::<PlayerRole>())
         .expect("the desktop fixture must retain one player")
         .id();
     let enemy_entity = world
         .iter_entities()
-        .find(|entity| entity.contains::<Enemy>())
+        .find(|entity| entity.contains::<EnemyRole>())
         .map(|entity| entity.id());
     let player_sprite = extracted
         .as_slice()
@@ -210,7 +425,10 @@ fn render_terminal(
         .expect("the player must be extracted as a sprite");
     assert_eq!(
         player_sprite.world_center,
-        world.get::<Player>(player_entity).unwrap().position,
+        world
+            .get::<GlobalTransform2d>(player_entity)
+            .expect("same-frame extraction requires the completed player global")
+            .translation(),
         "same-frame extraction must consume the transform projected after gameplay mutation",
     );
     let enemy_sprite = enemy_entity.and_then(|enemy_entity| {
@@ -258,11 +476,24 @@ fn render_terminal(
     observation
 }
 
-fn render_runtime(hit_points: Option<i64>, defeated_enemies: u64) -> RuntimeInstance {
+fn render_runtime() -> RuntimeInstance {
+    render_runtime_with_admission_edit(|_| {})
+}
+
+fn render_runtime_with_admission_edit(
+    edit: impl FnOnce(&mut World) + Send + Sync + 'static,
+) -> RuntimeInstance {
     let (project, plan, root) = desktop_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let content = loader.load(&project, &plan).unwrap();
     let scene = content.expanded_startup_scene().clone();
+    let runtime_time = plan.settings().runtime.runtime_time_settings();
+    let fixed_time = plan.settings().runtime.fixed_time();
+    let source = StartupSceneSource::direct(
+        Arc::new(scene),
+        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
+    )
+    .expect("the render scene should fit the bounded direct retention limit");
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -275,35 +506,62 @@ fn render_runtime(hit_points: Option<i64>, defeated_enemies: u64) -> RuntimeInst
     candidate
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
-                let report = spawn_scene(world, plan.schema_validation().registry(), &scene);
-                assert!(
-                    !report.diagnostics.has_errors(),
-                    "{:#?}",
-                    report.diagnostics
-                );
-                assert!(report.instance.is_some());
-
-                let mut players = world.query::<&mut Player>();
-                let mut player_count = 0;
-                for mut player in players.iter_mut(world) {
-                    if let Some(hit_points) = hit_points {
-                        player.hit_points = hit_points;
-                    }
-                    player_count += 1;
-                }
-                assert_eq!(player_count, 1);
-
-                let mut enemies = world.query::<&mut Enemy>();
-                let mut enemy_count = 0_u64;
-                for mut enemy in enemies.iter_mut(world) {
-                    if enemy_count < defeated_enemies {
-                        enemy.hit_points = 0;
-                    }
-                    enemy_count += 1;
-                }
-                assert_eq!(enemy_count, 3);
+                world.insert_resource(runtime_time);
+                world.insert_resource(fixed_time);
+                let report = materialize_startup_scene(world, source)
+                    .expect("the retained render scene should materialize");
+                assert!(!report.has_errors(), "{report:#?}");
+                edit(world);
             });
         })
         .unwrap();
     candidate.complete_startup().unwrap().promote()
+}
+
+fn scene_entity(world: &World, scene_id: &str) -> Entity {
+    world
+        .iter_entities()
+        .find_map(|entity| {
+            entity
+                .get::<SceneEntitySource>()
+                .is_some_and(|source| source.entity_id.as_str() == scene_id)
+                .then_some(entity.id())
+        })
+        .unwrap_or_else(|| panic!("the render fixture must contain scene entity {scene_id}"))
+}
+
+fn assert_extracted_sprite_matches_global(world: &World, entity: Entity) -> Vec2 {
+    let sprite = world
+        .get::<Sprite>(entity)
+        .expect("the observed scene entity must be a sprite");
+    let global = world
+        .get::<GlobalTransform2d>(entity)
+        .expect("sprite extraction requires a completed global transform");
+    let extracted = world
+        .resource::<ExtractedSprites>()
+        .as_slice()
+        .iter()
+        .find(|sprite| sprite.entity == entity)
+        .expect("the observed sprite must be extracted in the current frame");
+    let matrix = global.matrix();
+    assert_vec2_close(
+        extracted.world_center,
+        matrix.transform_point2(-sprite.anchor.normalized * sprite.size),
+    );
+    assert_vec2_close(
+        extracted.world_x_axis,
+        matrix.transform_vector2(Vec2::new(sprite.size.x * 0.5, 0.0)),
+    );
+    assert_vec2_close(
+        extracted.world_y_axis,
+        matrix.transform_vector2(Vec2::new(0.0, sprite.size.y * 0.5)),
+    );
+    extracted.world_center
+}
+
+fn assert_vec2_close(actual: Vec2, expected: Vec2) {
+    assert!(
+        (actual - expected).length() <= 1.0e-6,
+        "expected {expected:?}, observed {actual:?}",
+    );
 }

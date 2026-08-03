@@ -275,10 +275,9 @@ fn late_persistent_hook_rejects_before_scene_publication() {
 
     assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed, "{report:?}");
     assert!(
-        report
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "scene.persistent-apply-ineligible" })
+        report.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.persistent-apply-ineligible"
+        })
     );
     assert_eq!(LATE_HOOK_CALLS.load(Ordering::SeqCst), 0);
 }

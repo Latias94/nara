@@ -10,7 +10,46 @@
     "entities": [
       {
         "id": "enemy-anchor",
-        "components": {},
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "rotation": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "scale": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 1.0
+                    }
+                  }
+                },
+                "translation": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "prefab": {
           "source": {
             "kind": "path",
@@ -24,7 +63,46 @@
       },
       {
         "id": "enemy-anchor-2",
-        "components": {},
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "rotation": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "scale": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 1.0
+                    }
+                  }
+                },
+                "translation": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "prefab": {
           "source": {
             "kind": "path",
@@ -37,21 +115,12 @@
                 "op": "set_field",
                 "args": {
                   "entity": "enemy",
-                  "component": "reference_game.Enemy",
-                  "component_version": 2,
-                  "field": "position",
+                  "component": "nara.transform.Transform2d",
+                  "component_version": 1,
+                  "field": "translation.x",
                   "value": {
-                    "type": "map",
-                    "value": {
-                      "x": {
-                        "type": "f64",
-                        "value": 9.0
-                      },
-                      "y": {
-                        "type": "f64",
-                        "value": 0.0
-                      }
-                    }
+                    "type": "f64",
+                    "value": 9.0
                   }
                 }
               },
@@ -74,7 +143,46 @@
       },
       {
         "id": "enemy-anchor-3",
-        "components": {},
+        "components": {
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "rotation": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "scale": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 1.0
+                    }
+                  }
+                },
+                "translation": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "prefab": {
           "source": {
             "kind": "path",
@@ -87,21 +195,12 @@
                 "op": "set_field",
                 "args": {
                   "entity": "enemy",
-                  "component": "reference_game.Enemy",
-                  "component_version": 2,
-                  "field": "position",
+                  "component": "nara.transform.Transform2d",
+                  "component_version": 1,
+                  "field": "translation.x",
                   "value": {
-                    "type": "map",
-                    "value": {
-                      "x": {
-                        "type": "f64",
-                        "value": 13.0
-                      },
-                      "y": {
-                        "type": "f64",
-                        "value": 0.0
-                      }
-                    }
+                    "type": "f64",
+                    "value": 13.0
                   }
                 }
               },
@@ -249,16 +348,29 @@
               }
             }
           },
-          "reference_game.Player": {
+          "nara.transform.Transform2d": {
             "version": 1,
             "value": {
               "type": "map",
               "value": {
-                "hit-points": {
-                  "type": "i64",
-                  "value": 20
+                "rotation": {
+                  "type": "f64",
+                  "value": 0.0
                 },
-                "position": {
+                "scale": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 1.0
+                    }
+                  }
+                },
+                "translation": {
                   "type": "map",
                   "value": {
                     "x": {
@@ -270,7 +382,27 @@
                       "value": 0.0
                     }
                   }
-                },
+                }
+              }
+            }
+          },
+          "reference_game.InitialHealth": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "hit-points": {
+                  "type": "i64",
+                  "value": 20
+                }
+              }
+            }
+          },
+          "reference_game.InitialVelocity2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
                 "velocity": {
                   "type": "map",
                   "value": {
@@ -287,8 +419,106 @@
               }
             }
           },
-          "reference_game.Weapon": {
+          "reference_game.PlayerRole": {
             "version": 1,
+            "value": {
+              "type": "map",
+              "value": {}
+            }
+          }
+        }
+      },
+      {
+        "id": "player-weapon",
+        "parent": "player",
+        "components": {
+          "nara.sprite.Sprite": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "material": {
+                  "type": "map",
+                  "value": {
+                    "tint": {
+                      "type": "map",
+                      "value": {
+                        "a": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "b": {
+                          "type": "f64",
+                          "value": 0.22
+                        },
+                        "g": {
+                          "type": "f64",
+                          "value": 0.86
+                        },
+                        "r": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    }
+                  }
+                },
+                "size": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 0.9
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.3
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "rotation": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "scale": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 1.0
+                    }
+                  }
+                },
+                "translation": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.2000000476837158
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "reference_game.Weapon": {
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -299,57 +529,6 @@
                 "damage": {
                   "type": "i64",
                   "value": 3
-                },
-                "remaining-ticks": {
-                  "type": "u64",
-                  "value": 3
-                }
-              }
-            }
-          }
-        }
-      },
-      {
-        "id": "projectile-fixture",
-        "components": {
-          "reference_game.Projectile": {
-            "version": 1,
-            "value": {
-              "type": "map",
-              "value": {
-                "damage": {
-                  "type": "i64",
-                  "value": 0
-                },
-                "position": {
-                  "type": "map",
-                  "value": {
-                    "x": {
-                      "type": "f64",
-                      "value": -100.0
-                    },
-                    "y": {
-                      "type": "f64",
-                      "value": 0.0
-                    }
-                  }
-                },
-                "ttl-ticks": {
-                  "type": "u64",
-                  "value": 8
-                },
-                "velocity": {
-                  "type": "map",
-                  "value": {
-                    "x": {
-                      "type": "f64",
-                      "value": -2.0
-                    },
-                    "y": {
-                      "type": "f64",
-                      "value": 0.0
-                    }
-                  }
                 }
               }
             }

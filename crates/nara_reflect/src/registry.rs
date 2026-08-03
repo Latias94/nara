@@ -118,9 +118,6 @@ pub enum ComponentRegistryError {
         component_id: ComponentTypeId,
         capability: ComponentCapability,
     },
-    MissingSceneComponentFields {
-        component_id: ComponentTypeId,
-    },
     DuplicateComponentFieldId {
         component_id: ComponentTypeId,
         field_id: ComponentFieldId,
@@ -339,10 +336,6 @@ impl Display for ComponentRegistryError {
             } => write!(
                 formatter,
                 "component ID '{component_id}' cannot use field-only {capability:?} capability"
-            ),
-            Self::MissingSceneComponentFields { component_id } => write!(
-                formatter,
-                "scene component ID '{component_id}' requires explicit schema fields"
             ),
             Self::DuplicateComponentFieldId {
                 component_id,
@@ -2007,12 +2000,6 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
             });
         }
     }
-    if schema.has_capability(ComponentCapability::Scene) && schema.fields.is_empty() {
-        return Err(ComponentRegistryError::MissingSceneComponentFields {
-            component_id: schema.id.clone(),
-        });
-    }
-
     let mut field_ids = BTreeSet::new();
     for field in &schema.fields {
         field
@@ -2305,6 +2292,11 @@ fn validate_component_value_coverage(
     path_index: &SchemaPathIndex,
     value: &ComponentValue,
 ) -> Result<(), ComponentCodecError> {
+    if schema.fields.is_empty() && matches!(value, ComponentValue::Map(fields) if fields.is_empty())
+    {
+        return Ok(());
+    }
+
     for field in &schema.fields {
         match value.get_path(&field.path) {
             Ok(value) => {

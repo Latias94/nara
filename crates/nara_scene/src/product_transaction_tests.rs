@@ -1,5 +1,6 @@
 use super::*;
 
+use nara_app::App;
 use nara_core::ItemLimit;
 use nara_ecs::{
     Component, Entity, Mut, Resource, World,
@@ -8,7 +9,9 @@ use nara_ecs::{
     relationship::{Relationship, RelationshipHookMode},
     system::ResMut,
 };
-use nara_hierarchy::{HierarchyConstructionWriter, Parent};
+use nara_hierarchy::{
+    __private::completed_topology_generation, HierarchyConstructionWriter, HierarchyPlugin, Parent,
+};
 use nara_identity::{
     EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
     WorldEntityLocator, WorldEntityToken, WorldIdentityDomain, resolve_in_world,
@@ -503,6 +506,59 @@ fn overlay_lifecycle_rejection_rolls_back_scratch_and_resource_replacement() {
     ));
     assert_eq!(fixture.world.resource::<LifecycleCanary>().0, 0);
     fixture.assert_unchanged(&before_entities, before_stats);
+}
+
+#[test]
+fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
+    let mut registry = ComponentRegistry::new();
+    registry.freeze().unwrap();
+    let root = scene_id("root");
+    let child = scene_id("root/child");
+    let document = SceneDocument::new([
+        SceneEntityRecord::new(root),
+        SceneEntityRecord::new(child.clone()).with_parent(scene_id("root")),
+    ]);
+    let mut app = App::new();
+    app.add_plugin(HierarchyPlugin).unwrap();
+    app.insert_resource(RunState(1)).unwrap();
+    let initial = spawn_scene(app.world_mut().unwrap(), &registry, &document);
+    assert!(!initial.diagnostics.has_errors());
+    let current = spawned_instance(&initial).clone();
+    app.update().unwrap();
+    let completed_before = completed_topology_generation(app.world())
+        .expect("the initial scene hierarchy must complete before replacement");
+
+    {
+        let world = app.world_mut().unwrap();
+        world.init_resource::<LifecycleCanary>();
+        world.register_component::<RuntimeValue>();
+        world.add_observer(
+            |_: On<Add, RuntimeValue>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
+        );
+        world.flush();
+    }
+    let report = replace_scene_with_product(
+        app.world_mut().unwrap(),
+        &registry,
+        &document,
+        &current,
+        transaction_limits(1, 1),
+        &[],
+        |overlay| {
+            overlay.insert_component(child.clone(), RuntimeValue(1));
+        },
+    );
+
+    assert!(has_diagnostic(
+        &report,
+        "scene.product-overlay-lifecycle-ineligible"
+    ));
+    assert_eq!(app.world().resource::<LifecycleCanary>().0, 0);
+    assert_eq!(
+        completed_topology_generation(app.world()),
+        Some(completed_before),
+        "rejected candidate preparation must not dirty the published hierarchy"
+    );
 }
 
 #[test]

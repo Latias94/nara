@@ -94,6 +94,20 @@ fn main() -> ExitCode {
         || !evidence.submitted_frame.load(Ordering::SeqCst)
         || !evidence.retry_continuity.load(Ordering::SeqCst)
     {
+        let diagnostics = report
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| (diagnostic.code().as_str(), diagnostic.fields()))
+            .collect::<Vec<_>>();
+        eprintln!(
+            "desktop_render_probe.details outcome={:?} timed_out={} prepared_image={} textured_batch={} submitted_frame={} retry_continuity={} diagnostics={diagnostics:?}",
+            report.outcome(),
+            evidence.timed_out.load(Ordering::SeqCst),
+            evidence.prepared_image.load(Ordering::SeqCst),
+            evidence.textured_batch.load(Ordering::SeqCst),
+            evidence.submitted_frame.load(Ordering::SeqCst),
+            evidence.retry_continuity.load(Ordering::SeqCst),
+        );
         return fail("desktop_render_probe.product_path_failed");
     }
     if let Err(error) = marker.verify_success() {

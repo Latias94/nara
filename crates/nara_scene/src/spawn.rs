@@ -11,7 +11,8 @@ use nara_ecs::{
     prepare_lifecycle_free_despawn,
 };
 use nara_hierarchy::{
-    Children, HierarchyConstructionEdge, HierarchyConstructionWriter, Parent, validate_hierarchy,
+    __private::prepare_construction_batch, Children, HierarchyConstructionEdge, Parent,
+    validate_hierarchy,
 };
 use nara_identity::{
     __private::{
@@ -854,22 +855,21 @@ impl SceneSpawner {
             }
         };
 
-        if HierarchyConstructionWriter::new(world)
-            .attach_batch(&hierarchy_edges)
-            .is_err()
-        {
-            diagnostics.push(diagnostic_error(
-                "scene.hierarchy-publication-failed",
-                "Validated scene hierarchy could not be published",
-            ));
-            rollback_spawn_transaction(world, &spawned_entities);
-            return SceneSpawnReport {
-                instance: None,
-                diagnostics,
-                retired_entities: 0,
-            };
-        }
-        world.flush();
+        let prepared_hierarchy = match prepare_construction_batch(world, &hierarchy_edges) {
+            Ok(prepared) => prepared,
+            Err(_) => {
+                diagnostics.push(diagnostic_error(
+                    "scene.hierarchy-publication-failed",
+                    "Validated scene hierarchy could not be prepared",
+                ));
+                rollback_spawn_transaction(world, &spawned_entities);
+                return SceneSpawnReport {
+                    instance: None,
+                    diagnostics,
+                    retired_entities: 0,
+                };
+            }
+        };
 
         let product_insertion = match product_insertion.prepare(world) {
             Ok(prepared) => prepared,
@@ -889,6 +889,8 @@ impl SceneSpawner {
 
         let world = product_insertion.commit();
         prepared_components.commit(world);
+        prepared_hierarchy.commit(world);
+        world.flush();
 
         let instance_id = prepared_identity.instance_id();
         for (entity_id, runtime_entity) in &spawned_by_id {

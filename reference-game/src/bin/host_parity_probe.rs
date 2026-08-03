@@ -126,8 +126,7 @@ fn run_headless(
 ) -> Result<RuntimeFaultEvidence, &'static str> {
     let maximum_ticks =
         NonZeroU32::new(PARITY_FAULT_TICK as u32).expect("the parity tick limit is non-zero");
-    let intent =
-        advanced_wave_headless_intent_after::<ReferenceWavePlugin>(maximum_ticks, probe);
+    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(maximum_ticks, probe);
     let mut run = HeadlessRun::new(root, intent, Vec::new());
     let deadline = Instant::now() + HOST_TIMEOUT;
     let report = loop {

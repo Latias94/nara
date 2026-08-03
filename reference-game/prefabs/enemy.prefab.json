@@ -89,11 +89,11 @@
                   "value": {
                     "x": {
                       "type": "f64",
-                      "value": 0.0
+                      "value": 1.65
                     },
                     "y": {
                       "type": "f64",
-                      "value": 0.0
+                      "value": 1.65
                     }
                   }
                 },
@@ -135,16 +135,29 @@
               }
             }
           },
-          "reference_game.Enemy": {
-            "version": 2,
+          "nara.transform.Transform2d": {
+            "version": 1,
             "value": {
               "type": "map",
               "value": {
-                "hit-points": {
-                  "type": "i64",
-                  "value": 10
+                "rotation": {
+                  "type": "f64",
+                  "value": 0.0
                 },
-                "position": {
+                "scale": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 1.0
+                    }
+                  }
+                },
+                "translation": {
                   "type": "map",
                   "value": {
                     "x": {
@@ -156,7 +169,34 @@
                       "value": 0.0
                     }
                   }
-                },
+                }
+              }
+            }
+          },
+          "reference_game.EnemyRole": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {}
+            }
+          },
+          "reference_game.InitialHealth": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "hit-points": {
+                  "type": "i64",
+                  "value": 10
+                }
+              }
+            }
+          },
+          "reference_game.InitialVelocity2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
                 "velocity": {
                   "type": "map",
                   "value": {

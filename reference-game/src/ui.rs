@@ -17,8 +17,8 @@ use nara::{
 };
 
 use crate::{
-    Enemy, Player, Projectile, ReferenceWaveCaptureSet, WaveOutcome, WaveSnapshot, WaveSpawn,
-    input::install_desktop_input,
+    EnemyRole, Health, ProjectileRole, ReferenceWaveCaptureSet, WaveOutcome, WaveSnapshot,
+    WaveSpawn, input::install_desktop_input, resources::WaveRunOwner,
 };
 
 pub const REFERENCE_DESKTOP_PLUGIN_ID: PluginId =
@@ -48,8 +48,6 @@ const REFERENCE_ATLAS_PATH: &str = "textures/tiny-dungeon.png";
 const ATLAS_COLUMNS: u32 = 12;
 const ATLAS_ROWS: u32 = 11;
 const ATLAS_TILE_PIXELS: f32 = 16.0;
-const PLAYER_ATLAS_TILE: u32 = 96;
-const ENEMY_ATLAS_TILE: u32 = 110;
 const FLOOR_ATLAS_TILES: [u32; 4] = [14, 40, 57, 59];
 const ARENA_COLUMNS: usize = 15;
 const ARENA_ROWS: usize = 8;
@@ -76,8 +74,7 @@ impl Plugin for ReferenceDesktopPlugin {
                 .reserve::<ImageAsset>(REFERENCE_ATLAS_PATH)
                 .map_err(|_| setup_error("desktop atlas texture identity was rejected"))?
         };
-        app.insert_resource(ReferenceDesktopAssets { atlas_texture })?
-            .insert_resource(ReferenceHudProjection::default())?;
+        app.insert_resource(ReferenceHudProjection::default())?;
         spawn_desktop_view(app, atlas_texture)?;
         app.add_systems(
             CoreStage::FixedUpdate,
@@ -88,18 +85,19 @@ impl Plugin for ReferenceDesktopPlugin {
     }
 }
 
-#[derive(Debug, Clone, Copy, Resource)]
-struct ReferenceDesktopAssets {
-    atlas_texture: Handle<ImageAsset>,
-}
-
 type DesktopProjectionEntity<'a> = (
     Entity,
-    Option<&'a Player>,
-    Option<&'a Enemy>,
-    Option<&'a Projectile>,
+    Option<&'a nara::scene::SceneEntitySource>,
+    Option<&'a EnemyRole>,
+    Option<&'a ProjectileRole>,
     Option<&'a WaveSpawn>,
+    Option<&'a Health>,
+    Option<&'a mut Sprite>,
+    Option<&'a ReferenceAuthoredSpriteSize>,
 );
+
+#[derive(Debug, Clone, Copy, Component)]
+struct ReferenceAuthoredSpriteSize(Vec2);
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Resource)]
 pub struct ReferenceHudProjection {
@@ -229,47 +227,39 @@ fn spawn_arena(world: &mut World, atlas_texture: Handle<ImageAsset>) {
 
 fn project_desktop_sprites(
     mut commands: Commands,
-    assets: Res<ReferenceDesktopAssets>,
+    owner: Res<WaveRunOwner>,
     snapshot: Res<WaveSnapshot>,
-    entities: Query<DesktopProjectionEntity<'_>>,
+    mut entities: Query<DesktopProjectionEntity<'_>>,
 ) {
-    for (entity, player, enemy, projectile, spawn) in &entities {
-        let sprite = if player.is_some() {
-            Some(
-                atlas_sprite(
-                    assets.atlas_texture,
-                    PLAYER_ATLAS_TILE,
-                    Vec2::splat(1.8),
-                    Color::rgba(0.58, 0.84, 1.0, 1.0),
-                )
-                .with_sort_key(20),
-            )
-        } else if let Some(enemy) = enemy {
-            let active =
-                spawn.is_some_and(|spawn| spawn.tick <= snapshot.tick) && enemy.hit_points > 0;
-            Some(
-                atlas_sprite(
-                    assets.atlas_texture,
-                    ENEMY_ATLAS_TILE,
-                    if active {
-                        Vec2::splat(1.65)
-                    } else {
-                        Vec2::ZERO
-                    },
-                    Color::rgba(1.0, 0.74, 0.74, 1.0),
-                )
-                .with_sort_key(10),
-            )
-        } else {
-            projectile.map(|_| {
-                Sprite::from_color(Vec2::new(0.62, 0.24), Color::rgba(1.0, 0.86, 0.2, 1.0))
-                    .with_sort_key(30)
-            })
-        };
-        let Some(sprite) = sprite else {
+    for (entity, source, enemy, projectile, spawn, health, sprite, authored_size) in &mut entities {
+        if enemy.is_some() {
+            if source.is_none_or(|source| !owner.owns_scene_entity(entity, source)) {
+                continue;
+            }
+            let Some(mut sprite) = sprite else {
+                continue;
+            };
+            let authored_size = authored_size.map_or_else(
+                || {
+                    let authored_size = sprite.size;
+                    commands
+                        .entity(entity)
+                        .insert(ReferenceAuthoredSpriteSize(authored_size));
+                    authored_size
+                },
+                |authored_size| authored_size.0,
+            );
+            let active = spawn.is_some_and(|spawn| spawn.tick <= snapshot.tick)
+                && health.is_some_and(|health| health.current > 0);
+            sprite.size = if active { authored_size } else { Vec2::ZERO };
             continue;
-        };
-        commands.entity(entity).insert(sprite);
+        }
+        if projectile.is_some() && owner.owns_projectile_entity(entity) {
+            commands.entity(entity).insert(
+                Sprite::from_color(Vec2::new(0.62, 0.24), Color::rgba(1.0, 0.86, 0.2, 1.0))
+                    .with_sort_key(30),
+            );
+        }
     }
 }
 

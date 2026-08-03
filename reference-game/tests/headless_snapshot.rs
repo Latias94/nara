@@ -64,19 +64,11 @@ fn authoritative_snapshot_uses_sorted_stable_game_identities() {
     );
     assert_eq!(
         snapshot.projectiles,
-        vec![
-            ProjectileSnapshot {
-                id: 1,
-                position: Vec2::new(-106.0, 0.0),
-                velocity: Vec2::new(-2.0, 0.0),
-                ttl_ticks: 5,
-            },
-            ProjectileSnapshot {
-                id: 2,
-                position: Vec2::new(-1.0, 0.0),
-                velocity: Vec2::new(2.0, 0.0),
-                ttl_ticks: 63,
-            },
-        ]
+        vec![ProjectileSnapshot {
+            id: 1,
+            position: Vec2::new(-3.0, 0.0),
+            velocity: Vec2::new(2.0, 0.0),
+            ttl_ticks: 64,
+        }]
     );
 }

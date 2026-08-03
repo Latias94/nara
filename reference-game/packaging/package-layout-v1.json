@@ -30,7 +30,8 @@
     "scenes/startup.scene.json",
     "schema/component-schema-v1.json",
     "schema/component-schema-v2.json",
-    "schema/component-schema-v3.json"
+    "schema/component-schema-v3.json",
+    "schema/component-schema-v4.json"
   ],
   "limits": {
     "max_file_count": 32,

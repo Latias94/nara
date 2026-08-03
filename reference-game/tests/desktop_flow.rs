@@ -3,23 +3,23 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use std::{num::NonZeroU64, time::Duration};
+use std::{num::NonZeroU64, sync::Arc, time::Duration};
 
 use nara::{
+    advanced_prelude::{StartupSceneSource, materialize_startup_scene},
     app::{
         RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeFaultKind, RuntimeInstance,
         RuntimeObligationLedger, RuntimeState,
     },
-    core::ItemLimit,
+    core::{ByteLimit, ItemLimit},
     gameplay::{GameplayCommandQueue, GameplayCommandQueueSettings},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
-    prelude::FixedTime,
+    prelude::{FixedTime, Transform2d},
     project_host::ProjectContentLoader,
-    scene::spawn_scene,
 };
 use nara_reference_game::{
-    MovementDirection, WaveOutcome, WaveRetryPhase, WaveRetryRejection, WaveRetryStatus,
-    WaveRunGeneration, WaveSnapshot, movement_command,
+    MovementDirection, PlayerRole, WaveOutcome, WaveRetryPhase, WaveRetryRejection,
+    WaveRetryStatus, WaveRunGeneration, WaveSnapshot, movement_command,
 };
 use project_content_fixture::{desktop_candidate_plan_and_root, stop_runtime};
 
@@ -296,7 +296,17 @@ fn repeated_retry_keeps_one_runtime_generation() {
 
 #[test]
 fn rejected_physical_local_command_faults_the_managed_runtime() {
-    let (_candidate, plan, _root) = desktop_candidate_plan_and_root();
+    let (project, plan, root) = desktop_candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let snapshot = loader.load(&project, &plan).unwrap();
+    let scene = snapshot.expanded_startup_scene().clone();
+    let runtime_time = plan.settings().runtime.runtime_time_settings();
+    let fixed_time = plan.settings().runtime.fixed_time();
+    let source = StartupSceneSource::direct(
+        Arc::new(scene),
+        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
+    )
+    .expect("the desktop scene should fit the bounded direct retention limit");
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -307,8 +317,13 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
         )
         .unwrap();
     candidate
-        .with_admission_scope(|scope| {
-            scope.apply_command(|world: &mut nara::prelude::World| {
+        .with_admission_scope(move |scope| {
+            scope.apply_command(move |world: &mut nara::prelude::World| {
+                world.insert_resource(runtime_time);
+                world.insert_resource(fixed_time);
+                let report = materialize_startup_scene(world, source)
+                    .expect("the retained desktop scene should materialize");
+                assert!(!report.has_errors(), "{report:#?}");
                 let defaults = GameplayCommandQueueSettings::default();
                 let settings = GameplayCommandQueueSettings::new(
                     ItemLimit::new(1).unwrap(),
@@ -349,6 +364,11 @@ fn desktop_runtime() -> RuntimeInstance {
     let scene = snapshot.expanded_startup_scene().clone();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
+    let source = StartupSceneSource::direct(
+        Arc::new(scene),
+        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
+    )
+    .expect("the desktop scene should fit the bounded direct retention limit");
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -363,13 +383,9 @@ fn desktop_runtime() -> RuntimeInstance {
             scope.apply_command(move |world: &mut nara::prelude::World| {
                 world.insert_resource(runtime_time);
                 world.insert_resource(fixed_time);
-                let report = spawn_scene(world, plan.schema_validation().registry(), &scene);
-                assert!(
-                    !report.diagnostics.has_errors(),
-                    "{:#?}",
-                    report.diagnostics
-                );
-                assert!(report.instance.is_some());
+                let report = materialize_startup_scene(world, source)
+                    .expect("the retained desktop scene should materialize");
+                assert!(!report.has_errors(), "{report:#?}");
             });
         })
         .unwrap();
@@ -415,7 +431,13 @@ fn player_position(runtime: &RuntimeInstance) -> nara::prelude::Vec2 {
     runtime
         .world()
         .iter_entities()
-        .find_map(|entity| entity.get::<nara_reference_game::Player>())
-        .map(|player| player.position)
+        .find_map(|entity| {
+            if !entity.contains::<PlayerRole>() {
+                return None;
+            }
+            entity
+                .get::<Transform2d>()
+                .map(|transform| transform.translation)
+        })
         .expect("desktop fixture must contain one player")
 }

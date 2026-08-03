@@ -4,7 +4,11 @@
 //! operation owns the retained source, creates the scene receipt itself, and publishes the pair
 //! only after scene spawning succeeds, so callers cannot combine unrelated documents and receipts.
 
-use std::{error::Error, fmt, sync::Arc};
+use std::{
+    error::Error,
+    fmt,
+    sync::{Arc, Weak},
+};
 
 use nara_app::{
     App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, RuntimeFaultDetail,
@@ -28,7 +32,7 @@ use nara_scene::{SceneDocument, spawn_scene};
 
 use crate::project_content::{ProjectContentLease, direct_startup_scene_retained_bytes};
 
-pub(crate) const STARTUP_SCENE_ACTIVATION_PLUGIN_ID: PluginId =
+pub const STARTUP_SCENE_ACTIVATION_PLUGIN_ID: PluginId =
     PluginId::new("nara.startup-scene-activation");
 pub(crate) const STARTUP_SCENE_ACTIVATION_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(STARTUP_SCENE_ACTIVATION_PLUGIN_ID, PluginCategory::Runtime)
@@ -75,6 +79,18 @@ enum StartupSceneRetention {
 pub struct StartupSceneSource {
     document: Arc<SceneDocument>,
     retention: StartupSceneRetention,
+}
+
+/// Non-owning view of the startup source retained by the root activation authority.
+///
+/// The view deliberately holds neither a strong document reference nor the Project Content lease.
+/// Clones therefore cannot extend retained memory beyond candidate or runtime retirement. Product
+/// code may inspect the source only through a bounded borrow while the private root owner remains
+/// alive. The move-only [`StartupSceneSource`] remains the only materialization input.
+#[derive(Clone)]
+pub struct StartupSceneSourceView {
+    document: Weak<SceneDocument>,
+    retained_bytes: usize,
 }
 
 impl StartupSceneSource {
@@ -157,6 +173,34 @@ impl fmt::Debug for StartupSceneSource {
     }
 }
 
+impl StartupSceneSourceView {
+    /// Borrows the exact immutable document while the root activation authority retains it.
+    ///
+    /// Returns `None` after that authority has retired. The temporary strong reference is kept
+    /// inside this method so the view cannot accidentally extend the retained allocation.
+    pub fn with_document<R>(&self, inspect: impl FnOnce(&SceneDocument) -> R) -> Option<R> {
+        self.document
+            .upgrade()
+            .map(|document| inspect(document.as_ref()))
+    }
+
+    /// Returns the logical retained-byte charge owned by the root activation authority.
+    #[must_use]
+    pub const fn retained_bytes(&self) -> usize {
+        self.retained_bytes
+    }
+}
+
+impl fmt::Debug for StartupSceneSourceView {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StartupSceneSourceView")
+            .field("available", &(self.document.strong_count() > 0))
+            .field("retained_bytes", &self.retained_bytes())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Read-only product view of one exact startup source and its matching successful spawn receipt.
 ///
 /// The activation plugin promotes a private one-shot materialization input into a private owner
@@ -183,6 +227,18 @@ impl StartupSceneActivation<'_> {
     #[must_use]
     pub fn receipt(&self) -> &SpawnedSceneInstance {
         self.owner.receipt()
+    }
+
+    /// Returns a non-owning view of the exact startup source for product-local Retry.
+    ///
+    /// The private root activation owner remains the sole retention authority. Cloning or leaking
+    /// this view cannot keep its document or Project Content lease alive after runtime retirement.
+    #[must_use]
+    pub fn source_view(&self) -> StartupSceneSourceView {
+        StartupSceneSourceView {
+            document: Arc::downgrade(&self.owner.source.document),
+            retained_bytes: self.owner.source.retained_bytes(),
+        }
     }
 }
 
@@ -506,6 +562,24 @@ mod tests {
                 limit: required - 1,
             }
         );
+    }
+
+    #[test]
+    fn source_view_cannot_extend_the_root_document_lifetime() {
+        let document = Arc::new(SceneDocument::new([]));
+        let view = StartupSceneSourceView {
+            document: Arc::downgrade(&document),
+            retained_bytes: 17,
+        };
+        let clone = view.clone();
+
+        assert_eq!(Arc::strong_count(&document), 1);
+        assert_eq!(view.with_document(|source| source.entities.len()), Some(0));
+        assert_eq!(clone.retained_bytes(), 17);
+
+        drop(document);
+        assert_eq!(view.with_document(|source| source.entities.len()), None);
+        assert_eq!(clone.with_document(|source| source.entities.len()), None);
     }
 
     #[test]

@@ -49,7 +49,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
             "enemy-anchor-2",
             "enemy-anchor-3",
             "player",
-            "projectile-fixture",
+            "player-weapon",
         ]
     );
     assert_eq!(
@@ -80,7 +80,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
             "enemy-anchor-3/enemy",
             "enemy-anchor/enemy",
             "player",
-            "projectile-fixture",
+            "player-weapon",
         ],
     );
     let player = expanded
@@ -91,12 +91,43 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     assert!(
         player
             .components
-            .contains_key(&ComponentTypeId::new("reference_game.Player")),
+            .contains_key(&ComponentTypeId::new("reference_game.PlayerRole")),
     );
     assert!(
         player
             .components
+            .contains_key(&ComponentTypeId::new("reference_game.InitialHealth")),
+    );
+    assert!(
+        player
+            .components
+            .contains_key(&ComponentTypeId::new("reference_game.InitialVelocity2d")),
+    );
+    assert!(
+        player
+            .components
+            .contains_key(&ComponentTypeId::new("nara.transform.Transform2d")),
+    );
+    let weapon = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "player-weapon")
+        .unwrap();
+    assert_eq!(weapon.parent.as_ref().unwrap().as_str(), "player");
+    assert!(
+        weapon
+            .components
             .contains_key(&ComponentTypeId::new("reference_game.Weapon")),
+    );
+    let weapon_transform =
+        &weapon.components[&ComponentTypeId::new("nara.transform.Transform2d")].value;
+    assert_eq!(
+        weapon_transform
+            .field("translation")
+            .unwrap()
+            .field_f64("x")
+            .unwrap(),
+        f64::from(1.2_f32),
     );
     let enemy = expanded
         .entities
@@ -107,7 +138,17 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     assert!(
         enemy
             .components
-            .contains_key(&ComponentTypeId::new("reference_game.Enemy")),
+            .contains_key(&ComponentTypeId::new("reference_game.EnemyRole")),
+    );
+    assert!(
+        enemy
+            .components
+            .contains_key(&ComponentTypeId::new("reference_game.InitialHealth")),
+    );
+    assert!(
+        enemy
+            .components
+            .contains_key(&ComponentTypeId::new("reference_game.InitialVelocity2d")),
     );
     let second_enemy = expanded
         .entities
@@ -124,6 +165,30 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
             .unwrap(),
         5,
     );
+    let second_transform =
+        &second_enemy.components[&ComponentTypeId::new("nara.transform.Transform2d")].value;
+    assert_eq!(
+        second_transform
+            .field("translation")
+            .unwrap()
+            .field_f64("x")
+            .unwrap(),
+        9.0,
+    );
+    for removed_id in [
+        "reference_game.Player",
+        "reference_game.Enemy",
+        "reference_game.Projectile",
+    ] {
+        let removed_id = ComponentTypeId::new(removed_id);
+        assert!(
+            expanded
+                .entities
+                .iter()
+                .all(|entity| !entity.components.contains_key(&removed_id)),
+            "expanded content retained removed aggregate {removed_id}",
+        );
+    }
     let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
     let sprite = enemy.components.get(&sprite_id).unwrap();
     let references = collect_declared_asset_references(

@@ -13,6 +13,7 @@ use std::num::NonZeroU32;
 
 use nara::{
     ProductRecipe, ProductRecipeError, SchemaContribution,
+    advanced_prelude::StartupSceneActivationSet,
     app::{
         PluginCategory, PluginDeclaration, PluginDefinition, PluginError, PluginId,
         PluginPreflightContext, PluginSchemaProviderId, StartupStage,
@@ -45,7 +46,11 @@ use nara::project_host::EditorProjectIntent;
 #[cfg(feature = "desktop")]
 use nara::project_host::{DesktopRun, DesktopRunIntent};
 
-pub use components::{Enemy, Player, Projectile, RuntimeOnlyTag, WaveSpawn, Weapon};
+pub use components::{
+    EnemyRole, Health, InitialHealth, InitialVelocity2d, PlayerRole, ProjectileDamage,
+    ProjectileLifetime, ProjectileRole, RuntimeOnlyTag, Velocity2d, WaveSpawn, Weapon,
+    WeaponCooldown,
+};
 pub use resources::{
     MovementCommandError, MovementDirection, ProjectileId, RetryCommandError, WaveRetryPhase,
     WaveRetryRejection, WaveRetryStatus, WaveRunGeneration,
@@ -68,15 +73,16 @@ pub const REFERENCE_GAME_SCHEMA_PROVIDER: ComponentSchemaProviderDefinition =
     ComponentSchemaProviderDefinition::with_validation(
         REFERENCE_GAME_SCHEMA_OWNER_ID,
         REFERENCE_GAME_SCHEMA_PROVIDER_ID,
-        nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 3),
-        reference_game_schema_v3,
+        nara::reflect::ComponentSchemaProviderBindingId::new("reference-game.components.native", 4),
+        reference_game_schema_v4,
         validate_reference_game_components,
         register_reference_game_components,
     )
-    .with_predecessor(reference_game_schema_v2);
+    .with_predecessor(reference_game_schema_v3);
 const REFERENCE_GAME_REQUIREMENTS: &[PluginId] = &[
     nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID,
     nara::transform::TRANSFORM_PLUGIN_ID,
+    nara::advanced_prelude::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
 ];
 pub const REFERENCE_GAME_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_GAME_PLUGIN_ID, PluginCategory::Runtime)
@@ -106,7 +112,7 @@ enum ReferenceWaveCaptureSet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 enum ReferenceSpatialSet {
     Mutate,
-    Project,
+    Resolve,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -141,21 +147,33 @@ impl Plugin for ReferenceGamePlugin {
             REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
             &REFERENCE_GAME_SCHEMA_PROVIDER,
         )?;
+        {
+            let world = app.world_mut()?;
+            world.register_component::<Health>();
+            world.register_component::<Velocity2d>();
+            world.register_component::<WeaponCooldown>();
+            world.register_component::<ProjectileRole>();
+            world.register_component::<ProjectileDamage>();
+            world.register_component::<ProjectileLifetime>();
+            world.register_component::<ProjectileId>();
+        }
+        app.insert_resource(resources::WaveState::default())?
+            .insert_resource(resources::MovementIntent::default())?
+            .insert_resource(WaveRunGeneration::default())?
+            .insert_resource(WaveRetryStatus::default())?
+            .insert_resource(WaveSnapshot::default())?
+            .add_systems(
+                StartupStage::Runtime,
+                systems::initialize_reference_run.in_set(StartupSceneActivationSet::Dependents),
+            )?;
         app.configure_sets(
             CoreStage::FixedUpdate,
-            (ReferenceSpatialSet::Mutate, ReferenceSpatialSet::Project)
-                .chain()
-                .in_set(FixedUpdateSet::Simulate),
-        )?
-        .add_systems(
-            StartupStage::Tooling,
-            systems::bootstrap_role_transforms
-                .after(nara::hierarchy::__private::HierarchySet::ValidateAndComplete)
-                .before(nara::transform::__private::TransformSet::Propagate),
-        )?
-        .add_systems(
-            CoreStage::FixedUpdate,
-            systems::project_role_transforms.in_set(ReferenceSpatialSet::Project),
+            (
+                ReferenceSpatialSet::Mutate.in_set(FixedUpdateSet::Simulate),
+                ReferenceSpatialSet::Resolve
+                    .in_set(FixedUpdateSet::Finalize)
+                    .before(GameplayCommandSet::Capture),
+            ),
         )?;
         Ok(())
     }
@@ -170,58 +188,58 @@ impl Plugin for ReferenceWavePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.insert_resource(resources::WaveState::default())?
-            .insert_resource(resources::MovementIntent::default())?
-            .insert_resource(WaveRunGeneration::default())?
-            .insert_resource(WaveRetryStatus::default())?
-            .insert_resource(resources::WaveResetTemplate::default())?
-            .insert_resource(WaveSnapshot::default())?
-            .configure_sets(
-                CoreStage::FixedUpdate,
-                (
-                    ReferenceWaveCaptureSet::Snapshot,
-                    ReferenceWaveCaptureSet::Presentation,
-                )
-                    .chain()
-                    .in_set(GameplayCommandSet::Capture),
-            )?
-            .add_systems(
-                CoreStage::FixedUpdate,
-                systems::begin_wave_tick
-                    .in_set(FixedUpdateSet::Simulate)
-                    .before(GameplayCommandSet::Consume),
-            )?
-            .add_systems(
-                CoreStage::FixedUpdate,
-                (
-                    systems::consume_retry_commands,
-                    systems::consume_movement_commands,
-                )
-                    .chain()
-                    .in_set(GameplayCommandSet::Consume),
-            )?
-            .add_systems(
-                CoreStage::FixedUpdate,
-                (
-                    systems::assign_scene_projectile_ids,
-                    systems::validate_wave_topology,
-                    systems::move_scene_players,
-                    systems::pursue_scene_players,
-                    systems::fire_automatic_weapons,
-                    systems::move_wave_projectiles,
-                    systems::resolve_enemy_contacts,
-                    systems::resolve_wave_projectile_hits,
-                    systems::retire_expired_entities,
-                    systems::evaluate_wave_outcome,
-                )
-                    .chain()
-                    .after(GameplayCommandSet::Consume)
-                    .in_set(ReferenceSpatialSet::Mutate),
-            )?
-            .add_systems(
-                CoreStage::FixedUpdate,
-                snapshot::capture_wave_snapshot.in_set(ReferenceWaveCaptureSet::Snapshot),
-            )?;
+        app.configure_sets(
+            CoreStage::FixedUpdate,
+            (
+                ReferenceWaveCaptureSet::Snapshot,
+                ReferenceWaveCaptureSet::Presentation,
+            )
+                .chain()
+                .in_set(GameplayCommandSet::Capture),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            systems::begin_wave_tick
+                .in_set(FixedUpdateSet::Simulate)
+                .before(GameplayCommandSet::Consume),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            (
+                systems::consume_retry_commands,
+                systems::consume_movement_commands,
+            )
+                .chain()
+                .in_set(GameplayCommandSet::Consume),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            (
+                systems::validate_wave_topology,
+                systems::pursue_scene_players,
+                systems::move_scene_players,
+                systems::move_wave_projectiles,
+            )
+                .chain()
+                .after(GameplayCommandSet::Consume)
+                .in_set(ReferenceSpatialSet::Mutate),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            (
+                systems::fire_automatic_weapons,
+                systems::resolve_enemy_contacts,
+                systems::resolve_wave_projectile_hits,
+                systems::retire_expired_entities,
+                systems::evaluate_wave_outcome,
+            )
+                .chain()
+                .in_set(ReferenceSpatialSet::Resolve),
+        )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            snapshot::capture_wave_snapshot.in_set(ReferenceWaveCaptureSet::Snapshot),
+        )?;
         Ok(())
     }
 }
@@ -534,6 +552,7 @@ fn movement_draft(direction: MovementDirection) -> GameplayCommandDraft {
     movement_intent_draft(direction, true)
 }
 
+#[cfg(feature = "desktop")]
 fn movement_release_draft(direction: MovementDirection) -> GameplayCommandDraft {
     movement_intent_draft(direction, false)
 }
@@ -637,42 +656,64 @@ fn reference_game_schema_v3() -> Result<ComponentSchemaCatalog, ComponentSchemaP
     .map_err(|_| ComponentSchemaProviderSourceError::new("reference-game-schema-v3-invalid"))
 }
 
+fn reference_game_schema_v4() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>
+{
+    let predecessor = reference_game_schema_v3()?;
+    ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        include_bytes!("../schema/component-schema-v4.json"),
+        &predecessor,
+        ComponentCatalogFileLimits::default(),
+    )
+    .map_err(|_| ComponentSchemaProviderSourceError::new("reference-game-schema-v4-invalid"))
+}
+
 pub fn register_reference_game_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     validate_reference_game_components(registry)?;
-    register_component::<Player>(registry)?;
-    register_component::<Enemy>(registry)?;
-    registry
-        .register_component_migration(
-            &ComponentTypeId::new("reference_game.Enemy"),
-            ComponentSchemaVersion::ONE,
-            ComponentSchemaVersion::new(2).expect("the enemy schema version is non-zero"),
-            migrate_enemy_v1_to_v2,
-        )
-        .map(|_| ())?;
+    for removed_component in [
+        "reference_game.Enemy",
+        "reference_game.Player",
+        "reference_game.Projectile",
+    ] {
+        registry.declare_type_tombstone(ComponentTypeId::new(removed_component))?;
+    }
+    register_component::<PlayerRole>(registry)?;
+    register_component::<EnemyRole>(registry)?;
+    register_component::<InitialHealth>(registry)?;
+    register_component::<InitialVelocity2d>(registry)?;
     register_component::<WaveSpawn>(registry)?;
     register_component::<Weapon>(registry)?;
-    register_component::<Projectile>(registry)
+    registry
+        .register_component_migration(
+            &ComponentTypeId::new("reference_game.Weapon"),
+            ComponentSchemaVersion::ONE,
+            ComponentSchemaVersion::new(2).expect("the weapon schema version is non-zero"),
+            migrate_weapon_v1_to_v2,
+        )
+        .map(|_| ())
 }
 
-fn migrate_enemy_v1_to_v2(
+fn migrate_weapon_v1_to_v2(
     mut value: ComponentValue,
 ) -> Result<ComponentValue, ComponentCodecError> {
     value
-        .remove_path(&ComponentFieldPath::from_fields(["target"]))
-        .map_err(|error| ComponentCodecError::invalid_field("target", error.to_string()))?;
+        .remove_path(&ComponentFieldPath::from_fields(["remaining-ticks"]))
+        .map_err(|error| {
+            ComponentCodecError::invalid_field("remaining-ticks", error.to_string())
+        })?;
     Ok(value)
 }
 
 fn validate_reference_game_components(
     registry: &ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
-    registry.validate_persistent_component::<Player>()?;
-    registry.validate_persistent_component::<Enemy>()?;
+    registry.validate_persistent_component::<PlayerRole>()?;
+    registry.validate_persistent_component::<EnemyRole>()?;
+    registry.validate_persistent_component::<InitialHealth>()?;
+    registry.validate_persistent_component::<InitialVelocity2d>()?;
     registry.validate_persistent_component::<WaveSpawn>()?;
-    registry.validate_persistent_component::<Weapon>()?;
-    registry.validate_persistent_component::<Projectile>()
+    registry.validate_persistent_component::<Weapon>()
 }
 
 fn register_component<T>(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError>

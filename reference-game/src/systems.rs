@@ -1,232 +1,410 @@
-use std::{collections::BTreeSet, error::Error, fmt};
+use std::{collections::BTreeMap, error::Error, fmt};
 
 use nara::ecs as bevy_ecs;
 use nara::{
-    app::RuntimeFaultReporter,
-    ecs::{
-        Component, Entity, LifecycleFreeInsertionPlan, Or, With, Without, entity::EntityHashSet,
-        error::BevyError, prepare_lifecycle_free_despawn, system::SystemParam,
+    advanced_prelude::{
+        SceneProductOverlayWriter, SceneProductTransactionLimits, StartupSceneActivation,
+        replace_scene_with_product,
     },
+    app::RuntimeFaultReporter,
+    core::ItemLimit,
+    ecs::{Entity, Mut, With, Without, error::BevyError, system::SystemParam},
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
     hierarchy::Parent,
-    identity::{EntityLookup, TombstoneCause, WorldIdentityDomain, spawn_identity_entity},
-    prelude::{Commands, FixedTime, Query, Res, ResMut, Transform2d, Vec2, World},
-    scene::{SceneEntitySource, retire_and_despawn_scene_entity},
+    identity::{EntityLookup, SpawnedSceneInstance, spawn_identity_entity},
+    prelude::{
+        Commands, ComponentRegistry, ComponentSchema, ComponentTypeId, FixedTime,
+        PersistentComponentProvider, Query, Res, ResMut, SceneEntityId, Transform2d, Vec2, World,
+    },
+    reflect::component_registry,
+    scene::{SceneDocument, SceneEntityRecord, SceneEntitySource, retire_and_despawn_scene_entity},
+    transform::GlobalTransform2d,
 };
 
 use crate::{
-    Enemy, Player, Projectile, ReferenceProjectSnapshot, RuntimeOnlyTag, WaveSpawn, Weapon,
+    EnemyRole, Health, InitialHealth, InitialVelocity2d, PlayerRole, ProjectileDamage,
+    ProjectileLifetime, ProjectileRole, ReferenceProjectSnapshot, RuntimeOnlyTag, Velocity2d,
+    WaveSpawn, Weapon, WeaponCooldown, migrate_weapon_v1_to_v2,
     resources::{
         ENEMY_CONTACT_DAMAGE, KILL_SCORE, MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES,
         MAX_WAVE_SCENE_ENTITIES, MOVE_COMMAND_TYPE, MOVE_PRESSED_FIELD, MOVE_X_FIELD, MOVE_Y_FIELD,
-        MovementDirection, MovementIntent, PLAYER_SCENE_ID, PROJECTILE_TTL_TICKS, ProjectileId,
-        RETRY_COMMAND_TYPE, WaveEntityTemplate, WaveResetTemplate, WaveRetryStatus,
-        WaveRunGeneration, WaveSceneTemplate, WaveState,
+        MovementDirection, MovementIntent, PLAYER_SCENE_ID, PLAYER_WEAPON_SCENE_ID,
+        PROJECTILE_TTL_TICKS, ProjectileId, RETRY_COMMAND_TYPE, WaveRetryRejection,
+        WaveRetryStatus, WaveRunBaseline, WaveRunGeneration, WaveRunOwner, WaveState,
     },
-    snapshot::WaveOutcome,
+    snapshot::{WaveOutcome, WaveSnapshot},
 };
 
-type SpatialRoleEntity<'a> = (
-    Entity,
-    Option<&'a Player>,
-    Option<&'a Enemy>,
-    Option<&'a Projectile>,
-    Option<&'a mut Transform2d>,
-);
-type SpatialRoleFilter = Or<(With<Player>, With<Enemy>, With<Projectile>)>;
-
-pub(crate) fn bootstrap_role_transforms(world: &mut World) -> Result<(), BevyError> {
-    if nara::hierarchy::__private::completed_topology_generation(world).is_none() {
-        return Err(BevyError::error(
-            ReferenceSimulationError::InvalidSpatialHierarchy,
-        ));
-    }
-
-    let mut roles = world.query_filtered::<
-        (
-            Entity,
-            Option<&Player>,
-            Option<&Enemy>,
-            Option<&Projectile>,
-        ),
-        Or<(With<Player>, With<Enemy>, With<Projectile>)>,
-    >();
-    let mut projected = Vec::new();
-    for (entity, player, enemy, projectile) in roles.iter(world) {
-        if projected.len() >= MAX_WAVE_SCENE_ENTITIES {
-            return Err(BevyError::error(
-                ReferenceSimulationError::TooManySceneEntities,
-            ));
-        }
-        if let Some(transform) = projected_role_transform(player, enemy, projectile) {
-            projected.push((entity, transform));
-        }
-    }
-    projected.sort_unstable_by_key(|(entity, _)| entity.to_bits());
-
-    let mut identity_ancestors = EntityHashSet::default();
-    for (entity, _) in &projected {
-        let mut path = EntityHashSet::default();
-        let mut cursor = *entity;
-        while let Some(parent) = world.get::<Parent>(cursor).map(Parent::parent) {
-            if !path.insert(cursor) || world.get_entity(parent).is_err() {
-                return Err(BevyError::error(
-                    ReferenceSimulationError::InvalidSpatialHierarchy,
-                ));
-            }
-            if world.get::<Transform2d>(parent).is_none() {
-                identity_ancestors.insert(parent);
-                if projected.len().saturating_add(identity_ancestors.len())
-                    > MAX_WAVE_SCENE_ENTITIES
-                {
-                    return Err(BevyError::error(
-                        ReferenceSimulationError::TooManySceneEntities,
-                    ));
-                }
-            }
-            cursor = parent;
-        }
-    }
-
-    let mut identity_ancestors = identity_ancestors.into_iter().collect::<Vec<_>>();
-    identity_ancestors.sort_unstable_by_key(|entity| entity.to_bits());
-    for entity in identity_ancestors {
-        world.entity_mut(entity).insert(Transform2d::IDENTITY);
-    }
-    for (entity, transform) in projected {
-        world.entity_mut(entity).insert(transform);
-    }
-    Ok(())
+struct PreparedReferenceRun {
+    actors: Vec<PreparedActorRuntime>,
+    weapon: PreparedWeaponRuntime,
+    baseline: WaveRunBaseline,
 }
 
-pub(crate) fn project_role_transforms(
+struct PreparedActorRuntime {
+    id: SceneEntityId,
+    health: Health,
+    velocity: Velocity2d,
+}
+
+struct PreparedWeaponRuntime {
+    id: SceneEntityId,
+    cooldown: WeaponCooldown,
+}
+
+enum RunPublication {
+    Startup,
+    Retry {
+        last_rejection: Option<WaveRetryRejection>,
+    },
+}
+
+impl PreparedReferenceRun {
+    fn write_overlay(&self, writer: &mut SceneProductOverlayWriter<'_>) {
+        for actor in &self.actors {
+            writer
+                .insert_component(actor.id.clone(), actor.health)
+                .insert_component(actor.id.clone(), actor.velocity);
+        }
+        writer.insert_component(self.weapon.id.clone(), self.weapon.cooldown);
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the Bevy system signature is the explicit startup access contract"
+)]
+pub(crate) fn initialize_reference_run(
+    activation: StartupSceneActivation<'_>,
     mut commands: Commands,
-    mut entities: Query<SpatialRoleEntity<'_>, SpatialRoleFilter>,
-) {
-    for (entity, player, enemy, projectile, current) in &mut entities {
-        let Some(projected) = projected_role_transform(player, enemy, projectile) else {
-            continue;
-        };
+    scene_entities: Query<(Entity, &SceneEntitySource)>,
+    mut movement: ResMut<MovementIntent>,
+    mut generation: ResMut<WaveRunGeneration>,
+    mut retry: ResMut<WaveRetryStatus>,
+    mut state: ResMut<WaveState>,
+    mut snapshot: ResMut<WaveSnapshot>,
+) -> Result<(), BevyError> {
+    let prepared = prepare_reference_run(
+        activation.source(),
+        WaveRunGeneration::default(),
+        RunPublication::Startup,
+    )
+    .map_err(BevyError::error)?;
+    let entities = resolve_startup_entities(&activation, &scene_entities)?;
 
-        if let Some(mut current) = current {
-            if *current != projected {
-                *current = projected;
-            }
-        } else {
-            commands.entity(entity).insert(projected);
-        }
+    for actor in &prepared.actors {
+        let entity = entities
+            .get(&actor.id)
+            .copied()
+            .ok_or_else(|| BevyError::error(ReferenceSimulationError::SceneMembershipMismatch))?;
+        commands
+            .entity(entity)
+            .insert((actor.health, actor.velocity));
     }
-}
+    let weapon = entities
+        .get(&prepared.weapon.id)
+        .copied()
+        .ok_or_else(|| BevyError::error(ReferenceSimulationError::SceneMembershipMismatch))?;
+    commands.entity(weapon).insert(prepared.weapon.cooldown);
 
-fn projected_role_transform(
-    player: Option<&Player>,
-    enemy: Option<&Enemy>,
-    projectile: Option<&Projectile>,
-) -> Option<Transform2d> {
-    if let Some(player) = player {
-        Some(Transform2d::from_translation(player.position))
-    } else if let Some(enemy) = enemy {
-        Some(Transform2d::from_translation(enemy.position))
-    } else {
-        projectile.map(|projectile| Transform2d {
-            translation: projectile.position,
-            rotation: projectile.velocity.y.atan2(projectile.velocity.x),
-            ..Transform2d::IDENTITY
-        })
-    }
-}
-
-pub(crate) fn move_project_players(mut players: Query<&mut Player, With<SceneEntitySource>>) {
-    for mut player in &mut players {
-        let velocity = player.velocity;
-        player.position += velocity;
-    }
-}
-
-pub(crate) fn move_project_enemies(mut enemies: Query<&mut Enemy, With<SceneEntitySource>>) {
-    for mut enemy in &mut enemies {
-        let velocity = enemy.velocity;
-        enemy.position += velocity;
-    }
-}
-
-pub(crate) fn tick_project_weapons(mut weapons: Query<&mut Weapon, With<SceneEntitySource>>) {
-    for mut weapon in &mut weapons {
-        weapon.remaining_ticks = weapon.remaining_ticks.saturating_sub(1);
-    }
-}
-
-pub(crate) fn begin_wave_tick(world: &mut World) -> Result<(), BevyError> {
-    if world.resource::<WaveResetTemplate>().scene.is_none() {
-        let template = capture_wave_reset_template(world)?;
-        world.resource_mut::<WaveResetTemplate>().scene = Some(template);
-    }
-    let generation = world.resource::<WaveRunGeneration>().get();
-    if world.resource::<WaveRetryStatus>().pending_generation() == Some(generation) {
-        apply_wave_reset(world)?;
-        let applied_generation = world.resource::<WaveRunGeneration>().get();
-        world
-            .resource_mut::<WaveRetryStatus>()
-            .mark_applied(applied_generation);
-    }
-    world.resource_mut::<WaveState>().begin_tick();
+    *movement = prepared.baseline.movement;
+    *generation = prepared.baseline.generation;
+    *retry = prepared.baseline.retry;
+    *state = prepared.baseline.state.clone();
+    *snapshot = WaveSnapshot::default();
+    commands.insert_resource(WaveRunOwner::new(
+        activation.source_view(),
+        activation.receipt().clone(),
+        entities,
+        prepared.baseline,
+    ));
     Ok(())
 }
 
-fn capture_wave_reset_template(world: &World) -> Result<WaveSceneTemplate, BevyError> {
-    let mut instance_id = None;
-    let mut source_count = 0_usize;
-    for entity in world.iter_entities() {
-        let Some(source) = entity.get::<SceneEntitySource>() else {
+fn resolve_startup_entities(
+    activation: &StartupSceneActivation<'_>,
+    scene_entities: &Query<(Entity, &SceneEntitySource)>,
+) -> Result<BTreeMap<SceneEntityId, Entity>, BevyError> {
+    let mut entities = BTreeMap::new();
+    for (entity, source) in scene_entities {
+        if source.instance_id != activation.receipt().instance_id() {
             continue;
-        };
-        source_count = source_count
-            .checked_add(1)
-            .ok_or_else(|| BevyError::error(ReferenceSimulationError::TooManySceneEntities))?;
-        if source_count > MAX_WAVE_SCENE_ENTITIES {
-            return Err(BevyError::error(
-                ReferenceSimulationError::TooManySceneEntities,
-            ));
         }
-        if instance_id
-            .replace(source.instance_id)
-            .is_some_and(|current| current != source.instance_id)
-        {
+        if entities.insert(source.entity_id.clone(), entity).is_some() {
             return Err(BevyError::error(
-                ReferenceSimulationError::MultipleSceneInstances,
+                ReferenceSimulationError::SceneMembershipMismatch,
             ));
         }
     }
-    let instance_id = instance_id
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::MissingSceneInstance))?;
-    let instance = world
-        .resource::<WorldIdentityDomain>()
-        .active_scene_instance(world, instance_id)
-        .map_err(|_| BevyError::error(ReferenceSimulationError::IdentitySnapshot))?;
-    if instance.len() != source_count {
+    if !entities.keys().eq(activation.receipt().entity_ids().iter()) {
         return Err(BevyError::error(
             ReferenceSimulationError::SceneMembershipMismatch,
         ));
     }
+    Ok(entities)
+}
 
-    let mut entities = Vec::with_capacity(instance.len());
-    for id in instance.entity_ids() {
-        let EntityLookup::Resolved(entity) = instance.resolve(world, id) else {
-            return Err(BevyError::error(ReferenceSimulationError::IdentitySnapshot));
-        };
-        let entity = world
-            .get_entity(entity)
-            .map_err(|_| BevyError::error(ReferenceSimulationError::IdentitySnapshot))?;
-        entities.push(WaveEntityTemplate {
-            id: id.clone(),
-            player: entity.get::<Player>().cloned(),
-            enemy: entity.get::<Enemy>().cloned(),
-            spawn: entity.get::<WaveSpawn>().copied(),
-            weapon: entity.get::<Weapon>().cloned(),
-            projectile: entity.get::<Projectile>().cloned(),
+fn resolve_published_entities(
+    world: &World,
+    receipt: &SpawnedSceneInstance,
+) -> Result<BTreeMap<SceneEntityId, Entity>, ReferenceSimulationError> {
+    receipt
+        .entity_ids()
+        .iter()
+        .map(|entity_id| {
+            let EntityLookup::Resolved(entity) = receipt.resolve(world, entity_id) else {
+                return Err(ReferenceSimulationError::SceneMembershipMismatch);
+            };
+            let source = world
+                .get::<SceneEntitySource>(entity)
+                .ok_or(ReferenceSimulationError::SceneMembershipMismatch)?;
+            if source.instance_id != receipt.instance_id() || source.entity_id != *entity_id {
+                return Err(ReferenceSimulationError::SceneMembershipMismatch);
+            }
+            Ok((entity_id.clone(), entity))
+        })
+        .collect()
+}
+
+fn prepare_reference_run(
+    source: &SceneDocument,
+    generation: WaveRunGeneration,
+    publication: RunPublication,
+) -> Result<PreparedReferenceRun, ReferenceSimulationError> {
+    if source.entities.len() > MAX_WAVE_SCENE_ENTITIES {
+        return Err(ReferenceSimulationError::TooManySceneEntities);
+    }
+
+    let mut actors = Vec::new();
+    let mut player_count = 0_usize;
+    let mut enemy_count = 0_usize;
+    let mut weapon = None;
+    let player_role_schema = PlayerRole::persistent_component_schema();
+    let enemy_role_schema = EnemyRole::persistent_component_schema();
+    let initial_health_schema = InitialHealth::persistent_component_schema();
+    let initial_velocity_schema = InitialVelocity2d::persistent_component_schema();
+    let wave_spawn_schema = WaveSpawn::persistent_component_schema();
+    let weapon_schema = Weapon::persistent_component_schema();
+    let transform_type = ComponentTypeId::new("nara.transform.Transform2d");
+    let sprite_type = ComponentTypeId::new("nara.sprite.Sprite");
+    for entity in &source.entities {
+        let player = decode_current_component::<PlayerRole>(entity, &player_role_schema)?;
+        let enemy = decode_current_component::<EnemyRole>(entity, &enemy_role_schema)?;
+        let initial_health =
+            decode_current_component::<InitialHealth>(entity, &initial_health_schema)?;
+        let initial_velocity =
+            decode_current_component::<InitialVelocity2d>(entity, &initial_velocity_schema)?;
+        let wave_spawn = decode_current_component::<WaveSpawn>(entity, &wave_spawn_schema)?;
+        let weapon_config = decode_weapon(entity, &weapon_schema)?;
+        let has_transform = entity.components.contains_key(&transform_type);
+        let has_sprite = entity.components.contains_key(&sprite_type);
+
+        if player.is_some() && enemy.is_some() {
+            return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
+        }
+        if player.is_some() || enemy.is_some() {
+            let initial_health =
+                initial_health.ok_or(ReferenceSimulationError::InvalidAuthoredConfiguration)?;
+            let initial_velocity =
+                initial_velocity.ok_or(ReferenceSimulationError::InvalidAuthoredConfiguration)?;
+            if !has_transform {
+                return Err(ReferenceSimulationError::InvalidSpatialHierarchy);
+            }
+            if !has_sprite {
+                return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
+            }
+            if player.is_some() {
+                player_count = player_count
+                    .checked_add(1)
+                    .ok_or(ReferenceSimulationError::TooManySceneEntities)?;
+                if entity.id.as_str() != PLAYER_SCENE_ID || wave_spawn.is_some() {
+                    return Err(ReferenceSimulationError::UnexpectedPlayerIdentity);
+                }
+            } else {
+                enemy_count = enemy_count
+                    .checked_add(1)
+                    .ok_or(ReferenceSimulationError::TooManyEnemies)?;
+                if enemy_count > MAX_WAVE_ENEMIES || wave_spawn.is_none() {
+                    return Err(ReferenceSimulationError::MissingWaveSpawn);
+                }
+            }
+            actors.push(PreparedActorRuntime {
+                id: entity.id.clone(),
+                health: Health {
+                    current: initial_health.hit_points,
+                },
+                velocity: Velocity2d {
+                    value: initial_velocity.velocity,
+                },
+            });
+        } else if initial_health.is_some() || initial_velocity.is_some() || wave_spawn.is_some() {
+            return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
+        }
+
+        if let Some(config) = weapon_config {
+            if weapon.is_some()
+                || entity.id.as_str() != PLAYER_WEAPON_SCENE_ID
+                || entity
+                    .parent
+                    .as_ref()
+                    .is_none_or(|parent| parent.as_str() != PLAYER_SCENE_ID)
+                || !has_transform
+                || !has_sprite
+            {
+                return Err(ReferenceSimulationError::MissingPlayerWeapon);
+            }
+            if config.cooldown_ticks == 0 || config.damage <= 0 {
+                return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
+            }
+            weapon = Some(PreparedWeaponRuntime {
+                id: entity.id.clone(),
+                cooldown: WeaponCooldown {
+                    remaining_ticks: config.cooldown_ticks,
+                },
+            });
+        }
+    }
+    if player_count != 1 {
+        return Err(if player_count == 0 {
+            ReferenceSimulationError::MissingPlayer
+        } else {
+            ReferenceSimulationError::DuplicatePlayer
         });
     }
-    Ok(WaveSceneTemplate { instance, entities })
+    if enemy_count == 0 {
+        return Err(ReferenceSimulationError::MissingEnemy);
+    }
+    let weapon = weapon.ok_or(ReferenceSimulationError::MissingPlayerWeapon)?;
+    actors.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let mut retry = WaveRetryStatus::default();
+    if let RunPublication::Retry { last_rejection } = publication {
+        retry.mark_applied(generation.get(), last_rejection);
+    }
+    Ok(PreparedReferenceRun {
+        actors,
+        weapon,
+        baseline: WaveRunBaseline {
+            movement: MovementIntent::default(),
+            generation,
+            retry,
+            state: WaveState::default(),
+        },
+    })
+}
+
+fn decode_current_component<T>(
+    entity: &SceneEntityRecord,
+    schema: &ComponentSchema,
+) -> Result<Option<T>, ReferenceSimulationError>
+where
+    T: PersistentComponentProvider,
+{
+    let Some(record) = entity.components.get(schema.id()) else {
+        return Ok(None);
+    };
+    if record.version != schema.version() {
+        return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
+    }
+    T::__decode_persistent_component(&record.value)
+        .map(Some)
+        .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration)
+}
+
+fn decode_weapon(
+    entity: &SceneEntityRecord,
+    schema: &ComponentSchema,
+) -> Result<Option<Weapon>, ReferenceSimulationError> {
+    let Some(record) = entity.components.get(schema.id()) else {
+        return Ok(None);
+    };
+    let decoded = match record.version.get() {
+        1 => migrate_weapon_v1_to_v2(record.value.clone())
+            .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration)
+            .and_then(|value| {
+                Weapon::__decode_persistent_component(&value)
+                    .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration)
+            }),
+        2 => Weapon::__decode_persistent_component(&record.value)
+            .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration),
+        _ => return Err(ReferenceSimulationError::InvalidAuthoredConfiguration),
+    };
+    decoded.map(Some)
+}
+
+#[allow(
+    clippy::type_complexity,
+    reason = "the query signature keeps the ECS read/write contract visible at the system boundary"
+)]
+pub(crate) fn move_project_players(
+    owner: Res<WaveRunOwner>,
+    mut players: Query<
+        (Entity, &SceneEntitySource, &Velocity2d, &mut Transform2d),
+        (With<PlayerRole>, With<SceneEntitySource>),
+    >,
+) {
+    for (entity, source, velocity, mut transform) in &mut players {
+        if !owner.owns_scene_entity(entity, source) {
+            continue;
+        }
+        transform.translation += velocity.value;
+    }
+}
+
+#[allow(
+    clippy::type_complexity,
+    reason = "the query signature keeps the ECS read/write contract visible at the system boundary"
+)]
+pub(crate) fn move_project_enemies(
+    owner: Res<WaveRunOwner>,
+    mut enemies: Query<
+        (Entity, &SceneEntitySource, &Velocity2d, &mut Transform2d),
+        (With<EnemyRole>, With<SceneEntitySource>),
+    >,
+) {
+    for (entity, source, velocity, mut transform) in &mut enemies {
+        if !owner.owns_scene_entity(entity, source) {
+            continue;
+        }
+        transform.translation += velocity.value;
+    }
+}
+
+#[allow(
+    clippy::type_complexity,
+    reason = "the query signature keeps the ECS read/write contract visible at the system boundary"
+)]
+pub(crate) fn tick_project_weapons(
+    owner: Res<WaveRunOwner>,
+    mut weapons: Query<
+        (Entity, &SceneEntitySource, &mut WeaponCooldown),
+        (With<Weapon>, With<SceneEntitySource>),
+    >,
+) {
+    for (entity, source, mut cooldown) in &mut weapons {
+        if !owner.owns_scene_entity(entity, source) {
+            continue;
+        }
+        cooldown.remaining_ticks = cooldown.remaining_ticks.saturating_sub(1);
+    }
+}
+
+pub(crate) fn begin_wave_tick(world: &mut World) -> Result<(), BevyError> {
+    let generation = world.resource::<WaveRunGeneration>().get();
+    let reset_applied =
+        if world.resource::<WaveRetryStatus>().pending_generation() == Some(generation) {
+            apply_wave_reset(world)?
+        } else {
+            false
+        };
+    if reset_applied {
+        world
+            .resource_mut::<WaveState>()
+            .begin_projection_only_tick();
+    } else {
+        world.resource_mut::<WaveState>().begin_tick();
+    }
+    Ok(())
 }
 
 pub(crate) fn consume_retry_commands(world: &mut World) -> Result<(), BevyError> {
@@ -247,317 +425,102 @@ pub(crate) fn consume_retry_commands(world: &mut World) -> Result<(), BevyError>
             .reject_while_running();
         return Ok(());
     }
-    {
-        let mut status = world.resource_mut::<WaveRetryStatus>();
-        if status.pending_generation() == Some(generation) {
-            status.reject_duplicate();
-        } else {
-            status.mark_pending(generation);
-        }
-        if retry_count > 1 {
-            status.reject_duplicate();
-        }
+    let mut status = world.resource_mut::<WaveRetryStatus>();
+    if status.mark_pending(generation) && retry_count > 1 {
+        status.reject_duplicate();
     }
 
     Ok(())
 }
 
-fn apply_wave_reset(world: &mut World) -> Result<(), BevyError> {
+fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
     let fixed_tick = world.resource::<FixedTime>().tick();
     let mut next_generation = *world.resource::<WaveRunGeneration>();
-    next_generation
-        .advance_for_reset(fixed_tick)
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::RunGenerationOverflow))?;
+    if next_generation.advance_for_reset(fixed_tick).is_none() {
+        world
+            .resource_mut::<WaveRetryStatus>()
+            .reject(WaveRetryRejection::GenerationExhausted);
+        return Ok(false);
+    }
 
-    let mut reset = world
-        .remove_resource::<WaveResetTemplate>()
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::MissingResetTemplate))?;
-    let result = apply_wave_reset_with_template(world, &mut reset, next_generation);
-    world.insert_resource(reset);
-    result
-}
+    let registry = component_registry(world)
+        .and_then(|registry| registry.snapshot().ok())
+        .map(ComponentRegistry::from_snapshot)
+        .ok_or_else(|| BevyError::error(ReferenceSimulationError::ComponentRegistryUnavailable))?;
 
-fn apply_wave_reset_with_template(
-    world: &mut World,
-    reset: &mut WaveResetTemplate,
-    next_generation: WaveRunGeneration,
-) -> Result<(), BevyError> {
-    let scene = reset
-        .scene
-        .as_mut()
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::MissingResetTemplate))?;
-    let candidate_instance = world
-        .resource::<WorldIdentityDomain>()
-        .preflight_scene_instance_replacement(
-            world,
-            &scene.instance,
-            scene.entities.len(),
-            TombstoneCause::Replaced,
-        )
-        .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityReplacement))?;
-    let retirements = preflight_wave_reset_retirements(world, scene)?;
-    let retirement_entities = retirements.all.iter().copied().collect::<Vec<_>>();
-    let retirement_preflight = prepare_lifecycle_free_despawn(world, &retirement_entities)
-        .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityReplacement))?;
-    let _ = retirement_preflight.cancel();
-
-    let mut spawned = Vec::with_capacity(scene.entities.len());
-    for template in &scene.entities {
-        let token = match spawn_identity_entity(world) {
-            Ok(token) => token,
+    world.resource_scope(|world, mut owner: Mut<WaveRunOwner>| {
+        let last_rejection = world.resource::<WaveRetryStatus>().last_rejection();
+        let replacement = owner.source().with_document(|source| {
+            let prepared = prepare_reference_run(
+                source,
+                next_generation,
+                RunPublication::Retry { last_rejection },
+            )?;
+            let limits = SceneProductTransactionLimits::new(
+                ItemLimit::new(MAX_WAVE_SCENE_ENTITIES.saturating_mul(3))
+                    .expect("the reference overlay limit is non-zero"),
+                ItemLimit::new(MAX_WAVE_PROJECTILES)
+                    .expect("the reference projectile limit is non-zero"),
+            );
+            let retirements = owner.projectile_tokens().to_vec();
+            let baseline = prepared.baseline.clone();
+            let report = replace_scene_with_product(
+                world,
+                &registry,
+                source,
+                owner.receipt(),
+                limits,
+                &retirements,
+                |writer| {
+                    prepared.write_overlay(writer);
+                    writer
+                        .replace_resource(baseline.movement)
+                        .replace_resource(baseline.generation)
+                        .replace_resource(baseline.retry)
+                        .replace_resource(baseline.state.clone())
+                        .replace_resource(WaveSnapshot::default());
+                },
+            );
+            Ok::<_, ReferenceSimulationError>((prepared, report))
+        });
+        let Some(replacement) = replacement else {
+            world
+                .resource_mut::<WaveRetryStatus>()
+                .reject(WaveRetryRejection::InvalidAuthoredConfiguration);
+            return Ok(false);
+        };
+        let (prepared, mut report) = match replacement {
+            Ok(replacement) => replacement,
             Err(_) => {
-                rollback_reset_entities(world, &spawned);
-                return Err(BevyError::error(
-                    ReferenceSimulationError::IdentityReplacement,
-                ));
+                world
+                    .resource_mut::<WaveRetryStatus>()
+                    .reject(WaveRetryRejection::InvalidAuthoredConfiguration);
+                return Ok(false);
             }
         };
-        spawned.push((template.id.clone(), token));
-    }
-
-    let mut insertion_plan = LifecycleFreeInsertionPlan::new();
-    for (template, (_, token)) in scene.entities.iter().zip(&spawned) {
-        let entity = token.entity();
-        if let Some(component) = template.player.clone() {
-            insertion_plan.push(entity, component);
+        if report.diagnostics.has_errors() {
+            world
+                .resource_mut::<WaveRetryStatus>()
+                .reject(WaveRetryRejection::ReplacementRejected);
+            return Ok(false);
         }
-        if let Some(component) = template.enemy.clone() {
-            insertion_plan.push(entity, component);
-        }
-        if let Some(component) = template.spawn {
-            insertion_plan.push(entity, component);
-        }
-        if let Some(component) = template.weapon.clone() {
-            insertion_plan.push(entity, component);
-        }
-        if let Some(component) = template.projectile.clone() {
-            insertion_plan.push(entity, component);
-        }
-        insertion_plan.push(
-            entity,
-            SceneEntitySource {
-                instance_id: candidate_instance,
-                entity_id: template.id.clone(),
-            },
-        );
-    }
-    let insertion = match insertion_plan.prepare(world) {
-        Ok(insertion) => insertion,
-        Err(_) => {
-            rollback_reset_entities(world, &spawned);
-            return Err(BevyError::error(
-                ReferenceSimulationError::IdentityReplacement,
-            ));
-        }
-    };
-    let world = insertion.commit();
-    world.flush();
-
-    let confirmed_instance = match world
-        .resource::<WorldIdentityDomain>()
-        .preflight_scene_instance_replacement(
-            world,
-            &scene.instance,
-            scene.entities.len(),
-            TombstoneCause::Replaced,
-        ) {
-        Ok(instance) => instance,
-        Err(_) => {
-            rollback_reset_entities(world, &spawned);
-            return Err(BevyError::error(
-                ReferenceSimulationError::IdentityReplacement,
-            ));
-        }
-    };
-    if confirmed_instance != candidate_instance {
-        rollback_reset_entities(world, &spawned);
-        return Err(BevyError::error(
-            ReferenceSimulationError::IdentityReplacement,
-        ));
-    }
-    if !reset_candidates_match_template(world, scene, &spawned, candidate_instance) {
-        rollback_reset_entities(world, &spawned);
-        return Err(BevyError::error(
-            ReferenceSimulationError::IdentityReplacement,
-        ));
-    }
-    let replacement_entries = spawned
-        .iter()
-        .map(|(id, token)| (id.clone(), *token))
-        .collect::<Vec<_>>();
-    let replacement = WorldIdentityDomain::replace_scene_instance_and_despawn(
-        world,
-        &scene.instance,
-        &replacement_entries,
-        &retirement_entities,
-        TombstoneCause::Replaced,
-    );
-    let (replacement, retired) = match replacement {
-        Ok(replacement) => replacement,
-        Err(_) => {
-            rollback_reset_entities(world, &spawned);
-            return Err(BevyError::error(
-                ReferenceSimulationError::IdentityReplacement,
-            ));
-        }
-    };
-    debug_assert_eq!(
-        retired.into_iter().collect::<BTreeSet<_>>(),
-        retirements.scene
-    );
-    debug_assert_eq!(replacement.instance_id(), candidate_instance);
-    scene.instance = replacement;
-    *world.resource_mut::<WaveRunGeneration>() = next_generation;
-    *world.resource_mut::<MovementIntent>() = MovementIntent::default();
-    world.resource_mut::<WaveState>().reset();
-    Ok(())
-}
-
-fn reset_candidates_match_template(
-    world: &World,
-    scene: &WaveSceneTemplate,
-    spawned: &[(
-        nara::prelude::SceneEntityId,
-        nara::identity::WorldEntityToken,
-    )],
-    candidate_instance: nara::identity::SceneInstanceId,
-) -> bool {
-    scene
-        .entities
-        .iter()
-        .zip(spawned)
-        .all(|(template, (id, token))| {
-            &template.id == id
-                && world.get::<SceneEntitySource>(token.entity())
-                    == Some(&SceneEntitySource {
-                        instance_id: candidate_instance,
-                        entity_id: id.clone(),
-                    })
-                && reset_component_matches(world, token.entity(), &template.player)
-                && reset_component_matches(world, token.entity(), &template.enemy)
-                && reset_component_matches(world, token.entity(), &template.spawn)
-                && reset_component_matches(world, token.entity(), &template.weapon)
-                && reset_component_matches(world, token.entity(), &template.projectile)
-        })
-}
-
-fn reset_component_matches<T>(world: &World, entity: Entity, expected: &Option<T>) -> bool
-where
-    T: Component + PartialEq,
-{
-    world.get::<T>(entity) == expected.as_ref()
-}
-
-struct WaveResetRetirements {
-    scene: BTreeSet<Entity>,
-    all: BTreeSet<Entity>,
-}
-
-fn preflight_wave_reset_retirements(
-    world: &World,
-    scene: &WaveSceneTemplate,
-) -> Result<WaveResetRetirements, BevyError> {
-    let active = world
-        .resource::<WorldIdentityDomain>()
-        .active_scene_instance(world, scene.instance.instance_id())
-        .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityReplacement))?;
-    let mut scene_entities = BTreeSet::new();
-    for id in active.entity_ids() {
-        let EntityLookup::Resolved(entity) = active.resolve(world, id) else {
-            return Err(BevyError::error(
-                ReferenceSimulationError::SceneMembershipMismatch,
-            ));
-        };
-        let Some(source) = world.get::<SceneEntitySource>(entity) else {
-            return Err(BevyError::error(
-                ReferenceSimulationError::SceneMembershipMismatch,
-            ));
-        };
-        if source.instance_id != active.instance_id() || &source.entity_id != id {
-            return Err(BevyError::error(
-                ReferenceSimulationError::SceneMembershipMismatch,
-            ));
-        }
-        if !scene_entities.insert(entity) {
-            return Err(BevyError::error(
-                ReferenceSimulationError::SceneMembershipMismatch,
-            ));
-        }
-    }
-
-    let mut source_count = 0_usize;
-    for entity in world.iter_entities() {
-        let Some(source) = entity.get::<SceneEntitySource>() else {
-            continue;
-        };
-        source_count = source_count
-            .checked_add(1)
-            .ok_or_else(|| BevyError::error(ReferenceSimulationError::TooManySceneEntities))?;
-        if source_count > MAX_WAVE_SCENE_ENTITIES {
-            return Err(BevyError::error(
-                ReferenceSimulationError::TooManySceneEntities,
-            ));
-        }
-        if source.instance_id != active.instance_id()
-            || !active.contains(&source.entity_id)
-            || active.resolve(world, &source.entity_id) != EntityLookup::Resolved(entity.id())
-        {
-            return Err(BevyError::error(
-                ReferenceSimulationError::SceneMembershipMismatch,
-            ));
-        }
-    }
-    if source_count != active.len() {
-        return Err(BevyError::error(
-            ReferenceSimulationError::SceneMembershipMismatch,
-        ));
-    }
-
-    let runtime_projectiles = world
-        .iter_entities()
-        .filter(|entity| entity.contains::<Projectile>() && !entity.contains::<SceneEntitySource>())
-        .map(|entity| entity.id())
-        .take(MAX_WAVE_PROJECTILES + 1)
-        .collect::<Vec<_>>();
-    if runtime_projectiles.len() > MAX_WAVE_PROJECTILES {
-        return Err(BevyError::error(
-            ReferenceSimulationError::TooManyProjectiles,
-        ));
-    }
-    let mut all = scene_entities.clone();
-    if runtime_projectiles
-        .into_iter()
-        .any(|entity| !all.insert(entity))
-    {
-        return Err(BevyError::error(
-            ReferenceSimulationError::SceneMembershipMismatch,
-        ));
-    }
-    Ok(WaveResetRetirements {
-        scene: scene_entities,
-        all,
+        let receipt = report
+            .instance
+            .take()
+            .expect("successful product replacement publishes one scene receipt");
+        let scene_entities = resolve_published_entities(world, &receipt)
+            .expect("successful product replacement must publish exact scene membership");
+        owner.publish_replacement(receipt, scene_entities, prepared.baseline);
+        Ok(true)
     })
-}
-
-fn rollback_reset_entities(
-    world: &mut World,
-    spawned: &[(nara::scene::SceneEntityId, nara::identity::WorldEntityToken)],
-) {
-    let entities = spawned
-        .iter()
-        .map(|(_, token)| token.entity())
-        .filter(|entity| world.get_entity(*entity).is_ok())
-        .collect::<Vec<_>>();
-    if let Ok(retirement) = prepare_lifecycle_free_despawn(world, &entities) {
-        let _ = retirement.commit();
-    }
 }
 
 pub(crate) fn consume_movement_commands(
     batch: Res<GameplayCommandBatch>,
+    owner: Res<WaveRunOwner>,
     mut state: ResMut<WaveState>,
     mut movement: ResMut<MovementIntent>,
-    mut players: Query<(&SceneEntitySource, &mut Player)>,
+    mut players: Query<(Entity, &SceneEntitySource, &mut Velocity2d), With<PlayerRole>>,
 ) -> Result<(), BevyError> {
     if !state.is_running() {
         return Ok(());
@@ -579,18 +542,20 @@ pub(crate) fn consume_movement_commands(
         }
 
         let mut player = None;
-        for (source, candidate) in &mut players {
-            if source.entity_id.as_str() != PLAYER_SCENE_ID {
+        for (entity, source, candidate) in &mut players {
+            if !owner.owns_scene_entity(entity, source)
+                || source.entity_id.as_str() != PLAYER_SCENE_ID
+            {
                 continue;
             }
             if player.replace(candidate).is_some() {
                 return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
             }
         }
-        let Some(mut player) = player else {
+        let Some(mut velocity) = player else {
             return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
         };
-        player.velocity = next_movement.velocity();
+        velocity.value = next_movement.velocity();
         *movement = next_movement;
         Ok(())
     })();
@@ -633,81 +598,71 @@ fn movement_intent(
     })
 }
 
-pub(crate) fn assign_scene_projectile_ids(world: &mut World) -> Result<(), BevyError> {
-    if !world.resource::<WaveState>().tick_is_pending() {
-        return Ok(());
-    }
-    if world.resource::<RuntimeFaultReporter>().fault().is_some() {
-        world.resource_mut::<WaveState>().reject_tick();
-        return Ok(());
-    }
-
-    let pending = (|| {
-        let mut pending = Vec::new();
-        let mut projectile_count = 0_usize;
-        let mut orphan_projectile_ids =
-            world.query_filtered::<(), (With<ProjectileId>, Without<Projectile>)>();
-        if orphan_projectile_ids.iter(world).next().is_some() {
-            return Err(ReferenceSimulationError::OrphanProjectileIdentity);
-        }
-        let mut projectiles = world.query_filtered::<
-            (Entity, Option<&SceneEntitySource>, Option<&ProjectileId>),
-            With<Projectile>,
-        >();
-        for (entity, source, projectile_id) in projectiles.iter(world) {
-            projectile_count = projectile_count
-                .checked_add(1)
-                .ok_or(ReferenceSimulationError::TooManyProjectiles)?;
-            if projectile_count > MAX_WAVE_PROJECTILES {
-                return Err(ReferenceSimulationError::TooManyProjectiles);
-            }
-            if projectile_id.is_some() {
-                continue;
-            }
-            pending.push((
-                source
-                    .cloned()
-                    .ok_or(ReferenceSimulationError::MissingProjectileIdentity)?,
-                entity,
-            ));
-        }
-        pending.sort_by(|(left, _), (right, _)| {
-            left.instance_id
-                .cmp(&right.instance_id)
-                .then_with(|| left.entity_id.as_str().cmp(right.entity_id.as_str()))
-        });
-        Ok(pending)
-    })();
-    let pending = match pending {
-        Ok(pending) => pending,
-        Err(error) => {
-            world.resource_mut::<WaveState>().reject_tick();
-            return Err(BevyError::error(error));
-        }
-    };
-    let projectile_ids = world
-        .resource_mut::<WaveState>()
-        .allocate_projectile_ids(pending.len());
-    let Some(projectile_ids) = projectile_ids else {
-        world.resource_mut::<WaveState>().reject_tick();
-        return Err(BevyError::error(
-            ReferenceSimulationError::ProjectileIdentityOverflow,
-        ));
-    };
-    for ((_, entity), projectile_id) in pending.into_iter().zip(projectile_ids) {
-        world.entity_mut(entity).insert(projectile_id);
-    }
-    Ok(())
+#[allow(
+    clippy::type_complexity,
+    reason = "the topology queries intentionally expose their complete validation contract"
+)]
+#[derive(SystemParam)]
+pub(crate) struct WaveTopologyQueries<'w, 's> {
+    enemies: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static SceneEntitySource,
+            Option<&'static WaveSpawn>,
+            Option<&'static Health>,
+            Option<&'static Velocity2d>,
+            Option<&'static Transform2d>,
+            Option<&'static GlobalTransform2d>,
+        ),
+        With<EnemyRole>,
+    >,
+    players: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static SceneEntitySource,
+            Option<&'static Health>,
+            Option<&'static Velocity2d>,
+            Option<&'static Transform2d>,
+            Option<&'static GlobalTransform2d>,
+        ),
+        With<PlayerRole>,
+    >,
+    weapons: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static SceneEntitySource,
+            &'static Parent,
+            Option<&'static WeaponCooldown>,
+            Option<&'static Transform2d>,
+        ),
+        With<Weapon>,
+    >,
+    projectiles: Query<
+        'w,
+        's,
+        (
+            &'static ProjectileRole,
+            &'static ProjectileId,
+            &'static Velocity2d,
+            &'static ProjectileDamage,
+            &'static ProjectileLifetime,
+            &'static Transform2d,
+        ),
+        Without<SceneEntitySource>,
+    >,
 }
 
 pub(crate) fn validate_wave_topology(
-    mut state: ResMut<WaveState>,
     faults: Res<RuntimeFaultReporter>,
-    enemies: Query<(&SceneEntitySource, Option<&WaveSpawn>), With<Enemy>>,
-    spawns: Query<(&SceneEntitySource, Option<&Enemy>), With<WaveSpawn>>,
-    players: Query<(&SceneEntitySource, Option<&Weapon>), With<Player>>,
-    projectiles: Query<Option<&ProjectileId>, With<Projectile>>,
-    orphan_projectile_ids: Query<(), (With<ProjectileId>, Without<Projectile>)>,
+    owner: Res<WaveRunOwner>,
+    mut state: ResMut<WaveState>,
+    queries: WaveTopologyQueries<'_, '_>,
 ) -> Result<(), BevyError> {
     if !state.is_running() {
         return Ok(());
@@ -721,64 +676,91 @@ pub(crate) fn validate_wave_topology(
     }
 
     let result = (|| {
-        let mut enemy_count = 0_usize;
-        for (_, spawn) in &enemies {
-            if spawn.is_none() {
-                return Err(BevyError::error(ReferenceSimulationError::MissingWaveSpawn));
+        let (enemy_count, player_entity) = {
+            let mut enemy_count = 0_usize;
+            for (entity, source, spawn, health, velocity, transform, global) in &queries.enemies {
+                if !owner.owns_scene_entity(entity, source) {
+                    continue;
+                }
+                if spawn.is_none()
+                    || health.is_none()
+                    || velocity.is_none()
+                    || transform.is_none()
+                    || global.is_none()
+                {
+                    return Err(BevyError::error(
+                        ReferenceSimulationError::InvalidAuthoredConfiguration,
+                    ));
+                }
+                enemy_count = enemy_count
+                    .checked_add(1)
+                    .ok_or_else(|| BevyError::error(ReferenceSimulationError::TooManyEnemies))?;
+                if enemy_count > MAX_WAVE_ENEMIES {
+                    return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
+                }
             }
-            enemy_count = enemy_count
-                .checked_add(1)
-                .ok_or_else(|| BevyError::error(ReferenceSimulationError::TooManyEnemies))?;
-            if enemy_count > MAX_WAVE_ENEMIES {
-                return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
+            if enemy_count == 0 {
+                return Err(BevyError::error(ReferenceSimulationError::MissingEnemy));
             }
-        }
-        if enemy_count == 0 {
-            return Err(BevyError::error(ReferenceSimulationError::MissingEnemy));
-        }
-        if spawns.iter().any(|(_, enemy)| enemy.is_none()) {
-            return Err(BevyError::error(ReferenceSimulationError::OrphanWaveSpawn));
-        }
-        let mut projectile_count = 0_usize;
-        for projectile_id in &projectiles {
-            projectile_count = projectile_count
-                .checked_add(1)
-                .ok_or_else(|| BevyError::error(ReferenceSimulationError::TooManyProjectiles))?;
-            if projectile_count > MAX_WAVE_PROJECTILES {
-                return Err(BevyError::error(
-                    ReferenceSimulationError::TooManyProjectiles,
-                ));
-            }
-            if projectile_id.is_none() {
-                return Err(BevyError::error(
-                    ReferenceSimulationError::MissingProjectileIdentity,
-                ));
-            }
-        }
-        if !orphan_projectile_ids.is_empty() {
-            return Err(BevyError::error(
-                ReferenceSimulationError::OrphanProjectileIdentity,
-            ));
-        }
 
-        let mut player = None;
-        for (source, weapon) in &players {
-            if source.entity_id.as_str() != PLAYER_SCENE_ID {
-                return Err(BevyError::error(
-                    ReferenceSimulationError::UnexpectedPlayerIdentity,
-                ));
+            let mut player = None;
+            for (entity, source, health, velocity, transform, global) in &queries.players {
+                if !owner.owns_scene_entity(entity, source) {
+                    continue;
+                }
+                if source.entity_id.as_str() != PLAYER_SCENE_ID {
+                    return Err(BevyError::error(
+                        ReferenceSimulationError::UnexpectedPlayerIdentity,
+                    ));
+                }
+                if health.is_none() || velocity.is_none() || transform.is_none() || global.is_none()
+                {
+                    return Err(BevyError::error(
+                        ReferenceSimulationError::InvalidAuthoredConfiguration,
+                    ));
+                }
+                if player.replace(entity).is_some() {
+                    return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
+                }
             }
-            if weapon.is_none() {
+            let player =
+                player.ok_or_else(|| BevyError::error(ReferenceSimulationError::MissingPlayer))?;
+            (enemy_count, player)
+        };
+
+        let mut weapon_count = 0_usize;
+        for (entity, source, parent, cooldown, transform) in &queries.weapons {
+            if !owner.owns_scene_entity(entity, source) {
+                continue;
+            }
+            if source.entity_id.as_str() != PLAYER_WEAPON_SCENE_ID
+                || parent.parent() != player_entity
+                || cooldown.is_none()
+                || transform.is_none()
+            {
                 return Err(BevyError::error(
                     ReferenceSimulationError::MissingPlayerWeapon,
                 ));
             }
-            if player.replace(()).is_some() {
-                return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
-            }
+            weapon_count = weapon_count.saturating_add(1);
         }
-        if player.is_none() {
-            return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
+        if weapon_count != 1 {
+            return Err(BevyError::error(
+                ReferenceSimulationError::MissingPlayerWeapon,
+            ));
+        }
+
+        if owner.projectile_tokens().len() > MAX_WAVE_PROJECTILES {
+            return Err(BevyError::error(
+                ReferenceSimulationError::TooManyProjectiles,
+            ));
+        }
+        for token in owner.projectile_tokens() {
+            if queries.projectiles.get(token.entity()).is_err() {
+                return Err(BevyError::error(
+                    ReferenceSimulationError::ProjectileOwnershipMismatch,
+                ));
+            }
         }
 
         let enemy_count = u64::try_from(enemy_count)
@@ -807,23 +789,50 @@ pub(crate) fn validate_wave_topology(
 
 pub(crate) fn move_scene_players(
     state: Res<WaveState>,
-    mut players: Query<&mut Player, With<SceneEntitySource>>,
+    owner: Res<WaveRunOwner>,
+    mut players: Query<
+        (Entity, &SceneEntitySource, &Velocity2d, &mut Transform2d),
+        With<PlayerRole>,
+    >,
 ) {
     if !state.can_simulate() {
         return;
     }
-    for mut player in &mut players {
-        let velocity = player.velocity;
-        player.position += velocity;
+    for (entity, source, velocity, mut transform) in &mut players {
+        if !owner.owns_scene_entity(entity, source) {
+            continue;
+        }
+        transform.translation += velocity.value;
     }
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query signatures keep the ECS read/write contract visible at the system boundary"
+)]
 pub(crate) fn pursue_scene_players(
     fixed_time: Res<FixedTime>,
     run: Res<WaveRunGeneration>,
+    owner: Res<WaveRunOwner>,
     mut state: ResMut<WaveState>,
-    players: Query<(&SceneEntitySource, &Player)>,
-    mut enemies: Query<(&SceneEntitySource, &WaveSpawn, &mut Enemy)>,
+    players: Query<
+        (Entity, &SceneEntitySource, &GlobalTransform2d),
+        (With<PlayerRole>, Without<EnemyRole>),
+    >,
+    mut enemies: Query<
+        (
+            Entity,
+            &SceneEntitySource,
+            &WaveSpawn,
+            &Health,
+            Option<&Parent>,
+            &GlobalTransform2d,
+            &mut Velocity2d,
+            &mut Transform2d,
+        ),
+        (With<EnemyRole>, Without<PlayerRole>),
+    >,
+    globals: Query<&GlobalTransform2d>,
 ) -> Result<(), BevyError> {
     if !state.can_simulate() {
         return Ok(());
@@ -833,16 +842,32 @@ pub(crate) fn pursue_scene_players(
         .ok_or_else(|| BevyError::error(ReferenceSimulationError::InvalidRunTick))?;
 
     let result = (|| {
-        for (enemy_source, spawn, mut enemy) in &mut enemies {
-            if enemy.hit_points <= 0 || spawn.tick > run_tick {
+        for (
+            enemy_entity,
+            enemy_source,
+            spawn,
+            health,
+            parent,
+            enemy_global,
+            mut velocity,
+            mut transform,
+        ) in &mut enemies
+        {
+            if !owner.owns_scene_entity(enemy_entity, enemy_source)
+                || health.current <= 0
+                || spawn.tick > run_tick
+            {
                 continue;
             }
             let mut target_position = None;
-            for (source, player) in &players {
-                if source.instance_id != enemy_source.instance_id {
+            for (player_entity, source, player_global) in &players {
+                if !owner.owns_scene_entity(player_entity, source) {
                     continue;
                 }
-                if target_position.replace(player.position).is_some() {
+                if target_position
+                    .replace(player_global.translation())
+                    .is_some()
+                {
                     return Err(BevyError::error(
                         ReferenceSimulationError::DuplicateEnemyTarget,
                     ));
@@ -853,183 +878,357 @@ pub(crate) fn pursue_scene_players(
                     ReferenceSimulationError::MissingEnemyTarget,
                 ));
             };
-            let offset = target_position - enemy.position;
-            enemy.velocity = Vec2::new(axis_velocity(offset.x, 0.5), axis_velocity(offset.y, 0.5));
-            let velocity = enemy.velocity;
-            enemy.position += velocity;
+            let offset = target_position - enemy_global.translation();
+            let world_velocity =
+                Vec2::new(axis_velocity(offset.x, 0.5), axis_velocity(offset.y, 0.5));
+            let local_velocity = if let Some(parent) = parent {
+                let parent_matrix = globals
+                    .get(parent.parent())
+                    .map_err(|_| {
+                        BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy)
+                    })?
+                    .matrix();
+                let determinant = parent_matrix.determinant();
+                if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+                    return Err(BevyError::error(
+                        ReferenceSimulationError::InvalidSpatialHierarchy,
+                    ));
+                }
+                parent_matrix.inverse().transform_vector2(world_velocity)
+            } else {
+                world_velocity
+            };
+            if !local_velocity.is_finite() {
+                return Err(BevyError::error(
+                    ReferenceSimulationError::InvalidSpatialHierarchy,
+                ));
+            }
+            velocity.value = local_velocity;
+            transform.translation += velocity.value;
         }
         Ok(())
     })();
     state.reject_on_error(result)
 }
 
-pub(crate) fn fire_automatic_weapons(
-    mut commands: Commands,
-    fixed_time: Res<FixedTime>,
-    run: Res<WaveRunGeneration>,
-    mut state: ResMut<WaveState>,
-    enemies: Query<(&SceneEntitySource, &WaveSpawn, &Enemy)>,
-    mut players: Query<(&SceneEntitySource, &Player, &mut Weapon)>,
-) -> Result<(), BevyError> {
-    if !state.can_simulate() {
+pub(crate) fn fire_automatic_weapons(world: &mut World) -> Result<(), BevyError> {
+    if !world.resource::<WaveState>().can_simulate() {
         return Ok(());
     }
-    let run_tick = run
-        .run_tick(fixed_time.tick())
+    let result = fire_automatic_weapons_inner(world);
+    world.resource_mut::<WaveState>().reject_on_error(result)
+}
+
+fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
+    let run_tick = world
+        .resource::<WaveRunGeneration>()
+        .run_tick(world.resource::<FixedTime>().tick())
         .ok_or_else(|| BevyError::error(ReferenceSimulationError::InvalidRunTick))?;
 
-    let result = (|| {
-        let mut player = None;
-        for (source, candidate, weapon) in &mut players {
-            if source.entity_id.as_str() != PLAYER_SCENE_ID {
-                continue;
+    world.resource_scope(|world, mut owner: Mut<WaveRunOwner>| {
+        let player = {
+            let mut players = world.query_filtered::<
+            (Entity, &SceneEntitySource, &GlobalTransform2d),
+            With<PlayerRole>,
+        >();
+            let mut player = None;
+            for (entity, source, global) in players.iter(world) {
+                if !owner.owns_scene_entity(entity, source)
+                    || source.entity_id.as_str() != PLAYER_SCENE_ID
+                {
+                    continue;
+                }
+                if player.replace((entity, global.translation())).is_some() {
+                    return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
+                }
             }
-            if player.replace((candidate.position, weapon)).is_some() {
-                return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
-            }
-        }
-        let Some((player_position, mut weapon)) = player else {
-            return Err(BevyError::error(
-                ReferenceSimulationError::MissingPlayerWeapon,
-            ));
+            player.ok_or_else(|| BevyError::error(ReferenceSimulationError::MissingPlayer))?
         };
 
-        weapon.remaining_ticks = weapon.remaining_ticks.saturating_sub(1);
-        if weapon.remaining_ticks != 0 {
+        let (weapon_entity, weapon, next_remaining) = {
+            let mut weapons = world.query_filtered::<(
+                Entity,
+                &SceneEntitySource,
+                &Parent,
+                &Weapon,
+                &WeaponCooldown,
+            ), With<SceneEntitySource>>();
+            let mut selected = None;
+            for (entity, source, parent, config, cooldown) in weapons.iter(world) {
+                if !owner.owns_scene_entity(entity, source) || parent.parent() != player.0 {
+                    continue;
+                }
+                if selected
+                    .replace((entity, *config, cooldown.remaining_ticks.saturating_sub(1)))
+                    .is_some()
+                {
+                    return Err(BevyError::error(
+                        ReferenceSimulationError::MissingPlayerWeapon,
+                    ));
+                }
+            }
+            selected
+                .ok_or_else(|| BevyError::error(ReferenceSimulationError::MissingPlayerWeapon))?
+        };
+
+        if next_remaining != 0 {
+            world
+                .get_mut::<WeaponCooldown>(weapon_entity)
+                .expect("validated weapon cooldown remains present")
+                .remaining_ticks = next_remaining;
             return Ok(());
         }
 
-        let mut target: Option<(f32, &str, Vec2)> = None;
-        let mut target_count = 0_usize;
-        for (source, spawn, enemy) in &enemies {
-            if enemy.hit_points <= 0 || spawn.tick > run_tick {
-                continue;
+        let target = {
+            let mut enemies = world.query_filtered::<(
+                Entity,
+                &SceneEntitySource,
+                &WaveSpawn,
+                &Health,
+                &GlobalTransform2d,
+            ), With<EnemyRole>>();
+            let mut target: Option<(f32, &str, Vec2)> = None;
+            let mut target_count = 0_usize;
+            for (entity, source, spawn, health, global) in enemies.iter(world) {
+                if !owner.owns_scene_entity(entity, source)
+                    || health.current <= 0
+                    || spawn.tick > run_tick
+                {
+                    continue;
+                }
+                target_count = target_count
+                    .checked_add(1)
+                    .ok_or_else(|| BevyError::error(ReferenceSimulationError::TooManyEnemies))?;
+                if target_count > MAX_WAVE_ENEMIES {
+                    return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
+                }
+                let candidate = (
+                    distance_squared(player.1, global.translation()),
+                    source.entity_id.as_str(),
+                    global.translation(),
+                );
+                if target.as_ref().is_none_or(|best| {
+                    candidate
+                        .0
+                        .total_cmp(&best.0)
+                        .then_with(|| candidate.1.cmp(best.1))
+                        .is_lt()
+                }) {
+                    target = Some(candidate);
+                }
             }
-            target_count = target_count
-                .checked_add(1)
-                .ok_or_else(|| BevyError::error(ReferenceSimulationError::TooManyEnemies))?;
-            if target_count > MAX_WAVE_ENEMIES {
-                return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
-            }
-            let candidate = (
-                distance_squared(player_position, enemy.position),
-                source.entity_id.as_str(),
-                enemy.position,
-            );
-            let replace = target.as_ref().is_none_or(|best| {
-                candidate
-                    .0
-                    .total_cmp(&best.0)
-                    .then_with(|| candidate.1.cmp(best.1))
-                    .is_lt()
-            });
-            if replace {
-                target = Some(candidate);
-            }
-        }
-        let Some((_, _, target_position)) = target else {
+            target.map(|(_, _, position)| position)
+        };
+        let Some(target_position) = target else {
+            world
+                .get_mut::<WeaponCooldown>(weapon_entity)
+                .expect("validated weapon cooldown remains present")
+                .remaining_ticks = next_remaining;
             return Ok(());
         };
-        let offset = target_position - player_position;
-        let velocity = Vec2::new(axis_velocity(offset.x, 2.0), axis_velocity(offset.y, 2.0));
-        let projectile_id = state.allocate_projectile_id().ok_or_else(|| {
-            BevyError::error(ReferenceSimulationError::ProjectileIdentityOverflow)
-        })?;
-        commands.spawn((
-            Projectile {
-                position: player_position,
-                velocity,
-                damage: weapon.damage,
-                ttl_ticks: PROJECTILE_TTL_TICKS,
-            },
-            projectile_id,
-        ));
-        weapon.remaining_ticks = weapon.cooldown_ticks.max(1);
-        Ok(())
-    })();
-    state.reject_on_error(result)
-}
 
-pub(crate) fn move_wave_projectiles(
-    state: Res<WaveState>,
-    mut projectiles: Query<&mut Projectile, With<ProjectileId>>,
-) {
-    if !state.can_simulate() {
-        return;
-    }
-    for mut projectile in &mut projectiles {
-        let velocity = projectile.velocity;
-        projectile.position += velocity;
-        projectile.ttl_ticks = projectile.ttl_ticks.saturating_sub(1);
-    }
-}
-
-pub(crate) fn resolve_wave_projectile_hits(
-    fixed_time: Res<FixedTime>,
-    run: Res<WaveRunGeneration>,
-    mut state: ResMut<WaveState>,
-    mut projectiles: Query<(Entity, &ProjectileId, &mut Projectile)>,
-    mut enemies: Query<(Entity, &SceneEntitySource, &WaveSpawn, &mut Enemy)>,
-) -> Result<(), BevyError> {
-    if !state.can_simulate() {
-        return Ok(());
-    }
-    let run_tick = run
-        .run_tick(fixed_time.tick())
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::InvalidRunTick))?;
-
-    let result = (|| {
-        let mut target_order = enemies
-            .iter()
-            .filter(|(_, _, spawn, enemy)| enemy.hit_points > 0 && spawn.tick <= run_tick)
-            .map(|(entity, source, _, enemy)| {
-                (source.entity_id.as_str().to_owned(), entity, enemy.position)
-            })
-            .take(MAX_WAVE_ENEMIES + 1)
-            .collect::<Vec<_>>();
-        if target_order.len() > MAX_WAVE_ENEMIES {
-            return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
-        }
-        target_order.sort_by(|left, right| left.0.cmp(&right.0));
-        let mut projectile_order = projectiles
-            .iter_mut()
-            .take(MAX_WAVE_PROJECTILES + 1)
-            .collect::<Vec<_>>();
-        if projectile_order.len() > MAX_WAVE_PROJECTILES {
+        if owner.projectile_tokens().len() >= MAX_WAVE_PROJECTILES {
             return Err(BevyError::error(
                 ReferenceSimulationError::TooManyProjectiles,
             ));
         }
-        projectile_order.sort_by_key(|(_, id, _)| id.get());
+        let next_projectile_id = world
+            .resource::<WaveState>()
+            .next_projectile_id
+            .checked_add(1)
+            .ok_or_else(|| {
+                BevyError::error(ReferenceSimulationError::ProjectileIdentityOverflow)
+            })?;
+        let projectile_id = ProjectileId(world.resource::<WaveState>().next_projectile_id);
+        let offset = target_position - player.1;
+        let velocity = Vec2::new(axis_velocity(offset.x, 2.0), axis_velocity(offset.y, 2.0));
+        let token = spawn_identity_entity(world)
+            .map_err(|_| BevyError::error(ReferenceSimulationError::ProjectileIdentity))?;
+        world.entity_mut(token.entity()).insert((
+            ProjectileRole,
+            projectile_id,
+            Transform2d {
+                translation: player.1,
+                rotation: velocity.y.atan2(velocity.x),
+                ..Transform2d::IDENTITY
+            },
+            Velocity2d { value: velocity },
+            ProjectileDamage {
+                amount: weapon.damage,
+            },
+            ProjectileLifetime {
+                remaining_ticks: PROJECTILE_TTL_TICKS,
+            },
+        ));
+        world.resource_mut::<WaveState>().next_projectile_id = next_projectile_id;
+        world
+            .get_mut::<WeaponCooldown>(weapon_entity)
+            .expect("validated weapon cooldown remains present")
+            .remaining_ticks = weapon.cooldown_ticks.max(1);
+        let inserted = owner.record_projectile(token);
+        debug_assert!(
+            inserted,
+            "a fresh bounded projectile token must be recordable"
+        );
+        Ok(())
+    })
+}
 
-        for (_, _, mut projectile) in projectile_order {
-            if projectile.damage <= 0 || projectile.ttl_ticks == 0 {
+pub(crate) fn move_wave_projectiles(
+    state: Res<WaveState>,
+    owner: Res<WaveRunOwner>,
+    mut projectiles: Query<(
+        &Velocity2d,
+        &mut Transform2d,
+        Option<&mut ProjectileLifetime>,
+    )>,
+) -> Result<(), BevyError> {
+    if !state.can_simulate() {
+        return Ok(());
+    }
+    for token in owner.projectile_tokens() {
+        let (velocity, mut transform, lifetime) = projectiles
+            .get_mut(token.entity())
+            .map_err(|_| BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch))?;
+        transform.translation += velocity.value;
+        let mut lifetime = lifetime.ok_or_else(|| {
+            BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch)
+        })?;
+        lifetime.remaining_ticks = lifetime.remaining_ticks.saturating_sub(1);
+    }
+    Ok(())
+}
+
+pub(crate) fn resolve_wave_projectile_hits(world: &mut World) -> Result<(), BevyError> {
+    if !world.resource::<WaveState>().can_simulate() {
+        return Ok(());
+    }
+    let result = resolve_wave_projectile_hits_inner(world);
+    world.resource_mut::<WaveState>().reject_on_error(result)
+}
+
+fn resolve_wave_projectile_hits_inner(world: &mut World) -> Result<(), BevyError> {
+    let run_tick = world
+        .resource::<WaveRunGeneration>()
+        .run_tick(world.resource::<FixedTime>().tick())
+        .ok_or_else(|| BevyError::error(ReferenceSimulationError::InvalidRunTick))?;
+    world.resource_scope(|world, owner: Mut<WaveRunOwner>| {
+        let mut target_order = {
+            let mut enemies = world.query_filtered::<(
+                Entity,
+                &SceneEntitySource,
+                &WaveSpawn,
+                &Health,
+                &GlobalTransform2d,
+            ), With<EnemyRole>>();
+            enemies
+                .iter(world)
+                .filter(|(entity, source, spawn, health, _)| {
+                    owner.owns_scene_entity(*entity, source)
+                        && health.current > 0
+                        && spawn.tick <= run_tick
+                })
+                .map(|(entity, source, _, _, global)| {
+                    (
+                        source.entity_id.as_str().to_owned(),
+                        entity,
+                        global.translation(),
+                    )
+                })
+                .take(MAX_WAVE_ENEMIES + 1)
+                .collect::<Vec<_>>()
+        };
+        if target_order.len() > MAX_WAVE_ENEMIES {
+            return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
+        }
+        target_order.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let mut projectiles = owner
+            .projectile_tokens()
+            .iter()
+            .copied()
+            .map(|token| {
+                world
+                    .get::<ProjectileId>(token.entity())
+                    .copied()
+                    .map(|id| (id, token))
+                    .ok_or_else(|| {
+                        BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch)
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        projectiles.sort_by_key(|(id, _)| id.get());
+
+        for (_, token) in projectiles {
+            let damage = world
+                .get::<ProjectileDamage>(token.entity())
+                .copied()
+                .ok_or_else(|| {
+                    BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch)
+                })?;
+            let lifetime = world
+                .get::<ProjectileLifetime>(token.entity())
+                .copied()
+                .ok_or_else(|| {
+                    BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch)
+                })?;
+            let position = world
+                .get::<Transform2d>(token.entity())
+                .map(|transform| transform.translation)
+                .ok_or_else(|| {
+                    BevyError::error(ReferenceSimulationError::ProjectileOwnershipMismatch)
+                })?;
+            if damage.amount <= 0 || lifetime.remaining_ticks == 0 {
                 continue;
             }
-            let target = target_order.iter().find_map(|(_, entity, position)| {
-                (distance_squared(projectile.position, *position) <= 1.0).then_some(*entity)
-            });
+            let target = target_order
+                .iter()
+                .find_map(|(_, entity, target_position)| {
+                    (distance_squared(position, *target_position) <= 1.0).then_some(*entity)
+                });
             let Some(target) = target else {
                 continue;
             };
-            if let Ok((_, _, _, mut enemy)) = enemies.get_mut(target)
-                && enemy.hit_points > 0
-            {
-                enemy.hit_points = enemy.hit_points.saturating_sub(projectile.damage);
-                projectile.ttl_ticks = 0;
+            let Some(mut health) = world.get_mut::<Health>(target) else {
+                return Err(BevyError::error(
+                    ReferenceSimulationError::InvalidAuthoredConfiguration,
+                ));
+            };
+            if health.current > 0 {
+                health.current = health.current.saturating_sub(damage.amount);
+                world
+                    .get_mut::<ProjectileLifetime>(token.entity())
+                    .expect("validated projectile lifetime remains present")
+                    .remaining_ticks = 0;
             }
         }
         Ok(())
-    })();
-    state.reject_on_error(result)
+    })
 }
 
+#[allow(
+    clippy::type_complexity,
+    reason = "the query signatures keep the ECS read/write contract visible at the system boundary"
+)]
 pub(crate) fn resolve_enemy_contacts(
     fixed_time: Res<FixedTime>,
     run: Res<WaveRunGeneration>,
+    owner: Res<WaveRunOwner>,
     mut state: ResMut<WaveState>,
-    enemies: Query<(&Enemy, &WaveSpawn), With<SceneEntitySource>>,
-    mut players: Query<(&SceneEntitySource, &mut Player)>,
+    enemies: Query<
+        (
+            Entity,
+            &SceneEntitySource,
+            &Health,
+            &GlobalTransform2d,
+            &WaveSpawn,
+        ),
+        (With<EnemyRole>, Without<PlayerRole>),
+    >,
+    mut players: Query<
+        (Entity, &SceneEntitySource, &GlobalTransform2d, &mut Health),
+        (With<PlayerRole>, Without<EnemyRole>),
+    >,
 ) -> Result<(), BevyError> {
     if !state.can_simulate() {
         return Ok(());
@@ -1040,23 +1239,26 @@ pub(crate) fn resolve_enemy_contacts(
 
     let result = (|| {
         let mut player = None;
-        for (source, candidate) in &mut players {
-            if source.entity_id.as_str() != PLAYER_SCENE_ID {
+        for (entity, source, global, health) in &mut players {
+            if !owner.owns_scene_entity(entity, source)
+                || source.entity_id.as_str() != PLAYER_SCENE_ID
+            {
                 continue;
             }
-            if player.replace(candidate).is_some() {
+            if player.replace((global.translation(), health)).is_some() {
                 return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
             }
         }
-        let Some(mut player) = player else {
+        let Some((player_position, mut player_health)) = player else {
             return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
         };
-        for (enemy, spawn) in &enemies {
-            if enemy.hit_points > 0
+        for (entity, source, enemy_health, enemy_global, spawn) in &enemies {
+            if owner.owns_scene_entity(entity, source)
+                && enemy_health.current > 0
                 && spawn.tick <= run_tick
-                && distance_squared(player.position, enemy.position) <= 1.0
+                && distance_squared(player_position, enemy_global.translation()) <= 1.0
             {
-                player.hit_points = player.hit_points.saturating_sub(ENEMY_CONTACT_DAMAGE);
+                player_health.current = player_health.current.saturating_sub(ENEMY_CONTACT_DAMAGE);
             }
         }
         Ok(())
@@ -1073,86 +1275,85 @@ pub(crate) fn retire_expired_entities(world: &mut World) -> Result<(), BevyError
 }
 
 fn retire_expired_entities_inner(world: &mut World) -> Result<(), BevyError> {
-    let mut dead_enemies = world
-        .iter_entities()
-        .filter_map(|entity| {
-            let source = entity.get::<SceneEntitySource>()?;
-            entity
-                .get::<Enemy>()
-                .is_some_and(|enemy| enemy.hit_points <= 0)
-                .then(|| {
-                    (
-                        source.instance_id,
-                        source.entity_id.as_str().to_owned(),
-                        entity.id(),
-                    )
-                })
-        })
-        .take(MAX_WAVE_ENEMIES + 1)
-        .collect::<Vec<_>>();
-    if dead_enemies.len() > MAX_WAVE_ENEMIES {
-        return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
-    }
-    dead_enemies.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-    let mut expired_projectiles = world
-        .iter_entities()
-        .filter_map(|entity| {
-            let id = entity.get::<ProjectileId>()?;
-            entity
-                .get::<Projectile>()
-                .is_some_and(|projectile| projectile.ttl_ticks == 0)
-                .then_some((
-                    id.get(),
-                    entity.id(),
-                    entity.contains::<SceneEntitySource>(),
-                ))
-        })
-        .take(MAX_WAVE_PROJECTILES + 1)
-        .collect::<Vec<_>>();
-    if expired_projectiles.len() > MAX_WAVE_PROJECTILES {
-        return Err(BevyError::error(
-            ReferenceSimulationError::TooManyProjectiles,
-        ));
-    }
-    expired_projectiles.sort_by_key(|(id, _, _)| *id);
-
-    for (_, _, entity) in dead_enemies.iter() {
-        retire_and_despawn_scene_entity(world, *entity)
-            .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityRetirement))?;
-    }
-    for (_, entity, scene_managed) in expired_projectiles {
-        if scene_managed {
-            retire_and_despawn_scene_entity(world, entity)
-                .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityRetirement))?;
-        } else if !world.despawn(entity) {
+    world.resource_scope(|world, mut owner: Mut<WaveRunOwner>| {
+        let mut dead_enemies = world
+            .iter_entities()
+            .filter_map(|entity| {
+                let source = entity.get::<SceneEntitySource>()?;
+                if !owner.owns_scene_entity(entity.id(), source) {
+                    return None;
+                }
+                entity
+                    .get::<EnemyRole>()
+                    .zip(entity.get::<Health>())
+                    .is_some_and(|(_, health)| health.current <= 0)
+                    .then(|| {
+                        (
+                            source.instance_id,
+                            source.entity_id.as_str().to_owned(),
+                            entity.id(),
+                        )
+                    })
+            })
+            .take(MAX_WAVE_ENEMIES + 1)
+            .collect::<Vec<_>>();
+        if dead_enemies.len() > MAX_WAVE_ENEMIES {
+            return Err(BevyError::error(ReferenceSimulationError::TooManyEnemies));
+        }
+        dead_enemies.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        let mut expired_projectiles = owner
+            .projectile_tokens()
+            .iter()
+            .copied()
+            .filter_map(|token| {
+                let lifetime = world.get::<ProjectileLifetime>(token.entity())?;
+                let id = world.get::<ProjectileId>(token.entity())?;
+                (lifetime.remaining_ticks == 0).then_some((id.get(), token))
+            })
+            .collect::<Vec<_>>();
+        if expired_projectiles.len() > MAX_WAVE_PROJECTILES {
             return Err(BevyError::error(
-                ReferenceSimulationError::ProjectileDespawn,
+                ReferenceSimulationError::TooManyProjectiles,
             ));
         }
-    }
-    let kills = u64::try_from(dead_enemies.len())
-        .map_err(|_| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
-    let earned = kills
-        .checked_mul(KILL_SCORE)
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
-    let mut state = world.resource_mut::<WaveState>();
-    let score = state
-        .score
-        .checked_add(earned)
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
-    let defeated_enemies = state
-        .defeated_enemies
-        .checked_add(kills)
-        .ok_or_else(|| BevyError::error(ReferenceSimulationError::ProgressOverflow))?;
-    state.score = score;
-    state.defeated_enemies = defeated_enemies;
-    Ok(())
+        expired_projectiles.sort_by_key(|(id, _)| *id);
+
+        for (_, _, entity) in dead_enemies.iter() {
+            retire_and_despawn_scene_entity(world, *entity)
+                .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityRetirement))?;
+        }
+        for (_, token) in expired_projectiles {
+            if !world.despawn(token.entity()) || !owner.forget_projectile(token) {
+                return Err(BevyError::error(
+                    ReferenceSimulationError::ProjectileDespawn,
+                ));
+            }
+        }
+        let kills = u64::try_from(dead_enemies.len())
+            .map_err(|_| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
+        let earned = kills
+            .checked_mul(KILL_SCORE)
+            .ok_or_else(|| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
+        let mut state = world.resource_mut::<WaveState>();
+        let score = state
+            .score
+            .checked_add(earned)
+            .ok_or_else(|| BevyError::error(ReferenceSimulationError::ScoreOverflow))?;
+        let defeated_enemies = state
+            .defeated_enemies
+            .checked_add(kills)
+            .ok_or_else(|| BevyError::error(ReferenceSimulationError::ProgressOverflow))?;
+        state.score = score;
+        state.defeated_enemies = defeated_enemies;
+        Ok(())
+    })
 }
 
 pub(crate) fn evaluate_wave_outcome(
+    owner: Res<WaveRunOwner>,
     mut state: ResMut<WaveState>,
-    players: Query<(&SceneEntitySource, &Player)>,
-    enemies: Query<&Enemy, With<SceneEntitySource>>,
+    players: Query<(Entity, &SceneEntitySource, &Health), With<PlayerRole>>,
+    enemies: Query<(Entity, &SceneEntitySource, &Health), With<EnemyRole>>,
 ) -> Result<(), BevyError> {
     if !state.can_simulate() {
         return Ok(());
@@ -1160,18 +1361,22 @@ pub(crate) fn evaluate_wave_outcome(
 
     let result = (|| {
         let mut player_hit_points = None;
-        for (source, player) in &players {
-            if source.entity_id.as_str() != PLAYER_SCENE_ID {
+        for (entity, source, health) in &players {
+            if !owner.owns_scene_entity(entity, source)
+                || source.entity_id.as_str() != PLAYER_SCENE_ID
+            {
                 continue;
             }
-            if player_hit_points.replace(player.hit_points).is_some() {
+            if player_hit_points.replace(health.current).is_some() {
                 return Err(BevyError::error(ReferenceSimulationError::DuplicatePlayer));
             }
         }
         let Some(player_hit_points) = player_hit_points else {
             return Err(BevyError::error(ReferenceSimulationError::MissingPlayer));
         };
-        let enemies_alive = enemies.iter().any(|enemy| enemy.hit_points > 0);
+        let enemies_alive = enemies.iter().any(|(entity, source, health)| {
+            owner.owns_scene_entity(entity, source) && health.current > 0
+        });
         let outcome = if player_hit_points <= 0 {
             WaveOutcome::Defeated
         } else if !enemies_alive {
@@ -1204,14 +1409,10 @@ fn axis_velocity(offset: f32, speed: f32) -> f32 {
 
 #[derive(Debug)]
 enum ReferenceSimulationError {
-    MissingSceneInstance,
-    MultipleSceneInstances,
     TooManySceneEntities,
-    IdentitySnapshot,
     SceneMembershipMismatch,
-    MissingResetTemplate,
-    IdentityReplacement,
-    RunGenerationOverflow,
+    ComponentRegistryUnavailable,
+    InvalidAuthoredConfiguration,
     InvalidRunTick,
     MissingPlayer,
     DuplicatePlayer,
@@ -1219,18 +1420,17 @@ enum ReferenceSimulationError {
     MissingPlayerWeapon,
     MissingEnemy,
     MissingWaveSpawn,
-    OrphanWaveSpawn,
     EnemyPopulationChanged,
     InvalidMovementCommand,
     MissingEnemyTarget,
     DuplicateEnemyTarget,
     IdentityRetirement,
+    ProjectileIdentity,
     ProjectileDespawn,
+    ProjectileOwnershipMismatch,
     ScoreOverflow,
     ProgressOverflow,
     ProjectileIdentityOverflow,
-    MissingProjectileIdentity,
-    OrphanProjectileIdentity,
     TooManyEnemies,
     TooManyProjectiles,
     InvalidSpatialHierarchy,
@@ -1239,16 +1439,16 @@ enum ReferenceSimulationError {
 impl fmt::Display for ReferenceSimulationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::MissingSceneInstance => "reference wave scene instance is missing",
-            Self::MultipleSceneInstances => "reference wave spans multiple scene instances",
             Self::TooManySceneEntities => "reference wave scene entity limit was exceeded",
-            Self::IdentitySnapshot => "reference wave scene identity snapshot failed",
             Self::SceneMembershipMismatch => {
                 "reference wave scene identity membership is inconsistent"
             }
-            Self::MissingResetTemplate => "reference wave reset template is missing",
-            Self::IdentityReplacement => "reference wave scene identity replacement failed",
-            Self::RunGenerationOverflow => "reference wave run generation overflowed",
+            Self::ComponentRegistryUnavailable => {
+                "reference wave component registry is unavailable"
+            }
+            Self::InvalidAuthoredConfiguration => {
+                "reference wave authored configuration is invalid"
+            }
             Self::InvalidRunTick => "reference wave run tick is invalid",
             Self::MissingPlayer => "reference wave player is missing",
             Self::DuplicatePlayer => "reference wave player identity is duplicated",
@@ -1256,22 +1456,19 @@ impl fmt::Display for ReferenceSimulationError {
             Self::MissingPlayerWeapon => "reference wave player weapon is missing",
             Self::MissingEnemy => "reference wave has no enemy roster",
             Self::MissingWaveSpawn => "reference wave enemy has no spawn schedule",
-            Self::OrphanWaveSpawn => "reference wave spawn schedule has no enemy",
             Self::EnemyPopulationChanged => "reference wave enemy roster changed during execution",
             Self::InvalidMovementCommand => "reference wave movement command is invalid",
             Self::MissingEnemyTarget => "reference wave enemy target is missing",
             Self::DuplicateEnemyTarget => "reference wave enemy target identity is duplicated",
             Self::IdentityRetirement => "reference wave identity retirement failed",
+            Self::ProjectileIdentity => "reference wave projectile identity allocation failed",
             Self::ProjectileDespawn => "reference wave projectile retirement failed",
+            Self::ProjectileOwnershipMismatch => {
+                "reference wave projectile ownership is inconsistent"
+            }
             Self::ScoreOverflow => "reference wave score overflowed",
             Self::ProgressOverflow => "reference wave progress overflowed",
             Self::ProjectileIdentityOverflow => "reference wave projectile identity overflowed",
-            Self::MissingProjectileIdentity => {
-                "reference wave projectile has no stable runtime identity"
-            }
-            Self::OrphanProjectileIdentity => {
-                "reference wave projectile identity has no projectile"
-            }
             Self::TooManyEnemies => "reference wave enemy limit was exceeded",
             Self::TooManyProjectiles => "reference wave projectile limit was exceeded",
             Self::InvalidSpatialHierarchy => {
@@ -1304,55 +1501,87 @@ pub(crate) struct ProjectSnapshotQueries<'w, 's> {
         'w,
         's,
         (
+            Entity,
             &'static SceneEntitySource,
-            &'static Player,
-            Option<&'static Weapon>,
+            &'static GlobalTransform2d,
+            &'static Health,
         ),
+        With<PlayerRole>,
     >,
-    enemies: Query<'w, 's, (&'static SceneEntitySource, &'static Enemy)>,
+    enemies: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static SceneEntitySource,
+            &'static GlobalTransform2d,
+            &'static Health,
+        ),
+        With<EnemyRole>,
+    >,
+    weapons:
+        Query<'w, 's, (Entity, &'static SceneEntitySource, &'static WeaponCooldown), With<Weapon>>,
     runtime_only: Query<'w, 's, (), With<RuntimeOnlyTag>>,
-    unbound_players: Query<'w, 's, (), (With<Player>, Without<SceneEntitySource>)>,
-    unbound_enemies: Query<'w, 's, (), (With<Enemy>, Without<SceneEntitySource>)>,
+    unbound_players: Query<'w, 's, (), (With<PlayerRole>, Without<SceneEntitySource>)>,
+    unbound_enemies: Query<'w, 's, (), (With<EnemyRole>, Without<SceneEntitySource>)>,
     unbound_weapons: Query<'w, 's, (), (With<Weapon>, Without<SceneEntitySource>)>,
-    unbound_projectiles: Query<'w, 's, (), (With<Projectile>, Without<SceneEntitySource>)>,
 }
 
 pub(crate) fn capture_project_snapshot(
     fixed_time: Res<FixedTime>,
+    owner: Res<WaveRunOwner>,
     queries: ProjectSnapshotQueries,
     mut snapshot: ResMut<ReferenceProjectSnapshot>,
 ) -> Result<(), BevyError> {
     let mut player = None;
-    for (source, candidate, weapon) in &queries.players {
-        if source.entity_id.as_str() != PLAYER_SCENE_ID {
+    for (entity, source, global, health) in &queries.players {
+        if !owner.owns_scene_entity(entity, source) || source.entity_id.as_str() != PLAYER_SCENE_ID
+        {
             continue;
         }
-        if player.replace((candidate, weapon)).is_some() {
+        if player.replace((global, health)).is_some() {
             return Err(BevyError::error(ProjectSnapshotError::DuplicatePlayer));
         }
     }
-    let Some((player, Some(weapon))) = player else {
+    let Some((player_global, player_health)) = player else {
         return Err(BevyError::error(ProjectSnapshotError::MissingPlayer));
     };
 
     let mut enemy = None;
-    for (source, candidate) in &queries.enemies {
-        if source.entity_id.as_str() != "enemy-anchor/enemy" {
+    for (entity, source, global, health) in &queries.enemies {
+        if !owner.owns_scene_entity(entity, source)
+            || source.entity_id.as_str() != "enemy-anchor/enemy"
+        {
             continue;
         }
-        if enemy.replace(candidate).is_some() {
+        if enemy.replace((global, health)).is_some() {
             return Err(BevyError::error(ProjectSnapshotError::DuplicateEnemy));
         }
     }
-    let Some(enemy) = enemy else {
+    let Some((enemy_global, enemy_health)) = enemy else {
         return Err(BevyError::error(ProjectSnapshotError::MissingEnemy));
     };
 
+    let mut weapon = None;
+    for (entity, source, cooldown) in &queries.weapons {
+        if !owner.owns_scene_entity(entity, source)
+            || source.entity_id.as_str() != PLAYER_WEAPON_SCENE_ID
+        {
+            continue;
+        }
+        if weapon.replace(cooldown).is_some() {
+            return Err(BevyError::error(ProjectSnapshotError::DuplicateWeapon));
+        }
+    }
+    let Some(weapon) = weapon else {
+        return Err(BevyError::error(ProjectSnapshotError::MissingWeapon));
+    };
+
     snapshot.tick = fixed_time.tick();
-    snapshot.player_position = player.position;
-    snapshot.player_hit_points = player.hit_points;
-    snapshot.enemy_position = enemy.position;
-    snapshot.enemy_hit_points = enemy.hit_points;
+    snapshot.player_position = player_global.translation();
+    snapshot.player_hit_points = player_health.current;
+    snapshot.enemy_position = enemy_global.translation();
+    snapshot.enemy_hit_points = enemy_health.current;
     snapshot.weapon_remaining_ticks = weapon.remaining_ticks;
     snapshot.runtime_only_entities =
         u64::try_from(queries.runtime_only.iter().count()).unwrap_or(u64::MAX);
@@ -1360,7 +1589,6 @@ pub(crate) fn capture_project_snapshot(
         queries.unbound_players.iter().count(),
         queries.unbound_enemies.iter().count(),
         queries.unbound_weapons.iter().count(),
-        queries.unbound_projectiles.iter().count(),
     ]
     .into_iter()
     .fold(0_u64, |total, count| {
@@ -1375,6 +1603,8 @@ enum ProjectSnapshotError {
     DuplicatePlayer,
     MissingEnemy,
     DuplicateEnemy,
+    MissingWeapon,
+    DuplicateWeapon,
 }
 
 impl fmt::Display for ProjectSnapshotError {
@@ -1384,6 +1614,8 @@ impl fmt::Display for ProjectSnapshotError {
             Self::DuplicatePlayer => "project scene player identity is duplicated",
             Self::MissingEnemy => "project scene enemy is missing",
             Self::DuplicateEnemy => "project scene enemy identity is duplicated",
+            Self::MissingWeapon => "project scene weapon is missing",
+            Self::DuplicateWeapon => "project scene weapon identity is duplicated",
         })
     }
 }

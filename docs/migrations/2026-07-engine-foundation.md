@@ -2597,6 +2597,61 @@ authority mutation.
 `crates/nara_scene/src/spawn.rs#replace_scene_with_product`, and
 `crates/nara_scene/src/product_transaction_tests.rs`.
 
+## SRT-U5: Canonical Reference-Game Runtime Facts And Retry Ownership
+
+**Changed contract**:
+
+- Empty persistent marker components are valid scene schemas and encode as an empty
+  `ComponentValue::Map`. `ComponentRegistryError::MissingSceneComponentFields` is removed; callers
+  with exhaustive matches must remove that branch.
+- The reference game replaces the persistent `Player`, `Enemy`, and `Projectile` aggregate
+  components with authored `PlayerRole`, `EnemyRole`, `InitialHealth`, `InitialVelocity2d`,
+  `WaveSpawn`, and `Weapon` facts. Mutable health, velocity, cooldown, projectile damage, and
+  projectile lifetime are runtime-only components. `Transform2d` is the only authored position.
+- Reference-game schema generation 4 tombstones the three removed aggregate component type IDs.
+  `Weapon` advances from version 1 to version 2 and removes the persisted `remaining-ticks` field;
+  the retained migration drops that field before decoding the authored configuration.
+- `StartupSceneActivation::source_view` returns a cloneable `StartupSceneSourceView` with a weak
+  document reference. The private root activation owner remains the sole document and Project
+  Content lease owner. Product-local Retry can borrow the admitted document while the runtime is
+  alive but cannot extend its retention after retirement.
+- `STARTUP_SCENE_ACTIVATION_PLUGIN_ID` is available from the advanced surface so a product plugin
+  can declare its mandatory startup dependency during pure plugin planning.
+
+**Canonical replacement or deletion rationale**: persisted aggregate gameplay objects duplicated
+spatial and mutable runtime authority, made Retry reconstruct state by hand, and allowed unrelated
+same-shaped entities to enter gameplay queries. The replacement keeps authored configuration in
+the scene, initializes mutable run state once, owns projectiles by exact world identity tokens, and
+accepts only entities in the current scene receipt's exact stable-ID-to-entity mapping. Retry uses
+the same retained document and prepared scene product transaction as Startup. A weak source view is
+necessary because a public clone carrying the retention lease would let product code keep Project
+Content budget charged after runtime retirement.
+
+**User action**: regenerate reference-game content against schema generation 4, remove exhaustive
+matches for `MissingSceneComponentFields`, and update advanced product plugins that consume startup
+activation to declare `STARTUP_SCENE_ACTIVATION_PLUGIN_ID`. Persistent marker types may now derive
+`PersistentComponent` without inventing a placeholder field. Do not persist mutable run state or
+retain a startup document outside `StartupSceneSourceView::with_document`.
+
+**Source action**: reference-game scene and prefab sources must use the generation-4 component IDs.
+The removed aggregate component records are intentionally rejected by the current executable
+registry rather than silently reinterpreted. Existing generation-1 `Weapon` values migrate through
+the retained version-1-to-version-2 migration.
+
+**Cache action**: regenerate derived schema catalogs and rebuild Rust artifacts. Project Content and
+image import caches may be retained after the source files are updated.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). The removed aggregate Rust types,
+old scene records, and removed error variant have no compatibility shims. Startup source access
+remains provisional and advanced-only.
+
+**Verification anchors**: `crates/nara_reflect/src/registry.rs`,
+`crates/nara_reflect_derive/src/lib.rs`, `crates/nara_scene/src/spawn.rs`,
+`src/startup_scene.rs`, `reference-game/schema/component-schema-v4.json`,
+`reference-game/src/components.rs`, `reference-game/src/systems.rs`,
+`reference-game/tests/authoring.rs`, `reference-game/tests/first_wave.rs`, and
+`reference-game/tests/desktop_render.rs`.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

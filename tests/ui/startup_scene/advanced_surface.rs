@@ -1,6 +1,6 @@
 use nara::advanced_prelude::{
     StartupSceneActivation, StartupSceneActivationSet, StartupSceneMaterializeError,
-    StartupSceneSource, materialize_startup_scene,
+    StartupSceneSource, StartupSceneSourceView, materialize_startup_scene,
 };
 use nara::ecs::World;
 use nara::diagnostic::DiagnosticReport;
@@ -11,6 +11,7 @@ fn main() {
     let _ = inspect;
     let _: Option<StartupSceneActivationSet> = None;
     let _: Option<StartupSceneSource> = None;
+    let _: Option<StartupSceneSourceView> = None;
     let _: fn(
         &mut World,
         StartupSceneSource,

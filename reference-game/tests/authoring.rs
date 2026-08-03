@@ -1,13 +1,14 @@
 use nara::{
     identity::EntityLookup,
     prelude::{
-        Component, ComponentRegistry, ComponentTypeId, EntityReference, PersistentComponent, Vec2,
-        World,
+        Component, ComponentRegistry, ComponentTypeId, Parent, PersistentComponent, Transform2d,
+        Vec2, World,
     },
     reflect::{
         ComponentCatalogFileLimits, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-        ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaOwnerId,
-        ComponentSchemaVersion, ComponentValue, PersistentComponentProvider,
+        ComponentMigrationError, ComponentRegistryError, ComponentSchemaCatalog,
+        ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentValue,
+        PersistentComponentProvider,
     },
     scene::{
         SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
@@ -16,12 +17,11 @@ use nara::{
     },
 };
 use nara_reference_game::{
-    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_OWNER_ID, REFERENCE_GAME_SCHEMA_PROVIDER,
-    ReferenceGamePlugin, RuntimeOnlyTag, WaveSpawn, Weapon,
+    EnemyRole, InitialHealth, InitialVelocity2d, PlayerRole, REFERENCE_GAME_SCHEMA_OWNER_ID,
+    REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin, RuntimeOnlyTag, WaveSpawn, Weapon,
 };
 
 const LINEAGE_PROBE_ID: &str = "nara.test.LineageProbe";
-const PLAYER_ID: &str = "reference_game.Player";
 const LINEAGE_PROBE_OWNER_ID: ComponentSchemaOwnerId =
     ComponentSchemaOwnerId::new("nara.test.lineage-probe");
 
@@ -80,83 +80,44 @@ struct DroppedTombstoneProbe {
     current_value: i64,
 }
 
-#[derive(Component, PersistentComponent)]
-#[nara(
-    id = "reference_game.Player",
-    version = 2,
-    alias = "Player",
-    component_capabilities(scene, inspect, edit),
-    field_capabilities(scene, inspect, edit)
-)]
-struct PlayerWithoutVelocity {
-    #[nara(id = "position", alias = "Position")]
-    position: nara::prelude::Vec2,
-    #[nara(id = "hit-points", alias = "Hit points")]
-    hit_points: i64,
-}
-
-#[derive(Component, PersistentComponent)]
-#[nara(
-    id = "reference_game.Player",
-    version = 1,
-    alias = "Player",
-    component_capabilities(scene, inspect, edit),
-    field_capabilities(scene, inspect, edit)
-)]
-struct PlayerHealthKindChanged {
-    #[nara(id = "position", alias = "Position")]
-    position: nara::prelude::Vec2,
-    #[nara(id = "velocity", alias = "Velocity")]
-    velocity: nara::prelude::Vec2,
-    #[nara(id = "hit-points", alias = "Hit points")]
-    hit_points: u64,
-}
-
-#[derive(Component, PersistentComponent)]
-#[nara(
-    id = "reference_game.Enemy",
-    version = 1,
-    alias = "Enemy",
-    component_capabilities(scene, inspect, edit),
-    field_capabilities(scene, inspect, edit)
-)]
-struct EnemyV1 {
-    #[nara(id = "position", alias = "Position")]
-    position: Vec2,
-    #[nara(id = "velocity", alias = "Velocity")]
-    velocity: Vec2,
-    #[nara(id = "hit-points", alias = "Hit points")]
-    hit_points: i64,
-    #[nara(
-        id = "target",
-        alias = "Target",
-        capabilities(scene, inspect, edit, entity_ref)
-    )]
-    target: EntityReference,
-}
-
 #[test]
-fn five_game_components_register_and_round_trip_through_public_api() {
+fn authored_components_register_and_round_trip_while_runtime_state_stays_out_of_schema() {
     let mut app = nara::prelude::App::new();
-    app.add_plugins(nara::prelude::MinimalPlugins).unwrap();
+    app.add_plugins((
+        nara::prelude::MinimalPlugins,
+        nara::advanced_prelude::StartupSceneActivationPlugin,
+    ))
+    .unwrap();
     app.add_plugin(ReferenceGamePlugin).unwrap();
     let app = app.seal().unwrap();
 
     let registry = nara::reflect::component_registry(app.world()).unwrap();
     for id in [
-        "reference_game.Player",
-        "reference_game.Enemy",
+        "reference_game.PlayerRole",
+        "reference_game.EnemyRole",
+        "reference_game.InitialHealth",
+        "reference_game.InitialVelocity2d",
         "reference_game.WaveSpawn",
         "reference_game.Weapon",
-        "reference_game.Projectile",
     ] {
         assert!(registry.schema(&ComponentTypeId::new(id)).is_some());
     }
-    assert!(
-        registry
-            .schema(&ComponentTypeId::new("reference_game.RuntimeOnlyTag"))
-            .is_none()
-    );
+    for id in [
+        "reference_game.Health",
+        "reference_game.Velocity2d",
+        "reference_game.WeaponCooldown",
+        "reference_game.ProjectileRole",
+        "reference_game.ProjectileDamage",
+        "reference_game.ProjectileLifetime",
+        "reference_game.ProjectileId",
+        "reference_game.RuntimeOnlyTag",
+        "nara.transform.GlobalTransform2d",
+    ] {
+        assert!(
+            registry.schema(&ComponentTypeId::new(id)).is_none(),
+            "runtime-only component {id} entered the persistent schema",
+        );
+    }
 
     let mut runtime_only_world = World::new();
     let runtime_only_entity = runtime_only_world.spawn(RuntimeOnlyTag).id();
@@ -166,11 +127,22 @@ fn five_game_components_register_and_round_trip_through_public_api() {
             .is_some()
     );
 
-    assert_round_trip(Player::fixture(), "reference_game.Player", registry);
-    assert_round_trip(Enemy::fixture(), "reference_game.Enemy", registry);
+    assert_round_trip(PlayerRole {}, "reference_game.PlayerRole", registry);
+    assert_round_trip(EnemyRole {}, "reference_game.EnemyRole", registry);
+    assert_round_trip(
+        InitialHealth { hit_points: 20 },
+        "reference_game.InitialHealth",
+        registry,
+    );
+    assert_round_trip(
+        InitialVelocity2d {
+            velocity: Vec2::ZERO,
+        },
+        "reference_game.InitialVelocity2d",
+        registry,
+    );
     assert_round_trip(WaveSpawn::fixture(), "reference_game.WaveSpawn", registry);
     assert_round_trip(Weapon::fixture(), "reference_game.Weapon", registry);
-    assert_round_trip(Projectile::fixture(), "reference_game.Projectile", registry);
 }
 
 fn migrate_lineage_v1_to_v2(value: ComponentValue) -> Result<ComponentValue, ComponentCodecError> {
@@ -380,163 +352,212 @@ fn generated_catalog_rejects_missing_reused_and_dropped_tombstones() {
 }
 
 #[test]
-fn reference_game_catalog_preserves_v1_v2_and_matches_the_v3_successor() {
-    assert_eq!(REFERENCE_GAME_SCHEMA_PROVIDER.binding().version(), 3);
-    let predecessor = reference_game_predecessor_catalog();
+fn reference_game_catalog_preserves_v1_through_v3_and_matches_the_v4_successor() {
+    assert_eq!(REFERENCE_GAME_SCHEMA_PROVIDER.binding().version(), 4);
     let v1_fixture = include_str!("../schema/component-schema-v1.json");
     let v2_fixture = include_str!("../schema/component-schema-v2.json");
     let v3_fixture = include_str!("../schema/component-schema-v3.json");
-    assert_eq!(
-        format!("{}\n", predecessor.to_json_string().unwrap()),
-        v1_fixture
-    );
-    let expected_v2 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+    let v4_fixture = include_str!("../schema/component-schema-v4.json");
+    let v1 = reference_game_predecessor_catalog();
+    assert_eq!(format!("{}\n", v1.to_json_string().unwrap()), v1_fixture);
+    let v2 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
         v2_fixture.as_bytes(),
-        &predecessor,
+        &v1,
         ComponentCatalogFileLimits::default(),
     )
     .unwrap();
-    let mut v2_registry = reference_game_successor_with_player::<Player>().unwrap();
-    v2_registry.freeze().unwrap();
-    assert_eq!(v2_registry.catalog().unwrap(), &expected_v2);
+    let v3 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        v3_fixture.as_bytes(),
+        &v2,
+        ComponentCatalogFileLimits::default(),
+    )
+    .unwrap();
+    let v4 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
+        v4_fixture.as_bytes(),
+        &v3,
+        ComponentCatalogFileLimits::default(),
+    )
+    .unwrap();
+    for (catalog, predecessor, fixture) in [
+        (&v2, &v1, v2_fixture),
+        (&v3, &v2, v3_fixture),
+        (&v4, &v3, v4_fixture),
+    ] {
+        assert_eq!(
+            format!(
+                "{}\n",
+                catalog
+                    .to_json_string_with_predecessor(Some(predecessor))
+                    .unwrap()
+            ),
+            fixture,
+        );
+    }
 
     let registry = frozen_reference_game_successor();
-    let expected_v3 = ComponentSchemaCatalog::from_json_bytes_with_predecessor(
-        v3_fixture.as_bytes(),
-        &expected_v2,
-        ComponentCatalogFileLimits::default(),
-    )
-    .unwrap();
     let snapshot = registry.snapshot().unwrap();
     let owner_receipt = snapshot
         .owner_receipt(REFERENCE_GAME_SCHEMA_OWNER_ID)
         .unwrap();
-    assert_eq!(owner_receipt.generation(), expected_v3.generation());
-    assert_eq!(owner_receipt.catalog(), expected_v3.fingerprint());
-    assert_eq!(
-        owner_receipt.predecessor(),
-        expected_v3.predecessor().copied()
-    );
-    assert_eq!(
-        registry.catalog().unwrap().components(),
-        expected_v3.components()
-    );
+    assert_eq!(owner_receipt.generation(), v4.generation());
+    assert_eq!(owner_receipt.catalog(), v4.fingerprint());
+    assert_eq!(owner_receipt.predecessor(), v4.predecessor().copied());
+    assert_eq!(registry.catalog().unwrap().components(), v4.components());
     assert_eq!(
         registry.catalog().unwrap().type_tombstones(),
-        expected_v3.type_tombstones()
-    );
-    assert_eq!(
-        format!(
-            "{}\n",
-            expected_v3
-                .to_json_string_with_predecessor(Some(&expected_v2))
-                .unwrap()
-        ),
-        v3_fixture
+        v4.type_tombstones()
     );
     for id in [
-        "reference_game.Player",
-        "reference_game.Enemy",
+        "reference_game.PlayerRole",
+        "reference_game.EnemyRole",
+        "reference_game.InitialHealth",
+        "reference_game.InitialVelocity2d",
         "reference_game.WaveSpawn",
         "reference_game.Weapon",
-        "reference_game.Projectile",
     ] {
         assert!(registry.schema(&ComponentTypeId::new(id)).is_some());
     }
 }
 
 #[test]
-fn reference_game_enemy_v1_migrates_to_the_current_runtime_component() {
-    let enemy_id = ComponentTypeId::new("reference_game.Enemy");
-    let expected = Enemy::fixture();
-    let mut legacy_registry = reference_game_successor_with_player::<Player>().unwrap();
-    legacy_registry.freeze().unwrap();
-    let mut legacy_world = World::new();
-    let legacy_entity = legacy_world
-        .spawn(EnemyV1 {
-            position: expected.position,
-            velocity: expected.velocity,
-            hit_points: expected.hit_points,
-            target: EntityReference::SceneLocal {
-                entity: scene_id("player"),
-            },
-        })
-        .id();
-    let legacy_value = legacy_registry
-        .encode_component(&enemy_id, &legacy_world, legacy_entity)
-        .unwrap()
-        .unwrap()
-        .unwrap();
-
+fn weapon_v1_migrates_to_v2_without_persisting_runtime_cooldown() {
     let registry = frozen_reference_game_successor();
+    let weapon_id = ComponentTypeId::new("reference_game.Weapon");
+    let legacy_value = ComponentValue::map([
+        ("cooldown-ticks", ComponentValue::U64(3)),
+        ("remaining-ticks", ComponentValue::U64(2)),
+        ("damage", ComponentValue::I64(3)),
+    ]);
     let migrated = registry
-        .migrate_component_value(&enemy_id, ComponentSchemaVersion::ONE, &legacy_value)
+        .migrate_component_value(&weapon_id, ComponentSchemaVersion::ONE, &legacy_value)
         .unwrap();
     assert_eq!(migrated.version, ComponentSchemaVersion::new(2).unwrap());
     let ComponentValue::Map(fields) = &migrated.value else {
-        panic!("migrated Enemy value must remain a map");
+        panic!("migrated Weapon value must remain a map");
     };
-    assert!(!fields.contains_key("target"));
+    assert!(!fields.contains_key("remaining-ticks"));
+    assert_eq!(fields.get("cooldown-ticks"), Some(&ComponentValue::U64(3)));
+    assert_eq!(fields.get("damage"), Some(&ComponentValue::I64(3)));
 
     let mut current_world = World::new();
     let current_entity = current_world.spawn_empty().id();
     registry
-        .preflight_component(&enemy_id, &migrated.value)
+        .preflight_component(&weapon_id, &migrated.value)
         .unwrap()
         .unwrap()
         .apply(&mut current_world, current_entity)
         .unwrap();
-    assert_eq!(current_world.get::<Enemy>(current_entity), Some(&expected));
+    assert_eq!(
+        current_world.get::<Weapon>(current_entity),
+        Some(&Weapon::fixture())
+    );
 }
 
 #[test]
-fn reference_game_catalog_rejects_unversioned_semantic_change_and_missing_tombstone() {
-    assert!(matches!(
-        reference_game_successor_with_player::<PlayerWithoutVelocity>(),
-        Err(ComponentRegistryError::MissingFieldTombstone { field_id, .. })
-            if field_id == ComponentFieldId::new("velocity")
-    ));
-
-    assert!(matches!(
-        reference_game_successor_with_player::<PlayerHealthKindChanged>(),
-        Err(ComponentRegistryError::ComponentSchemaChangedWithoutVersionBump {
-            component_id,
-        }) if component_id == ComponentTypeId::new(PLAYER_ID)
-    ));
+fn removed_aggregate_component_records_are_explicitly_tombstoned_and_rejected() {
+    let registry = frozen_reference_game_successor();
+    let tombstones = registry.catalog().unwrap().type_tombstones();
+    for id in [
+        "reference_game.Player",
+        "reference_game.Enemy",
+        "reference_game.Projectile",
+    ] {
+        let component_id = ComponentTypeId::new(id);
+        assert!(tombstones.contains(&component_id));
+        assert!(registry.schema(&component_id).is_none());
+        assert!(matches!(
+            registry.migrate_component_value(
+                &component_id,
+                ComponentSchemaVersion::ONE,
+                &ComponentValue::Map(Default::default()),
+            ),
+            Err(ComponentMigrationError::UnknownComponentId { component_id: rejected })
+                if rejected == component_id
+        ));
+    }
 }
 
 #[test]
 fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
-    let registry = frozen_reference_game_successor();
-    let player_id = ComponentTypeId::new(PLAYER_ID);
-    let enemy_id = ComponentTypeId::new("reference_game.Enemy");
+    let registry = frozen_reference_game_authoring_registry();
+    let player_role_id = ComponentTypeId::new("reference_game.PlayerRole");
+    let enemy_role_id = ComponentTypeId::new("reference_game.EnemyRole");
+    let health_id = ComponentTypeId::new("reference_game.InitialHealth");
+    let velocity_id = ComponentTypeId::new("reference_game.InitialVelocity2d");
     let wave_spawn_id = ComponentTypeId::new("reference_game.WaveSpawn");
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
-    let projectile_id = ComponentTypeId::new("reference_game.Projectile");
+    let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
     let player_entity_id = scene_id("player");
+    let weapon_entity_id = scene_id("player-weapon");
     let document = SceneDocument::new([
         SceneEntityRecord::new(player_entity_id.clone())
             .with_component(
-                player_id.clone(),
-                scene_component_record(Player::fixture(), &player_id, &registry),
+                player_role_id.clone(),
+                scene_component_record(PlayerRole {}, &player_role_id, &registry),
             )
+            .with_component(
+                health_id.clone(),
+                scene_component_record(InitialHealth { hit_points: 20 }, &health_id, &registry),
+            )
+            .with_component(
+                velocity_id.clone(),
+                scene_component_record(
+                    InitialVelocity2d {
+                        velocity: Vec2::ZERO,
+                    },
+                    &velocity_id,
+                    &registry,
+                ),
+            )
+            .with_component(
+                transform_id.clone(),
+                scene_component_record(Transform2d::IDENTITY, &transform_id, &registry),
+            ),
+        SceneEntityRecord::new(weapon_entity_id.clone())
+            .with_parent(player_entity_id.clone())
             .with_component(
                 weapon_id.clone(),
                 scene_component_record(Weapon::fixture(), &weapon_id, &registry),
+            )
+            .with_component(
+                transform_id.clone(),
+                scene_component_record(
+                    Transform2d::from_translation(Vec2::new(1.2, 0.0)),
+                    &transform_id,
+                    &registry,
+                ),
             ),
         SceneEntityRecord::new(scene_id("enemy"))
             .with_component(
-                enemy_id.clone(),
-                scene_component_record(Enemy::fixture(), &enemy_id, &registry),
+                enemy_role_id.clone(),
+                scene_component_record(EnemyRole {}, &enemy_role_id, &registry),
+            )
+            .with_component(
+                health_id.clone(),
+                scene_component_record(InitialHealth { hit_points: 10 }, &health_id, &registry),
+            )
+            .with_component(
+                velocity_id.clone(),
+                scene_component_record(
+                    InitialVelocity2d {
+                        velocity: Vec2::new(-0.5, 0.0),
+                    },
+                    &velocity_id,
+                    &registry,
+                ),
             )
             .with_component(
                 wave_spawn_id.clone(),
                 scene_component_record(WaveSpawn::fixture(), &wave_spawn_id, &registry),
+            )
+            .with_component(
+                transform_id.clone(),
+                scene_component_record(
+                    Transform2d::from_translation(Vec2::new(5.0, 0.0)),
+                    &transform_id,
+                    &registry,
+                ),
             ),
-        SceneEntityRecord::new(scene_id("projectile")).with_component(
-            projectile_id.clone(),
-            scene_component_record(Projectile::fixture(), &projectile_id, &registry),
-        ),
     ]);
     let scene_json = document.to_json_string().unwrap();
     let scene_candidate = SceneDocumentCandidate::decode_json_bytes(scene_json.as_bytes()).unwrap();
@@ -552,7 +573,7 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
 
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player_entity_id.clone(),
-        component: player_id,
+        component: health_id,
         component_version: ComponentSchemaVersion::ONE,
         field: ComponentFieldId::new("hit-points"),
         value: ComponentValue::I64(12),
@@ -581,20 +602,34 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     assert_eq!(live_instance.len(), 3);
 
     let player_entity = resolved_entity(live_instance, &world, &player_entity_id);
+    let weapon_entity = resolved_entity(live_instance, &world, &weapon_entity_id);
     let enemy_entity = resolved_entity(live_instance, &world, &scene_id("enemy"));
-    let projectile_entity = resolved_entity(live_instance, &world, &scene_id("projectile"));
-    let mut expected_player = Player::fixture();
-    expected_player.hit_points = 12;
-    assert_eq!(world.get::<Player>(player_entity), Some(&expected_player));
-    assert_eq!(world.get::<Weapon>(player_entity), Some(&Weapon::fixture()));
-    assert_eq!(world.get::<Enemy>(enemy_entity), Some(&Enemy::fixture()));
+    assert_eq!(world.get::<PlayerRole>(player_entity), Some(&PlayerRole {}));
+    assert_eq!(
+        world.get::<InitialHealth>(player_entity),
+        Some(&InitialHealth { hit_points: 12 })
+    );
+    assert_eq!(
+        world.get::<Transform2d>(player_entity),
+        Some(&Transform2d::IDENTITY)
+    );
+    assert_eq!(world.get::<Weapon>(weapon_entity), Some(&Weapon::fixture()));
+    assert_eq!(
+        world.get::<Transform2d>(weapon_entity),
+        Some(&Transform2d::from_translation(Vec2::new(1.2, 0.0)))
+    );
+    assert_eq!(
+        world.get::<Parent>(weapon_entity).map(Parent::parent),
+        Some(player_entity)
+    );
+    assert_eq!(world.get::<EnemyRole>(enemy_entity), Some(&EnemyRole {}));
     assert_eq!(
         world.get::<WaveSpawn>(enemy_entity),
         Some(&WaveSpawn::fixture())
     );
     assert_eq!(
-        world.get::<Projectile>(projectile_entity),
-        Some(&Projectile::fixture())
+        world.get::<Transform2d>(enemy_entity),
+        Some(&Transform2d::from_translation(Vec2::new(5.0, 0.0)))
     );
 }
 
@@ -627,35 +662,20 @@ fn reference_game_predecessor_catalog() -> ComponentSchemaCatalog {
         .unwrap()
 }
 
-fn reference_game_successor_with_player<T>() -> Result<ComponentRegistry, ComponentRegistryError>
-where
-    T: PersistentComponentProvider,
-{
-    let predecessor = reference_game_predecessor_catalog();
-    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
-        .expect("the reference-game v1 catalog has a successor generation");
-    current.components.extend([
-        T::persistent_component_schema(),
-        EnemyV1::persistent_component_schema(),
-        WaveSpawn::persistent_component_schema(),
-        Weapon::persistent_component_schema(),
-        Projectile::persistent_component_schema(),
-    ]);
-    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
-        REFERENCE_GAME_SCHEMA_OWNER_ID,
-        current,
-        Some(predecessor),
-    )?;
-    bind_persistent_component::<T>(&mut registry)?;
-    bind_persistent_component::<EnemyV1>(&mut registry)?;
-    bind_persistent_component::<WaveSpawn>(&mut registry)?;
-    bind_persistent_component::<Weapon>(&mut registry)?;
-    bind_persistent_component::<Projectile>(&mut registry)?;
-    Ok(registry)
-}
-
 fn frozen_reference_game_successor() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
+    REFERENCE_GAME_SCHEMA_PROVIDER
+        .register_or_validate_into(&mut registry)
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn frozen_reference_game_authoring_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    nara::transform::TRANSFORM_SCHEMA_PROVIDER
+        .register_or_validate_into(&mut registry)
+        .unwrap();
     REFERENCE_GAME_SCHEMA_PROVIDER
         .register_or_validate_into(&mut registry)
         .unwrap();

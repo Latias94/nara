@@ -3,16 +3,18 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use nara::{
+    advanced_prelude::{StartupSceneSource, materialize_startup_scene},
     app::{
         RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
     },
+    core::ByteLimit,
     gameplay::{GameplayCommandQueue, GameplayCommandSubmission},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
+    prelude::FixedTime,
     project_host::{ProjectContentLoader, ProjectSettingsCandidate, RuntimePlan},
-    scene::spawn_scene,
 };
 use nara_reference_game::{MovementDirection, WaveSnapshot, movement_command};
 use project_content_fixture::{
@@ -47,10 +49,11 @@ fn physical_desktop_and_direct_headless_commands_remain_equal_through_terminal()
         1,
     );
 
-    let fixed_step = Duration::from_millis(20);
+    let headless_fixed_step = headless.world().resource::<FixedTime>().timestep();
+    let desktop_fixed_step = desktop.world().resource::<FixedTime>().timestep();
     let terminal = (0..96).find_map(|_| {
-        headless.drive(fixed_step).unwrap();
-        desktop.drive(fixed_step).unwrap();
+        headless.drive(headless_fixed_step).unwrap();
+        desktop.drive(desktop_fixed_step).unwrap();
         let headless_snapshot = headless.world().resource::<WaveSnapshot>().clone();
         let desktop_snapshot = desktop.world().resource::<WaveSnapshot>().clone();
 
@@ -74,6 +77,13 @@ fn runtime_with_scene(
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let scene = snapshot.expanded_startup_scene().clone();
+    let runtime_time = plan.settings().runtime.runtime_time_settings();
+    let fixed_time = plan.settings().runtime.fixed_time();
+    let source = StartupSceneSource::direct(
+        Arc::new(scene),
+        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
+    )
+    .expect("the parity scene should fit the bounded direct retention limit");
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut runtime = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -86,13 +96,11 @@ fn runtime_with_scene(
     runtime
         .with_admission_scope(move |scope| {
             scope.apply_command(move |world: &mut nara::prelude::World| {
-                let report = spawn_scene(world, plan.schema_validation().registry(), &scene);
-                assert!(
-                    !report.diagnostics.has_errors(),
-                    "{:#?}",
-                    report.diagnostics
-                );
-                assert!(report.instance.is_some());
+                world.insert_resource(runtime_time);
+                world.insert_resource(fixed_time);
+                let report = materialize_startup_scene(world, source)
+                    .expect("the retained parity scene should materialize");
+                assert!(!report.has_errors(), "{report:#?}");
                 let mut queue = world.resource_mut::<GameplayCommandQueue>();
                 for command in commands {
                     queue.submit(command).unwrap();

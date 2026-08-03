@@ -135,7 +135,7 @@ fn headless_cli_opens_the_committed_manifest_from_a_random_working_directory() {
         String::from_utf8(output.stdout).unwrap(),
         concat!(
             "{\"schema\":\"nara-reference-game.wave-summary-v1\",",
-            "\"outcome\":\"completed\",\"tick\":49,\"score\":300,",
+            "\"outcome\":\"completed\",\"tick\":50,\"score\":300,",
             "\"player_hit_points\":20,\"enemies_remaining\":0,",
             "\"projectiles_remaining\":4}\n"
         )

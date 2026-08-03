@@ -1,11 +1,14 @@
-use std::{error::Error, fmt};
+use std::{collections::BTreeMap, error::Error, fmt};
 
 use nara::{
+    advanced_prelude::StartupSceneSourceView,
+    ecs::Entity,
+    identity::{SceneEntityId, SpawnedSceneInstance, WorldEntityToken},
     prelude::{Component, Resource, Vec2},
-    scene::{SceneEntityId, SpawnedSceneInstance},
+    scene::{SceneEntitySource, SceneProductResource},
 };
 
-use crate::{Enemy, Player, Projectile, WaveSpawn, Weapon, snapshot::WaveOutcome};
+use crate::snapshot::WaveOutcome;
 
 pub(crate) const MOVE_COMMAND_TYPE: &str = "reference-game.move-v2";
 pub(crate) const MOVE_X_FIELD: &str = "x";
@@ -13,6 +16,7 @@ pub(crate) const MOVE_Y_FIELD: &str = "y";
 pub(crate) const MOVE_PRESSED_FIELD: &str = "pressed";
 pub(crate) const RETRY_COMMAND_TYPE: &str = "reference-game.retry-v1";
 pub(crate) const PLAYER_SCENE_ID: &str = "player";
+pub(crate) const PLAYER_WEAPON_SCENE_ID: &str = "player-weapon";
 pub(crate) const COMMAND_SOURCE: &str = "reference-game.bundled";
 pub(crate) const PROJECTILE_TTL_TICKS: u64 = 64;
 pub(crate) const ENEMY_CONTACT_DAMAGE: i64 = 10;
@@ -173,15 +177,23 @@ pub enum WaveRetryPhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Bounded reason for rejecting a requested in-runtime wave retry.
 pub enum WaveRetryRejection {
+    /// The current wave has not reached a terminal state.
     WhileRunning,
+    /// The same run generation already has a pending retry request.
     AlreadyPending,
+    /// The run generation counter cannot advance without overflow.
+    GenerationExhausted,
+    /// The retained authored source cannot initialize a valid run.
+    InvalidAuthoredConfiguration,
+    /// The prepared scene and product-state replacement was rejected atomically.
+    ReplacementRejected,
 }
 
 /// Inspectable game-owned retry state; it never requests platform or runtime replacement.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 pub struct WaveRetryStatus {
-    phase: WaveRetryPhase,
     pending_generation: Option<u64>,
     applied_generation: Option<u64>,
     last_rejection: Option<WaveRetryRejection>,
@@ -190,7 +202,13 @@ pub struct WaveRetryStatus {
 impl WaveRetryStatus {
     #[must_use]
     pub const fn phase(self) -> WaveRetryPhase {
-        self.phase
+        if self.pending_generation.is_some() {
+            WaveRetryPhase::Pending
+        } else if self.applied_generation.is_some() {
+            WaveRetryPhase::Applied
+        } else {
+            WaveRetryPhase::Idle
+        }
     }
 
     #[must_use]
@@ -213,49 +231,128 @@ impl WaveRetryStatus {
             self.last_rejection = Some(WaveRetryRejection::AlreadyPending);
             return false;
         }
-        self.phase = WaveRetryPhase::Pending;
         self.pending_generation = Some(generation);
         self.last_rejection = None;
         true
     }
 
     pub(crate) fn reject_while_running(&mut self) {
-        self.last_rejection = Some(WaveRetryRejection::WhileRunning);
+        self.reject(WaveRetryRejection::WhileRunning);
     }
 
     pub(crate) fn reject_duplicate(&mut self) {
         self.last_rejection = Some(WaveRetryRejection::AlreadyPending);
     }
 
-    pub(crate) fn mark_applied(&mut self, generation: u64) {
-        self.phase = WaveRetryPhase::Applied;
+    pub(crate) fn reject(&mut self, rejection: WaveRetryRejection) {
+        self.pending_generation = None;
+        self.last_rejection = Some(rejection);
+    }
+
+    pub(crate) fn mark_applied(
+        &mut self,
+        generation: u64,
+        last_rejection: Option<WaveRetryRejection>,
+    ) {
         self.pending_generation = None;
         self.applied_generation = Some(generation);
+        self.last_rejection = last_rejection;
     }
 }
 
-#[derive(Debug, Default, Resource)]
-pub(crate) struct WaveResetTemplate {
-    pub(crate) scene: Option<WaveSceneTemplate>,
+impl SceneProductResource for WaveRetryStatus {}
+
+#[derive(Debug, Resource)]
+pub(crate) struct WaveRunOwner {
+    source: StartupSceneSourceView,
+    receipt: SpawnedSceneInstance,
+    scene_entities: BTreeMap<SceneEntityId, Entity>,
+    projectiles: Vec<WorldEntityToken>,
+    baseline: WaveRunBaseline,
 }
 
-#[derive(Debug)]
-pub(crate) struct WaveSceneTemplate {
-    pub(crate) instance: SpawnedSceneInstance,
-    pub(crate) entities: Vec<WaveEntityTemplate>,
+impl WaveRunOwner {
+    pub(crate) fn new(
+        source: StartupSceneSourceView,
+        receipt: SpawnedSceneInstance,
+        scene_entities: BTreeMap<SceneEntityId, Entity>,
+        baseline: WaveRunBaseline,
+    ) -> Self {
+        Self {
+            source,
+            receipt,
+            scene_entities,
+            projectiles: Vec::new(),
+            baseline,
+        }
+    }
+
+    pub(crate) fn source(&self) -> &StartupSceneSourceView {
+        &self.source
+    }
+
+    pub(crate) fn receipt(&self) -> &SpawnedSceneInstance {
+        &self.receipt
+    }
+
+    pub(crate) fn projectile_tokens(&self) -> &[WorldEntityToken] {
+        &self.projectiles
+    }
+
+    pub(crate) fn owns_scene_entity(&self, entity: Entity, source: &SceneEntitySource) -> bool {
+        source.instance_id == self.receipt.instance_id()
+            && self.scene_entities.get(&source.entity_id) == Some(&entity)
+    }
+
+    #[cfg(feature = "desktop")]
+    pub(crate) fn owns_projectile_entity(&self, entity: nara::ecs::Entity) -> bool {
+        self.projectiles
+            .iter()
+            .any(|token| token.entity() == entity)
+    }
+
+    pub(crate) fn record_projectile(&mut self, token: WorldEntityToken) -> bool {
+        if self.projectiles.len() >= MAX_WAVE_PROJECTILES || self.projectiles.contains(&token) {
+            return false;
+        }
+        self.projectiles.push(token);
+        true
+    }
+
+    pub(crate) fn forget_projectile(&mut self, token: WorldEntityToken) -> bool {
+        let Some(index) = self
+            .projectiles
+            .iter()
+            .position(|candidate| *candidate == token)
+        else {
+            return false;
+        };
+        self.projectiles.swap_remove(index);
+        true
+    }
+
+    pub(crate) fn publish_replacement(
+        &mut self,
+        receipt: SpawnedSceneInstance,
+        scene_entities: BTreeMap<SceneEntityId, Entity>,
+        baseline: WaveRunBaseline,
+    ) {
+        self.receipt = receipt;
+        self.scene_entities = scene_entities;
+        self.projectiles.clear();
+        self.baseline = baseline;
+    }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct WaveEntityTemplate {
-    pub(crate) id: SceneEntityId,
-    pub(crate) player: Option<Player>,
-    pub(crate) enemy: Option<Enemy>,
-    pub(crate) spawn: Option<WaveSpawn>,
-    pub(crate) weapon: Option<Weapon>,
-    pub(crate) projectile: Option<Projectile>,
+pub(crate) struct WaveRunBaseline {
+    pub(crate) movement: MovementIntent,
+    pub(crate) generation: WaveRunGeneration,
+    pub(crate) retry: WaveRetryStatus,
+    pub(crate) state: WaveState,
 }
 
-#[derive(Debug, Resource)]
+#[derive(Debug, Clone, Resource)]
 pub(crate) struct WaveState {
     pub(crate) outcome: WaveOutcome,
     pub(crate) score: u64,
@@ -269,6 +366,7 @@ pub(crate) struct WaveState {
 enum WaveTickGate {
     #[default]
     Pending,
+    ProjectionOnly,
     Admitted,
     Rejected,
 }
@@ -299,6 +397,14 @@ impl WaveState {
         };
     }
 
+    pub(crate) fn begin_projection_only_tick(&mut self) {
+        self.tick_gate = if self.is_running() {
+            WaveTickGate::ProjectionOnly
+        } else {
+            WaveTickGate::Rejected
+        };
+    }
+
     pub(crate) const fn tick_is_pending(&self) -> bool {
         self.is_running() && matches!(self.tick_gate, WaveTickGate::Pending)
     }
@@ -308,7 +414,10 @@ impl WaveState {
     }
 
     pub(crate) const fn can_publish_snapshot(&self) -> bool {
-        matches!(self.tick_gate, WaveTickGate::Admitted)
+        matches!(
+            self.tick_gate,
+            WaveTickGate::ProjectionOnly | WaveTickGate::Admitted
+        )
     }
 
     pub(crate) fn admit_tick(&mut self) {
@@ -327,22 +436,8 @@ impl WaveState {
         }
         result
     }
-
-    pub(crate) fn allocate_projectile_id(&mut self) -> Option<ProjectileId> {
-        let id = ProjectileId(self.next_projectile_id);
-        self.next_projectile_id = self.next_projectile_id.checked_add(1)?;
-        Some(id)
-    }
-
-    pub(crate) fn allocate_projectile_ids(&mut self, count: usize) -> Option<Vec<ProjectileId>> {
-        let count = u64::try_from(count).ok()?;
-        let first = self.next_projectile_id;
-        let next = first.checked_add(count)?;
-        self.next_projectile_id = next;
-        Some((first..next).map(ProjectileId).collect())
-    }
-
-    pub(crate) fn reset(&mut self) {
-        *self = Self::default();
-    }
 }
+
+impl SceneProductResource for MovementIntent {}
+impl SceneProductResource for WaveRunGeneration {}
+impl SceneProductResource for WaveState {}

@@ -17,7 +17,7 @@ fn bundled_cli_emits_one_stable_json_summary() {
         stdout,
         concat!(
             "{\"schema\":\"nara-reference-game.wave-summary-v1\",",
-            "\"outcome\":\"completed\",\"tick\":49,\"score\":300,",
+            "\"outcome\":\"completed\",\"tick\":50,\"score\":300,",
             "\"player_hit_points\":20,\"enemies_remaining\":0,",
             "\"projectiles_remaining\":4}\n"
         )
@@ -43,7 +43,7 @@ fn opt_in_startup_marker_precedes_the_terminal_summary() {
             "{\"schema\":\"nara-reference-game.startup-marker-v1\",",
             "\"event\":\"headless_first_authoritative_tick\"}\n",
             "{\"schema\":\"nara-reference-game.wave-summary-v1\",",
-            "\"outcome\":\"completed\",\"tick\":49,\"score\":300,",
+            "\"outcome\":\"completed\",\"tick\":50,\"score\":300,",
             "\"player_hit_points\":20,\"enemies_remaining\":0,",
             "\"projectiles_remaining\":4}\n"
         )

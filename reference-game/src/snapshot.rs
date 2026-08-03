@@ -3,15 +3,17 @@ use std::{error::Error, fmt};
 use nara::ecs as bevy_ecs;
 use nara::{
     app::RuntimeFaultReporter,
-    ecs::{error::BevyError, system::SystemParam},
-    prelude::{FixedTime, Query, Res, ResMut, Resource, Vec2},
-    scene::SceneEntitySource,
+    ecs::{Entity, With, error::BevyError, system::SystemParam},
+    prelude::{FixedTime, Query, Res, ResMut, Resource, Transform2d, Vec2},
+    scene::{SceneEntitySource, SceneProductResource},
+    transform::GlobalTransform2d,
 };
 
 use crate::{
-    Enemy, Player, Projectile, WaveSpawn,
+    EnemyRole, Health, PlayerRole, ProjectileLifetime, ProjectileRole, Velocity2d, WaveSpawn,
     resources::{
         MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES, PLAYER_SCENE_ID, ProjectileId, WaveRunGeneration,
+        WaveRunOwner,
     },
 };
 
@@ -76,6 +78,8 @@ pub struct WaveSnapshot {
     pub projectiles: Vec<ProjectileSnapshot>,
 }
 
+impl SceneProductResource for WaveSnapshot {}
+
 impl WaveSnapshot {
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
@@ -85,22 +89,46 @@ impl WaveSnapshot {
 
 #[derive(SystemParam)]
 pub(crate) struct WaveSnapshotQueries<'w, 's> {
-    players: Query<'w, 's, (&'static SceneEntitySource, &'static Player)>,
+    players: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static SceneEntitySource,
+            &'static GlobalTransform2d,
+            &'static Health,
+        ),
+        With<PlayerRole>,
+    >,
     enemies: Query<
         'w,
         's,
         (
+            Entity,
             &'static SceneEntitySource,
-            &'static Enemy,
+            &'static GlobalTransform2d,
+            &'static Health,
             &'static WaveSpawn,
         ),
+        With<EnemyRole>,
     >,
-    projectiles: Query<'w, 's, (&'static ProjectileId, &'static Projectile)>,
+    projectiles: Query<
+        'w,
+        's,
+        (
+            &'static ProjectileId,
+            &'static Transform2d,
+            &'static Velocity2d,
+            &'static ProjectileLifetime,
+        ),
+        With<ProjectileRole>,
+    >,
 }
 
 pub(crate) fn capture_wave_snapshot(
     fixed_time: Res<FixedTime>,
     run: Res<WaveRunGeneration>,
+    owner: Res<WaveRunOwner>,
     state: Res<crate::resources::WaveState>,
     faults: Res<RuntimeFaultReporter>,
     queries: WaveSnapshotQueries<'_, '_>,
@@ -111,15 +139,16 @@ pub(crate) fn capture_wave_snapshot(
     }
 
     let mut player = None;
-    for (source, candidate) in &queries.players {
-        if source.entity_id.as_str() != PLAYER_SCENE_ID {
+    for (entity, source, global, health) in &queries.players {
+        if !owner.owns_scene_entity(entity, source) || source.entity_id.as_str() != PLAYER_SCENE_ID
+        {
             continue;
         }
-        if player.replace((source, candidate)).is_some() {
+        if player.replace((source, global, health)).is_some() {
             return Err(BevyError::error(WaveSnapshotError::DuplicatePlayer));
         }
     }
-    let Some((source, player)) = player else {
+    let Some((source, player_global, player_health)) = player else {
         return Err(BevyError::error(WaveSnapshotError::MissingPlayer));
     };
     let run_tick = run
@@ -129,10 +158,11 @@ pub(crate) fn capture_wave_snapshot(
     let mut enemy_values = queries
         .enemies
         .iter()
-        .map(|(source, enemy, spawn)| EnemySnapshot {
+        .filter(|(entity, source, _, _, _)| owner.owns_scene_entity(*entity, source))
+        .map(|(_, source, global, health, spawn)| EnemySnapshot {
             id: source.entity_id.as_str().to_owned(),
-            position: enemy.position,
-            hit_points: enemy.hit_points,
+            position: global.translation(),
+            hit_points: health.current,
             spawn_tick: spawn.tick,
             active: spawn.tick <= run_tick,
         })
@@ -143,17 +173,23 @@ pub(crate) fn capture_wave_snapshot(
     }
     enemy_values.sort_by(|left, right| left.id.cmp(&right.id));
 
-    let mut projectile_values = queries
-        .projectiles
+    let mut projectile_values = owner
+        .projectile_tokens()
         .iter()
-        .map(|(id, projectile)| ProjectileSnapshot {
-            id: id.get(),
-            position: projectile.position,
-            velocity: projectile.velocity,
-            ttl_ticks: projectile.ttl_ticks,
+        .copied()
+        .map(|token| {
+            queries
+                .projectiles
+                .get(token.entity())
+                .map(|(id, transform, velocity, lifetime)| ProjectileSnapshot {
+                    id: id.get(),
+                    position: transform.translation,
+                    velocity: velocity.value,
+                    ttl_ticks: lifetime.remaining_ticks,
+                })
+                .map_err(|_| BevyError::error(WaveSnapshotError::InvalidProjectileOwnership))
         })
-        .take(MAX_WAVE_PROJECTILES + 1)
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     if projectile_values.len() > MAX_WAVE_PROJECTILES {
         return Err(BevyError::error(WaveSnapshotError::TooManyProjectiles));
     }
@@ -167,8 +203,8 @@ pub(crate) fn capture_wave_snapshot(
     snapshot.defeated_enemies = state.defeated_enemies;
     snapshot.player = PlayerSnapshot {
         id: source.entity_id.as_str().to_owned(),
-        position: player.position,
-        hit_points: player.hit_points,
+        position: player_global.translation(),
+        hit_points: player_health.current,
     };
     snapshot.enemies = enemy_values;
     snapshot.projectiles = projectile_values;
@@ -182,6 +218,7 @@ enum WaveSnapshotError {
     DuplicatePlayer,
     TooManyEnemies,
     TooManyProjectiles,
+    InvalidProjectileOwnership,
 }
 
 impl fmt::Display for WaveSnapshotError {
@@ -192,6 +229,9 @@ impl fmt::Display for WaveSnapshotError {
             Self::DuplicatePlayer => "reference wave player identity is duplicated",
             Self::TooManyEnemies => "reference wave enemy snapshot limit was exceeded",
             Self::TooManyProjectiles => "reference wave projectile snapshot limit was exceeded",
+            Self::InvalidProjectileOwnership => {
+                "reference wave projectile snapshot ownership is inconsistent"
+            }
         })
     }
 }

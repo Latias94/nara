@@ -282,9 +282,9 @@ pub mod advanced_prelude {
 
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub use crate::startup_scene::{
-        StartupSceneActivation, StartupSceneActivationPlugin, StartupSceneActivationSet,
-        StartupSceneMaterializeError, StartupSceneSource, StartupSceneSourceError,
-        materialize_startup_scene,
+        STARTUP_SCENE_ACTIVATION_PLUGIN_ID, StartupSceneActivation, StartupSceneActivationPlugin,
+        StartupSceneActivationSet, StartupSceneMaterializeError, StartupSceneSource,
+        StartupSceneSourceError, StartupSceneSourceView, materialize_startup_scene,
     };
 
     #[cfg(feature = "asset-watch")]

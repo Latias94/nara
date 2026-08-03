@@ -13,7 +13,7 @@ use nara::{
     asset::{AssetRef, AssetSourceKind, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     image::ImageImportLimits,
-    prelude::{Component, ComponentRegistry, Vec2, World},
+    prelude::{Component, ComponentRegistry, Transform2d, Vec2, World},
     project_host::{
         ProjectContentLoader, ProjectContentSnapshot, ProjectSettingsCandidate, RuntimePlan,
         built_in_schema_providers, ingest_project_manifest, resolve_runtime_plan,
@@ -27,8 +27,9 @@ use nara::{
 };
 use nara::{gameplay::GameplayCommandPlugin, project_host::project_runtime_plugins};
 use nara_reference_game::{
-    Enemy, Player, Projectile, REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin,
-    ReferenceWavePlugin, WaveSpawn, Weapon, advanced_project_outcome_plugin_definition,
+    EnemyRole, InitialHealth, InitialVelocity2d, PlayerRole, REFERENCE_GAME_SCHEMA_PROVIDER,
+    ReferenceGamePlugin, ReferenceWavePlugin, WaveSpawn, Weapon,
+    advanced_project_outcome_plugin_definition,
 };
 
 #[cfg(feature = "desktop")]
@@ -271,15 +272,17 @@ pub fn reference_runtime_plugins(
 pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let registry = plan.schema_validation().registry();
     let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
-    let player_id = ComponentTypeId::new("reference_game.Player");
-    let projectile_id = ComponentTypeId::new("reference_game.Projectile");
+    let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
+    let player_role_id = ComponentTypeId::new("reference_game.PlayerRole");
+    let health_id = ComponentTypeId::new("reference_game.InitialHealth");
+    let velocity_id = ComponentTypeId::new("reference_game.InitialVelocity2d");
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
-    let anchor = enemy_anchor("enemy-anchor", None);
-    let second_anchor = enemy_anchor("enemy-anchor-2", Some((9.0, 5)));
-    let third_anchor = enemy_anchor("enemy-anchor-3", Some((13.0, 9)));
+    let anchor = enemy_anchor("enemy-anchor", None, registry);
+    let second_anchor = enemy_anchor("enemy-anchor-2", Some((9.0, 5)), registry);
+    let third_anchor = enemy_anchor("enemy-anchor-3", Some((13.0, 9)), registry);
     let player = SceneEntityRecord::new(scene_id("player"))
         .with_component(
-            sprite_id,
+            sprite_id.clone(),
             SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
                 sprite_value(
@@ -293,42 +296,61 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
             ),
         )
         .with_component(
-            player_id.clone(),
-            component_record(Player::fixture(), &player_id, registry),
+            transform_id.clone(),
+            component_record(Transform2d::IDENTITY, &transform_id, registry),
+        )
+        .with_component(
+            health_id.clone(),
+            component_record(InitialHealth { hit_points: 20 }, &health_id, registry),
+        )
+        .with_component(
+            velocity_id.clone(),
+            component_record(
+                InitialVelocity2d {
+                    velocity: Vec2::ZERO,
+                },
+                &velocity_id,
+                registry,
+            ),
+        )
+        .with_component(
+            player_role_id.clone(),
+            component_record(PlayerRole {}, &player_role_id, registry),
+        );
+    let weapon = SceneEntityRecord::new(scene_id("player-weapon"))
+        .with_parent(scene_id("player"))
+        .with_component(
+            sprite_id,
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, weapon_sprite_value()),
+        )
+        .with_component(
+            transform_id.clone(),
+            component_record(
+                Transform2d::from_translation(Vec2::new(1.2, 0.0)),
+                &transform_id,
+                registry,
+            ),
         )
         .with_component(
             weapon_id.clone(),
             component_record(Weapon::fixture(), &weapon_id, registry),
         );
-    let projectile = SceneEntityRecord::new(scene_id("projectile-fixture")).with_component(
-        projectile_id.clone(),
-        component_record(
-            Projectile {
-                position: Vec2::new(-100.0, 0.0),
-                velocity: Vec2::new(-2.0, 0.0),
-                damage: 0,
-                ttl_ticks: 8,
-            },
-            &projectile_id,
-            registry,
-        ),
-    );
-    SceneDocument::new([anchor, second_anchor, third_anchor, player, projectile])
+    SceneDocument::new([anchor, second_anchor, third_anchor, player, weapon])
 }
 
-fn enemy_anchor(id: &str, override_values: Option<(f64, u64)>) -> SceneEntityRecord {
+fn enemy_anchor(
+    id: &str,
+    override_values: Option<(f64, u64)>,
+    registry: &ComponentRegistry,
+) -> SceneEntityRecord {
     let overrides = override_values.map_or_else(ScenePatchDocument::default, |(x, spawn_tick)| {
         ScenePatchDocument::new([
             ScenePatchOperation::SetField {
                 entity: scene_id("enemy"),
-                component: ComponentTypeId::new("reference_game.Enemy"),
-                component_version: ComponentSchemaVersion::new(2)
-                    .expect("the enemy component version is non-zero"),
-                field: ComponentFieldId::new("position"),
-                value: ComponentValue::map([
-                    ("x", ComponentValue::f64(x).unwrap()),
-                    ("y", ComponentValue::f64(0.0).unwrap()),
-                ]),
+                component: ComponentTypeId::new("nara.transform.Transform2d"),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("translation.x"),
+                value: ComponentValue::f64(x).unwrap(),
             },
             ScenePatchOperation::SetField {
                 entity: scene_id("enemy"),
@@ -339,7 +361,11 @@ fn enemy_anchor(id: &str, override_values: Option<(f64, u64)>) -> SceneEntityRec
             },
         ])
     });
-    let mut anchor = SceneEntityRecord::new(scene_id(id));
+    let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
+    let mut anchor = SceneEntityRecord::new(scene_id(id)).with_component(
+        transform_id.clone(),
+        component_record(Transform2d::IDENTITY, &transform_id, registry),
+    );
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
         overrides,
@@ -349,7 +375,10 @@ fn enemy_anchor(id: &str, override_values: Option<(f64, u64)>) -> SceneEntityRec
 
 pub fn expected_enemy_prefab(plan: &RuntimePlan) -> PrefabDocument {
     let registry = plan.schema_validation().registry();
-    let enemy_id = ComponentTypeId::new("reference_game.Enemy");
+    let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
+    let enemy_role_id = ComponentTypeId::new("reference_game.EnemyRole");
+    let health_id = ComponentTypeId::new("reference_game.InitialHealth");
+    let velocity_id = ComponentTypeId::new("reference_game.InitialVelocity2d");
     let wave_spawn_id = ComponentTypeId::new("reference_game.WaveSpawn");
     let image = AssetRef::path("textures/tiny-dungeon.png").unwrap();
     let enemy = SceneEntityRecord::new(scene_id("enemy"))
@@ -359,7 +388,7 @@ pub fn expected_enemy_prefab(plan: &RuntimePlan) -> PrefabDocument {
                 ComponentSchemaVersion::ONE,
                 sprite_value(
                     &image,
-                    (0.0, 0.0),
+                    (1.65, 1.65),
                     (1.0, 0.74, 0.74, 1.0),
                     (2.0 / 12.0, 9.0 / 11.0),
                     (1.0 / 12.0, 0.090_909_090_909_090_93),
@@ -368,14 +397,60 @@ pub fn expected_enemy_prefab(plan: &RuntimePlan) -> PrefabDocument {
             ),
         )
         .with_component(
-            enemy_id.clone(),
-            component_record(Enemy::fixture(), &enemy_id, registry),
+            transform_id.clone(),
+            component_record(
+                Transform2d::from_translation(Vec2::new(5.0, 0.0)),
+                &transform_id,
+                registry,
+            ),
+        )
+        .with_component(
+            enemy_role_id.clone(),
+            component_record(EnemyRole {}, &enemy_role_id, registry),
+        )
+        .with_component(
+            health_id.clone(),
+            component_record(InitialHealth { hit_points: 10 }, &health_id, registry),
+        )
+        .with_component(
+            velocity_id.clone(),
+            component_record(
+                InitialVelocity2d {
+                    velocity: Vec2::new(-0.5, 0.0),
+                },
+                &velocity_id,
+                registry,
+            ),
         )
         .with_component(
             wave_spawn_id.clone(),
             component_record(WaveSpawn::fixture(), &wave_spawn_id, registry),
         );
     PrefabDocument::new([enemy])
+}
+
+fn weapon_sprite_value() -> ComponentValue {
+    ComponentValue::map([
+        (
+            "material",
+            ComponentValue::map([(
+                "tint",
+                ComponentValue::map([
+                    ("r", ComponentValue::f64(1.0).unwrap()),
+                    ("g", ComponentValue::f64(0.86).unwrap()),
+                    ("b", ComponentValue::f64(0.22).unwrap()),
+                    ("a", ComponentValue::f64(1.0).unwrap()),
+                ]),
+            )]),
+        ),
+        (
+            "size",
+            ComponentValue::map([
+                ("x", ComponentValue::f64(0.9).unwrap()),
+                ("y", ComponentValue::f64(0.3).unwrap()),
+            ]),
+        ),
+    ])
 }
 
 pub fn scene_id(value: &str) -> nara::identity::SceneEntityId {

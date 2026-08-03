@@ -42,6 +42,52 @@ pub struct HierarchyConstructionWriter<'world> {
     world: &'world mut World,
 }
 
+/// Owned candidate hierarchy edges validated for a later infallible publication tail.
+///
+/// This proof is intentionally exposed only through the private hierarchy surface. Its caller
+/// must retain exclusive control of the target World between preparation and commit.
+#[must_use]
+pub struct PreparedHierarchyConstructionBatch {
+    edges: Vec<HierarchyConstructionEdge>,
+}
+
+pub(crate) fn prepare_hierarchy_construction_batch(
+    world: &World,
+    edges: &[HierarchyConstructionEdge],
+) -> Result<PreparedHierarchyConstructionBatch, HierarchyError> {
+    let mut scratch = HierarchyValidationScratch::default();
+    validate_hierarchy_with_additions(
+        world,
+        edges.iter().map(|edge| (edge.child, edge.parent)),
+        &mut scratch,
+    )?;
+    Ok(PreparedHierarchyConstructionBatch {
+        edges: edges.to_vec(),
+    })
+}
+
+impl PreparedHierarchyConstructionBatch {
+    /// Publishes the previously validated edges without a recoverable failure branch.
+    pub fn commit(self, world: &mut World) {
+        let mut scratch = HierarchyValidationScratch::default();
+        validate_hierarchy_with_additions(
+            world,
+            self.edges.iter().map(|edge| (edge.child, edge.parent)),
+            &mut scratch,
+        )
+        .expect("prepared hierarchy construction facts must remain valid through commit");
+        if self.edges.is_empty() {
+            return;
+        }
+        world.insert_batch(
+            self.edges
+                .into_iter()
+                .map(|edge| (edge.child, Parent::new(edge.parent))),
+        );
+        mark_topology_dirty(world);
+    }
+}
+
 impl<'world> HierarchyConstructionWriter<'world> {
     /// Creates a construction writer over an exclusively borrowed world.
     #[must_use]

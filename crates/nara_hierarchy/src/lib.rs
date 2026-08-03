@@ -28,7 +28,12 @@ use validation::{HierarchyValidationScratch, validate_hierarchy_with_scratch};
 pub mod __private {
     use nara_ecs::{Resource, SystemSet, World};
 
-    use super::HierarchyGenerationState;
+    use super::{
+        HierarchyConstructionEdge, HierarchyError, HierarchyGenerationState,
+        writer::prepare_hierarchy_construction_batch,
+    };
+
+    pub use super::writer::PreparedHierarchyConstructionBatch;
 
     /// Capability token proving that the current runtime hierarchy generation completed.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
@@ -65,6 +70,14 @@ pub mod __private {
         (state.completed_generation == Some(completed.generation())
             && state.topology_generation == completed.generation())
         .then_some(completed.generation())
+    }
+
+    /// Prepares candidate construction edges without publishing a hierarchy generation.
+    pub fn prepare_construction_batch(
+        world: &World,
+        edges: &[HierarchyConstructionEdge],
+    ) -> Result<PreparedHierarchyConstructionBatch, HierarchyError> {
+        prepare_hierarchy_construction_batch(world, edges)
     }
 }
 

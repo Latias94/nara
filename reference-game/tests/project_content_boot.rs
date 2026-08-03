@@ -62,7 +62,7 @@ fn assert_committed_content() {
             .owner_receipts()
             .find(|receipt| receipt.owner() == REFERENCE_GAME_SCHEMA_OWNER_ID)
             .map(|receipt| receipt.generation()),
-        Some(3),
+        Some(4),
     );
     assert!(!snapshot.source_upgrade_required());
     assert_eq!(snapshot.revision().to_hex().len(), 64);
