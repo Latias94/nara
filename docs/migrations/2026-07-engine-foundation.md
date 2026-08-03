@@ -50,6 +50,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGS-U2-1 | RGS-U2 | `51b3fe4` | `rust-api/behavior` | Runtime hierarchy ownership, scene component composition, and parented spatial content admission | Import runtime relationships from `nara_hierarchy`, install `HierarchyPlugin` and `SceneComponentsPlugin` separately, and keep parented transform/visibility content fail-closed until RGS-U3. |
 | RGS-U3-1 | RGS-U3 | `fb4fdc7` | `rust-api/behavior` | Completed global 2D projection and world-space camera/sprite/tilemap extraction | Treat `GlobalTransform2d` as an opaque immutable derived component, give every world-space renderable an explicit `Transform2d`, and pass completed globals to extraction helpers without local/identity fallback. |
 | SRT-U2-1 | SRT-U2 | `0b5beba` | `rust-api/behavior/safety` | Image construction, render prepare snapshot identity, and prepare invalidation | Handle fallible `ImageAsset` construction, capture `AssetSlotRevision` in each prepare snapshot, borrow non-`Copy` snapshots, and remove the unconsumed invalidation event log. |
+| SRT-U4-1 | SRT-U4 | `25e7f6c` | `rust-api/behavior` | Lifecycle-free insertion preparation, complete hierarchy validation, and provisional product replacement retirement | Prepare lifecycle-free insertions before commit, pass mutable World access to complete hierarchy validation, and authorize extra retirement with `WorldEntityToken` rather than bare `Entity`. |
 
 ## Entry Contract
 
@@ -2529,6 +2530,73 @@ provisional advanced contract and is not re-exported from the ordinary prelude.
 `src/project_host/runtime.rs`, `crates/nara_app/src/runtime/fault_route.rs`,
 `src/project_host/runtime/tests.rs`, `tests/startup_scene_public_surface.rs`, and
 `tests/workspace_play_runtime.rs`.
+
+## SRT-U4-1: Prepared Atomic Product Scene Replacement
+
+**Changed contract**:
+
+- `LifecycleFreeInsertionPlan::commit(&mut World)` is replaced by
+  `LifecycleFreeInsertionPlan::prepare(&mut World)?.commit()`. Preparation flushes the existing
+  deferred baseline, resolves only already registered component IDs, and rejects required
+  components, hooks, observers, missing targets, duplicates, and existing components before any
+  insertion.
+- `nara_hierarchy::validate_hierarchy` now accepts `&mut World` so complete validation can use
+  filtered ECS query state and visit hierarchy participants rather than every entity in the World.
+- The provisional advanced `replace_scene_with_product` path accepts exact additional retirement
+  authority as `&[WorldEntityToken]`. Bare `Entity` values cannot authorize product-owned
+  retirement across World identity domains.
+- `SceneProductTransactionLimits::MAX_OVERLAY_WRITES` and
+  `MAX_ADDITIONAL_RETIREMENTS` are the documented engine ceilings above caller-supplied limits.
+
+**Canonical replacement or deletion rationale**: the former insertion call combined validation
+and mutation behind a fallible commit. Scene replacement needs every recoverable check complete
+before hierarchy, identity, resource, or membership authority changes. The prepared guard owns the
+exclusive World borrow through insertion commit. The focused product path similarly accepts only
+stable scene IDs for candidate overlay writes and identity-bound tokens for exact extra retirement;
+it does not expose a candidate World, runtime entity map, provider registry, or general scene
+session.
+
+**Before**:
+
+```rust
+insertion_plan.commit(&mut world)?;
+validate_hierarchy(&world)?;
+```
+
+**After**:
+
+```rust
+let world = insertion_plan.prepare(&mut world)?.commit();
+validate_hierarchy(world)?;
+```
+
+Advanced product replacement callers obtain `WorldEntityToken` values from the active
+`WorldIdentityDomain`, supply explicit overlay and retirement limits, and target candidate
+components only by `SceneEntityId`. Do not reconstruct token authority from `Entity` bits.
+
+**User action**: split lifecycle-free insertion into prepare and commit, make complete hierarchy
+validation call sites provide mutable World access, and replace any provisional bare-entity extra
+retirement list with identity-domain tokens. Handle limit and preparation rejection before treating
+the old scene generation as changed.
+
+**Source action**: none. Scene, Prefab, component, and project manifest formats are unchanged.
+
+**Cache action**: keep; rebuild Rust artifacts because public Rust signatures changed.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No fallible insertion-commit shim,
+immutable hierarchy-validation overload, or bare-entity retirement overload remains.
+
+**Rollback**: revert the ECS insertion guard, identity-token preflight, hierarchy query validation,
+and scene product transaction together. Do not restore a recoverable branch after the first scene
+authority mutation.
+
+**Verification anchors**: `crates/nara_ecs/src/transaction.rs`,
+`crates/nara_identity/src/domain.rs#validate_additional_retirement_identity_axes`,
+`crates/nara_hierarchy/src/validation.rs#validate_hierarchy`,
+`crates/nara_reflect/src/persistent_apply.rs#PreparedComponentApplyBatch`,
+`crates/nara_scene/src/product_transaction.rs`,
+`crates/nara_scene/src/spawn.rs#replace_scene_with_product`, and
+`crates/nara_scene/src/product_transaction_tests.rs`.
 
 ## Persistent Format Matrix
 

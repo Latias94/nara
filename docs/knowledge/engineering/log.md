@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-03
+* **Work Registration**: [Startup scene activation and atomic Retry: SRT-U5 active](registry/2026-08/2026-08-03T053651Z-engine-foundation-contract-completion-codex-root-f86b996f972f46ad9355d3e99810080b.md) - Closes the atomic scene replacement extension and activates the reference-game spatial authority slice.
+* **Verification Evidence**: [SRT-U4 atomic product scene replacement](verification/2026-08/2026-08-03T053651Z-srt-u4-atomic-product-scene-replacement-5175acec97f041c2af61585559c01e04.md) - Verifies bounded stable-ID candidate overlays, identity-bound exact retirement, a prepared failure-free scene commit tail, and hierarchy-only complete validation.
+
 ## 2026-08-02
 * **Work Registration**: [Startup scene activation and atomic Retry: SRT-U4 active](registry/2026-08/2026-08-02T194646Z-engine-foundation-contract-completion-codex-root-fd1daaea2e6a41648b4dbbe11e75473d.md) - Closes bounded startup activation and activates the atomic scene replacement extension.
 * **Verification Evidence**: [SRT-U3 bounded startup activation and runtime fault detail](verification/2026-08/2026-08-02T194244Z-srt-u3-bounded-startup-activation-and-runtime-fault-detail-3b4d5b25813f420d8f0e62f478576077.md) - Verifies exact retained startup source and receipt ownership, ordered unpublished Startup activation, bounded runtime fault metadata, and finite lease retirement.
@@ -145,5 +149,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-07-21
 * **Work Registration**: [Reference-game runtime authority and delivery: RGD-U2](registry/2026-07/2026-07-21T171141Z-engine-foundation-contract-completion-codex-root-0b91543a2a524a0abf5749c95091e530.md) - Publish one frozen component behavior authority for RuntimePlan, Editor, and candidate World.
-* **Work Registration**: [Reference-game runtime authority and delivery: RGD-U1 complete](registry/2026-07/2026-07-21T171120Z-engine-foundation-contract-completion-codex-root-2e2b7d538ebc48ae906bd07773ef20bc.md) - Completes successor authority migration after reviewed dependency-graph and governance verification.
-* **Verification Evidence**: [RGD-U1 successor authority activation verification](verification/2026-07/2026-07-21T170414Z-rgd-u1-successor-authority-activation-verification-675a512f9e1949fa91bdb7284f361731.md) - Verifies successor-plan activation, predecessor supersession, dependency-graph repair, and governance checks at the activation commit.
