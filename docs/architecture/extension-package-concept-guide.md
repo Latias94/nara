@@ -292,7 +292,7 @@ Most Rust names in the walkthrough are proposed. Read each row independently:
 | Package-fed schema contribution candidate and binding | Proposed |
 | UI-neutral editor workspace models and commands | Implemented in substantial part |
 | Third-party tooling contribution/provider candidate | Proposed |
-| Current importer traits and image import path | Implemented but transitional; not the shared Import Host design |
+| Concrete Image import path | Implemented under ADR 0103; generic importer traits and registry are removed |
 | Atomic package authoring and leaf contract kernel | Proposed |
 | Shared Import Host and artifact-group publication | Proposed |
 | Render Feature/Pass provider, Pipeline Family, wgpu/native interop, and replacement Render Host roles | Candidate pressure classes only; ADR 0094 admits no public Interface for them yet |

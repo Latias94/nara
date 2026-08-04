@@ -14,7 +14,6 @@ pub enum ImportLabelKind {
     ImportedAssetType,
     ImportDependencyRole,
     ArtifactLabel,
-    SourceExtension,
 }
 
 impl Display for ImportLabelKind {
@@ -25,7 +24,6 @@ impl Display for ImportLabelKind {
             Self::ImportedAssetType => formatter.write_str("imported asset type"),
             Self::ImportDependencyRole => formatter.write_str("import dependency role"),
             Self::ArtifactLabel => formatter.write_str("artifact label"),
-            Self::SourceExtension => formatter.write_str("source extension"),
         }
     }
 }

@@ -10,13 +10,13 @@ use std::{
 
 use nara_app::{App, CoreStage};
 use nara_asset::{
-    AssetEventKind, AssetEvents, AssetId, AssetLoadGeneration, AssetLoadGenerations, AssetPath,
-    AssetRecord, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
-    AssetReloadRequestKind, AssetServer, AssetSourceChangeKind, AssetSourceChanges,
-    AssetSourceKind, AssetStates, AssetTaskUpdateSet, AssetVersion, Assets, Handle,
-    ImportArtifactPathError, ImportDependencyDigest, ImportProfile, ImportRequest,
-    ImportSettingsHash, Importer, ImporterRegistry, ImporterSelectionError, LoadState,
-    SourceExtension, SourceHash, StableAssetId,
+    ArtifactFormatVersion, ArtifactLabel, AssetEventKind, AssetEvents, AssetId,
+    AssetLoadGeneration, AssetLoadGenerations, AssetPath, AssetRecord, AssetReloadDiagnostics,
+    AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind, AssetServer,
+    AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind, AssetStates, AssetTaskUpdateSet,
+    AssetVersion, Assets, Handle, ImportArtifactKey, ImportArtifactPathError, ImportArtifactRecord,
+    ImportDependencyDigest, ImportProfile, ImportSettingsHash, ImportedAssetType, ImporterId,
+    ImporterVersion, LoadState, SourceHash, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
@@ -67,16 +67,6 @@ fn bounded_task_config(io_workers: usize, io_pending: usize) -> TaskPoolConfig {
         TaskShutdownPolicy::default(),
     )
     .unwrap()
-}
-
-fn request<'a>(record: &'a AssetRecord, source_bytes: &'a [u8]) -> ImportRequest<'a> {
-    ImportRequest::new(
-        record,
-        source_bytes,
-        ImportDependencyDigest::empty(),
-        ImportSettingsHash::default(),
-        ImportProfile::default(),
-    )
 }
 
 fn bytes_request(record: &AssetRecord, source_bytes: &[u8]) -> ImageBytesImportRequest {
@@ -260,20 +250,18 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
             vec![],
         ),
         ImageDiagnosticCase::new(
-            "import-selection",
-            ImageReloadError::Import(ImageImportError::Selection(
-                ImporterSelectionError::MissingSourceExtension {
-                    path: AssetPath::new("textures/player").unwrap(),
-                },
-            )),
-            "image.import-selection-failed",
-            "Image importer selection failed",
+            "missing-source-extension",
+            ImageReloadError::Import(ImageImportError::MissingSourceExtension {
+                path: AssetPath::new("textures/player").unwrap(),
+            }),
+            "image.import-source-extension-missing",
+            "Image source extension is missing",
             vec![identifier_field("stage", "admission")],
         ),
         ImageDiagnosticCase::new(
             "import-unsupported-format",
             ImageReloadError::Import(ImageImportError::UnsupportedFormat {
-                extension: SourceExtension::new("gif").unwrap(),
+                extension: "gif".to_owned(),
             }),
             "image.import-format-unsupported",
             "Image format is unsupported",
@@ -653,28 +641,68 @@ fn unsupported_image_extension_returns_import_diagnostic() {
 
     assert!(matches!(
         error,
-        ImageImportError::UnsupportedFormat { extension } if extension.as_str() == "jpg"
+        ImageImportError::UnsupportedFormat { extension } if extension == "jpg"
     ));
 }
 
 #[test]
-fn importer_registry_selects_png_importer_by_extension() {
-    let importer = ImageImporter::default();
-    assert_eq!(
-        nara_asset::Importer::descriptor(&importer).version(),
-        nara_asset::ImporterVersion::new(2)
+fn concrete_image_importer_owns_extension_admission() {
+    let uppercase = image_record("textures/player.PNG");
+    let imported = import_uncommitted(
+        &ImageImporter::default(),
+        &uppercase,
+        &rgba_png(1, 1, &[0, 0, 255, 255]),
     );
-    let mut registry = ImporterRegistry::new();
-    registry.register(importer).unwrap();
+    assert_eq!(imported.image().source().path(), uppercase.path());
+
+    let missing = image_record("textures/player");
+    let error =
+        try_import_uncommitted(&ImageImporter::default(), &missing, b"not a png").unwrap_err();
+    assert!(matches!(
+        error,
+        ImageImportError::MissingSourceExtension { path }
+            if path.as_str() == missing.path().as_str()
+    ));
+}
+
+#[test]
+fn concrete_image_import_owns_stable_artifact_identity() {
+    let importer = ImageImporter::default();
     let record = image_record("textures/player.png");
     let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
+    let dependency_digest = ImportDependencyDigest::from_digest([7; 32]);
+    let settings_hash = ImportSettingsHash::from_bytes(b"image-settings");
+    let profile = ImportProfile::new("mobile").unwrap();
+    let mut server = AssetServer::new();
+    let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+    let imported = importer
+        .import_image(
+            ImageBytesImportRequest::new(
+                record.clone(),
+                bytes.clone(),
+                dependency_digest,
+                settings_hash,
+                profile.clone(),
+            ),
+            handle,
+            AssetVersion::ZERO,
+            &server,
+            &Assets::default(),
+            &AssetStates::default(),
+        )
+        .unwrap();
+    let key = imported.artifact().key();
 
-    let artifact = registry.import(request(&record, &bytes)).unwrap();
-
-    assert_eq!(
-        artifact.key().output_asset_type().as_str(),
-        "nara_image.image"
-    );
+    assert_eq!(key.stable_id(), record.stable_id());
+    assert_eq!(key.source_hash(), SourceHash::from_bytes(&bytes));
+    assert_eq!(key.dependency_digest(), dependency_digest);
+    assert_eq!(key.importer_id().as_str(), "nara_image_png");
+    assert_eq!(key.importer_version(), ImporterVersion::new(2));
+    assert_eq!(key.settings_hash(), settings_hash);
+    assert_eq!(key.profile(), &profile);
+    assert_eq!(key.output_asset_type().as_str(), "nara_image.image");
+    assert_eq!(key.artifact_label(), &ArtifactLabel::default());
+    assert_eq!(key.artifact_format_version(), ArtifactFormatVersion::new(1));
 }
 
 #[test]
@@ -2698,15 +2726,29 @@ fn descriptor_hash_changes_when_content_descriptor_changes() {
 fn direct_image_source() -> ImageSourceMetadata {
     let record = image_record("textures/direct-image.png");
     let source_bytes = b"direct image source";
-    let artifact = ImageImporter::default()
-        .import(request(&record, source_bytes))
-        .unwrap();
+    let artifact = test_artifact_record(&record, source_bytes);
     ImageSourceMetadata::new(
         record.stable_id(),
         record.path().clone(),
         SourceHash::from_bytes(source_bytes),
         artifact,
     )
+}
+
+fn test_artifact_record(record: &AssetRecord, source_bytes: &[u8]) -> ImportArtifactRecord {
+    ImportArtifactRecord::new(ImportArtifactKey::new(
+        record.stable_id(),
+        SourceHash::from_bytes(source_bytes),
+        ImportDependencyDigest::empty(),
+        ImporterId::new("image-test").unwrap(),
+        ImporterVersion::new(1),
+        ImportSettingsHash::default(),
+        ImportProfile::default(),
+        ImportedAssetType::new("image-test").unwrap(),
+        ArtifactLabel::default(),
+        ArtifactFormatVersion::new(1),
+    ))
+    .unwrap()
 }
 
 #[test]
@@ -2760,9 +2802,7 @@ fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
 fn image_asset_reuses_the_admitted_pixel_allocation() {
     let record = image_record("textures/player.png");
     let source_bytes = b"image allocation fixture";
-    let artifact = ImageImporter::default()
-        .import(request(&record, source_bytes))
-        .unwrap();
+    let artifact = test_artifact_record(&record, source_bytes);
     let pixels = vec![24, 120, 220, 255];
     let admitted_allocation = pixels.as_ptr();
 

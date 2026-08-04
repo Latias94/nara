@@ -4,21 +4,31 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-16
+**Last Updated**: 2026-08-04
 
 **Owner**: `nara_asset`, importer-owning domains, concrete authoring Hosts, `nara_tasks`, and `nara_fs`
 
 **Authority**: Non-normative Interface design. Accepted ADRs remain authoritative on conflict.
 
-**Document Role**: Import specialization appendix; dormant until ADR 0087 or an Accepted successor is admitted.
+**Document Role**: Historical import-specialization appendix; dormant until ADR 0087 or an
+Accepted successor is admitted after ADR 0103's second-domain trigger.
 
 **Upstream Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md), [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md)
 
 **Concept Guide**: [Extension Package Concept Guide](extension-package-concept-guide.md)
 
-**Related ADRs**: [0007](adr/0007-asset-identity-and-import-pipeline.md), [0033](adr/0033-asset-import-and-render-resource-preparation-seam.md), [0037](adr/0037-asset-load-request-cache-and-lifetime-policy.md), [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md), [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md), [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md), [0068](adr/0068-global-resource-budgets-metrics-and-diagnostic-privacy.md), [0070](adr/0070-capability-oriented-filesystem-substrate.md), [0080](adr/0080-domain-owned-task-update-integration-sets.md), [0083](adr/0083-durable-project-asset-and-document-entity-identity.md), [0087](adr/0087-asset-dependency-import-product-and-artifact-publication-graph.md), [0091](adr/0091-editor-persistence-recovery-and-concurrent-writer-policy.md)
+**Related ADRs**: [0007](adr/0007-asset-identity-and-import-pipeline.md), [0033](adr/0033-asset-import-and-render-resource-preparation-seam.md), [0037](adr/0037-asset-load-request-cache-and-lifetime-policy.md), [0049](adr/0049-untrusted-project-input-and-parse-budget-policy.md), [0050](adr/0050-asset-root-symlink-junction-and-package-trust-policy.md), [0052](adr/0052-task-backpressure-cancellation-and-long-running-diagnostics.md), [0068](adr/0068-global-resource-budgets-metrics-and-diagnostic-privacy.md), [0070](adr/0070-capability-oriented-filesystem-substrate.md), [0080](adr/0080-domain-owned-task-update-integration-sets.md), [0083](adr/0083-durable-project-asset-and-document-entity-identity.md), [0087](adr/0087-asset-dependency-import-product-and-artifact-publication-graph.md), [0091](adr/0091-editor-persistence-recovery-and-concurrent-writer-policy.md), [0103](adr/0103-concrete-domain-owned-asset-import-execution.md)
 
 **Research Context**: [Extension Ecosystem Research](../knowledge/engineering/extension-ecosystem-engine-research.md)
+
+## Current Status
+
+ADR 0103 supersedes this draft's assumptions about the current implementation. The generic
+`Importer`, `TypedImporter<T>`, descriptor, and erased registry surfaces have been deleted. Image
+now owns its bounded read-decode-publication transaction directly while `nara_asset` retains only
+shared identity, artifact, reload-generation, and scheduling primitives. The rest of this document
+is future design evidence, not an API roadmap. A shared Import Host may be reconsidered only after
+a second complete production asset domain exposes measured duplicated policy.
 
 ## Purpose
 
@@ -79,12 +89,12 @@ publication requirements.
 |---|---|---|
 | Stable asset UUID and current metadata lookup | Implemented in `nara_asset` | Current `AssetMeta` still duplicates path authority and is transitional |
 | ADR 0083 metadata and product identity authority | Proposed, not started | Final `.meta` authority shape, durable product IDs, and full reconciliation are absent |
-| Importer metadata and registry | Implemented in `crates/nara_asset/src/import.rs` | Registry stores live erased single-output importers and treats extension selection too narrowly |
+| Generic importer metadata and registry | Removed by ADR 0103 | No production Host executed it; a future shared Host requires second-domain evidence |
 | Artifact and dependency digests | Implemented in `crates/nara_asset/src/artifact.rs` | One aggregate dependency digest is not the exact typed observation graph required by ADR 0087 |
 | Typed image import | Implemented in `nara_image` | `ImageImporter` is directly constructed in jobs; the typed provider is not the catalog execution path |
 | Task backpressure and terminal handles | Settled and substantially implemented under ADR 0052 | Import-domain priority, generation, last-good, and publication do not belong in `nara_tasks` |
 | Asset task integration stages | Settled and implemented in part under ADR 0080 | `nara_image` still owns a private spawn/poll/apply pipeline |
-| Filesystem authority | Settled, pending under ADR 0070 | Image reload jobs still call `std::fs::read` directly |
+| Filesystem authority | Implemented for Image through Host-issued `FileCapability` values | Broader future domains must prove their own bounded authority path |
 | Multi-product graph and atomic artifact groups | Proposed by ADR 0087 | Tracked reads, stable product reconciliation, exact invalidation, and crash-safe group publication are not implemented |
 | Shared Import Host | Proposed here | No common provider/context/candidate/publication Module exists |
 
@@ -93,17 +103,17 @@ domain.
 
 ## Problem
 
-The current import path spreads one domain transaction across several owners:
+Before ADR 0103, the import path spread one domain transaction across several owners:
 
-- `ImporterRegistry` stores `Box<dyn Importer>` for a single artifact-record result;
-- `TypedImporter<T>` is useful in tests but is not the object stored in that registry;
+- `ImporterRegistry` stored `Box<dyn Importer>` for a single artifact-record result;
+- `TypedImporter<T>` existed only as an unused parallel abstraction;
 - `nara_image` directly constructs `ImageImporter`, reads the filesystem, submits task closures,
   captures ready jobs, orders integration, applies results, and records last-good behavior;
 - each new asset type could therefore copy filesystem, task, generation, stale-result, queue,
   diagnostic, and publication policy.
 
-This is a shallow product seam. Deleting a shared Import Host would redistribute hundreds of lines
-of lifecycle logic into image, audio, font, model, animation, and future third-party importers.
+This was a shallow product seam. ADR 0103 selected complete concrete-domain ownership until a
+second real domain demonstrates which lifecycle policy is genuinely shared.
 
 The opposite design is also unsafe. A broad context containing `AssetServer`, raw paths,
 `DirectoryCapability`, `TaskPools`, editor workspace, process creation, and publication methods
@@ -875,7 +885,7 @@ shared stage seam only after at least two real Adapters vary independently.
 | Minimal provider plus context-owned outputs | High | High for transaction policy | Correctly between domain decode and Host transaction | Base recommendation |
 | Flexible affinity-partitioned catalog and streaming staging | High for large/affine use cases | High if placement stays private | Correct at concrete Adapter/storage seams | Retain as advanced implementation shape |
 | Ergonomic provider returning context-created candidate | High for common author flow | Medium; provider still controls sealing order | Candidate seam is exposed one phase too early | Keep typed conveniences, move finalization back to Host |
-| Current single-output `TypedImporter<T>` | High only for one isolated decode | Low for tasks, dependencies, and publication | Seam stops before the real complexity | Replace after migration |
+| Deleted single-output `TypedImporter<T>` | High only for one isolated decode | Low for tasks, dependencies, and publication | Seam stopped before the real complexity | Do not restore; reconsider only from two complete domains |
 
 The selected hybrid is:
 
@@ -998,8 +1008,9 @@ extension package. The trigger is a failed product-closure proof, not architectu
    concurrent writer policy, filesystem guarantee tiers, zero named-staging creation on unsupported
    tiers, degraded legacy-orphan handling, and every admitted publication crash point through the
    public workflow.
-5. Delete obsolete `Importer`, `TypedImporter`, `ImportRequest`, `ImportJobInput`,
-   `ImportedAsset<T>`, label-as-identity, and compatibility scaffolding once both providers migrate.
+5. Preserve ADR 0103's deletion of `Importer`, `TypedImporter`, `ImportRequest`, `ImportJobInput`,
+   `ImportedAsset<T>`, label-as-identity, and compatibility scaffolding. Any admitted successor
+   replaces concrete paths only after its second-domain evidence passes.
 6. Run release/server product-closure audits and split physical crates only if the measured graph
    cannot exclude authoring code.
 7. Admit ADR 0087 only after its complete evidence matrix passes.

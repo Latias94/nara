@@ -29,9 +29,9 @@ rendering, atlases, materials, runtime UI images, or 3D mesh/material rendering.
 
 Rules:
 
-- `nara_asset` owns source asset identity, `.meta` records, importer registry metadata, import
-  settings hashes, imported artifact records, asset dependency graph data, load states, and reload
-  events.
+- `nara_asset` owns source asset identity, `.meta` records, import settings hashes, imported
+  artifact records, asset dependency graph data, load states, and reload events. Concrete asset
+  domains own import execution; `nara_asset` has no generic decoder registry.
 - `nara_asset` must not own GPU resources or depend on render backend crates.
 - Source asset `.meta` files live beside source assets first, for example
   `assets/textures/player.png.meta`. The `.meta` file is the stable identity authority for the
@@ -66,7 +66,7 @@ Rules:
 The first implementation slice after scene/prefab serialization should therefore combine:
 
 1. source-side `.meta` identity and stable `AssetRef::StableId` resolution;
-2. an importer registry and imported artifact cache model;
+2. stable imported-artifact identity plus concrete domain-owned import execution;
 3. image import and texture descriptor assets;
 4. render resource preparation state in `nara_render`;
 5. material-aware sprite/tilemap usage through typed handles and prepared render resources;
@@ -114,8 +114,8 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 
 - `AssetRef::StableId` is a real resolution path through `.meta` and `ProjectAssetDatabase`;
   `AssetRef::Path` remains useful for hand-authored and AI-generated files.
-- Texture upload should not be implemented as a sprite-only feature. It should be the first consumer
-  of the generic import/prepare/cache path.
+- Texture upload should not be implemented as a sprite-only feature. It consumes the shared
+  artifact identity and prepare/cache primitives after the Image domain completes import.
 - Render backends need resource-cache invalidation tests, not only draw-path tests.
 - Scene and prefab validation can check unresolved asset IDs before world mutation. Spawning uses a
   scratch `AssetServer` during component preflight and writes it back to the target `World` only when
@@ -140,8 +140,9 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   Changing sampler policy is a material change, not an image import or prepare change.
 - Sprite and tilemap authoring components store typed handles to `ImageAsset`/`TileSet` inside
   narrow material wrappers; backend texture objects remain private to `nara_render_wgpu`.
-- `nara_image::ImagePlugin` is the first domain implementation of the async import seam. It registers
-  `ImageImporter`, spawns image reload jobs from `AssetReloadRequest` values in
+- `nara_image::ImagePlugin` is the first domain implementation of the async import seam. It installs
+  `ImageImporter` as the concrete execution resource, spawns image reload jobs from
+  `AssetReloadRequest` values in
   `AssetTaskUpdateSet::SpawnJobs`, applies typed `ImageAsset` results in
   `AssetTaskUpdateSet::ApplyResults`, and then updates backend-neutral `PreparedImageResources` in
   `CoreStage::Prepare`.

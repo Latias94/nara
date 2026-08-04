@@ -5,7 +5,6 @@ mod database;
 #[cfg(feature = "serde")]
 mod format;
 mod identity;
-mod import;
 mod reload;
 mod revision;
 mod server;
@@ -32,11 +31,6 @@ pub use database::{
 pub use format::{AssetMetaCandidate, AssetMetaFileLimits, AssetMetaFormatError};
 pub use identity::{
     AssetId, AssetPath, AssetPathError, AssetRef, StableAssetId, StableAssetIdError,
-};
-pub use import::{
-    ImportError, ImportJobInput, ImportRequest, ImportedAsset, Importer, ImporterDescriptor,
-    ImporterDescriptorError, ImporterRegistry, ImporterRegistryError, ImporterSelectionError,
-    SourceExtension, TypedImporter,
 };
 pub use reload::{
     ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations,

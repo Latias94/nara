@@ -2712,6 +2712,87 @@ remains provisional and advanced-only.
 `reference-game/tests/authoring.rs`, `reference-game/tests/first_wave.rs`, and
 `reference-game/tests/desktop_render.rs`.
 
+## NUI-U3: Concrete Domain-Owned Asset Import Execution
+
+**Removed contract**:
+
+- `Importer`, `TypedImporter<T>`, `ImporterRegistry`, `ImporterDescriptor`, `ImportRequest`,
+  `ImportJobInput`, generic `ImportedAsset<T>`, their selection/registration errors, and
+  `SourceExtension` plus `ImportLabelKind::SourceExtension`.
+- The `ImporterRegistry` ECS resource and Image plugin registration step.
+- `ImageImporter`'s generic trait implementation and descriptor-shaped construction failure.
+- `ImageImportError::Selection`; a missing suffix is now the concrete
+  `MissingSourceExtension` error. Its stable diagnostic code changes from
+  `image.import-selection-failed` to `image.import-source-extension-missing`, and its safe summary
+  changes from `Image importer selection failed` to `Image source extension is missing`.
+
+**Canonical replacement or deletion rationale**: no production Host executed the registry. Image
+jobs always consumed `ImageImporter` directly and already owned source authority, budgets, decode,
+task ordering, generation/version checks, and typed publication. `nara_asset` therefore retains the
+shared stable source/artifact identity and reload primitives, while `nara_image` privately creates
+the exact `ImportArtifactKey` for its decoded product. No provider, registry, or compatibility
+facade replaces the deleted surface. A shared executor may be reconsidered only after a second
+complete asset domain demonstrates concrete duplicated policy.
+
+**Before**:
+
+```rust
+let mut registry = ImporterRegistry::new();
+registry.register(ImageImporter::default())?;
+let artifact = registry.import(ImportRequest::new(
+    &record,
+    png_bytes,
+    dependency_digest,
+    settings_hash,
+    profile,
+))?;
+```
+
+**After**:
+
+```rust
+let imported = ImageImporter::default().import_image(
+    ImageBytesImportRequest::new(
+        record,
+        png_bytes,
+        dependency_digest,
+        settings_hash,
+        profile,
+    ),
+    handle,
+    expected_version,
+    &asset_server,
+    &images,
+    &states,
+)?;
+```
+
+**User action**: call the concrete Image byte/file APIs and carry `ImageImportedAsset` through its
+typed commit path. Remove generic importer registration, dispatch, descriptor inspection, and
+exhaustive matches for the deleted errors. Match `ImageImportError::MissingSourceExtension` or
+`UnsupportedFormat { extension }` for Image admission diagnostics, remove exhaustive
+`ImportLabelKind::SourceExtension` arms, and update telemetry/alert classification to the new
+missing-extension diagnostic code.
+
+**Source action**: none. Asset metadata, Scene/Prefab records, and image sources are unchanged.
+
+**Cache action**: keep. The Image importer ID, importer version 2, output type, artifact format
+version, profile, settings hash, dependency digest, source hash, and artifact label are unchanged,
+so existing version-2 Image artifact keys remain exact.
+
+**Compatibility window**: none (pre-1.0 fearless deletion). No deprecated aliases, empty registry,
+or adapter traits remain.
+
+**Rollback**: revert the complete NUI-U3 boundary change. Do not restore registration metadata
+without a Host that owns execution, authority, budgets, errors, tasks, and publication end to end.
+
+**Verification anchors**: `crates/nara_asset/src/artifact.rs`,
+`crates/nara_image/src/import.rs`, `crates/nara_image/src/reload.rs`,
+`crates/nara_image/src/tests.rs`, `crates/nara_image/tests/image_import_limits.rs`,
+`tests/image_import_limits.rs`, `reference-game/tests/image_asset_safety.rs`, and the root Image
+examples prove concrete execution, exact artifact identity, bounded failure, stale-result
+rejection, and last-good publication.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

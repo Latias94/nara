@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use nara_asset::{AssetRecord, ImportRequest};
+use nara_asset::AssetRecord;
 use nara_tasks::TaskCancellationToken;
 
 use crate::budget::{ImageImportCharge, ImageImportReservation};
@@ -10,14 +10,14 @@ use crate::limits::{
 use crate::{ImageAsset, ImageExtent, ImageFormat, ImageImportLimitKind, ImageSourceMetadata};
 
 use super::{
-    ImageImportError, ImageImportStage, ImageImporter, ImagePngFailureKind,
+    ImageDecodeRequest, ImageImportError, ImageImportStage, ImageImporter, ImagePngFailureKind,
     ImageUnsupportedFeature, validate_extension,
 };
 
 impl ImageImporter {
     pub(super) fn decode_png(
         &self,
-        request: ImportRequest<'_>,
+        request: ImageDecodeRequest<'_>,
         encoded_allocation_bytes: usize,
         publication_overlap_bytes: usize,
         reservation: &mut ImageImportReservation,
@@ -37,7 +37,7 @@ impl ImageImporter {
 
     pub(super) fn decode_png_with_preflight(
         &self,
-        request: ImportRequest<'_>,
+        request: ImageDecodeRequest<'_>,
         preflight: PngHeaderPreflight,
         memory_plan: ImageImportMemoryPlan,
         reservation: &mut ImageImportReservation,

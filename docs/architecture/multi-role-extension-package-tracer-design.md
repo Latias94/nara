@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-13
 
-**Last Updated**: 2026-07-16
+**Last Updated**: 2026-08-04
 
 **Owner**: source package composition, runtime, schema, asset import, tooling, and concrete product Hosts
 
@@ -746,8 +746,9 @@ contribution, but it cannot hide schema discovery or mutate a closed package pla
 ### 5. Import Contribution And Shared Host
 
 The focused [Asset Import Host Interface Design](asset-import-host-interface-design.md) supersedes
-the earlier provider-returned candidate sketch. The current `TypedImporter<T>` remains useful
-evidence but is not the final provider catalog:
+the earlier provider-returned candidate sketch. ADR 0103 has since deleted `TypedImporter<T>` and
+the erased registry; the following trait is an unadmitted future sketch, not a current migration
+target:
 
 ```rust
 pub trait Importer: Send + Sync + 'static {
@@ -767,10 +768,10 @@ pub trait Importer: Send + Sync + 'static {
 }
 ```
 
-Importer metadata comes from the verified package contribution rather than a duplicate
-`descriptor()` method. The target trait replaces the current `Importer` / `TypedImporter<T>` pair
-rather than adding a third path. Required `map_error` writes through a bounded Host-owned sink, so
-error mapping has one explicit source and cannot stringify arbitrary payloads. The first
+Importer metadata would come from a verified package contribution rather than a duplicate
+`descriptor()` method. An admitted successor would replace concrete domain paths rather than
+restoring the deleted pair or adding a parallel path. Required `map_error` writes through a bounded
+Host-owned sink, so error mapping has one explicit source and cannot stringify arbitrary payloads. The first
 `package::importer` helper captures a repeatable `Fn() -> I + Send + Sync + 'static` factory for
 `I: Importer`; the concrete threaded Adapter privately erases associated settings/error types while
 retaining those already-proven bounds. A local affine or process Adapter requires a distinct

@@ -19,7 +19,7 @@ use nara_asset::{
     AssetEvents, AssetId, AssetLoadGenerations, AssetPath, AssetReloadDiagnostics,
     AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetStateError,
     AssetStates, AssetTaskUpdateSet, Assets, Handle, ImageReloadConsumer, ImageReloadDrainError,
-    ImageReloadRegistrationError, ImporterRegistry, register_image_reload_consumer,
+    ImageReloadRegistrationError, register_image_reload_consumer,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
@@ -388,9 +388,7 @@ impl Plugin for ImagePlugin {
         app.init_resource::<ImageReloadStats>()?;
         app.init_resource::<PendingImageJobs>()?;
         app.init_resource::<ReadyImageJobs>()?;
-        app.init_resource::<ImporterRegistry>()?;
         app.insert_resource(self.importer.clone())?;
-        register_image_importer(app, self.importer.clone())?;
         let reload_consumer =
             register_image_reload_consumer(app).map_err(image_reload_registration_plugin_error)?;
         app.add_systems(
@@ -435,20 +433,6 @@ impl Plugin for ImagePlugin {
                 .in_set(ImageReloadInternalSet::ApplyResults),
         )?;
         Ok(())
-    }
-}
-
-fn register_image_importer(app: &mut App, importer: ImageImporter) -> Result<(), PluginError> {
-    let mut registry = app.world_mut()?.resource_mut::<ImporterRegistry>();
-    registry
-        .register(importer)
-        .map_err(|error| image_plugin_setup_error("register image importer", error))
-}
-
-fn image_plugin_setup_error(context: &'static str, error: impl fmt::Display) -> PluginError {
-    PluginError::SetupFailed {
-        plugin: IMAGE_PLUGIN_ID,
-        message: format!("{context}: {error}"),
     }
 }
 
@@ -817,7 +801,7 @@ pub(super) fn image_reload_diagnostic(path: &AssetPath, error: &ImageReloadError
                 ImageImportError::Publication(kind) => {
                     diagnostic = with_image_public_identifier(diagnostic, "reason", kind.as_str());
                 }
-                ImageImportError::Selection(_)
+                ImageImportError::MissingSourceExtension { .. }
                 | ImageImportError::UnsupportedFormat { .. }
                 | ImageImportError::ArtifactPath(_)
                 | ImageImportError::Cancelled { .. } => {}

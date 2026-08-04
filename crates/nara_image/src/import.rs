@@ -1,14 +1,16 @@
 mod png;
 mod publication;
 
-use std::fmt::{self, Debug, Display, Formatter};
+use std::{
+    fmt::{self, Debug, Display, Formatter},
+    sync::LazyLock,
+};
 
 use nara_asset::{
-    ArtifactFormatVersion, ArtifactLabel, AssetRecord, AssetServer, AssetStates, AssetVersion,
-    Assets, Handle, ImportArtifactPathError, ImportArtifactRecord, ImportDependencyDigest,
-    ImportError, ImportProfile, ImportRequest, ImportSettingsHash, ImportedAssetType, Importer,
-    ImporterDescriptor, ImporterDescriptorError, ImporterId, ImporterSelectionError,
-    ImporterVersion, SourceExtension,
+    ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetRecord, AssetServer, AssetStates,
+    AssetVersion, Assets, Handle, ImportArtifactKey, ImportArtifactPathError, ImportArtifactRecord,
+    ImportDependencyDigest, ImportProfile, ImportSettingsHash, ImportedAssetType, ImporterId,
+    ImporterVersion, SourceHash,
 };
 use nara_ecs::Resource;
 use nara_fs::{DirectoryCapability, FileCapability, FsError, PathValidationError, RelativePath};
@@ -138,7 +140,6 @@ impl ImagePngFailureKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageImporterCreateError {
-    Descriptor(ImporterDescriptorError),
     Limits(ImageImportLimitsError),
     BudgetLimitMismatch { configured: u64, host: u64 },
     BudgetOverlapLimitTooSmall { required: u64, host: u64 },
@@ -148,7 +149,6 @@ pub enum ImageImporterCreateError {
 impl Display for ImageImporterCreateError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Descriptor(error) => Display::fmt(error, formatter),
             Self::Limits(error) => Display::fmt(error, formatter),
             Self::BudgetLimitMismatch { configured, host } => write!(
                 formatter,
@@ -173,9 +173,11 @@ impl std::error::Error for ImageImporterCreateError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageImportError {
-    Selection(ImporterSelectionError),
+    MissingSourceExtension {
+        path: AssetPath,
+    },
     UnsupportedFormat {
-        extension: SourceExtension,
+        extension: String,
     },
     ArtifactPath(ImportArtifactPathError),
     Budget {
@@ -204,9 +206,9 @@ impl ImageImportError {
     #[must_use]
     pub const fn stage(&self) -> ImageImportStage {
         match self {
-            Self::Selection(_) | Self::UnsupportedFormat { .. } | Self::ArtifactPath(_) => {
-                ImageImportStage::Admission
-            }
+            Self::MissingSourceExtension { .. }
+            | Self::UnsupportedFormat { .. }
+            | Self::ArtifactPath(_) => ImageImportStage::Admission,
             Self::Budget { stage, .. } => *stage,
             Self::Unsupported { stage, .. }
             | Self::Png { stage, .. }
@@ -219,7 +221,7 @@ impl ImageImportError {
     #[must_use]
     pub const fn stable_code(&self) -> &'static str {
         match self {
-            Self::Selection(_) => "image.import-selection-failed",
+            Self::MissingSourceExtension { .. } => "image.import-source-extension-missing",
             Self::UnsupportedFormat { .. } => "image.import-format-unsupported",
             Self::ArtifactPath(_) => "image.import-artifact-path-failed",
             Self::Budget { .. } => "image.import-budget-exceeded",
@@ -234,7 +236,7 @@ impl ImageImportError {
     #[must_use]
     pub const fn safe_summary(&self) -> &'static str {
         match self {
-            Self::Selection(_) => "Image importer selection failed",
+            Self::MissingSourceExtension { .. } => "Image source extension is missing",
             Self::UnsupportedFormat { .. } => "Image format is unsupported",
             Self::ArtifactPath(_) => "Image artifact path creation failed",
             Self::Budget { .. } => "Image import budget was exceeded",
@@ -435,6 +437,46 @@ struct BudgetedImageInput {
     reservation: ImageImportReservation,
 }
 
+struct ImageDecodeRequest<'a> {
+    source: &'a AssetRecord,
+    source_bytes: &'a [u8],
+    source_hash: SourceHash,
+    dependency_digest: ImportDependencyDigest,
+    settings_hash: ImportSettingsHash,
+    profile: ImportProfile,
+}
+
+impl<'a> ImageDecodeRequest<'a> {
+    fn new(
+        source: &'a AssetRecord,
+        source_bytes: &'a [u8],
+        dependency_digest: ImportDependencyDigest,
+        settings_hash: ImportSettingsHash,
+        profile: ImportProfile,
+    ) -> Self {
+        Self {
+            source,
+            source_bytes,
+            source_hash: SourceHash::from_bytes(source_bytes),
+            dependency_digest,
+            settings_hash,
+            profile,
+        }
+    }
+
+    const fn source(&self) -> &AssetRecord {
+        self.source
+    }
+
+    const fn source_bytes(&self) -> &[u8] {
+        self.source_bytes
+    }
+
+    const fn source_hash(&self) -> SourceHash {
+        self.source_hash
+    }
+}
+
 impl BudgetedImageInput {
     fn new(bytes: Vec<u8>, reservation: ImageImportReservation) -> Self {
         Self { bytes, reservation }
@@ -496,7 +538,7 @@ impl UnpublishedImageImport {
         let image = {
             let (bytes, reservation) = input.parts_mut();
             let request =
-                ImportRequest::new(&source, bytes, dependency_digest, settings_hash, profile);
+                ImageDecodeRequest::new(&source, bytes, dependency_digest, settings_hash, profile);
             let (image, observed_plan) = importer.decode_png_with_preflight(
                 request,
                 preflight,
@@ -558,7 +600,7 @@ impl AdmittedImageImport {
         }
         let (image, memory_plan) = {
             let (bytes, reservation) = input.parts_mut();
-            let import_request = ImportRequest::new(
+            let import_request = ImageDecodeRequest::new(
                 &request.source,
                 bytes,
                 request.dependency_digest,
@@ -591,7 +633,6 @@ impl Debug for AdmittedImageImport {
 
 #[derive(Debug, Clone, Resource)]
 pub struct ImageImporter {
-    descriptor: ImporterDescriptor,
     color_space: ImageColorSpace,
     limits: ImageImportLimits,
     budget_host: ImageImportBudgetHost,
@@ -644,16 +685,7 @@ impl ImageImporter {
                 required: required_file_admission as u64,
             });
         }
-        let descriptor = ImporterDescriptor::new(
-            ImporterId::new("nara_image_png").expect("built-in importer id is valid"),
-            ImporterVersion::new(2),
-            [SourceExtension::new("png").expect("built-in source extension is valid")],
-            ImportedAssetType::new("nara_image.image").expect("built-in output type is valid"),
-            ArtifactFormatVersion::new(1),
-        )
-        .map_err(ImageImporterCreateError::Descriptor)?;
         Ok(Self {
-            descriptor,
             color_space: ImageColorSpace::Srgb,
             limits,
             budget_host,
@@ -799,7 +831,7 @@ impl ImageImporter {
         let (image, memory_plan) = {
             let (bytes, reservation) = input.parts_mut();
             let import_request =
-                ImportRequest::new(&source, bytes, dependency_digest, settings_hash, profile);
+                ImageDecodeRequest::new(&source, bytes, dependency_digest, settings_hash, profile);
             self.decode_png(
                 import_request,
                 bytes.len(),
@@ -815,33 +847,47 @@ impl ImageImporter {
 
     fn import_record(
         &self,
-        request: &ImportRequest<'_>,
+        request: &ImageDecodeRequest<'_>,
     ) -> Result<ImportArtifactRecord, ImageImportError> {
-        let key = request.artifact_key(&self.descriptor, ArtifactLabel::default());
+        let key = ImportArtifactKey::new(
+            request.source.stable_id(),
+            request.source_hash,
+            request.dependency_digest,
+            IMAGE_IMPORTER_ID.clone(),
+            IMAGE_IMPORTER_VERSION,
+            request.settings_hash,
+            request.profile.clone(),
+            IMAGE_OUTPUT_ASSET_TYPE.clone(),
+            ArtifactLabel::default(),
+            IMAGE_ARTIFACT_FORMAT_VERSION,
+        );
         ImportArtifactRecord::new(key).map_err(ImageImportError::ArtifactPath)
     }
 }
 
-impl Importer for ImageImporter {
-    fn descriptor(&self) -> &ImporterDescriptor {
-        &self.descriptor
-    }
+static IMAGE_IMPORTER_ID: LazyLock<ImporterId> = LazyLock::new(|| {
+    ImporterId::new("nara_image_png").expect("built-in image importer id is valid")
+});
+static IMAGE_OUTPUT_ASSET_TYPE: LazyLock<ImportedAssetType> = LazyLock::new(|| {
+    ImportedAssetType::new("nara_image.image").expect("built-in image output type is valid")
+});
+const IMAGE_IMPORTER_VERSION: ImporterVersion = ImporterVersion::new(2);
+const IMAGE_ARTIFACT_FORMAT_VERSION: ArtifactFormatVersion = ArtifactFormatVersion::new(1);
 
-    fn import(&self, request: ImportRequest<'_>) -> Result<ImportArtifactRecord, ImportError> {
-        validate_extension(request.source().path())
-            .map_err(|_| ImportError::ImporterFailed("image import admission failed".to_owned()))?;
-        self.import_record(&request)
-            .map_err(|_| ImportError::ImporterFailed("image artifact creation failed".to_owned()))
+fn validate_extension(path: &AssetPath) -> Result<(), ImageImportError> {
+    let file_name = path.as_str().rsplit('/').next().unwrap_or(path.as_str());
+    let Some((_, extension)) = file_name.rsplit_once('.') else {
+        return Err(ImageImportError::MissingSourceExtension { path: path.clone() });
+    };
+    if extension.is_empty() {
+        return Err(ImageImportError::MissingSourceExtension { path: path.clone() });
     }
-}
-
-fn validate_extension(path: &nara_asset::AssetPath) -> Result<(), ImageImportError> {
-    let extension = SourceExtension::from_asset_path(path).map_err(ImageImportError::Selection)?;
-    let png_extension = SourceExtension::new("png").expect("built-in source extension is valid");
-    if extension == png_extension {
+    if extension.eq_ignore_ascii_case("png") {
         Ok(())
     } else {
-        Err(ImageImportError::UnsupportedFormat { extension })
+        Err(ImageImportError::UnsupportedFormat {
+            extension: extension.to_ascii_lowercase(),
+        })
     }
 }
 

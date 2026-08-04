@@ -10,9 +10,9 @@ Golden Fixtures
 ## Context
 
 ADR 0033 defined the asset import to render-resource preparation seam. The implementation now has
-stable asset IDs, `.meta` records, importer registry metadata, import artifacts, typed `Assets<T>`,
-`LoadState`, reload generations, dependency-aware reload requests, async image imports, and backend
-GPU caches.
+stable asset IDs, `.meta` records, deterministic import artifact identity, typed `Assets<T>`,
+`LoadState`, reload generations, dependency-aware reload requests, concrete async Image import, and
+backend GPU caches.
 
 The missing contract is the public lifetime model: how runtime acquisition differs from source
 reload, how failures are observed, when cached runtime values remain alive, how stale task results

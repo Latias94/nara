@@ -23,9 +23,9 @@ Phase 1 may resolve assets by project-relative path, but the data model and APIs
 ```mermaid
 flowchart TD
     Source[Source Asset Path] --> Meta[Future .meta AssetId]
-    Source --> Importer[Asset Importer]
-    Meta --> Importer
-    Importer --> Artifact[Imported Artifact Cache]
+    Source --> Domain[Concrete Asset Domain]
+    Meta --> Domain
+    Domain --> Artifact[Imported Artifact Cache]
     Artifact --> AssetServer[AssetServer]
     AssetServer --> Handle[Handle<T>]
     Handle --> Scene[Scene / Prefab References]
@@ -89,12 +89,14 @@ Core rules:
 - Domain apply systems also check the request's expected `AssetVersion` before committing successful
   first-load results or failure states. Generations reject superseded requests; expected versions
   reject older task completions after any other state mutation advanced the asset.
-- Import work receives owned `ImportJobInput` values and returns typed `ImportedAsset<T>` values
-  through `TypedImporter<T>`. Importers may read source bytes and produce backend-neutral runtime
-  assets, but they must not allocate GPU resources.
+- Concrete asset domains own their complete import transaction and use owned, domain-specific task
+  inputs and typed results. The Image domain accepts immutable bytes or a Host-authorized file
+  capability, applies its own budgets, and produces backend-neutral CPU image data without
+  allocating GPU resources.
 - `AssetPlugin` installs the asset resources, configures the chained `AssetTaskUpdateSet` ordering,
   and runs source-change resolution in `AssetTaskUpdateSet::ResolveSourceChanges`. Domain plugins
-  register their own typed importers and join the asset-owned spawn/apply phases for reload jobs.
+  claim their concrete reload-consumer authority and join the asset-owned spawn/apply phases. As
+  refined by ADR 0103, `nara_asset` exposes no generic importer registry or erased decoder executor.
 
 ## Success Metrics
 
