@@ -1,4 +1,4 @@
-//! Tooling-facing runtime inspection seam.
+//! UI-agnostic Editor domain models and command seams.
 
 mod diagnostic;
 mod inspector;
@@ -6,8 +6,6 @@ mod persistence;
 mod play;
 mod snapshot;
 mod workspace;
-
-use nara_app::{App, CoreStage, Plugin, PluginError};
 
 pub use inspector::{
     SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
@@ -40,25 +38,3 @@ pub use workspace::{
 pub use workspace::{
     EditorPersistenceAuthority, EditorPersistenceCheckpoint, EditorPersistenceCommit,
 };
-
-#[derive(Debug, Default)]
-pub struct ToolingPlugin;
-
-pub const TOOLING_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.tooling");
-const TOOLING_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
-    &[nara_app::PluginProductCapability::new("tooling")];
-pub const TOOLING_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
-    nara_app::PluginDeclaration::new(TOOLING_PLUGIN_ID, nara_app::PluginCategory::Tooling)
-        .requires_product_capabilities(TOOLING_PRODUCT_REQUIREMENTS);
-
-impl Plugin for ToolingPlugin {
-    fn declaration() -> &'static nara_app::PluginDeclaration {
-        &TOOLING_PLUGIN_DECLARATION
-    }
-
-    fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        app.init_resource::<EditorWorkspace>()?;
-        app.add_systems(CoreStage::Last, || {})?;
-        Ok(())
-    }
-}

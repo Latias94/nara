@@ -420,6 +420,29 @@ plugin_plan = "runtime-2d"
 }
 
 #[test]
+fn runtime_tooling_capabilities_are_rejected_by_manifest() {
+    for capability in ["tooling", "tooling-egui"] {
+        let load = ProjectManifest::parse_toml_str(&format!(
+            r#"
+schema_version = 1
+
+[project]
+name = "Runtime Tooling Capability"
+
+[capabilities]
+requested = ["{capability}"]
+"#,
+        ));
+
+        assert!(load.manifest.is_none(), "accepted {capability}");
+        assert!(
+            diagnostic_codes(&load).contains(&"project.manifest.parse"),
+            "missing parse diagnostic for {capability}"
+        );
+    }
+}
+
+#[test]
 fn server_profile_enforces_headless_preserve_debt_with_threaded_tasks() {
     let load = ProjectManifest::parse_toml_str(
         r#"
@@ -451,6 +474,32 @@ name = "Server Game"
             .workers()
             .get()
             > 0
+    );
+}
+
+#[test]
+fn editor_profile_does_not_request_runtime_tooling() {
+    let load = ProjectManifest::parse_toml_str(
+        r#"
+schema_version = 1
+
+[project]
+name = "Host-Owned Editor"
+
+[profiles.editor]
+"#,
+    );
+    let settings = load
+        .manifest
+        .unwrap()
+        .resolve_profile(Some("editor"))
+        .unwrap();
+
+    assert!(
+        settings
+            .requested_capabilities
+            .iter()
+            .all(|capability| !capability.as_str().starts_with("tooling"))
     );
 }
 
@@ -997,15 +1046,15 @@ requested = ["future-renderer"]
 #[test]
 fn product_capability_iteration_is_stable_and_sorted_by_engine_vocabulary() {
     let set = ProductCapabilitySet::from_capabilities([
-        ProductCapability::ToolingEgui,
         ProductCapability::Runtime2d,
         ProductCapability::RuntimeCore,
+        ProductCapability::RenderWgpu,
     ]);
 
     assert_eq!(
         set.iter()
             .map(ProductCapability::as_str)
             .collect::<Vec<_>>(),
-        vec!["runtime-core", "runtime-2d", "tooling-egui"]
+        vec!["runtime-core", "runtime-2d", "render-wgpu"]
     );
 }

@@ -163,20 +163,15 @@ fn validate_product_request(
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
     let explicit = settings.requested_capabilities;
     let required = ProductCapabilitySet::singleton(ProductCapability::RuntimeCore);
-    let mut normalized = explicit.union(required);
-    if explicit.contains(ProductCapability::ToolingEgui) {
-        normalized.insert(ProductCapability::Tooling);
-    }
+    let normalized = explicit.union(required);
     let implied = normalized.difference(explicit);
 
     if settings.runtime_preset == RuntimePreset::Server {
         let forbidden = ProductCapabilitySet::from_capabilities([
             ProductCapability::Runtime2d,
             ProductCapability::RuntimeUi,
-            ProductCapability::Tooling,
             ProductCapability::DesktopWinit,
             ProductCapability::RenderWgpu,
-            ProductCapability::ToolingEgui,
         ]);
         let conflicting = normalized.intersection(forbidden);
         if !conflicting.is_empty() {

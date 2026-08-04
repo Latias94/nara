@@ -6,7 +6,6 @@ use std::{
 };
 
 use nara_diagnostic::DiagnosticReport;
-use nara_ecs::Resource;
 use nara_fs::{
     FileIdentity, PublicationAtomicity, PublicationIdentityEvidence, ReplaceReceipt, StageStatus,
 };
@@ -160,7 +159,7 @@ impl WorkspaceDocumentContext {
     }
 }
 
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Default)]
 pub struct EditorWorkspace {
     persistence_identity: Arc<EditorWorkspacePersistenceIdentity>,
     next_document_id: u64,
@@ -1173,12 +1172,9 @@ fn document_has_entity(document: &SceneDocument, entity: &SceneEntityId) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_app::App;
     use nara_diagnostic::DiagnosticValueRef;
     use nara_reflect::ComponentRegistry;
     use nara_scene::{SceneEntityRecord, ScenePatchOperation};
-
-    use crate::ToolingPlugin;
 
     #[test]
     fn dirty_close_requires_an_explicit_decision() {
@@ -1725,14 +1721,6 @@ mod tests {
         );
         assert!(error.into_session().live_instance().is_some());
         assert!(workspace.is_empty());
-    }
-
-    #[test]
-    fn tooling_plugin_initializes_editor_workspace() {
-        let mut app = App::new();
-        app.add_plugin(ToolingPlugin).unwrap();
-
-        assert!(app.world().contains_resource::<EditorWorkspace>());
     }
 
     fn diagnostic_field_value<'a>(

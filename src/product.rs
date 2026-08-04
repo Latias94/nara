@@ -620,8 +620,6 @@ const SLOT_UI_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.ui-ren
 const SLOT_WINDOW: PluginSlotId = PluginSlotId::new("nara.plugins.slot.window");
 #[cfg(feature = "render-wgpu")]
 const SLOT_WGPU_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.render-wgpu");
-#[cfg(feature = "tooling")]
-const SLOT_TOOLING: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tooling");
 const SLOT_STARTUP_SCENE_ACTIVATION: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.startup-scene-activation");
 
@@ -890,22 +888,6 @@ impl PluginGroup for WgpuBackendPlugins {
     }
 }
 
-#[cfg(feature = "tooling")]
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ToolingPlugins;
-
-#[cfg(feature = "tooling")]
-impl PluginGroup for ToolingPlugins {
-    const ID: PluginGroupId = PluginGroupId::new("nara.plugins.tooling");
-
-    fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::new().add_slot(
-            PluginSlot::required(SLOT_TOOLING, nara_tooling::TOOLING_PLUGIN_ID),
-            PluginDefinition::for_default::<nara_tooling::ToolingPlugin>(),
-        )
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ProjectProfilePlugins {
     preset: RuntimePreset,
@@ -966,16 +948,6 @@ impl PluginGroup for ProjectProfilePlugins {
             .contains(nara_project::ProductCapability::RuntimeUi)
         {
             builder.add_edited_group(RuntimeUiPlugins.edit().configure(task_plugin.clone()))
-        } else {
-            builder
-        };
-
-        #[cfg(feature = "tooling")]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::Tooling)
-        {
-            builder.add_group(ToolingPlugins)
         } else {
             builder
         };

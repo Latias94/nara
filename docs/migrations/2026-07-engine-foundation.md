@@ -52,6 +52,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | SRT-U2-1 | SRT-U2 | `0b5beba` | `rust-api/behavior/safety` | Image construction, render prepare snapshot identity, and prepare invalidation | Handle fallible `ImageAsset` construction, capture `AssetSlotRevision` in each prepare snapshot, borrow non-`Copy` snapshots, and remove the unconsumed invalidation event log. |
 | SRT-U4-1 | SRT-U4 | `25e7f6c` | `rust-api/behavior` | Lifecycle-free insertion preparation and provisional product replacement retirement | Prepare lifecycle-free insertions before commit and authorize extra retirement with `WorldEntityToken` rather than bare `Entity`; complete hierarchy validation remains read-only. |
 | NUI-U1-1 | NUI-U1 | `NUI-U1` | `architecture-authority` | Ordered placement, renderer-neutral UI modules, concrete import execution, Host-owned Editor state, closed rendering, and content/presentation composition | Treat ADRs 0101 through 0106 and the ordered UI kernel correction plan as the accepted target. No source/API migration occurs until its owning NUI unit lands and adds a concrete entry below. |
+| NUI-U2-1 | NUI-U2 | `NUI-U2` | `rust-api/cargo-feature/project-manifest` | Runtime tooling plugin installation and manifest-requestable Editor capabilities | Compile Editor models with the `tooling`/`tooling-egui` Cargo features, let the process Host own `EditorWorkspace`, and remove tooling capabilities from `nara.toml`. |
 
 ## Entry Contract
 
@@ -67,6 +68,64 @@ Each migration entry contains:
 8. **Compatibility window**: normally `none (unreleased canonical replacement)`; otherwise link the authorizing ADR.
 9. **Rollback**: how to recover source data or revert the code commit without relying on a compatibility shim.
 10. **Verification anchors**: tests, fixtures, examples, and stale-symbol searches proving the replacement is complete.
+
+## NUI-U2-1: Host-Owned Editor Workspace
+
+**Removed contract**:
+
+- `nara_tooling::ToolingPlugin`, `TOOLING_PLUGIN_ID`, and the root `ToolingPlugins` group/slot.
+- The `Resource` implementation for `EditorWorkspace` and automatic workspace insertion into a
+  runtime `World`.
+- `ProductCapability::Tooling`, `ProductCapability::ToolingEgui`, the corresponding compiled
+  runtime capability claims, Editor-profile implication, and manifest spellings `tooling` plus
+  `tooling-egui`.
+
+**Canonical replacement or deletion rationale**: Editor workspace lifetime, persistence, Play,
+Retry, and recovery belong to the process Host. Use `EditorProjectSession` for the complete hosted
+workflow or construct `EditorWorkspace` as ordinary Host-owned domain state. The existing `tooling`
+and `tooling-egui` Cargo features remain compile-time boundaries for models and adapters; they do
+not install runtime plugins or become project-requestable capabilities.
+
+Before:
+
+```rust
+app.add_plugin(nara_tooling::ToolingPlugin)?;
+let workspace = app.world().resource::<nara_tooling::EditorWorkspace>();
+```
+
+After:
+
+```rust
+let mut workspace = nara_tooling::EditorWorkspace::new();
+// The process Host owns this value and applies adapter-returned commands.
+```
+
+**Affected examples and fixtures**: root product-capability and plugin-composition fixtures,
+`nara_project` manifest/profile tests, tooling unit tests, egui adapter tests, Editor persistence and
+Play/Retry integration tests, and the reference-game Host-parity workflow.
+
+**User action**: remove `tooling` and `tooling-egui` from `[capabilities].requested`; keep the Cargo
+features when compiling an Editor Host. Remove direct `ToolingPlugin` installation and route
+workspace commands through the owning Host session.
+
+**Source action**: `manual-rewrite` for experimental `nara.toml` files that requested either removed
+capability. Runtime loading intentionally rejects the old spellings.
+
+**Cache action**: rebuild Rust artifacts; persistent Scene/Prefab data and asset caches are unchanged.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No plugin alias, capability alias,
+or duplicate ECS workspace is retained.
+
+**Rollback**: revert the tooling crate, root product composition, project capability vocabulary,
+Host tests, and manifest sources together. Do not restore only the plugin wrapper around a second
+workspace authority.
+
+**Verification anchors**: `crates/nara_tooling/src/lib.rs`,
+`crates/nara_tooling/src/workspace.rs#EditorWorkspace`, `crates/nara_project/src/capability.rs`,
+`src/project_host/runtime/editor.rs#EditorProjectSession`, `tests/plugin_composition.rs`,
+`tests/editor_persistence.rs`, `tests/ui/editor_persistence/workspace_not_resource.rs`,
+`tests/workspace_play_runtime.rs`,
+`crates/nara_tooling_egui/src/lib.rs`, and `reference-game/tests/host_parity.rs`.
 
 ## U2-1: Terminal Plugin Lifecycle and Fallible App Mutation
 

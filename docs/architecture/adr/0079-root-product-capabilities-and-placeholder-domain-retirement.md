@@ -6,8 +6,16 @@
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
 **Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md);
+[ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace
+Installation;
 [ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
 Composition
+
+## ADR 0104 Refinement
+
+The `tooling` and `tooling-egui` Cargo features remain compile-time Host boundaries, but they are no
+longer manifest-requestable runtime product capabilities. Editor profiles do not inject tooling
+into runtime plans, and no tooling plugin group or workspace resource is installed in a game World.
 
 ## ADR 0095 Refinement
 
@@ -115,8 +123,9 @@ backend-free and does not expand merely because an adapter feature is active.
 `ProjectPluginPlan` is replaced by two independent concepts:
 
 - a small runtime preset for execution policy, initially minimal, local headless, or server;
-- an additive project capability set for 2D, runtime UI, tooling, asset watching, and selected host
-  adapters.
+- an additive project capability set for runtime domains, asset watching, and selected runtime host
+  adapters. Editor tooling is selected by the process Host outside the runtime capability set under
+  ADR 0104.
 
 Presets may imply capabilities, but normalization produces one inspectable set. Explicit and preset
 forms that mean the same product must resolve identically. Project content may request less than the
@@ -289,8 +298,9 @@ feature-combination test matrix.
   graph.
 - Hosts can compile a superset while projects and plugin groups install a strict subset.
 - Capability mismatch becomes retryable pre-mutation setup failure instead of partial app state.
-- Runtime 2D, runtime UI, platform adapters, tooling adapters, and backend submitters become
-  independently inspectable product choices.
+- Runtime 2D, runtime UI, platform adapters, and backend submitters become independently
+  inspectable runtime product choices. Editor tooling remains an independently compiled Host
+  choice, not a runtime product capability.
 - Root facade items are conditionally visible according to compiled product capabilities.
 - `ProjectPluginPlan`, legacy adapter feature names, `DesktopWgpuPlugins`, and the `nara_audio`
   placeholder are intentionally breaking deletions.

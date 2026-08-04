@@ -17,17 +17,12 @@ fn compiled_ceiling_matches_the_active_cargo_features() {
         (ProductCapability::RuntimeCore, true),
         (ProductCapability::Runtime2d, cfg!(feature = "runtime-2d")),
         (ProductCapability::RuntimeUi, cfg!(feature = "runtime-ui")),
-        (ProductCapability::Tooling, cfg!(feature = "tooling")),
         (ProductCapability::AssetWatch, cfg!(feature = "asset-watch")),
         (
             ProductCapability::DesktopWinit,
             cfg!(feature = "desktop-winit"),
         ),
         (ProductCapability::RenderWgpu, cfg!(feature = "render-wgpu")),
-        (
-            ProductCapability::ToolingEgui,
-            cfg!(feature = "tooling-egui"),
-        ),
     ]
     .into_iter()
     .filter_map(|(capability, enabled)| enabled.then_some(capability))

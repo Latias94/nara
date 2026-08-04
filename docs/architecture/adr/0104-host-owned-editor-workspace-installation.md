@@ -5,7 +5,10 @@
 **Owner**: Process Host, Editor workspace and session persistence, tooling models, and UI adapters
 **Refines**: [ADR 0015](0015-editor-tooling-and-dogfooding-boundary.md),
 [ADR 0026](0026-editor-command-patch-and-undo-model.md),
+[ADR 0044](0044-root-facade-and-prelude-layering-policy.md),
+[ADR 0046](0046-plugin-metadata-and-default-plugin-groups.md),
 [ADR 0047](0047-editor-workspace-and-scene-document-state.md),
+[ADR 0079](0079-root-product-capabilities-and-placeholder-domain-retirement.md),
 [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md), and
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
 **Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U2

@@ -8,6 +8,8 @@
 Capabilities and Placeholder Domain Retirement; ADR 0095: Plugin-Owned Specialized Domains and
 Project Configuration; [ADR 0103](0103-concrete-domain-owned-asset-import-execution.md): Concrete
 Domain-Owned Asset Import Execution;
+[ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace
+Installation;
 [ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
 Composition
 
@@ -174,7 +176,10 @@ Initial group vocabulary:
 | `ServerPlugins` | Dedicated-server-ready headless composition with deterministic-friendly gameplay stages, diagnostics/metrics, and no networking transport unless an optional networking crate is explicitly added |
 | `DesktopWinitPlugins` | Backend-neutral window configuration for a desktop profile; top-level Host/code-first authority selects `WinitRunner` separately |
 | `WgpuBackendPlugins` | Transitional runtime integration for the already selected stock wgpu Host; it does not select or replace Render Host authority. Sprite and UI submitters are available only under their compiled domain/backend features and join a resolved plan only when requested. |
-| `ToolingPlugins` | UI-agnostic tooling models and optional adapter groups |
+
+Editor tooling is Host-owned under ADR 0104. The `tooling` and `tooling-egui` Cargo features compile
+Host models and adapters, but no `ToolingPlugins` group, tooling slot, or runtime product capability
+installs an Editor workspace into a game World.
 
 `MinimalPlugins` should remain small and headless. It should not grow into "everything a sample game
 might want." Examples can use richer groups when they need rendering, windowing, asset import, or UI.

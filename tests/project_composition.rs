@@ -121,9 +121,8 @@ requested = ["runtime-2d", "render-wgpu"]
     assert!(!format!("{error:?}").contains(manifest.path().to_string_lossy().as_ref()));
 }
 
-#[cfg(not(feature = "tooling-egui"))]
 #[test]
-fn implied_capability_is_rejected_when_the_compiled_ceiling_is_too_small() {
+fn runtime_tooling_capability_is_rejected_before_host_admission() {
     let manifest = TestManifest::new(
         br#"
 schema_version = 1
@@ -138,10 +137,7 @@ requested = ["tooling-egui"]
 
     let error = ingest_project_manifest(&manifest.capability(), None).unwrap_err();
 
-    assert_eq!(
-        error.kind(),
-        ProjectCandidateErrorKind::UnavailableCapabilities
-    );
+    assert_eq!(error.kind(), ProjectCandidateErrorKind::Manifest);
     let rendered = format!("{error:?}");
     assert!(!rendered.contains("Unavailable Tooling"));
     assert!(!rendered.contains(manifest.path().to_string_lossy().as_ref()));

@@ -1,0 +1,25 @@
+error[E0277]: `EditorWorkspace` is not a `Resource`
+ --> tests/ui/editor_persistence/workspace_not_resource.rs:6:27
+  |
+6 |     world.insert_resource(EditorWorkspace::new());
+  |           --------------- ^^^^^^^^^^^^^^^^^^^^^^ invalid `Resource`
+  |           |
+  |           required by a bound introduced by this call
+  |
+  = help: the trait `Resource` is not implemented for `EditorWorkspace`
+  = note: consider annotating `EditorWorkspace` with `#[derive(Resource)]`
+  = help: the following other types implement trait `Resource`:
+            AppTypeRegistry
+            CachedSystemId<S>
+            FallbackErrorHandler
+            MainThreadExecutor
+            MessageRegistry
+            Messages<M>
+            RegisteredSystemDespawner
+            Schedules
+          and $N others
+note: required by a bound in `World::insert_resource`
+ --> $CARGO/bevy_ecs-$VERSION/src/world/mod.rs
+  |
+  |     pub fn insert_resource<R: Resource>(&mut self, value: R) {
+  |                               ^^^^^^^^ required by this bound in `World::insert_resource`

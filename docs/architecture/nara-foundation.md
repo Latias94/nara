@@ -158,7 +158,7 @@ or private. ADR 0089 remains Proposed; the implementation ledger is the authorit
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
 | `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver over `RuntimeInstance` that owns native windows, updates normalized input/window state through short driver scopes, invokes scoped renderer retirement only for its targets, joins registered runtime close with provider/native teardown, and preserves distinct primary-runner and teardown failures |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, `WgpuFrameTransactionStats`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, owned topology and sprite/UI batch capture, pre-acquire generation/topology rejection, at-most-once acquire/submit/present, clamped UI scissor, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, and `RenderBackendStatus` updates |
-| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `EditorPlayCommand`, `EditorPlayView`, `EditorRuntimeEditRequest`, `SceneApplyChangesRequest`, `WorldIdentitySnapshot`, `SceneInspectorState`, `ToolingPlugin` | UI-agnostic workspace/inspector/query/command/view models, stable identity-only snapshots, open scene document slots, selection and dirty/saved/conflict state, a paired linear persistence authority that consumes `nara_fs` receipts without owning filesystem capabilities, and generation/revision-stamped runtime edit plus selected-component Apply Changes requests; no runtime, start-attempt, filesystem capability, or native authority ownership |
+| `nara_tooling` | `EditorWorkspace`, `EditorDocumentId`, `EditorWorkspaceCommand`, `EditorWorkspaceCommandReport`, `EditorPlayCommand`, `EditorPlayView`, `EditorRuntimeEditRequest`, `SceneApplyChangesRequest`, `WorldIdentitySnapshot`, `SceneInspectorState` | UI-agnostic Host-owned workspace/inspector/query/command/view models, stable identity-only snapshots, open scene document slots, selection and dirty/saved/conflict state, a paired linear persistence authority that consumes `nara_fs` receipts without owning filesystem capabilities, and generation/revision-stamped runtime edit plus selected-component Apply Changes requests; no `App`, runtime workspace resource, start-attempt, filesystem capability, or native authority ownership |
 | `nara_tooling_egui` | `EguiSceneEditorPanel`, `EguiSceneInspectorPanel`, panel responses | egui-only rendering adapter that consumes tooling models and returns `EditorWorkspaceCommand` values; no scene/session/world ownership |
 
 ## Accepted Runtime Debugging Direction
@@ -567,24 +567,25 @@ second real adapter or stronger isolation pressure.
 - `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path according to `RenderPassPlan`; pass order is no longer an implicit backend-only draw-loop rule. The backend owns texture/bind-group cache lifetime, uses grace-frame eviction, and keys pipelines by render target format plus `AlphaMode2d`.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
-## Accepted Correction Target (Implementation Not Started)
+## Accepted Correction Boundary
 
-ADRs 0101 through 0106 accept the next correction boundary; their implementation remains
-`not-started` until the owning NUI unit records evidence in the implementation ledger.
+ADRs 0101 through 0106 define the accepted correction boundary. Their live implementation states
+and evidence anchors belong only in the [implementation ledger](adr/implementation-status.md).
 
 - Scene and Prefab documents will own one ordered root/child placement closure. Runtime hierarchy
   will be its ordered projection, and UI will not add a sibling-order authority.
 - `nara_text`, `nara_ui_kernel`, and `nara_ui_widgets` will form renderer-neutral deep modules.
   Runtime and future Editor products will share those modules through separate adapters,
   persistence, session state, and domain commands.
-- Concrete asset domains will own import execution, the process Host will remain the sole Editor
-  workspace authority, and the stock render plan will remain closed until a complete external
+- Concrete asset domains will own import execution, the process Host is the sole Editor workspace
+  authority under NUI-U2, and the stock render plan will remain closed until a complete external
   renderer workflow proves another seam.
 - Product composition will distinguish content/simulation from presentation so headless products
   can reuse authored 2D and UI content without installing render, window, WGPU, or tooling owners.
 
-The module table and implemented-runtime bullets above continue to describe the current repository
-until the corresponding NUI units land. They are not previews of the accepted replacement API.
+The module table and implemented-runtime bullets above describe the current repository. The target
+bullets define accepted ownership and dependency direction, not a second implementation ledger or
+preview API surface.
 
 ## Settled Policy Contracts Pending Full Implementation
 

@@ -8,6 +8,8 @@ Boundary Checks, and Compatibility Fixtures; ADR 0079: Root Product Capabilities
 Domain Retirement;
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
 UI, Text, Widget, and Presented-Frame Topology;
+[ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace
+Installation;
 [ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
 Composition
 
@@ -31,7 +33,7 @@ flowchart TD
     Root --> Advanced[nara::advanced_prelude]
     Root --> Domain[nara::<domain>::prelude behind product capability]
     Root --> Backend[nara::<backend>::prelude behind adapter capability]
-    Root --> Tooling[nara::<tooling>::prelude behind tooling capability]
+    Root --> Tooling[nara::<tooling>::prelude behind tooling Cargo feature]
 ```
 
 Rules:

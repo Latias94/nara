@@ -112,8 +112,6 @@ pub use product::DesktopWinitPlugins;
 pub use product::Runtime2dPlugins;
 #[cfg(feature = "runtime-ui")]
 pub use product::RuntimeUiPlugins;
-#[cfg(feature = "tooling")]
-pub use product::ToolingPlugins;
 #[cfg(feature = "render-wgpu")]
 pub use product::WgpuBackendPlugins;
 #[cfg(feature = "runtime-core")]
@@ -341,7 +339,6 @@ pub mod advanced_prelude {
 
 #[cfg(feature = "tooling")]
 pub mod tooling_prelude {
-    pub use crate::ToolingPlugins;
     pub use nara_tooling::{
         EditorApplyChangesRejection, EditorApplyChangesResult, EditorCloseDecision,
         EditorDocumentDigest, EditorDocumentId, EditorExternalReloadState,
@@ -358,8 +355,7 @@ pub mod tooling_prelude {
         SceneApplyChangesReport, SceneApplyChangesRequest, SceneEditorModel, SceneEditorState,
         SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
         SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
-        SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, ToolingPlugin,
-        WorldIdentitySnapshot,
+        SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, WorldIdentitySnapshot,
     };
     #[cfg(feature = "tooling-egui")]
     pub use nara_tooling_egui::{
@@ -464,11 +460,6 @@ mod tests {
         ))]
         assert!(!app.world().contains_resource::<nara_render::RenderFrame>());
         assert!(!app.world().contains_resource::<nara_window::WindowEvents>());
-        #[cfg(feature = "tooling")]
-        assert!(
-            !app.world()
-                .contains_resource::<nara_tooling::EditorWorkspace>()
-        );
         assert_eq!(
             app.world()
                 .resource::<nara_app::FixedTime>()

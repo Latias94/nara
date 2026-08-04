@@ -4,7 +4,7 @@ use nara_ecs::Resource;
 use nara_tasks::TaskPoolConfig;
 use nara_window::{PresentMode, Window, WindowMode, WindowResolution};
 
-use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
+use crate::capability::{ProductCapabilitySet, RuntimePreset};
 use crate::manifest::ProjectManifest;
 use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
@@ -62,11 +62,10 @@ impl EffectiveProjectSettings {
                 self.runtime
                     .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
             }
-            ProjectProfileKind::Editor => {
-                self.requested_capabilities
-                    .insert(ProductCapability::Tooling);
-            }
-            ProjectProfileKind::Dev | ProjectProfileKind::Release | ProjectProfileKind::Custom => {}
+            ProjectProfileKind::Editor
+            | ProjectProfileKind::Dev
+            | ProjectProfileKind::Release
+            | ProjectProfileKind::Custom => {}
         }
     }
 
@@ -82,11 +81,10 @@ impl EffectiveProjectSettings {
                 self.runtime
                     .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
             }
-            ProjectProfileKind::Editor => {
-                self.requested_capabilities
-                    .insert(ProductCapability::Tooling);
-            }
-            ProjectProfileKind::Dev | ProjectProfileKind::Release | ProjectProfileKind::Custom => {}
+            ProjectProfileKind::Editor
+            | ProjectProfileKind::Dev
+            | ProjectProfileKind::Release
+            | ProjectProfileKind::Custom => {}
         }
     }
 

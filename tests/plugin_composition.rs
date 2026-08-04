@@ -1827,11 +1827,10 @@ fn desktop_project_configures_the_existing_window_plugin_slot() {
     feature = "render-wgpu"
 ))]
 #[test]
-fn requested_product_profile_selects_ui_tooling_window_and_wgpu_plugins() {
+fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling() {
     use nara::{
         render::RENDER_SCHEMA_PROVIDER_ID,
         render_wgpu::WGPU_RENDER_PLUGIN_ID,
-        tooling::TOOLING_PLUGIN_ID,
         ui::{UI_PLUGIN_ID, UI_SCHEMA_PROVIDER_ID},
         window::WINDOW_PLUGIN_ID,
     };
@@ -1847,19 +1846,18 @@ fn requested_product_profile_selects_ui_tooling_window_and_wgpu_plugins() {
 
     for capability in [
         ProductCapability::RuntimeUi,
-        ProductCapability::Tooling,
         ProductCapability::DesktopWinit,
         ProductCapability::RenderWgpu,
     ] {
         assert!(plan.required_capabilities().contains(capability));
     }
     let entries = plan.plugin_plan().entries();
-    for plugin in [
-        UI_PLUGIN_ID,
-        TOOLING_PLUGIN_ID,
-        WINDOW_PLUGIN_ID,
-        WGPU_RENDER_PLUGIN_ID,
-    ] {
+    assert!(
+        !entries
+            .iter()
+            .any(|entry| entry.plugin_id() == PluginId::new("nara.tooling"))
+    );
+    for plugin in [UI_PLUGIN_ID, WINDOW_PLUGIN_ID, WGPU_RENDER_PLUGIN_ID] {
         assert!(entries.iter().any(|entry| entry.plugin_id() == plugin));
     }
     assert!(
@@ -1871,6 +1869,42 @@ fn requested_product_profile_selects_ui_tooling_window_and_wgpu_plugins() {
         plan.schema_validation()
             .provider_ids()
             .contains(&RENDER_SCHEMA_PROVIDER_ID)
+    );
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn editor_profile_keeps_tooling_out_of_the_runtime_plan() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Host-Owned Editor Profile"
+
+[profiles.editor]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), Some("editor")).unwrap();
+
+    assert!(
+        candidate
+            .normalized_capabilities()
+            .iter()
+            .all(|capability| !capability.as_str().starts_with("tooling"))
+    );
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+    assert!(
+        !plan
+            .plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == PluginId::new("nara.tooling"))
     );
 }
 
@@ -2144,7 +2178,7 @@ name = "Full Product Plugin Composition"
 preset = "minimal"
 
 [capabilities]
-requested = ["runtime-ui", "tooling", "desktop-winit", "render-wgpu"]
+requested = ["runtime-ui", "desktop-winit", "render-wgpu"]
 
 [window]
 enabled = true

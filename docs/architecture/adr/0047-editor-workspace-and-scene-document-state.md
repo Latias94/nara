@@ -67,8 +67,8 @@ Rules:
   runtime changes by default; Apply Changes flows back through document patches and normal undo.
 - Workspace commands are explicit data values. UI adapters render workspace models and submit
   commands; they do not mutate documents or sessions through private paths.
-- `ToolingPlugin` should eventually install the workspace resources and scheduling needed for
-  tooling models. It should not remain a placeholder once editor workspace features ship.
+- Under ADR 0104, the process Host constructs and owns the workspace. No runtime plugin installs it
+  as an ECS resource; tooling models remain ordinary Host-owned data.
 
 ## Workspace State Vocabulary
 
@@ -135,7 +135,8 @@ surface as editor UI, and keeps save/reload/conflict semantics centralized.
 - `nara_tooling` should grow `EditorWorkspace` / `OpenDocumentSlot` before editor dogfooding expands.
 - `SceneInspectorState` and `SceneEditorState` can remain useful, but they should become parts of a
   broader workspace model rather than independent editor singletons.
-- `ToolingPlugin` should install meaningful tooling resources/systems when workspace state lands.
+- The process Host installs the workspace and any UI adapter deliberately; runtime Worlds receive
+  only authorized Play inputs and never an Editor workspace resource.
 - Save/reload/dirty/conflict behavior should be tested at the tooling layer before a visual editor
   depends on it.
 

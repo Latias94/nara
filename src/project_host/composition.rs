@@ -51,16 +51,12 @@ pub const fn compiled_product_capabilities() -> CompiledProductCapabilities {
     let capabilities = capabilities.with(ProductCapability::Runtime2d);
     #[cfg(feature = "runtime-ui")]
     let capabilities = capabilities.with(ProductCapability::RuntimeUi);
-    #[cfg(feature = "tooling")]
-    let capabilities = capabilities.with(ProductCapability::Tooling);
     #[cfg(feature = "asset-watch")]
     let capabilities = capabilities.with(ProductCapability::AssetWatch);
     #[cfg(feature = "desktop-winit")]
     let capabilities = capabilities.with(ProductCapability::DesktopWinit);
     #[cfg(feature = "render-wgpu")]
     let capabilities = capabilities.with(ProductCapability::RenderWgpu);
-    #[cfg(feature = "tooling-egui")]
-    let capabilities = capabilities.with(ProductCapability::ToolingEgui);
     CompiledProductCapabilities(capabilities)
 }
 

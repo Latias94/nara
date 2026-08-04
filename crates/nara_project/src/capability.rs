@@ -12,28 +12,22 @@ pub enum ProductCapability {
     Runtime2d,
     #[serde(rename = "runtime-ui")]
     RuntimeUi,
-    #[serde(rename = "tooling")]
-    Tooling,
     #[serde(rename = "asset-watch")]
     AssetWatch,
     #[serde(rename = "desktop-winit")]
     DesktopWinit,
     #[serde(rename = "render-wgpu")]
     RenderWgpu,
-    #[serde(rename = "tooling-egui")]
-    ToolingEgui,
 }
 
 impl ProductCapability {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 6] = [
         Self::RuntimeCore,
         Self::Runtime2d,
         Self::RuntimeUi,
-        Self::Tooling,
         Self::AssetWatch,
         Self::DesktopWinit,
         Self::RenderWgpu,
-        Self::ToolingEgui,
     ];
 
     #[must_use]
@@ -42,11 +36,9 @@ impl ProductCapability {
             Self::RuntimeCore => "runtime-core",
             Self::Runtime2d => "runtime-2d",
             Self::RuntimeUi => "runtime-ui",
-            Self::Tooling => "tooling",
             Self::AssetWatch => "asset-watch",
             Self::DesktopWinit => "desktop-winit",
             Self::RenderWgpu => "render-wgpu",
-            Self::ToolingEgui => "tooling-egui",
         }
     }
 
