@@ -16,7 +16,13 @@
 [ADR 0079](0079-root-product-capabilities-and-placeholder-domain-retirement.md), and
 [ADR 0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md)
 **Refined By**:
-[ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md)
+[ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md);
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology;
+[ADR 0103](0103-concrete-domain-owned-asset-import-execution.md): Concrete Domain-Owned Asset
+Import Execution; [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
+Workspace Installation; [ADR 0106](0106-content-and-presentation-product-composition.md): Content
+and Presentation Product Composition
 
 ## Context
 

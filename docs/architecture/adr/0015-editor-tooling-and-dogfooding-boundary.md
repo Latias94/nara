@@ -4,7 +4,9 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
 Capability Metadata; ADR 0047: Editor Workspace and Scene Document State; ADR 0095: Plugin-Owned
-Specialized Domains and Project Configuration
+Specialized Domains and Project Configuration;
+[ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace
+Installation
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
 Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
 

@@ -8,7 +8,8 @@
 and Prelude Layering Policy; ADR 0053: Visibility, Culling, and Tilemap Render Cache (Superseded); ADR 0077:
 Render Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded); ADR 0078: Render
 Host Affinity, WebGPU Initialization, and Device Recovery; ADR 0094: Minimal Render Execution
-Boundary and Evidence-Gated Extensions; ADR 0096: Evidence-Gated Render Scaling and Upload Policy
+Boundary and Evidence-Gated Extensions; ADR 0096: Evidence-Gated Render Scaling and Upload Policy;
+[ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan
 
 ## ADR 0096 Refinement
 

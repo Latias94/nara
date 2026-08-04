@@ -5,6 +5,8 @@
 **Refines**: [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0018](0018-coordinate-units-and-time.md), and
 [ADR 0022](0022-3d-coordinate-system.md)
+**Refined By**: [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered
+Persistent Placement and Runtime Projection
 **Related**: [ADR 0025](0025-runtime-ui-system.md),
 [ADR 0029](0029-animation-strategy.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),

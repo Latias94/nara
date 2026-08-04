@@ -4,7 +4,9 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0050: Asset Root,
 Symlink, Junction, and Package Trust Policy; ADR 0051: Persistent File Envelope, Migration, and
-Golden Fixtures; ADR 0080: Domain-Owned TaskUpdate Integration Sets
+Golden Fixtures; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
+[ADR 0103](0103-concrete-domain-owned-asset-import-execution.md): Concrete Domain-Owned Asset
+Import Execution
 
 ## Context
 

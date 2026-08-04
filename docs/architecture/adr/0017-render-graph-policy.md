@@ -4,7 +4,8 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0077: Render
 Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded); ADR 0094: Minimal Render
-Execution Boundary and Evidence-Gated Extensions
+Execution Boundary and Evidence-Gated Extensions;
+[ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan
 
 ## Context
 

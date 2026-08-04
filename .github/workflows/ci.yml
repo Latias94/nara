@@ -77,16 +77,14 @@ jobs:
           cargo check -p nara --locked --no-default-features --features runtime-2d,desktop-winit,render-wgpu --example windowed_sprites
           cargo check -p nara --locked --no-default-features --features runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel
           cargo check --workspace --locked --all-features --all-targets
-      - name: Test architecture governance
-        run: cargo nextest run --locked -p nara --test architecture_docs --test-threads=1
       - name: Test root workspace
         shell: bash
         run: |
-          cargo nextest run --workspace --locked -E 'not binary(architecture_docs)' --test-threads=1
+          cargo nextest run --workspace --locked --test-threads=1
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1
+            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --locked --all-features --test-threads=1
           else
-            NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --locked --all-features -E 'not binary(architecture_docs)' --test-threads=1
+            NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --locked --all-features --test-threads=1
           fi
 
   reference-game:

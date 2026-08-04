@@ -4,7 +4,9 @@
 **Date**: 2026-07-09
 **Refines**: ADR 0013, ADR 0025, ADR 0035, ADR 0036, ADR 0039
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0095: Plugin-Owned
-Specialized Domains and Project Configuration
+Specialized Domains and Project Configuration;
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology
 
 ## ADR 0095 Refinement
 

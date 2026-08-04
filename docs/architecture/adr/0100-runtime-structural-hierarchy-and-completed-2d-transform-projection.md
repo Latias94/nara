@@ -7,8 +7,10 @@
 **Refines**: The current 2D completion slice of
 [ADR 0097](0097-future-capable-2d-3d-spatial-transform-model.md)
 **Extracted From**: [ADR 0085](0085-hierarchy-transform-and-visibility-semantics.md), which
-remains Proposed for persistent order, reparent authoring, visibility, prefab provenance, UI
-projection details, physics, and 3D
+remains Proposed for visibility, linked lifetime, physics, 3D, and broader hierarchy semantics not
+owned by ADR 0100 or ADR 0101
+**Refined By**: [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered
+Persistent Placement and Runtime Projection
 **Implementation Plan**:
 [Reference-Game 2D Spatial Authority and Hierarchy Closure](../../plans/2026-08-01-002-refactor-reference-game-2d-spatial-authority-plan.md),
 RGS-U2 through RGS-U5

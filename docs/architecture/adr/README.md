@@ -41,11 +41,11 @@ The implementation ledger uses these states:
 
 Each implementation unit updates its ADR and ledger row before code, then records final code and verification anchors after the unit passes. Historical classification outside an active implementation slice is non-blocking and belongs to the final integration unit.
 
-The focused architecture-document gate derives ADR, catalogue, and ledger membership from the
-repository and requires exact equality. It also checks the active plan's reciprocal supersession,
-relations and symbol anchors touched by the RGF successor, and the canonical-v1 capability
-vocabulary shared by ADRs 0045 and 0081. It does not turn unrelated historical prose into an
-implementation or release prerequisite.
+Architecture authority is reviewed directly at the affected boundary: ADR, catalogue, and ledger
+membership must agree; plan supersession and ADR refinement links must be reciprocal; and claimed
+anchors must exist. Engineering-memory validation proves the active work lane. Architecture prose
+is not parsed by a custom executable and unrelated historical prose is not an implementation or
+release prerequisite.
 
 ## Pre-1.0 Replacement Policy
 
@@ -146,3 +146,9 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md): Schema Owner Lineage and Active Runtime Composition
 - [ADR 0099](0099-decision-local-product-evidence-and-publication-admission.md): Decision-Local Product Evidence and Publication Admission
 - [ADR 0100](0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md): Runtime Structural Hierarchy and Completed 2D Transform Projection
+- [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered Persistent Placement and Runtime Projection
+- [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral UI, Text, Widget, and Presented-Frame Topology
+- [ADR 0103](0103-concrete-domain-owned-asset-import-execution.md): Concrete Domain-Owned Asset Import Execution
+- [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace Installation
+- [ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan
+- [ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product Composition

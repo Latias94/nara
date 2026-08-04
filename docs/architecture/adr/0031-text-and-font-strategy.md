@@ -3,7 +3,9 @@
 **Status**: Accepted
 **Date**: 2026-07-08
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0095: Plugin-Owned Specialized
-Domains and Project Configuration
+Domains and Project Configuration;
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology
 
 ## ADR 0095 Refinement
 
@@ -11,6 +13,15 @@ Unicode-capable text, stable font assets, and non-persistent glyph caches remain
 dedicated `nara_text` crate, shared UI/world shaping layer, or replaceable text backend is not
 admitted until a real text workflow proves the consumer boundary. The first text integration may be
 owned end to end by the runtime UI or a concrete text plugin.
+
+## ADR 0102 Refinement
+
+The reference-game UI workflow now proves a bounded CPU text consumer and the need to keep text
+independent from ECS and presentation ownership. ADR 0102 therefore admits `nara_text` as a
+workspace-internal deep module for deterministic font admission, shaping, bidi/line layout,
+measurement, glyph keys/raster requests, and diagnostics. Project fonts, localization, editable
+text, world text, replaceable providers, atlas allocation, and GPU residency remain outside this
+accepted slice.
 
 ## Context
 

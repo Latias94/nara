@@ -4,6 +4,8 @@
 **Date**: 2026-07-09
 **Last Revised**: 2026-07-28
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
+**Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
+Workspace Installation
 
 ## Context
 

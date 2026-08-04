@@ -8,6 +8,10 @@
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
 [ADR 0054](0054-gpu-upload-budget-and-buffer-allocation-policy.md), and
 [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)
+**Refined By**:
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology; [ADR 0105](0105-closed-first-party-render-plan.md):
+Closed First-Party Render Plan
 
 ## Context
 

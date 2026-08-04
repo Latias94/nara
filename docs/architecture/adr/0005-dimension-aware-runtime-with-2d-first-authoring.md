@@ -4,7 +4,9 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0053: Visibility, Culling, and Tilemap Render Cache (Superseded); ADR 0096:
 Evidence-Gated Render Scaling and Upload Policy; ADR 0097: Future-Capable 2D and 3D Spatial
-Transform Model
+Transform Model; [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered
+Persistent Placement and Runtime Projection; [ADR 0106](0106-content-and-presentation-product-composition.md):
+Content and Presentation Product Composition
 
 ## Context
 

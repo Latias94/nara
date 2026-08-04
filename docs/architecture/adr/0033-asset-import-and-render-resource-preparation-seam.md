@@ -4,7 +4,9 @@
 **Date**: 2026-07-08
 **Refined By**: ADR 0037: Runtime Asset Acquisition, Reload, and Lifetime Policy; ADR 0040:
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
-Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets
+Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
+[ADR 0103](0103-concrete-domain-owned-asset-import-execution.md): Concrete Domain-Owned Asset
+Import Execution
 
 ## Context
 

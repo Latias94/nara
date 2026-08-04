@@ -7,7 +7,9 @@
 composition and guarded target-World apply on 2026-07-18
 **Refined By**: ADR 0038: Scene/Prefab Authoring Identity and Provenance; ADR 0043:
 Scene, Prefab, and Patch Document Migration Policy; ADR 0049: Untrusted Project Input and Parse
-Budget Policy; ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures
+Budget Policy; ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures;
+[ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered Persistent
+Placement and Runtime Projection
 
 ## Context
 

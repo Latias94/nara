@@ -6,7 +6,11 @@
 ADR 0046, ADR 0048
 **Refined By**: ADR 0057: Authoritative Fixed-Tick and Command Ingress; ADR 0058: Stable Runtime
 Identity and Entity References; ADR 0068: Global Resource Budgets, Metrics, and Diagnostic Privacy;
-ADR 0079: Root Product Capabilities and Placeholder Domain Retirement
+ADR 0079: Root Product Capabilities and Placeholder Domain Retirement;
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology;
+[ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
+Composition
 
 ## Context
 

@@ -16,11 +16,14 @@ relationship substrate cannot maintain the required structural facts and determi
 **Proposed Refinement Under Evaluation**: If accepted, this ADR refines ADR 0038 by defining
 ordered document hierarchy and instance-override-owned authoring provenance. ADR 0038 remains
 authoritative while this ADR is Proposed.
-**Accepted Extracted Slice**: [ADR 0100](0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md)
-accepts only the dedicated non-linked runtime structural ownership boundary, one-way document
-lowering, distinct local/global 2D authority, and completed-consumer invariant. This ADR remains
-Proposed for persistent order, runtime/editor reparent semantics, visibility, prefab provenance,
-UI projection details, physics, and 3D.
+**Accepted Extracted Slices**:
+[ADR 0100](0100-runtime-structural-hierarchy-and-completed-2d-transform-projection.md) accepts the
+dedicated non-linked runtime structural ownership boundary, one-way document lowering, distinct
+local/global 2D authority, and completed-consumer invariant;
+[ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md) accepts persistent ordered
+placement, exact anchor-based mutation/inverse, and its ordered runtime projection. This ADR remains
+Proposed for visibility, linked lifetime, physics, 3D, and any broader hierarchy semantics not
+owned by those extracted decisions.
 **Transform Model Authority**: ADR 0097 is Accepted and owns separate 2D/3D base TRS plus
 post-affine residual semantics. This Proposed ADR may define hierarchy transactions only in terms
 of that accepted transform model.

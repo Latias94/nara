@@ -9,7 +9,8 @@
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
 [ADR 0078](0078-render-host-affinity-webgpu-initialization-and-device-recovery.md)
-**Refined By**: [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
+**Refined By**: [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md);
+[ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan
 
 ## Context
 

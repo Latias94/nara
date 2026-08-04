@@ -3,7 +3,9 @@
 **Status**: Accepted
 **Date**: 2026-07-08
 **Refined By**: ADR 0041: Input Routing, Actions, Text Input, UI Focus, and Accessibility; ADR 0095:
-Plugin-Owned Specialized Domains and Project Configuration
+Plugin-Owned Specialized Domains and Project Configuration;
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
 Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
 

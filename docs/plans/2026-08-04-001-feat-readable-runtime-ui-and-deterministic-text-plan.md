@@ -4,11 +4,12 @@ type: feat
 date: 2026-08-04
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
-execution_state: active
+execution_state: superseded
 product_contract_source: reference-game-product-gap
 execution: code
 origin: docs/plans/2026-08-02-001-refactor-startup-scene-activation-and-atomic-retry-plan.md
 supersedes: docs/plans/2026-08-02-001-refactor-startup-scene-activation-and-atomic-retry-plan.md
+superseded_by: docs/plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md
 plan_id: readable-runtime-ui-deterministic-text-2026-08
 unit_namespace: RUI
 operator_execution_authority: external-control-plane

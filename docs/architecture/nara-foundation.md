@@ -567,6 +567,25 @@ second real adapter or stronger isolation pressure.
 - `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path according to `RenderPassPlan`; pass order is no longer an implicit backend-only draw-loop rule. The backend owns texture/bind-group cache lifetime, uses grace-frame eviction, and keys pipelines by render target format plus `AlphaMode2d`.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
+## Accepted Correction Target (Implementation Not Started)
+
+ADRs 0101 through 0106 accept the next correction boundary; their implementation remains
+`not-started` until the owning NUI unit records evidence in the implementation ledger.
+
+- Scene and Prefab documents will own one ordered root/child placement closure. Runtime hierarchy
+  will be its ordered projection, and UI will not add a sibling-order authority.
+- `nara_text`, `nara_ui_kernel`, and `nara_ui_widgets` will form renderer-neutral deep modules.
+  Runtime and future Editor products will share those modules through separate adapters,
+  persistence, session state, and domain commands.
+- Concrete asset domains will own import execution, the process Host will remain the sole Editor
+  workspace authority, and the stock render plan will remain closed until a complete external
+  renderer workflow proves another seam.
+- Product composition will distinguish content/simulation from presentation so headless products
+  can reuse authored 2D and UI content without installing render, window, WGPU, or tooling owners.
+
+The module table and implemented-runtime bullets above continue to describe the current repository
+until the corresponding NUI units land. They are not previews of the accepted replacement API.
+
 ## Settled Policy Contracts Pending Full Implementation
 
 - Render resource lifetime is a product contract even before a full render graph. Backend caches own
@@ -735,8 +754,8 @@ second real adapter or stronger isolation pressure.
   suite. Exact policy tests reject selective replacements for these commands. The integrated
   six-cell matrix passed at `ef8f300` through GitHub Actions run `30462379022` after the later Rust,
   product-content, policy-test, workflow, strict-filesystem, canonical-fixture, cross-platform
-  budget, and software-GPU repairs. That U8 run is historical for the current workflow because the
-  explicit `architecture_docs` governance gate has since been restored. The surviving RGD-U9
+  budget, and software-GPU repairs. That U8 run remains historical for the current workflow. The
+  surviving RGD-U9
   Windows capture at `b2ddb5b` preserves 10 passing observations and 10 missing required metrics,
   so its historical outcome remains `Redirect`; U9 is evidence-repair pending because the executed
   collector was not committed. Protected run `30510353046` remains a real checkout-free U10

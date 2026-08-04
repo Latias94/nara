@@ -4,7 +4,11 @@
 **Date**: 2026-07-09
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
-Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References
+Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
+[ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered Persistent
+Placement and Runtime Projection;
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology
 
 ## Context
 

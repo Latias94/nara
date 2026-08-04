@@ -5,7 +5,10 @@
 **Last Revised**: 2026-07-16
 **Refined By**: ADR 0032: Render Backend Integration Boundary; ADR 0044: Root Facade and Prelude
 Layering Policy; ADR 0078: Render Host Affinity, WebGPU Initialization, and Device Recovery; ADR
-0094: Minimal Render Execution Boundary and Evidence-Gated Extensions
+0094: Minimal Render Execution Boundary and Evidence-Gated Extensions;
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology; [ADR 0105](0105-closed-first-party-render-plan.md):
+Closed First-Party Render Plan
 
 ## Context
 

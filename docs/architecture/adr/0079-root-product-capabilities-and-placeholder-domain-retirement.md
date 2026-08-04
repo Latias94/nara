@@ -5,7 +5,9 @@
 **Last Revised**: 2026-07-18
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
-**Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
+**Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md);
+[ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
+Composition
 
 ## ADR 0095 Refinement
 

@@ -12,6 +12,9 @@ retained both verdicts and their compatibility at `27cbd12`.
 **Revisit Trigger**: A second concurrent runtime or platform-affine service proves that the proposed
 scope graph cannot express required sharing or shutdown ordering
 **Related**: ADR 0035, ADR 0042, ADR 0050, ADR 0070, ADR 0078, ADR 0079, ADR 0084, ADR 0094
+**Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
+Workspace Installation; [ADR 0106](0106-content-and-presentation-product-composition.md): Content
+and Presentation Product Composition
 **Decision Evidence**:
 [RGD-U7 refreshed Runtime and Host decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-28T214815Z-rgd-u7-refreshed-runtime-and-host-independent-decision-matrix-cb08ecb6f5054f938f8a6d7de30941e4.md),
 the historical [RGD-U7 decision matrix](../../knowledge/engineering/decisions/2026-07/2026-07-23T074018Z-rgd-u7-runtime-and-host-independent-decision-matrix-e2e5ea1ed4cf4e28860cedb32f0e7e48.md),

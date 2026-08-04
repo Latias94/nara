@@ -5,7 +5,11 @@
 **Refines**: ADR 0001, ADR 0012, ADR 0015, ADR 0032
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0055: Feature Matrix,
 Boundary Checks, and Compatibility Fixtures; ADR 0079: Root Product Capabilities and Placeholder
-Domain Retirement
+Domain Retirement;
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology;
+[ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
+Composition
 
 ## Context
 

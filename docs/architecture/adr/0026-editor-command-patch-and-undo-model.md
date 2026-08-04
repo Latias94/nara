@@ -4,7 +4,10 @@
 **Date**: 2026-07-08
 **Last Revised**: 2026-07-16
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
-Editor Workspace and Scene Document State
+Editor Workspace and Scene Document State;
+[ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered Persistent
+Placement and Runtime Projection; [ADR 0104](0104-host-owned-editor-workspace-installation.md):
+Host-Owned Editor Workspace Installation
 
 ## Context
 

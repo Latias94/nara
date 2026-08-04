@@ -6,7 +6,11 @@
 **Implemented Slice**: RGF-U1 on 2026-07-12
 **Refines**: ADR 0006, ADR 0011, ADR 0026, ADR 0038
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0049: Untrusted Project
-Input and Parse Budget Policy; ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures
+Input and Parse Budget Policy; ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures;
+[ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered Persistent
+Placement and Runtime Projection;
+[ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
+UI, Text, Widget, and Presented-Frame Topology
 
 ## Context
 

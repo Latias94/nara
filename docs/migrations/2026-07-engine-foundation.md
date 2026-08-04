@@ -51,6 +51,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGS-U3-1 | RGS-U3 | `fb4fdc7` | `rust-api/behavior` | Completed global 2D projection and world-space camera/sprite/tilemap extraction | Treat `GlobalTransform2d` as an opaque immutable derived component, give every world-space renderable an explicit `Transform2d`, and pass completed globals to extraction helpers without local/identity fallback. |
 | SRT-U2-1 | SRT-U2 | `0b5beba` | `rust-api/behavior/safety` | Image construction, render prepare snapshot identity, and prepare invalidation | Handle fallible `ImageAsset` construction, capture `AssetSlotRevision` in each prepare snapshot, borrow non-`Copy` snapshots, and remove the unconsumed invalidation event log. |
 | SRT-U4-1 | SRT-U4 | `25e7f6c` | `rust-api/behavior` | Lifecycle-free insertion preparation and provisional product replacement retirement | Prepare lifecycle-free insertions before commit and authorize extra retirement with `WorldEntityToken` rather than bare `Entity`; complete hierarchy validation remains read-only. |
+| NUI-U1-1 | NUI-U1 | `NUI-U1` | `architecture-authority` | Ordered placement, renderer-neutral UI modules, concrete import execution, Host-owned Editor state, closed rendering, and content/presentation composition | Treat ADRs 0101 through 0106 and the ordered UI kernel correction plan as the accepted target. No source/API migration occurs until its owning NUI unit lands and adds a concrete entry below. |
 
 ## Entry Contract
 

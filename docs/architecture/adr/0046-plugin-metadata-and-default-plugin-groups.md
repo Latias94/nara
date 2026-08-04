@@ -6,7 +6,10 @@
 **Refines**: ADR 0003, ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement; ADR 0095: Plugin-Owned Specialized Domains and
-Project Configuration
+Project Configuration; [ADR 0103](0103-concrete-domain-owned-asset-import-execution.md): Concrete
+Domain-Owned Asset Import Execution;
+[ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
+Composition
 
 ## ADR 0095 Refinement
 

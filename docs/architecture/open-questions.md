@@ -29,18 +29,23 @@ This document contains undecided architecture questions only. Accepted decisions
 ## OQ-003: Runtime UI Layout Model
 
 - **Status**: open
-- **Owner**: `nara_ui`
-- **Trigger**: Text, image, and child intrinsic measurement exist and at least two real panels need responsive layout.
-- **Related ADRs**: 0025, 0041
-- **Question**: Should the next retained layout slice use flex, grid, or a smaller nara-specific model, and what is the canonical `Auto`/content sizing contract?
+- **Owner**: `nara_ui_kernel`
+- **Trigger**: The accepted Flex and Absolute slice is implemented, and a concrete product panel
+  cannot meet its layout contract without Grid, constraint layout, or another advanced primitive.
+- **Related ADRs**: 0025, 0041, 0102
+- **Question**: Which smallest additional layout primitive closes the measured product gap without
+  exposing the kernel's private layout IR or creating a CSS-compatible language commitment?
 
 ## OQ-004: Platform Accessibility Bridge
 
 - **Status**: open
 - **Owner**: input/UI platform adapters
-- **Trigger**: Toolkit-independent semantic UI actions are implemented and a desktop accessibility API integration is scheduled.
-- **Related ADRs**: 0025, 0041
-- **Question**: How should platform accessibility trees and assistive actions map onto nara focus, navigation, activation, and text semantics?
+- **Trigger**: The kernel's presented semantic tree and actions are implemented and the first
+  desktop AccessKit bridge is scheduled.
+- **Related ADRs**: 0025, 0041, 0102
+- **Question**: How should the platform adapter map stable semantic identity, incremental tree
+  updates, assistive actions, focus, and text ranges onto AccessKit while the kernel remains the
+  geometry and action authority?
 
 ## OQ-005: First Concrete Physics Plugin Contract
 
@@ -253,15 +258,15 @@ flowchart LR
 ## OQ-010: Editor Runtime-UI Dogfooding Gate
 
 - **Status**: open
-- **Owner**: `nara_ui`, editor adapters
-- **Trigger**: Runtime UI has text/IME, keyboard navigation, focus, scroll, accessibility semantics,
-  and the layout capabilities required by one complete existing egui panel.
-- **Related ADRs**: 0015, 0025, 0041
-- **Question**: Which complete editor panel should migrate first, what command/undo/usability/
-  performance parity constitutes success, and which later heterogeneous workloads (a virtualized
-  hierarchy/table, viewport, timeline, or graph) are required before deciding whether nara UI
-  should become the primary editor toolkit? Success with the first panel proves only that panel's
-  tooling-model/command separation, not toolkit replaceability or final toolkit convergence.
+- **Owner**: `nara_ui_kernel`, `nara_ui_widgets`, and a separate Editor UI adapter
+- **Trigger**: The shared kernel and widget modules have text/IME, navigation, focus, scroll,
+  accessibility semantics, and the capabilities required by one complete existing egui panel.
+- **Related ADRs**: 0015, 0025, 0041, 0102, 0104
+- **Question**: Which complete panel should prove the separate Editor adapter, session-state, and
+  tooling-command boundary first, and which later heterogeneous workloads (a virtualized
+  hierarchy/table, viewport, timeline, or graph) are required before deciding whether the shared
+  kernel can support the primary editor toolkit? The first panel does not admit shared persistence,
+  Editor Shell ownership, docking, native multi-window policy, or toolkit convergence.
 
 ## OQ-011: Platform Export, Signing, and Store Adapter
 
@@ -298,21 +303,19 @@ flowchart LR
 ## OQ-015: Text Shaping and Localization Stack
 
 - **Status**: open
-- **Owner**: future text, localization, asset, runtime-UI, and tooling domains
-- **Trigger**: Runtime UI requires multilingual shaped text, deterministic font import, or a real
-  game needs localized content with runtime locale switching and authoring diagnostics.
-- **Related ADRs**: 0007, 0025, 0031, 0033, 0049, 0051, 0087, 0095
-- **Question**: Which shaping, bidi, fallback, rasterization, and glyph-cache boundary fits Nara's
-  asset/render model, and which separate localization contract owns stable message identity,
-  fallback chains, plural/select rules, typed argument formatting, runtime locale changes, package
-  contributions, locale-specific asset variants, pseudolocalization, and missing-translation
-  diagnostics?
-- **Boundary**: Font/shaping backend selection and localization content/runtime policy are separate
-  decisions. Neither a shaping library nor a string-key table may silently become the other
-  domain's authority; package precedence and user locale storage also wait for their owning
-  package/settings decisions. A dedicated `nara_text` crate or portable `TextBackend` requires a
-  real second consumer or implementation challenge; the first UI/text plugin may own the complete
-  shaping path.
+- **Owner**: `nara_text`, localization, asset, runtime-UI, and tooling domains
+- **Trigger**: A product requires project-supplied fonts, fallback families, runtime locale
+  switching, editable/IME text, world text, or authoring diagnostics beyond the accepted bundled
+  deterministic UI-text slice.
+- **Related ADRs**: 0007, 0025, 0031, 0033, 0049, 0051, 0087, 0095, 0102
+- **Question**: Which project-font admission, fallback, localization, editable-text, and world-text
+  contracts extend `nara_text` without moving localization content authority or GPU atlas ownership
+  into the text module?
+- **Boundary**: ADR 0102 admits `nara_text` for bounded deterministic shaping, layout, measurement,
+  and raster requests. Localization owns message identity, plural/select rules, arguments, locale
+  changes, package contributions, pseudolocalization, and missing-translation diagnostics. Atlas
+  allocation and GPU residency remain presentation-owned; a portable provider interface still
+  requires independent implementation evidence.
 
 ## OQ-016: GPU Cache Eviction Defaults
 
