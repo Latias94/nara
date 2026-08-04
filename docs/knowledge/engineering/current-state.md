@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "874f7af7cd7008a0682fcc60eff8df806af2544db3cba103bbde3c4d89d884fd"
+source_fingerprint: "7ab2063dbcaedea5d83cc82a375da7dc889cac0158e22318e53820992ac99105"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "874f7af7cd7008a0682fcc60eff8df806af2544db3cba103bbde3c4d89d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `874f7af7cd7008a0682fcc60eff8df806af2544db3cba103bbde3c4d89d884fd`
-- Immutable records: 345
+- Source fingerprint: `7ab2063dbcaedea5d83cc82a375da7dc889cac0158e22318e53820992ac99105`
+- Immutable records: 347
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Ordered UI kernel correction: NUI-U3 active](registry/2026-08/2026-08-04T142426Z-engine-foundation-contract-completion-codex-root-8231deadee904719bdcd23c10ef26d4a.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Ordered UI kernel correction: NUI-U4 active](registry/2026-08/2026-08-04T154228Z-engine-foundation-contract-completion-codex-root-0941dd3ad7944d789b3ed80f13b29762.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [NUI-U3 concrete domain-owned asset import](verification/2026-08/2026-08-04T154228Z-nui-u3-concrete-domain-owned-asset-import-a1f06f28aca444229163c89f0b028682.md) - Verifies deletion of generic importer execution while preserving the concrete Image transaction, artifact identity, limits, and replacement semantics.
 - **Verification Evidence**: [NUI-U2 Host-owned Editor workspace](verification/2026-08/2026-08-04T142426Z-nui-u2-host-owned-editor-workspace-4bfdea95f38e4b6da30c4f16cc66562a.md) - Verifies removal of runtime tooling installation while preserving Host-owned persistence, Play, Retry, and adapter command behavior.
 - **Verification Evidence**: [NUI-U1 ordered UI kernel authority activation](verification/2026-08/2026-08-04T092606Z-nui-u1-ordered-ui-kernel-authority-activation-e3d3a8bda597403f8d8d4a6336bb2fc2.md) - Records the accepted correction decisions, successor authority, architecture-governance simplification, and the transition to NUI-U2.
 - **Verification Evidence**: [RUI-U1 post-activation contract correction](verification/2026-08/2026-08-04T025725Z-rui-u1-post-activation-contract-correction-2732c5f909c84103b8d3425cbe911cf5.md) - Corrects the active ledger pointer and makes the readable-runtime-UI units independently executable after independent read-only plan audits.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [SRT-U3 bounded startup activation and runtime fault detail](verification/2026-08/2026-08-02T194244Z-srt-u3-bounded-startup-activation-and-runtime-fault-detail-3b4d5b25813f420d8f0e62f478576077.md) - Verifies exact retained startup source and receipt ownership, ordered unpublished Startup activation, bounded runtime fault metadata, and finite lease retirement.
 - **Verification Evidence**: [SRT-U2 exact image revision and invalidation correction](verification/2026-08/2026-08-02T143954Z-srt-u2-exact-image-revision-and-invalidation-correction-a45da756131c43c7a3632928e8cd4d4a.md) - Verifies exact image slot identity, bounded immutable RGBA storage, transient prepare-to-submit races, and removal of duplicate invalidation authority.
 - **Verification Evidence**: [SRT-U1 focused startup and Retry Trial activation](verification/2026-08/2026-08-02T120006Z-srt-u1-focused-startup-retry-trial-activation-17ad79c7bdfd417d90ee3d524909b120.md) - Verifies the RGS stop condition, the narrow ADR 0089 Trial boundary, reviewed successor execution order, and truthful active authority.
-- **Memory Event**: [Verification: RGS-U3 completed and verified at fb4fdc7; RGS-U4 is now the sole active implemen](logs/2026-08/2026-08-02T091933Z-verification-rgs-u3-completed-and-verified-at-fb4fdc7-rgs-u4-is-now-the-sole-active-implemen-06e8903eeeed4badb27f557a676f9393.md) - RGS-U3 completed and verified at fb4fdc7; RGS-U4 is now the sole active implementation unit.
 
 # Integration Notes
 
