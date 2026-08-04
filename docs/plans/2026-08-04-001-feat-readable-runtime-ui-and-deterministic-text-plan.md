@@ -20,8 +20,8 @@ operator_execution_authority: external-control-plane
 
 - **Objective:** Replace the reference game's unlabeled bars and terminal color block with a
   readable HUD, a clear victory/defeat overlay, and a real Retry button. Prove one deterministic,
-  Unicode-capable runtime-UI text path from typed font bytes through shaping, glyph caching,
-  backend-neutral primitives, and the existing wgpu UI pass.
+  Unicode-capable runtime-UI text path from a private validated bundled font through shaping,
+  glyph caching, backend-neutral primitives, and the existing wgpu UI pass.
 - **Authority:** Accepted ADR 0025 owns runtime UI, ADR 0031 owns the text/font constraints, ADR
   0041 owns input routing, and ADR 0095 rejects a speculative text backend. OQ-015 remains open for
   project font import, fallback families, localization, editable text, and a possible future shared
@@ -46,7 +46,7 @@ The reference game starts immediately but does not tell the player how to move, 
 automatic, how much health remains, what the score is, or how to retry. Runtime UI renders panels
 only, and equal-order layout and hit testing still use runtime `Entity` allocation as a product
 ordering fallback. The current system therefore cannot provide readable product feedback or a
-stable button contract across rebuild, Retry, save, and reopen.
+stable button contract across rebuild, Retry, resize, and unrelated entity allocation.
 
 ### Requirements
 
@@ -78,18 +78,22 @@ stable button contract across rebuild, Retry, save, and reopen.
   examples assign sibling order deliberately; migration never claims to recover an order that the
   prior format did not store.
 
-#### Typed Font And Text
+#### Bundled Font And Text
 
-- R8. `UiFontAsset` is an immutable typed asset constructed through one fallible byte-validation
-  boundary. Retained font bytes, faces, text bytes, shaped glyphs, atlas dimensions, and atlas
-  pixels have documented fixed ceilings. Invalid or oversized input fails before publication.
-- R9. `UiPlugin` installs one deterministic bundled default font from a repository-owned asset with
-  recorded source and license. It performs no system-font discovery and needs no current working
-  directory. A Direct App may install a typed runtime font override; file-backed project font
-  import is not claimed by this slice.
+- R8. `nara_ui_render` owns one immutable private typed font asset constructed through a fallible
+  container-and-face validation boundary backed by a mature low-level parser. Its stable type and
+  controlled storage satisfy ADR 0031 without exposing a public handle. The supported container,
+  face selection, retained font bytes, text bytes, shaped glyphs, atlas dimensions, and atlas
+  pixels have documented fixed ceilings. Invalid, ambiguous, or oversized input fails before
+  publication to shaping or raster systems.
+- R9. `UiRenderPlugin` installs one deterministic bundled instance of that private typed asset from
+  a repository-owned font with recorded source and license. It performs no system-font discovery,
+  requires no current working directory, and exposes no public runtime font override in this slice.
+  Project font import, public font handles, and a reusable public font asset wait for a real
+  custom-font consumer.
 - R10. `UiText` is a bounded single-line persistent component with private fields and fallible
-  construction/update. It owns UTF-8 text, finite positive font size, and color. A separate
-  runtime-only `UiTextFont` may select a typed font handle; absence selects the bundled default.
+  construction/update. It owns UTF-8 text, finite positive font size, and color. It contains no
+  backend font type, platform font name, or speculative font handle.
 - R11. `nara_ui_render` privately owns Parley 0.11 shaping/layout and Swash 0.2 rasterization with
   system discovery disabled. The architecture accepts Unicode text and advanced shaping; missing
   fonts or glyphs produce bounded diagnostics rather than silent empty output or ASCII-only
@@ -107,59 +111,77 @@ stable button contract across rebuild, Retry, save, and reopen.
   primitive key contains the node stack index and an intra-node primitive order, so a node's panel
   precedes its glyphs while text and panels from different nodes remain correctly interleaved.
 - R15. The wgpu frame packet owns the exact glyph-atlas snapshot needed by its UI primitives.
-  `nara_render_wgpu` uploads and caches atlas generations under the existing device epoch, scissor,
-  quad shader, UI phase, acquire, submit, and present contract. Packet submission does not borrow
-  the gameplay World.
+  A private closed quad-material key distinguishes `Solid`, `Image`, and `GlyphAtlas`; a glyph key
+  always resolves against the packet-owned atlas snapshot rather than an `ImageAsset` or a global
+  lookup. `nara_render_wgpu` uploads and caches atlas generations under the existing device epoch,
+  scissor, quad shader, UI phase, acquire, submit, and present contract. The glyph-atlas path does
+  not introduce an additional gameplay-World borrow; this slice does not claim to redesign the
+  pre-existing Image submission path.
 - R16. Atlas upload and cache retention are bounded and observable through focused UI render stats.
   Device loss or generation change cannot reuse stale glyph pixels. No new render phase, public
   graph node, generic resource provider, or mirrored image-asset pipeline is added.
 
 #### Button And Input Semantics
 
-- R17. `UiButton` owns enabled state only. `UiInteractionState` exposes one frame-transient
-  activation target and no callback. A left press starts capture only on a visible enabled button;
-  release activates exactly once only on the same still-eligible target.
-- R18. Ordered mouse transitions are consumed in order. Release outside, hidden/disabled/removed
-  targets, pointer-route changes, and focus loss cancel activation. The interaction system runs in
-  a named `PreUpdate` UI set after physical action resolution and uses the last completed UI stack.
-- R19. The reference game's desktop adapter observes Enter and Retry-button activation, coalesces
-  them to at most one submission per frame, and submits the existing `retry_draft()` into the
-  existing bounded `GameplayCommandQueue`. It does not add a second reset path, mutate wave state,
-  add a semantic-input bus, or expose a widget callback.
+- R17. `UiButton` carries a bounded semantic action ID, an accessible label, and enabled state;
+  its visual label remains an ordinary `UiText` child. A frame-transient UI action outcome exposes
+  the stable action plus source target and no callback. A left press starts capture only on a
+  visible enabled button; release activates exactly once only on the same still-eligible target.
+- R18. `nara_input` owns one bounded, globally ordered normalized pointer timeline whose move,
+  button, route, resize-invalidation, and cancellation entries retain the position and source route
+  at the event boundary. Focus loss, cursor leave, close, resize, and scale-factor change emit
+  distinguishable cancellation/invalidation rather than synthetic ordinary release. A named UI
+  routing set consumes exact physical transitions before `InputSet::ResolveActions`; the action
+  resolver skips consumed transitions. Routing uses only the last completed UI stack whose route
+  and viewport revision still match, so a resize cannot activate stale geometry.
+- R19. The reference game's desktop adapter keeps Enter in `ActionMap`, removes the existing Retry
+  `ActionCommandBinding`, and becomes the sole local Retry mapper. After action resolution and UI
+  routing, but before `GameplayCommandSet::MapLocalActions`, it observes Enter plus the Retry UI
+  action, coalesces them to at most one submission per frame, and submits the existing
+  `retry_draft()` into the existing bounded `GameplayCommandQueue`. It does not add a second reset
+  path, mutate wave state, add a cross-domain semantic-input bus, or expose a widget callback.
 
 #### Reference-Game Product Proof
 
-- R20. Running HUD visibly presents wave, `HP current / maximum`, score, enemies remaining/planned,
-  and `WASD MOVE | AUTO-FIRE`. It projects only `WaveSnapshot` and does not become gameplay
-  authority.
+- R20. Running HUD visibly presents `WAVE 1`, `HP current / maximum`, score, enemies
+  remaining/planned, and `WASD MOVE | AUTO-FIRE`. `WaveSnapshot` gains the maximum-health fact so
+  the HUD projects only the snapshot; `run_generation` remains a Retry generation and is never
+  mislabeled as a wave number.
 - R21. Terminal state presents a dim overlay, `VICTORY` or `DEFEAT`, final score, a real Retry
   button, and `ENTER TO RETRY`. Pending Retry disables the button and displays `RETRYING...`;
   rejection keeps the terminal generation and restores a bounded visible reason; success removes
   the terminal UI with the new generation.
 - R22. HUD, terminal panel, text, button visuals, and hit target preserve explicit stack order over
-  rebuild, Retry, resize, save, reopen, and unrelated entity allocation. The ordinary desktop and
-  packaged product paths use the same recipe and renderer.
+  runtime rebuild, Retry, resize, and unrelated entity allocation. No runtime-spawned HUD
+  persistence is claimed. The ordinary desktop and packaged product paths use the same recipe and
+  renderer.
 - R23. The selected bundled font and its license/provenance are committed and embedded in the
   product. Source and packaged desktop products render the same glyph pixels from arbitrary
   current working directories and home directories.
 
 #### Public Boundary And Closure
 
-- R24. Ordinary public API is limited to the typed font asset, bounded `UiText`, runtime font
-  override, `UiButton`, explicit sibling order, activation observation, and the semantic UI schedule
-  anchor required by the real product. Shaping contexts, glyph IDs, allocator state, atlas pages,
-  primitive internals, and wgpu cache types remain private or advanced.
+- R24. Ordinary public API is limited to bounded `UiText`, `UiButton` and its semantic action
+  outcome, explicit sibling order, and the semantic UI/input schedule anchors required by the real
+  product. The typed bundled font asset and its storage, font parser, shaping contexts, glyph IDs,
+  allocator state, atlas pages, primitive internals, and wgpu cache types remain private. ADR 0041
+  remains partial because platform accessibility export, keyboard navigation, text input, and IME
+  are outside this slice.
 - R25. Every behavior-bearing unit uses focused proof-first or characterization-first tests. No
   script parses Rust source, mirrors job topology, or grows a special evidence protocol.
 - R26. The slice closes only after real text pixels and click-to-Retry are observed through the
   packaged ordinary desktop product, with no unresolved P0/P1 review finding.
 
+## Planning Contract
+
 ### Key Technical Decisions
 
 1. **One concrete text owner first.** Runtime UI owns shaping through submission. A shared text
    crate waits for a second real consumer.
-2. **Parley plus Swash, kept private.** They provide mature Unicode shaping/layout and rasterization
-   without exposing their types. System font discovery is disabled.
+2. **Private typed font admission plus private Parley/Swash.** A low-level parser in
+   `nara_ui_render` admits one typed bundled face before Parley/Swash shape and rasterize it. The
+   asset type, storage, parser, and font override stay outside the ordinary API; system font
+   discovery is disabled.
 3. **Bundled default before project font import.** This closes the product workflow without
    misclassifying fonts in the current image-only Project Content closure or inventing a generic
    importer seam.
@@ -167,8 +189,10 @@ stable button contract across rebuild, Retry, save, and reopen.
    the generic `Children` collection remains a runtime relationship projection.
 5. **One primitive stream.** Panels and glyphs are sorted together before adjacent batching, so
    material grouping cannot violate painter order.
-6. **Product adapter, not input framework expansion.** The reference game coalesces Enter and
-   button activation into its existing Retry command at `PreUpdate`.
+6. **Fix the normalized input contract at its owner.** A bounded pointer timeline records the
+   coordinates, route, and cancellation cause for each edge. UI routing consumes physical mouse
+   edges before gameplay action resolution; the reference-game adapter then coalesces the UI action
+   with Enter into one existing Retry command.
 7. **No title menu yet.** Direct startup remains. A full boot/menu/gameplay/pause/game-over state
    topology waits for the simultaneous workflow pressure described by OQ-034.
 
@@ -203,7 +227,8 @@ reference-game desktop adapter -> retry_draft() -> GameplayCommandQueue -> atomi
 | Material batching changes painter order | Sort one primitive stream first and batch only adjacent compatible items. |
 | Runtime entity allocation changes visual or hit order | Reject duplicate explicit order and remove every entity-ID tie-break. |
 | Glyph atlas masquerades as imported content | Keep an owned UI-render atlas snapshot and a wgpu cache; never create an `ImageAsset`. |
-| Click creates a second Retry authority | Submit the existing command draft and leave all reset logic in the current fixed-tick consumer. |
+| Click creates a second Retry authority | Remove the old Retry command binding, submit the existing command draft from one adapter, and leave all reset logic in the current fixed-tick consumer. |
+| Same-frame movement and click edges lose their event-time position | Record one bounded pointer timeline at platform ingress and route it before gameplay action resolution. |
 | UI interaction observes half-built layout | Publish complete last-good layout generations and use the prior completed generation in `PreUpdate`. |
 
 ---
@@ -230,29 +255,32 @@ reference-game desktop adapter -> retry_draft() -> GameplayCommandQueue -> atomi
 - **Requirements:** R4-R7, R24-R25.
 - **Dependencies:** RUI-U1.
 - **Files:** `crates/nara_ui/src/{lib.rs,layout.rs,interaction.rs,codec.rs,tests.rs}`;
-  `crates/nara_ui_render/src/{types.rs,extract.rs,queue.rs,tests.rs}`; affected examples and schema
-  fixtures.
+  `crates/nara_ui_render/src/{types.rs,extract.rs,queue.rs,tests.rs}`; `reference-game/src/ui.rs`;
+  affected examples, schema fixtures, and the smallest desktop UI regression test.
 - **Approach:** Add `UiNode` sibling order, validate root/sibling uniqueness into a candidate
   generation, derive one stack index, remove `Entity::to_bits()` from painter and hit semantics,
   and make panel extraction carry the exact index. Preserve only adjacent material batching.
 - **Test scenarios:** Stable order after unrelated spawn/despawn and entity reallocation; nested
   siblings and z-index; duplicate root/sibling rejection with last-good generation; draw-forward and
   hit-reverse parity; clip behavior; schema version/codec roundtrip and legacy disposition.
-- **Verification:** Focused serial `nara_ui` and `nara_ui_render` nextest suites, affected examples,
-  locked checks, strict changed-target Clippy, fmt, API review, and unit evidence.
+- **Verification:** Focused serial `nara_ui` and `nara_ui_render` nextest suites, reference-game
+  desktop UI regression, affected examples, locked checks, strict changed-target Clippy, fmt, API
+  review, and unit evidence.
 
-### RUI-U3. Add The Typed Bundled Font And CPU Text Pipeline
+### RUI-U3. Add The Private Typed Bundled Font And CPU Text Pipeline
 
-- **Goal:** Shape and rasterize bounded single-line UI text into a private owned glyph-atlas
-  generation without platform font discovery.
+- **Goal:** Validate one bundled face, then shape and rasterize bounded single-line UI text into a
+  private owned glyph-atlas generation without platform font discovery.
 - **Requirements:** R8-R13, R24-R25.
 - **Dependencies:** RUI-U2.
-- **Files:** workspace dependencies and lockfile; `crates/nara_ui` font/text modules, codec, bundled
-  font and license/provenance; `crates/nara_ui_render` text pipeline, atlas, stats, and tests.
-- **Approach:** Add private Parley 0.11, Swash 0.2, and a proven rectangle allocator. Install a
-  validated default typed font, expose bounded `UiText` plus runtime override, shape advanced UTF-8
-  text, rasterize/cache glyphs, and publish an immutable bounded atlas snapshot. Do not use system
-  fonts, `ImageAsset`, a file importer, or a public backend trait.
+- **Files:** workspace dependencies and lockfile; `crates/nara_ui` text component and codec;
+  `crates/nara_ui_render` private font admission, bundled font and license/provenance, text pipeline,
+  atlas, stats, and tests.
+- **Approach:** Add a mature low-level font parser, private Parley 0.11, Swash 0.2, and a proven
+  rectangle allocator to `nara_ui_render`. Validate and install one private typed bundled face with
+  controlled storage, expose bounded `UiText`, shape advanced UTF-8 text, rasterize/cache glyphs,
+  and publish an immutable bounded atlas snapshot. Do not expose a font handle or override, or use
+  system fonts, `ImageAsset`, a file importer, or a public backend trait.
 - **Test scenarios:** Bundled font parses; corrupt/oversized font rejection; empty, boundary, and
   oversized text; invalid size/color; repeated glyph cache reuse; non-ASCII shaping; missing glyph
   diagnostic; exact glyph/atlas limits; deterministic glyph positions and atlas bytes; codec
@@ -264,32 +292,52 @@ reference-game desktop adapter -> retry_draft() -> GameplayCommandQueue -> atomi
 
 - **Goal:** Render the exact CPU glyph-atlas generation through the existing owned frame packet and
   UI phase while preserving panel/text painter order.
-- **Requirements:** R14-R16, R23-R26.
+- **Requirements:** R14-R16, R25.
 - **Dependencies:** RUI-U3.
-- **Files:** `crates/nara_ui_render` primitive/batch ownership; `crates/nara_render_wgpu/src/{lib.rs,
-  ui.rs,backend.rs}` and focused GPU tests; root feature wiring if required.
+- **Files:** `crates/nara_ui_render` primitive/batch ownership;
+  `crates/nara_render_wgpu/src/{lib.rs,ui.rs,backend.rs,quad.rs,texture.rs}` and focused GPU tests;
+  root feature wiring if required.
 - **Approach:** Replace panel-only extraction with one ordered primitive stream, capture the required
   atlas snapshot into `WgpuFramePayload`, cache atlas textures by generation and device epoch, and
   reuse the existing UI shader/scissor/pass. Add bounded upload/cache stats without a second render
-  phase or World borrow during submit.
+  phase or an additional World borrow for glyph-atlas resolution during submit.
 - **Test scenarios:** Panel/glyph/panel interleaving; text clipping; unchanged atlas reuse; changed
   generation single upload; stale generation/device-epoch rejection; missing atlas fail-closed;
   bounded upload and eviction; nonblank glyph pixel readback at desktop viewport sizes.
 - **Verification:** Focused serial UI-render and wgpu nextest suites, locked checks, constrained GPU
   pixel proof, strict Clippy, fmt, correctness/performance review, and unit evidence.
 
-### RUI-U5. Deliver The Readable HUD And Retry Button
+### RUI-U5. Complete Pointer Routing And Button Activation
+
+- **Goal:** Establish the event-time pointer and cancellation facts required for one correct button
+  without letting UI-captured mouse edges leak into gameplay actions.
+- **Requirements:** R17-R18, R24-R25.
+- **Dependencies:** RUI-U4.
+- **Files:** `crates/nara_input`; `crates/nara_winit`; `crates/nara_ui` button, semantic-action,
+  interaction, schedule, codec, and tests; affected root composition and boundary tests.
+- **Approach:** Add one bounded normalized pointer timeline at the input owner, retain event-time
+  position/route/cancellation facts, expose a consumed-transition decision to action resolution,
+  and run UI routing in a named set before `InputSet::ResolveActions`. Add the minimal semantic
+  button component and action outcome with no callbacks or generalized widget framework.
+- **Test scenarios:** Same-frame move/press/move/release ordering; release outside;
+  hidden/disabled/removed target; focus loss and cursor leave cancellation; route change; resize and
+  scale-factor invalidation; stale viewport generation cannot activate; exact consumed mouse edge
+  is absent from gameplay actions; unrelated keyboard actions still resolve.
+- **Verification:** Focused serial input, winit, and UI nextest suites; locked checks; strict Clippy;
+  fmt; input-routing/correctness/API review; and unit evidence.
+
+### RUI-U6. Deliver The Readable HUD And Retry Button
 
 - **Goal:** Replace the reference game's rectangle-only status display with an understandable,
   mouse-operable product flow that reuses the existing Retry command.
-- **Requirements:** R17-R23, R25-R26.
-- **Dependencies:** RUI-U4.
+- **Requirements:** R19-R22, R25.
+- **Dependencies:** RUI-U5.
 - **Files:** `crates/nara_ui` button/interaction scheduling and tests; `reference-game/src/{ui.rs,
-  input.rs,lib.rs}`; desktop flow/render tests, probes, docs, and package policy as needed.
-- **Approach:** Add minimal enabled-button activation semantics, move interaction to the named
-  `PreUpdate` set using the last completed stack, and install one product adapter that coalesces
-  Enter and click into `retry_draft()`. Project HUD and terminal text exclusively from
-  `WaveSnapshot` and `WaveRetryStatus`.
+  input.rs,lib.rs,snapshot.rs}`; desktop flow/render tests, probes, and docs.
+- **Approach:** Remove the Retry `ActionCommandBinding`, install one ordered product adapter that
+  coalesces Enter and the stable Retry UI action into `retry_draft()`, and project HUD and terminal
+  text exclusively from `WaveSnapshot` and `WaveRetryStatus`. Add maximum health to the snapshot
+  and keep `run_generation` out of the displayed wave label.
 - **Test scenarios:** Running HUD values and controls; victory/defeat text; press/release same target
   activates once; drag-out/hidden/disabled/removed/focus-loss cancellation; same-frame ordered
   transitions; Enter/click equivalence and coalescing; Pending disabled state; Rejected reason and
@@ -297,12 +345,12 @@ reference-game desktop adapter -> retry_draft() -> GameplayCommandQueue -> atomi
 - **Verification:** Reference-game default/desktop/flow/render/parity suites, source desktop smoke,
   bounded pixel proof, Clippy/fmt, product/correctness review, and unit evidence.
 
-### RUI-U6. Prove Packaged Product Readability And Close
+### RUI-U7. Prove Packaged Product Readability And Close
 
 - **Goal:** Verify the ordinary packaged desktop journey, classify the new public surface, and
   update architecture status without claiming the deferred text ecosystem.
 - **Requirements:** R2-R3, R22-R26.
-- **Dependencies:** RUI-U5 and a reviewed executable revision.
+- **Dependencies:** RUI-U6 and a reviewed executable revision.
 - **Files:** package smoke/policy and reference-game docs; API boundary tests; ADR 0025/0031/0041
   ledger rows; foundation ownership summary; engineering-memory evidence and registration.
 - **Approach:** Run the real packaged binary from arbitrary cwd/home, visually verify HUD and both
@@ -328,8 +376,9 @@ reference-game desktop adapter -> retry_draft() -> GameplayCommandQueue -> atomi
 | RUI-U2 | UI layout/interaction/render ordering suites, schema/codec migration evidence, affected examples, locked serial checks and Clippy. |
 | RUI-U3 | Font validation, shaping/raster, cache/atlas limits, Unicode/missing-glyph behavior, locked serial checks and review. |
 | RUI-U4 | Unified primitive ordering, owned atlas packet, wgpu cache/device epoch, clipping and glyph pixel proof. |
-| RUI-U5 | Reference-game HUD/terminal/button behavior, Enter/click command parity, desktop flow/render/parity suites and smoke. |
-| RUI-U6 | Packaged arbitrary-environment journey, feature isolation, public API audit, independent review and memory closure. |
+| RUI-U5 | Event-time pointer timeline, UI-before-gameplay routing, cancellation, consumed-edge, and button semantic suites. |
+| RUI-U6 | Reference-game HUD/terminal/button behavior, Enter/click command parity, desktop flow/render/parity suites and smoke. |
+| RUI-U7 | Packaged arbitrary-environment journey, feature isolation, public API audit, independent review and memory closure. |
 
 ### Regression Rules
 
@@ -354,15 +403,17 @@ reference-game desktop adapter -> retry_draft() -> GameplayCommandQueue -> atomi
 - Explicit UI root/sibling order produces one validated stack consumed identically by layout,
   panel/text drawing, clipping, and reverse hit testing; no runtime entity ID is a product-order
   tie-break.
-- One immutable typed bundled font, bounded single-line `UiText`, mature Unicode shaping/raster,
-  and a private bounded glyph atlas reach the existing wgpu UI phase through an owned frame packet.
+- One private validated typed bundled font, bounded single-line `UiText`, mature Unicode
+  shaping/raster, and a private bounded glyph atlas reach the existing wgpu UI phase through an
+  owned frame packet.
 - Panel and glyph primitives remain correctly interleaved; atlas generation and device epoch cannot
   display stale pixels; missing/invalid/over-budget text data fails with bounded diagnostics.
 - The reference game visibly explains controls and live status, shows victory/defeat/final score,
   and exposes a real Retry button. Click and Enter coalesce into the existing Retry command and
   preserve the SRT atomic replacement authority.
-- Source, Editor, ordinary desktop, and packaged no-checkout paths retain deterministic font and UI
-  behavior across resize and Retry. Headless behavior remains unchanged.
+- Source, ordinary desktop, and packaged no-checkout paths retain deterministic font and UI
+  behavior across resize and Retry. Existing Editor authoring behavior and headless gameplay remain
+  unchanged, but runtime-spawned HUD persistence and platform accessibility export are not claimed.
 - ADR 0025, ADR 0031, ADR 0041, the ledger, foundation summary, reference-game docs, and engineering
   memory state only the implemented slice. OQ-015 remains open for project font import, fallback,
   localization, editable text, world text, and any shared text module.

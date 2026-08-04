@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-04
+* **Work Registration**: [Readable runtime UI: corrected RUI-U2 active](registry/2026-08/2026-08-04T025725Z-engine-foundation-contract-completion-codex-root-4c6e8c1857574fb29851d3ffc470f509.md) - Retains deterministic UI stack ordering as the active unit after correcting the successor plan's input, font, render, and product boundaries.
+* **Verification Evidence**: [RUI-U1 post-activation contract correction](verification/2026-08/2026-08-04T025725Z-rui-u1-post-activation-contract-correction-2732c5f909c84103b8d3425cbe911cf5.md) - Corrects the active ledger pointer and makes the readable-runtime-UI units independently executable after independent read-only plan audits.
+
 ## 2026-08-03
 * **Work Registration**: [Readable runtime UI: RUI-U2 active](registry/2026-08/2026-08-03T232430Z-engine-foundation-contract-completion-codex-root-f7194c79ff664e0dbe3f607cb1744820.md) - Closes SRT successor selection, verifies the readable product gap, and activates deterministic UI stack ordering.
 * **Verification Evidence**: [RUI-U1 readable runtime UI activation](verification/2026-08/2026-08-03T232430Z-rui-u1-readable-runtime-ui-activation-c7fea22cd092467fb326065112af5619.md) - Verifies SRT closure, the concrete readable-UI product gap, the bounded first runtime text owner, and truthful successor authority.
@@ -145,5 +149,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game runtime authority and delivery: RGD-U4](registry/2026-07/2026-07-22T152344Z-engine-foundation-contract-completion-codex-root-84a2b5a685b843b085007a1ad9309612.md) - Prove fresh mutable runtime-session reconstruction across generations while preserving explicit immutable parent authorities.
 * **Work Registration**: [Reference-game runtime authority and delivery: RGD-U3 complete](registry/2026-07/2026-07-22T152316Z-engine-foundation-contract-completion-codex-root-e479ad14aec842c08061c4e5ce2e5f48.md) - Completes bounded per-runtime Bevy fault attribution, pre-transfer reservation, and truthful route retirement without serializing healthy runtimes.
 * **Verification Evidence**: [RGD-U3 per-runtime Bevy fault routing verification](verification/2026-07/2026-07-22T152136Z-rgd-u3-per-runtime-bevy-fault-routing-verification-49c7a3efe7ad4a5e8ea569c862c2f64d.md) - Verifies bounded per-runtime Bevy failure attribution, reservation-before-transfer, truthful route retirement, and overlapping runtime execution.
-* **Work Registration**: [Reference-game runtime authority and delivery: RGD-U3](registry/2026-07/2026-07-22T080053Z-engine-foundation-contract-completion-codex-root-aa44bd726bc64329ab7aed2377c9eb87.md) - Route Bevy fallible execution through bounded per-runtime authority without serializing healthy runtimes.
-* **Work Registration**: [Reference-game runtime authority and delivery: RGD-U2 complete](registry/2026-07/2026-07-22T080033Z-engine-foundation-contract-completion-codex-root-a3490df16b714fdf988ffdc61500c1a9.md) - Completes the exact frozen component behavior authority across product composition, Editor, candidate startup, and managed runtimes.
