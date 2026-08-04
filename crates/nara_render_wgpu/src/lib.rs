@@ -17,7 +17,7 @@ mod ui;
 
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::quad::{
-    WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers_for_phase,
+    WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers,
 };
 use crate::surface::{SurfaceDropReason, WgpuSurfaceState};
 use nara_app::{
@@ -38,17 +38,14 @@ use nara_material::AlphaMode2d;
 use nara_render::Extent2d;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_render::PreparedRenderResources;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use nara_render::RenderPassStepLabel;
 use nara_render::{
     Color, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
-    RenderFramePacket, RenderFramePacketError, RenderFrameSkipReason, RenderPassStep,
-    RenderPhaseInput, build_render_frame_packet,
+    RenderFramePacket, RenderFramePacketError, RenderFrameSkipReason, build_render_frame_packet,
 };
 #[cfg(feature = "sprite-submitter")]
 use nara_sprite_render::SpriteBatches;
 #[cfg(feature = "ui-submitter")]
-use nara_ui_render::UiBatches;
+use nara_ui_render::__private::{UiBatchReader, UiBatchSnapshot};
 use nara_window::{
     PrimaryWindowId, Window, WindowId,
     backend::{BackendWindowHandles, WindowSurfaceRetirementDriver, WindowSurfaceRetirementError},
@@ -180,7 +177,7 @@ struct WgpuFramePayload {
     #[cfg(feature = "sprite-submitter")]
     sprite_batches: Option<SpriteBatches>,
     #[cfg(feature = "ui-submitter")]
-    ui_batches: Option<UiBatches>,
+    ui_batches: Option<UiBatchSnapshot>,
 }
 
 #[derive(Debug)]
@@ -194,32 +191,24 @@ struct WgpuCapturedFrame {
 impl WgpuFramePayload {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     fn quad_batches(&self) -> Vec<WgpuQuadBatch> {
-        let mut batches = Vec::new();
         #[cfg(feature = "sprite-submitter")]
-        if let Some(sprite_batches) = &self.sprite_batches {
-            batches.extend(sprite::collect_sprite_quad_batches(sprite_batches, 0));
-        }
+        let content = self
+            .sprite_batches
+            .as_ref()
+            .map_or_else(Vec::new, |batches| {
+                sprite::collect_sprite_quad_batches(batches, 0)
+            });
+        #[cfg(not(feature = "sprite-submitter"))]
+        let content = Vec::new();
         #[cfg(feature = "ui-submitter")]
-        if let Some(ui_batches) = &self.ui_batches {
-            batches.extend(ui::collect_ui_quad_batches(ui_batches, 0));
-        }
-        batches
-    }
+        let ui = self
+            .ui_batches
+            .as_ref()
+            .map_or_else(Vec::new, |batches| ui::collect_ui_quad_batches(batches, 0));
+        #[cfg(not(feature = "ui-submitter"))]
+        let ui = Vec::new();
 
-    fn phase_inputs(&self) -> Vec<RenderPhaseInput> {
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        let mut inputs = Vec::new();
-        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-        let inputs = Vec::new();
-        #[cfg(feature = "sprite-submitter")]
-        if let Some(sprite_batches) = &self.sprite_batches {
-            sprite::append_sprite_phase_inputs(sprite_batches, &mut inputs);
-        }
-        #[cfg(feature = "ui-submitter")]
-        if let Some(ui_batches) = &self.ui_batches {
-            ui::append_ui_phase_inputs(ui_batches, &mut inputs);
-        }
-        inputs
+        nara_render::__private::assemble_first_party_draws(content, ui)
     }
 }
 
@@ -261,7 +250,7 @@ fn capture_wgpu_frame_packet(
     windows: Query<&Window>,
     views: Res<ExtractedViews>,
     #[cfg(feature = "sprite-submitter")] sprite_batches: Option<Res<SpriteBatches>>,
-    #[cfg(feature = "ui-submitter")] ui_batches: Option<Res<UiBatches>>,
+    #[cfg(feature = "ui-submitter")] ui_batches: UiBatchReader,
     mut slot: ResMut<WgpuFramePacketSlot>,
 ) {
     let Some(generation) = generation.map(|generation| *generation) else {
@@ -272,13 +261,12 @@ fn capture_wgpu_frame_packet(
         #[cfg(feature = "sprite-submitter")]
         sprite_batches: sprite_batches.as_deref().cloned(),
         #[cfg(feature = "ui-submitter")]
-        ui_batches: ui_batches.as_deref().cloned(),
+        ui_batches: ui_batches.snapshot(),
     };
     if !payload_batches_match_topology(&payload, &views) {
         slot.current = Some(Err(WgpuFrameCaptureError::BatchTopologyMismatch));
         return;
     }
-    let phases = payload.phase_inputs();
     slot.current = Some(
         build_render_frame_packet(
             generation,
@@ -286,7 +274,6 @@ fn capture_wgpu_frame_packet(
             primary_window_id.map(|primary| primary.0),
             windows.iter(),
             &views,
-            phases,
         )
         .map(|topology| {
             topology.map(|topology| WgpuCapturedFrame {
@@ -504,7 +491,6 @@ fn render_acquired_texture(
     viewport: nara_render::ViewportRect,
     clear_color: Color,
     draw: &PreparedSubmitterDraw,
-    pass_steps: &[RenderPassStep],
 ) -> Result<(), WgpuRenderError> {
     #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
     let _ = viewport;
@@ -548,19 +534,9 @@ fn render_acquired_texture(
             1.0,
         );
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        for step in pass_steps {
-            if let RenderPassStepLabel::Phase(phase) = step.node.label {
-                draw_quad_batch_buffers_for_phase(
-                    &mut pass,
-                    &draw.pipelines,
-                    &draw.buffers,
-                    phase,
-                    viewport,
-                );
-            }
-        }
+        draw_quad_batch_buffers(&mut pass, &draw.pipelines, &draw.buffers, viewport);
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-        let _ = (&mut pass, draw, pass_steps);
+        let _ = (&mut pass, draw);
     }
     queue.submit([encoder.finish()]);
     queue.present(surface_texture);
@@ -878,9 +854,34 @@ mod tests {
         assert!(!system.is_send());
     }
 
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     #[test]
-    fn base_submitter_input_has_no_phase_work() {
-        assert!(WgpuFramePayload::default().phase_inputs().is_empty());
+    fn enabled_submitter_input_has_no_quad_work() {
+        assert!(WgpuFramePayload::default().quad_batches().is_empty());
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    #[test]
+    fn closed_first_party_plan_orders_content_before_ui() {
+        let content = WgpuQuadBatch {
+            material: crate::quad::WgpuQuadMaterialKey {
+                image: None,
+                sampler: nara_material::SamplerDescriptor::default(),
+                alpha_mode: nara_material::AlphaMode2d::Blend,
+            },
+            scissor: None,
+            instances: Vec::new(),
+            counts_as_sprites: true,
+        };
+        let ui = WgpuQuadBatch {
+            counts_as_sprites: false,
+            ..content.clone()
+        };
+
+        let ordered = nara_render::__private::assemble_first_party_draws(vec![content], vec![ui]);
+
+        assert!(ordered[0].counts_as_sprites);
+        assert!(!ordered[1].counts_as_sprites);
     }
 
     #[test]

@@ -4,13 +4,11 @@ use nara_asset::Assets;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
 use nara_image::{ImageAsset, PreparedImageResource, image_resource_key};
-use nara_render::{
-    ExtractedView, ExtractedViews, PreparedRenderResources, RenderPhaseLabel, render_phase_order,
-};
+use nara_render::{ExtractedView, ExtractedViews, PreparedRenderResources};
 
 use crate::{
-    ExtractedSprite, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches,
-    SpriteInstance, SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
+    ExtractedSprite, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind,
+    SpriteBatches, SpriteInstance, SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
 };
 
 pub fn queue_sprites(
@@ -45,7 +43,7 @@ pub fn queue_sprites(
                 view_index,
                 view_order: view.order,
                 target: view.target,
-                phase: queueable.sprite.phase,
+                kind: SpriteBatchKind::from_extracted(queueable.sprite.kind),
                 layer: queueable.sprite.layer,
                 sort_key: queueable.sprite.sort_key,
                 material: queueable.material,
@@ -160,7 +158,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             && batch.view_index == item.view_index
             && batch.view_order == item.view_order
             && batch.target == item.target
-            && batch.phase == item.phase
+            && batch.kind == item.kind
             && batch.layer == item.layer
             && batch.sort_key == item.sort_key
             && batch.material == item.material
@@ -173,7 +171,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             view_index: item.view_index,
             view_order: item.view_order,
             target: item.target,
-            phase: item.phase,
+            kind: item.kind,
             layer: item.layer,
             sort_key: item.sort_key,
             material: item.material,
@@ -188,7 +186,7 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
     (
         left.view_order,
         left.view_index,
-        phase_order(left.phase),
+        left.kind.order(),
         left.layer,
         left.sort_key,
         left.source_order,
@@ -198,18 +196,13 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
         .cmp(&(
             right.view_order,
             right.view_index,
-            phase_order(right.phase),
+            right.kind.order(),
             right.layer,
             right.sort_key,
             right.source_order,
             right.entity_bits,
             right.material,
         ))
-}
-
-#[must_use]
-pub fn phase_order(phase: RenderPhaseLabel) -> u8 {
-    render_phase_order(phase).min(u16::from(u8::MAX)) as u8
 }
 
 fn saturating_u32(value: usize) -> u32 {

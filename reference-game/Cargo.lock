@@ -1490,7 +1490,6 @@ dependencies = [
 name = "nara_render"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "nara_app",
  "nara_asset",
  "nara_core",
@@ -1507,7 +1506,6 @@ dependencies = [
 name = "nara_render_wgpu"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "bytemuck",
  "nara_app",
  "nara_asset",
@@ -1560,7 +1558,6 @@ dependencies = [
 name = "nara_sprite_render"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "nara_app",
  "nara_asset",
  "nara_core",
@@ -1650,7 +1647,6 @@ dependencies = [
 name = "nara_ui_render"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "nara_app",
  "nara_asset",
  "nara_core",

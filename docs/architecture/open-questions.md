@@ -1,7 +1,7 @@
 # nara Architecture Open Questions
 
 **Status**: Living Draft
-**Updated**: 2026-07-22
+**Updated**: 2026-08-05
 
 This document contains undecided architecture questions only. Accepted decisions belong in ADRs; implementation evidence belongs in `adr/implementation-status.md` and engineering memory. Each question remains open until its trigger creates enough concrete pressure for an ADR.
 
@@ -9,7 +9,8 @@ This document contains undecided architecture questions only. Accepted decisions
 
 - **Status**: open
 - **Owner**: `nara_render`
-- **Trigger**: An intermediate logical resource, retained/history lifetime, or cross-target dependency requires scheduling that `RenderPassPlan` cannot express.
+- **Trigger**: An intermediate logical resource, retained/history lifetime, or cross-target
+  dependency requires scheduling that the closed first-party order cannot express.
 - **Related ADRs**: 0017, 0032, 0040, 0094, 0096
 - **Question**: What is the smallest execution model that satisfies the first static-plan-breaking workflow:
   extended static phases, a minimal execution kernel, or a logical resource

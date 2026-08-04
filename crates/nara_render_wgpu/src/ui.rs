@@ -1,24 +1,15 @@
 use crate::quad::{WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuScissorRect};
-use nara_render::{RenderPhaseInput, RenderPhaseLabel};
-use nara_ui_render::{UiBatch, UiBatches, UiInstance};
+use nara_ui_render::__private::{UiBatch, UiBatchSnapshot};
 
 pub(crate) fn collect_ui_quad_batches(
-    batches: &UiBatches,
+    batches: &UiBatchSnapshot,
     view_index: usize,
 ) -> Vec<WgpuQuadBatch> {
     batches.for_view(view_index).map(ui_quad_batch).collect()
 }
 
-pub(crate) fn append_ui_phase_inputs(batches: &UiBatches, inputs: &mut Vec<RenderPhaseInput>) {
-    inputs.extend(batches.as_slice().iter().map(|batch| RenderPhaseInput {
-        view_index: batch.view_index,
-        phase: RenderPhaseLabel::UI,
-    }));
-}
-
 fn ui_quad_batch(batch: &UiBatch) -> WgpuQuadBatch {
     WgpuQuadBatch {
-        phase: RenderPhaseLabel::UI,
         material: WgpuQuadMaterialKey {
             image: batch.material.image,
             sampler: batch.material.sampler,
@@ -30,24 +21,24 @@ fn ui_quad_batch(batch: &UiBatch) -> WgpuQuadBatch {
             width: clip.width,
             height: clip.height,
         }),
-        instances: batch.instances.iter().map(ui_quad_instance).collect(),
+        instances: batch
+            .instances
+            .iter()
+            .map(|instance| WgpuQuadInstance {
+                center: instance.center.to_array(),
+                x_axis: instance.x_axis.to_array(),
+                y_axis: instance.y_axis.to_array(),
+                color: [
+                    instance.color.r,
+                    instance.color.g,
+                    instance.color.b,
+                    instance.color.a,
+                ],
+                uv_min: instance.uv.min.to_array(),
+                uv_size: instance.uv.size.to_array(),
+            })
+            .collect(),
         counts_as_sprites: false,
-    }
-}
-
-fn ui_quad_instance(instance: &UiInstance) -> WgpuQuadInstance {
-    WgpuQuadInstance {
-        center: instance.center.to_array(),
-        x_axis: instance.x_axis.to_array(),
-        y_axis: instance.y_axis.to_array(),
-        color: [
-            instance.color.r,
-            instance.color.g,
-            instance.color.b,
-            instance.color.a,
-        ],
-        uv_min: instance.uv.min.to_array(),
-        uv_size: instance.uv.size.to_array(),
     }
 }
 
@@ -59,71 +50,23 @@ mod tests {
     use crate::{
         quad::{
             WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, create_quad_batch_buffers,
-            create_quad_pipeline, create_quad_texture_bind_group_layout,
-            draw_quad_batch_buffers_for_phase,
+            create_quad_pipeline, create_quad_texture_bind_group_layout, draw_quad_batch_buffers,
         },
         texture::WgpuSpriteTextureCache,
     };
-    use nara_core::{Color, Vec2};
+    use nara_core::Vec2;
     use nara_material::{AlphaMode2d, SamplerDescriptor};
-    use nara_render::{RenderTarget, ViewportRect};
-    use nara_ui::UiRect;
-    use nara_ui_render::{UiClipRect, UiColorKey, UiMaterialKey, UiTextureRect};
+    use nara_render::ViewportRect;
 
     #[test]
-    fn ui_adapter_does_not_require_sprite_domain_types() {
-        let batch = UiBatch {
-            view_index: 0,
-            view_order: 0,
-            target: RenderTarget::PrimaryWindow,
-            order: 0,
-            z_index: 0,
-            material: UiMaterialKey {
-                image: None,
-                sampler: SamplerDescriptor::default(),
-                alpha_mode: AlphaMode2d::Blend,
-                tint: UiColorKey::from_color(Color::WHITE),
-            },
-            clip_rect: Some(
-                UiClipRect::from_rect_clamped(
-                    UiRect::new(Vec2::new(-10.0, 5.0), Vec2::new(150.0, 80.0)),
-                    nara_render::ViewportRect::new(0, 0, 100, 60).unwrap(),
-                )
-                .unwrap(),
-            ),
-            instances: vec![UiInstance {
-                center: Vec2::ZERO,
-                x_axis: Vec2::X,
-                y_axis: Vec2::Y,
-                color: Color::WHITE,
-                uv: UiTextureRect::FULL,
-            }],
-        };
-
-        let converted = ui_quad_batch(&batch);
-        assert_eq!(converted.phase, RenderPhaseLabel::UI);
-        assert!(!converted.counts_as_sprites);
-        assert_eq!(converted.instances.len(), 1);
-        assert_eq!(
-            converted.scissor,
-            Some(WgpuScissorRect {
-                x: 0,
-                y: 5,
-                width: 100,
-                height: 55,
-            })
-        );
-    }
-
-    #[test]
-    fn production_quad_pipeline_applies_clamped_ui_scissor_to_pixels() {
+    fn production_quad_pipeline_applies_ui_scissor_to_pixels() {
         let mut child = std::process::Command::new(
             std::env::current_exe().expect("the unit-test executable should have a path"),
         )
         .args([
             "--ignored",
             "--exact",
-            "ui::tests::production_quad_pipeline_applies_clamped_ui_scissor_to_pixels_child",
+            "ui::tests::production_quad_pipeline_applies_ui_scissor_to_pixels_child",
             "--nocapture",
         ])
         .env(UI_PIXEL_CHILD_MARKER, "1")
@@ -158,7 +101,7 @@ mod tests {
 
     #[test]
     #[ignore = "runs only inside the parent-owned hard-deadline process"]
-    fn production_quad_pipeline_applies_clamped_ui_scissor_to_pixels_child() {
+    fn production_quad_pipeline_applies_ui_scissor_to_pixels_child() {
         assert_eq!(
             std::env::var_os(UI_PIXEL_CHILD_MARKER).as_deref(),
             Some(std::ffi::OsStr::new("1")),
@@ -251,41 +194,28 @@ mod tests {
                 .expect("production UI pixel readback requires a wgpu device");
 
         let viewport = ViewportRect::new(8, 4, 40, 32).unwrap();
-        let clip = UiClipRect::from_rect_clamped(
-            UiRect::new(Vec2::new(-10.0, 12.0), Vec2::new(80.0, 18.0)),
-            viewport,
-        )
-        .unwrap();
-        assert_eq!(
-            clip,
-            UiClipRect {
+        let batch = WgpuQuadBatch {
+            material: WgpuQuadMaterialKey {
+                image: None,
+                sampler: SamplerDescriptor::default(),
+                alpha_mode: AlphaMode2d::Opaque,
+            },
+            scissor: Some(WgpuScissorRect {
                 x: 8,
                 y: 12,
                 width: 40,
                 height: 18,
-            },
-            "the UI queue must clamp an oversized clip to the admitted viewport",
-        );
-
-        let batch = ui_quad_batch(&UiBatch {
-            view_index: 0,
-            view_order: 0,
-            target: RenderTarget::PrimaryWindow,
-            order: 0,
-            z_index: 0,
-            material: UiMaterialKey {
-                image: None,
-                sampler: SamplerDescriptor::default(),
-                alpha_mode: AlphaMode2d::Opaque,
-                tint: UiColorKey::from_color(Color::rgb(1.0, 0.0, 0.0)),
-            },
-            clip_rect: Some(clip),
-            instances: vec![UiInstance::axis_aligned(
-                Vec2::ZERO,
-                Vec2::ONE,
-                Color::rgb(1.0, 0.0, 0.0),
-            )],
-        });
+            }),
+            instances: vec![WgpuQuadInstance {
+                center: Vec2::ZERO.to_array(),
+                x_axis: Vec2::X.to_array(),
+                y_axis: Vec2::Y.to_array(),
+                color: [1.0, 0.0, 0.0, 1.0],
+                uv_min: Vec2::ZERO.to_array(),
+                uv_size: Vec2::ONE.to_array(),
+            }],
+            counts_as_sprites: false,
+        };
 
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let texture_layout = create_quad_texture_bind_group_layout(&device);
@@ -363,13 +293,7 @@ mod tests {
                 0.0,
                 1.0,
             );
-            draw_quad_batch_buffers_for_phase(
-                &mut pass,
-                &pipelines,
-                &buffers,
-                RenderPhaseLabel::UI,
-                viewport,
-            );
+            draw_quad_batch_buffers(&mut pass, &pipelines, &buffers, viewport);
         }
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {

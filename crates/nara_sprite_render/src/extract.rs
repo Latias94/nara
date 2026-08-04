@@ -1,7 +1,6 @@
 use nara_asset::Assets;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, error::BevyError};
-use nara_render::RenderPhaseLabel;
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::{GlobalTransform2d, Transform2d};
@@ -153,7 +152,6 @@ pub fn extract_sprite(
         world_x_axis: matrix.transform_vector2(local_x_axis),
         world_y_axis: matrix.transform_vector2(local_y_axis),
         color: sprite.material.tint,
-        phase: RenderPhaseLabel::TRANSPARENT_2D,
         layer: sprite.layer,
         sort_key: sprite.sort_key,
     }
@@ -210,7 +208,6 @@ pub fn extract_tile_cell(
         world_x_axis: matrix.transform_vector2(local_x_axis),
         world_y_axis: matrix.transform_vector2(local_y_axis),
         color: multiply_color(material.tint, color),
-        phase: RenderPhaseLabel::TILEMAP_2D,
         layer: tilemap.layer.index,
         sort_key: tilemap.sort_key,
     })

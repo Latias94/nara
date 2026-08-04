@@ -13,14 +13,14 @@ use nara_ecs::schedule::IntoScheduleConfigs;
 use crate::extract::extract_sprites;
 pub use crate::extract::{extract_sprite, extract_tile_cell};
 pub use crate::queue::{
-    build_sprite_batches, compare_queued_sprite_items, phase_order, project_sprite_to_view,
+    build_sprite_batches, compare_queued_sprite_items, project_sprite_to_view,
     project_sprite_to_view_with_uv, queue_sprites, sort_and_batch_sprites, view_world_extent,
     world_to_clip_instance, world_to_clip_instance_with_uv,
 };
 pub use crate::types::{
     ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
-    QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance,
-    SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
+    QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind, SpriteBatches,
+    SpriteInstance, SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
 };
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -48,7 +48,7 @@ impl Plugin for SpriteRenderPlugin {
         app.init_resource::<ExtractedSprites>()?;
         app.init_resource::<extract::ExtractedSpriteScratch>()?;
         app.init_resource::<QueuedSpriteItems>()?;
-        app.init_resource::<SpriteBatches>()?;
+        app.insert_resource(SpriteBatches::new())?;
         app.init_resource::<SpriteRenderStats>()?;
         app.add_systems(
             CoreStage::Extract,
@@ -63,9 +63,9 @@ impl Plugin for SpriteRenderPlugin {
 pub mod prelude {
     pub use crate::{
         ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
-        QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance,
-        SpriteMaterialKey, SpriteRenderPlugin, SpriteRenderStats, TextureUvRect,
-        build_sprite_batches, compare_queued_sprite_items, phase_order, project_sprite_to_view,
+        QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind, SpriteBatches,
+        SpriteInstance, SpriteMaterialKey, SpriteRenderPlugin, SpriteRenderStats, TextureUvRect,
+        build_sprite_batches, compare_queued_sprite_items, project_sprite_to_view,
         project_sprite_to_view_with_uv, queue_sprites, sort_and_batch_sprites, view_world_extent,
         world_to_clip_instance, world_to_clip_instance_with_uv,
     };

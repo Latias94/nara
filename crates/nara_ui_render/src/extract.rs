@@ -3,7 +3,7 @@ use nara_ui::{ComputedUiLayouts, UiPanel};
 
 use crate::{ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, UiRenderStats};
 
-pub fn extract_ui(
+pub(crate) fn extract_ui(
     mut extracted: ResMut<ExtractedUiItems>,
     mut stats: ResMut<UiRenderStats>,
     layouts: Res<ComputedUiLayouts>,
@@ -23,7 +23,6 @@ pub fn extract_ui(
         extracted.push(ExtractedUiItem {
             entity,
             source_order,
-            root: layout.root,
             view_index: layout.view_index,
             target: layout.target,
             order: layout.order,

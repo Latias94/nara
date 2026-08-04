@@ -466,7 +466,6 @@ impl WgpuRenderBackend {
             packet.view().viewport,
             packet.view().clear_color,
             &draw,
-            packet.pass_plan().steps(),
             app_frame_index,
             work_started_at,
         );
@@ -630,7 +629,6 @@ impl WgpuRenderBackend {
         viewport: nara_render::ViewportRect,
         clear_color: Color,
         draw: &PreparedSubmitterDraw,
-        pass_steps: &[nara_render::RenderPassStep],
         frame_index: u64,
         work_started_at: std::time::Instant,
     ) -> Result<bool, WgpuRenderError> {
@@ -662,7 +660,6 @@ impl WgpuRenderBackend {
                     viewport,
                     clear_color,
                     draw,
-                    pass_steps,
                 )?;
                 if let Some(completion) = self.telemetry.begin_frame_submission(
                     frame_index,
@@ -686,7 +683,6 @@ impl WgpuRenderBackend {
                     viewport,
                     clear_color,
                     draw,
-                    pass_steps,
                 )?;
                 if let Some(completion) = self.telemetry.begin_frame_submission(
                     frame_index,
@@ -1235,7 +1231,6 @@ mod tests {
             Some(WindowId::PRIMARY),
             [&window],
             &views,
-            [],
         )
         .unwrap()
         .unwrap();

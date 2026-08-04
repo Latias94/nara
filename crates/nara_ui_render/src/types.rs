@@ -1,6 +1,6 @@
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
-use nara_ecs::{Entity, Resource};
+use nara_ecs::{Entity, Res, Resource, system::SystemParam};
 use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderResourceKey, RenderTarget};
@@ -75,81 +75,63 @@ impl UiColorKey {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ExtractedUiItem {
-    pub entity: Entity,
-    pub source_order: u64,
-    pub root: Entity,
-    pub view_index: usize,
-    pub target: RenderTarget,
-    pub order: i32,
-    pub z_index: i32,
-    pub rect: UiRect,
-    pub clip_rect: Option<UiRect>,
-    pub material: ExtractedUiMaterial,
+pub(crate) struct ExtractedUiItem {
+    pub(crate) entity: Entity,
+    pub(crate) source_order: u64,
+    pub(crate) view_index: usize,
+    pub(crate) target: RenderTarget,
+    pub(crate) order: i32,
+    pub(crate) z_index: i32,
+    pub(crate) rect: UiRect,
+    pub(crate) clip_rect: Option<UiRect>,
+    pub(crate) material: ExtractedUiMaterial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ExtractedUiMaterial {
-    pub image: Option<Handle<ImageAsset>>,
-    pub sampler: SamplerDescriptor,
-    pub alpha_mode: AlphaMode2d,
-    pub tint: Color,
-}
-
-impl ExtractedUiMaterial {
-    #[must_use]
-    pub fn from_color(tint: Color) -> Self {
-        Self {
-            image: None,
-            sampler: SamplerDescriptor::default(),
-            alpha_mode: AlphaMode2d::Blend,
-            tint,
-        }
-    }
+pub(crate) struct ExtractedUiMaterial {
+    pub(crate) image: Option<Handle<ImageAsset>>,
+    pub(crate) sampler: SamplerDescriptor,
+    pub(crate) alpha_mode: AlphaMode2d,
+    pub(crate) tint: Color,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Resource)]
-pub struct ExtractedUiItems {
+pub(crate) struct ExtractedUiItems {
     items: Vec<ExtractedUiItem>,
 }
 
 impl ExtractedUiItems {
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.items.clear();
     }
 
-    pub fn push(&mut self, item: ExtractedUiItem) {
+    pub(crate) fn push(&mut self, item: ExtractedUiItem) {
         self.items.push(item);
     }
 
     #[must_use]
-    pub fn as_slice(&self) -> &[ExtractedUiItem] {
+    pub(crate) fn as_slice(&self) -> &[ExtractedUiItem] {
         &self.items
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.items.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct QueuedUiItem {
-    pub view_index: usize,
-    pub view_order: i32,
-    pub target: RenderTarget,
-    pub order: i32,
-    pub z_index: i32,
-    pub material: UiMaterialKey,
-    pub clip_rect: Option<UiClipRect>,
-    pub entity_bits: u64,
-    pub source_order: u64,
-    pub instance: UiInstance,
+pub(crate) struct QueuedUiItem {
+    pub(crate) view_index: usize,
+    pub(crate) view_order: i32,
+    pub(crate) target: RenderTarget,
+    pub(crate) order: i32,
+    pub(crate) z_index: i32,
+    pub(crate) material: UiMaterialKey,
+    pub(crate) clip_rect: Option<UiClipRect>,
+    pub(crate) entity_bits: u64,
+    pub(crate) source_order: u64,
+    pub(crate) instance: UiInstance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -193,36 +175,31 @@ impl UiClipRect {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Resource)]
-pub struct QueuedUiItems {
+pub(crate) struct QueuedUiItems {
     items: Vec<QueuedUiItem>,
 }
 
 impl QueuedUiItems {
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.items.clear();
     }
 
-    pub fn push(&mut self, item: QueuedUiItem) {
+    pub(crate) fn push(&mut self, item: QueuedUiItem) {
         self.items.push(item);
     }
 
-    pub fn sort(&mut self) {
+    pub(crate) fn sort(&mut self) {
         self.items.sort_by(crate::compare_queued_ui_items);
     }
 
     #[must_use]
-    pub fn as_slice(&self) -> &[QueuedUiItem] {
+    pub(crate) fn as_slice(&self) -> &[QueuedUiItem] {
         &self.items
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.items.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
     }
 }
 
@@ -238,20 +215,60 @@ pub struct UiBatch {
     pub instances: Vec<UiInstance>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Resource)]
-pub struct UiBatches {
+#[derive(Debug, Clone, PartialEq, Resource)]
+pub(crate) struct UiBatches {
     batches: Vec<UiBatch>,
 }
 
 impl UiBatches {
-    pub fn clear(&mut self) {
-        self.batches.clear();
+    pub(crate) const fn new() -> Self {
+        Self {
+            batches: Vec::new(),
+        }
     }
 
-    pub fn replace(&mut self, batches: Vec<UiBatch>) {
+    pub(crate) fn replace(&mut self, batches: Vec<UiBatch>) {
         self.batches = batches;
     }
 
+    #[must_use]
+    pub(crate) fn as_slice(&self) -> &[UiBatch] {
+        &self.batches
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_view(&self, view_index: usize) -> impl Iterator<Item = &UiBatch> {
+        self.batches
+            .iter()
+            .filter(move |batch| batch.view_index == view_index)
+    }
+
+    #[must_use]
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.batches.len()
+    }
+
+    #[must_use]
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.batches.is_empty()
+    }
+
+    #[must_use]
+    #[cfg(test)]
+    pub(crate) fn total_instances(&self) -> usize {
+        self.batches.iter().map(|batch| batch.instances.len()).sum()
+    }
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct UiBatchSnapshot {
+    batches: Vec<UiBatch>,
+}
+
+impl UiBatchSnapshot {
     #[must_use]
     pub fn as_slice(&self) -> &[UiBatch] {
         &self.batches
@@ -262,34 +279,34 @@ impl UiBatches {
             .iter()
             .filter(move |batch| batch.view_index == view_index)
     }
+}
 
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.batches.len()
-    }
+#[doc(hidden)]
+#[derive(SystemParam)]
+pub struct UiBatchReader<'w> {
+    batches: Option<Res<'w, UiBatches>>,
+}
 
+impl UiBatchReader<'_> {
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.batches.is_empty()
-    }
-
-    #[must_use]
-    pub fn total_instances(&self) -> usize {
-        self.batches.iter().map(|batch| batch.instances.len()).sum()
+    pub fn snapshot(&self) -> Option<UiBatchSnapshot> {
+        self.batches.as_deref().map(|batches| UiBatchSnapshot {
+            batches: batches.as_slice().to_vec(),
+        })
     }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
-pub struct UiRenderStats {
-    pub extracted_panels: u32,
-    pub missing_images: u32,
-    pub unprepared_images: u32,
-    pub queued_items: u32,
-    pub batches: u32,
+pub(crate) struct UiRenderStats {
+    pub(crate) extracted_panels: u32,
+    pub(crate) missing_images: u32,
+    pub(crate) unprepared_images: u32,
+    pub(crate) queued_items: u32,
+    pub(crate) batches: u32,
 }
 
 #[must_use]
-pub fn material_key(
+pub(crate) fn material_key(
     material: ExtractedUiMaterial,
     image: Option<RenderResourceKey>,
 ) -> UiMaterialKey {

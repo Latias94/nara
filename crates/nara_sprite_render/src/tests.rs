@@ -17,9 +17,7 @@ use nara_image::{
     ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata, image_resource_key,
 };
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_render::{
-    Camera2d, ExtractedView, RenderImage2d, RenderPhaseLabel, RenderTarget, ViewportRect,
-};
+use nara_render::{Camera2d, ExtractedView, RenderImage2d, RenderTarget, ViewportRect};
 use nara_sprite::{Sprite, TextureRegion};
 use nara_tilemap::{TileAtlasLayout, TileCell, TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
@@ -91,7 +89,6 @@ fn extraction_clears_stale_sprites_and_uses_explicit_identity_transform() {
             world_x_axis: Vec2::X,
             world_y_axis: Vec2::Y,
             color: Color::WHITE,
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
             layer: 0,
             sort_key: 0,
         });
@@ -438,7 +435,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            kind: SpriteBatchKind::Sprite,
             layer: 0,
             sort_key: 0,
             material: material_key(None),
@@ -450,7 +447,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            kind: SpriteBatchKind::Sprite,
             layer: 0,
             sort_key: 0,
             material: material_key(None),
@@ -462,7 +459,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            kind: SpriteBatchKind::Sprite,
             layer: 1,
             sort_key: 0,
             material: material_key(None),
@@ -474,7 +471,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            kind: SpriteBatchKind::Sprite,
             layer: 1,
             sort_key: 1,
             material: material_key(None),
@@ -597,21 +594,21 @@ fn same_image_with_different_samplers_splits_batches() {
 }
 
 #[test]
-fn target_or_phase_changes_split_batches() {
+fn target_or_domain_kind_changes_split_batches() {
     let mut items = vec![
         QueuedSpriteItem {
             target: RenderTarget::PrimaryWindow,
-            phase: RenderPhaseLabel::TILEMAP_2D,
+            kind: SpriteBatchKind::Sprite,
             ..queued_item(0)
         },
         QueuedSpriteItem {
             target: RenderTarget::PrimaryWindow,
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            kind: SpriteBatchKind::Tilemap,
             ..queued_item(1)
         },
         QueuedSpriteItem {
             target: RenderTarget::Image(Handle::new(AssetId::from_raw(8))),
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            kind: SpriteBatchKind::Sprite,
             ..queued_item(2)
         },
     ];
@@ -620,15 +617,17 @@ fn target_or_phase_changes_split_batches() {
     let batches = build_sprite_batches(&items);
 
     assert_eq!(batches.len(), 3);
+    assert_eq!(batches[0].kind, SpriteBatchKind::Tilemap);
+    assert_eq!(batches[1].kind, SpriteBatchKind::Sprite);
     assert!(
         batches
             .iter()
-            .any(|batch| batch.phase == RenderPhaseLabel::TILEMAP_2D)
+            .any(|batch| batch.kind == SpriteBatchKind::Tilemap)
     );
     assert!(
         batches
             .iter()
-            .any(|batch| batch.phase == RenderPhaseLabel::TRANSPARENT_2D)
+            .any(|batch| batch.kind == SpriteBatchKind::Sprite)
     );
     assert!(
         batches
@@ -689,7 +688,7 @@ fn app_pipeline_extracts_tilemaps_into_batches() {
 
     let batches = app.world().resource::<SpriteBatches>();
     assert_eq!(batches.total_instances(), 1);
-    assert_eq!(batches.as_slice()[0].phase, RenderPhaseLabel::TILEMAP_2D);
+    assert_eq!(batches.as_slice()[0].kind, SpriteBatchKind::Tilemap);
     assert_eq!(batches.as_slice()[0].target, target);
     assert!(
         batches.as_slice()[0].instances[0]
@@ -795,7 +794,6 @@ fn placeholder_extracted_sprite() -> ExtractedSprite {
         world_x_axis: Vec2::X,
         world_y_axis: Vec2::Y,
         color: Color::WHITE,
-        phase: RenderPhaseLabel::TRANSPARENT_2D,
         layer: 0,
         sort_key: 0,
     }
@@ -806,7 +804,7 @@ fn queued_item(entity_index: u32) -> QueuedSpriteItem {
         view_index: 0,
         view_order: 0,
         target: RenderTarget::PrimaryWindow,
-        phase: RenderPhaseLabel::TRANSPARENT_2D,
+        kind: SpriteBatchKind::Sprite,
         layer: 0,
         sort_key: 0,
         material: material_key(None),

@@ -12,7 +12,7 @@ use crate::{
     UiInstance, UiRenderStats, UiTextureRect, material_key,
 };
 
-pub fn queue_ui(
+pub(crate) fn queue_ui(
     mut queued: ResMut<QueuedUiItems>,
     mut stats: ResMut<UiRenderStats>,
     views: Res<ExtractedViews>,
@@ -59,7 +59,7 @@ pub fn queue_ui(
     stats.queued_items = saturating_u32(queued.len());
 }
 
-pub fn sort_and_batch_ui(
+pub(crate) fn sort_and_batch_ui(
     mut queued: ResMut<QueuedUiItems>,
     mut batches: ResMut<UiBatches>,
     mut stats: ResMut<UiRenderStats>,
@@ -71,7 +71,7 @@ pub fn sort_and_batch_ui(
 }
 
 #[must_use]
-pub fn build_ui_batches(items: &[QueuedUiItem]) -> Vec<UiBatch> {
+pub(crate) fn build_ui_batches(items: &[QueuedUiItem]) -> Vec<UiBatch> {
     let mut batches = Vec::<UiBatch>::new();
 
     for item in items {
@@ -103,7 +103,7 @@ pub fn build_ui_batches(items: &[QueuedUiItem]) -> Vec<UiBatch> {
     batches
 }
 
-pub fn compare_queued_ui_items(left: &QueuedUiItem, right: &QueuedUiItem) -> Ordering {
+pub(crate) fn compare_queued_ui_items(left: &QueuedUiItem, right: &QueuedUiItem) -> Ordering {
     (
         left.view_order,
         left.view_index,
@@ -127,7 +127,7 @@ pub fn compare_queued_ui_items(left: &QueuedUiItem, right: &QueuedUiItem) -> Ord
 }
 
 #[must_use]
-pub fn ui_rect_to_clip_instance(
+pub(crate) fn ui_rect_to_clip_instance(
     viewport: ViewportRect,
     rect: UiRect,
     color: Color,

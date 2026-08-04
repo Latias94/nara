@@ -145,14 +145,14 @@ or private. ADR 0089 remains Proposed; the implementation ledger is the authorit
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, stable artifact identity/records, bounded `AssetSourceChanges`, bounded `AssetReloadRequests`, and bounded `AssetEvents` | Deterministic artifact keys, O(1) state and persistent slot revisions, dependency-aware reload generations, private concrete-domain consumer authority, same-frame terminal rejection, and sticky full-rescan observation recovery; no generic decoder registry or erased importer executor |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, bounded semantic watch event queue, runtime status/diagnostics, source-change translator, and downstream admission observation | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
 | `nara_scene` | Bounded `SceneDocument`/`PrefabDocument` candidates, stable parent facts, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, `Name`/`Visibility` schemas, scene materialization/export, and documented direct use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware validation, patch transactions, undo/redo, prefab expansion, one-way lowering into `nara_hierarchy`, failure-atomic exact-membership replacement/unload, and rejection of runtime topology export; no runtime relation ownership or transform re-export |
-| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, completed-global `ExtractedView`, owned topology-only `RenderFramePacket`, `RenderFrame`, static `RenderPassPlan`, `RenderBackendStatus`, `RenderPhaseLabel` | Backend-neutral render-domain data and the admitted generation-stamped one-window/one-target/one-view topology; current camera extraction accepts completed translation and rejects unsupported global linear state; stock pass order, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary; no arbitrary external pass/phase promise |
+| `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, completed-global `ExtractedView`, owned topology-only `RenderFramePacket`, `RenderFrame`, and `RenderBackendStatus` | Backend-neutral render-domain data and the admitted generation-stamped one-window/one-target/one-view topology; current camera extraction accepts completed translation and rejects unsupported global linear state; one hidden non-configurable content-before-UI assembly boundary, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary; no public pass, phase, dependency, or graph construction |
 | `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, async image reload jobs, candidate-owned publication, last-good reload preservation, and backend-neutral image content preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, `Material2dKey` | Backend-neutral 2D material intent shared by sprites, tilemaps, runtime UI images, and future material assets |
 | `nara_sprite` | `Sprite`, `SpriteMaterial`, `TextureRegion`, `SpriteAnchor`, `Handle<ImageAsset>` material image binding | Sprite authoring component data with material-first image/sampler/alpha/tint; no backend handles |
 | `nara_tilemap` | `Tilemap`, `TileCoord`, `TileCell`, `TileSet`, `TileSetMaterial`, `TileAtlasLayout`, `TileLayer`, dirty chunk tracking | Tilemap authoring data with material-first tilesets that lower into textured quads now; later culling/cache mechanisms remain measurement-gated under ADR 0096 |
 | `nara_sprite_render` | `ExtractedSprites`, `QueuedSpriteItems`, `SpriteBatches`, `SpriteMaterialKey`, `TextureUvRect`, `SpriteRenderPlugin` | Completed-global affine sprite extraction, tilemap lowering, failure-atomic retained frame scratch, deterministic sort keys, and material-keyed textured quad batches |
 | `nara_ui` | `UiRoot`, `UiNode`, `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiInteractionState`, `UiPointerRoute`, `UiInteractionTarget` | Runtime ECS UI authoring data, layout projection, and target/view-aware pointer hover/capture/focus state; no editor UI toolkit or backend handles |
-| `nara_ui_render` | `ExtractedUiItems`, `QueuedUiItems`, `UiBatches`, `UiMaterialKey`, `UiClipRect`, `UiRenderPlugin` | Backend-neutral UI panel extraction, UI-owned material/instance/UV types, image/color material queueing, clipping, sort, and batching for the UI render phase |
+| `nara_ui_render` | `UiRenderPlugin` | Private backend-neutral UI panel extraction, image/color material queueing, clipping, sort, and batching; the doc-hidden read-only WGPU batch bridge is transitional until ADR 0105's resource-complete packet lands, and root consumers receive no technical pipeline DTOs |
 | `nara_input` | `ButtonInput<KeyCode>`, `ButtonInput<MouseButton>`, bounded ordered `ButtonTransition`, `PointerState`, `ActionMap`, `ActionOutcomes`, `InputSet` | Backend-normalized retained state plus atomic retained-edge admission, independent frame-observation/action-resolution cursors, deterministic transition-order action resolution, focus-loss release, action contexts, future UI focus/capture integration, text routing, and replay diagnostics |
 | `nara_gameplay` | `GameplayCommandDraft`, `GameplayCommandSubmission`, `GameplayCommandIngressSource`, `GameplayCommandEnvelope`, `GameplayCommandQueue`, `GameplayCommandBatch`, bounded `ActionCommandMap`, command schedule sets, settings and stats | Canonically ordered fixed-tick admission with reserved local-action authority, pending/active/quarantine accounting, terminal fail-closed lifecycle state, and action/replay/AI/test/external producer bridges without networking transports or runtime entity handles |
 | `nara_window` | `WindowId`, `Window`, `PrimaryWindow`, normalized window events, owning backend handle providers, atomic non-cloneable surface bindings, target lifecycle authority, scoped retirement driver | Raw platform windows, winit event loop, backend surfaces |
@@ -241,9 +241,9 @@ sequenceDiagram
         SpriteRender->>SpriteRender: queue, sort, and batch material-keyed colored/textured quads
         Ui->>ECS: compute UI layouts and pointer interaction
         UiRender->>UiRender: extract, queue, sort, clip, and batch UI panels
-        Render->>Wgpu: build RenderPassPlan for clear/world/UI/gizmo order
         Wgpu->>SpriteRender: read SpriteBatches
-        Wgpu->>UiRender: read UiBatches
+        Wgpu->>UiRender: capture read-only UiBatchSnapshot
+        Wgpu->>Render: assemble closed content then UI order
         Wgpu-->>App: FrameStats
     end
 ```
@@ -476,15 +476,17 @@ second real adapter or stronger isolation pressure.
   than maintained as a runtime API, production evidence facade, telemetry service, or benchmark
   framework. A future external reader must prove its concrete ADR 0049 input budgets when a real
   `Publish` result admits it.
-- `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`,
-  `RenderPassPlan`, and an owned immutable `RenderFramePacket`. The packet freezes one admitted
-  runtime generation, frame, window, target, view, viewport, and phase sequence before acquisition.
-  It is a topology packet, not yet a resource-complete gameplay-World-independent frame transfer.
-  `nara_render_wgpu` captures owned sprite/UI batches beside that topology, rejects stale,
-  repeated, extra, mismatched, or invalid topology before surface work, records at-most-once
-  acquire/submit/present counters, and consumes the explicit pass plan for clear/world/UI/gizmo
-  order. Submit-time texture preparation still reads live image/prepared-resource storage; RGF-U14
-  measures packet clone/allocation and retained-byte pressure before that boundary changes.
+- `nara_render` exposes `RenderBackendStatus`, `RenderBackendState`, `RenderFrameSkipReason`, and an
+  owned immutable `RenderFramePacket`. The packet freezes one admitted runtime generation, frame,
+  window, target, view, and viewport before acquisition. It is a topology packet, not yet a
+  resource-complete gameplay-World-independent frame transfer. `nara_render` owns one hidden,
+  non-configurable content-before-UI assembly operation; sprite rendering owns the closed
+  `Tilemap`-before-`Sprite` domain order. `nara_render_wgpu` captures owned sprite/UI batches beside
+  that topology, rejects stale, repeated, extra, mismatched, or invalid topology before surface
+  work, and records at-most-once acquire/submit/present counters. Its transaction clears, encodes
+  the assembled batches once, and presents. Submit-time texture preparation still reads live
+  image/prepared-resource storage; NUI-U14 replaces that remaining boundary with resource-complete
+  packets.
 - Native window targets use an owning provider plus an explicit lifecycle authority. Atomic surface
   acquisition issues one non-cloneable handle source and one control lease; safe wgpu surface
   creation consumes the handle source, whose `Drop` acknowledges actual owner release. Controlled
@@ -563,8 +565,8 @@ second real adapter or stronger isolation pressure.
   adapters apply ADR 0049 encoded parse budgets before serde.
 - `HeadlessRuntimePlugins` and `ServerPlugins` are concrete root facade bundles. `HeadlessRuntimePlugins` composes `MinimalPlugins` plus gameplay commands for local headless drivers; `ServerPlugins` installs bounded threaded tasks, preserve-debt fixed time, diagnostics, asset/scene/transform foundations, and gameplay commands without window/render/audio/editor/toolkit or raw input resources by default.
 - `nara_ui` owns the first runtime ECS UI foundation: `UiRoot`, `UiNode`, `UiPanel`, material-aware image/color panel data, computed top-left logical-pixel layouts, and target/view-aware pointer hover/capture/focus state. Computed layout and interaction resources are runtime-only.
-- `nara_ui_render` extracts runtime UI panels from computed layouts, queues UI-owned color/image material keys through the same `nara_image` prepare and `nara_material` sampler/alpha/tint path as sprites, clips panels, and emits `UiBatches` for the UI render phase.
-- `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path according to `RenderPassPlan`; pass order is no longer an implicit backend-only draw-loop rule. The backend owns texture/bind-group cache lifetime, uses grace-frame eviction, and keys pipelines by render target format plus `AlphaMode2d`.
+- `nara_ui_render` privately extracts runtime UI panels from computed layouts, queues UI-owned color/image material keys through the same `nara_image` prepare and `nara_material` sampler/alpha/tint path as sprites, clips panels, and publishes only a transitional read-only workspace bridge to WGPU. Root consumers receive `UiRenderPlugin`, not extract/queue/batch stages or DTOs.
+- `nara_render_wgpu` draws sprite and UI batches through the shared quad pipeline path in the closed order assembled by `nara_render`: tilemap and sprite content, then UI. Clear and present remain the backend transaction boundaries. The backend owns texture/bind-group cache lifetime, uses grace-frame eviction, and keys pipelines by render target format plus `AlphaMode2d`.
 - JSON and RON examples cover schema export, patch roundtrip, and field-level prefab overrides without `winit` or `wgpu`.
 
 ## Accepted Correction Boundary
@@ -594,9 +596,9 @@ preview API surface.
   generation/device/budget aware. Domains own extraction and batch data, while the stock wgpu
   integration may encode those concrete batches privately; a submitter SPI remains evidence-gated. See ADR
   [0040](adr/0040-render-resource-lifetime-and-submitter-ownership.md).
-- The accepted render baseline keeps views, targets, stock phases, static `RenderPassPlan` ordering,
-  and owned topology transfer backend-neutral over one serialized wgpu execution authority. wgpu remains
-  the only RHI; exact limits, handles, allocation, encoding, and submission stay in the backend.
+- The accepted render baseline keeps views, targets, a closed non-configurable first-party order,
+  and owned topology transfer backend-neutral over one serialized wgpu execution authority. wgpu
+  remains the only RHI; exact limits, handles, allocation, encoding, and submission stay in the backend.
   Pipeline families, recipes, a graph/compiler, retained scene, exact-GPU interop, and replacement
   Host roles remain candidate mechanisms until focused tracers admit them. See ADR
   [0094](adr/0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md) and the
@@ -798,9 +800,9 @@ security defect, or measured platform/product constraint fires and the owning de
    See [UI Product Boundaries, Editor Dogfooding, and Porting
    Strategy](ui-product-boundaries-editor-dogfood-and-porting-strategy.md).
 - Treat post-processing, render-to-texture, editor viewport composition, 3D depth/prepass, and
-   transient resource lifetime as OQ-001 evidence only when `RenderPassPlan` cannot express the
-   concrete workflow. None of those feature labels selects a full `RenderGraph`; the review still
-   compares static phases, a minimal execution kernel, and a logical graph.
+   transient resource lifetime as OQ-001 evidence only when the closed first-party order cannot
+   express the concrete workflow. None of those feature labels selects a full `RenderGraph`; the
+   review still compares an extended static order, a minimal execution kernel, and a logical graph.
 - Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
 - Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab

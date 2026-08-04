@@ -1,5 +1,4 @@
 use crate::quad::{WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey};
-use nara_render::RenderPhaseInput;
 use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteInstance};
 
 pub(crate) fn collect_sprite_quad_batches(
@@ -12,19 +11,8 @@ pub(crate) fn collect_sprite_quad_batches(
         .collect()
 }
 
-pub(crate) fn append_sprite_phase_inputs(
-    batches: &SpriteBatches,
-    inputs: &mut Vec<RenderPhaseInput>,
-) {
-    inputs.extend(batches.as_slice().iter().map(|batch| RenderPhaseInput {
-        view_index: batch.view_index,
-        phase: batch.phase,
-    }));
-}
-
 fn sprite_quad_batch(batch: &SpriteBatch) -> WgpuQuadBatch {
     WgpuQuadBatch {
-        phase: batch.phase,
         material: WgpuQuadMaterialKey {
             image: batch.material.image,
             sampler: batch.material.sampler,
@@ -57,8 +45,8 @@ mod tests {
     use super::*;
     use nara_core::{Color, Vec2};
     use nara_material::{AlphaMode2d, SamplerDescriptor};
-    use nara_render::{RenderPhaseLabel, RenderTarget};
-    use nara_sprite_render::{ColorKey, SpriteMaterialKey, TextureUvRect};
+    use nara_render::RenderTarget;
+    use nara_sprite_render::{ColorKey, SpriteBatchKind, SpriteMaterialKey, TextureUvRect};
 
     #[test]
     fn sprite_adapter_preserves_material_and_instance_geometry() {
@@ -66,7 +54,7 @@ mod tests {
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
-            phase: RenderPhaseLabel::TRANSPARENT_2D,
+            kind: SpriteBatchKind::Sprite,
             layer: 0,
             sort_key: 0,
             material: SpriteMaterialKey {

@@ -3,7 +3,7 @@ use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
 use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_render::{RenderPhaseLabel, RenderResourceKey, RenderTarget};
+use nara_render::{RenderResourceKey, RenderTarget};
 use nara_sprite::TextureRegion;
 use nara_tilemap::{TileCoord, TileIndex};
 
@@ -11,6 +11,29 @@ use nara_tilemap::{TileCoord, TileIndex};
 pub enum ExtractedSpriteKind {
     Sprite,
     TilemapCell { coord: TileCoord, tile: TileIndex },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SpriteBatchKind {
+    Tilemap,
+    Sprite,
+}
+
+impl SpriteBatchKind {
+    pub(crate) const fn order(self) -> u8 {
+        match self {
+            Self::Tilemap => 0,
+            Self::Sprite => 1,
+        }
+    }
+
+    #[must_use]
+    pub const fn from_extracted(kind: ExtractedSpriteKind) -> Self {
+        match kind {
+            ExtractedSpriteKind::Sprite => Self::Sprite,
+            ExtractedSpriteKind::TilemapCell { .. } => Self::Tilemap,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -24,7 +47,6 @@ pub struct ExtractedSprite {
     pub world_x_axis: Vec2,
     pub world_y_axis: Vec2,
     pub color: Color,
-    pub phase: RenderPhaseLabel,
     pub layer: i32,
     pub sort_key: i32,
 }
@@ -162,7 +184,7 @@ pub struct QueuedSpriteItem {
     pub view_index: usize,
     pub view_order: i32,
     pub target: RenderTarget,
-    pub phase: RenderPhaseLabel,
+    pub kind: SpriteBatchKind,
     pub layer: i32,
     pub sort_key: i32,
     pub material: SpriteMaterialKey,
@@ -258,24 +280,26 @@ pub struct SpriteBatch {
     pub view_index: usize,
     pub view_order: i32,
     pub target: RenderTarget,
-    pub phase: RenderPhaseLabel,
+    pub kind: SpriteBatchKind,
     pub layer: i32,
     pub sort_key: i32,
     pub material: SpriteMaterialKey,
     pub instances: Vec<SpriteInstance>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Resource)]
+#[derive(Debug, Clone, PartialEq, Resource)]
 pub struct SpriteBatches {
     batches: Vec<SpriteBatch>,
 }
 
 impl SpriteBatches {
-    pub fn clear(&mut self) {
-        self.batches.clear();
+    pub(crate) const fn new() -> Self {
+        Self {
+            batches: Vec::new(),
+        }
     }
 
-    pub fn replace(&mut self, batches: Vec<SpriteBatch>) {
+    pub(crate) fn replace(&mut self, batches: Vec<SpriteBatch>) {
         self.batches = batches;
     }
 

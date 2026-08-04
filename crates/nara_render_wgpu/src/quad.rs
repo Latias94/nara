@@ -3,7 +3,7 @@ use bytemuck::{Pod, Zeroable};
 use nara_asset::Assets;
 use nara_image::{ImageAsset, PreparedImageResource};
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_render::{PreparedRenderResources, RenderPhaseLabel, RenderResourceKey, ViewportRect};
+use nara_render::{PreparedRenderResources, RenderResourceKey, ViewportRect};
 use wgpu::util::DeviceExt;
 
 const VERTICES_PER_QUAD: u32 = 6;
@@ -37,7 +37,6 @@ pub(crate) struct WgpuQuadMaterialKey {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WgpuQuadBatch {
-    pub(crate) phase: RenderPhaseLabel,
     pub(crate) material: WgpuQuadMaterialKey,
     pub(crate) scissor: Option<WgpuScissorRect>,
     pub(crate) instances: Vec<WgpuQuadInstance>,
@@ -74,7 +73,6 @@ pub(crate) struct WgpuQuadPipelineDrawRef {
 pub(crate) struct WgpuQuadBatchBuffer {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
-    phase: RenderPhaseLabel,
     alpha_mode: AlphaMode2d,
     scissor: Option<WgpuScissorRect>,
     instance_count: u32,
@@ -203,7 +201,6 @@ pub(crate) fn create_quad_batch_buffers(
             Ok(WgpuQuadBatchBuffer {
                 buffer,
                 bind_group,
-                phase: batch.phase,
                 alpha_mode: batch.material.alpha_mode,
                 scissor: batch.scissor,
                 instance_count,
@@ -213,19 +210,14 @@ pub(crate) fn create_quad_batch_buffers(
         .collect()
 }
 
-pub(crate) fn draw_quad_batch_buffers_for_phase<'pass>(
+pub(crate) fn draw_quad_batch_buffers<'pass>(
     render_pass: &mut wgpu::RenderPass<'pass>,
     pipelines: &'pass [WgpuQuadPipelineDrawRef],
     buffers: &'pass [WgpuQuadBatchBuffer],
-    phase: RenderPhaseLabel,
     viewport: ViewportRect,
 ) {
-    if buffers.iter().all(|buffer| buffer.phase != phase) {
-        return;
-    }
-
     let mut bound_alpha_mode = None::<AlphaMode2d>;
-    for buffer in buffers.iter().filter(|buffer| buffer.phase == phase) {
+    for buffer in buffers {
         let Some(pipeline) = pipelines
             .iter()
             .find(|pipeline| pipeline.alpha_mode == buffer.alpha_mode)

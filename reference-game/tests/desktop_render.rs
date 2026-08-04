@@ -24,7 +24,7 @@ use nara::{
     scene::SceneEntitySource,
     sprite_render::{ExtractedSprites, TextureUvRect},
     transform::{GlobalTransform2d, Transform2d},
-    ui_render::UiBatches,
+    ui::ComputedUiLayouts,
 };
 use nara_reference_game::{
     EnemyRole, PlayerRole, ReferenceHudProjection, WaveOutcome, WaveSnapshot, Weapon,
@@ -43,7 +43,7 @@ fn desktop_projection_emits_sprites_clipped_hud_and_distinct_terminal_geometry()
     assert_eq!(completed.hud.health_width, 240.0);
     assert_eq!(completed.hud.progress_width, 240.0);
     assert!(completed.extracted_sprites >= 1);
-    assert!(completed.clipped_batches >= 1);
+    assert!(completed.clipped_layouts >= 1);
     assert!(completed.terminal_half_width > defeated.terminal_half_width);
     assert_eq!(completed.arena_floor_sprites, 15 * 8);
     assert!(defeated.player_and_enemy_share_atlas);
@@ -369,7 +369,7 @@ struct RenderObservation {
     player_and_enemy_share_atlas: bool,
     player_and_enemy_regions_are_distinct: bool,
     atlas_sprites_use_nearest_sampling: bool,
-    clipped_batches: usize,
+    clipped_layouts: usize,
     terminal_half_width: f32,
     terminal_half_height: f32,
 }
@@ -448,18 +448,17 @@ fn render_terminal(outcome: WaveOutcome) -> RenderObservation {
         .iter()
         .filter(|sprite| sprite.material.image == player_sprite.material.image)
         .all(|sprite| sprite.material.sampler == SamplerDescriptor::NEAREST_CLAMP);
-    let batches = world.resource::<UiBatches>();
-    let clipped_batches = batches
+    let layouts = world.resource::<ComputedUiLayouts>();
+    let clipped_layouts = layouts
         .as_slice()
         .iter()
-        .filter(|batch| batch.clip_rect.is_some())
+        .filter(|layout| layout.visible && layout.clip_rect.is_some())
         .count();
-    let terminal = batches
+    let terminal = layouts
         .as_slice()
         .iter()
-        .find(|batch| batch.order == 10)
-        .expect("terminal geometry should be queued");
-    let terminal_instance = terminal.instances.first().unwrap();
+        .find(|layout| layout.visible && layout.order == 10)
+        .expect("terminal geometry should be laid out");
     let observation = RenderObservation {
         hud,
         extracted_sprites,
@@ -467,9 +466,9 @@ fn render_terminal(outcome: WaveOutcome) -> RenderObservation {
         player_and_enemy_share_atlas,
         player_and_enemy_regions_are_distinct,
         atlas_sprites_use_nearest_sampling,
-        clipped_batches,
-        terminal_half_width: terminal_instance.x_axis.x.abs(),
-        terminal_half_height: terminal_instance.y_axis.y.abs(),
+        clipped_layouts,
+        terminal_half_width: terminal.rect.size.x * 0.5,
+        terminal_half_height: terminal.rect.size.y * 0.5,
     };
 
     stop_runtime(runtime);

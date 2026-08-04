@@ -320,6 +320,7 @@ fn public_prelude_is_gameplay_first() {
     check_public_prelude_fixture("recipe-pass", true, None);
     check_public_prelude_fixture("one-shot-direct-pass", true, None);
     check_public_prelude_fixture("explicit-surfaces-pass", true, None);
+    check_public_prelude_fixture("render-product-pass", true, None);
     check_public_prelude_fixture("recipe-one-shot-fail", false, None);
     check_public_prelude_fixture("hierarchy-construction-fail", false, None);
     check_public_prelude_fixture("hierarchy-children-mutation-fail", false, None);
@@ -346,6 +347,91 @@ fn public_prelude_is_gameplay_first() {
             "prepare_exact_scene_instance_replacement",
         )),
     );
+    check_public_prelude_fixture(
+        "render-topology-fail",
+        false,
+        Some(PublicPreludeFailure::MentionsAll(&[
+            "RenderPassDependency",
+            "RenderPassDependencyError",
+            "RenderPassNodeId",
+            "RenderPassPlan",
+            "RenderPassStep",
+            "RenderPassStepLabel",
+            "RenderPhaseInput",
+            "RenderPhaseLabel",
+            "build_render_pass_plan",
+            "render_phase_order",
+        ])),
+    );
+    check_public_prelude_fixture(
+        "render-frame-plan-fail",
+        false,
+        Some(PublicPreludeFailure::Method("pass_plan")),
+    );
+    check_public_prelude_fixture(
+        "render-frame-phases-fail",
+        false,
+        Some(PublicPreludeFailure::ArgumentCount {
+            expected: 5,
+            actual: 6,
+        }),
+    );
+    check_public_prelude_fixture(
+        "ui-pipeline-fail",
+        false,
+        Some(PublicPreludeFailure::MentionsAll(&[
+            "ExtractedUiItem",
+            "ExtractedUiItems",
+            "ExtractedUiMaterial",
+            "QueuedUiItem",
+            "QueuedUiItems",
+            "UiBatch",
+            "UiBatches",
+            "UiClipRect",
+            "UiColorKey",
+            "UiInstance",
+            "UiMaterialKey",
+            "UiRenderStats",
+            "UiTextureRect",
+            "build_ui_batches",
+            "compare_queued_ui_items",
+            "extract_ui",
+            "material_key",
+            "queue_ui",
+            "sort_and_batch_ui",
+            "ui_rect_to_clip_instance",
+        ])),
+    );
+    check_public_prelude_fixture(
+        "ui-prelude-fail",
+        false,
+        Some(PublicPreludeFailure::MentionsAll(&[
+            "UiBatch",
+            "UiBatches",
+            "UiRenderStats",
+            "extract_ui",
+            "queue_ui",
+        ])),
+    );
+    check_public_prelude_fixture(
+        "ui-private-bridge-fail",
+        false,
+        Some(PublicPreludeFailure::Missing("__private")),
+    );
+    check_public_prelude_fixture(
+        "ui-resource-bridge-fail",
+        false,
+        Some(PublicPreludeFailure::Missing("UiBatches")),
+    );
+    check_public_prelude_fixture(
+        "advanced-render-pipeline-fail",
+        false,
+        Some(PublicPreludeFailure::MentionsAll(&[
+            "RenderPhaseLabel",
+            "SpriteBatch",
+            "UiBatch",
+        ])),
+    );
     for (binary, symbol) in [
         ("backend-fail", "WindowEvents"),
         ("tooling-fail", "SceneInspectorState"),
@@ -361,6 +447,9 @@ fn public_prelude_is_gameplay_first() {
 enum PublicPreludeFailure<'a> {
     Missing(&'a str),
     Private(&'a str),
+    Method(&'a str),
+    ArgumentCount { expected: usize, actual: usize },
+    MentionsAll(&'a [&'a str]),
 }
 
 fn cargo_metadata() -> Value {
@@ -450,7 +539,14 @@ fn check_public_prelude_fixture(
     let output = Command::new(env!("CARGO"))
         .args(["check", "--manifest-path"])
         .arg(&manifest)
-        .args(["--locked", "--jobs", "1", "--bin", binary])
+        .args([
+            "--locked",
+            "--jobs",
+            "1",
+            "--message-format=json",
+            "--bin",
+            binary,
+        ])
         .current_dir(repository)
         .env("CARGO_TERM_COLOR", "never")
         .env("CARGO_TARGET_DIR", public_prelude_target_dir(repository))
@@ -458,6 +554,7 @@ fn check_public_prelude_fixture(
         .unwrap_or_else(|error| panic!("failed to check public prelude fixture {binary}: {error}"));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let diagnostics = compiler_diagnostic_messages(&output.stdout);
     assert_eq!(
         output.status.success(),
         should_succeed,
@@ -467,17 +564,62 @@ fn check_public_prelude_fixture(
     if let Some(failure) = failure {
         match failure {
             PublicPreludeFailure::Missing(symbol) => assert!(
-                (stderr.contains("unresolved import") || stderr.contains("cannot find type"))
-                    && stderr.contains(symbol),
-                "{binary} must fail because {symbol} is absent from the ordinary facade\n{stderr}"
+                (diagnostics.contains("unresolved import")
+                    || diagnostics.contains("cannot find type"))
+                    && diagnostics.contains(symbol),
+                "{binary} must fail because {symbol} is absent from the ordinary facade\n\
+                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
             ),
             PublicPreludeFailure::Private(symbol) => assert!(
-                (stderr.contains("is private") || stderr.contains("private associated function"))
-                    && stderr.contains(symbol),
-                "{binary} must fail because {symbol} is private to its owning crate\n{stderr}"
+                (diagnostics.contains("is private")
+                    || diagnostics.contains("private associated function"))
+                    && diagnostics.contains(symbol),
+                "{binary} must fail because {symbol} is private to its owning crate\n\
+                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
+            ),
+            PublicPreludeFailure::Method(symbol) => assert!(
+                diagnostics.contains("no method named") && diagnostics.contains(symbol),
+                "{binary} must fail because method {symbol} is absent\n\
+                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
+            ),
+            PublicPreludeFailure::ArgumentCount { expected, actual } => assert!(
+                diagnostics.contains(&format!(
+                    "this function takes {expected} arguments but {actual} arguments were supplied"
+                )),
+                "{binary} must reject the obsolete {actual}-argument call\n\
+                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
+            ),
+            PublicPreludeFailure::MentionsAll(symbols) => assert!(
+                symbols.iter().all(|symbol| diagnostics.contains(symbol)),
+                "{binary} must diagnose every removed symbol {symbols:?}\n\
+                 diagnostics:\n{diagnostics}\nstderr:\n{stderr}"
             ),
         }
     }
+}
+
+fn compiler_diagnostic_messages(stdout: &[u8]) -> String {
+    fn collect_messages(diagnostic: &Value, messages: &mut Vec<String>) {
+        if let Some(message) = diagnostic["message"].as_str() {
+            messages.push(message.to_owned());
+        }
+        if let Some(children) = diagnostic["children"].as_array() {
+            for child in children {
+                collect_messages(child, messages);
+            }
+        }
+    }
+
+    let mut messages = Vec::new();
+    for line in String::from_utf8_lossy(stdout).lines() {
+        let Ok(event) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if event["reason"] == "compiler-message" {
+            collect_messages(&event["message"], &mut messages);
+        }
+    }
+    messages.join("\n")
 }
 
 fn public_prelude_target_dir(repository: &Path) -> PathBuf {

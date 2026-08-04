@@ -2793,6 +2793,72 @@ without a Host that owns execution, authority, budgets, errors, tasks, and publi
 examples prove concrete execution, exact artifact identity, bounded failure, stale-result
 rejection, and last-good publication.
 
+## NUI-U4: Closed First-Party Render And UI Internals
+
+**Removed contract**:
+
+- `RenderPhaseLabel`, `RenderPhaseInput`, `RenderPassNodeId`, `RenderPassStepLabel`,
+  `RenderPassStep`, `RenderPassPlan`, `RenderPassDependency`, `RenderPassDependencyError`,
+  `build_render_pass_plan`, and `render_phase_order`.
+- The phase-input argument to `build_render_frame_packet` and
+  `RenderFramePacket::pass_plan`.
+- Root and advanced-prelude exports for render topology, sprite extraction/queue/batch DTOs, and
+  UI extraction/queue/batch DTOs.
+- Public `nara_ui_render` access to extract, queue, compare, sort, batch construction,
+  material-key construction, mutable intermediate resources, and render statistics.
+- The direct `bevy_ecs` dependencies of `nara_render`, `nara_sprite_render`, `nara_ui_render`, and
+  `nara_render_wgpu`; these crates use the `nara_ecs` ownership boundary.
+
+**Changed contract**:
+
+- `ExtractedSprite::phase` is removed; `ExtractedSpriteKind` remains the source-domain fact.
+  `QueuedSpriteItem::phase` and `SpriteBatch::phase` are replaced by the closed owner-local
+  `SpriteBatchKind::{Tilemap, Sprite}` ordering fact. It cannot introduce a new renderer-wide
+  phase.
+- WGPU performs one fixed first-party draw sequence: clear through the render-pass load operation,
+  then ordered sprite content (`Tilemap`, `Sprite`), then UI content, then presentation. It no
+  longer interprets a runtime pass plan or scans buffers once per phase.
+- `nara_ui_render` publicly exposes `UiRenderPlugin` as its product entry. Its doc-hidden
+  `__private` module gives WGPU a temporary read-only `UiBatchReader -> UiBatchSnapshot` bridge
+  until NUI-U14 replaces the incomplete live-resource handoff with the owned resource-complete UI
+  packet required by ADR 0105. The internal `UiBatches` ECS resource is not exported, and the
+  snapshot is neither constructible nor a `Resource`; this bridge is not a supported external
+  extension surface.
+
+**Canonical replacement or deletion rationale**: no production consumer created a distinct phase,
+dependency graph, or UI pipeline schedule. The old pass plan deduplicated labels and sorted them,
+but its dependencies did not control execution, its clear step was ignored, and frame packet
+admission already rejected the multi-view shape used by its topology tests. The real backend order
+is static and is now represented directly by owner-local batch order plus one WGPU draw traversal.
+Technical UI stages remain owned by `UiRenderPlugin`; external products author UI and select a
+presentation recipe instead of mutating half-built render state.
+
+**User action**: remove custom phase labels, pass dependencies, pass-plan inspection, direct UI
+stage calls, and imports of sprite/UI render DTOs from root preludes. Author cameras, sprites,
+tilemaps, and UI through their product modules, install the applicable product recipe, and treat
+render submission as engine-owned. Code that needs a real intermediate resource, history lifetime,
+or cross-target dependency must supply the evidence required by OQ-001 before a general execution
+model can be proposed.
+
+**Source action**: none. Scene, Prefab, project, image, sprite, tilemap, and UI source formats are
+unchanged by this unit.
+
+**Cache action**: keep. Rebuild Rust artifacts because public Rust signatures and feature dependency
+edges changed; imported assets and prepared image identities are unchanged.
+
+**Compatibility window**: none (pre-1.0 fearless deletion). No deprecated phase label, pass-plan
+adapter, empty dependency graph, public UI stage wrapper, or alternate prelude export remains.
+
+**Rollback**: revert the topology deletion, sprite owner-local kind, UI surface closure, WGPU fixed
+ordering, and facade cleanup together. Do not restore a public graph whose dependency edges do not
+control execution.
+
+**Verification anchors**: `crates/nara_render/src/lib.rs`,
+`crates/nara_sprite_render/src/{types.rs,queue.rs}`, `crates/nara_ui_render/src/lib.rs`,
+`crates/nara_render_wgpu/src/{lib.rs,quad.rs}`, `tests/product_capabilities.rs`, and the independently
+locked `tests/fixtures/public-prelude` consumer prove topology removal, product authoring access,
+fixed first-party ordering, private UI stages, and exact manifest ownership.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

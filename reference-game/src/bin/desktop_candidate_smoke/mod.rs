@@ -67,17 +67,19 @@ struct CandidateSmokeState {
 
 fn observe_candidate_frame(
     prepared: Res<PreparedRenderResources<PreparedImageResource>>,
-    batches: Res<SpriteBatches>,
+    batches: Option<Res<SpriteBatches>>,
     frame: Res<RenderFrame>,
     backend: Res<WgpuRenderBackend>,
     state: Res<CandidateSmokeState>,
     mut exit: ResMut<AppExitRequests>,
 ) -> Result<(), BevyError> {
     let product_frame_ready = !prepared.is_empty()
-        && batches
-            .as_slice()
-            .iter()
-            .any(|batch| batch.material.image.is_some())
+        && batches.as_deref().is_some_and(|batches| {
+            batches
+                .as_slice()
+                .iter()
+                .any(|batch| batch.material.image.is_some())
+        })
         && submitted_product_frame(&frame, &backend);
     if product_frame_ready {
         exit.request_success();
@@ -122,7 +124,6 @@ mod tests {
     fn expired_candidate_frame_fails_without_requesting_exit() {
         let mut world = World::new();
         world.insert_resource(PreparedRenderResources::<PreparedImageResource>::default());
-        world.insert_resource(SpriteBatches::default());
         world.insert_resource(RenderFrame::default());
         world.insert_resource(WgpuRenderBackend::default());
         world.insert_resource(CandidateSmokeState {

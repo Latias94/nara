@@ -76,7 +76,11 @@ pub use nara_transform as transform;
 #[cfg(feature = "runtime-ui")]
 pub use nara_ui as ui;
 #[cfg(feature = "runtime-ui")]
-pub use nara_ui_render as ui_render;
+pub mod ui_render {
+    //! Runtime UI presentation product surface.
+
+    pub use nara_ui_render::{UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiRenderPlugin};
+}
 #[cfg(feature = "runtime-core")]
 pub use nara_window as window;
 #[cfg(feature = "desktop-winit")]
@@ -313,25 +317,13 @@ pub mod advanced_prelude {
         Extent2d, ExtractedView, ExtractedViews, FrameStats, PreparedRenderResource,
         PreparedRenderResourceRecord, PreparedRenderResources, RenderBackendState,
         RenderBackendStatus, RenderFrame, RenderFrameSkip, RenderFrameSkipReason, RenderFrameState,
-        RenderPhaseLabel, RenderPrepareError, RenderPrepareStatus, RenderResourceKey,
-        RenderResourceKind, RenderResourceSnapshot, ViewportRect,
-    };
-    #[cfg(feature = "runtime-2d")]
-    pub use nara_sprite_render::{
-        ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
-        QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatches, SpriteInstance,
-        SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
+        RenderPrepareError, RenderPrepareStatus, RenderResourceKey, RenderResourceKind,
+        RenderResourceSnapshot, ViewportRect,
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::{
         ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiInteractionTarget,
         UiPointerRoute,
-    };
-    #[cfg(feature = "runtime-ui")]
-    pub use nara_ui_render::{
-        ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, QueuedUiItem, QueuedUiItems,
-        UiBatch, UiBatches, UiClipRect, UiColorKey, UiInstance, UiMaterialKey, UiRenderStats,
-        UiTextureRect,
     };
 }
 
@@ -767,11 +759,15 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(RuntimeUiPlugins).unwrap();
 
-        assert!(app.world().contains_resource::<nara_ui_render::UiBatches>());
         let metadata = app
             .installed_plugin_groups()
             .find(|group| group.id() == PluginGroupId::new("nara.plugins.runtime-ui"))
             .unwrap();
+        assert!(
+            metadata
+                .plugins()
+                .contains(&nara_ui_render::UI_RENDER_PLUGIN_ID)
+        );
         assert!(
             !metadata
                 .plugins()

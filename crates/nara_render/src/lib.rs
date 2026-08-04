@@ -1,6 +1,5 @@
 //! Renderer-facing data and backend seam.
 
-mod pass_plan;
 mod prepare;
 
 use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext, RuntimeGeneration};
@@ -19,11 +18,6 @@ use nara_reflect::{
 use nara_transform::{GlobalTransform2d, Transform2d};
 use nara_window::{PresentMode, PrimaryWindowId, Window, WindowId, WindowResolution};
 
-pub use pass_plan::{
-    RenderPassDependency, RenderPassDependencyError, RenderPassNodeId, RenderPassPlan,
-    RenderPassStep, RenderPassStepLabel, RenderPhaseInput, build_render_pass_plan,
-    render_phase_order,
-};
 pub use prepare::{
     PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
     RenderPrepareError, RenderPrepareStatus, RenderResourceKey, RenderResourceKind,
@@ -33,6 +27,12 @@ pub use prepare::{
 #[doc(hidden)]
 pub mod __private {
     use nara_ecs::SystemSet;
+
+    /// Assembles the closed first-party draw order without exposing topology construction.
+    pub fn assemble_first_party_draws<T>(mut content: Vec<T>, ui: Vec<T>) -> Vec<T> {
+        content.extend(ui);
+        content
+    }
 
     /// Provisional first-party ordering boundary after camera extraction completes.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
@@ -153,27 +153,6 @@ impl ViewportRect {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RenderPhaseLabel(&'static str);
-
-impl RenderPhaseLabel {
-    pub const OPAQUE_2D: Self = Self("opaque_2d");
-    pub const TRANSPARENT_2D: Self = Self("transparent_2d");
-    pub const TILEMAP_2D: Self = Self("tilemap_2d");
-    pub const GIZMO: Self = Self("gizmo");
-    pub const UI: Self = Self("ui");
-
-    #[must_use]
-    pub const fn new(name: &'static str) -> Self {
-        Self(name)
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        self.0
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Component)]
 pub struct Camera2d {
     pub target: RenderTarget,
@@ -275,7 +254,6 @@ pub struct RenderFramePacket {
     frame_index: u64,
     window: RenderWindowPacket,
     view: ExtractedView,
-    pass_plan: RenderPassPlan,
 }
 
 impl RenderFramePacket {
@@ -297,11 +275,6 @@ impl RenderFramePacket {
     #[must_use]
     pub const fn view(&self) -> &ExtractedView {
         &self.view
-    }
-
-    #[must_use]
-    pub const fn pass_plan(&self) -> &RenderPassPlan {
-        &self.pass_plan
     }
 }
 
@@ -328,7 +301,6 @@ pub fn build_render_frame_packet<'a>(
     primary_window_id: Option<WindowId>,
     windows: impl IntoIterator<Item = &'a Window>,
     views: &ExtractedViews,
-    phases: impl IntoIterator<Item = RenderPhaseInput>,
 ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
     if views.is_empty() {
         return Ok(None);
@@ -376,7 +348,6 @@ pub fn build_render_frame_packet<'a>(
             present_mode: window.present_mode,
         },
         view,
-        pass_plan: build_render_pass_plan(views, phases),
     }))
 }
 
@@ -1047,25 +1018,15 @@ mod tests {
         let mut views = ExtractedViews::default();
         views.push(test_extracted_view());
 
-        let packet = build_render_frame_packet(
-            generation,
-            9,
-            Some(WindowId::PRIMARY),
-            [&window],
-            &views,
-            [RenderPhaseInput {
-                view_index: 0,
-                phase: RenderPhaseLabel::TRANSPARENT_2D,
-            }],
-        )
-        .unwrap()
-        .unwrap();
+        let packet =
+            build_render_frame_packet(generation, 9, Some(WindowId::PRIMARY), [&window], &views)
+                .unwrap()
+                .unwrap();
 
         assert_eq!(packet.generation(), generation);
         assert_eq!(packet.frame_index(), 9);
         assert_eq!(packet.window().id, WindowId::PRIMARY);
         assert_eq!(packet.view(), &test_extracted_view());
-        assert_eq!(packet.pass_plan().len(), 2);
     }
 
     #[test]
@@ -1079,7 +1040,7 @@ mod tests {
             ..test_extracted_view()
         });
         assert!(matches!(
-            build_render_frame_packet(generation, 1, None, [&window], &views, []),
+            build_render_frame_packet(generation, 1, None, [&window], &views),
             Err(RenderFramePacketError::UnsupportedViewCount { actual: 2 })
         ));
 
@@ -1087,7 +1048,7 @@ mod tests {
         views.push(test_extracted_view());
         let second_window = Window::default().with_id(WindowId::new(2));
         assert!(matches!(
-            build_render_frame_packet(generation, 1, None, [&window, &second_window], &views, [],),
+            build_render_frame_packet(generation, 1, None, [&window, &second_window], &views),
             Err(RenderFramePacketError::UnsupportedWindowCount { actual: 2 })
         ));
 
@@ -1097,7 +1058,7 @@ mod tests {
             ..test_extracted_view()
         });
         assert!(matches!(
-            build_render_frame_packet(generation, 1, None, [&window], &image_views, []),
+            build_render_frame_packet(generation, 1, None, [&window], &image_views),
             Err(RenderFramePacketError::UnsupportedImageTarget)
         ));
     }
@@ -1113,7 +1074,7 @@ mod tests {
             ..test_extracted_view()
         });
         assert_eq!(
-            build_render_frame_packet(generation, 1, None, [&window], &mismatched, []),
+            build_render_frame_packet(generation, 1, None, [&window], &mismatched),
             Err(RenderFramePacketError::TargetWindowMismatch {
                 window_id: target_window,
             })
@@ -1125,7 +1086,7 @@ mod tests {
             ..test_extracted_view()
         });
         assert_eq!(
-            build_render_frame_packet(generation, 1, None, [&window], &outside, []),
+            build_render_frame_packet(generation, 1, None, [&window], &outside),
             Err(RenderFramePacketError::ViewportOutsideTarget {
                 window_id: WindowId::PRIMARY,
             })
@@ -1138,7 +1099,7 @@ mod tests {
         let window = Window::default();
         let mut views = ExtractedViews::default();
         views.push(test_extracted_view());
-        let packet = build_render_frame_packet(generation, 1, None, [&window], &views, [])
+        let packet = build_render_frame_packet(generation, 1, None, [&window], &views)
             .unwrap()
             .unwrap();
 
@@ -1152,7 +1113,7 @@ mod tests {
             Entity::from_raw_u32(1).unwrap()
         );
         assert!(matches!(
-            build_render_frame_packet(generation, 2, None, [&window], &views, []),
+            build_render_frame_packet(generation, 2, None, [&window], &views),
             Err(RenderFramePacketError::UnsupportedViewCount { actual: 2 })
         ));
     }
