@@ -1,4 +1,4 @@
-use nara_ecs::{Entity, Query, Res, ResMut};
+use nara_ecs::{Query, Res, ResMut};
 use nara_ui::{ComputedUiLayouts, UiPanel};
 
 use crate::{ExtractedUiItem, ExtractedUiItems, ExtractedUiMaterial, UiRenderStats};
@@ -7,7 +7,7 @@ pub(crate) fn extract_ui(
     mut extracted: ResMut<ExtractedUiItems>,
     mut stats: ResMut<UiRenderStats>,
     layouts: Res<ComputedUiLayouts>,
-    panels: Query<(Entity, &UiPanel)>,
+    panels: Query<&UiPanel>,
 ) {
     extracted.clear();
     stats.extracted_panels = 0;
@@ -16,12 +16,11 @@ pub(crate) fn extract_ui(
         if !layout.visible || !layout.rect.is_non_empty() {
             continue;
         }
-        let Ok((entity, panel)) = panels.get(layout.entity) else {
+        let Ok(panel) = panels.get(layout.entity) else {
             continue;
         };
         let source_order = extracted.len() as u64;
         extracted.push(ExtractedUiItem {
-            entity,
             source_order,
             view_index: layout.view_index,
             target: layout.target,

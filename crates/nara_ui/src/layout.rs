@@ -1,6 +1,6 @@
 use nara_core::Vec2;
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, Without};
-use nara_hierarchy::Children;
+use nara_hierarchy::{Children, HierarchyOrder};
 use nara_render::{ExtractedViews, RenderTarget, ViewportRect};
 
 use crate::{UiNode, UiRoot, style::resolve_ui_position, style::resolve_ui_size};
@@ -59,6 +59,7 @@ pub struct ComputedUiLayout {
     pub target: RenderTarget,
     pub order: i32,
     pub z_index: i32,
+    pub structural_index: usize,
     pub rect: UiRect,
     pub visible: bool,
     pub clip_rect: Option<UiRect>,
@@ -88,7 +89,7 @@ impl ComputedUiLayouts {
                 layout.order,
                 layout.view_index,
                 layout.z_index,
-                layout.entity.to_bits(),
+                layout.structural_index,
             )
         });
         self.layouts = layouts;
@@ -118,6 +119,7 @@ impl ComputedUiLayouts {
 pub fn compute_ui_layouts(
     mut computed: ResMut<ComputedUiLayouts>,
     views: Res<ExtractedViews>,
+    hierarchy_order: Res<HierarchyOrder>,
     roots: Query<(Entity, &UiRoot, Option<&UiNode>, Option<&Children>)>,
     nodes: Query<(&UiNode, Option<&Children>), Without<UiRoot>>,
 ) {
@@ -125,16 +127,18 @@ pub fn compute_ui_layouts(
     let mut root_entries = roots
         .iter()
         .filter_map(|(entity, root, node, _children)| {
+            let structural_index = hierarchy_order.index(entity)?;
             view_for_target(&views, root.target).map(|(view_index, viewport)| RootEntry {
                 entity,
                 root: *root,
                 node: node.copied(),
+                structural_index,
                 view_index,
                 viewport,
             })
         })
         .collect::<Vec<_>>();
-    root_entries.sort_by_key(|entry| (entry.root.order, entry.view_index, entry.entity.to_bits()));
+    root_entries.sort_by_key(|entry| (entry.root.order, entry.view_index, entry.structural_index));
 
     for entry in root_entries {
         let viewport_rect = rect_from_viewport(entry.viewport);
@@ -151,6 +155,7 @@ pub fn compute_ui_layouts(
             target: entry.root.target,
             order: entry.root.order,
             z_index: entry.node.map_or(0, |node| node.z_index),
+            structural_index: entry.structural_index,
             rect,
             visible: node_visible && rect.is_non_empty(),
             clip_rect: None,
@@ -182,6 +187,9 @@ pub fn compute_ui_layouts(
                 target: parent.target,
                 order: parent.order,
                 z_index: node.z_index,
+                structural_index: hierarchy_order
+                    .index(entity)
+                    .expect("validated hierarchy child must have a structural index"),
                 rect,
                 visible,
                 clip_rect,
@@ -189,8 +197,8 @@ pub fn compute_ui_layouts(
             };
             layouts.push(layout);
 
-            // Each relationship edge is visited once. Collection order controls only transient
-            // traversal order; product draw and hit-test order remains explicit in `replace`.
+            // Each structural edge is visited once. The completed hierarchy index remains the
+            // shared draw and hit-test tie-breaker after layout publication.
             if let Some(children) = children {
                 pending.extend(children.iter().rev().map(|child| (child, layout)));
             }
@@ -248,6 +256,7 @@ struct RootEntry {
     entity: Entity,
     root: UiRoot,
     node: Option<UiNode>,
+    structural_index: usize,
     view_index: usize,
     viewport: ViewportRect,
 }

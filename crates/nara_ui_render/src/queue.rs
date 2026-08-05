@@ -50,7 +50,6 @@ pub(crate) fn queue_ui(
             z_index: item.z_index,
             material,
             clip_rect,
-            entity_bits: item.entity.to_bits(),
             source_order: item.source_order,
             instance,
         });
@@ -110,7 +109,6 @@ pub(crate) fn compare_queued_ui_items(left: &QueuedUiItem, right: &QueuedUiItem)
         left.order,
         left.z_index,
         left.source_order,
-        left.entity_bits,
         left.material,
         left.clip_rect,
     )
@@ -120,7 +118,6 @@ pub(crate) fn compare_queued_ui_items(left: &QueuedUiItem, right: &QueuedUiItem)
             right.order,
             right.z_index,
             right.source_order,
-            right.entity_bits,
             right.material,
             right.clip_rect,
         ))

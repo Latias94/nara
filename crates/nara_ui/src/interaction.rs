@@ -200,7 +200,7 @@ pub fn top_hit_target(
                 layout.order,
                 layout.view_index,
                 layout.z_index,
-                layout.entity.to_bits(),
+                layout.structural_index,
             )
         })
         .map(|layout| UiInteractionTarget::from_layout(*layout))

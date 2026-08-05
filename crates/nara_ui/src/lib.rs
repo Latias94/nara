@@ -276,7 +276,9 @@ impl Plugin for UiPlugin {
         app.add_systems(
             CoreStage::Extract,
             (
-                compute_ui_layouts.after(nara_render::__private::RenderExtractSet::Views),
+                compute_ui_layouts
+                    .after(nara_hierarchy::__private::HierarchySet::ValidateAndComplete)
+                    .after(nara_render::__private::RenderExtractSet::Views),
                 update_ui_interaction.after(compute_ui_layouts),
             ),
         )?;

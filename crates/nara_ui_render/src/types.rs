@@ -1,6 +1,6 @@
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
-use nara_ecs::{Entity, Res, Resource, system::SystemParam};
+use nara_ecs::{Res, Resource, system::SystemParam};
 use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderResourceKey, RenderTarget};
@@ -76,7 +76,6 @@ impl UiColorKey {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ExtractedUiItem {
-    pub(crate) entity: Entity,
     pub(crate) source_order: u64,
     pub(crate) view_index: usize,
     pub(crate) target: RenderTarget,
@@ -129,7 +128,6 @@ pub(crate) struct QueuedUiItem {
     pub(crate) z_index: i32,
     pub(crate) material: UiMaterialKey,
     pub(crate) clip_rect: Option<UiClipRect>,
-    pub(crate) entity_bits: u64,
     pub(crate) source_order: u64,
     pub(crate) instance: UiInstance,
 }
