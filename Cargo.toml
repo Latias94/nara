@@ -38,6 +38,7 @@ members = [
     "crates/nara_tooling",
     "crates/nara_tooling_egui",
     "crates/nara_transform",
+    "crates/nara_ui_kernel",
     "crates/nara_ui",
     "crates/nara_ui_render",
     "crates/nara_window",
@@ -79,6 +80,7 @@ nara_text = { path = "crates/nara_text" }
 nara_tooling = { path = "crates/nara_tooling" }
 nara_tooling_egui = { path = "crates/nara_tooling_egui" }
 nara_transform = { path = "crates/nara_transform" }
+nara_ui_kernel = { path = "crates/nara_ui_kernel" }
 nara_ui = { path = "crates/nara_ui" }
 nara_ui_render = { path = "crates/nara_ui_render" }
 nara_window = { path = "crates/nara_window" }
@@ -95,6 +97,7 @@ glam = { version = "0.30", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 notify = "8.2.0"
 parley = { version = "=0.11.0", default-features = false, features = ["std"] }
+taffy = { version = "=0.10.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
 raw-window-handle = "0.6"
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }
