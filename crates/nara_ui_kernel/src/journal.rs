@@ -175,6 +175,24 @@ impl UiFrameJournal {
         }
     }
 
+    /// Returns the newest exact frame/receipt pair submitted for a surface.
+    pub fn latest(&self, surface_id: UiSurfaceId) -> Result<UiRouteTarget, UiJournalError> {
+        let Some(pair) = self
+            .active
+            .get(&surface_id)
+            .and_then(|history| history.entries.front())
+        else {
+            return Err(UiJournalError::CompiledButNotPresented {
+                surface: surface_id,
+            });
+        };
+        verify_pair(pair)?;
+        Ok(UiRouteTarget {
+            frame: Arc::clone(&pair.frame),
+            receipt: pair.receipt,
+        })
+    }
+
     /// Retires all presentation authority for a surface while retaining bounded rejection facts.
     pub fn retire_surface(&mut self, surface_id: UiSurfaceId) -> bool {
         let Some(history) = self.active.remove(&surface_id) else {

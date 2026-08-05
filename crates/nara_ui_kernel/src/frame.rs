@@ -179,6 +179,7 @@ impl UiResolvedBorder {
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiLayoutFact {
     pub(crate) key: Option<UiKey>,
+    pub(crate) route_parent: Option<UiKey>,
     pub(crate) root_key: UiRootKey,
     pub(crate) layer: UiLayer,
     pub(crate) structural_index: usize,
@@ -193,6 +194,12 @@ impl UiLayoutFact {
     #[must_use]
     pub const fn key(&self) -> Option<&UiKey> {
         self.key.as_ref()
+    }
+
+    /// Returns the nearest stable-key ancestor used for routed-event propagation.
+    #[must_use]
+    pub const fn route_parent(&self) -> Option<&UiKey> {
+        self.route_parent.as_ref()
     }
 
     #[must_use]
@@ -345,6 +352,8 @@ pub struct UiSemanticNode {
     pub(crate) name: String,
     pub(crate) value: Option<String>,
     pub(crate) enabled: bool,
+    pub(crate) selected: Option<bool>,
+    pub(crate) expanded: Option<bool>,
     pub(crate) actions: Vec<UiActionId>,
     pub(crate) rect: UiRect,
 }
@@ -378,6 +387,16 @@ impl UiSemanticNode {
     #[must_use]
     pub const fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    #[must_use]
+    pub const fn selected(&self) -> Option<bool> {
+        self.selected
+    }
+
+    #[must_use]
+    pub const fn expanded(&self) -> Option<bool> {
+        self.expanded
     }
 
     #[must_use]

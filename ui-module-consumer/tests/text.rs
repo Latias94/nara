@@ -1,4 +1,6 @@
-use nara_ui_module_consumer::{compile_status_panel, prepare_status_label};
+use nara_ui_kernel::UiActivationSource;
+use nara_ui_module_consumer::{activate_retry_button, compile_status_panel, prepare_status_label};
+use nara_ui_widgets::UiIntent;
 
 #[test]
 fn direct_consumer_shapes_without_ecs_scene_or_render_dependencies() {
@@ -15,4 +17,16 @@ fn direct_consumer_compiles_an_immutable_ui_frame() {
     assert_eq!(frame.layouts().len(), 2);
     assert_eq!(frame.paint().len(), 2);
     assert!(frame.diagnostics().is_empty());
+}
+
+#[test]
+fn direct_consumer_reduces_a_presented_button_to_a_typed_intent() {
+    let intent = activate_retry_button().unwrap();
+    assert!(matches!(
+        intent,
+        UiIntent::Activate {
+            source: UiActivationSource::Keyboard,
+            ..
+        }
+    ));
 }

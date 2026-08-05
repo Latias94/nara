@@ -9,6 +9,7 @@ mod compiler;
 mod frame;
 mod geometry;
 mod identity;
+mod interaction;
 mod journal;
 mod limits;
 mod style;
@@ -27,6 +28,12 @@ pub use geometry::{UiPhysicalRect, UiPoint, UiRect, UiSize, UiSnapPolicy};
 pub use identity::{
     UiActionId, UiImageId, UiKey, UiKeyError, UiLocalKey, UiOpaqueId, UiPersistentIdentity,
     UiProjectionPath, UiProjectionStep, UiRootKey,
+};
+pub use interaction::{
+    UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchError, UiInputEvent,
+    UiInteractionSession, UiNavigation, UiNonActivation, UiPointerButton, UiPointerId,
+    UiRoutePhase, UiRoutedEvent, UiRoutedEventKind, UiSeatId, UiSemanticFact, UiSemanticSnapshot,
+    UiSemanticState,
 };
 pub use journal::{UiFrameJournal, UiJournalError, UiRouteStamp, UiRouteTarget, UiSurfaceId};
 pub use limits::{UiLimits, UiLimitsError};

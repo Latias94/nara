@@ -295,6 +295,7 @@ impl UiCompiler {
             let order = PaintOrder::for_node(root.layer, root_sequence, node, 0);
             let layout_fact = UiLayoutFact {
                 key: node.key.clone(),
+                route_parent: node.keyed_parent.clone(),
                 root_key: root.key.clone(),
                 layer: root.layer,
                 structural_index: node.structural_index,
@@ -410,6 +411,8 @@ impl UiCompiler {
                         name: semantics.name.clone(),
                         value: semantics.value.clone(),
                         enabled: semantic_enabled(node.node),
+                        selected: semantics.selected,
+                        expanded: semantics.expanded,
                         actions: semantics.actions.clone(),
                         rect,
                     },
@@ -427,6 +430,8 @@ impl UiCompiler {
                             .unwrap_or_else(|| text.content.clone()),
                         value: None,
                         enabled: true,
+                        selected: None,
+                        expanded: None,
                         actions: Vec::new(),
                         rect,
                     },
@@ -509,6 +514,7 @@ fn flatten_root<'a>(
         1,
         Vec::new(),
         None,
+        None,
         &mut nodes,
         &mut keys,
         limits,
@@ -525,6 +531,7 @@ fn visit_node<'a>(
     depth: usize,
     stacking_ancestors: Vec<(i32, usize)>,
     semantic_parent: Option<UiKey>,
+    keyed_parent: Option<UiKey>,
     nodes: &mut Vec<FlatNode<'a>>,
     keys: &mut BTreeSet<UiKey>,
     limits: UiLimits,
@@ -598,6 +605,7 @@ fn visit_node<'a>(
     } else {
         semantic_parent.clone()
     };
+    let child_keyed_parent = key.clone().or_else(|| keyed_parent.clone());
     let mut child_stacking = stacking_ancestors.clone();
     if node.style.stacking_context {
         child_stacking.push((node.style.z_index, index));
@@ -610,6 +618,7 @@ fn visit_node<'a>(
         structural_index: index,
         stacking_ancestors,
         semantic_parent,
+        keyed_parent,
     });
     for child in &node.children {
         let child_index = visit_node(
@@ -620,6 +629,7 @@ fn visit_node<'a>(
             depth + 1,
             child_stacking.clone(),
             child_semantic_parent.clone(),
+            child_keyed_parent.clone(),
             nodes,
             keys,
             limits,
@@ -772,6 +782,7 @@ struct FlatNode<'a> {
     structural_index: usize,
     stacking_ancestors: Vec<(i32, usize)>,
     semantic_parent: Option<UiKey>,
+    keyed_parent: Option<UiKey>,
 }
 
 #[derive(Clone, Copy, Debug)]

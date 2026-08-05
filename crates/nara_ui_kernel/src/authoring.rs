@@ -63,6 +63,8 @@ pub struct UiSemantics {
     pub(crate) role: UiSemanticRole,
     pub(crate) name: String,
     pub(crate) value: Option<String>,
+    pub(crate) selected: Option<bool>,
+    pub(crate) expanded: Option<bool>,
     pub(crate) actions: Vec<UiActionId>,
 }
 
@@ -74,6 +76,8 @@ impl UiSemantics {
             role,
             name,
             value: None,
+            selected: None,
+            expanded: None,
             actions: Vec::new(),
         })
     }
@@ -83,6 +87,18 @@ impl UiSemantics {
         validate_semantic_text("value", &value)?;
         self.value = Some(value);
         Ok(self)
+    }
+
+    #[must_use]
+    pub const fn with_selected(mut self, selected: bool) -> Self {
+        self.selected = Some(selected);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
     }
 
     pub fn with_action(mut self, action: UiActionId) -> Result<Self, UiAuthoringError> {

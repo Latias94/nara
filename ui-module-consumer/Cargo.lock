@@ -327,6 +327,7 @@ version = "0.0.0"
 dependencies = [
  "nara_text",
  "nara_ui_kernel",
+ "nara_ui_widgets",
 ]
 
 [[package]]
@@ -346,6 +347,14 @@ version = "0.1.0"
 dependencies = [
  "nara_text",
  "taffy",
+ "thiserror",
+]
+
+[[package]]
+name = "nara_ui_widgets"
+version = "0.1.0"
+dependencies = [
+ "nara_ui_kernel",
  "thiserror",
 ]
 

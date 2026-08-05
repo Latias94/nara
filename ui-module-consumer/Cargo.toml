@@ -12,3 +12,4 @@ resolver = "3"
 [dependencies]
 nara_text = { path = "../crates/nara_text" }
 nara_ui_kernel = { path = "../crates/nara_ui_kernel" }
+nara_ui_widgets = { path = "../crates/nara_ui_widgets" }

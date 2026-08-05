@@ -39,6 +39,7 @@ members = [
     "crates/nara_tooling_egui",
     "crates/nara_transform",
     "crates/nara_ui_kernel",
+    "crates/nara_ui_widgets",
     "crates/nara_ui",
     "crates/nara_ui_render",
     "crates/nara_window",
@@ -52,6 +53,7 @@ rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+accesskit = "0.24.1"
 nara_app = { path = "crates/nara_app" }
 nara_asset = { path = "crates/nara_asset" }
 nara_asset_watch = { path = "crates/nara_asset_watch" }
@@ -81,6 +83,7 @@ nara_tooling = { path = "crates/nara_tooling" }
 nara_tooling_egui = { path = "crates/nara_tooling_egui" }
 nara_transform = { path = "crates/nara_transform" }
 nara_ui_kernel = { path = "crates/nara_ui_kernel" }
+nara_ui_widgets = { path = "crates/nara_ui_widgets" }
 nara_ui = { path = "crates/nara_ui" }
 nara_ui_render = { path = "crates/nara_ui_render" }
 nara_window = { path = "crates/nara_window" }

@@ -2263,6 +2263,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nara_ui_widgets"
+version = "0.1.0"
+dependencies = [
+ "nara_text",
+ "nara_ui_kernel",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "nara_window"
 version = "0.1.0"
 dependencies = [
@@ -2278,13 +2287,17 @@ dependencies = [
 name = "nara_winit"
 version = "0.1.0"
 dependencies = [
+ "accesskit",
  "nara_app",
  "nara_core",
  "nara_ecs",
  "nara_gameplay",
  "nara_input",
+ "nara_text",
+ "nara_ui_kernel",
  "nara_window",
  "raw-window-handle",
+ "thiserror 2.0.18",
  "winit",
 ]
 

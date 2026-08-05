@@ -1,5 +1,13 @@
 //! Winit runner and native window adapter for nara.
 
+#[cfg(feature = "accessibility")]
+mod accessibility;
+
+#[cfg(feature = "accessibility")]
+pub use accessibility::{
+    WinitAccessibilityBridge, WinitAccessibilityError, WinitAccessibilityUpdate,
+};
+
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
