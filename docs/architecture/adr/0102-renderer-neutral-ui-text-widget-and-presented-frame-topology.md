@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
+**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0025](0025-runtime-ui-system.md),
@@ -20,7 +21,8 @@
 
 The current runtime UI combines persistent ECS components, renderer-owned view discovery, layout,
 hit testing, and public extract/queue/batch stages. It has no stable logical widget identity, text
-owner, semantic tree, or proof that input targets the frame a player actually saw. Editor UI has a
+owner, semantic tree, or proof that input targets the frame whose exact packet the backend accepted
+and submitted. Editor UI has a
 different persistence and command authority, so a shared top-level object model would couple two
 products while still leaving their common algorithms shallow.
 
@@ -64,15 +66,21 @@ flowchart LR
   one concrete fallible authoring-snapshot builder, compilation, read-only frame access, and
   presented-frame dispatch. Normalized IR, layout nodes, caches, fragments, and lifecycle stages
   remain private.
-- Every root and stateful or interactive node has an exact stable logical key. Persistent keys
-  derive from stable source/entity identity; runtime-created nodes require explicit domain keys.
-  Runtime entity bits, query order, sibling indexes, and source locations are invalid identities.
+- Every root and stateful or interactive node has an exact stable logical key. Persistent Scene
+  keys derive from an opaque `SceneEntityId` plus an opaque, structured `PrefabProjectionPath`;
+  the path carries source asset/product, instance-anchor, source-entity, and nested projection
+  segments without string-concatenating source identity with location. Runtime-created roots and
+  nodes require explicit domain keys. Runtime entity bits, query order, sibling indexes, source
+  locations, and `SceneInstanceId` are invalid logical identities.
 - One immutable `UiFrame` owns resolved logical geometry, root layers, stacking, clipping, paint
   order, reverse hit order, focus/navigation facts, semantics, diagnostics, and its environment
   revision. Root compilation is bounded and failure-atomic.
-- A presenter returns a `UiPresentationReceipt` only after the exact packet was presented for the
-  matching surface/environment revision. Input dispatch targets an exact retained frame/receipt
-  pair; compilation alone never grants interaction authority.
+- A presenter returns a `UiPresentationReceipt` only after the exact packet was accepted and
+  submitted by the backend for the matching surface/environment revision. The receipt proves
+  backend submission of that immutable packet; it does not claim that a player actually saw the
+  pixels. Input dispatch targets an exact retained frame/receipt pair; compilation alone never
+  grants interaction authority. The adapter retains the current pair plus two prior pairs and
+  rejects routes that resolve to a retired pair.
 - The first authoring vocabulary is closed: root, node/style, visual, display text, controlled
   button, optional semantics, immutable theme, bounded action ID, and typed semantic intent. It has
   no callback with World/Editor authority, property bag, generic Widget component, CSS selector
@@ -86,6 +94,9 @@ flowchart LR
 - Runtime and future Editor adapters share text, kernel, widget state machines, semantic
   vocabulary, and presentation infrastructure. They do not share persistent authoring identity,
   session persistence, Host authority, or domain commands.
+- The semantic tree and typed accessibility actions are part of the formal `UiFrame` contract.
+  AccessKit integration is a bounded desktop-adapter trial; AccessKit types and availability never
+  enter the kernel, widget, packet, or headless contracts.
 - Open-GPUI and other engines are behavioral evidence only. Nara does not adopt their App/Window/
   Entity/Element lifecycle or copy source without explicit provenance and license review.
 
@@ -115,14 +126,14 @@ and a narrow public API.
 - Editable text, rich spans, localization, project fonts, virtual collections, docking, and native
   multi-window Editor policy remain deferred.
 - Headless tests require an explicit test presenter when they exercise interaction; a compiled
-  frame by itself is not presented evidence.
+  frame by itself is not submission evidence, and a receipt never attests human visibility.
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
 | Frame authorities for paint/hit/focus/semantics | 1 | Kernel snapshots and routing tests |
-| Interaction against unpresented or stale geometry | 0 activations | Receipt-journal failure tests |
+| Interaction against unsubmitted or stale geometry | 0 activations | Receipt-journal failure tests |
 | Kernel dependencies on ECS/Host/Editor/WGPU | 0 | Cargo graph and independent-consumer checks |
 | World-mutating widget callbacks | 0 | Public API inspection and compile tests |
 | Reference product parity | HUD, terminal, Retry, accessibility, package, and headless gates pass | Reference-game verification contract |

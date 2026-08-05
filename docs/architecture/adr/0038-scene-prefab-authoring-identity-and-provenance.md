@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Amended**: 2026-08-05 by the ADR 0102 UI identity checkpoint
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -30,7 +31,12 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
 - A prefab source entity is owned by its prefab document.
 - A prefab instance anchor is scene-local, but expanded children are projections of source prefab
   entities.
-- Expanded prefab IDs continue to use the deterministic `anchor/source_entity` namespace rule.
+- Existing Scene projection may continue to expose the deterministic `anchor/source_entity`
+  namespace as a transitional instance-local locator. It is not a durable source identity and no
+  new UI, session, semantics, selection, or persistence key may parse or extend that encoding.
+- New projection-aware consumers receive the opaque source `SceneEntityId` and a separate
+  structured `PrefabProjectionPath`. ADR 0102 admits this minimum separation for UI; ADR 0083
+  remains Proposed for the complete asset/product/document identity migration.
 - Persistent overrides are `ScenePatchDocument` values applied relative to source prefab entity IDs
   before expansion.
 - Runtime `Entity` values never become authoring identity.
@@ -46,7 +52,7 @@ flowchart TD
     Scene --> Anchor[Prefab instance anchor]
     Anchor --> Source[PrefabDocument via AssetRef]
     Source --> SourceEntity[source SceneEntityId]
-    SourceEntity --> Expanded[expanded id: anchor/source_entity]
+    SourceEntity --> Expanded[projection: opaque source id plus structured path]
     Override[ScenePatchDocument override] --> SourceEntity
     Expanded --> Runtime[Runtime Entity projection]
     Runtime -. invalid as persistent id .-> Scene
@@ -59,7 +65,7 @@ flowchart TD
 | Scene local | Scene document | `SceneEntityId` | Patch scene directly |
 | Prefab source | Prefab document | source `SceneEntityId` | Patch prefab source document |
 | Prefab anchor | Scene document | anchor `SceneEntityId` plus `PrefabInstance.source` | Patch scene anchor or instance overrides |
-| Prefab expanded projection | Runtime/authoring projection | `anchor/source_entity` namespace | Write source override or convert to local |
+| Prefab expanded projection | Runtime/authoring projection | Opaque source `SceneEntityId` plus structured `PrefabProjectionPath`; existing `anchor/source_entity` locator is transitional | Write source override or convert to local |
 | Runtime-only | Runtime world | `Entity` | Never persistent by default |
 
 ## Rules
@@ -108,7 +114,7 @@ ownership, and gives editor/AI write-back a clear contract.
 | Metric | Target | Measurement |
 |---|---:|---|
 | Persistent identity safety | Scene/prefab docs never contain runtime `Entity` or runtime `AssetId` | Serialization tests |
-| Prefab projection clarity | Expanded IDs are deterministic and namespace source IDs under anchors | Unit tests |
+| Prefab projection clarity | Source entity identity and projection location are separate for every new consumer | Unit tests |
 | Write-back safety | Prefab-expanded Apply Changes rejects or produces explicit override/localization flow | Tooling tests |
 | Reference migration readiness | Cross-document references can be represented as `AssetRef` plus `SceneEntityId` | Design review |
 
@@ -131,6 +137,7 @@ ownership, and gives editor/AI write-back a clear contract.
 
 ## Open Questions
 
-- What exact Rust type should represent projected entity provenance in tooling models?
+- What additional asset/product identity axes must join the minimum `PrefabProjectionPath` when
+  ADR 0083 reaches its admission trigger?
 - Should cross-scene references be accepted before scene streaming exists?
 - How should ID rename patches update references inside the same document and across project files?
