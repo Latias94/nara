@@ -1326,8 +1326,20 @@ impl SceneFileCounts {
             )?;
             self.observe_diagnostic_source(limits)?;
             match operation {
-                ScenePatchOperation::AddEntity { entity } => {
+                ScenePatchOperation::AddEntity { entity, .. } => {
+                    self.observe_placements(1, limits)?;
                     self.observe_entity(entity, limits)?;
+                }
+                ScenePatchOperation::RestoreEntity {
+                    entity,
+                    descendants,
+                    ..
+                } => {
+                    self.observe_placements(1, limits)?;
+                    self.observe_entity(entity, limits)?;
+                    for descendant in descendants {
+                        self.observe_entity(descendant, limits)?;
+                    }
                 }
                 ScenePatchOperation::AddComponent { value, .. }
                 | ScenePatchOperation::ReplaceComponent { value, .. } => {
@@ -1343,10 +1355,14 @@ impl SceneFileCounts {
                 ScenePatchOperation::SetField { value, .. } => {
                     self.observe_component_value(value.cost(), limits)?;
                 }
-                ScenePatchOperation::RemoveEntity { .. }
-                | ScenePatchOperation::RemoveComponent { .. }
+                ScenePatchOperation::RemoveEntity { .. } => {
+                    self.observe_placements(1, limits)?;
+                }
+                ScenePatchOperation::MoveEntity { .. } => {
+                    self.observe_placements(2, limits)?;
+                }
+                ScenePatchOperation::RemoveComponent { .. }
                 | ScenePatchOperation::RemoveField { .. }
-                | ScenePatchOperation::Reparent { .. }
                 | ScenePatchOperation::SetAssetRefField { .. } => {}
             }
         }

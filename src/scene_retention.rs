@@ -5,7 +5,7 @@ use nara_asset::AssetRef;
 use nara_scene::PrefabDocument;
 use nara_scene::{
     PrefabInstance, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation,
+    ScenePatchOperation, ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
 };
 
 pub(crate) const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
@@ -119,7 +119,25 @@ pub(crate) fn patch_retained_bytes(
     )?;
     for operation in &patch.operations {
         let dynamic = match operation {
-            ScenePatchOperation::AddEntity { entity } => entity_dynamic_bytes(entity)?,
+            ScenePatchOperation::AddEntity { entity, placement } => checked_sum([
+                entity_dynamic_bytes(entity)?,
+                placement_retained_bytes(placement)?,
+            ])?,
+            ScenePatchOperation::RestoreEntity {
+                entity,
+                descendants,
+                placement,
+            } => descendants.iter().try_fold(
+                checked_sum([
+                    entity_dynamic_bytes(entity)?,
+                    placement_retained_bytes(placement)?,
+                ])?,
+                |total, descendant| {
+                    total
+                        .checked_add(entity_dynamic_bytes(descendant)?)
+                        .ok_or(SceneRetentionOverflow)
+                },
+            )?,
             ScenePatchOperation::AddComponent {
                 entity,
                 component,
@@ -161,7 +179,10 @@ pub(crate) fn patch_retained_bytes(
                     AssetRef::StableId(_) => 16,
                 },
             ])?,
-            ScenePatchOperation::RemoveEntity { entity } => string_retained_bytes(entity.as_str())?,
+            ScenePatchOperation::RemoveEntity { entity, from } => checked_sum([
+                string_retained_bytes(entity.as_str())?,
+                placement_retained_bytes(from)?,
+            ])?,
             ScenePatchOperation::RemoveComponent { entity, component } => checked_sum([
                 string_retained_bytes(entity.as_str())?,
                 string_retained_bytes(component.as_str())?,
@@ -176,18 +197,29 @@ pub(crate) fn patch_retained_bytes(
                 string_retained_bytes(component.as_str())?,
                 string_retained_bytes(field.as_str())?,
             ])?,
-            ScenePatchOperation::Reparent { entity, parent } => checked_sum([
+            ScenePatchOperation::MoveEntity { entity, from, to } => checked_sum([
                 string_retained_bytes(entity.as_str())?,
-                parent
-                    .as_ref()
-                    .map(|parent| string_retained_bytes(parent.as_str()))
-                    .transpose()?
-                    .unwrap_or(0),
+                placement_retained_bytes(from)?,
+                placement_retained_bytes(to)?,
             ])?,
         };
         checked_add_to(&mut total, dynamic)?;
     }
     Ok(total)
+}
+
+fn placement_retained_bytes(placement: &ScenePlacement) -> Result<usize, SceneRetentionOverflow> {
+    let owner = match &placement.owner {
+        ScenePlacementOwner::Root => 0,
+        ScenePlacementOwner::Parent { parent } => string_retained_bytes(parent.as_str())?,
+    };
+    let anchor = match &placement.anchor {
+        ScenePlacementAnchor::First | ScenePlacementAnchor::Last => 0,
+        ScenePlacementAnchor::Before { sibling } | ScenePlacementAnchor::After { sibling } => {
+            string_retained_bytes(sibling.as_str())?
+        }
+    };
+    checked_sum([owner, anchor])
 }
 
 fn component_value_retained_bytes(

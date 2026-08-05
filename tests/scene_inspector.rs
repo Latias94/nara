@@ -1,5 +1,8 @@
 use nara::{
-    advanced_prelude::*, diagnostic::DiagnosticValueRef, scene::SceneAuthoringHistoryStatus,
+    advanced_prelude::*,
+    diagnostic::DiagnosticValueRef,
+    scene::SceneAuthoringHistoryStatus,
+    scene::{ScenePlacement, ScenePlacementOwner},
     tooling_prelude::*,
 };
 
@@ -223,6 +226,70 @@ fn inspector_set_field_command_applies_patch_and_selects_target() {
         }
     );
     assert!(session.is_live_dirty());
+}
+
+#[test]
+fn inspector_move_command_preserves_exact_order_through_undo_and_redo() {
+    let registry = test_registry();
+    let parent = scene_id("parent");
+    let first = scene_id("first");
+    let middle = scene_id("middle");
+    let last = scene_id("last");
+    let original = SceneDocument::new(
+        [parent.clone()],
+        [
+            SceneEntityRecord::new(parent.clone()).with_children([
+                first.clone(),
+                middle.clone(),
+                last.clone(),
+            ]),
+            SceneEntityRecord::new(first.clone()),
+            SceneEntityRecord::new(middle.clone()),
+            SceneEntityRecord::new(last.clone()),
+        ],
+    );
+    let mut session = SceneAuthoringSession::new(original.clone());
+    let mut inspector = SceneInspectorState::new();
+
+    let report = inspector.apply_command(
+        &mut session,
+        &registry,
+        SceneInspectorCommand::MoveEntity {
+            entity: last.clone(),
+            to: ScenePlacement::first(ScenePlacementOwner::Parent {
+                parent: parent.clone(),
+            }),
+        },
+    );
+
+    assert!(report.applied, "{:?}", report.diagnostics);
+    assert_eq!(report.selected_entity.as_ref(), Some(&last));
+    assert_eq!(session.history_status().undo_depth, 1);
+    assert_eq!(session.history_status().redo_depth, 0);
+    assert_eq!(
+        session
+            .document()
+            .entities
+            .iter()
+            .find(|entity| entity.id == parent)
+            .unwrap()
+            .children,
+        [last.clone(), first, middle]
+    );
+
+    assert!(session.undo(&registry).applied);
+    assert_eq!(session.document(), &original);
+    assert!(session.redo(&registry).applied);
+    assert_eq!(
+        session
+            .document()
+            .entities
+            .iter()
+            .find(|entity| entity.id == parent)
+            .unwrap()
+            .children,
+        [last, scene_id("first"), scene_id("middle")]
+    );
 }
 
 #[test]

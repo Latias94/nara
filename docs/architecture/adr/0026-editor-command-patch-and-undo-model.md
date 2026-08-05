@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-08-05
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State;
 [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered Persistent
@@ -54,15 +54,20 @@ ScenePatchDocument
   operations: Vec<ScenePatchOperation>
 
 ScenePatchOperation
-  AddEntity { entity }
-  RemoveEntity { entity }
+  AddEntity { entity, placement }
+  RemoveEntity { entity, from }
+  RestoreEntity { entity, descendants, placement }
   AddComponent { entity, component, value }
   RemoveComponent { entity, component }
   ReplaceComponent { entity, component, value }
-  SetField { entity, component, path, value }
-  RemoveField { entity, component, path }
-  Reparent { entity, parent }
-  SetAssetRefField { entity, component, path, asset_ref }
+  SetField { entity, component, component_version, field, value }
+  RemoveField { entity, component, component_version, field }
+  MoveEntity { entity, from, to }
+  SetAssetRefField { entity, component, component_version, field, asset_ref }
+
+ScenePlacement
+  owner: Root | Parent { parent }
+  anchor: First | Last | Before { sibling } | After { sibling }
 ```
 
 Patch operations serialize as `op + args` so JSON and RON roundtrip with the same semantic shape.
@@ -74,7 +79,12 @@ Implementation notes as of 2026-07-08:
   validated, canonicalized, then committed only if the full transaction succeeds.
 - Patch diagnostics include operation index plus entity/component/field context when available.
 - Successful patch apply returns an inverse `ScenePatchDocument` for transaction-level undo.
-- `RemoveEntity` removes the subtree and inverse data restores it parent-first.
+- Ordered add, move, remove, and restore operations share `ScenePlacement`; source placement is an
+  explicit precondition rather than inferred mutable context.
+- `RemoveEntity` removes the subtree and returns one `RestoreEntity` inverse containing the exact
+  root record, descendant records, and prior placement. Delete and restore therefore consume the
+  same bounded validation-work shape instead of expanding one deletion into many intermediate
+  operations.
 - `RemoveField` is only allowed for optional fields or fields with registered defaults.
 - Prefab overrides reuse `ScenePatchDocument`; overrides are applied relative to source prefab IDs
   before prefab expansion namespaces them.

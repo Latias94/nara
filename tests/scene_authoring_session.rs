@@ -2,7 +2,10 @@ use nara::{
     identity::{EntityLookup, SpawnedSceneInstance},
     prelude::*,
     reflect::ComponentValueKind,
-    scene::{SceneAuthoringHistoryStatus, ScenePatchDocument, ScenePatchOperation},
+    scene::{
+        SceneAuthoringHistoryStatus, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+        ScenePlacementOwner,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq, Component)]
@@ -105,6 +108,35 @@ fn authoring_session_undo_redo_are_transactional() {
             redo_depth: 0,
         }
     );
+}
+
+#[test]
+fn authoring_session_undo_redo_preserve_exact_root_order() {
+    let registry = scene_registry();
+    let first = scene_id("first");
+    let middle = scene_id("middle");
+    let last = scene_id("last");
+    let original = SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(first.clone()),
+        SceneEntityRecord::new(middle.clone()),
+        SceneEntityRecord::new(last.clone()),
+    ]);
+    let patch = ScenePatchDocument::new([ScenePatchOperation::MoveEntity {
+        entity: last.clone(),
+        from: ScenePlacement::after(ScenePlacementOwner::Root, middle.clone()),
+        to: ScenePlacement::first(ScenePlacementOwner::Root),
+    }]);
+    let mut session = SceneAuthoringSession::new(original.clone());
+
+    assert!(session.apply_patch(&patch, &registry).applied);
+    assert_eq!(
+        session.document().roots,
+        [last.clone(), first.clone(), middle.clone()]
+    );
+    assert!(session.undo(&registry).applied);
+    assert_eq!(session.document(), &original);
+    assert!(session.redo(&registry).applied);
+    assert_eq!(session.document().roots, [last, first, middle]);
 }
 
 #[test]

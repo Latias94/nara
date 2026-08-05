@@ -2,9 +2,12 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-08-05
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
 Capability Metadata; ADR 0047: Editor Workspace and Scene Document State; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
+[ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered Persistent
+Placement and Runtime Projection;
 [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace
 Installation
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
@@ -56,8 +59,8 @@ Implementation notes as of 2026-07-08:
 - `nara_tooling::SceneInspectorState` is the first UI-agnostic inspector controller.
 - `SceneInspectorModel` combines authoring entity rows, selected component schema fields,
   `ComponentSchemaCatalog`, `WorldSnapshot`, undo/redo status, live dirty state, and diagnostics.
-- `SceneInspectorCommand` converts selected field/reparent edits into `ScenePatchDocument`
-  transactions applied through `SceneAuthoringSession`.
+- `SceneInspectorCommand` converts selected field and ordered placement edits into
+  `ScenePatchDocument` transactions applied through `SceneAuthoringSession`.
 - egui, dear-imgui-rs, or future nara UI adapters should render these models rather than owning
   separate inspector state machines.
 

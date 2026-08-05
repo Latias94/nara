@@ -14,7 +14,7 @@ use nara_scene::{
     PrefabSourceResolver, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileBudgetKind, SceneFileLimits,
     SceneFormatError, ScenePatchDocument, ScenePatchDocumentCandidate, ScenePatchOperation,
-    register_scene_components,
+    ScenePlacement, ScenePlacementOwner, register_scene_components,
 };
 use serde::Serialize;
 
@@ -86,6 +86,10 @@ fn envelope<'a, T>(
         },
         payload,
     }
+}
+
+fn root_last() -> ScenePlacement {
+    ScenePlacement::last(ScenePlacementOwner::Root)
 }
 
 fn placement_wire_envelope<'a>(
@@ -312,6 +316,53 @@ fn scene_prefab_and_patch_round_trip_through_canonical_json_and_ron_envelopes() 
 }
 
 #[test]
+fn ordered_patch_round_trip_preserves_owner_and_anchor_vocabulary() {
+    let parent = scene_id("parent");
+    let first = scene_id("first");
+    let second = scene_id("second");
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(first.clone()),
+            placement: ScenePlacement::before(ScenePlacementOwner::Root, second.clone()),
+        },
+        ScenePatchOperation::MoveEntity {
+            entity: second.clone(),
+            from: ScenePlacement::after(ScenePlacementOwner::Root, first.clone()),
+            to: ScenePlacement::first(ScenePlacementOwner::Parent {
+                parent: parent.clone(),
+            }),
+        },
+        ScenePatchOperation::RemoveEntity {
+            entity: second,
+            from: ScenePlacement::before(ScenePlacementOwner::Parent { parent }, scene_id("third")),
+        },
+        ScenePatchOperation::RestoreEntity {
+            entity: SceneEntityRecord::new(scene_id("restored-root"))
+                .with_children([scene_id("restored-child")]),
+            descendants: vec![SceneEntityRecord::new(scene_id("restored-child"))],
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        },
+    ]);
+
+    let json = patch.to_json_string().unwrap();
+    assert_eq!(
+        ScenePatchDocumentCandidate::decode_json_bytes(json.as_bytes())
+            .unwrap()
+            .to_json_string()
+            .unwrap(),
+        json
+    );
+    let ron = patch.to_ron_string().unwrap();
+    assert_eq!(
+        ScenePatchDocumentCandidate::decode_ron_bytes(ron.as_bytes())
+            .unwrap()
+            .to_ron_string()
+            .unwrap(),
+        ron
+    );
+}
+
+#[test]
 fn canonical_v1_rejects_non_v1_embedded_patch_records() {
     fn entity_with_future_override() -> SceneEntityRecord {
         let mut entity = SceneEntityRecord::new(scene_id("instance"));
@@ -329,6 +380,7 @@ fn canonical_v1_rejects_non_v1_embedded_patch_records() {
     let prefab = PrefabDocument::from_ordered_roots([entity_with_future_override()]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: entity_with_future_override(),
+        placement: root_last(),
     }]);
     for error in [
         scene.to_json_string().unwrap_err(),
@@ -490,9 +542,11 @@ fn entity_component_operation_and_diagnostic_budgets_are_independent() {
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::RemoveEntity {
             entity: scene_id("first"),
+            from: root_last(),
         },
         ScenePatchOperation::RemoveEntity {
             entity: scene_id("second"),
+            from: root_last(),
         },
     ]);
     let encoded = patch.to_ron_string().unwrap();
@@ -815,6 +869,7 @@ fn nested_prefab_override_add_entity_legacy_parent_is_a_transitional_payload_err
         source: AssetRef::path("prefabs/nested.ron").unwrap(),
         overrides: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(scene_id("nested-added")),
+            placement: root_last(),
         }]),
     });
     let mut encoded = serde_json::from_str::<serde_json::Value>(
@@ -1450,6 +1505,7 @@ fn prefab_candidate_canonicalizes_components_and_nested_override_operations() {
             ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(nested_entity.clone())
                     .with_component(migrating_text_id(), legacy_text_record("nested-before")),
+                placement: root_last(),
             },
             ScenePatchOperation::SetField {
                 entity: nested_entity,
@@ -1480,7 +1536,7 @@ fn prefab_candidate_canonicalizes_components_and_nested_override_operations() {
     assert_eq!(component.version, ComponentSchemaVersion(2));
     assert_eq!(component.value.field_str("current").unwrap(), "root-before");
     let operations = &root.prefab.as_ref().unwrap().overrides.operations;
-    let ScenePatchOperation::AddEntity { entity } = &operations[0] else {
+    let ScenePatchOperation::AddEntity { entity, .. } = &operations[0] else {
         panic!("first override must add the nested entity");
     };
     let component = entity.components.get(&migrating_text_id()).unwrap();

@@ -1073,9 +1073,24 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             .sum::<usize>();
         for operation in &overrides.operations {
             match operation {
-                ScenePatchOperation::AddEntity { entity } => {
+                ScenePatchOperation::AddEntity { entity, .. } => {
                     entities = entities.saturating_add(1);
                     components = components.saturating_add(entity.components.len());
+                }
+                ScenePatchOperation::RestoreEntity {
+                    entity,
+                    descendants,
+                    ..
+                } => {
+                    entities = entities.saturating_add(1_usize.saturating_add(descendants.len()));
+                    components = components
+                        .saturating_add(entity.components.len())
+                        .saturating_add(
+                            descendants
+                                .iter()
+                                .map(|descendant| descendant.components.len())
+                                .sum::<usize>(),
+                        );
                 }
                 ScenePatchOperation::AddComponent { .. } => {
                     components = components.saturating_add(1);
@@ -1085,7 +1100,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 | ScenePatchOperation::ReplaceComponent { .. }
                 | ScenePatchOperation::SetField { .. }
                 | ScenePatchOperation::RemoveField { .. }
-                | ScenePatchOperation::Reparent { .. }
+                | ScenePatchOperation::MoveEntity { .. }
                 | ScenePatchOperation::SetAssetRefField { .. } => {}
             }
         }

@@ -10,7 +10,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
 };
 
 use crate::{diagnostic, snapshot::WorldIdentitySnapshot};
@@ -255,9 +255,9 @@ pub enum SceneInspectorCommand {
         field: ComponentFieldId,
         asset_ref: AssetRef,
     },
-    Reparent {
+    MoveEntity {
         entity: SceneEntityId,
-        parent: Option<SceneEntityId>,
+        to: ScenePlacement,
     },
 }
 
@@ -269,14 +269,16 @@ impl SceneInspectorCommand {
             Self::SetField { entity, .. }
             | Self::RemoveField { entity, .. }
             | Self::SetAssetRefField { entity, .. }
-            | Self::Reparent { entity, .. } => Some(entity),
+            | Self::MoveEntity { entity, .. } => Some(entity),
         }
     }
 
-    #[must_use]
-    pub fn to_patch(&self) -> Option<ScenePatchDocument> {
+    pub fn to_patch(
+        &self,
+        document: &SceneDocument,
+    ) -> Result<Option<ScenePatchDocument>, Diagnostic> {
         let operation = match self {
-            Self::SelectEntity { .. } => return None,
+            Self::SelectEntity { .. } => return Ok(None),
             Self::SetField {
                 entity,
                 component,
@@ -314,12 +316,24 @@ impl SceneInspectorCommand {
                 field: field.clone(),
                 asset_ref: asset_ref.clone(),
             },
-            Self::Reparent { entity, parent } => ScenePatchOperation::Reparent {
-                entity: entity.clone(),
-                parent: parent.clone(),
-            },
+            Self::MoveEntity { entity, to } => {
+                let Some(from) = ScenePlacement::current(document, entity) else {
+                    return Err(diagnostic::with_entity(
+                        diagnostic::error(
+                            "tooling.inspector-placement-missing",
+                            "inspector move target has no validated document placement",
+                        ),
+                        entity,
+                    ));
+                };
+                ScenePatchOperation::MoveEntity {
+                    entity: entity.clone(),
+                    from,
+                    to: to.clone(),
+                }
+            }
         };
-        Some(ScenePatchDocument::new([operation]))
+        Ok(Some(ScenePatchDocument::new([operation])))
     }
 
     fn to_patch_for_document(
@@ -327,7 +341,7 @@ impl SceneInspectorCommand {
         document: &SceneDocument,
         registry: &ComponentRegistry,
     ) -> Result<Option<ScenePatchDocument>, Diagnostic> {
-        let Some(patch) = self.to_patch() else {
+        let Some(patch) = self.to_patch(document)? else {
             return Ok(None);
         };
         let Some((entity_id, component_id)) = self.component_target() else {
@@ -379,7 +393,7 @@ impl SceneInspectorCommand {
             | Self::SetAssetRefField {
                 entity, component, ..
             } => Some((entity, component)),
-            Self::SelectEntity { .. } | Self::Reparent { .. } => None,
+            Self::SelectEntity { .. } | Self::MoveEntity { .. } => None,
         }
     }
 }

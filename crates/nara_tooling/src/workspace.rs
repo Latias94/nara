@@ -1174,7 +1174,7 @@ mod tests {
     use super::*;
     use nara_diagnostic::DiagnosticValueRef;
     use nara_reflect::ComponentRegistry;
-    use nara_scene::{SceneEntityRecord, ScenePatchOperation};
+    use nara_scene::{SceneEntityRecord, ScenePatchOperation, ScenePlacement, ScenePlacementOwner};
 
     #[test]
     fn dirty_close_requires_an_explicit_decision() {
@@ -1556,6 +1556,75 @@ mod tests {
     }
 
     #[test]
+    fn inspector_move_and_workspace_history_preserve_exact_root_order() {
+        let mut workspace = EditorWorkspace::new();
+        let registry = frozen_empty_registry();
+        let first = entity_id("first");
+        let middle = entity_id("middle");
+        let last = entity_id("last");
+        let original = SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(first.clone()),
+            SceneEntityRecord::new(middle.clone()),
+            SceneEntityRecord::new(last.clone()),
+        ]);
+        let document = open_scene(&mut workspace, "ordered", original.clone());
+
+        let moved = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ApplyInspectorCommand {
+                document: Some(document),
+                command: SceneInspectorCommand::MoveEntity {
+                    entity: last.clone(),
+                    to: ScenePlacement::first(ScenePlacementOwner::Root),
+                },
+            },
+        );
+
+        assert!(moved.applied, "{:?}", moved.diagnostics);
+        let slot = workspace.scene(document).unwrap();
+        assert_eq!(
+            slot.session().document().roots,
+            [last.clone(), first, middle]
+        );
+        assert_eq!(slot.session().history_status().undo_depth, 1);
+
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::Undo {
+                        document: Some(document),
+                    },
+                )
+                .applied
+        );
+        assert_eq!(
+            workspace.scene(document).unwrap().session().document(),
+            &original
+        );
+
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::Redo {
+                        document: Some(document),
+                    },
+                )
+                .applied
+        );
+        assert_eq!(
+            workspace
+                .scene(document)
+                .unwrap()
+                .session()
+                .document()
+                .roots,
+            [last, entity_id("first"), entity_id("middle")]
+        );
+    }
+
+    #[test]
     fn external_reload_tracks_pending_and_dirty_conflict() {
         let mut workspace = EditorWorkspace::new();
         let registry = frozen_empty_registry();
@@ -1760,6 +1829,7 @@ mod tests {
     fn add_entity_patch(id: &str) -> ScenePatchDocument {
         ScenePatchDocument::new([ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(entity_id(id)),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
         }])
     }
 

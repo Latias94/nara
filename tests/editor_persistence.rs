@@ -20,7 +20,7 @@ use nara::{
     project_host::{EditorProjectIntent, EditorProjectSession},
     scene::{
         SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-        ScenePatchOperation,
+        ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
         EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceCommit,
@@ -127,7 +127,10 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
         editor
             .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
                 document: Some(document),
-                patch: add_entity_patch("later"),
+                patch: add_entity_patch_at(
+                    "later",
+                    ScenePlacement::first(ScenePlacementOwner::Root),
+                ),
             })
             .applied
     );
@@ -192,17 +195,26 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
         Some(EditorPersistenceResult::Opened { document, .. }) => document,
         other => panic!("expected reopened document, got {other:?}"),
     };
-    let ids = editor
+    let reopened = editor
         .workspace()
         .scene(reopened_document)
         .unwrap()
         .session()
-        .document()
+        .document();
+    let ids = reopened
         .entities
         .iter()
         .map(|entity| entity.id.as_str())
         .collect::<Vec<_>>();
     assert_eq!(ids, ["captured", "later"]);
+    assert_eq!(
+        reopened
+            .roots
+            .iter()
+            .map(SceneEntityId::as_str)
+            .collect::<Vec<_>>(),
+        ["later", "captured"]
+    );
 }
 
 #[test]
@@ -768,8 +780,13 @@ fn drive_workspace_intent_until_idle(editor: &mut EditorProjectSession) {
 }
 
 fn add_entity_patch(id: &str) -> ScenePatchDocument {
+    add_entity_patch_at(id, ScenePlacement::last(ScenePlacementOwner::Root))
+}
+
+fn add_entity_patch_at(id: &str, placement: ScenePlacement) -> ScenePatchDocument {
     ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: SceneEntityRecord::new(scene_id(id)),
+        placement,
     }])
 }
 

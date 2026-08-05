@@ -105,8 +105,18 @@ fn canonicalize_patch(
     let mut changed = false;
     for operation in &mut patch.operations {
         match operation {
-            ScenePatchOperation::AddEntity { entity } => {
+            ScenePatchOperation::AddEntity { entity, .. } => {
                 changed |= canonicalize_entity(entity, registry, budget)?;
+            }
+            ScenePatchOperation::RestoreEntity {
+                entity,
+                descendants,
+                ..
+            } => {
+                changed |= canonicalize_entity(entity, registry, budget)?;
+                for descendant in descendants {
+                    changed |= canonicalize_entity(descendant, registry, budget)?;
+                }
             }
             ScenePatchOperation::AddComponent {
                 entity,
@@ -170,7 +180,7 @@ fn canonicalize_patch(
             }
             ScenePatchOperation::RemoveEntity { .. }
             | ScenePatchOperation::RemoveComponent { .. }
-            | ScenePatchOperation::Reparent { .. } => {}
+            | ScenePatchOperation::MoveEntity { .. } => {}
         }
     }
     Ok(changed)

@@ -39,7 +39,7 @@ use nara_reflect::{
 };
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 #[cfg(feature = "tooling")]
-use nara_scene::{ScenePatchDocument, ScenePatchOperation};
+use nara_scene::{ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner};
 use nara_tasks::{
     TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
 };
@@ -678,6 +678,7 @@ fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
         document: Some(document),
         patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(nara_identity::SceneEntityId::new("edited").unwrap()),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
         }]),
     });
     assert!(report.applied);
@@ -763,6 +764,7 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
                     entity: SceneEntityRecord::new(
                         nara_identity::SceneEntityId::new("unsaved").unwrap(),
                     ),
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
                 }]),
             })
             .applied

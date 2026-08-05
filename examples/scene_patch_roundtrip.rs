@@ -1,6 +1,8 @@
 use nara::{
     prelude::*,
-    scene::{ScenePatchDocumentCandidate, register_scene_components},
+    scene::{
+        ScenePatchDocumentCandidate, ScenePlacement, ScenePlacementOwner, register_scene_components,
+    },
     sprite::register_sprite_components,
     transform::register_transform_components,
 };
@@ -36,9 +38,12 @@ fn main() {
             field: ComponentFieldId::new("material.image"),
             asset_ref: AssetRef::path("textures/player.png").unwrap(),
         },
-        ScenePatchOperation::Reparent {
+        ScenePatchOperation::MoveEntity {
             entity: enemy.clone(),
-            parent: Some(player.clone()),
+            from: ScenePlacement::last(ScenePlacementOwner::Root),
+            to: ScenePlacement::last(ScenePlacementOwner::Parent {
+                parent: player.clone(),
+            }),
         },
     ]);
 

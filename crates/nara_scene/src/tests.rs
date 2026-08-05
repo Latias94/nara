@@ -563,6 +563,92 @@ fn prefab_instance_override_patch_applies_before_namespacing() {
 }
 
 #[test]
+fn prefab_instance_override_preserves_ordered_placement_before_namespacing() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/ordered-overrides.ron").unwrap();
+    let root_a = scene_id("root-a");
+    let root_b = scene_id("root-b");
+    let root_c = scene_id("root-c");
+    let child_a = scene_id("child-a");
+    let child_b = scene_id("child-b");
+    let added = scene_id("added");
+    let prefab = PrefabDocument::new(
+        [root_a.clone(), root_b.clone(), root_c.clone()],
+        [
+            SceneEntityRecord::new(root_a.clone())
+                .with_children([child_a.clone(), child_b.clone()]),
+            SceneEntityRecord::new(root_b.clone()),
+            SceneEntityRecord::new(root_c),
+            SceneEntityRecord::new(child_a.clone()),
+            SceneEntityRecord::new(child_b.clone()),
+        ],
+    );
+    let overrides = ScenePatchDocument::new([
+        ScenePatchOperation::MoveEntity {
+            entity: root_b.clone(),
+            from: ScenePlacement::after(ScenePlacementOwner::Root, root_a.clone()),
+            to: ScenePlacement::first(ScenePlacementOwner::Root),
+        },
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(added.clone()),
+            placement: ScenePlacement::after(ScenePlacementOwner::Root, root_b),
+        },
+        ScenePatchOperation::MoveEntity {
+            entity: child_b.clone(),
+            from: ScenePlacement::after(
+                ScenePlacementOwner::Parent {
+                    parent: root_a.clone(),
+                },
+                child_a,
+            ),
+            to: ScenePlacement::first(ScenePlacementOwner::Parent {
+                parent: root_a.clone(),
+            }),
+        },
+    ]);
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor_with_overrides(
+        "instance", source, overrides,
+    )]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    let anchor = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("instance"))
+        .unwrap();
+    assert_eq!(
+        anchor
+            .children
+            .iter()
+            .map(SceneEntityId::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "instance/root-b",
+            "instance/added",
+            "instance/root-a",
+            "instance/root-c",
+        ]
+    );
+    let root_a = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("instance/root-a"))
+        .unwrap();
+    assert_eq!(
+        root_a
+            .children
+            .iter()
+            .map(SceneEntityId::as_str)
+            .collect::<Vec<_>>(),
+        ["instance/child-b", "instance/child-a"]
+    );
+}
+
+#[test]
 fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
     let registry = test_registry();
     let enemy_source = AssetRef::path("prefabs/enemy.ron").unwrap();
@@ -3674,6 +3760,7 @@ fn patch_validation_failure_preserves_sticky_pressure_stats_and_operation_contex
     };
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: invalid_entity,
+        placement: ScenePlacement::last(ScenePlacementOwner::Root),
     }]);
     let mut document = SceneDocument::default();
 
@@ -3839,6 +3926,7 @@ fn owned_unpublished_patch_matches_public_apply_for_supported_operations() {
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(scene_id("added"))
                 .with_component(position_type_id(), position_record(3)),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
         },
         ScenePatchOperation::AddComponent {
             entity: scene_id("empty"),
@@ -3857,9 +3945,12 @@ fn owned_unpublished_patch_matches_public_apply_for_supported_operations() {
             field: ComponentFieldId::new("x"),
             value: ComponentValue::I64(6),
         },
-        ScenePatchOperation::Reparent {
+        ScenePatchOperation::MoveEntity {
             entity: scene_id("empty"),
-            parent: Some(scene_id("root")),
+            from: ScenePlacement::after(ScenePlacementOwner::Root, scene_id("editable")),
+            to: ScenePlacement::last(ScenePlacementOwner::Parent {
+                parent: scene_id("root"),
+            }),
         },
         ScenePatchOperation::RemoveComponent {
             entity: scene_id("empty"),
@@ -3867,6 +3958,7 @@ fn owned_unpublished_patch_matches_public_apply_for_supported_operations() {
         },
         ScenePatchOperation::RemoveEntity {
             entity: scene_id("doomed"),
+            from: ScenePlacement::after(ScenePlacementOwner::Root, scene_id("editable")),
         },
     ]);
     let mut published = source.clone();

@@ -37,7 +37,10 @@ pub use format::{
     SceneFormatError, ScenePatchDocumentCandidate,
 };
 pub use nara_identity::{SceneEntityId, SceneEntityIdError, SceneInstanceId, SpawnedSceneInstance};
-pub use patch::{ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport};
+pub use patch::{
+    ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
+};
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabExpansionBudgetKind, PrefabExpansionLimits,
     PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,

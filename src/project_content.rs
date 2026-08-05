@@ -955,8 +955,21 @@ impl<'a> LoadContext<'a> {
         discovered: &mut BTreeSet<AssetPath>,
     ) -> Result<(), ProjectContentError> {
         for operation in &patch.operations {
-            if let ScenePatchOperation::AddEntity { entity } = operation {
-                self.enqueue_prefab_references(entity, depth, queue, discovered)?;
+            match operation {
+                ScenePatchOperation::AddEntity { entity, .. } => {
+                    self.enqueue_prefab_references(entity, depth, queue, discovered)?;
+                }
+                ScenePatchOperation::RestoreEntity {
+                    entity,
+                    descendants,
+                    ..
+                } => {
+                    self.enqueue_prefab_references(entity, depth, queue, discovered)?;
+                    for descendant in descendants {
+                        self.enqueue_prefab_references(descendant, depth, queue, discovered)?;
+                    }
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -1939,7 +1952,9 @@ mod tests {
 
     use nara_identity::SceneEntityId;
     use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
-    use nara_scene::{ScenePatchDocument, ScenePatchOperation};
+    use nara_scene::{
+        ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    };
 
     use super::{
         ProjectContentBudgetKind, checked_plan_sum, patch_retained_bytes, string_retained_bytes,
@@ -1962,13 +1977,19 @@ mod tests {
                 component_version: ComponentSchemaVersion::ONE,
                 field: field.clone(),
             },
-            ScenePatchOperation::Reparent {
+            ScenePatchOperation::MoveEntity {
                 entity: entity.clone(),
-                parent: Some(parent.clone()),
+                from: ScenePlacement::last(ScenePlacementOwner::Root),
+                to: ScenePlacement::last(ScenePlacementOwner::Parent {
+                    parent: parent.clone(),
+                }),
             },
-            ScenePatchOperation::Reparent {
+            ScenePatchOperation::MoveEntity {
                 entity: entity.clone(),
-                parent: None,
+                from: ScenePlacement::last(ScenePlacementOwner::Parent {
+                    parent: parent.clone(),
+                }),
+                to: ScenePlacement::last(ScenePlacementOwner::Root),
             },
         ]);
         let expected = checked_plan_sum(
@@ -1983,6 +2004,7 @@ mod tests {
                 string_retained_bytes(entity.as_str()).unwrap(),
                 string_retained_bytes(parent.as_str()).unwrap(),
                 string_retained_bytes(entity.as_str()).unwrap(),
+                string_retained_bytes(parent.as_str()).unwrap(),
             ],
         )
         .unwrap();

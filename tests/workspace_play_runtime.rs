@@ -27,7 +27,7 @@ use nara::{
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
-        ScenePatchDocument, ScenePatchOperation,
+        ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
         EditorPlayCommand, EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult,
@@ -1022,6 +1022,7 @@ fn apply_changes_rejects_prefab_expansion_and_stale_document_without_mutation() 
                 document: Some(document),
                 patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
                     entity: SceneEntityRecord::new(SceneEntityId::new("later-edit").unwrap()),
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
                 }]),
             })
             .applied
