@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "f5ab1af0c44bd051f524edccd256da2ba6aea871102f35c0b2c5b1592dc93c32"
+source_fingerprint: "4e33b2463eb11c6a479facefb292f013420a75befbc7347155c8d919c412a9ef"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "f5ab1af0c44bd051f524edccd256da2ba6aea871102f35c0b2c5b1592dc
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `f5ab1af0c44bd051f524edccd256da2ba6aea871102f35c0b2c5b1592dc93c32`
-- Immutable records: 361
+- Source fingerprint: `4e33b2463eb11c6a479facefb292f013420a75befbc7347155c8d919c412a9ef`
+- Immutable records: 363
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Ordered UI kernel correction: NUI-U11 input timeline active](registry/2026-08/2026-08-05T122212Z-engine-foundation-contract-completion-codex-root-3c1ccdb07e28445fb62b0e0c68176d20.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Ordered UI kernel correction: NUI-U12 widgets and semantics active](registry/2026-08/2026-08-05T132914Z-engine-foundation-contract-completion-codex-root-6b2d1b94dc86416ab2e62cb943afeaed.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [NUI-U11 normalized input timeline and pause-safe routing](verification/2026-08/2026-08-05T132051Z-nui-u11-normalized-input-timeline-and-pause-safe-routing-aba5a9f9a3664dfdaf3093313a43989f.md) - Verifies the bounded globally ordered normalized input timeline, event-time route stamps, atomic lifecycle cancellation, independent consumer cursors, and pause-safe UI-before-gameplay handling.
 - **Verification Evidence**: [NUI-U10 renderer-neutral immutable UI frame kernel](verification/2026-08/2026-08-05T122212Z-nui-u10-renderer-neutral-immutable-ui-frame-kernel-524095a3d0614d7390aa2b2f8e8d3442.md) - Verifies the bounded renderer-neutral compiler, exact structured identity, stable layout and presentation order, root-local failure atomicity, and exact submitted-frame receipts.
 - **Verification Evidence**: [NUI-U9 bounded deterministic text module](verification/2026-08/2026-08-05T111150Z-nui-u9-bounded-deterministic-text-module-9b67d709856c4004b32df7db37c0d2ae.md) - Verifies exact bundled-font admission, deterministic bounded shaping and raster output, no system discovery, and direct independently locked consumption.
 - **Decision**: [NUI post-U8 identity receipt and reference UI checkpoint](decisions/2026-08/2026-08-05T101528Z-nui-post-u8-identity-receipt-and-reference-ui-checkpoint-cafb82e406d24834a129c782e07b65bb.md) - Fixes the minimum source/projection identity rule, exact backend-submission receipt semantics and retention, AccessKit trial boundary, and the reference HUD/terminal/Retry product matrix before UI core implementation.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [NUI-U2 Host-owned Editor workspace](verification/2026-08/2026-08-04T142426Z-nui-u2-host-owned-editor-workspace-4bfdea95f38e4b6da30c4f16cc66562a.md) - Verifies removal of runtime tooling installation while preserving Host-owned persistence, Play, Retry, and adapter command behavior.
 - **Verification Evidence**: [NUI-U1 ordered UI kernel authority activation](verification/2026-08/2026-08-04T092606Z-nui-u1-ordered-ui-kernel-authority-activation-e3d3a8bda597403f8d8d4a6336bb2fc2.md) - Records the accepted correction decisions, successor authority, architecture-governance simplification, and the transition to NUI-U2.
 - **Verification Evidence**: [RUI-U1 post-activation contract correction](verification/2026-08/2026-08-04T025725Z-rui-u1-post-activation-contract-correction-2732c5f909c84103b8d3425cbe911cf5.md) - Corrects the active ledger pointer and makes the readable-runtime-UI units independently executable after independent read-only plan audits.
-- **Verification Evidence**: [RUI-U1 readable runtime UI activation](verification/2026-08/2026-08-03T232430Z-rui-u1-readable-runtime-ui-activation-c7fea22cd092467fb326065112af5619.md) - Verifies SRT closure, the concrete readable-UI product gap, the bounded first runtime text owner, and truthful successor authority.
 
 # Integration Notes
 
