@@ -370,6 +370,10 @@ impl RuntimePlan {
         self.normalized
     }
 
+    /// Returns the conservative product-capability witness used to admit this plan.
+    ///
+    /// For an any-of plugin clause, every requested matching alternative is retained. This set is
+    /// therefore deterministic and monotonic, but is not a minimal dependency solution.
     #[must_use]
     pub const fn required_capabilities(&self) -> ProductCapabilitySet {
         self.required
@@ -400,6 +404,10 @@ pub enum CompositionError {
     UnrequestedProductCapability {
         plugin: PluginId,
         capability: ProductCapability,
+    },
+    UnrequestedProductCapabilityAlternatives {
+        plugin: PluginId,
+        alternatives: ProductCapabilitySet,
     },
     MissingSchemaProvider {
         provider: PluginSchemaProviderId,
@@ -442,6 +450,9 @@ impl fmt::Display for CompositionError {
             }
             Self::UnrequestedProductCapability { .. } => {
                 "plugin requires a product capability that was not requested"
+            }
+            Self::UnrequestedProductCapabilityAlternatives { .. } => {
+                "plugin requires at least one product capability alternative, but none were requested"
             }
             Self::MissingSchemaProvider { .. } => {
                 "plugin plan declares a schema provider without a typed binding"
@@ -632,6 +643,37 @@ fn resolve_product_requirements(
                     capability,
                 });
             }
+            if !candidate.compiled.capabilities().contains(capability) {
+                return Err(CompositionError::UncompiledProductCapability {
+                    plugin: entry.plugin_id(),
+                    capability,
+                });
+            }
+            required.insert(capability);
+        }
+
+        let mut alternatives = ProductCapabilitySet::new();
+        for declared in entry.declaration().requires_any_product_capabilities {
+            let Some(capability) = product_capability(*declared) else {
+                return Err(CompositionError::UnknownProductCapability {
+                    plugin: entry.plugin_id(),
+                    capability: *declared,
+                });
+            };
+            alternatives.insert(capability);
+        }
+        if alternatives.is_empty() {
+            continue;
+        }
+
+        let requested_alternatives = alternatives.intersection(candidate.normalized);
+        if requested_alternatives.is_empty() {
+            return Err(CompositionError::UnrequestedProductCapabilityAlternatives {
+                plugin: entry.plugin_id(),
+                alternatives,
+            });
+        }
+        for capability in requested_alternatives.iter() {
             if !candidate.compiled.capabilities().contains(capability) {
                 return Err(CompositionError::UncompiledProductCapability {
                     plugin: entry.plugin_id(),

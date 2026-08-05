@@ -10,7 +10,10 @@ use std::{
 
 use engine::{
     ProductConfiguration, ProductRecipe, ProductRecipeError, SchemaContribution,
-    app::{PluginCategory, PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId},
+    app::{
+        PluginCategory, PluginDeclaration, PluginError, PluginId, PluginProductCapability,
+        PluginSchemaProviderId,
+    },
     ecs::{ResMut, Resource},
     fs::{
         CapabilityRights, DirectoryCapability, FsError, FsOperation, HostCapabilityOptions,
@@ -26,8 +29,13 @@ use engine::{
 };
 
 const RUNTIME_PROBE_PLUGIN_ID: PluginId = PluginId::new("renamed-root.runtime-probe");
+const RUNTIME_PROBE_PRODUCT_ALTERNATIVES: &[PluginProductCapability] = &[
+    PluginProductCapability::new("runtime-2d"),
+    PluginProductCapability::new("runtime-ui"),
+];
 const RUNTIME_PROBE_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(RUNTIME_PROBE_PLUGIN_ID, PluginCategory::Runtime);
+    PluginDeclaration::new(RUNTIME_PROBE_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_any_product_capabilities(RUNTIME_PROBE_PRODUCT_ALTERNATIVES);
 
 const CONTRIBUTION_PLUGIN_ID: PluginId = PluginId::new("renamed-root.configured-contribution");
 const CONTRIBUTION_REQUIREMENTS: &[PluginId] = &[RUNTIME_PROBE_PLUGIN_ID];

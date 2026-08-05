@@ -80,7 +80,7 @@ pub(super) fn fingerprint_plan(
     groups: &[ResolvedPluginGroup],
     disabled_slots: &BTreeSet<PluginSlotId>,
 ) -> PluginPlanFingerprint {
-    let mut encoder = FingerprintEncoder::new(b"nara.plugin-plan.v2");
+    let mut encoder = FingerprintEncoder::new(b"nara.plugin-plan.v3");
     encoder.u64(b"entry-count", entries.len() as u64);
     for entry in entries {
         encoder.bytes(b"entry", b"begin");
@@ -230,6 +230,15 @@ fn encode_declaration(encoder: &mut FingerprintEncoder, declaration: &PluginDecl
         b"requires-product",
         declaration
             .requires_product_capabilities
+            .iter()
+            .map(|id| id.as_str()),
+    );
+    encode_id_list(
+        encoder,
+        b"requires-any-product-count",
+        b"requires-any-product",
+        declaration
+            .requires_any_product_capabilities
             .iter()
             .map(|id| id.as_str()),
     );

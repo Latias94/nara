@@ -815,7 +815,7 @@ impl PluginResolver {
         provenance.insert(id);
         let builder = catch_unwind(AssertUnwindSafe(|| group.build()))
             .map_err(|_| PluginPlanError::GroupPanicked { group: id })?;
-        let mut encoder = FingerprintEncoder::new(b"nara.plugin-group-definition.v2");
+        let mut encoder = FingerprintEncoder::new(b"nara.plugin-group-definition.v3");
         encoder.string(b"group-id", id.as_str());
         encoder.u64(b"item-count", builder.items.len() as u64);
         for item in builder.items {

@@ -17,7 +17,7 @@ use nara::{
     },
     fs::{FileCapability, TrustMode},
     hierarchy::HIERARCHY_PLUGIN_ID,
-    project::ProductCapability,
+    project::{ProductCapability, ProductCapabilitySet},
     project_host::{
         CompositionError, ProjectRuntimePlugins, RuntimePlanError, built_in_schema_providers,
         ingest_project_manifest, project_runtime_plugins, resolve_product_recipe,
@@ -45,10 +45,20 @@ use nara::app::PluginPlanError;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const RUNTIME_2D_REQUIREMENT: PluginProductCapability = PluginProductCapability::new("runtime-2d");
+const RUNTIME_CORE_REQUIREMENT: PluginProductCapability =
+    PluginProductCapability::new("runtime-core");
+const RUNTIME_UI_REQUIREMENT: PluginProductCapability = PluginProductCapability::new("runtime-ui");
 const UNKNOWN_PRODUCT_REQUIREMENT: PluginProductCapability =
     PluginProductCapability::new("test.unknown-product-capability");
 const TEST_PRODUCT_PLUGIN_ID: PluginId = PluginId::new("test.product-capability");
 const TEST_UNKNOWN_PRODUCT_PLUGIN_ID: PluginId = PluginId::new("test.unknown-product-plugin");
+const TEST_ANY_PRODUCT_PLUGIN_ID: PluginId = PluginId::new("test.any-product-capability");
+const TEST_ALL_AND_ANY_PRODUCT_PLUGIN_ID: PluginId =
+    PluginId::new("test.all-and-any-product-capability");
+const TEST_MISSING_ALL_WITH_MATCHING_ANY_PRODUCT_PLUGIN_ID: PluginId =
+    PluginId::new("test.missing-all-with-matching-any-product-capability");
+const TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_ID: PluginId =
+    PluginId::new("test.unknown-any-product-capability");
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
@@ -71,6 +81,26 @@ const TEST_PRODUCT_PLUGIN_DECLARATION: PluginDeclaration =
 const TEST_UNKNOWN_PRODUCT_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(TEST_UNKNOWN_PRODUCT_PLUGIN_ID, PluginCategory::Runtime)
         .requires_product_capabilities(&[UNKNOWN_PRODUCT_REQUIREMENT]);
+const TEST_ANY_PRODUCT_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TEST_ANY_PRODUCT_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_any_product_capabilities(&[RUNTIME_UI_REQUIREMENT, RUNTIME_2D_REQUIREMENT]);
+const TEST_ALL_AND_ANY_PRODUCT_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TEST_ALL_AND_ANY_PRODUCT_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_product_capabilities(&[RUNTIME_CORE_REQUIREMENT])
+        .requires_any_product_capabilities(&[RUNTIME_2D_REQUIREMENT, RUNTIME_UI_REQUIREMENT]);
+const TEST_MISSING_ALL_WITH_MATCHING_ANY_PRODUCT_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(
+        TEST_MISSING_ALL_WITH_MATCHING_ANY_PRODUCT_PLUGIN_ID,
+        PluginCategory::Runtime,
+    )
+    .requires_product_capabilities(&[RUNTIME_2D_REQUIREMENT])
+    .requires_any_product_capabilities(&[RUNTIME_UI_REQUIREMENT, RUNTIME_CORE_REQUIREMENT]);
+const TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_any_product_capabilities(&[
+            RUNTIME_CORE_REQUIREMENT,
+            UNKNOWN_PRODUCT_REQUIREMENT,
+        ]);
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
@@ -259,6 +289,58 @@ struct UnknownProductCapabilityPlugin;
 impl Plugin for UnknownProductCapabilityPlugin {
     fn declaration() -> &'static PluginDeclaration {
         &TEST_UNKNOWN_PRODUCT_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, _app: &mut nara::app::App) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct AnyProductCapabilityPlugin;
+
+impl Plugin for AnyProductCapabilityPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_ANY_PRODUCT_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, _app: &mut nara::app::App) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct AllAndAnyProductCapabilityPlugin;
+
+impl Plugin for AllAndAnyProductCapabilityPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_ALL_AND_ANY_PRODUCT_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, _app: &mut nara::app::App) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct MissingAllWithMatchingAnyProductCapabilityPlugin;
+
+impl Plugin for MissingAllWithMatchingAnyProductCapabilityPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_MISSING_ALL_WITH_MATCHING_ANY_PRODUCT_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, _app: &mut nara::app::App) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct UnknownAnyProductCapabilityPlugin;
+
+impl Plugin for UnknownAnyProductCapabilityPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_DECLARATION
     }
 
     fn build(&self, _app: &mut nara::app::App) -> Result<(), PluginError> {
@@ -960,16 +1042,17 @@ fn omitted_known_owner_component_rejects_before_world_mutation() {
             .contains(&nara::tilemap::TILEMAP_SCHEMA_PROVIDER_ID)
     );
 
-    let document = nara::scene::SceneDocument::new([nara::scene::SceneEntityRecord::new(
-        nara::identity::SceneEntityId::new("omitted-owner").unwrap(),
-    )
-    .with_component(
-        ComponentTypeId::new("nara.tilemap.Tilemap"),
-        nara::scene::SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            nara::reflect::ComponentValue::Null,
-        ),
-    )]);
+    let document =
+        nara::scene::SceneDocument::from_ordered_roots([nara::scene::SceneEntityRecord::new(
+            nara::identity::SceneEntityId::new("omitted-owner").unwrap(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            nara::scene::SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                nara::reflect::ComponentValue::Null,
+            ),
+        )]);
     let mut world = nara::ecs::World::new();
     world.spawn_empty();
     let baseline = world
@@ -1379,6 +1462,241 @@ fn unknown_plugin_product_capability_rejects_in_composition_phase() {
             capability: UNKNOWN_PRODUCT_REQUIREMENT,
         })
     );
+}
+
+#[test]
+fn unrequested_product_capability_alternatives_reject_as_one_normalized_clause() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+
+    let error = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::for_default::<AnyProductCapabilityPlugin>(),
+        ),
+        built_in_schema_providers(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        RuntimePlanError::Composition(CompositionError::UnrequestedProductCapabilityAlternatives {
+            plugin: TEST_ANY_PRODUCT_PLUGIN_ID,
+            alternatives: ProductCapabilitySet::from_capabilities([
+                ProductCapability::Runtime2d,
+                ProductCapability::RuntimeUi,
+            ]),
+        },)
+    );
+}
+
+#[test]
+fn all_of_and_any_of_product_requirements_are_combined_with_logical_and() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+
+    let error = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::for_default::<AllAndAnyProductCapabilityPlugin>(),
+        ),
+        built_in_schema_providers(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RuntimePlanError::Composition(CompositionError::UnrequestedProductCapabilityAlternatives {
+            plugin: TEST_ALL_AND_ANY_PRODUCT_PLUGIN_ID,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn all_of_clause_rejects_even_when_the_any_of_clause_matches() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+
+    let error = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::for_default::<MissingAllWithMatchingAnyProductCapabilityPlugin>(),
+        ),
+        built_in_schema_providers(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        RuntimePlanError::Composition(CompositionError::UnrequestedProductCapability {
+            plugin: TEST_MISSING_ALL_WITH_MATCHING_ANY_PRODUCT_PLUGIN_ID,
+            capability: ProductCapability::Runtime2d,
+        })
+    );
+}
+
+#[test]
+fn unknown_product_capability_alternative_rejects_even_when_another_alternative_matches() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+
+    let error = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::for_default::<UnknownAnyProductCapabilityPlugin>(),
+        ),
+        built_in_schema_providers(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        RuntimePlanError::Composition(CompositionError::UnknownProductCapability {
+            plugin: TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_ID,
+            capability: UNKNOWN_PRODUCT_REQUIREMENT,
+        })
+    );
+}
+
+#[cfg(feature = "runtime-2d")]
+#[test]
+fn requested_product_capability_alternative_is_recorded_as_an_admission_witness() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Alternative Product Capability"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-2d"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::for_default::<AnyProductCapabilityPlugin>(),
+        ),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+
+    assert!(
+        plan.required_capabilities()
+            .contains(ProductCapability::Runtime2d)
+    );
+}
+
+#[cfg(all(feature = "runtime-2d", feature = "runtime-ui"))]
+#[test]
+fn every_requested_matching_alternative_is_recorded_conservatively() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Multiple Product Capability Alternatives"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-2d", "runtime-ui"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate).insert_after::<TransformPlugin>(
+            PluginDefinition::for_default::<AnyProductCapabilityPlugin>(),
+        ),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+
+    for capability in [ProductCapability::Runtime2d, ProductCapability::RuntimeUi] {
+        assert!(plan.required_capabilities().contains(capability));
+    }
+}
+
+#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+#[test]
+fn product_recipe_cannot_inject_image_content_into_runtime_core() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let recipe = ProductRecipe::new()
+        .add_plugin::<nara::image::ImagePlugin>()
+        .unwrap();
+
+    assert!(matches!(
+        resolve_product_recipe(&candidate, recipe).unwrap_err(),
+        RuntimePlanError::Composition(CompositionError::UnrequestedProductCapabilityAlternatives {
+            plugin: nara::image::IMAGE_PLUGIN_ID,
+            ..
+        })
+    ));
+}
+
+#[cfg(feature = "presentation-2d")]
+#[test]
+fn product_recipe_cannot_inject_image_prepare_into_runtime_2d() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Content-Only Runtime 2D"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-2d"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let recipe = ProductRecipe::new()
+        .add_plugin::<nara::image::ImagePreparePlugin>()
+        .unwrap();
+
+    assert!(matches!(
+        resolve_product_recipe(&candidate, recipe).unwrap_err(),
+        RuntimePlanError::Composition(CompositionError::UnrequestedProductCapabilityAlternatives {
+            plugin: nara::image::IMAGE_PREPARE_PLUGIN_ID,
+            ..
+        })
+    ));
+}
+
+#[cfg(any(
+    feature = "presentation-2d",
+    feature = "runtime-ui",
+    feature = "render-wgpu"
+))]
+#[test]
+fn schema_contribution_cannot_inject_render_into_runtime_core() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let contribution = SchemaContribution::<nara::render::RenderPlugin>::for_default([
+        nara::render::RENDER_SCHEMA_PROVIDER,
+    ])
+    .unwrap();
+    let recipe = ProductRecipe::new().add_contribution(contribution).unwrap();
+
+    assert!(matches!(
+        resolve_product_recipe(&candidate, recipe).unwrap_err(),
+        RuntimePlanError::Composition(CompositionError::UnrequestedProductCapabilityAlternatives {
+            plugin: nara::render::RENDER_PLUGIN_ID,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -1869,6 +2187,117 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
         plan.schema_validation()
             .provider_ids()
             .contains(&RENDER_SCHEMA_PROVIDER_ID)
+    );
+}
+
+#[cfg(feature = "presentation-2d")]
+#[test]
+fn presentation_2d_profile_satisfies_shared_image_prepare_and_render_plugins() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Presentation 2D Composition"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-2d", "presentation-2d"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+
+    for plugin in [
+        nara::image::IMAGE_PLUGIN_ID,
+        nara::image::IMAGE_PREPARE_PLUGIN_ID,
+        nara::render::RENDER_PLUGIN_ID,
+    ] {
+        assert!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .any(|entry| entry.plugin_id() == plugin)
+        );
+    }
+}
+
+#[cfg(feature = "runtime-ui")]
+#[test]
+fn runtime_ui_profile_satisfies_shared_image_prepare_and_render_plugins() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Runtime UI Composition"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-ui"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+
+    for plugin in [
+        nara::image::IMAGE_PLUGIN_ID,
+        nara::image::IMAGE_PREPARE_PLUGIN_ID,
+        nara::render::RENDER_PLUGIN_ID,
+    ] {
+        assert!(
+            plan.plugin_plan()
+                .entries()
+                .iter()
+                .any(|entry| entry.plugin_id() == plugin)
+        );
+    }
+}
+
+#[cfg(feature = "render-wgpu")]
+#[test]
+fn render_wgpu_profile_satisfies_the_shared_render_plugin() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Render WGPU Composition"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["render-wgpu"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+
+    assert!(
+        plan.plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == nara::render::RENDER_PLUGIN_ID)
     );
 }
 

@@ -554,9 +554,15 @@ const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
     nara_transform::TRANSFORM_PLUGIN_ID,
 ];
+const RENDER_PLUGIN_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
+    nara_app::PluginProductCapability::new("presentation-2d"),
+    nara_app::PluginProductCapability::new("runtime-ui"),
+    nara_app::PluginProductCapability::new("render-wgpu"),
+];
 pub const RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
         .requires_plugins(RENDER_PLUGIN_REQUIREMENTS)
+        .requires_any_product_capabilities(RENDER_PLUGIN_PRODUCT_ALTERNATIVES)
         .provides_schema(&[RENDER_SCHEMA_PROVIDER_ID]);
 
 impl Plugin for RenderPlugin {

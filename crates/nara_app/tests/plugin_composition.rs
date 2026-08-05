@@ -10,12 +10,12 @@ use nara_app::{
     AddPluginsError, App, Plugin, PluginCapability, PluginCategory, PluginDeclaration,
     PluginDefinition, PluginDefinitionId, PluginError, PluginGroup, PluginGroupBuilder,
     PluginGroupId, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
-    PluginLifecycleState, PluginPlan, PluginPlanError, PluginPrepareFailure, PluginServiceId,
-    PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId, PluginSlot,
-    PluginSlotId, RuntimeAdmissionReservation, RuntimeCandidateRetirementState,
-    RuntimeCloseContext, RuntimeCloseParticipant, RuntimeCloseParticipantError,
-    RuntimeCloseParticipantId, RuntimeClosePolicy, RuntimeCloseProgress, RuntimeConstructionError,
-    RuntimeObligationLedger,
+    PluginLifecycleState, PluginPlan, PluginPlanError, PluginPrepareFailure,
+    PluginProductCapability, PluginServiceId, PluginShutdownContext, PluginShutdownError,
+    PluginShutdownObligationId, PluginSlot, PluginSlotId, RuntimeAdmissionReservation,
+    RuntimeCandidateRetirementState, RuntimeCloseContext, RuntimeCloseParticipant,
+    RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
+    RuntimeCloseProgress, RuntimeConstructionError, RuntimeObligationLedger,
 };
 use nara_ecs::Resource;
 
@@ -51,6 +51,13 @@ const ABSENT_CAPABILITY: PluginCapability =
     PluginCapability::new("nara.test.plan.absent-capability");
 const TEST_OBLIGATION: PluginShutdownObligationId =
     PluginShutdownObligationId::new("nara.test.plan.obligation.owner");
+const PRODUCT_ALTERNATIVE_A: PluginProductCapability =
+    PluginProductCapability::new("nara.test.product-a");
+const PRODUCT_ALTERNATIVE_B: PluginProductCapability =
+    PluginProductCapability::new("nara.test.product-b");
+const PRODUCT_ALTERNATIVE_PLUGIN_ID: PluginId = PluginId::new("nara.test.plan.product-alternative");
+const PRODUCT_ALTERNATIVE_GROUP_ID: PluginGroupId =
+    PluginGroupId::new("nara.test.plan.product-alternative-group");
 const CORE_POLICY_A: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.plan.core.policy-a", 1);
 const CORE_POLICY_B: PluginDefinitionId =
@@ -108,6 +115,12 @@ const SHUTDOWN_B_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(SHUTDOWN_B_PLUGIN_ID, PluginCategory::Runtime);
 const SHUTDOWN_C_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(SHUTDOWN_C_PLUGIN_ID, PluginCategory::Runtime);
+const PRODUCT_ALTERNATIVE_A_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(PRODUCT_ALTERNATIVE_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_any_product_capabilities(&[PRODUCT_ALTERNATIVE_A]);
+const PRODUCT_ALTERNATIVE_B_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(PRODUCT_ALTERNATIVE_PLUGIN_ID, PluginCategory::Runtime)
+        .requires_any_product_capabilities(&[PRODUCT_ALTERNATIVE_B]);
 
 macro_rules! noop_plugin {
     ($plugin:ident, $declaration:ident) => {
@@ -128,6 +141,32 @@ macro_rules! noop_plugin {
 
 noop_plugin!(OptionalConsumerPlugin, OPTIONAL_CONSUMER_DECLARATION);
 noop_plugin!(CapabilityConsumerPlugin, CAPABILITY_CONSUMER_DECLARATION);
+noop_plugin!(ProductAlternativeAPlugin, PRODUCT_ALTERNATIVE_A_DECLARATION);
+noop_plugin!(ProductAlternativeBPlugin, PRODUCT_ALTERNATIVE_B_DECLARATION);
+
+#[derive(Debug, Default)]
+struct ProductAlternativeGroupA;
+
+impl PluginGroup for ProductAlternativeGroupA {
+    const ID: PluginGroupId = PRODUCT_ALTERNATIVE_GROUP_ID;
+
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::new()
+            .add_definition(PluginDefinition::for_default::<ProductAlternativeAPlugin>())
+    }
+}
+
+#[derive(Debug, Default)]
+struct ProductAlternativeGroupB;
+
+impl PluginGroup for ProductAlternativeGroupB {
+    const ID: PluginGroupId = PRODUCT_ALTERNATIVE_GROUP_ID;
+
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::new()
+            .add_definition(PluginDefinition::for_default::<ProductAlternativeBPlugin>())
+    }
+}
 noop_plugin!(ServiceConsumerPlugin, SERVICE_CONSUMER_DECLARATION);
 noop_plugin!(ConflictAPlugin, CONFLICT_A_DECLARATION);
 noop_plugin!(ConflictBPlugin, CONFLICT_B_DECLARATION);
@@ -566,6 +605,29 @@ fn plan_identity_includes_the_canonical_plugin_declaration() {
     .unwrap();
 
     assert_ne!(core.fingerprint(), variant.fingerprint());
+}
+
+#[test]
+fn alternative_product_requirements_are_part_of_plan_and_group_identity() {
+    assert!(
+        PluginDeclaration::new(OPTIONAL_ID, PluginCategory::Runtime)
+            .requires_any_product_capabilities
+            .is_empty()
+    );
+
+    let direct_first =
+        PluginPlan::resolve(PluginDefinition::for_default::<ProductAlternativeAPlugin>()).unwrap();
+    let direct_second =
+        PluginPlan::resolve(PluginDefinition::for_default::<ProductAlternativeBPlugin>()).unwrap();
+    assert_ne!(direct_first.fingerprint(), direct_second.fingerprint());
+
+    let first = PluginPlan::resolve(ProductAlternativeGroupA).unwrap();
+    let second = PluginPlan::resolve(ProductAlternativeGroupB).unwrap();
+
+    assert_ne!(
+        first.groups()[0].definition_fingerprint(),
+        second.groups()[0].definition_fingerprint()
+    );
 }
 
 #[test]

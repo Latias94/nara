@@ -1113,6 +1113,9 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         CompositionError::UnknownProductCapability { .. } => "unknown-product-capability",
         CompositionError::UncompiledProductCapability { .. } => "uncompiled-product-capability",
         CompositionError::UnrequestedProductCapability { .. } => "unrequested-product-capability",
+        CompositionError::UnrequestedProductCapabilityAlternatives { .. } => {
+            "unrequested-product-capability-alternatives"
+        }
         CompositionError::MissingSchemaProvider { .. } => "missing-schema-provider",
         CompositionError::DivergentSchemaProvider { .. } => "divergent-schema-provider",
         CompositionError::DivergentSchemaOwner { .. } => "divergent-schema-owner",
@@ -1137,6 +1140,17 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
             diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
             diagnostic = attach_identifier(diagnostic, "capability", capability.as_str());
         }
+        CompositionError::UnrequestedProductCapabilityAlternatives {
+            plugin,
+            alternatives,
+        } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+            diagnostic = attach_identifier(
+                diagnostic,
+                "alternatives",
+                &normalized_product_capability_alternatives(*alternatives),
+            );
+        }
         CompositionError::MissingSchemaProvider { provider }
         | CompositionError::DivergentSchemaProvider { provider }
         | CompositionError::SchemaProviderRejected { provider, .. }
@@ -1160,6 +1174,16 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         | CompositionError::SchemaAuthorityPublicationFailed => {}
     }
     single_diagnostic(diagnostic)
+}
+
+fn normalized_product_capability_alternatives(
+    alternatives: nara_project::ProductCapabilitySet,
+) -> String {
+    alternatives
+        .iter()
+        .map(nara_project::ProductCapability::as_str)
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn plugin_plan_failure_report(error: &PluginPlanError) -> DiagnosticReport {

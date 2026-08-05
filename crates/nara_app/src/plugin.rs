@@ -89,7 +89,13 @@ pub struct PluginDeclaration {
     pub conflicts: &'static [PluginId],
     pub provides_services: &'static [PluginServiceId],
     pub requires_services: &'static [PluginServiceId],
+    /// Product capabilities that must all be requested by a file-backed product Host.
     pub requires_product_capabilities: &'static [PluginProductCapability],
+    /// Product capabilities of which at least one must be requested by a file-backed product Host.
+    ///
+    /// An empty slice adds no alternative requirement. When both product-capability fields are
+    /// populated, the all-of and any-of clauses are combined with logical AND.
+    pub requires_any_product_capabilities: &'static [PluginProductCapability],
     pub provides_schema: &'static [PluginSchemaProviderId],
     pub requires_schema: &'static [PluginSchemaProviderId],
     pub shutdown_obligations: &'static [PluginShutdownObligationId],
@@ -108,6 +114,7 @@ impl PluginDeclaration {
             provides_services: &[],
             requires_services: &[],
             requires_product_capabilities: &[],
+            requires_any_product_capabilities: &[],
             provides_schema: &[],
             requires_schema: &[],
             shutdown_obligations: &[],
@@ -159,6 +166,15 @@ impl PluginDeclaration {
         capabilities: &'static [PluginProductCapability],
     ) -> Self {
         self.requires_product_capabilities = capabilities;
+        self
+    }
+
+    #[must_use]
+    pub const fn requires_any_product_capabilities(
+        mut self,
+        capabilities: &'static [PluginProductCapability],
+    ) -> Self {
+        self.requires_any_product_capabilities = capabilities;
         self
     }
 

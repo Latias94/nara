@@ -315,9 +315,14 @@ pub const IMAGE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.im
 const IMAGE_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
     nara_app::PluginDefinitionId::new("nara.image.configured", 1);
 const IMAGE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[nara_asset::ASSET_PLUGIN_ID];
+const IMAGE_PLUGIN_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
+    nara_app::PluginProductCapability::new("runtime-2d"),
+    nara_app::PluginProductCapability::new("runtime-ui"),
+];
 pub const IMAGE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(IMAGE_PLUGIN_ID, nara_app::PluginCategory::Asset)
-        .requires_plugins(IMAGE_PLUGIN_REQUIREMENTS);
+        .requires_plugins(IMAGE_PLUGIN_REQUIREMENTS)
+        .requires_any_product_capabilities(IMAGE_PLUGIN_PRODUCT_ALTERNATIVES);
 
 /// Creates a repeatable image plugin definition from pure import limits.
 #[must_use]
