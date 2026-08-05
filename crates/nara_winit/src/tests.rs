@@ -12,7 +12,9 @@ use nara_gameplay::{
     GameplayCommandTypeId,
 };
 use nara_input::{
-    ActionBinding, ActionId, ActionMap, ActionPhase, ButtonInput, InputPlugin, PointerState,
+    ActionBinding, ActionId, ActionMap, ActionPhase, ButtonInput, InputEventKind,
+    InputInvalidationReason, InputPlugin, InputPresentationEpoch, InputSeatId, InputSurfaceId,
+    InputTimeline, InputWindowId, PointerState,
 };
 use nara_window::{
     WindowEvents, WindowPlugin,
@@ -334,6 +336,22 @@ fn focus_gate_rejects_repeats_and_requires_a_fresh_press_after_regain() {
         gate.keyboard_input(key, ElementState::Pressed, false),
         Some(ButtonDriverInput::Press(key))
     );
+
+    let mouse_button = MouseButton::Left;
+    assert_eq!(
+        gate.mouse_input(mouse_button, ElementState::Pressed),
+        Some(ButtonDriverInput::Press(mouse_button))
+    );
+    gate.suppress_mouse_buttons([mouse_button]);
+    assert_eq!(gate.mouse_input(mouse_button, ElementState::Pressed), None);
+    assert_eq!(
+        gate.mouse_input(mouse_button, ElementState::Released),
+        Some(ButtonDriverInput::Release(mouse_button))
+    );
+    assert_eq!(
+        gate.mouse_input(mouse_button, ElementState::Pressed),
+        Some(ButtonDriverInput::Press(mouse_button))
+    );
 }
 
 #[test]
@@ -454,6 +472,78 @@ fn focus_event_wiring_releases_input_and_lowers_a_semantic_stop_command() {
             .accepted,
         3
     );
+
+    drop(state);
+    stop_runtime(&mut runtime);
+}
+
+#[test]
+fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
+    let mut app = App::new();
+    app.add_plugin(InputPlugin).unwrap();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .publish_presented_route(
+            InputWindowId::new(WindowId::PRIMARY.get()),
+            InputSurfaceId::new(41),
+            InputSeatId::PRIMARY,
+            InputPresentationEpoch::new(73).unwrap(),
+        )
+        .unwrap();
+    let mut runtime = start_runtime(app);
+    let mut state = WinitApp::new(&mut runtime).unwrap();
+
+    state
+        .apply_focus_driver_event(WindowId::PRIMARY, true)
+        .unwrap();
+    assert!(
+        state
+            .apply_physical_keyboard_driver_event(
+                raw_key_event(WinitKeyCode::Enter, ElementState::Pressed),
+                false,
+            )
+            .unwrap()
+    );
+    state
+        .apply_focus_driver_event(WindowId::PRIMARY, false)
+        .unwrap();
+
+    let entries = state
+        .runtime
+        .world()
+        .resource::<InputTimeline>()
+        .entries()
+        .copied()
+        .collect::<Vec<_>>();
+    let pressed = entries
+        .iter()
+        .find(|entry| {
+            matches!(
+                entry.kind(),
+                InputEventKind::Key {
+                    key: KeyCode::Enter,
+                    phase: nara_input::ButtonTransitionPhase::Pressed,
+                }
+            )
+        })
+        .unwrap();
+    assert_eq!(pressed.route().surface(), Some(InputSurfaceId::new(41)));
+    assert_eq!(
+        pressed.route().presentation_epoch(),
+        InputPresentationEpoch::new(73)
+    );
+    let focus_loss = entries.last().unwrap();
+    assert!(matches!(
+        focus_loss.kind(),
+        InputEventKind::FocusChanged { focused: false }
+    ));
+    assert_eq!(
+        focus_loss.invalidation(),
+        Some(InputInvalidationReason::FocusLost)
+    );
+    assert_eq!(focus_loss.route(), pressed.route());
 
     drop(state);
     stop_runtime(&mut runtime);

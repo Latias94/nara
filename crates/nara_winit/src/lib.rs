@@ -11,8 +11,10 @@ use nara_app::{
     RuntimeDriverScope, RuntimeFault, RuntimeInstance, RuntimeScopeError, RuntimeState,
 };
 use nara_input::{
-    ButtonDriverInput, ButtonInputDriverError, KeyCode, MouseButton, PointerDriverInput,
-    apply_keyboard_driver_input, apply_mouse_driver_input, apply_pointer_driver_input,
+    ButtonDriverInput, ButtonInputDriverError, InputPointerId, InputSeatId, InputTimeline,
+    InputWindowEvent, InputWindowId, KeyCode, MouseButton, PointerDriverInput,
+    apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
+    apply_window_input_driver_event,
 };
 use nara_window::{
     Window, WindowEvent, WindowId, WindowResolution,
@@ -140,6 +142,7 @@ struct WinitApp<'runtime> {
     shutdown: WinitShutdownState,
     runtime_close_incomplete_observed: bool,
     input_gate: WinitInputGate,
+    input_window_id: WindowId,
 }
 
 #[derive(Debug)]
@@ -171,6 +174,13 @@ impl WinitInputGate {
     ) {
         self.focused = false;
         self.suppressed_keys.extend(released_keys);
+        self.suppress_mouse_buttons(released_mouse_buttons);
+    }
+
+    fn suppress_mouse_buttons(
+        &mut self,
+        released_mouse_buttons: impl IntoIterator<Item = MouseButton>,
+    ) {
         self.suppressed_mouse_buttons.extend(released_mouse_buttons);
     }
 
@@ -244,6 +254,7 @@ impl<'runtime> WinitApp<'runtime> {
             shutdown: WinitShutdownState::Running,
             runtime_close_incomplete_observed: false,
             input_gate: WinitInputGate::default(),
+            input_window_id: WindowId::PRIMARY,
         })
     }
 
@@ -343,15 +354,44 @@ impl<'runtime> WinitApp<'runtime> {
         if !should_process_window_event_during_shutdown(self.shutdown, &event) {
             return Ok(());
         }
+        self.input_window_id = window_id;
 
         match event {
             WinitWindowEvent::CloseRequested => {
+                if self.input_timeline_installed() {
+                    self.with_driver_scope(|scope| {
+                        apply_window_input_driver_event(
+                            scope,
+                            InputWindowId::new(window_id.get()),
+                            InputSeatId::PRIMARY,
+                            InputWindowEvent::CloseRequested,
+                        )
+                    })?;
+                }
                 self.with_driver_scope(|scope| {
                     push_window_driver_event(scope, WindowEvent::CloseRequested { window_id })
                 })?;
             }
             WinitWindowEvent::Resized(size) => {
+                let scale_factor = self
+                    .platform_windows
+                    .get(&window_id)
+                    .map_or(1.0, |window| window.scale_factor());
                 let resolution = WindowResolution::new(size.width, size.height);
+                let logical_size = nara_core::Vec2::new(
+                    size.width as f32 / scale_factor as f32,
+                    size.height as f32 / scale_factor as f32,
+                );
+                if self.input_timeline_installed() {
+                    self.with_driver_scope(|scope| {
+                        apply_window_input_driver_event(
+                            scope,
+                            InputWindowId::new(window_id.get()),
+                            InputSeatId::PRIMARY,
+                            InputWindowEvent::Resized { logical_size },
+                        )
+                    })?;
+                }
                 self.with_driver_scope(|scope| {
                     push_window_driver_event(
                         scope,
@@ -366,6 +406,16 @@ impl<'runtime> WinitApp<'runtime> {
                 self.apply_focus_driver_event(window_id, focused)?;
             }
             WinitWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if self.input_timeline_installed() {
+                    self.with_driver_scope(|scope| {
+                        apply_window_input_driver_event(
+                            scope,
+                            InputWindowId::new(window_id.get()),
+                            InputSeatId::PRIMARY,
+                            InputWindowEvent::ScaleFactorChanged { scale_factor },
+                        )
+                    })?;
+                }
                 self.with_driver_scope(|scope| {
                     push_window_driver_event(
                         scope,
@@ -392,20 +442,54 @@ impl<'runtime> WinitApp<'runtime> {
             }
             WinitWindowEvent::MouseInput { state, button, .. } => {
                 let button = convert_mouse_button(button);
-                if let Some(input) = self.mouse_driver_input(state, button) {
-                    self.with_driver_scope(|scope| apply_mouse_driver_input(scope, input))?;
+                if self.input_timeline_installed()
+                    && let Some(input) = self.mouse_driver_input(state, button)
+                {
+                    self.with_driver_scope(|scope| {
+                        apply_mouse_driver_input_at(
+                            scope,
+                            InputWindowId::new(window_id.get()),
+                            InputSeatId::PRIMARY,
+                            InputPointerId::PRIMARY,
+                            input,
+                        )
+                    })?;
                 }
             }
             WinitWindowEvent::CursorMoved { position, .. } => {
-                let position = nara_core::Vec2::new(position.x as f32, position.y as f32);
+                if !self.input_timeline_installed() {
+                    return Ok(());
+                }
+                let scale_factor = self
+                    .platform_windows
+                    .get(&window_id)
+                    .map_or(1.0, |window| window.scale_factor());
+                let position = nara_core::Vec2::new(
+                    position.x as f32 / scale_factor as f32,
+                    position.y as f32 / scale_factor as f32,
+                );
                 self.with_driver_scope(|scope| {
-                    apply_pointer_driver_input(scope, PointerDriverInput::Moved(position))
+                    apply_pointer_driver_input_at(
+                        scope,
+                        InputWindowId::new(window_id.get()),
+                        InputSeatId::PRIMARY,
+                        InputPointerId::PRIMARY,
+                        PointerDriverInput::Moved(position),
+                    )
                 })?;
             }
-            WinitWindowEvent::CursorLeft { .. } => {
-                self.with_driver_scope(|scope| {
-                    apply_pointer_driver_input(scope, PointerDriverInput::Left)
+            WinitWindowEvent::CursorLeft { .. } if self.input_timeline_installed() => {
+                let (_, released_mouse_buttons) = self.with_driver_scope(|scope| {
+                    apply_pointer_driver_input_at(
+                        scope,
+                        InputWindowId::new(window_id.get()),
+                        InputSeatId::PRIMARY,
+                        InputPointerId::PRIMARY,
+                        PointerDriverInput::Left,
+                    )
                 })?;
+                self.input_gate
+                    .suppress_mouse_buttons(released_mouse_buttons);
             }
             _ => {}
         }
@@ -418,13 +502,19 @@ impl<'runtime> WinitApp<'runtime> {
         event: RawKeyEvent,
         repeat: bool,
     ) -> Result<bool, AppRunError> {
+        if !self.input_timeline_installed() {
+            return Ok(false);
+        }
         let Some(key) = convert_physical_key(event.physical_key) else {
             return Ok(false);
         };
         let Some(input) = self.input_gate.keyboard_input(key, event.state, repeat) else {
             return Ok(false);
         };
-        self.with_driver_scope(|scope| apply_keyboard_driver_input(scope, input))?;
+        let input_window_id = InputWindowId::new(self.input_window_id.get());
+        self.with_driver_scope(|scope| {
+            apply_keyboard_driver_input_at(scope, input_window_id, InputSeatId::PRIMARY, input)
+        })?;
         Ok(true)
     }
 
@@ -433,13 +523,39 @@ impl<'runtime> WinitApp<'runtime> {
         window_id: WindowId,
         focused: bool,
     ) -> Result<(), AppRunError> {
+        if !self.input_timeline_installed() {
+            if focused {
+                self.input_gate.gain_focus();
+            } else {
+                self.input_gate.lose_focus([], []);
+            }
+            return self.with_driver_scope(|scope| {
+                push_window_driver_event(scope, WindowEvent::Focused { window_id, focused })
+            });
+        }
         if focused {
             self.input_gate.gain_focus();
         } else {
-            let (released_keys, released_mouse_buttons) =
-                self.with_driver_scope(release_all_input)?;
+            let (_, released_keys, released_mouse_buttons) = self.with_driver_scope(|scope| {
+                apply_window_input_driver_event(
+                    scope,
+                    InputWindowId::new(window_id.get()),
+                    InputSeatId::PRIMARY,
+                    InputWindowEvent::Focused(false),
+                )
+            })?;
             self.input_gate
                 .lose_focus(released_keys, released_mouse_buttons);
+        }
+        if focused {
+            self.with_driver_scope(|scope| {
+                apply_window_input_driver_event(
+                    scope,
+                    InputWindowId::new(window_id.get()),
+                    InputSeatId::PRIMARY,
+                    InputWindowEvent::Focused(true),
+                )
+            })?;
         }
         self.with_driver_scope(|scope| {
             push_window_driver_event(scope, WindowEvent::Focused { window_id, focused })
@@ -452,6 +568,10 @@ impl<'runtime> WinitApp<'runtime> {
         button: MouseButton,
     ) -> Option<ButtonDriverInput<MouseButton>> {
         self.input_gate.mouse_input(button, state)
+    }
+
+    fn input_timeline_installed(&self) -> bool {
+        self.runtime.world().contains_resource::<InputTimeline>()
     }
 
     fn handle_destroyed_window(
@@ -467,6 +587,16 @@ impl<'runtime> WinitApp<'runtime> {
             .mark_native_destroyed(window_id)
             .map_err(|_| AppRunError::runner("native window target is not registered"))?;
         if externally_destroyed {
+            if self.input_timeline_installed() {
+                self.with_driver_scope(|scope| {
+                    apply_window_input_driver_event(
+                        scope,
+                        InputWindowId::new(window_id.get()),
+                        InputSeatId::PRIMARY,
+                        InputWindowEvent::SurfaceRetired,
+                    )
+                })?;
+            }
             self.with_driver_scope(|scope| {
                 push_window_driver_event(scope, WindowEvent::Closed { window_id })
             })?;
@@ -793,6 +923,22 @@ fn retire_runtime_targets(
     backend_windows
         .request_retirements(&owned_window_ids)
         .map_err(|_| AppRunError::runner("owned native window target is not registered"))?;
+    if runtime.world().contains_resource::<InputTimeline>() {
+        runtime
+            .with_driver_scope(|scope| {
+                for window_id in owned_window_ids.iter().copied() {
+                    apply_window_input_driver_event(
+                        scope,
+                        InputWindowId::new(window_id.get()),
+                        InputSeatId::PRIMARY,
+                        InputWindowEvent::SurfaceRetired,
+                    )?;
+                }
+                Ok::<(), ButtonInputDriverError>(())
+            })
+            .map_err(runtime_scope_error)?
+            .map_err(|_| AppRunError::runner("input route retirement failed"))?;
+    }
     let retirement_driver = runtime
         .world()
         .get_resource::<WindowSurfaceRetirementDriver>()
@@ -851,16 +997,6 @@ fn runtime_scope_error(error: RuntimeScopeError) -> AppRunError {
 
 fn runtime_fault_error(fault: &RuntimeFault) -> AppRunError {
     AppRunError::managed_runtime_fault(fault)
-}
-
-fn release_all_input(
-    scope: &mut RuntimeDriverScope<'_>,
-) -> Result<(Vec<KeyCode>, Vec<MouseButton>), ButtonInputDriverError> {
-    let keys = apply_keyboard_driver_input(scope, ButtonDriverInput::ReleaseAll)?;
-    let mouse_buttons = apply_mouse_driver_input(scope, ButtonDriverInput::ReleaseAll)?;
-    apply_pointer_driver_input(scope, PointerDriverInput::Left)
-        .map_err(ButtonInputDriverError::WorldAccess)?;
-    Ok((keys, mouse_buttons))
 }
 
 #[must_use]

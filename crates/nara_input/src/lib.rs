@@ -14,11 +14,28 @@ use nara_app::{
 use nara_core::Vec2;
 use nara_ecs::{
     Res, ResMut, Resource,
+    error::BevyError,
     schedule::{IntoScheduleConfigs, SystemSet},
+};
+
+mod timeline;
+
+#[doc(hidden)]
+pub use timeline::{__InputDriverEvent, __InputDriverOutput};
+pub use timeline::{
+    InputAdmission, InputConsumerCursors, InputEventKind, InputFrameObservations,
+    InputIngressError, InputInvalidationReason, InputPointerId, InputPresentationEpoch,
+    InputRouteStamp, InputSeatId, InputSurfaceId, InputTimeline, InputTimelineEntry,
+    InputUiCursorError, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
+    MAX_INPUT_TIMELINE_ENTRIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum InputSet {
+    ProjectTimeline,
+    PublishObservations,
+    RouteUi,
+    StageActions,
     ResolveActions,
 }
 
@@ -49,7 +66,7 @@ pub enum MouseButton {
 ///
 /// Paused frames still finish frame observation but defer action resolution, so one bounded
 /// retention interval can span multiple platform frames.
-pub const MAX_RETAINED_BUTTON_TRANSITIONS: usize = 256;
+pub const MAX_RETAINED_BUTTON_TRANSITIONS: usize = MAX_INPUT_TIMELINE_ENTRIES;
 
 /// Physical edge recorded for a retained button state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +79,7 @@ pub enum ButtonTransitionPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ButtonTransition<T> {
     sequence: u64,
+    timeline_sequence: Option<u64>,
     button: T,
     phase: ButtonTransitionPhase,
 }
@@ -70,6 +88,11 @@ impl<T: Copy> ButtonTransition<T> {
     #[must_use]
     pub const fn sequence(self) -> u64 {
         self.sequence
+    }
+
+    #[must_use]
+    pub const fn timeline_sequence(self) -> Option<u64> {
+        self.timeline_sequence
     }
 
     #[must_use]
@@ -266,12 +289,48 @@ where
     }
 
     fn push_transition_preflighted(&mut self, button: T, phase: ButtonTransitionPhase) {
+        self.push_transition_with_origin_preflighted(button, phase, None);
+    }
+
+    fn apply_timeline_transition(
+        &mut self,
+        timeline_sequence: u64,
+        button: T,
+        phase: ButtonTransitionPhase,
+    ) -> Result<(), ButtonInputError> {
+        let changes_state = match phase {
+            ButtonTransitionPhase::Pressed => !self.pressed.contains(&button),
+            ButtonTransitionPhase::Released => self.pressed.contains(&button),
+        };
+        if !changes_state {
+            return Ok(());
+        }
+        self.preflight_transition_count(1)?;
+        match phase {
+            ButtonTransitionPhase::Pressed => {
+                self.pressed.insert(button);
+            }
+            ButtonTransitionPhase::Released => {
+                self.pressed.remove(&button);
+            }
+        }
+        self.push_transition_with_origin_preflighted(button, phase, Some(timeline_sequence));
+        Ok(())
+    }
+
+    fn push_transition_with_origin_preflighted(
+        &mut self,
+        button: T,
+        phase: ButtonTransitionPhase,
+        timeline_sequence: Option<u64>,
+    ) {
         self.transition_sequence = self
             .transition_sequence
             .checked_add(1)
             .expect("button transition sequence was preflighted");
         self.transitions.push(ButtonTransition {
             sequence: self.transition_sequence,
+            timeline_sequence,
             button,
             phase,
         });
@@ -311,6 +370,7 @@ where
 pub enum ButtonInputDriverError {
     WorldAccess(RuntimeWorldAccessError),
     Input(ButtonInputError),
+    Timeline(InputIngressError),
 }
 
 impl Display for ButtonInputDriverError {
@@ -318,6 +378,7 @@ impl Display for ButtonInputDriverError {
         match self {
             Self::WorldAccess(error) => Display::fmt(error, formatter),
             Self::Input(error) => Display::fmt(error, formatter),
+            Self::Timeline(error) => Display::fmt(error, formatter),
         }
     }
 }
@@ -327,6 +388,7 @@ impl Error for ButtonInputDriverError {
         match self {
             Self::WorldAccess(error) => Some(error),
             Self::Input(error) => Some(error),
+            Self::Timeline(error) => Some(error),
         }
     }
 }
@@ -340,6 +402,12 @@ impl From<RuntimeWorldAccessError> for ButtonInputDriverError {
 impl From<ButtonInputError> for ButtonInputDriverError {
     fn from(error: ButtonInputError) -> Self {
         Self::Input(error)
+    }
+}
+
+impl From<InputIngressError> for ButtonInputDriverError {
+    fn from(error: InputIngressError) -> Self {
+        Self::Timeline(error)
     }
 }
 
@@ -385,27 +453,110 @@ pub fn apply_keyboard_driver_input(
     scope: &mut RuntimeDriverScope<'_>,
     input: ButtonDriverInput<KeyCode>,
 ) -> Result<Vec<KeyCode>, ButtonInputDriverError> {
-    scope
-        .__apply_port::<ButtonInput<KeyCode>>(input)
-        .map_err(ButtonInputDriverError::WorldAccess)?
-        .map_err(ButtonInputDriverError::Input)
+    apply_keyboard_driver_input_at(
+        scope,
+        InputWindowId::UNSPECIFIED,
+        InputSeatId::PRIMARY,
+        input,
+    )
+}
+
+pub fn apply_keyboard_driver_input_at(
+    scope: &mut RuntimeDriverScope<'_>,
+    window: InputWindowId,
+    seat: InputSeatId,
+    input: ButtonDriverInput<KeyCode>,
+) -> Result<Vec<KeyCode>, ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::Keyboard {
+            window,
+            seat,
+            input,
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok(output.released_keys)
 }
 
 pub fn apply_mouse_driver_input(
     scope: &mut RuntimeDriverScope<'_>,
     input: ButtonDriverInput<MouseButton>,
 ) -> Result<Vec<MouseButton>, ButtonInputDriverError> {
-    scope
-        .__apply_port::<ButtonInput<MouseButton>>(input)
-        .map_err(ButtonInputDriverError::WorldAccess)?
-        .map_err(ButtonInputDriverError::Input)
+    apply_mouse_driver_input_at(
+        scope,
+        InputWindowId::UNSPECIFIED,
+        InputSeatId::PRIMARY,
+        InputPointerId::PRIMARY,
+        input,
+    )
+}
+
+pub fn apply_mouse_driver_input_at(
+    scope: &mut RuntimeDriverScope<'_>,
+    window: InputWindowId,
+    seat: InputSeatId,
+    pointer: InputPointerId,
+    input: ButtonDriverInput<MouseButton>,
+) -> Result<Vec<MouseButton>, ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::Mouse {
+            window,
+            seat,
+            pointer,
+            input,
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok(output.released_mouse_buttons)
 }
 
 pub fn apply_pointer_driver_input(
     scope: &mut RuntimeDriverScope<'_>,
     input: PointerDriverInput,
-) -> Result<(), RuntimeWorldAccessError> {
-    scope.__apply_port::<PointerState>(input)
+) -> Result<(InputAdmission, Vec<MouseButton>), ButtonInputDriverError> {
+    apply_pointer_driver_input_at(
+        scope,
+        InputWindowId::UNSPECIFIED,
+        InputSeatId::PRIMARY,
+        InputPointerId::PRIMARY,
+        input,
+    )
+}
+
+pub fn apply_pointer_driver_input_at(
+    scope: &mut RuntimeDriverScope<'_>,
+    window: InputWindowId,
+    seat: InputSeatId,
+    pointer: InputPointerId,
+    input: PointerDriverInput,
+) -> Result<(InputAdmission, Vec<MouseButton>), ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::Pointer {
+            window,
+            seat,
+            pointer,
+            input,
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok((output.admission, output.released_mouse_buttons))
+}
+
+pub fn apply_window_input_driver_event(
+    scope: &mut RuntimeDriverScope<'_>,
+    window: InputWindowId,
+    seat: InputSeatId,
+    event: InputWindowEvent,
+) -> Result<(InputAdmission, Vec<KeyCode>, Vec<MouseButton>), ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::Window {
+            window,
+            seat,
+            event,
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok((
+        output.admission,
+        output.released_keys,
+        output.released_mouse_buttons,
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -739,6 +890,12 @@ impl Plugin for InputPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        if !app.world().contains_resource::<InputTimeline>() {
+            app.insert_resource(InputTimeline::default())?;
+        }
+        if !app.world().contains_resource::<InputFrameObservations>() {
+            app.insert_resource(InputFrameObservations::default())?;
+        }
         if !app.world().contains_resource::<ButtonInput<KeyCode>>() {
             app.insert_resource(ButtonInput::<KeyCode>::default())?;
         }
@@ -754,7 +911,29 @@ impl Plugin for InputPlugin {
         if !app.world().contains_resource::<PointerState>() {
             app.insert_resource(PointerState::default())?;
         }
-        app.add_systems(
+        app.configure_sets(
+            CoreStage::First,
+            (
+                InputSet::ProjectTimeline,
+                InputSet::PublishObservations,
+                InputSet::RouteUi,
+                InputSet::StageActions,
+            )
+                .chain(),
+        )?
+        .add_systems(
+            CoreStage::First,
+            project_timeline_input.in_set(InputSet::ProjectTimeline),
+        )?
+        .add_systems(
+            CoreStage::First,
+            publish_timeline_observations.in_set(InputSet::PublishObservations),
+        )?
+        .add_systems(
+            CoreStage::First,
+            finalize_timeline_routing.in_set(InputSet::StageActions),
+        )?
+        .add_systems(
             CoreStage::PreUpdate,
             resolve_action_outcomes.in_set(InputSet::ResolveActions),
         )?
@@ -763,8 +942,76 @@ impl Plugin for InputPlugin {
     }
 }
 
+fn project_timeline_input(
+    mut timeline: ResMut<InputTimeline>,
+    mut keyboard: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut pointer: ResMut<PointerState>,
+) -> Result<(), BevyError> {
+    let entries = timeline.projection_entries();
+    let keyboard_edges = entries
+        .iter()
+        .filter(|entry| matches!(entry.kind(), InputEventKind::Key { .. }))
+        .count();
+    let mouse_edges = entries
+        .iter()
+        .filter(|entry| matches!(entry.kind(), InputEventKind::PointerButton { .. }))
+        .count();
+    keyboard
+        .preflight_transition_count(keyboard_edges)
+        .map_err(BevyError::error)?;
+    mouse
+        .preflight_transition_count(mouse_edges)
+        .map_err(BevyError::error)?;
+
+    for entry in entries {
+        match entry.kind() {
+            InputEventKind::Key { key, phase } => {
+                keyboard
+                    .apply_timeline_transition(entry.sequence(), key, phase)
+                    .map_err(BevyError::error)?;
+            }
+            InputEventKind::PointerButton { button, phase } => {
+                mouse
+                    .apply_timeline_transition(entry.sequence(), button, phase)
+                    .map_err(BevyError::error)?;
+            }
+            InputEventKind::PointerMoved => {
+                if let Some(position) = entry.logical_position() {
+                    pointer.set_position(position);
+                }
+            }
+            InputEventKind::PointerLeft => pointer.clear_position(),
+            InputEventKind::Wheel { .. }
+            | InputEventKind::GamepadButton { .. }
+            | InputEventKind::FocusChanged { .. }
+            | InputEventKind::Resized { .. }
+            | InputEventKind::ScaleFactorChanged { .. }
+            | InputEventKind::AccessibilityAction { .. }
+            | InputEventKind::CloseRequested
+            | InputEventKind::SurfaceRetired => {}
+        }
+    }
+    timeline.finish_projection();
+    Ok(())
+}
+
+fn publish_timeline_observations(
+    mut timeline: ResMut<InputTimeline>,
+    mut observations: ResMut<InputFrameObservations>,
+) {
+    timeline.publish_observations(&mut observations);
+}
+
+fn finalize_timeline_routing(action_map: Res<ActionMap>, mut timeline: ResMut<InputTimeline>) {
+    timeline.finalize_ui_routing();
+    timeline.stage_actions(&action_map);
+    timeline.reclaim_completed();
+}
+
 fn resolve_action_outcomes(
     action_map: Res<ActionMap>,
+    mut timeline: ResMut<InputTimeline>,
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut outcomes: ResMut<ActionOutcomes>,
@@ -772,8 +1019,15 @@ fn resolve_action_outcomes(
     if !outcomes.is_empty() {
         outcomes.clear();
     }
+    for entry in timeline.take_deferred_actions() {
+        let Some((input, transition_phase)) = entry.action_transition() else {
+            continue;
+        };
+        resolve_input_binding(&action_map, input, transition_phase, &mut outcomes);
+    }
     // Keyboard and mouse retain independent physical timelines. Resolve each timeline in event
-    // order, with deterministic keyboard-before-mouse precedence between the two domains.
+    // order for direct legacy mutations. Timeline-projected edges were already resolved above in
+    // their global platform order.
     if keyboard.has_unresolved_action_transitions() {
         resolve_button_transitions(
             &action_map,
@@ -800,25 +1054,37 @@ fn resolve_button_transitions<T: Copy>(
     input_binding: impl Fn(T) -> InputBinding,
     outcomes: &mut ActionOutcomes,
 ) {
-    for transition in transitions {
+    for transition in transitions
+        .iter()
+        .filter(|transition| transition.timeline_sequence().is_none())
+    {
         let input = input_binding(transition.button());
-        let (phase, value) = match transition.phase() {
-            ButtonTransitionPhase::Pressed => (ActionPhase::Started, ActionValue::pressed()),
-            ButtonTransitionPhase::Released => (ActionPhase::Released, ActionValue::released()),
+        resolve_input_binding(action_map, input, transition.phase(), outcomes);
+    }
+}
+
+fn resolve_input_binding(
+    action_map: &ActionMap,
+    input: InputBinding,
+    transition_phase: ButtonTransitionPhase,
+    outcomes: &mut ActionOutcomes,
+) {
+    let (phase, value) = match transition_phase {
+        ButtonTransitionPhase::Pressed => (ActionPhase::Started, ActionValue::pressed()),
+        ButtonTransitionPhase::Released => (ActionPhase::Released, ActionValue::released()),
+    };
+    for binding_index in action_map.binding_indices_for_input(input) {
+        let Some(binding) = action_map.binding_at(binding_index) else {
+            continue;
         };
-        for binding_index in action_map.binding_indices_for_input(input) {
-            let Some(binding) = action_map.binding_at(binding_index) else {
-                continue;
-            };
-            if action_map.is_context_enabled(&binding.context) {
-                outcomes.push(ActionOutcome {
-                    action: binding.action.clone(),
-                    context: binding.context.clone(),
-                    binding: input,
-                    phase,
-                    value,
-                });
-            }
+        if action_map.is_context_enabled(&binding.context) {
+            outcomes.push(ActionOutcome {
+                action: binding.action.clone(),
+                context: binding.context.clone(),
+                binding: input,
+                phase,
+                value,
+            });
         }
     }
 }
@@ -827,6 +1093,8 @@ fn clear_input_transitions(
     mut keyboard: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut outcomes: ResMut<ActionOutcomes>,
+    mut observations: ResMut<InputFrameObservations>,
+    mut timeline: ResMut<InputTimeline>,
 ) {
     if keyboard.needs_frame_cleanup() {
         keyboard.finish_frame_transitions();
@@ -837,6 +1105,8 @@ fn clear_input_transitions(
     if !outcomes.is_empty() {
         outcomes.clear();
     }
+    observations.clear();
+    timeline.reclaim_completed();
 }
 
 fn validate_identifier(id: &str) -> Result<(), ActionIdError> {
@@ -1149,7 +1419,7 @@ mod tests {
         let mut input = ButtonInput::default();
         input.press(KeyCode::Space).unwrap();
         input.press(KeyCode::Enter).unwrap();
-        for _ in 0..126 {
+        for _ in 0..((MAX_RETAINED_BUTTON_TRANSITIONS - 4) / 2) {
             input.press(KeyCode::ArrowUp).unwrap();
             input.release(KeyCode::ArrowUp).unwrap();
         }
