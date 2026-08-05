@@ -17,8 +17,9 @@ use nara_identity::{
         prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
         validate_additional_retirement_identity_axes, validate_identity_support_topology,
     },
-    IdentityDomainError, RuntimeEntityReference, SceneInstanceId, SpawnedSceneInstance,
-    TombstoneCause, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
+    EntityLookup, IdentityDomainError, RuntimeEntityReference, SceneInstanceId,
+    SpawnedSceneInstance, TombstoneCause, WorldEntityToken, WorldIdentityDomain,
+    WorldIdentityDomainSettings,
 };
 use nara_reflect::{
     __private::{
@@ -29,8 +30,8 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabDocument, PrefabExpansionReport, PrefabSourceResolver, SceneDocument, SceneEntityId,
-    ScenePatchDocument,
+    PrefabDocument, PrefabExpansionReport, PrefabProjectionPath, PrefabSourceResolver,
+    SceneDocument, SceneEntityId, ScenePatchDocument,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     product_transaction::{
         PreparedSceneProductOverlay, SceneProductOverlayError, SceneProductOverlayWriter,
@@ -81,6 +82,10 @@ pub struct SceneEntitySource {
     pub instance_id: SceneInstanceId,
     /// Stable entity identity within the persistent scene document.
     pub entity_id: SceneEntityId,
+    /// Opaque identity in the owning scene or prefab source document.
+    pub source_entity_id: SceneEntityId,
+    /// Structured prefab location, absent for scene-local entities.
+    pub projection_path: Option<PrefabProjectionPath>,
 }
 
 /// Result of one scene materialization or replacement attempt.
@@ -802,6 +807,8 @@ impl SceneSpawner {
             world.entity_mut(*runtime_entity).insert(SceneEntitySource {
                 instance_id,
                 entity_id: entity_id.clone(),
+                source_entity_id: entity_id.clone(),
+                projection_path: None,
             });
         }
 
@@ -856,7 +863,11 @@ impl SceneSpawner {
         database: Option<&ProjectAssetDatabase>,
         commit: SceneIdentityCommit<'_>,
     ) -> SceneSpawnReport {
-        let mut diagnostics = expansion.diagnostics;
+        let PrefabExpansionReport {
+            document,
+            mut diagnostics,
+            provenance,
+        } = expansion;
         if diagnostics.has_errors() {
             return SceneSpawnReport {
                 instance: None,
@@ -865,11 +876,21 @@ impl SceneSpawner {
             };
         }
 
-        let document = expansion
-            .document
-            .expect("successful prefab expansion should include document");
+        let document = document.expect("successful prefab expansion should include document");
         let mut report =
             self.spawn_with_asset_context(world, registry, &document, database, commit);
+        if let Some(instance) = &report.instance {
+            for (entity_id, provenance) in provenance {
+                let EntityLookup::Resolved(entity) = instance.resolve(world, &entity_id) else {
+                    panic!("successful prefab spawn must resolve every provenance entry");
+                };
+                let mut source = world
+                    .get_mut::<SceneEntitySource>(entity)
+                    .expect("successful prefab spawn must attach scene provenance");
+                source.source_entity_id = provenance.source_entity_id().clone();
+                source.projection_path = provenance.projection_path().cloned();
+            }
+        }
         diagnostics.extend(report.diagnostics);
         report.diagnostics = diagnostics;
         report

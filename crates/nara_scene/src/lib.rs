@@ -11,6 +11,7 @@ mod migration;
 mod patch;
 mod prefab;
 mod product_transaction;
+mod provenance;
 mod runtime_hierarchy;
 mod scene_components;
 mod spawn;
@@ -47,6 +48,7 @@ pub use prefab::{
     PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
     PrefabSourceResolver,
 };
+pub use provenance::{PrefabProjectionPath, PrefabProjectionStep, SceneEntityProvenance};
 /// Provisional APIs for advanced product integrations.
 ///
 /// These contracts have a real reference-game consumer but are not ordinary scene-authoring

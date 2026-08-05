@@ -2265,7 +2265,9 @@ mod tests {
     fn scene_source(instance: u64, entity_id: SceneEntityId) -> SceneEntitySource {
         SceneEntitySource {
             instance_id: SceneInstanceId::new(instance).unwrap(),
+            source_entity_id: entity_id.clone(),
             entity_id,
+            projection_path: None,
         }
     }
 }

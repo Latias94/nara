@@ -687,19 +687,54 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
             PrefabDocument::from_ordered_roots([prefab_anchor("weapon", weapon_source.clone())]),
         )
         .with_prefab(
-            weapon_source,
+            weapon_source.clone(),
             PrefabDocument::from_ordered_roots([prefab_anchor("muzzle", muzzle_source.clone())]),
         )
         .with_prefab(
-            muzzle_source,
+            muzzle_source.clone(),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("flash"))
                 .with_component(position_type_id(), position_record(8))]),
         );
-    let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", enemy_source)]);
+    let document =
+        SceneDocument::from_ordered_roots([prefab_anchor("enemy", enemy_source.clone())]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
+    let provenance = expansion
+        .provenance
+        .get(&scene_id("enemy/weapon/muzzle/flash"))
+        .expect("nested projection must retain source provenance");
+    assert_eq!(provenance.source_entity_id(), &scene_id("flash"));
+    let projection = provenance
+        .projection_path()
+        .expect("nested prefab entity must carry a projection path");
+    assert_eq!(projection.root_anchor(), &scene_id("enemy"));
+    assert_eq!(projection.source_chain().len(), 3);
+    assert_eq!(
+        projection.source_chain()[0].source_document(),
+        &enemy_source
+    );
+    assert_eq!(
+        projection.source_chain()[0].source_entity(),
+        &scene_id("weapon")
+    );
+    assert_eq!(
+        projection.source_chain()[1].source_document(),
+        &weapon_source
+    );
+    assert_eq!(
+        projection.source_chain()[1].source_entity(),
+        &scene_id("muzzle")
+    );
+    assert_eq!(
+        projection.source_chain()[2].source_document(),
+        &muzzle_source
+    );
+    assert_eq!(
+        projection.source_chain()[2].source_entity(),
+        &scene_id("flash")
+    );
     let expanded = expansion.document.unwrap();
     assert_eq!(
         expanded
@@ -713,6 +748,24 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
             "enemy/weapon/muzzle",
             "enemy/weapon/muzzle/flash"
         ]
+    );
+
+    let mut world = World::new();
+    let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
+    let projected = spawned_entity(&world, &report, &scene_id("enemy/weapon/muzzle/flash"));
+    let source = world
+        .get::<SceneEntitySource>(projected)
+        .expect("spawned prefab projection must carry source provenance");
+    assert_eq!(source.entity_id, scene_id("enemy/weapon/muzzle/flash"));
+    assert_eq!(source.source_entity_id, scene_id("flash"));
+    assert_eq!(
+        source
+            .projection_path
+            .as_ref()
+            .expect("spawned nested prefab entity must retain its path")
+            .source_chain()
+            .len(),
+        3
     );
 }
 
@@ -2046,6 +2099,8 @@ fn scene_retirement_rejection_keeps_the_target_alive() {
         .spawn(SceneEntitySource {
             instance_id: source.instance_id,
             entity_id: scene_id("forged"),
+            source_entity_id: scene_id("forged"),
+            projection_path: None,
         })
         .id();
     let forged_components = world.entity(forged).archetype().components().len();
