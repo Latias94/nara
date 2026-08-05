@@ -47,6 +47,21 @@ impl UiInteraction {
         self.enabled = enabled;
         self
     }
+
+    #[must_use]
+    pub const fn hit_testable(self) -> bool {
+        self.hit_testable
+    }
+
+    #[must_use]
+    pub const fn focusable(self) -> bool {
+        self.focusable
+    }
+
+    #[must_use]
+    pub const fn enabled(self) -> bool {
+        self.enabled
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,6 +124,36 @@ impl UiSemantics {
             self.actions.push(action);
         }
         Ok(self)
+    }
+
+    #[must_use]
+    pub const fn role(&self) -> UiSemanticRole {
+        self.role
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+
+    #[must_use]
+    pub const fn selected(&self) -> Option<bool> {
+        self.selected
+    }
+
+    #[must_use]
+    pub const fn expanded(&self) -> Option<bool> {
+        self.expanded
+    }
+
+    #[must_use]
+    pub fn actions(&self) -> &[UiActionId] {
+        &self.actions
     }
 }
 

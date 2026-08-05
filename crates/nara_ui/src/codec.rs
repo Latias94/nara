@@ -1,904 +1,1046 @@
-use nara_asset::{AssetRef, AssetRefError, AssetServer, AssetSourceKind, Handle};
-use nara_core::Color;
-use nara_image::ImageAsset;
-use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
-    ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
-    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
-    ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PreparedComponentCandidate,
+    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
-use nara_render::RenderTarget;
+use nara_ui_kernel::{
+    UiActionId, UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension,
+    UiEdges, UiFlexDirection, UiImageId, UiJustify, UiLayer, UiOverflow, UiPositionMode,
+    UiSemanticRole, UiStyle, UiTextAlignment, UiTextOverflow, UiThemePalette,
+};
 
-use crate::{UiNode, UiPanel, UiPanelMaterial, UiRoot, UiStyle, UiVal};
+use crate::{UiButton, UiNode, UiRoot, UiSemantics, UiText, UiTheme, UiVisual};
+
+const UI_ROOT_ID: &str = "nara.ui.UiRoot";
+const UI_NODE_ID: &str = "nara.ui.UiNode";
+const UI_VISUAL_ID: &str = "nara.ui.UiVisual";
+const UI_TEXT_ID: &str = "nara.ui.UiText";
+const UI_BUTTON_ID: &str = "nara.ui.UiButton";
+const UI_SEMANTICS_ID: &str = "nara.ui.UiSemantics";
+const UI_THEME_ID: &str = "nara.ui.UiTheme";
+
+const DIMENSION_FIELDS: &[&str] = &["kind", "value"];
+const BRUSH_FIELDS: &[&str] = &["kind", "red", "green", "blue", "alpha", "reference"];
+const COLOR_FIELDS: &[&str] = &["red", "green", "blue", "alpha"];
 
 pub fn register_ui_components(
     registry: &mut ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
     validate_ui_components(registry)?;
-    register_ui_root_component(registry)?;
-    register_ui_node_component(registry)?;
-    register_ui_panel_component(registry)
-}
-
-pub(crate) fn ui_schema_catalog() -> nara_reflect::ComponentSchemaCatalog {
-    nara_reflect::ComponentSchemaCatalog {
-        components: vec![ui_root_schema(), ui_node_schema(), ui_panel_schema()],
-        ..nara_reflect::ComponentSchemaCatalog::default()
-    }
+    registry.register_persistent_component_with_codec::<UiRoot, _, _>(
+        ui_root_schema(),
+        decode_root,
+        encode_root,
+    )?;
+    registry.register_persistent_component_with_codec::<UiNode, _, _>(
+        ui_node_schema(),
+        decode_node,
+        encode_node,
+    )?;
+    registry.register_persistent_component_with_codec::<UiVisual, _, _>(
+        ui_visual_schema(),
+        decode_visual,
+        encode_visual,
+    )?;
+    registry.register_persistent_component_with_codec::<UiText, _, _>(
+        ui_text_schema(),
+        decode_text,
+        encode_text,
+    )?;
+    registry.register_persistent_component_with_codec::<UiButton, _, _>(
+        ui_button_schema(),
+        decode_button,
+        encode_button,
+    )?;
+    registry.register_persistent_component_with_codec::<UiSemantics, _, _>(
+        ui_semantics_schema(),
+        decode_semantics,
+        encode_semantics,
+    )?;
+    registry.register_persistent_component_with_codec::<UiTheme, _, _>(
+        ui_theme_schema(),
+        decode_theme,
+        encode_theme,
+    )?;
+    Ok(())
 }
 
 pub(crate) fn validate_ui_components(
     registry: &ComponentRegistry,
 ) -> Result<(), ComponentRegistryError> {
-    registry.validate_component_registration::<UiRoot>(&ComponentTypeId::new("nara.ui.UiRoot"))?;
-    registry.validate_component_registration::<UiNode>(&ComponentTypeId::new("nara.ui.UiNode"))?;
+    registry.validate_component_registration::<UiRoot>(&ComponentTypeId::new(UI_ROOT_ID))?;
+    registry.validate_component_registration::<UiNode>(&ComponentTypeId::new(UI_NODE_ID))?;
+    registry.validate_component_registration::<UiVisual>(&ComponentTypeId::new(UI_VISUAL_ID))?;
+    registry.validate_component_registration::<UiText>(&ComponentTypeId::new(UI_TEXT_ID))?;
+    registry.validate_component_registration::<UiButton>(&ComponentTypeId::new(UI_BUTTON_ID))?;
     registry
-        .validate_component_registration::<UiPanel>(&ComponentTypeId::new("nara.ui.UiPanel"))?;
+        .validate_component_registration::<UiSemantics>(&ComponentTypeId::new(UI_SEMANTICS_ID))?;
+    registry.validate_component_registration::<UiTheme>(&ComponentTypeId::new(UI_THEME_ID))?;
     Ok(())
 }
 
-pub(crate) fn register_ui_root_component(
-    registry: &mut ComponentRegistry,
-) -> Result<(), ComponentRegistryError> {
-    registry.register_persistent_component_with_codec::<UiRoot, _, _>(
-        ui_root_schema(),
-        |value| {
-            Ok(UiRoot {
-                target: read_render_target(value.get("target"))?,
-                order: optional_i32(value, "order")?.unwrap_or(0),
-            })
-        },
-        |root| {
-            Ok(ComponentValue::map([
-                ("target", render_target_value(root.target)?),
-                ("order", ComponentValue::I64(i64::from(root.order))),
-            ]))
-        },
+pub(crate) fn ui_schema_catalog() -> nara_reflect::ComponentSchemaCatalog {
+    nara_reflect::ComponentSchemaCatalog {
+        components: vec![
+            ui_root_schema(),
+            ui_node_schema(),
+            ui_visual_schema(),
+            ui_text_schema(),
+            ui_button_schema(),
+            ui_semantics_schema(),
+            ui_theme_schema(),
+        ],
+        ..nara_reflect::ComponentSchemaCatalog::default()
+    }
+}
+
+fn decode_root(value: &ComponentValue) -> Result<UiRoot, ComponentCodecError> {
+    expect_fields(value, "UiRoot", &["layer"])?;
+    Ok(UiRoot::new(read_layer(value.field("layer")?, "layer")?))
+}
+
+fn encode_root(root: &UiRoot) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([(
+        "layer",
+        ComponentValue::String(layer_name(root.layer()).to_string()),
+    )]))
+}
+
+fn decode_node(value: &ComponentValue) -> Result<UiNode, ComponentCodecError> {
+    expect_fields(value, "UiNode", &["style"])?;
+    Ok(UiNode::new(read_style(value.field("style")?)?))
+}
+
+fn encode_node(node: &UiNode) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([("style", style_value(node.style())?)]))
+}
+
+fn decode_visual(value: &ComponentValue) -> Result<UiVisual, ComponentCodecError> {
+    expect_fields(
+        value,
+        "UiVisual",
+        &["background", "border_width", "border_brush", "radii"],
     )?;
-    Ok(())
+    let background = read_brush(value.field("background")?, "background")?;
+    let border_width = read_non_negative(value.field("border_width")?, "border_width")?;
+    let border_brush = read_brush(value.field("border_brush")?, "border_brush")?;
+    let mut visual = match background {
+        UiBrush::Solid(color) => UiVisual::solid(color),
+        UiBrush::Role(role) => UiVisual::role(role),
+        UiBrush::Image { image, tint } => UiVisual::image(image, tint),
+    }
+    .with_radii(read_radii(value.field("radii")?)?);
+    if border_width > 0.0 {
+        visual = visual.with_border(
+            UiBorder::new(border_width, border_brush)
+                .map_err(|error| codec_message(error.to_string()))?,
+        );
+    }
+    Ok(visual)
 }
 
-pub(crate) fn register_ui_node_component(
-    registry: &mut ComponentRegistry,
-) -> Result<(), ComponentRegistryError> {
-    registry.register_persistent_component_with_codec::<UiNode, _, _>(
-        ui_node_schema(),
-        |value| {
-            Ok(UiNode {
-                style: read_style(value.get("style"))?,
-                z_index: optional_i32(value, "z_index")?.unwrap_or(0),
-                visible: optional_bool(value, "visible")?.unwrap_or(true),
-                focusable: optional_bool(value, "focusable")?.unwrap_or(false),
-                clip: optional_bool(value, "clip")?.unwrap_or(false),
-            })
-        },
-        |node| {
-            Ok(ComponentValue::map([
-                ("style", style_value(node.style)?),
-                ("z_index", ComponentValue::I64(i64::from(node.z_index))),
-                ("visible", ComponentValue::Bool(node.visible)),
-                ("focusable", ComponentValue::Bool(node.focusable)),
-                ("clip", ComponentValue::Bool(node.clip)),
-            ]))
-        },
+fn encode_visual(visual: &UiVisual) -> Result<ComponentValue, ComponentCodecError> {
+    let visual = visual.kernel();
+    let background = visual
+        .background()
+        .ok_or_else(|| ComponentCodecError::invalid_field("background", "an explicit UI brush"))?;
+    let (border_width, border_brush) = visual.border().map_or_else(
+        || (0.0, UiBrush::Solid(UiColor::rgba(0.0, 0.0, 0.0, 0.0))),
+        |border| (border.width(), border.brush().clone()),
+    );
+    Ok(ComponentValue::map([
+        ("background", brush_value(background)?),
+        ("border_width", float_value(border_width)?),
+        ("border_brush", brush_value(&border_brush)?),
+        ("radii", radii_value(visual.radii())?),
+    ]))
+}
+
+fn decode_text(value: &ComponentValue) -> Result<UiText, ComponentCodecError> {
+    expect_fields(
+        value,
+        "UiText",
+        &[
+            "content",
+            "logical_size",
+            "brush",
+            "alignment",
+            "overflow",
+            "has_semantic_text",
+            "semantic_text",
+        ],
     )?;
-    Ok(())
+    let mut text = UiText::new(
+        read_string(value.field("content")?, "content")?,
+        read_positive(value.field("logical_size")?, "logical_size")?,
+    )
+    .map_err(|error| codec_message(error.to_string()))?
+    .with_brush(read_brush(value.field("brush")?, "brush")?)
+    .with_alignment(read_text_alignment(value.field("alignment")?, "alignment")?)
+    .with_overflow(read_text_overflow(value.field("overflow")?, "overflow")?);
+    let has_semantic_text = read_bool(value.field("has_semantic_text")?, "has_semantic_text")?;
+    let semantic_text = read_string(value.field("semantic_text")?, "semantic_text")?;
+    if has_semantic_text {
+        text = text.with_semantic_text(semantic_text);
+    } else if !semantic_text.is_empty() {
+        return Err(ComponentCodecError::invalid_field(
+            "semantic_text",
+            "an empty string when has_semantic_text is false",
+        ));
+    }
+    Ok(text)
 }
 
-pub(crate) fn register_ui_panel_component(
-    registry: &mut ComponentRegistry,
-) -> Result<(), ComponentRegistryError> {
-    registry.register_persistent_component_codec_with_context::<UiPanel, _, _>(
-        ui_panel_schema(),
-        |value, context| {
-            let material = read_panel_material(value.field("material")?, context)?;
-            if material.requires_asset_server() {
-                Ok(PreparedComponentCandidate::with_asset_server(
-                    move |context| {
-                        let material = resolve_prepared_material(context, material)?;
-                        Ok(UiPanel { material })
-                    },
-                ))
-            } else {
-                let material = material.into_resolved().ok_or_else(|| {
-                    ComponentCodecError::Message(
-                        "prepared UI panel material unexpectedly requires AssetServer".to_string(),
-                    )
-                })?;
-                Ok(PreparedComponentCandidate::insert(UiPanel { material }))
-            }
-        },
-        |world, entity, context| {
-            let Some(panel) = world.get::<UiPanel>(entity) else {
-                return Ok(None);
-            };
-            let image = match panel.material.image {
-                Some(handle) => Some(asset_ref_value(
-                    &AssetRef::from_handle_with_policy(
-                        world.get_resource::<AssetServer>().ok_or_else(|| {
-                            ComponentCodecError::Message(
-                                "AssetServer resource is missing".to_string(),
-                            )
-                        })?,
-                        handle,
-                        context.asset_ref_export_policy(),
-                    )
-                    .map_err(|error| ComponentCodecError::Message(error.to_string()))?,
-                )?),
-                None => None,
-            };
-            Ok(Some(ComponentValue::map([(
-                "material",
-                material_value(
-                    image.unwrap_or(ComponentValue::Null),
-                    panel.material.sampler,
-                    panel.material.alpha_mode,
-                    panel.material.tint,
-                )?,
-            )])))
-        },
+fn encode_text(text: &UiText) -> Result<ComponentValue, ComponentCodecError> {
+    let text = text.kernel();
+    Ok(ComponentValue::map([
+        (
+            "content",
+            ComponentValue::String(text.content().to_string()),
+        ),
+        ("logical_size", float_value(text.logical_size())?),
+        ("brush", brush_value(text.brush())?),
+        (
+            "alignment",
+            ComponentValue::String(text_alignment_name(text.alignment()).to_string()),
+        ),
+        (
+            "overflow",
+            ComponentValue::String(text_overflow_name(text.overflow()).to_string()),
+        ),
+        (
+            "has_semantic_text",
+            ComponentValue::Bool(text.semantic_text().is_some()),
+        ),
+        (
+            "semantic_text",
+            ComponentValue::String(text.semantic_text().unwrap_or_default().to_string()),
+        ),
+    ]))
+}
+
+fn decode_button(value: &ComponentValue) -> Result<UiButton, ComponentCodecError> {
+    expect_fields(
+        value,
+        "UiButton",
+        &["label", "action", "enabled", "logical_text_size"],
     )?;
-    Ok(())
-}
-
-fn ui_root_schema() -> ComponentSchema {
-    ComponentSchema::new(
-        ComponentTypeId::new("nara.ui.UiRoot"),
-        "UI root",
-        ComponentSchemaVersion::ONE,
+    let action = UiActionId::new(read_string(value.field("action")?, "action")?)
+        .map_err(|error| codec_message(error.to_string()))?;
+    let button = UiButton::new(
+        read_string(value.field("label")?, "label")?,
+        action,
+        read_positive(value.field("logical_text_size")?, "logical_text_size")?,
     )
-    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-    .with_fields(ui_root_fields())
+    .map_err(|error| codec_message(error.to_string()))?;
+    Ok(button.with_enabled(read_bool(value.field("enabled")?, "enabled")?))
 }
 
-fn ui_node_schema() -> ComponentSchema {
-    ComponentSchema::new(
-        ComponentTypeId::new("nara.ui.UiNode"),
-        "UI node",
-        ComponentSchemaVersion::ONE,
+fn encode_button(button: &UiButton) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("label", ComponentValue::String(button.label().to_string())),
+        (
+            "action",
+            ComponentValue::String(button.action().as_str().to_string()),
+        ),
+        ("enabled", ComponentValue::Bool(button.enabled())),
+        (
+            "logical_text_size",
+            float_value(button.logical_text_size())?,
+        ),
+    ]))
+}
+
+fn decode_semantics(value: &ComponentValue) -> Result<UiSemantics, ComponentCodecError> {
+    expect_fields(
+        value,
+        "UiSemantics",
+        &[
+            "role",
+            "name",
+            "has_value",
+            "value",
+            "has_selected",
+            "selected",
+            "has_expanded",
+            "expanded",
+            "actions",
+        ],
+    )?;
+    let mut semantics = UiSemantics::new(
+        read_semantic_role(value.field("role")?, "role")?,
+        read_string(value.field("name")?, "name")?,
     )
-    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-    .with_fields(ui_node_fields())
+    .map_err(|error| codec_message(error.to_string()))?;
+    let has_value = read_bool(value.field("has_value")?, "has_value")?;
+    let semantic_value = read_string(value.field("value")?, "value")?;
+    if has_value {
+        semantics = semantics
+            .with_value(semantic_value)
+            .map_err(|error| codec_message(error.to_string()))?;
+    } else if !semantic_value.is_empty() {
+        return Err(ComponentCodecError::invalid_field(
+            "value",
+            "an empty string when has_value is false",
+        ));
+    }
+    if read_bool(value.field("has_selected")?, "has_selected")? {
+        semantics = semantics.with_selected(read_bool(value.field("selected")?, "selected")?);
+    }
+    if read_bool(value.field("has_expanded")?, "has_expanded")? {
+        semantics = semantics.with_expanded(read_bool(value.field("expanded")?, "expanded")?);
+    }
+    let ComponentValue::List(actions) = value.field("actions")? else {
+        return Err(ComponentCodecError::invalid_field(
+            "actions",
+            "a string list",
+        ));
+    };
+    for action in actions {
+        let action = UiActionId::new(read_string(action, "actions[]")?)
+            .map_err(|error| codec_message(error.to_string()))?;
+        semantics = semantics
+            .with_action(action)
+            .map_err(|error| codec_message(error.to_string()))?;
+    }
+    Ok(semantics)
 }
 
-fn ui_panel_schema() -> ComponentSchema {
-    ComponentSchema::new(
-        ComponentTypeId::new("nara.ui.UiPanel"),
-        "UI panel",
-        ComponentSchemaVersion::ONE,
+fn encode_semantics(semantics: &UiSemantics) -> Result<ComponentValue, ComponentCodecError> {
+    let semantics = semantics.kernel();
+    Ok(ComponentValue::map([
+        (
+            "role",
+            ComponentValue::String(semantic_role_name(semantics.role()).to_string()),
+        ),
+        ("name", ComponentValue::String(semantics.name().to_string())),
+        (
+            "has_value",
+            ComponentValue::Bool(semantics.value().is_some()),
+        ),
+        (
+            "value",
+            ComponentValue::String(semantics.value().unwrap_or_default().to_string()),
+        ),
+        (
+            "has_selected",
+            ComponentValue::Bool(semantics.selected().is_some()),
+        ),
+        (
+            "selected",
+            ComponentValue::Bool(semantics.selected().unwrap_or(false)),
+        ),
+        (
+            "has_expanded",
+            ComponentValue::Bool(semantics.expanded().is_some()),
+        ),
+        (
+            "expanded",
+            ComponentValue::Bool(semantics.expanded().unwrap_or(false)),
+        ),
+        (
+            "actions",
+            ComponentValue::List(
+                semantics
+                    .actions()
+                    .iter()
+                    .map(|action| ComponentValue::String(action.as_str().to_string()))
+                    .collect(),
+            ),
+        ),
+    ]))
+}
+
+fn decode_theme(value: &ComponentValue) -> Result<UiTheme, ComponentCodecError> {
+    expect_fields(value, "UiTheme", &["revision", "palette"])?;
+    UiTheme::new(
+        read_u64(value.field("revision")?, "revision")?,
+        read_palette(value.field("palette")?)?,
     )
-    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-    .with_fields(ui_panel_fields())
+    .map_err(|error| codec_message(error.to_string()))
 }
 
-fn ui_root_fields() -> [ComponentFieldSchema; 2] {
-    [
-        ui_optional(
-            "target",
-            "Target",
-            ComponentFieldPath::from_fields(["target"]),
-            ComponentValueKind::String,
-            ComponentValue::String("primary_window".to_string()),
-        ),
-        ui_optional(
-            "order",
-            "Order",
-            ComponentFieldPath::from_fields(["order"]),
-            ComponentValueKind::I64,
-            ComponentValue::I64(0),
-        ),
-    ]
+fn encode_theme(theme: &UiTheme) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("revision", ComponentValue::U64(theme.revision().get())),
+        ("palette", palette_value(theme.palette())?),
+    ]))
 }
 
-fn ui_node_fields() -> [ComponentFieldSchema; 12] {
-    [
-        ui_optional(
-            "clip",
-            "Clip",
-            ComponentFieldPath::from_fields(["clip"]),
-            ComponentValueKind::Bool,
-            ComponentValue::Bool(false),
-        ),
-        ui_optional(
-            "focusable",
-            "Focusable",
-            ComponentFieldPath::from_fields(["focusable"]),
-            ComponentValueKind::Bool,
-            ComponentValue::Bool(false),
-        ),
-        ui_optional(
-            "style.height.kind",
-            "Height mode",
-            ComponentFieldPath::from_fields(["style", "height", "kind"]),
-            ComponentValueKind::String,
-            ComponentValue::String("auto".to_string()),
-        ),
-        ui_optional(
-            "style.height.value",
-            "Height value",
-            ComponentFieldPath::from_fields(["style", "height", "value"]),
-            ComponentValueKind::F64,
-            ComponentValue::f64(0.0).expect("0.0 is a valid ComponentValue f64"),
-        ),
-        ui_optional(
-            "style.left.kind",
-            "Left mode",
-            ComponentFieldPath::from_fields(["style", "left", "kind"]),
-            ComponentValueKind::String,
-            ComponentValue::String("px".to_string()),
-        ),
-        ui_optional(
-            "style.left.value",
-            "Left value",
-            ComponentFieldPath::from_fields(["style", "left", "value"]),
-            ComponentValueKind::F64,
-            ComponentValue::f64(0.0).expect("0.0 is a valid ComponentValue f64"),
-        ),
-        ui_optional(
-            "style.top.kind",
-            "Top mode",
-            ComponentFieldPath::from_fields(["style", "top", "kind"]),
-            ComponentValueKind::String,
-            ComponentValue::String("px".to_string()),
-        ),
-        ui_optional(
-            "style.top.value",
-            "Top value",
-            ComponentFieldPath::from_fields(["style", "top", "value"]),
-            ComponentValueKind::F64,
-            ComponentValue::f64(0.0).expect("0.0 is a valid ComponentValue f64"),
-        ),
-        ui_optional(
-            "style.width.kind",
-            "Width mode",
-            ComponentFieldPath::from_fields(["style", "width", "kind"]),
-            ComponentValueKind::String,
-            ComponentValue::String("auto".to_string()),
-        ),
-        ui_optional(
-            "style.width.value",
-            "Width value",
-            ComponentFieldPath::from_fields(["style", "width", "value"]),
-            ComponentValueKind::F64,
-            ComponentValue::f64(0.0).expect("0.0 is a valid ComponentValue f64"),
-        ),
-        ui_optional(
-            "visible",
-            "Visible",
-            ComponentFieldPath::from_fields(["visible"]),
-            ComponentValueKind::Bool,
-            ComponentValue::Bool(true),
-        ),
-        ui_optional(
+fn read_style(value: &ComponentValue) -> Result<UiStyle, ComponentCodecError> {
+    expect_fields(
+        value,
+        "style",
+        &[
+            "position_mode",
+            "width",
+            "height",
+            "left",
+            "top",
+            "flex_direction",
+            "align_items",
+            "justify_content",
+            "gap",
+            "padding",
+            "flex_grow",
+            "flex_shrink",
             "z_index",
-            "Z index",
-            ComponentFieldPath::from_fields(["z_index"]),
-            ComponentValueKind::I64,
-            ComponentValue::I64(0),
-        ),
-    ]
-}
-
-fn ui_panel_fields() -> [ComponentFieldSchema; 11] {
-    [
-        ui_optional(
-            "material.alpha_mode",
-            "Alpha mode",
-            ComponentFieldPath::from_fields(["material", "alpha_mode"]),
-            ComponentValueKind::String,
-            ComponentValue::String("blend".to_string()),
-        ),
-        ui_optional_asset_ref(
-            "material.image",
-            "Image",
-            ComponentFieldPath::from_fields(["material", "image"]),
-            ComponentValue::Null,
-        ),
-        ui_optional(
-            "material.sampler.address_mode_u",
-            "Horizontal address mode",
-            ComponentFieldPath::from_fields(["material", "sampler", "address_mode_u"]),
-            ComponentValueKind::String,
-            ComponentValue::String("clamp_to_edge".to_string()),
-        ),
-        ui_optional(
-            "material.sampler.address_mode_v",
-            "Vertical address mode",
-            ComponentFieldPath::from_fields(["material", "sampler", "address_mode_v"]),
-            ComponentValueKind::String,
-            ComponentValue::String("clamp_to_edge".to_string()),
-        ),
-        ui_optional(
-            "material.sampler.mag_filter",
-            "Magnification filter",
-            ComponentFieldPath::from_fields(["material", "sampler", "mag_filter"]),
-            ComponentValueKind::String,
-            ComponentValue::String("linear".to_string()),
-        ),
-        ui_optional(
-            "material.sampler.min_filter",
-            "Minimum filter",
-            ComponentFieldPath::from_fields(["material", "sampler", "min_filter"]),
-            ComponentValueKind::String,
-            ComponentValue::String("linear".to_string()),
-        ),
-        ui_optional(
-            "material.sampler.mipmap_filter",
-            "Mipmap filter",
-            ComponentFieldPath::from_fields(["material", "sampler", "mipmap_filter"]),
-            ComponentValueKind::String,
-            ComponentValue::String("linear".to_string()),
-        ),
-        ui_required(
-            "material.tint.a",
-            "Tint alpha",
-            ComponentFieldPath::from_fields(["material", "tint", "a"]),
-            ComponentValueKind::F64,
-        ),
-        ui_required(
-            "material.tint.b",
-            "Tint blue",
-            ComponentFieldPath::from_fields(["material", "tint", "b"]),
-            ComponentValueKind::F64,
-        ),
-        ui_required(
-            "material.tint.g",
-            "Tint green",
-            ComponentFieldPath::from_fields(["material", "tint", "g"]),
-            ComponentValueKind::F64,
-        ),
-        ui_required(
-            "material.tint.r",
-            "Tint red",
-            ComponentFieldPath::from_fields(["material", "tint", "r"]),
-            ComponentValueKind::F64,
-        ),
-    ]
-}
-
-fn ui_required(
-    id: &str,
-    alias: &str,
-    path: ComponentFieldPath,
-    kind: ComponentValueKind,
-) -> ComponentFieldSchema {
-    ComponentFieldSchema::required(ComponentFieldId::new(id), alias, path, kind)
-        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-}
-
-fn ui_optional(
-    id: &str,
-    alias: &str,
-    path: ComponentFieldPath,
-    kind: ComponentValueKind,
-    default_value: ComponentValue,
-) -> ComponentFieldSchema {
-    ComponentFieldSchema::optional_with_default(
-        ComponentFieldId::new(id),
-        alias,
-        path,
-        kind,
-        default_value,
-    )
-    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-}
-
-fn ui_optional_asset_ref(
-    id: &str,
-    alias: &str,
-    path: ComponentFieldPath,
-    default_value: ComponentValue,
-) -> ComponentFieldSchema {
-    ui_optional(id, alias, path, ComponentValueKind::AssetRef, default_value)
-        .with_capability(ComponentCapability::AssetRef)
-}
-
-fn read_render_target(value: Option<&ComponentValue>) -> Result<RenderTarget, ComponentCodecError> {
-    match value.and_then(ComponentValue::as_str) {
-        None | Some("primary_window") => Ok(RenderTarget::PrimaryWindow),
-        Some(_) => Err(ComponentCodecError::invalid_field(
-            "target",
-            "'primary_window'",
-        )),
-    }
-}
-
-fn render_target_value(target: RenderTarget) -> Result<ComponentValue, ComponentCodecError> {
-    match target {
-        RenderTarget::PrimaryWindow => Ok(ComponentValue::String("primary_window".to_string())),
-        RenderTarget::Window(_) | RenderTarget::Image(_) => Err(ComponentCodecError::Message(
-            "only primary window UI roots are scene-capable in this slice".to_string(),
-        )),
-    }
-}
-
-fn read_style(value: Option<&ComponentValue>) -> Result<UiStyle, ComponentCodecError> {
-    let Some(value) = value else {
-        return Ok(UiStyle::default());
-    };
-    Ok(UiStyle {
-        left: read_ui_val(value.get("left"), "style.left", UiVal::Px(0.0))?,
-        top: read_ui_val(value.get("top"), "style.top", UiVal::Px(0.0))?,
-        width: read_ui_val(value.get("width"), "style.width", UiVal::Auto)?,
-        height: read_ui_val(value.get("height"), "style.height", UiVal::Auto)?,
-    })
-}
-
-fn read_ui_val(
-    value: Option<&ComponentValue>,
-    field: &str,
-    default: UiVal,
-) -> Result<UiVal, ComponentCodecError> {
-    let Some(value) = value else {
-        return Ok(default);
-    };
-    match value
-        .get("kind")
-        .and_then(ComponentValue::as_str)
-        .unwrap_or(match default {
-            UiVal::Px(_) => "px",
-            UiVal::Percent(_) => "percent",
-            UiVal::Auto => "auto",
-        }) {
-        "px" => Ok(UiVal::Px(
-            optional_f32(value, "value", &format!("{field}.value"))?.unwrap_or(0.0),
-        )),
-        "percent" => Ok(UiVal::Percent(
-            optional_f32(value, "value", &format!("{field}.value"))?.unwrap_or(0.0),
-        )),
-        "auto" => Ok(UiVal::Auto),
-        _ => Err(ComponentCodecError::invalid_field(
-            format!("{field}.kind"),
-            "'px', 'percent', or 'auto'",
-        )),
-    }
+            "visible",
+            "overflow",
+            "stacking_context",
+        ],
+    )?;
+    let padding = value.field("padding")?;
+    expect_fields(
+        padding,
+        "style.padding",
+        &["left", "right", "top", "bottom"],
+    )?;
+    Ok(UiStyle::flex()
+        .with_position_mode(read_position_mode(
+            value.field("position_mode")?,
+            "style.position_mode",
+        )?)
+        .with_width(read_dimension(value.field("width")?, "style.width")?)
+        .with_height(read_dimension(value.field("height")?, "style.height")?)
+        .with_left(read_dimension(value.field("left")?, "style.left")?)
+        .with_top(read_dimension(value.field("top")?, "style.top")?)
+        .with_flex_direction(read_flex_direction(
+            value.field("flex_direction")?,
+            "style.flex_direction",
+        )?)
+        .with_align_items(read_align(
+            value.field("align_items")?,
+            "style.align_items",
+        )?)
+        .with_justify_content(read_justify(
+            value.field("justify_content")?,
+            "style.justify_content",
+        )?)
+        .with_gap(read_non_negative(value.field("gap")?, "style.gap")?)
+        .with_padding(
+            UiEdges::new(
+                read_non_negative(padding.field("left")?, "style.padding.left")?,
+                read_non_negative(padding.field("right")?, "style.padding.right")?,
+                read_non_negative(padding.field("top")?, "style.padding.top")?,
+                read_non_negative(padding.field("bottom")?, "style.padding.bottom")?,
+            )
+            .map_err(|error| codec_message(error.to_string()))?,
+        )
+        .with_flex_grow(read_non_negative(
+            value.field("flex_grow")?,
+            "style.flex_grow",
+        )?)
+        .with_flex_shrink(read_non_negative(
+            value.field("flex_shrink")?,
+            "style.flex_shrink",
+        )?)
+        .with_z_index(read_i32(value.field("z_index")?, "style.z_index")?)
+        .with_visible(read_bool(value.field("visible")?, "style.visible")?)
+        .with_overflow(read_overflow(value.field("overflow")?, "style.overflow")?)
+        .with_stacking_context(read_bool(
+            value.field("stacking_context")?,
+            "style.stacking_context",
+        )?))
 }
 
 fn style_value(style: UiStyle) -> Result<ComponentValue, ComponentCodecError> {
+    let padding = style.padding();
     Ok(ComponentValue::map([
-        ("left", ui_val_value(style.left)?),
-        ("top", ui_val_value(style.top)?),
-        ("width", ui_val_value(style.width)?),
-        ("height", ui_val_value(style.height)?),
-    ]))
-}
-
-fn ui_val_value(value: UiVal) -> Result<ComponentValue, ComponentCodecError> {
-    let (kind, numeric) = match value {
-        UiVal::Px(value) => ("px", Some(value)),
-        UiVal::Percent(value) => ("percent", Some(value)),
-        UiVal::Auto => ("auto", None),
-    };
-    Ok(ComponentValue::map([
-        ("kind", ComponentValue::String(kind.to_string())),
         (
-            "value",
-            numeric
-                .map(|value| ComponentValue::f64(f64::from(value)))
-                .transpose()?
-                .unwrap_or(ComponentValue::Null),
+            "position_mode",
+            ComponentValue::String(position_mode_name(style.position_mode()).to_string()),
+        ),
+        ("width", dimension_value(style.width())?),
+        ("height", dimension_value(style.height())?),
+        ("left", dimension_value(style.left())?),
+        ("top", dimension_value(style.top())?),
+        (
+            "flex_direction",
+            ComponentValue::String(flex_direction_name(style.flex_direction()).to_string()),
+        ),
+        (
+            "align_items",
+            ComponentValue::String(align_name(style.align_items()).to_string()),
+        ),
+        (
+            "justify_content",
+            ComponentValue::String(justify_name(style.justify_content()).to_string()),
+        ),
+        ("gap", float_value(style.gap())?),
+        (
+            "padding",
+            ComponentValue::map([
+                ("left", float_value(padding.left())?),
+                ("right", float_value(padding.right())?),
+                ("top", float_value(padding.top())?),
+                ("bottom", float_value(padding.bottom())?),
+            ]),
+        ),
+        ("flex_grow", float_value(style.flex_grow())?),
+        ("flex_shrink", float_value(style.flex_shrink())?),
+        ("z_index", ComponentValue::I64(i64::from(style.z_index()))),
+        ("visible", ComponentValue::Bool(style.visible())),
+        (
+            "overflow",
+            ComponentValue::String(overflow_name(style.overflow()).to_string()),
+        ),
+        (
+            "stacking_context",
+            ComponentValue::Bool(style.stacking_context()),
         ),
     ]))
 }
 
-#[derive(Debug, Clone)]
-enum PreparedImage {
-    Resolved(Handle<ImageAsset>),
-    Deferred(AssetRef),
-}
-
-#[derive(Debug, Clone)]
-struct PreparedPanelMaterial {
-    image: Option<PreparedImage>,
-    sampler: SamplerDescriptor,
-    alpha_mode: AlphaMode2d,
-    tint: Color,
-}
-
-impl PreparedPanelMaterial {
-    fn requires_asset_server(&self) -> bool {
-        matches!(self.image, Some(PreparedImage::Deferred(_)))
-    }
-
-    fn into_resolved(self) -> Option<UiPanelMaterial> {
-        let image = match self.image {
-            None => None,
-            Some(PreparedImage::Resolved(handle)) => Some(handle),
-            Some(PreparedImage::Deferred(_)) => return None,
-        };
-        Some(UiPanelMaterial {
-            image,
-            sampler: self.sampler,
-            alpha_mode: self.alpha_mode,
-            tint: self.tint,
-        })
+fn read_dimension(value: &ComponentValue, field: &str) -> Result<UiDimension, ComponentCodecError> {
+    expect_fields(value, field, DIMENSION_FIELDS)?;
+    let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
+    let number = read_non_negative(value.field("value")?, &format!("{field}.value"))?;
+    match kind.as_str() {
+        "auto" if number == 0.0 => Ok(UiDimension::auto()),
+        "px" => UiDimension::px(number).map_err(|error| codec_message(error.to_string())),
+        "percent" => UiDimension::percent(number).map_err(|error| codec_message(error.to_string())),
+        "auto" => Err(ComponentCodecError::invalid_field(
+            format!("{field}.value"),
+            "0.0 for an auto dimension",
+        )),
+        _ => Err(ComponentCodecError::invalid_field(
+            format!("{field}.kind"),
+            "auto, px, or percent",
+        )),
     }
 }
 
-fn read_panel_material(
-    value: &ComponentValue,
-    context: &mut ComponentDecodeContext<'_>,
-) -> Result<PreparedPanelMaterial, ComponentCodecError> {
-    let tint = read_color(value.field("tint")?, "material.tint")?;
-    let image_ref = read_optional_asset_ref(value.get("image"), "material.image")?;
-    let image = prepare_optional_image(context, image_ref, "material.image.value")?;
-    let sampler = read_sampler(value.get("sampler"), "material.sampler")?;
-    let alpha_mode = read_alpha_mode(value.get("alpha_mode"), "material.alpha_mode")?;
+fn dimension_value(value: UiDimension) -> Result<ComponentValue, ComponentCodecError> {
+    let (kind, value) = match value {
+        UiDimension::Auto => ("auto", 0.0),
+        UiDimension::Px(value) => ("px", value),
+        UiDimension::Percent(value) => ("percent", value),
+    };
+    Ok(ComponentValue::map([
+        ("kind", ComponentValue::String(kind.to_string())),
+        ("value", float_value(value)?),
+    ]))
+}
 
-    Ok(PreparedPanelMaterial {
-        image,
-        sampler,
-        alpha_mode,
-        tint,
+fn read_brush(value: &ComponentValue, field: &str) -> Result<UiBrush, ComponentCodecError> {
+    expect_fields(value, field, BRUSH_FIELDS)?;
+    let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
+    let color = read_flat_color(value, field)?;
+    let reference = read_string(value.field("reference")?, &format!("{field}.reference"))?;
+    match kind.as_str() {
+        "solid" if reference.is_empty() => Ok(UiBrush::Solid(color)),
+        "role" => Ok(UiBrush::Role(read_color_role_name(
+            &reference,
+            &format!("{field}.reference"),
+        )?)),
+        "image" => Ok(UiBrush::Image {
+            image: UiImageId::new(reference).map_err(|error| codec_message(error.to_string()))?,
+            tint: color,
+        }),
+        "solid" => Err(ComponentCodecError::invalid_field(
+            format!("{field}.reference"),
+            "an empty string for a solid brush",
+        )),
+        _ => Err(ComponentCodecError::invalid_field(
+            format!("{field}.kind"),
+            "solid, role, or image",
+        )),
+    }
+}
+
+fn brush_value(brush: &UiBrush) -> Result<ComponentValue, ComponentCodecError> {
+    let (kind, color, reference) = match brush {
+        UiBrush::Solid(color) => ("solid", *color, String::new()),
+        UiBrush::Role(role) => (
+            "role",
+            UiColor::rgba(0.0, 0.0, 0.0, 0.0),
+            color_role_name(*role).to_string(),
+        ),
+        UiBrush::Image { image, tint } => ("image", *tint, image.as_str().to_string()),
+    };
+    let [red, green, blue, alpha] = color.components();
+    Ok(ComponentValue::map([
+        ("kind", ComponentValue::String(kind.to_string())),
+        ("red", float_value(red)?),
+        ("green", float_value(green)?),
+        ("blue", float_value(blue)?),
+        ("alpha", float_value(alpha)?),
+        ("reference", ComponentValue::String(reference)),
+    ]))
+}
+
+fn read_radii(value: &ComponentValue) -> Result<UiCornerRadii, ComponentCodecError> {
+    expect_fields(
+        value,
+        "radii",
+        &["top_left", "top_right", "bottom_right", "bottom_left"],
+    )?;
+    let values = [
+        read_non_negative(value.field("top_left")?, "radii.top_left")?,
+        read_non_negative(value.field("top_right")?, "radii.top_right")?,
+        read_non_negative(value.field("bottom_right")?, "radii.bottom_right")?,
+        read_non_negative(value.field("bottom_left")?, "radii.bottom_left")?,
+    ];
+    if values.iter().all(|value| *value == values[0]) {
+        return UiCornerRadii::all(values[0]).map_err(|error| codec_message(error.to_string()));
+    }
+    Err(ComponentCodecError::invalid_field(
+        "radii",
+        "equal first-pass corner radii",
+    ))
+}
+
+fn radii_value(radii: UiCornerRadii) -> Result<ComponentValue, ComponentCodecError> {
+    let [top_left, top_right, bottom_right, bottom_left] = radii.values();
+    Ok(ComponentValue::map([
+        ("top_left", float_value(top_left)?),
+        ("top_right", float_value(top_right)?),
+        ("bottom_right", float_value(bottom_right)?),
+        ("bottom_left", float_value(bottom_left)?),
+    ]))
+}
+
+fn read_palette(value: &ComponentValue) -> Result<UiThemePalette, ComponentCodecError> {
+    const NAMES: &[&str] = &[
+        "surface",
+        "panel",
+        "primary_text",
+        "secondary_text",
+        "accent",
+        "positive",
+        "warning",
+        "danger",
+        "disabled",
+        "focus",
+    ];
+    expect_fields(value, "palette", NAMES)?;
+    Ok(UiThemePalette {
+        surface: read_color(value.field("surface")?, "palette.surface")?,
+        panel: read_color(value.field("panel")?, "palette.panel")?,
+        primary_text: read_color(value.field("primary_text")?, "palette.primary_text")?,
+        secondary_text: read_color(value.field("secondary_text")?, "palette.secondary_text")?,
+        accent: read_color(value.field("accent")?, "palette.accent")?,
+        positive: read_color(value.field("positive")?, "palette.positive")?,
+        warning: read_color(value.field("warning")?, "palette.warning")?,
+        danger: read_color(value.field("danger")?, "palette.danger")?,
+        disabled: read_color(value.field("disabled")?, "palette.disabled")?,
+        focus: read_color(value.field("focus")?, "palette.focus")?,
     })
 }
 
-fn prepare_optional_image(
-    context: &mut ComponentDecodeContext<'_>,
-    image_ref: Option<AssetRef>,
-    field: &str,
-) -> Result<Option<PreparedImage>, ComponentCodecError> {
-    let Some(image_ref) = image_ref else {
-        return Ok(None);
-    };
-    prepare_image_handle(context, field, image_ref).map(Some)
+fn palette_value(palette: UiThemePalette) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        ("surface", color_value(palette.surface)?),
+        ("panel", color_value(palette.panel)?),
+        ("primary_text", color_value(palette.primary_text)?),
+        ("secondary_text", color_value(palette.secondary_text)?),
+        ("accent", color_value(palette.accent)?),
+        ("positive", color_value(palette.positive)?),
+        ("warning", color_value(palette.warning)?),
+        ("danger", color_value(palette.danger)?),
+        ("disabled", color_value(palette.disabled)?),
+        ("focus", color_value(palette.focus)?),
+    ]))
 }
 
-fn prepare_image_handle(
-    context: &mut ComponentDecodeContext<'_>,
-    field: &str,
-    asset_ref: AssetRef,
-) -> Result<PreparedImage, ComponentCodecError> {
-    let expected_source_kind = AssetSourceKind::Image;
-    if let Some(result) =
-        context.resolve_asset_ref_with_kind::<ImageAsset>(&asset_ref, &expected_source_kind)
-    {
-        return result
-            .map(PreparedImage::Resolved)
-            .map_err(|error| invalid_asset_ref(field, &asset_ref, error));
-    }
-
-    if let Some(result) = context.validate_asset_ref_with_kind(&asset_ref, &expected_source_kind) {
-        return match result {
-            Ok(()) => Ok(PreparedImage::Deferred(asset_ref)),
-            Err(error) => Err(invalid_asset_ref(field, &asset_ref, error)),
-        };
-    }
-
-    if let Some(stable_id) = asset_ref.as_stable_id() {
-        let Some(database) = context.project_asset_database() else {
-            return Err(invalid_asset_ref(
-                field,
-                &asset_ref,
-                AssetRefError::MissingProjectDatabase(stable_id),
-            ));
-        };
-        database.resolve_ref(&asset_ref).map_err(|error| {
-            ComponentCodecError::invalid_asset_ref(field, asset_ref.to_string(), error.to_string())
-        })?;
-    }
-
-    Ok(PreparedImage::Deferred(asset_ref))
+fn read_color(value: &ComponentValue, field: &str) -> Result<UiColor, ComponentCodecError> {
+    expect_fields(value, field, COLOR_FIELDS)?;
+    read_flat_color(value, field)
 }
 
-fn resolve_prepared_material(
-    context: &mut ComponentApplyContext,
-    material: PreparedPanelMaterial,
-) -> Result<UiPanelMaterial, ComponentCodecError> {
-    Ok(UiPanelMaterial {
-        image: resolve_prepared_image(context, material.image)?,
-        sampler: material.sampler,
-        alpha_mode: material.alpha_mode,
-        tint: material.tint,
-    })
+fn read_flat_color(value: &ComponentValue, field: &str) -> Result<UiColor, ComponentCodecError> {
+    Ok(UiColor::rgba(
+        read_unit(value.field("red")?, &format!("{field}.red"))?,
+        read_unit(value.field("green")?, &format!("{field}.green"))?,
+        read_unit(value.field("blue")?, &format!("{field}.blue"))?,
+        read_unit(value.field("alpha")?, &format!("{field}.alpha"))?,
+    ))
 }
 
-fn resolve_prepared_image(
-    context: &mut ComponentApplyContext,
-    image: Option<PreparedImage>,
-) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
-    match image {
-        None => Ok(None),
-        Some(PreparedImage::Resolved(handle)) => Ok(Some(handle)),
-        Some(PreparedImage::Deferred(image_ref)) => {
-            resolve_optional_image(context, Some(&image_ref), "material.image.value")
-        }
-    }
+fn color_value(color: UiColor) -> Result<ComponentValue, ComponentCodecError> {
+    let [red, green, blue, alpha] = color.components();
+    Ok(ComponentValue::map([
+        ("red", float_value(red)?),
+        ("green", float_value(green)?),
+        ("blue", float_value(blue)?),
+        ("alpha", float_value(alpha)?),
+    ]))
 }
 
-fn resolve_optional_image(
-    context: &mut ComponentApplyContext,
-    image_ref: Option<&AssetRef>,
-    field: &str,
-) -> Result<Option<Handle<ImageAsset>>, ComponentCodecError> {
-    let Some(image_ref) = image_ref else {
-        return Ok(None);
-    };
-    context
-        .resolve_asset_ref::<ImageAsset>(image_ref)
-        .map(Some)
-        .map_err(|error| invalid_asset_ref(field, image_ref, error))
-}
-
-fn invalid_asset_ref(
-    field: &str,
-    asset_ref: &AssetRef,
-    error: AssetRefError,
-) -> ComponentCodecError {
-    ComponentCodecError::invalid_asset_ref(field, asset_ref.to_string(), error.to_string())
-}
-
-fn optional_i32(value: &ComponentValue, field: &str) -> Result<Option<i32>, ComponentCodecError> {
-    value
-        .get(field)
-        .map(|value| {
-            let value = value
-                .as_i64()
-                .ok_or_else(|| ComponentCodecError::invalid_field(field, "i32"))?;
-            i32::try_from(value).map_err(|_| ComponentCodecError::invalid_field(field, "i32"))
-        })
-        .transpose()
-}
-
-fn optional_bool(value: &ComponentValue, field: &str) -> Result<Option<bool>, ComponentCodecError> {
-    value
-        .get(field)
-        .map(|value| {
-            value
-                .as_bool()
-                .ok_or_else(|| ComponentCodecError::invalid_field(field, "bool"))
-        })
-        .transpose()
-}
-
-fn optional_f32(
+fn expect_fields(
     value: &ComponentValue,
     field: &str,
-    display_field: &str,
-) -> Result<Option<f32>, ComponentCodecError> {
+    expected: &[&str],
+) -> Result<(), ComponentCodecError> {
+    let ComponentValue::Map(fields) = value else {
+        return Err(ComponentCodecError::invalid_field(field, "an exact map"));
+    };
+    if fields.len() != expected.len() || expected.iter().any(|name| !fields.contains_key(*name)) {
+        return Err(ComponentCodecError::invalid_field(
+            field,
+            format!("exact fields: {}", expected.join(", ")),
+        ));
+    }
+    Ok(())
+}
+
+fn read_string(value: &ComponentValue, field: &str) -> Result<String, ComponentCodecError> {
+    match value {
+        ComponentValue::String(value) => Ok(value.clone()),
+        _ => Err(ComponentCodecError::invalid_field(field, "a string")),
+    }
+}
+
+fn read_bool(value: &ComponentValue, field: &str) -> Result<bool, ComponentCodecError> {
     value
-        .get(field)
-        .map(|value| read_f32(value, display_field))
-        .transpose()
+        .as_bool()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "a bool"))
+}
+
+fn read_u64(value: &ComponentValue, field: &str) -> Result<u64, ComponentCodecError> {
+    value
+        .as_u64()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "a u64"))
+}
+
+fn read_i32(value: &ComponentValue, field: &str) -> Result<i32, ComponentCodecError> {
+    let value = value
+        .as_i64()
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "an i32"))?;
+    i32::try_from(value).map_err(|_| ComponentCodecError::invalid_field(field, "an i32"))
 }
 
 fn read_f32(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
     let value = value
         .as_f64()
-        .ok_or_else(|| ComponentCodecError::invalid_field(field, "finite f32"))?;
-    if value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
-        return Err(ComponentCodecError::invalid_field(field, "finite f32"));
+        .ok_or_else(|| ComponentCodecError::invalid_field(field, "a finite f32"))?;
+    if !value.is_finite() || value < f64::from(f32::MIN) || value > f64::from(f32::MAX) {
+        return Err(ComponentCodecError::invalid_field(field, "a finite f32"));
     }
     Ok(value as f32)
 }
 
-fn read_color(value: &ComponentValue, field: &str) -> Result<Color, ComponentCodecError> {
-    Ok(Color::rgba(
-        read_f32(value.field("r")?, &format!("{field}.r"))?,
-        read_f32(value.field("g")?, &format!("{field}.g"))?,
-        read_f32(value.field("b")?, &format!("{field}.b"))?,
-        read_f32(value.field("a")?, &format!("{field}.a"))?,
-    ))
-}
-
-fn color_value(value: Color) -> Result<ComponentValue, ComponentCodecError> {
-    Ok(ComponentValue::map([
-        ("r", ComponentValue::f64(f64::from(value.r))?),
-        ("g", ComponentValue::f64(f64::from(value.g))?),
-        ("b", ComponentValue::f64(f64::from(value.b))?),
-        ("a", ComponentValue::f64(f64::from(value.a))?),
-    ]))
-}
-
-fn read_sampler(
-    value: Option<&ComponentValue>,
-    field: &str,
-) -> Result<SamplerDescriptor, ComponentCodecError> {
-    let Some(value) = value else {
-        return Ok(SamplerDescriptor::default());
-    };
-    if matches!(value, ComponentValue::Null) {
-        return Ok(SamplerDescriptor::default());
-    }
-    Ok(SamplerDescriptor {
-        min_filter: read_filter_mode(
-            value.get("min_filter"),
-            &format!("{field}.min_filter"),
-            FilterMode::Linear,
-        )?,
-        mag_filter: read_filter_mode(
-            value.get("mag_filter"),
-            &format!("{field}.mag_filter"),
-            FilterMode::Linear,
-        )?,
-        mipmap_filter: read_filter_mode(
-            value.get("mipmap_filter"),
-            &format!("{field}.mipmap_filter"),
-            FilterMode::Linear,
-        )?,
-        address_mode_u: read_address_mode(
-            value.get("address_mode_u"),
-            &format!("{field}.address_mode_u"),
-            AddressMode::ClampToEdge,
-        )?,
-        address_mode_v: read_address_mode(
-            value.get("address_mode_v"),
-            &format!("{field}.address_mode_v"),
-            AddressMode::ClampToEdge,
-        )?,
-    })
-}
-
-fn read_filter_mode(
-    value: Option<&ComponentValue>,
-    field: &str,
-    default: FilterMode,
-) -> Result<FilterMode, ComponentCodecError> {
-    let Some(value) = value else {
-        return Ok(default);
-    };
-    match value
-        .as_str()
-        .ok_or_else(|| ComponentCodecError::invalid_field(field, "filter mode string"))?
-    {
-        "nearest" => Ok(FilterMode::Nearest),
-        "linear" => Ok(FilterMode::Linear),
-        _ => Err(ComponentCodecError::invalid_field(
+fn read_non_negative(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+    let value = read_f32(value, field)?;
+    if value < 0.0 {
+        return Err(ComponentCodecError::invalid_field(
             field,
-            "'nearest' or 'linear'",
-        )),
+            "a non-negative f32",
+        ));
     }
+    Ok(value)
 }
 
-fn read_address_mode(
-    value: Option<&ComponentValue>,
-    field: &str,
-    default: AddressMode,
-) -> Result<AddressMode, ComponentCodecError> {
-    let Some(value) = value else {
-        return Ok(default);
-    };
-    match value
-        .as_str()
-        .ok_or_else(|| ComponentCodecError::invalid_field(field, "address mode string"))?
-    {
-        "clamp_to_edge" => Ok(AddressMode::ClampToEdge),
-        "repeat" => Ok(AddressMode::Repeat),
-        "mirror_repeat" => Ok(AddressMode::MirrorRepeat),
-        _ => Err(ComponentCodecError::invalid_field(
+fn read_positive(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+    let value = read_f32(value, field)?;
+    if value <= 0.0 {
+        return Err(ComponentCodecError::invalid_field(field, "a positive f32"));
+    }
+    Ok(value)
+}
+
+fn read_unit(value: &ComponentValue, field: &str) -> Result<f32, ComponentCodecError> {
+    let value = read_f32(value, field)?;
+    if !(0.0..=1.0).contains(&value) {
+        return Err(ComponentCodecError::invalid_field(
             field,
-            "'clamp_to_edge', 'repeat', or 'mirror_repeat'",
-        )),
+            "a value in 0.0..=1.0",
+        ));
     }
+    Ok(value)
 }
 
-fn read_alpha_mode(
-    value: Option<&ComponentValue>,
-    field: &str,
-) -> Result<AlphaMode2d, ComponentCodecError> {
-    let Some(value) = value else {
-        return Ok(AlphaMode2d::Blend);
+fn float_value(value: f32) -> Result<ComponentValue, ComponentCodecError> {
+    ComponentValue::f64(f64::from(value)).map_err(|error| codec_message(error.to_string()))
+}
+
+fn codec_message(message: String) -> ComponentCodecError {
+    ComponentCodecError::Message(message)
+}
+
+macro_rules! string_enum_reader {
+    ($name:ident, $type:ty, $expected:literal, {$($text:literal => $value:expr),+ $(,)?}) => {
+        fn $name(value: &ComponentValue, field: &str) -> Result<$type, ComponentCodecError> {
+            match read_string(value, field)?.as_str() {
+                $($text => Ok($value),)+
+                _ => Err(ComponentCodecError::invalid_field(field, $expected)),
+            }
+        }
     };
-    match value
-        .as_str()
-        .ok_or_else(|| ComponentCodecError::invalid_field(field, "alpha mode string"))?
-    {
-        "opaque" => Ok(AlphaMode2d::Opaque),
-        "blend" => Ok(AlphaMode2d::Blend),
-        _ => Err(ComponentCodecError::invalid_field(
-            field,
-            "'opaque' or 'blend'",
-        )),
-    }
 }
 
-fn material_value(
-    image: ComponentValue,
-    sampler: SamplerDescriptor,
-    alpha_mode: AlphaMode2d,
-    tint: Color,
-) -> Result<ComponentValue, ComponentCodecError> {
-    Ok(ComponentValue::map([
-        ("image", image),
-        ("sampler", sampler_value(sampler)),
-        (
-            "alpha_mode",
-            ComponentValue::String(alpha_mode_str(alpha_mode).to_string()),
-        ),
-        ("tint", color_value(tint)?),
-    ]))
-}
+string_enum_reader!(read_layer, UiLayer, "base, overlay, or modal", {
+    "base" => UiLayer::Base, "overlay" => UiLayer::Overlay, "modal" => UiLayer::Modal,
+});
+string_enum_reader!(read_position_mode, UiPositionMode, "flow or absolute", {
+    "flow" => UiPositionMode::Flow, "absolute" => UiPositionMode::Absolute,
+});
+string_enum_reader!(read_flex_direction, UiFlexDirection, "row or column", {
+    "row" => UiFlexDirection::Row, "column" => UiFlexDirection::Column,
+});
+string_enum_reader!(read_align, UiAlign, "start, center, end, or stretch", {
+    "start" => UiAlign::Start, "center" => UiAlign::Center,
+    "end" => UiAlign::End, "stretch" => UiAlign::Stretch,
+});
+string_enum_reader!(read_justify, UiJustify, "start, center, end, or space_between", {
+    "start" => UiJustify::Start, "center" => UiJustify::Center,
+    "end" => UiJustify::End, "space_between" => UiJustify::SpaceBetween,
+});
+string_enum_reader!(read_overflow, UiOverflow, "visible or clip", {
+    "visible" => UiOverflow::Visible, "clip" => UiOverflow::Clip,
+});
+string_enum_reader!(read_text_alignment, UiTextAlignment, "start, center, or end", {
+    "start" => UiTextAlignment::Start, "center" => UiTextAlignment::Center,
+    "end" => UiTextAlignment::End,
+});
+string_enum_reader!(read_text_overflow, UiTextOverflow, "wrap or clip", {
+    "wrap" => UiTextOverflow::Wrap, "clip" => UiTextOverflow::Clip,
+});
+string_enum_reader!(read_semantic_role, UiSemanticRole, "group, text, button, or status", {
+    "group" => UiSemanticRole::Group, "text" => UiSemanticRole::Text,
+    "button" => UiSemanticRole::Button, "status" => UiSemanticRole::Status,
+});
 
-fn sampler_value(sampler: SamplerDescriptor) -> ComponentValue {
-    ComponentValue::map([
-        (
-            "min_filter",
-            ComponentValue::String(filter_mode_str(sampler.min_filter).to_string()),
-        ),
-        (
-            "mag_filter",
-            ComponentValue::String(filter_mode_str(sampler.mag_filter).to_string()),
-        ),
-        (
-            "mipmap_filter",
-            ComponentValue::String(filter_mode_str(sampler.mipmap_filter).to_string()),
-        ),
-        (
-            "address_mode_u",
-            ComponentValue::String(address_mode_str(sampler.address_mode_u).to_string()),
-        ),
-        (
-            "address_mode_v",
-            ComponentValue::String(address_mode_str(sampler.address_mode_v).to_string()),
-        ),
-    ])
-}
-
-fn filter_mode_str(filter_mode: FilterMode) -> &'static str {
-    match filter_mode {
-        FilterMode::Nearest => "nearest",
-        FilterMode::Linear => "linear",
-    }
-}
-
-fn address_mode_str(address_mode: AddressMode) -> &'static str {
-    match address_mode {
-        AddressMode::ClampToEdge => "clamp_to_edge",
-        AddressMode::Repeat => "repeat",
-        AddressMode::MirrorRepeat => "mirror_repeat",
-    }
-}
-
-fn alpha_mode_str(alpha_mode: AlphaMode2d) -> &'static str {
-    match alpha_mode {
-        AlphaMode2d::Opaque => "opaque",
-        AlphaMode2d::Blend => "blend",
-    }
-}
-
-fn read_optional_asset_ref(
-    value: Option<&ComponentValue>,
-    field: &str,
-) -> Result<Option<AssetRef>, ComponentCodecError> {
+fn read_color_role_name(value: &str, field: &str) -> Result<UiColorRole, ComponentCodecError> {
     match value {
-        None | Some(ComponentValue::Null) => Ok(None),
-        Some(value) => read_asset_ref(value, field).map(Some),
-    }
-}
-
-fn read_asset_ref(value: &ComponentValue, field: &str) -> Result<AssetRef, ComponentCodecError> {
-    match value.field_str("kind")? {
-        "path" => AssetRef::path(value.field_str("value")?).map_err(|error| {
-            ComponentCodecError::invalid_asset_ref(
-                format!("{field}.value"),
-                value.field_str("value").unwrap_or_default(),
-                error.to_string(),
-            )
-        }),
-        "stable_id" => AssetRef::stable_id(value.field_str("value")?).map_err(|error| {
-            ComponentCodecError::invalid_asset_ref(
-                format!("{field}.value"),
-                value.field_str("value").unwrap_or_default(),
-                error.to_string(),
-            )
-        }),
+        "surface" => Ok(UiColorRole::Surface),
+        "panel" => Ok(UiColorRole::Panel),
+        "primary_text" => Ok(UiColorRole::PrimaryText),
+        "secondary_text" => Ok(UiColorRole::SecondaryText),
+        "accent" => Ok(UiColorRole::Accent),
+        "positive" => Ok(UiColorRole::Positive),
+        "warning" => Ok(UiColorRole::Warning),
+        "danger" => Ok(UiColorRole::Danger),
+        "disabled" => Ok(UiColorRole::Disabled),
+        "focus" => Ok(UiColorRole::Focus),
         _ => Err(ComponentCodecError::invalid_field(
-            format!("{field}.kind"),
-            "'path' or 'stable_id'",
+            field,
+            "a UI theme color role",
         )),
     }
 }
 
-fn asset_ref_value(asset_ref: &AssetRef) -> Result<ComponentValue, ComponentCodecError> {
-    match asset_ref {
-        AssetRef::Path(path) => Ok(ComponentValue::map([
-            ("kind", ComponentValue::String("path".to_string())),
-            ("value", ComponentValue::String(path.as_str().to_string())),
-        ])),
-        AssetRef::StableId(id) => Ok(ComponentValue::map([
-            ("kind", ComponentValue::String("stable_id".to_string())),
-            ("value", ComponentValue::String(id.to_string())),
-        ])),
+const fn layer_name(value: UiLayer) -> &'static str {
+    match value {
+        UiLayer::Base => "base",
+        UiLayer::Overlay => "overlay",
+        UiLayer::Modal => "modal",
+    }
+}
+const fn position_mode_name(value: UiPositionMode) -> &'static str {
+    match value {
+        UiPositionMode::Flow => "flow",
+        UiPositionMode::Absolute => "absolute",
+    }
+}
+const fn flex_direction_name(value: UiFlexDirection) -> &'static str {
+    match value {
+        UiFlexDirection::Row => "row",
+        UiFlexDirection::Column => "column",
+    }
+}
+const fn align_name(value: UiAlign) -> &'static str {
+    match value {
+        UiAlign::Start => "start",
+        UiAlign::Center => "center",
+        UiAlign::End => "end",
+        UiAlign::Stretch => "stretch",
+    }
+}
+const fn justify_name(value: UiJustify) -> &'static str {
+    match value {
+        UiJustify::Start => "start",
+        UiJustify::Center => "center",
+        UiJustify::End => "end",
+        UiJustify::SpaceBetween => "space_between",
+    }
+}
+const fn overflow_name(value: UiOverflow) -> &'static str {
+    match value {
+        UiOverflow::Visible => "visible",
+        UiOverflow::Clip => "clip",
+    }
+}
+const fn text_alignment_name(value: UiTextAlignment) -> &'static str {
+    match value {
+        UiTextAlignment::Start => "start",
+        UiTextAlignment::Center => "center",
+        UiTextAlignment::End => "end",
+    }
+}
+const fn text_overflow_name(value: UiTextOverflow) -> &'static str {
+    match value {
+        UiTextOverflow::Wrap => "wrap",
+        UiTextOverflow::Clip => "clip",
+    }
+}
+const fn semantic_role_name(value: UiSemanticRole) -> &'static str {
+    match value {
+        UiSemanticRole::Group => "group",
+        UiSemanticRole::Text => "text",
+        UiSemanticRole::Button => "button",
+        UiSemanticRole::Status => "status",
+    }
+}
+const fn color_role_name(value: UiColorRole) -> &'static str {
+    match value {
+        UiColorRole::Surface => "surface",
+        UiColorRole::Panel => "panel",
+        UiColorRole::PrimaryText => "primary_text",
+        UiColorRole::SecondaryText => "secondary_text",
+        UiColorRole::Accent => "accent",
+        UiColorRole::Positive => "positive",
+        UiColorRole::Warning => "warning",
+        UiColorRole::Danger => "danger",
+        UiColorRole::Disabled => "disabled",
+        UiColorRole::Focus => "focus",
+    }
+}
+
+fn ui_root_schema() -> ComponentSchema {
+    schema(
+        UI_ROOT_ID,
+        "UI root",
+        &[field("layer", ComponentValueKind::String)],
+    )
+}
+
+fn ui_node_schema() -> ComponentSchema {
+    let mut fields = Vec::new();
+    for (name, kind) in [
+        ("style.position_mode", ComponentValueKind::String),
+        ("style.flex_direction", ComponentValueKind::String),
+        ("style.align_items", ComponentValueKind::String),
+        ("style.justify_content", ComponentValueKind::String),
+        ("style.gap", ComponentValueKind::F64),
+        ("style.padding.left", ComponentValueKind::F64),
+        ("style.padding.right", ComponentValueKind::F64),
+        ("style.padding.top", ComponentValueKind::F64),
+        ("style.padding.bottom", ComponentValueKind::F64),
+        ("style.flex_grow", ComponentValueKind::F64),
+        ("style.flex_shrink", ComponentValueKind::F64),
+        ("style.z_index", ComponentValueKind::I64),
+        ("style.visible", ComponentValueKind::Bool),
+        ("style.overflow", ComponentValueKind::String),
+        ("style.stacking_context", ComponentValueKind::Bool),
+    ] {
+        fields.push(field(name, kind));
+    }
+    for dimension in ["width", "height", "left", "top"] {
+        fields.push(field(
+            &format!("style.{dimension}.kind"),
+            ComponentValueKind::String,
+        ));
+        fields.push(field(
+            &format!("style.{dimension}.value"),
+            ComponentValueKind::F64,
+        ));
+    }
+    schema(UI_NODE_ID, "UI node", &fields)
+}
+
+fn ui_visual_schema() -> ComponentSchema {
+    let mut fields = Vec::new();
+    add_brush_fields(&mut fields, "background");
+    fields.push(field("border_width", ComponentValueKind::F64));
+    add_brush_fields(&mut fields, "border_brush");
+    for name in ["top_left", "top_right", "bottom_right", "bottom_left"] {
+        fields.push(field(&format!("radii.{name}"), ComponentValueKind::F64));
+    }
+    schema(UI_VISUAL_ID, "UI visual", &fields)
+}
+
+fn ui_text_schema() -> ComponentSchema {
+    let mut fields = vec![
+        field("content", ComponentValueKind::String),
+        field("logical_size", ComponentValueKind::F64),
+        field("alignment", ComponentValueKind::String),
+        field("overflow", ComponentValueKind::String),
+        field("has_semantic_text", ComponentValueKind::Bool),
+        field("semantic_text", ComponentValueKind::String),
+    ];
+    add_brush_fields(&mut fields, "brush");
+    schema(UI_TEXT_ID, "UI text", &fields)
+}
+
+fn ui_button_schema() -> ComponentSchema {
+    schema(
+        UI_BUTTON_ID,
+        "UI button",
+        &[
+            field("label", ComponentValueKind::String),
+            field("action", ComponentValueKind::String),
+            field("enabled", ComponentValueKind::Bool),
+            field("logical_text_size", ComponentValueKind::F64),
+        ],
+    )
+}
+
+fn ui_semantics_schema() -> ComponentSchema {
+    schema(
+        UI_SEMANTICS_ID,
+        "UI semantics",
+        &[
+            field("role", ComponentValueKind::String),
+            field("name", ComponentValueKind::String),
+            field("has_value", ComponentValueKind::Bool),
+            field("value", ComponentValueKind::String),
+            field("has_selected", ComponentValueKind::Bool),
+            field("selected", ComponentValueKind::Bool),
+            field("has_expanded", ComponentValueKind::Bool),
+            field("expanded", ComponentValueKind::Bool),
+            field("actions", ComponentValueKind::List),
+        ],
+    )
+}
+
+fn ui_theme_schema() -> ComponentSchema {
+    let mut fields = vec![field("revision", ComponentValueKind::U64)];
+    for role in [
+        "surface",
+        "panel",
+        "primary_text",
+        "secondary_text",
+        "accent",
+        "positive",
+        "warning",
+        "danger",
+        "disabled",
+        "focus",
+    ] {
+        for channel in COLOR_FIELDS {
+            fields.push(field(
+                &format!("palette.{role}.{channel}"),
+                ComponentValueKind::F64,
+            ));
+        }
+    }
+    schema(UI_THEME_ID, "UI theme", &fields)
+}
+
+fn schema(id: &str, alias: &str, fields: &[ComponentFieldSchema]) -> ComponentSchema {
+    ComponentSchema::new(ComponentTypeId::new(id), alias, ComponentSchemaVersion::ONE)
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(fields.iter().cloned())
+}
+
+fn field(path: &str, kind: ComponentValueKind) -> ComponentFieldSchema {
+    ComponentFieldSchema::required(
+        ComponentFieldId::new(path),
+        path,
+        ComponentFieldPath::from_fields(path.split('.')),
+        kind,
+    )
+}
+
+fn add_brush_fields(fields: &mut Vec<ComponentFieldSchema>, prefix: &str) {
+    for name in BRUSH_FIELDS {
+        let kind = if matches!(*name, "red" | "green" | "blue" | "alpha") {
+            ComponentValueKind::F64
+        } else {
+            ComponentValueKind::String
+        };
+        fields.push(field(&format!("{prefix}.{name}"), kind));
     }
 }

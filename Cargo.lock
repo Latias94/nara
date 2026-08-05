@@ -2226,13 +2226,14 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_hierarchy",
- "nara_image",
  "nara_input",
- "nara_material",
  "nara_reflect",
- "nara_render",
+ "nara_scene",
+ "nara_text",
  "nara_transform",
- "serde",
+ "nara_ui_kernel",
+ "nara_ui_widgets",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

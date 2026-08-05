@@ -323,6 +323,86 @@ impl UiStyle {
         self
     }
 
+    #[must_use]
+    pub const fn position_mode(self) -> UiPositionMode {
+        self.position_mode
+    }
+
+    #[must_use]
+    pub const fn width(self) -> UiDimension {
+        self.width
+    }
+
+    #[must_use]
+    pub const fn height(self) -> UiDimension {
+        self.height
+    }
+
+    #[must_use]
+    pub const fn left(self) -> UiDimension {
+        self.left
+    }
+
+    #[must_use]
+    pub const fn top(self) -> UiDimension {
+        self.top
+    }
+
+    #[must_use]
+    pub const fn flex_direction(self) -> UiFlexDirection {
+        self.flex_direction
+    }
+
+    #[must_use]
+    pub const fn align_items(self) -> UiAlign {
+        self.align_items
+    }
+
+    #[must_use]
+    pub const fn justify_content(self) -> UiJustify {
+        self.justify_content
+    }
+
+    #[must_use]
+    pub const fn gap(self) -> f32 {
+        self.gap
+    }
+
+    #[must_use]
+    pub const fn padding(self) -> UiEdges {
+        self.padding
+    }
+
+    #[must_use]
+    pub const fn flex_grow(self) -> f32 {
+        self.flex_grow
+    }
+
+    #[must_use]
+    pub const fn flex_shrink(self) -> f32 {
+        self.flex_shrink
+    }
+
+    #[must_use]
+    pub const fn z_index(self) -> i32 {
+        self.z_index
+    }
+
+    #[must_use]
+    pub const fn visible(self) -> bool {
+        self.visible
+    }
+
+    #[must_use]
+    pub const fn overflow(self) -> UiOverflow {
+        self.overflow
+    }
+
+    #[must_use]
+    pub const fn stacking_context(self) -> bool {
+        self.stacking_context
+    }
+
     pub(crate) fn validate(self) -> Result<(), UiStyleError> {
         self.width.validate()?;
         self.height.validate()?;
@@ -546,6 +626,21 @@ impl UiVisual {
         self
     }
 
+    #[must_use]
+    pub const fn background(&self) -> Option<&UiBrush> {
+        self.background.as_ref()
+    }
+
+    #[must_use]
+    pub const fn border(&self) -> Option<&UiBorder> {
+        self.border.as_ref()
+    }
+
+    #[must_use]
+    pub const fn radii(&self) -> UiCornerRadii {
+        self.radii
+    }
+
     pub(crate) fn validate(&self) -> Result<(), UiStyleError> {
         if let Some(background) = &self.background {
             background.validate()?;
@@ -639,6 +734,26 @@ impl UiText {
     #[must_use]
     pub const fn logical_size(&self) -> f32 {
         self.logical_size
+    }
+
+    #[must_use]
+    pub const fn brush(&self) -> &UiBrush {
+        &self.brush
+    }
+
+    #[must_use]
+    pub const fn alignment(&self) -> UiTextAlignment {
+        self.alignment
+    }
+
+    #[must_use]
+    pub const fn overflow(&self) -> UiTextOverflow {
+        self.overflow
+    }
+
+    #[must_use]
+    pub fn semantic_text(&self) -> Option<&str> {
+        self.semantic_text.as_deref()
     }
 
     pub(crate) fn request(
@@ -767,6 +882,11 @@ impl UiTheme {
     #[must_use]
     pub const fn revision(self) -> UiRevision {
         self.revision
+    }
+
+    #[must_use]
+    pub const fn palette(self) -> UiThemePalette {
+        self.palette
     }
 }
 
