@@ -53,6 +53,9 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | SRT-U4-1 | SRT-U4 | `25e7f6c` | `rust-api/behavior` | Lifecycle-free insertion preparation and provisional product replacement retirement | Prepare lifecycle-free insertions before commit and authorize extra retirement with `WorldEntityToken` rather than bare `Entity`; complete hierarchy validation remains read-only. |
 | NUI-U1-1 | NUI-U1 | `NUI-U1` | `architecture-authority` | Ordered placement, renderer-neutral UI modules, concrete import execution, Host-owned Editor state, closed rendering, and content/presentation composition | Treat ADRs 0101 through 0106 and the ordered UI kernel correction plan as the accepted target. No source/API migration occurs until its owning NUI unit lands and adds a concrete entry below. |
 | NUI-U2-1 | NUI-U2 | `92ee7f9` | `rust-api/cargo-feature/project-manifest` | Runtime tooling plugin installation and manifest-requestable Editor capabilities | Compile Editor models with the `tooling`/`tooling-egui` Cargo features, let the process Host own `EditorWorkspace`, and remove tooling capabilities from `nara.toml`. |
+| NUI-U3-1 | NUI-U3 | `3b20856` | `rust-api/behavior` | Generic importer registration, selection, and execution APIs | Call concrete domain importers directly and preserve shared artifact identity without an unconsumed executor registry. |
+| NUI-U4-1 | NUI-U4 | `e1a4595` | `rust-api/behavior` | Public render topology and technical sprite/UI pipeline stages | Use the closed first-party render plan and product-level authoring/presentation entry points; remove custom phase and direct pipeline-stage calls. |
+| NUI-U5A-1 | NUI-U5A | `2f0bd69` | `cargo-feature/rust-api/project-manifest/behavior` | Implicit 2D presentation through `runtime-2d` and `Runtime2dPlugins` | Keep headless content on `runtime-2d`; add `presentation-2d` plus `Presentation2dPlugins` to presented products and explicitly request both capabilities. |
 
 ## Entry Contract
 
@@ -1105,8 +1108,9 @@ embedding, patch operations, and catalog records.
 - The unconsumed `nara_audio` placeholder crate and root scaffold binary.
 
 **Canonical replacement or deletion rationale**: root Cargo features are the compiled product
-ceiling: `runtime-core`, `runtime-2d`, `runtime-ui`, `tooling`, `asset-watch`, `desktop-winit`,
-`render-wgpu`, and `tooling-egui`; `serde` weakly forwards only into selected domains. Projects use
+ceiling: `runtime-core`, `runtime-2d`, `runtime-ui`, `presentation-2d`, `tooling`, `asset-watch`,
+`desktop-winit`, `render-wgpu`, and `tooling-egui`; `serde` weakly forwards only into selected
+domains. Projects use
 `[runtime].preset` plus `[capabilities].requested`. The root host reads an already opened
 `FileCapability`, applies the 256 KiB sentinel read and bounded TOML shape preflight, then publishes
 an immutable `ProjectSettingsCandidate` only when the request fits the compiled ceiling. Plugin
@@ -1130,6 +1134,7 @@ app.add_plugins(DesktopWgpuPlugins)?;
 [dependencies]
 nara = { path = "..", default-features = false, features = [
     "runtime-2d",
+    "presentation-2d",
     "desktop-winit",
     "render-wgpu",
     "serde",
@@ -1138,6 +1143,7 @@ nara = { path = "..", default-features = false, features = [
 
 ```rust
 app.add_plugins(Runtime2dPlugins)?;
+app.add_plugins(Presentation2dPlugins)?;
 app.add_plugins(DesktopWinitPlugins)?;
 app.add_plugins(WgpuBackendPlugins)?;
 ```
@@ -1149,8 +1155,12 @@ File-backed projects declare product intent separately:
 preset = "local-headless"
 
 [capabilities]
-requested = ["runtime-2d", "render-wgpu"]
+requested = ["runtime-2d", "presentation-2d", "render-wgpu"]
 ```
+
+NUI-U5A later corrected the 2D feature meaning recorded by the original RGF-U3 implementation.
+Use only `runtime-2d` for headless content. Presented 2D products use the complete current examples
+above. Runtime UI still carries its legacy presentation closure until NUI-U5B after NUI-U13.
 
 **Affected examples and fixtures**: all root examples now declare `required-features`; optional
 tooling/2D integration tests are target-gated; the independent reference game disables root
@@ -1172,8 +1182,9 @@ source remains valid after the explicit `nara.toml` rewrite.
 **Rollback**: revert the complete RGF-U3 change. Do not restore legacy feature aliases, ambient
 file loading, the broad prelude, or the audio placeholder as compatibility shims.
 
-**Verification anchors**: `tests/{product_capabilities,project_composition}.rs`, the four
-`nara_render_wgpu` submitter feature checks, minimal desktop example checks, and
+**Verification anchors**: `tests/{product_capabilities,project_composition}.rs`, the locked
+`tests/fixtures/product-slices/presentation-2d` consumer, the four `nara_render_wgpu` submitter
+feature checks, minimal desktop example checks, and
 `reference-game/tests/project_manifest_ingest.rs` prove feature/dependency truth, explicit surface
 imports, authorized bounded ingest, product request rejection, and actual settings consumption.
 
@@ -2858,6 +2869,121 @@ control execution.
 `crates/nara_render_wgpu/src/{lib.rs,quad.rs}`, `tests/product_capabilities.rs`, and the independently
 locked `tests/fixtures/public-prelude` consumer prove topology removal, product authoring access,
 fixed first-party ordering, private UI stages, and exact manifest ownership.
+
+## NUI-U5A: Explicit 2D Content And Presentation Composition
+
+**Removed contract**:
+
+- `runtime-2d` compiling `nara_render` and `nara_sprite_render`, enabling image preparation, and
+  weakly selecting the WGPU sprite submitter.
+- `Runtime2dPlugins` installing `RenderPlugin`, `ImagePreparePlugin`, and `SpriteRenderPlugin`.
+- `ImagePlugin` depending on `ImagePreparePlugin` for both plugin closure and initialization of
+  `Assets<ImageAsset>`.
+- Presented examples and desktop project profiles relying on `runtime-2d` to imply packet
+  production.
+
+**Canonical replacement or deletion rationale**: 2D content and simulation must remain usable by
+the same headless product that owns Scene, gameplay, sprite, tilemap, image, and Retry facts.
+`runtime-2d` now owns only that content closure. The explicit `presentation-2d` Cargo capability,
+project capability, and `Presentation2dPlugins` group add backend-neutral render coordination,
+image preparation, and sprite packet production. Windowing and WGPU remain separate adapters.
+Manifest ingest rejects `presentation-2d` without an explicit `runtime-2d` request using
+`project.product.incomplete-capability-closure`. Existing `ProductCapability` discriminants 0
+through 5 remain stable; `Presentation2d` uses the new value 6.
+
+Before:
+
+```toml
+[dependencies]
+nara = { path = "..", default-features = false, features = ["runtime-2d"] }
+```
+
+```rust
+app.add_plugins(Runtime2dPlugins)?;
+```
+
+After, for headless content:
+
+```toml
+[dependencies]
+nara = { path = "..", default-features = false, features = ["runtime-2d"] }
+```
+
+```rust
+app.add_plugins(Runtime2dPlugins)?;
+```
+
+After, for presented 2D content:
+
+```toml
+[dependencies]
+nara = { path = "..", default-features = false, features = [
+    "presentation-2d",
+    "desktop-winit",
+    "render-wgpu",
+] }
+```
+
+```rust
+app.add_plugins((
+    Runtime2dPlugins,
+    Presentation2dPlugins,
+    DesktopWinitPlugins,
+    WgpuBackendPlugins,
+))?;
+```
+
+Presented project profiles request the complete product closure:
+
+```toml
+[capabilities]
+requested = [
+    "runtime-2d",
+    "presentation-2d",
+    "desktop-winit",
+    "render-wgpu",
+]
+```
+
+**Affected examples and fixtures**: `windowed_sprites`, `asset_import_texture`,
+`sprite_tilemap_scene`, `scene_prefab_roundtrip`, and `component_schema_export` select
+`presentation-2d`; `hello_world` remains a presentation-free `runtime-2d` consumer. The reference
+game base dependency and headless profile remain content-only, while its desktop feature/profile
+selects 2D presentation and adapters explicitly. The independently locked
+`tests/fixtures/product-slices/presentation-2d` workspace proves the public group and physical
+dependency boundary.
+
+**User action**: presented 2D products add the `presentation-2d` Cargo feature, import
+`Presentation2dPlugins`, install it alongside `Runtime2dPlugins`, and add `presentation-2d` to each
+presented `nara.toml` profile. Headless products keep `runtime-2d` only. Code using image import
+without presentation no longer installs `RenderPlugin` or `ImagePreparePlugin` merely to satisfy
+`ImagePlugin`.
+
+**Source action**: `manual-rewrite` only for presented `nara.toml` capability lists. Scene, Prefab,
+Patch, image, sprite, tilemap, and UI source formats are unchanged.
+
+**Cache action**: rebuild Rust artifacts and regenerate affected Cargo lockfiles. Imported assets
+and prepared image identities are unchanged.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No alias preserves the old
+implicit meaning of `runtime-2d` or `Runtime2dPlugins`.
+
+**Rollback**: revert `2f0bd69` together with its root, reference-game, public-prelude,
+runtime-runner, and presentation fixture lockfiles. Do not add an alias or silently reattach
+presentation to the content feature.
+
+**Verification anchors**: `Cargo.toml`, `src/{lib.rs,product.rs}`,
+`crates/nara_image/{Cargo.toml,src/lib.rs,src/reload.rs}`,
+`crates/nara_project/src/{capability.rs,tests.rs}`, `tests/{product_capabilities,
+project_composition,runtime_runner_contract,reference_game_contract}.rs`,
+`tests/fixtures/product-slices/presentation-2d`, `reference-game/tests/{plugin_composition,
+project_manifest_ingest,asset_task_flow}.rs`, and `.github/workflows/ci.yml` prove the content-only
+tree, explicit presentation closure, exact desktop composition, stable capability bits, and
+independent locked consumer.
+
+This is the first dependency-ordered NUI-U5 checkpoint, not final UI closure. `runtime-ui` still
+contains render and UI-render owners. NUI-U5B runs after NUI-U13 and must split UI presentation and
+make Host adapter selection fully semantic before ADR 0106 can be implemented.
 
 ## Persistent Format Matrix
 

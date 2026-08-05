@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "db76b24bee2f27b2237b13b9553d8df37b65254af3194c29749930f487da9519"
+source_fingerprint: "318867288e4820d8c4766e96324a46dc4deae04995ce2b37cb02200987ce1c11"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "db76b24bee2f27b2237b13b9553d8df37b65254af3194c29749930f487d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `db76b24bee2f27b2237b13b9553d8df37b65254af3194c29749930f487da9519`
-- Immutable records: 349
+- Source fingerprint: `318867288e4820d8c4766e96324a46dc4deae04995ce2b37cb02200987ce1c11`
+- Immutable records: 351
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Ordered UI kernel correction: NUI-U5 active](registry/2026-08/2026-08-04T182540Z-engine-foundation-contract-completion-codex-root-0b516441d98743b6a66ba5408f02346b.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Ordered UI kernel correction: NUI-U6 active](registry/2026-08/2026-08-05T021107Z-engine-foundation-contract-completion-codex-root-81e32271e18646c6a6f287b6bc770021.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [NUI-U5A explicit 2D content and presentation composition](verification/2026-08/2026-08-05T020814Z-nui-u5a-explicit-2d-content-and-presentation-composition-cab380e2dfc34bb88b849f62b84b8c3b.md) - Verifies the content-only runtime-2d boundary, explicit presentation-2d composition, stable project capability bits, exact headless and desktop plans, and independently locked consumers.
 - **Verification Evidence**: [NUI-U4 closed first-party render and UI internals](verification/2026-08/2026-08-04T182540Z-nui-u4-closed-first-party-render-and-ui-internals-af4e0733217a483cb73239914fd21ef1.md) - Verifies deletion of arbitrary render topology, closure of technical UI stages and mutable batch resources, deterministic first-party ordering, and facade/dependency cleanup.
 - **Verification Evidence**: [NUI-U3 concrete domain-owned asset import](verification/2026-08/2026-08-04T154228Z-nui-u3-concrete-domain-owned-asset-import-a1f06f28aca444229163c89f0b028682.md) - Verifies deletion of generic importer execution while preserving the concrete Image transaction, artifact identity, limits, and replacement semantics.
 - **Verification Evidence**: [NUI-U2 Host-owned Editor workspace](verification/2026-08/2026-08-04T142426Z-nui-u2-host-owned-editor-workspace-4bfdea95f38e4b6da30c4f16cc66562a.md) - Verifies removal of runtime tooling installation while preserving Host-owned persistence, Play, Retry, and adapter command behavior.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [SRT-U4 read-only validation API correction](verification/2026-08/2026-08-03T064907Z-srt-u4-read-only-validation-api-correction-164eae47e7e54ba79fd905af197dd353.md) - Supersedes the first U4 verification after detailed API review found hierarchy validation could register missing component types and the provisional replacement result was hidden and discardable.
 - **Verification Evidence**: [SRT-U4 atomic product scene replacement](verification/2026-08/2026-08-03T053651Z-srt-u4-atomic-product-scene-replacement-5175acec97f041c2af61585559c01e04.md) - Verifies bounded stable-ID candidate overlays, identity-bound exact retirement, a prepared failure-free scene commit tail, and hierarchy-only complete validation.
 - **Verification Evidence**: [SRT-U3 bounded startup activation and runtime fault detail](verification/2026-08/2026-08-02T194244Z-srt-u3-bounded-startup-activation-and-runtime-fault-detail-3b4d5b25813f420d8f0e62f478576077.md) - Verifies exact retained startup source and receipt ownership, ordered unpublished Startup activation, bounded runtime fault metadata, and finite lease retirement.
-- **Verification Evidence**: [SRT-U2 exact image revision and invalidation correction](verification/2026-08/2026-08-02T143954Z-srt-u2-exact-image-revision-and-invalidation-correction-a45da756131c43c7a3632928e8cd4d4a.md) - Verifies exact image slot identity, bounded immutable RGBA storage, transient prepare-to-submit races, and removal of duplicate invalidation authority.
 
 # Integration Notes
 

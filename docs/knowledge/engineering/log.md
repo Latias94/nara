@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-05
+* **Work Registration**: [Ordered UI kernel correction: NUI-U6 active](registry/2026-08/2026-08-05T021107Z-engine-foundation-contract-completion-codex-root-81e32271e18646c6a6f287b6bc770021.md) - Records the completed NUI-U5A 2D composition checkpoint, keeps final UI composition open after NUI-U13, and activates canonical ordered Scene and Prefab documents.
+* **Verification Evidence**: [NUI-U5A explicit 2D content and presentation composition](verification/2026-08/2026-08-05T020814Z-nui-u5a-explicit-2d-content-and-presentation-composition-cab380e2dfc34bb88b849f62b84b8c3b.md) - Verifies the content-only runtime-2d boundary, explicit presentation-2d composition, stable project capability bits, exact headless and desktop plans, and independently locked consumers.
+
 ## 2026-08-04
 * **Verification Evidence**: [NUI-U4 closed first-party render and UI internals](verification/2026-08/2026-08-04T182540Z-nui-u4-closed-first-party-render-and-ui-internals-af4e0733217a483cb73239914fd21ef1.md) - Verifies deletion of arbitrary render topology, closure of technical UI stages and mutable batch resources, deterministic first-party ordering, and facade/dependency cleanup.
 * **Work Registration**: [Ordered UI kernel correction: NUI-U5 active](registry/2026-08/2026-08-04T182540Z-engine-foundation-contract-completion-codex-root-0b516441d98743b6a66ba5408f02346b.md) - Completes render/UI boundary closure and activates the split between content authoring and presentation composition.
@@ -147,5 +151,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-07-22
 * **Work Registration**: [Reference-game runtime authority and delivery: RGD-U7](registry/2026-07/2026-07-22T230538Z-engine-foundation-contract-completion-codex-root-72f0947df216450a81e39547627c32f2.md) - Independently re-review Runtime authority before deciding whether Host topology review is admitted.
-* **Work Registration**: [Reference-game runtime authority and delivery: RGD-U6 complete](registry/2026-07/2026-07-22T230538Z-engine-foundation-contract-completion-codex-root-68ffc2e526bb4ee19b125d18bf0df74d.md) - Completes the renamed-root external managed-runtime Runner proof without a Nara Runner SPI.
-* **Verification Evidence**: [RGD-U6 external managed-runtime runner verification](verification/2026-07/2026-07-22T230538Z-rgd-u6-external-managed-runtime-runner-verification-5c2044aca8cd4eaf81087d08c7c75e40.md) - Verifies that an independently locked renamed-root Rust package can own one concrete managed-runtime loop through public Nara APIs.
