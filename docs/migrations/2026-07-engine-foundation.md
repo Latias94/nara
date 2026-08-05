@@ -56,6 +56,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | NUI-U3-1 | NUI-U3 | `3b20856` | `rust-api/behavior` | Generic importer registration, selection, and execution APIs | Call concrete domain importers directly and preserve shared artifact identity without an unconsumed executor registry. |
 | NUI-U4-1 | NUI-U4 | `e1a4595` | `rust-api/behavior` | Public render topology and technical sprite/UI pipeline stages | Use the closed first-party render plan and product-level authoring/presentation entry points; remove custom phase and direct pipeline-stage calls. |
 | NUI-U5A-1 | NUI-U5A | `2f0bd69` | `cargo-feature/rust-api/project-manifest/behavior` | Implicit 2D presentation through `runtime-2d` and `Runtime2dPlugins` | Keep headless content on `runtime-2d`; add `presentation-2d` plus `Presentation2dPlugins` to presented products and explicitly request both capabilities. |
+| NUI-U6-U7-1 | NUI-U6/U7 | `7c2c5ba`, `53d6678` | `serialized-format/rust-api/behavior` | Record-owned `parent`, implicit root order, placement-free add/remove, and bare `Reparent` | Rewrite Scene/Prefab documents to ordered `roots` plus parent-owned `children`; express Patch mutations with `ScenePlacement`, `MoveEntity { from, to }`, and exact subtree `RestoreEntity`. |
 
 ## Entry Contract
 
@@ -2984,6 +2985,89 @@ independent locked consumer.
 This is the first dependency-ordered NUI-U5 checkpoint, not final UI closure. `runtime-ui` still
 contains render and UI-render owners. NUI-U5B runs after NUI-U13 and must split UI presentation and
 make Host adapter selection fully semantic before ADR 0106 can be implemented.
+
+## NUI-U6-U7-1: Canonical Ordered Documents And Exact Placement Patches
+
+**Removed contract**: Scene and Prefab records no longer serialize a record-owned `parent` field or
+derive root/sibling order from record order. `ScenePatchOperation::AddEntity { entity }`,
+`RemoveEntity { entity }`, and `Reparent { entity, parent }` are removed. The old version-1
+Scene/Prefab object shape is rejected rather than interpreted as an unordered approximation.
+
+**Canonical replacement or deletion rationale**: `SceneDocument` and `PrefabDocument` own an
+explicit ordered `roots` sequence, while each parent record owns its ordered `children` sequence.
+Entity records remain canonically sorted by stable ID independently of placement. Patch add,
+remove, restore, and move operations use one `ScenePlacement` vocabulary with `Root` or `Parent`
+ownership and `First`, `Last`, `Before`, or `After` anchors. `MoveEntity { from, to }` makes stale
+source context an explicit failure; subtree deletion returns one `RestoreEntity` inverse carrying
+the exact records and prior placement. Nara is pre-1.0, so retaining either ambiguous shape would
+create two structural authorities without a migration contract.
+
+**Before**:
+
+```rust
+let patch = ScenePatchDocument::new([ScenePatchOperation::Reparent {
+    entity: child,
+    parent: Some(parent),
+}]);
+```
+
+**After**:
+
+```rust
+let from = ScenePlacement::current(&scene, &child).expect("validated placement");
+let patch = ScenePatchDocument::new([ScenePatchOperation::MoveEntity {
+    entity: child,
+    from,
+    to: ScenePlacement::last(ScenePlacementOwner::Parent { parent }),
+}]);
+```
+
+Serialized Scene and Prefab sources must move hierarchy ownership out of each child's `parent`
+field and into the document's ordered placement closure:
+
+```json
+{
+  "format_version": 1,
+  "roots": ["ui", "world"],
+  "entities": [
+    { "id": "ui", "children": ["ui/title", "ui/retry"], "components": {} },
+    { "id": "ui/retry", "children": [], "components": {} },
+    { "id": "ui/title", "children": [], "components": {} },
+    { "id": "world", "children": [], "components": {} }
+  ]
+}
+```
+
+**Affected examples and fixtures**: all first-party Scene, Prefab, Patch, project-content, Host,
+workspace, persistence, module-consumer, and reference-game sources were rewritten together.
+`examples/scene_patch_roundtrip.rs` demonstrates the canonical Patch API; Scene/Prefab JSON and RON
+fixtures now carry explicit placement while retaining stable-ID record sorting.
+
+**User action**: manually rewrite every authored Scene, Prefab, and Scene Patch source. Preserve the
+intended root and sibling sequence explicitly; do not infer it from entity-record order. Rewrite
+custom authoring commands to capture the current `from` placement and provide a stable target
+anchor.
+
+**Source action**: `manual-rewrite`. There is no runtime or offline auto-migrator for the removed
+draft shape.
+
+**Cache action**: `keep` after the source rewrite. Rebuild Rust artifacts for the API change;
+asset identities and imported payloads do not change.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No serde alias, deprecated
+operation, or unordered fallback preserves the removed contract.
+
+**Rollback**: revert `53d6678` and `7c2c5ba` together, then restore the matching pre-U6 authored
+sources. Do not revert only Patch or document ownership, and do not introduce a compatibility
+reader that guesses order.
+
+**Verification anchors**: `crates/nara_scene/src/tests.rs`,
+`crates/nara_scene/tests/format_contract.rs`, `tests/scene_patch_transactions.rs`,
+`tests/{scene_authoring_session,scene_inspector,editor_persistence,workspace_play_runtime}.rs`,
+`src/project_host/runtime/tests.rs`, `module-consumer`, and `reference-game/tests/{authoring,
+prefab_startup}.rs` prove canonical formats, bounded legacy rejection, candidate-relative anchors,
+failure atomicity, exact undo/redo, Prefab override order, and save/reopen parity. Source searches
+find no Rust use of `ScenePatchOperation::Reparent` or record-owned `parent`.
 
 ## Persistent Format Matrix
 
