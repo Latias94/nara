@@ -15,7 +15,7 @@ fn main() {
 
     let player = scene_id("player");
     let enemy = scene_id("enemy");
-    let mut scene = SceneDocument::new([
+    let mut scene = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(player.clone()).with_component(
             sprite_id(),
             SceneComponentRecord::new(v1(), sprite_value(ComponentValue::Null)),
@@ -54,16 +54,13 @@ fn main() {
     let report = from_json.apply_to_scene(&mut scene, &registry);
     assert!(report.applied);
     assert!(!report.diagnostics.has_errors());
-    assert_eq!(
-        scene
-            .entities
-            .iter()
-            .find(|entity| entity.id == enemy)
-            .unwrap()
-            .parent
-            .as_ref(),
-        Some(&player)
-    );
+    let player_record = scene
+        .entities
+        .iter()
+        .find(|entity| entity.id == player)
+        .unwrap();
+    assert_eq!(player_record.children, [enemy.clone()]);
+    assert_eq!(scene.roots, [player.clone()]);
 
     let inverse = report.inverse.unwrap();
     let undo = inverse.apply_to_scene(&mut scene, &registry);

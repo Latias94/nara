@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
@@ -415,12 +415,13 @@ fn build_inspector_model(
         ));
     }
     let document = session.document();
+    let parent_by_entity = derive_parent_by_entity(document);
     let entities = document
         .entities
         .iter()
         .map(|entity| SceneInspectorEntityRow {
             id: entity.id.clone(),
-            parent: entity.parent.clone(),
+            parent: derived_parent(&parent_by_entity, &entity.id).cloned(),
             inspectable_component_count: inspectable_component_count(entity, registry),
             has_prefab: entity.prefab.is_some(),
             selected: selected_entity == Some(&entity.id),
@@ -441,7 +442,14 @@ fn build_inspector_model(
                 id,
             ));
         }
-        entity.map(|entity| build_entity_view(entity, registry, &mut diagnostics))
+        entity.map(|entity| {
+            build_entity_view(
+                entity,
+                derived_parent(&parent_by_entity, &entity.id),
+                registry,
+                &mut diagnostics,
+            )
+        })
     });
 
     SceneInspectorModel {
@@ -475,13 +483,14 @@ fn inspectable_component_count(
 
 fn build_entity_view(
     entity: &nara_scene::SceneEntityRecord,
+    parent: Option<&SceneEntityId>,
     registry: &ComponentRegistry,
     diagnostics: &mut DiagnosticReport,
 ) -> SceneInspectorEntityView {
     if !registry.is_frozen() {
         return SceneInspectorEntityView {
             id: entity.id.clone(),
-            parent: entity.parent.clone(),
+            parent: parent.cloned(),
             has_prefab: entity.prefab.is_some(),
             components: Vec::new(),
         };
@@ -533,10 +542,31 @@ fn build_entity_view(
 
     SceneInspectorEntityView {
         id: entity.id.clone(),
-        parent: entity.parent.clone(),
+        parent: parent.cloned(),
         has_prefab: entity.prefab.is_some(),
         components,
     }
+}
+
+fn derive_parent_by_entity(document: &SceneDocument) -> BTreeMap<&str, Option<&SceneEntityId>> {
+    let mut parent_by_entity = document
+        .roots
+        .iter()
+        .map(|root| (root.as_str(), None))
+        .collect::<BTreeMap<_, _>>();
+    for parent in &document.entities {
+        for child in &parent.children {
+            parent_by_entity.insert(child.as_str(), Some(&parent.id));
+        }
+    }
+    parent_by_entity
+}
+
+fn derived_parent<'document>(
+    parent_by_entity: &BTreeMap<&'document str, Option<&'document SceneEntityId>>,
+    entity: &SceneEntityId,
+) -> Option<&'document SceneEntityId> {
+    parent_by_entity.get(entity.as_str()).copied().flatten()
 }
 
 fn build_component_view(
@@ -661,5 +691,39 @@ fn inspector_entity_error_report(
         patch: None,
         patch_report: None,
         diagnostics,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nara_scene::SceneEntityRecord;
+
+    fn scene_id(value: &str) -> SceneEntityId {
+        SceneEntityId::new(value).expect("test scene entity id must be valid")
+    }
+
+    #[test]
+    fn parent_map_is_derived_from_ordered_roots_and_children() {
+        let root = scene_id("root");
+        let child = scene_id("root/child");
+        let grandchild = scene_id("root/child/grandchild");
+        let sibling_root = scene_id("sibling-root");
+        let document = SceneDocument::new(
+            [root.clone(), sibling_root.clone()],
+            [
+                SceneEntityRecord::new(root.clone()).with_children([child.clone()]),
+                SceneEntityRecord::new(child.clone()).with_children([grandchild.clone()]),
+                SceneEntityRecord::new(grandchild.clone()),
+                SceneEntityRecord::new(sibling_root.clone()),
+            ],
+        );
+
+        let parent_by_entity = derive_parent_by_entity(&document);
+
+        assert_eq!(derived_parent(&parent_by_entity, &root), None);
+        assert_eq!(derived_parent(&parent_by_entity, &sibling_root), None);
+        assert_eq!(derived_parent(&parent_by_entity, &child), Some(&root));
+        assert_eq!(derived_parent(&parent_by_entity, &grandchild), Some(&child));
     }
 }

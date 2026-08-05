@@ -17,19 +17,37 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneDocument {
+    pub roots: Vec<SceneEntityId>,
     pub entities: Vec<SceneEntityRecord>,
 }
 
 impl SceneDocument {
     #[must_use]
-    pub fn new(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
+    pub fn new(
+        roots: impl IntoIterator<Item = SceneEntityId>,
+        entities: impl IntoIterator<Item = SceneEntityRecord>,
+    ) -> Self {
         let mut entities = entities.into_iter().collect::<Vec<_>>();
         entities.sort_by(|left, right| left.id.cmp(&right.id));
-        Self { entities }
+        Self {
+            roots: roots.into_iter().collect(),
+            entities,
+        }
+    }
+
+    /// Creates a flat document whose input record order is its root order.
+    #[must_use]
+    pub fn from_ordered_roots(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
+        let entities = entities.into_iter().collect::<Vec<_>>();
+        let roots = entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+        Self::new(roots, entities)
     }
 
     pub fn canonicalize(&mut self) {
@@ -89,24 +107,13 @@ impl SceneDocument {
     }
 }
 
-impl Default for SceneDocument {
-    fn default() -> Self {
-        Self {
-            entities: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneEntityRecord {
     pub id: SceneEntityId,
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub parent: Option<SceneEntityId>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub children: Vec<SceneEntityId>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
     #[cfg_attr(
@@ -121,15 +128,15 @@ impl SceneEntityRecord {
     pub fn new(id: SceneEntityId) -> Self {
         Self {
             id,
-            parent: None,
+            children: Vec::new(),
             components: BTreeMap::new(),
             prefab: None,
         }
     }
 
     #[must_use]
-    pub fn with_parent(mut self, parent: SceneEntityId) -> Self {
-        self.parent = Some(parent);
+    pub fn with_children(mut self, children: impl IntoIterator<Item = SceneEntityId>) -> Self {
+        self.children = children.into_iter().collect();
         self
     }
 

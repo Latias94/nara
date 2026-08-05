@@ -2,6 +2,7 @@
 
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits};
+use nara_diagnostic::{Diagnostic, DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -32,6 +33,40 @@ struct TestEnvelope<'a, T> {
     payload: T,
 }
 
+#[derive(Serialize)]
+struct PlacementWirePayload<'a> {
+    roots: Vec<&'a str>,
+    entities: Vec<PlacementWireEntity<'a>>,
+}
+
+#[derive(Serialize)]
+struct MissingRootsWirePayload<'a> {
+    entities: Vec<PlacementWireEntity<'a>>,
+}
+
+#[derive(Serialize)]
+struct PlacementWireEntity<'a> {
+    id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<Option<&'a str>>,
+    children: Vec<&'a str>,
+    components: std::collections::BTreeMap<&'a str, ()>,
+}
+
+#[derive(Serialize)]
+struct UnknownPlacementWirePayload<'a> {
+    roots: Vec<&'a str>,
+    entities: Vec<UnknownPlacementWireEntity<'a>>,
+}
+
+#[derive(Serialize)]
+struct UnknownPlacementWireEntity<'a> {
+    id: &'a str,
+    children: Vec<&'a str>,
+    components: std::collections::BTreeMap<&'a str, ()>,
+    unexpected: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
 struct MigratingText(String);
 
@@ -53,6 +88,61 @@ fn envelope<'a, T>(
     }
 }
 
+fn placement_wire_envelope<'a>(
+    kind: &'a str,
+    parent: Option<Option<&'a str>>,
+) -> TestEnvelope<'a, PlacementWirePayload<'a>> {
+    envelope(
+        kind,
+        1,
+        "0.1.0",
+        PlacementWirePayload {
+            roots: vec!["root"],
+            entities: vec![PlacementWireEntity {
+                id: "root",
+                parent,
+                children: Vec::new(),
+                components: std::collections::BTreeMap::new(),
+            }],
+        },
+    )
+}
+
+fn missing_roots_wire_envelope<'a>(kind: &'a str) -> TestEnvelope<'a, MissingRootsWirePayload<'a>> {
+    envelope(
+        kind,
+        1,
+        "0.1.0",
+        MissingRootsWirePayload {
+            entities: vec![PlacementWireEntity {
+                id: "root",
+                parent: None,
+                children: Vec::new(),
+                components: std::collections::BTreeMap::new(),
+            }],
+        },
+    )
+}
+
+fn unknown_placement_wire_envelope<'a>(
+    kind: &'a str,
+) -> TestEnvelope<'a, UnknownPlacementWirePayload<'a>> {
+    envelope(
+        kind,
+        1,
+        "0.1.0",
+        UnknownPlacementWirePayload {
+            roots: vec!["root"],
+            entities: vec![UnknownPlacementWireEntity {
+                id: "root",
+                children: Vec::new(),
+                components: std::collections::BTreeMap::new(),
+                unexpected: true,
+            }],
+        },
+    )
+}
+
 fn scene_id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
 }
@@ -61,8 +151,68 @@ fn component_id(value: &str) -> ComponentTypeId {
     ComponentTypeId::new(value)
 }
 
+fn placement_document(roots: &[&str], entities: &[(&str, &[&str])]) -> SceneDocument {
+    SceneDocument::new(
+        roots.iter().map(|root| scene_id(root)),
+        entities.iter().map(|(entity, children)| {
+            SceneEntityRecord::new(scene_id(entity))
+                .with_children(children.iter().map(|child| scene_id(child)))
+        }),
+    )
+}
+
+fn sorted_diagnostic_codes(report: &DiagnosticReport) -> Vec<&'static str> {
+    let mut codes = report
+        .iter()
+        .map(|diagnostic| diagnostic.code().as_str())
+        .collect::<Vec<_>>();
+    codes.sort_unstable();
+    codes
+}
+
+fn assert_scene_and_prefab_placement_diagnostics(
+    case: &str,
+    document: &SceneDocument,
+    expected: &[&'static str],
+) {
+    let registry = frozen_scene_registry();
+    let scene_report = document.validate(&registry);
+    let prefab_report =
+        PrefabDocument::new(document.roots.clone(), document.entities.clone()).validate(&registry);
+    let mut expected = expected.to_vec();
+    expected.sort_unstable();
+
+    assert_eq!(
+        sorted_diagnostic_codes(&scene_report),
+        expected,
+        "scene placement case {case}: {scene_report:#?}"
+    );
+    assert_eq!(
+        sorted_diagnostic_codes(&prefab_report),
+        expected,
+        "prefab placement case {case}: {prefab_report:#?}"
+    );
+}
+
+fn diagnostic_field<'a>(diagnostic: &'a Diagnostic, key: &str) -> Option<DiagnosticValueRef<'a>> {
+    diagnostic
+        .fields()
+        .iter()
+        .find(|field| field.key().as_str() == key)
+        .map(|field| field.value())
+}
+
+fn assert_legacy_placement_error(error: SceneFormatError, entity_index: Option<usize>) {
+    assert!(matches!(
+        error,
+        SceneFormatError::LegacyPlacementShape {
+            entity_index: observed,
+        } if observed == entity_index
+    ));
+}
+
 fn sample_scene() -> SceneDocument {
-    SceneDocument::new([
+    SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("enemy")),
         SceneEntityRecord::new(scene_id("player")).with_component(
             component_id("nara.test.Health"),
@@ -75,7 +225,7 @@ fn sample_scene() -> SceneDocument {
 }
 
 fn sample_prefab() -> PrefabDocument {
-    PrefabDocument::new([SceneEntityRecord::new(scene_id("root")).with_component(
+    PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("root")).with_component(
         component_id("nara.test.Health"),
         SceneComponentRecord::new(
             ComponentSchemaVersion::ONE,
@@ -175,8 +325,8 @@ fn canonical_v1_rejects_non_v1_embedded_patch_records() {
         entity
     }
 
-    let scene = SceneDocument::new([entity_with_future_override()]);
-    let prefab = PrefabDocument::new([entity_with_future_override()]);
+    let scene = SceneDocument::from_ordered_roots([entity_with_future_override()]);
+    let prefab = PrefabDocument::from_ordered_roots([entity_with_future_override()]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: entity_with_future_override(),
     }]);
@@ -195,7 +345,8 @@ fn canonical_v1_rejects_non_v1_embedded_patch_records() {
         );
     }
 
-    let valid = SceneDocument::new([prefab_anchor("instance", "prefabs/source.ron")]);
+    let valid =
+        SceneDocument::from_ordered_roots([prefab_anchor("instance", "prefabs/source.ron")]);
     let mut encoded =
         serde_json::from_str::<serde_json::Value>(&valid.to_json_string().unwrap()).unwrap();
     encoded["payload"]["entities"][0]["prefab"]["overrides"]["format_version"] =
@@ -304,15 +455,16 @@ fn entity_component_operation_and_diagnostic_budgets_are_independent() {
         Err(SceneFormatError::Budget(error)) if error.kind == SceneFileBudgetKind::Entities
     ));
 
-    let component_scene = SceneDocument::new([SceneEntityRecord::new(scene_id("player"))
-        .with_component(
-            component_id("nara.test.Health"),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
-        )
-        .with_component(
-            component_id("nara.test.Speed"),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
-        )]);
+    let component_scene =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
+            .with_component(
+                component_id("nara.test.Health"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+            )
+            .with_component(
+                component_id("nara.test.Speed"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+            )]);
     let encoded = component_scene.to_json_string().unwrap();
     let component_limits = SceneFileLimits::default().with_components(ItemLimit::ONE);
     assert!(matches!(
@@ -323,7 +475,7 @@ fn entity_component_operation_and_diagnostic_budgets_are_independent() {
         Err(SceneFormatError::Budget(error)) if error.kind == SceneFileBudgetKind::Components
     ));
 
-    let prefab_scene = SceneDocument::new([
+    let prefab_scene = SceneDocument::from_ordered_roots([
         prefab_anchor("first", "prefabs/unit.ron"),
         prefab_anchor("second", "prefabs/unit.ron"),
     ]);
@@ -367,6 +519,337 @@ fn entity_component_operation_and_diagnostic_budgets_are_independent() {
 }
 
 #[test]
+fn canonical_placement_keeps_root_and_child_order_while_sorting_entity_records() {
+    let document = placement_document(
+        &["root-b", "root-a"],
+        &[
+            ("root-b", &["child-b", "child-a"]),
+            ("child-b", &[]),
+            ("root-a", &[]),
+            ("child-a", &[]),
+        ],
+    );
+    assert_eq!(
+        document
+            .roots
+            .iter()
+            .map(SceneEntityId::as_str)
+            .collect::<Vec<_>>(),
+        ["root-b", "root-a"]
+    );
+    assert_eq!(
+        document
+            .entities
+            .iter()
+            .map(|entity| entity.id.as_str())
+            .collect::<Vec<_>>(),
+        ["child-a", "child-b", "root-a", "root-b"]
+    );
+    assert_eq!(
+        document
+            .entities
+            .iter()
+            .find(|entity| entity.id.as_str() == "root-b")
+            .unwrap()
+            .children
+            .iter()
+            .map(SceneEntityId::as_str)
+            .collect::<Vec<_>>(),
+        ["child-b", "child-a"]
+    );
+
+    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    assert_eq!(prefab.roots, document.roots);
+    assert_eq!(prefab.entities, document.entities);
+
+    let scene_json =
+        serde_json::from_str::<serde_json::Value>(&document.to_json_string().unwrap()).unwrap();
+    assert_eq!(
+        scene_json["payload"]["roots"],
+        serde_json::json!(["root-b", "root-a"])
+    );
+    assert_eq!(
+        scene_json["payload"]["entities"][3]["children"],
+        serde_json::json!(["child-b", "child-a"])
+    );
+
+    for encoded in [
+        SceneDocument::default().to_json_string().unwrap(),
+        PrefabDocument::default().to_json_string().unwrap(),
+    ] {
+        let value = serde_json::from_str::<serde_json::Value>(&encoded).unwrap();
+        assert_eq!(value["payload"]["roots"], serde_json::json!([]));
+        assert_eq!(value["payload"]["entities"], serde_json::json!([]));
+    }
+}
+
+#[test]
+fn scene_and_prefab_publication_reject_every_invalid_placement_closure() {
+    let cases = [
+        (
+            "duplicate root",
+            placement_document(&["root", "root"], &[("root", &[])]),
+            &["scene.duplicate-root"][..],
+        ),
+        (
+            "dangling root",
+            placement_document(&["root", "missing"], &[("root", &[])]),
+            &["scene.dangling-root"][..],
+        ),
+        (
+            "duplicate child",
+            placement_document(
+                &["parent"],
+                &[("parent", &["child", "child"]), ("child", &[])],
+            ),
+            &["scene.duplicate-child"][..],
+        ),
+        (
+            "dangling child",
+            placement_document(&["parent"], &[("parent", &["missing"])]),
+            &["scene.dangling-child"][..],
+        ),
+        (
+            "root-child overlap",
+            placement_document(
+                &["parent", "child"],
+                &[("parent", &["child"]), ("child", &[])],
+            ),
+            &["scene.root-child-overlap"][..],
+        ),
+        (
+            "multiple parents",
+            placement_document(
+                &["parent-a", "parent-b"],
+                &[
+                    ("parent-a", &["child"]),
+                    ("parent-b", &["child"]),
+                    ("child", &[]),
+                ],
+            ),
+            &["scene.multiple-parents"][..],
+        ),
+        (
+            "missing placement",
+            placement_document(&["root"], &[("root", &[]), ("orphan", &[])]),
+            &["scene.missing-placement"][..],
+        ),
+        (
+            "self cycle",
+            placement_document(&[], &[("cycle", &["cycle"])]),
+            &["scene.placement-cycle"][..],
+        ),
+        (
+            "two-node cycle",
+            placement_document(&[], &[("cycle-a", &["cycle-b"]), ("cycle-b", &["cycle-a"])]),
+            &["scene.placement-cycle"][..],
+        ),
+    ];
+
+    for (case, document, expected) in cases {
+        assert_scene_and_prefab_placement_diagnostics(case, &document, expected);
+    }
+}
+
+#[test]
+fn placement_cycle_reports_one_stable_cycle_witness_not_the_ingress_entity() {
+    let document = placement_document(
+        &[],
+        &[
+            ("a-ingress", &[]),
+            ("m-cycle", &["n-cycle", "a-ingress"]),
+            ("n-cycle", &["m-cycle"]),
+        ],
+    );
+    let registry = frozen_scene_registry();
+    let report = document.validate(&registry);
+    let cycle_diagnostics = report
+        .iter()
+        .filter(|diagnostic| diagnostic.code().as_str() == "scene.placement-cycle")
+        .collect::<Vec<_>>();
+
+    assert_eq!(cycle_diagnostics.len(), 1, "{report:#?}");
+    assert_eq!(
+        diagnostic_field(cycle_diagnostics[0], "entity-id"),
+        Some(DiagnosticValueRef::Identifier("m-cycle"))
+    );
+
+    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab_report = prefab.validate(&registry);
+    assert_eq!(
+        sorted_diagnostic_codes(&prefab_report),
+        vec!["scene.placement-cycle"]
+    );
+}
+
+#[test]
+fn placement_count_and_depth_budgets_apply_to_scene_and_prefab_json_and_ron() {
+    let two_placements = placement_document(&["root"], &[("root", &["child"]), ("child", &[])]);
+    let two_placements_prefab = PrefabDocument::new(
+        two_placements.roots.clone(),
+        two_placements.entities.clone(),
+    );
+    let placement_limits = SceneFileLimits::default().with_placements(ItemLimit::ONE);
+    let scene_json = two_placements.to_json_string().unwrap();
+    assert!(matches!(
+        SceneDocumentCandidate::decode_json_bytes_with_limits(
+            scene_json.as_bytes(),
+            placement_limits,
+        ),
+        Err(SceneFormatError::Budget(error))
+            if error.kind == SceneFileBudgetKind::Placements
+                && error.observed == 2
+                && error.maximum == 1
+    ));
+    let prefab_ron = two_placements_prefab.to_ron_string().unwrap();
+    assert!(matches!(
+        PrefabDocumentCandidate::decode_ron_bytes_with_limits(
+            prefab_ron.as_bytes(),
+            placement_limits,
+        ),
+        Err(SceneFormatError::Budget(error))
+            if error.kind == SceneFileBudgetKind::Placements
+                && error.observed == 2
+                && error.maximum == 1
+    ));
+
+    let depth_three = placement_document(
+        &["root"],
+        &[
+            ("root", &["child"]),
+            ("child", &["grandchild"]),
+            ("grandchild", &[]),
+        ],
+    );
+    let depth_three_prefab =
+        PrefabDocument::new(depth_three.roots.clone(), depth_three.entities.clone());
+    let depth_limits = SceneFileLimits::default()
+        .with_placement_depth(DepthLimit::new(2).expect("test depth is non-zero"));
+    let scene_ron = depth_three.to_ron_string().unwrap();
+    assert!(matches!(
+        SceneDocumentCandidate::decode_ron_bytes_with_limits(scene_ron.as_bytes(), depth_limits),
+        Err(SceneFormatError::Budget(error))
+            if error.kind == SceneFileBudgetKind::PlacementDepth
+                && error.observed == 3
+                && error.maximum == 2
+    ));
+    let prefab_json = depth_three_prefab.to_json_string().unwrap();
+    assert!(matches!(
+        PrefabDocumentCandidate::decode_json_bytes_with_limits(
+            prefab_json.as_bytes(),
+            depth_limits,
+        ),
+        Err(SceneFormatError::Budget(error))
+            if error.kind == SceneFileBudgetKind::PlacementDepth
+                && error.observed == 3
+                && error.maximum == 2
+    ));
+}
+
+#[test]
+fn legacy_parent_and_missing_roots_fail_without_migration_or_order_inference() {
+    let scene_parent_json = serde_json::to_vec(&placement_wire_envelope(
+        "scene",
+        Some(Some("legacy-parent")),
+    ))
+    .unwrap();
+    assert_legacy_placement_error(
+        SceneDocumentCandidate::decode_json_bytes(&scene_parent_json).unwrap_err(),
+        Some(0),
+    );
+
+    let scene_null_parent_ron =
+        ron::ser::to_string(&placement_wire_envelope("scene", Some(None))).unwrap();
+    assert_legacy_placement_error(
+        SceneDocumentCandidate::decode_ron_bytes(scene_null_parent_ron.as_bytes()).unwrap_err(),
+        Some(0),
+    );
+
+    let prefab_null_parent_json =
+        serde_json::to_vec(&placement_wire_envelope("prefab", Some(None))).unwrap();
+    assert_legacy_placement_error(
+        PrefabDocumentCandidate::decode_json_bytes(&prefab_null_parent_json).unwrap_err(),
+        Some(0),
+    );
+
+    let prefab_parent_ron = ron::ser::to_string(&placement_wire_envelope(
+        "prefab",
+        Some(Some("legacy-parent")),
+    ))
+    .unwrap();
+    assert_legacy_placement_error(
+        PrefabDocumentCandidate::decode_ron_bytes(prefab_parent_ron.as_bytes()).unwrap_err(),
+        Some(0),
+    );
+
+    let scene_missing_roots_json =
+        serde_json::to_vec(&missing_roots_wire_envelope("scene")).unwrap();
+    assert_legacy_placement_error(
+        SceneDocumentCandidate::decode_json_bytes(&scene_missing_roots_json).unwrap_err(),
+        None,
+    );
+    let scene_missing_roots_ron =
+        ron::ser::to_string(&missing_roots_wire_envelope("scene")).unwrap();
+    assert_legacy_placement_error(
+        SceneDocumentCandidate::decode_ron_bytes(scene_missing_roots_ron.as_bytes()).unwrap_err(),
+        None,
+    );
+    let prefab_missing_roots_json =
+        serde_json::to_vec(&missing_roots_wire_envelope("prefab")).unwrap();
+    assert_legacy_placement_error(
+        PrefabDocumentCandidate::decode_json_bytes(&prefab_missing_roots_json).unwrap_err(),
+        None,
+    );
+    let prefab_missing_roots_ron =
+        ron::ser::to_string(&missing_roots_wire_envelope("prefab")).unwrap();
+    assert_legacy_placement_error(
+        PrefabDocumentCandidate::decode_ron_bytes(prefab_missing_roots_ron.as_bytes()).unwrap_err(),
+        None,
+    );
+}
+
+#[test]
+fn nested_prefab_override_add_entity_legacy_parent_is_a_transitional_payload_error() {
+    let mut root = SceneEntityRecord::new(scene_id("root"));
+    root.prefab = Some(PrefabInstance {
+        source: AssetRef::path("prefabs/nested.ron").unwrap(),
+        overrides: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(scene_id("nested-added")),
+        }]),
+    });
+    let mut encoded = serde_json::from_str::<serde_json::Value>(
+        &PrefabDocument::from_ordered_roots([root])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    encoded["payload"]["entities"][0]["prefab"]["overrides"]["operations"][0]["args"]["entity"]["parent"] =
+        serde_json::json!("root");
+    let encoded = serde_json::to_vec(&encoded).unwrap();
+
+    let error = PrefabDocumentCandidate::decode_json_bytes(&encoded).unwrap_err();
+    assert!(
+        matches!(&error, SceneFormatError::Payload { .. }),
+        "nested patch wire remains a generic payload boundary until U7: {error}"
+    );
+}
+
+#[test]
+fn unknown_placement_fields_remain_generic_payload_errors() {
+    let scene_json = serde_json::to_vec(&unknown_placement_wire_envelope("scene")).unwrap();
+    assert!(matches!(
+        SceneDocumentCandidate::decode_json_bytes(&scene_json),
+        Err(SceneFormatError::Payload { .. })
+    ));
+
+    let prefab_ron = ron::ser::to_string(&unknown_placement_wire_envelope("prefab")).unwrap();
+    assert!(matches!(
+        PrefabDocumentCandidate::decode_ron_bytes(prefab_ron.as_bytes()),
+        Err(SceneFormatError::Payload { .. })
+    ));
+}
+
+#[test]
 fn nested_unknown_fields_are_rejected_and_existing_document_is_unchanged() {
     let existing = sample_scene();
     let before = existing.clone();
@@ -402,13 +885,14 @@ fn semantic_scene_publication_requires_frozen_registry_and_is_atomic() {
 
     let registry = frozen_scene_registry();
     let player = scene_id("player");
-    let existing = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
-        component_id("nara.scene.Name"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::String("before".to_owned()),
-        ),
-    )]);
+    let existing = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
+        .with_component(
+            component_id("nara.scene.Name"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("before".to_owned()),
+            ),
+        )]);
     let mut session = SceneAuthoringSession::new(existing);
     let edit = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player,
@@ -472,7 +956,7 @@ fn scene_candidate_migrates_to_the_current_schema_and_requires_source_save() {
     let registry = migrating_text_registry(0);
     let player = scene_id("player");
     let legacy = legacy_text_record("before");
-    let scene = SceneDocument::new([
+    let scene = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(player.clone()).with_component(migrating_text_id(), legacy)
     ]);
     let encoded = scene.to_json_string().unwrap();
@@ -497,15 +981,16 @@ fn scene_candidate_migrates_to_the_current_schema_and_requires_source_save() {
 #[test]
 fn migration_value_growth_respects_candidate_limits_and_is_failure_atomic() {
     let registry = migrating_text_registry(64);
-    let incoming = SceneDocument::new([SceneEntityRecord::new(scene_id("incoming"))
-        .with_component(migrating_text_id(), legacy_text_record("x"))]);
+    let incoming =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
+            .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let encoded = incoming.to_json_string().unwrap();
     let limits = SceneFileLimits::default()
         .with_component_value_nodes(ItemLimit::new(4).unwrap())
         .with_component_value_bytes(ByteLimit::new(16).unwrap());
     let candidate =
         SceneDocumentCandidate::decode_json_bytes_with_limits(encoded.as_bytes(), limits).unwrap();
-    let before = SceneDocument::new([SceneEntityRecord::new(scene_id("existing"))]);
+    let before = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("existing"))]);
     let mut session = SceneAuthoringSession::new(before.clone());
     let before_revision = session.revision();
 
@@ -528,9 +1013,11 @@ fn prefab_and_patch_migration_growth_respects_limits_and_is_failure_atomic() {
         .with_component_value_nodes(ItemLimit::new(4).unwrap())
         .with_component_value_bytes(ByteLimit::new(16).unwrap());
     let source = AssetRef::path("prefabs/migrating.ron").unwrap();
-    let existing = PrefabDocument::new([SceneEntityRecord::new(scene_id("existing"))]);
-    let incoming = PrefabDocument::new([SceneEntityRecord::new(scene_id("incoming"))
-        .with_component(migrating_text_id(), legacy_text_record("x"))]);
+    let existing =
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("existing"))]);
+    let incoming =
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
+            .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let encoded = incoming.to_json_string().unwrap();
     let mut resolver =
         InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), existing.clone());
@@ -549,7 +1036,7 @@ fn prefab_and_patch_migration_growth_respects_limits_and_is_failure_atomic() {
     }));
     assert_eq!(resolver.resolve_prefab(&source), Some(&existing));
 
-    let target = SceneDocument::new([SceneEntityRecord::new(scene_id("target"))]);
+    let target = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("target"))]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
         entity: scene_id("target"),
         component: migrating_text_id(),
@@ -640,10 +1127,12 @@ fn migration_results_reapply_shape_limits_for_scene_prefab_and_patch() {
 fn migration_results_validate_json_and_ron_encoded_limits() {
     let registry = migrating_text_registry(0);
 
-    let legacy_scene = SceneDocument::new([SceneEntityRecord::new(scene_id("incoming"))
-        .with_component(migrating_text_id(), legacy_text_record("x"))]);
-    let current_scene = SceneDocument::new([SceneEntityRecord::new(scene_id("incoming"))
-        .with_component(migrating_text_id(), current_text_record("x"))]);
+    let legacy_scene =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
+            .with_component(migrating_text_id(), legacy_text_record("x"))]);
+    let current_scene =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
+            .with_component(migrating_text_id(), current_text_record("x"))]);
     let scene_limits = ron_only_encoded_limits(
         &legacy_scene.to_json_string().unwrap(),
         &current_scene.to_json_string().unwrap(),
@@ -656,10 +1145,12 @@ fn migration_results_validate_json_and_ron_encoded_limits() {
         scene_limits,
     );
 
-    let legacy_prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("incoming"))
-        .with_component(migrating_text_id(), legacy_text_record("x"))]);
-    let current_prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("incoming"))
-        .with_component(migrating_text_id(), current_text_record("x"))]);
+    let legacy_prefab =
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
+            .with_component(migrating_text_id(), legacy_text_record("x"))]);
+    let current_prefab =
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
+            .with_component(migrating_text_id(), current_text_record("x"))]);
     let prefab_limits = ron_only_encoded_limits(
         &legacy_prefab.to_json_string().unwrap(),
         &current_prefab.to_json_string().unwrap(),
@@ -707,7 +1198,7 @@ fn patch_candidate_migrates_whole_component_operations() {
             ComponentValue::String("current-before".to_owned()),
         )]),
     );
-    let mut document = SceneDocument::new([
+    let mut document = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(add_target.clone()),
         SceneEntityRecord::new(replace_target.clone())
             .with_component(migrating_text_id(), current_record),
@@ -747,13 +1238,14 @@ fn patch_candidate_migrates_whole_component_operations() {
 fn patch_candidate_resolves_stable_fields_against_the_current_schema_version() {
     let registry = migrating_text_registry(0);
     let player = scene_id("player");
-    let mut document = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
-        migrating_text_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(2),
-            ComponentValue::map([("current", ComponentValue::String("before".to_owned()))]),
-        ),
-    )]);
+    let mut document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
+        .with_component(
+            migrating_text_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(2),
+                ComponentValue::map([("current", ComponentValue::String("before".to_owned()))]),
+            ),
+        )]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player,
         component: migrating_text_id(),
@@ -780,13 +1272,14 @@ fn patch_candidate_resolves_stable_fields_against_the_current_schema_version() {
 fn patch_candidate_rejects_legacy_field_writes_without_a_value_migration_contract() {
     let registry = migrating_text_registry(0);
     let player = scene_id("player");
-    let before = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
-        migrating_text_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(2),
-            ComponentValue::map([("current", ComponentValue::String("before".to_owned()))]),
-        ),
-    )]);
+    let before = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
+        .with_component(
+            migrating_text_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(2),
+                ComponentValue::map([("current", ComponentValue::String("before".to_owned()))]),
+            ),
+        )]);
     let operations = [
         ScenePatchOperation::SetField {
             entity: player.clone(),
@@ -826,16 +1319,17 @@ fn patch_candidate_rejects_legacy_field_writes_without_a_value_migration_contrac
 fn patch_candidate_upgrades_legacy_remove_field_by_stable_identity() {
     let registry = migrating_text_registry(0);
     let player = scene_id("player");
-    let mut document = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
-        migrating_text_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(2),
-            ComponentValue::map([
-                ("current", ComponentValue::String("before".to_owned())),
-                ("note", ComponentValue::String("remove-me".to_owned())),
-            ]),
-        ),
-    )]);
+    let mut document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
+        .with_component(
+            migrating_text_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(2),
+                ComponentValue::map([
+                    ("current", ComponentValue::String("before".to_owned())),
+                    ("note", ComponentValue::String("remove-me".to_owned())),
+                ]),
+            ),
+        )]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::RemoveField {
         entity: player,
         component: migrating_text_id(),
@@ -874,7 +1368,7 @@ fn patch_candidate_upgrades_legacy_remove_field_by_stable_identity() {
 fn patch_candidate_rejects_legacy_remove_of_tombstoned_field() {
     let registry = migrating_text_registry(0);
     let player = scene_id("player");
-    let before = SceneDocument::new([SceneEntityRecord::new(player.clone())
+    let before = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
         .with_component(migrating_text_id(), current_text_record("before"))]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::RemoveField {
         entity: player,
@@ -911,7 +1405,7 @@ fn prefab_candidate_upgrades_nested_legacy_remove_field() {
             field: ComponentFieldId::new("note"),
         }]),
     });
-    let incoming = PrefabDocument::new([root]);
+    let incoming = PrefabDocument::from_ordered_roots([root]);
     let encoded = incoming.to_json_string().unwrap();
     let published_source = AssetRef::path("prefabs/root.ron").unwrap();
     let mut resolver = InMemoryPrefabSourceResolver::new();
@@ -966,7 +1460,9 @@ fn prefab_candidate_canonicalizes_components_and_nested_override_operations() {
             },
         ]),
     });
-    let encoded = PrefabDocument::new([root]).to_json_string().unwrap();
+    let encoded = PrefabDocument::from_ordered_roots([root])
+        .to_json_string()
+        .unwrap();
     let published_source = AssetRef::path("prefabs/root.ron").unwrap();
     let mut resolver = InMemoryPrefabSourceResolver::new();
 
@@ -1027,7 +1523,8 @@ fn prefab_and_patch_candidates_publish_only_through_their_owning_transactions() 
         Some(&PrefabDocument::default())
     );
 
-    let mut target = SceneDocument::new([SceneEntityRecord::new(scene_id("player"))]);
+    let mut target =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))]);
     let before = target.clone();
     let patch_json = sample_patch().to_json_string().unwrap();
     let report = ScenePatchDocumentCandidate::decode_json_bytes(patch_json.as_bytes())
@@ -1041,13 +1538,14 @@ fn prefab_and_patch_candidates_publish_only_through_their_owning_transactions() 
 fn patch_candidate_participates_in_authoring_revision_and_history_atomically() {
     let registry = frozen_scene_registry();
     let player = scene_id("player");
-    let before = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
-        component_id("nara.scene.Name"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::String("before".to_owned()),
-        ),
-    )]);
+    let before = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
+        .with_component(
+            component_id("nara.scene.Name"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("before".to_owned()),
+            ),
+        )]);
     let mut session = SceneAuthoringSession::new(before.clone());
     let initial_revision = session.revision();
     let valid_patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
@@ -1249,12 +1747,13 @@ fn assert_scene_migration_shape_rejected(
     registry: &ComponentRegistry,
     limits: SceneFileLimits,
 ) {
-    let incoming = SceneDocument::new([SceneEntityRecord::new(scene_id("incoming"))
-        .with_component(migrating_text_id(), legacy_text_record("x"))]);
+    let incoming =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
+            .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let encoded = incoming.to_json_string().unwrap();
     let candidate =
         SceneDocumentCandidate::decode_json_bytes_with_limits(encoded.as_bytes(), limits).unwrap();
-    let before = SceneDocument::new([SceneEntityRecord::new(scene_id("existing"))]);
+    let before = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("existing"))]);
     let mut session = SceneAuthoringSession::new(before.clone());
 
     let error = session
@@ -1272,9 +1771,11 @@ fn assert_prefab_migration_shape_rejected(
     limits: SceneFileLimits,
 ) {
     let source = AssetRef::path(format!("prefabs/{case}.ron")).unwrap();
-    let existing = PrefabDocument::new([SceneEntityRecord::new(scene_id("existing"))]);
-    let incoming = PrefabDocument::new([SceneEntityRecord::new(scene_id("incoming"))
-        .with_component(migrating_text_id(), legacy_text_record("x"))]);
+    let existing =
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("existing"))]);
+    let incoming =
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
+            .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let encoded = incoming.to_json_string().unwrap();
     let candidate =
         PrefabDocumentCandidate::decode_json_bytes_with_limits(encoded.as_bytes(), limits).unwrap();
@@ -1295,7 +1796,7 @@ fn assert_patch_migration_shape_rejected(
     registry: &ComponentRegistry,
     limits: SceneFileLimits,
 ) {
-    let before = SceneDocument::new([SceneEntityRecord::new(scene_id("target"))]);
+    let before = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("target"))]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
         entity: scene_id("target"),
         component: migrating_text_id(),

@@ -223,7 +223,7 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
     );
     fs::write(
         project.scene_path(),
-        SceneDocument::new([SceneEntityRecord::new(scene_id("external"))])
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("external"))])
             .to_json_string()
             .unwrap(),
     )
@@ -357,7 +357,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     let duplicate = scene_id("duplicate");
     fs::write(
         project.scene_path(),
-        SceneDocument::new([
+        SceneDocument::from_ordered_roots([
             SceneEntityRecord::new(duplicate.clone()),
             SceneEntityRecord::new(duplicate),
         ])
@@ -570,7 +570,7 @@ fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
     let generation = editor.play_view().generation();
     fs::write(
         project.scene_path(),
-        SceneDocument::new([SceneEntityRecord::new(scene_id("external"))])
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("external"))])
             .to_json_string()
             .unwrap(),
     )

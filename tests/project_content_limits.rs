@@ -254,7 +254,7 @@ fn two_prefabs(project: &TestProject) {
         overrides: ScenePatchDocument::default(),
     });
     project.write_prefab("bonus.prefab.json", &PrefabDocument::default());
-    project.write_scene_source(&SceneDocument::new([enemy, bonus]));
+    project.write_scene_source(&SceneDocument::from_ordered_roots([enemy, bonus]));
 }
 
 fn duplicate_prefab_edges(project: &TestProject) {
@@ -268,5 +268,5 @@ fn duplicate_prefab_edges(project: &TestProject) {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
         overrides: ScenePatchDocument::default(),
     });
-    project.write_scene_source(&SceneDocument::new([left, right]));
+    project.write_scene_source(&SceneDocument::from_ordered_roots([left, right]));
 }

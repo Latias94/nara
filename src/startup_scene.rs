@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn direct_source_enforces_its_exact_retained_byte_limit() {
-        let document = Arc::new(SceneDocument::new([]));
+        let document = Arc::new(SceneDocument::from_ordered_roots([]));
         let required = direct_startup_scene_retained_bytes(&document).unwrap();
         assert!(required > 1);
 
@@ -579,7 +579,7 @@ mod tests {
 
     #[test]
     fn source_view_cannot_extend_the_root_document_lifetime() {
-        let document = Arc::new(SceneDocument::new([]));
+        let document = Arc::new(SceneDocument::from_ordered_roots([]));
         let view = StartupSceneSourceView {
             document: Arc::downgrade(&document),
             retained_bytes: 17,
@@ -614,7 +614,7 @@ mod tests {
             )
             .unwrap();
         let source = StartupSceneSource::direct(
-            Arc::new(SceneDocument::new([])),
+            Arc::new(SceneDocument::from_ordered_roots([])),
             ByteLimit::new(1024).unwrap(),
         )
         .unwrap();
@@ -688,7 +688,7 @@ mod tests {
 
         let entity_count = app.world().entities().len();
         let source = StartupSceneSource::direct(
-            Arc::new(SceneDocument::new([])),
+            Arc::new(SceneDocument::from_ordered_roots([])),
             ByteLimit::new(1024).unwrap(),
         )
         .unwrap();

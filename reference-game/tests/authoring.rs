@@ -489,76 +489,79 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
     let player_entity_id = scene_id("player");
     let weapon_entity_id = scene_id("player-weapon");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(player_entity_id.clone())
-            .with_component(
-                player_role_id.clone(),
-                scene_component_record(PlayerRole {}, &player_role_id, &registry),
-            )
-            .with_component(
-                health_id.clone(),
-                scene_component_record(InitialHealth { hit_points: 20 }, &health_id, &registry),
-            )
-            .with_component(
-                velocity_id.clone(),
-                scene_component_record(
-                    InitialVelocity2d {
-                        velocity: Vec2::ZERO,
-                    },
-                    &velocity_id,
-                    &registry,
+    let document = SceneDocument::new(
+        [player_entity_id.clone(), scene_id("enemy")],
+        [
+            SceneEntityRecord::new(player_entity_id.clone())
+                .with_children([weapon_entity_id.clone()])
+                .with_component(
+                    player_role_id.clone(),
+                    scene_component_record(PlayerRole {}, &player_role_id, &registry),
+                )
+                .with_component(
+                    health_id.clone(),
+                    scene_component_record(InitialHealth { hit_points: 20 }, &health_id, &registry),
+                )
+                .with_component(
+                    velocity_id.clone(),
+                    scene_component_record(
+                        InitialVelocity2d {
+                            velocity: Vec2::ZERO,
+                        },
+                        &velocity_id,
+                        &registry,
+                    ),
+                )
+                .with_component(
+                    transform_id.clone(),
+                    scene_component_record(Transform2d::IDENTITY, &transform_id, &registry),
                 ),
-            )
-            .with_component(
-                transform_id.clone(),
-                scene_component_record(Transform2d::IDENTITY, &transform_id, &registry),
-            ),
-        SceneEntityRecord::new(weapon_entity_id.clone())
-            .with_parent(player_entity_id.clone())
-            .with_component(
-                weapon_id.clone(),
-                scene_component_record(Weapon::fixture(), &weapon_id, &registry),
-            )
-            .with_component(
-                transform_id.clone(),
-                scene_component_record(
-                    Transform2d::from_translation(Vec2::new(1.2, 0.0)),
-                    &transform_id,
-                    &registry,
+            SceneEntityRecord::new(weapon_entity_id.clone())
+                .with_component(
+                    weapon_id.clone(),
+                    scene_component_record(Weapon::fixture(), &weapon_id, &registry),
+                )
+                .with_component(
+                    transform_id.clone(),
+                    scene_component_record(
+                        Transform2d::from_translation(Vec2::new(1.2, 0.0)),
+                        &transform_id,
+                        &registry,
+                    ),
                 ),
-            ),
-        SceneEntityRecord::new(scene_id("enemy"))
-            .with_component(
-                enemy_role_id.clone(),
-                scene_component_record(EnemyRole {}, &enemy_role_id, &registry),
-            )
-            .with_component(
-                health_id.clone(),
-                scene_component_record(InitialHealth { hit_points: 10 }, &health_id, &registry),
-            )
-            .with_component(
-                velocity_id.clone(),
-                scene_component_record(
-                    InitialVelocity2d {
-                        velocity: Vec2::new(-0.5, 0.0),
-                    },
-                    &velocity_id,
-                    &registry,
+            SceneEntityRecord::new(scene_id("enemy"))
+                .with_component(
+                    enemy_role_id.clone(),
+                    scene_component_record(EnemyRole {}, &enemy_role_id, &registry),
+                )
+                .with_component(
+                    health_id.clone(),
+                    scene_component_record(InitialHealth { hit_points: 10 }, &health_id, &registry),
+                )
+                .with_component(
+                    velocity_id.clone(),
+                    scene_component_record(
+                        InitialVelocity2d {
+                            velocity: Vec2::new(-0.5, 0.0),
+                        },
+                        &velocity_id,
+                        &registry,
+                    ),
+                )
+                .with_component(
+                    wave_spawn_id.clone(),
+                    scene_component_record(WaveSpawn::fixture(), &wave_spawn_id, &registry),
+                )
+                .with_component(
+                    transform_id.clone(),
+                    scene_component_record(
+                        Transform2d::from_translation(Vec2::new(5.0, 0.0)),
+                        &transform_id,
+                        &registry,
+                    ),
                 ),
-            )
-            .with_component(
-                wave_spawn_id.clone(),
-                scene_component_record(WaveSpawn::fixture(), &wave_spawn_id, &registry),
-            )
-            .with_component(
-                transform_id.clone(),
-                scene_component_record(
-                    Transform2d::from_translation(Vec2::new(5.0, 0.0)),
-                    &transform_id,
-                    &registry,
-                ),
-            ),
-    ]);
+        ],
+    );
     let scene_json = document.to_json_string().unwrap();
     let scene_candidate = SceneDocumentCandidate::decode_json_bytes(scene_json.as_bytes()).unwrap();
     assert_eq!(scene_candidate.to_json_string().unwrap(), scene_json);

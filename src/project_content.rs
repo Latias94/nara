@@ -33,7 +33,8 @@ use nara_reflect::{
 };
 use nara_scene::{
     PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver, SceneDocument,
-    SceneDocumentCandidate, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    SceneDocumentCandidate, SceneEntityRecord, SceneFormatError, ScenePatchDocument,
+    ScenePatchOperation,
 };
 
 use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
@@ -350,6 +351,37 @@ impl ProjectContentError {
         let mut diagnostics = DiagnosticReport::default();
         diagnostics.push(diagnostic);
         Self::with_report(kind, diagnostics)
+    }
+
+    fn legacy_placement_shape(
+        code: &'static str,
+        summary: &'static str,
+        key: &'static str,
+        value: &str,
+        entity_index: Option<usize>,
+    ) -> Self {
+        let diagnostic = PublicDiagnosticIdentifier::new(value).map_or_else(
+            |_| with_sensitive(diagnostic(code, summary), key),
+            |value| {
+                attach_field(
+                    diagnostic(code, summary),
+                    DiagnosticField::public_identifier(field_key(key), value),
+                )
+            },
+        );
+        let diagnostic = match entity_index {
+            Some(entity_index) => attach_field(
+                diagnostic,
+                DiagnosticField::public_u64(
+                    field_key("entity_index"),
+                    u64::try_from(entity_index).unwrap_or(u64::MAX),
+                ),
+            ),
+            None => diagnostic,
+        };
+        let mut diagnostics = DiagnosticReport::default();
+        diagnostics.push(diagnostic);
+        Self::with_report(ProjectContentErrorKind::SceneFormat, diagnostics)
     }
 
     fn budget(error: ProjectContentBudgetError) -> Self {
@@ -1303,15 +1335,7 @@ fn decode_scene_candidate(
             path,
         ));
     }
-    .map_err(|_| {
-        ProjectContentError::with_identifier(
-            ProjectContentErrorKind::SceneFormat,
-            "project.content.scene-format-invalid",
-            "Project scene format is invalid",
-            "scene",
-            path,
-        )
-    })
+    .map_err(|error| map_scene_format_error(path, error))
 }
 
 fn decode_prefab_candidate(
@@ -1332,15 +1356,49 @@ fn decode_prefab_candidate(
             path,
         ));
     }
-    .map_err(|_| {
-        ProjectContentError::with_identifier(
+    .map_err(|error| map_prefab_format_error(path, error))
+}
+
+fn map_scene_format_error(path: &str, error: SceneFormatError) -> ProjectContentError {
+    match error {
+        SceneFormatError::LegacyPlacementShape { entity_index } => {
+            ProjectContentError::legacy_placement_shape(
+                "project.content.scene-legacy-placement-shape",
+                "Rewrite the legacy scene with ordered roots and parent-owned children; sibling order cannot be inferred",
+                "scene",
+                path,
+                entity_index,
+            )
+        }
+        _ => ProjectContentError::with_identifier(
+            ProjectContentErrorKind::SceneFormat,
+            "project.content.scene-format-invalid",
+            "Project scene format is invalid",
+            "scene",
+            path,
+        ),
+    }
+}
+
+fn map_prefab_format_error(path: &str, error: SceneFormatError) -> ProjectContentError {
+    match error {
+        SceneFormatError::LegacyPlacementShape { entity_index } => {
+            ProjectContentError::legacy_placement_shape(
+                "project.content.prefab-legacy-placement-shape",
+                "Rewrite the legacy prefab with ordered roots and parent-owned children; sibling order cannot be inferred",
+                "prefab",
+                path,
+                entity_index,
+            )
+        }
+        _ => ProjectContentError::with_identifier(
             ProjectContentErrorKind::SceneFormat,
             "project.content.prefab-format-invalid",
             "Project prefab format is invalid",
             "prefab",
             path,
-        )
-    })
+        ),
+    }
 }
 
 fn map_scene_publication_error(

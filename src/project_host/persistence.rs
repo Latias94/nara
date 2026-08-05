@@ -533,7 +533,7 @@ mod tests {
     }
 
     fn scene_with_entity(id: &str) -> SceneDocument {
-        SceneDocument::new([SceneEntityRecord::new(SceneEntityId::new(id).unwrap())])
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(SceneEntityId::new(id).unwrap())])
     }
 
     struct TestRoot {

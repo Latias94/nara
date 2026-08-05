@@ -42,7 +42,7 @@ fn patch_adds_component_sets_field_reparents_and_inverse_restores() {
     let registry = test_registry();
     let player = scene_id("player");
     let enemy = scene_id("enemy");
-    let mut scene = SceneDocument::new([
+    let mut scene = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(player.clone()),
         SceneEntityRecord::new(enemy.clone()),
     ]);
@@ -71,7 +71,8 @@ fn patch_adds_component_sets_field_reparents_and_inverse_restores() {
     assert!(report.applied);
     assert!(!report.diagnostics.has_errors());
     assert_eq!(component_value(&scene, &player).field_i64("x").unwrap(), 7);
-    assert_eq!(scene_entity(&scene, &enemy).parent.as_ref(), Some(&player));
+    assert_eq!(scene_entity(&scene, &player).children, [enemy.clone()]);
+    assert_eq!(scene.roots, [player.clone()]);
 
     let inverse = report.inverse.unwrap();
     let inverse_report = inverse.apply_to_scene(&mut scene, &registry);
@@ -84,13 +85,14 @@ fn patch_adds_component_sets_field_reparents_and_inverse_restores() {
 fn stable_field_id_patch_resolves_current_path_after_rename() {
     let registry = renamed_field_registry();
     let player = scene_id("player");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
-        position_type_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::map([("renamed_x", ComponentValue::I64(1))]),
-        ),
-    )]);
+    let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
+        .with_component(
+            position_type_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("renamed_x", ComponentValue::I64(1))]),
+            ),
+        )]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player.clone(),
         component: position_type_id(),
@@ -114,7 +116,7 @@ fn stable_field_id_patch_resolves_current_path_after_rename() {
 fn invalid_patch_operation_leaves_document_unchanged_with_operation_context() {
     let registry = test_registry();
     let player = scene_id("player");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())]);
+    let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())]);
     let original = scene.clone();
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::AddComponent {
@@ -181,7 +183,7 @@ fn patch_new_uses_current_format_version() {
 fn unsupported_patch_format_version_fails_before_mutating_document() {
     let registry = test_registry();
     let player = scene_id("player");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())
+    let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
         .with_component(position_type_id(), position_record(1, None))]);
     let original = scene.clone();
     let patch = ScenePatchDocument {
@@ -208,7 +210,7 @@ fn unsupported_patch_format_version_fails_before_mutating_document() {
 fn stale_patch_component_schema_version_fails_before_mutating_document() {
     let registry = test_registry();
     let player = scene_id("player");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())
+    let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
         .with_component(position_type_id(), position_record(1, None))]);
     let original = scene.clone();
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
@@ -256,7 +258,7 @@ fn stale_patch_component_schema_version_fails_before_mutating_document() {
 fn set_field_without_edit_capability_fails_before_mutating_document() {
     let registry = readonly_field_registry();
     let player = scene_id("player");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())
+    let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
         .with_component(position_type_id(), position_record(1, None))]);
     let original = scene.clone();
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
@@ -296,7 +298,7 @@ fn whole_component_and_entity_operations_require_edit_for_every_field() {
     let readonly = position_record(1, None);
     let cases = [
         (
-            SceneDocument::new([SceneEntityRecord::new(player.clone())]),
+            SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())]),
             ScenePatchOperation::AddComponent {
                 entity: player.clone(),
                 component: position_type_id(),
@@ -304,7 +306,7 @@ fn whole_component_and_entity_operations_require_edit_for_every_field() {
             },
         ),
         (
-            SceneDocument::new([SceneEntityRecord::new(player.clone())
+            SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
                 .with_component(position_type_id(), readonly.clone())]),
             ScenePatchOperation::RemoveComponent {
                 entity: player.clone(),
@@ -312,7 +314,7 @@ fn whole_component_and_entity_operations_require_edit_for_every_field() {
             },
         ),
         (
-            SceneDocument::new([SceneEntityRecord::new(player.clone())
+            SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
                 .with_component(position_type_id(), readonly.clone())]),
             ScenePatchOperation::ReplaceComponent {
                 entity: player.clone(),
@@ -321,19 +323,21 @@ fn whole_component_and_entity_operations_require_edit_for_every_field() {
             },
         ),
         (
-            SceneDocument::new([]),
+            SceneDocument::from_ordered_roots([]),
             ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(player.clone())
                     .with_component(position_type_id(), readonly.clone()),
             },
         ),
         (
-            SceneDocument::new([
-                SceneEntityRecord::new(player.clone()),
-                SceneEntityRecord::new(child.clone())
-                    .with_parent(player.clone())
-                    .with_component(position_type_id(), readonly),
-            ]),
+            SceneDocument::new(
+                [player.clone()],
+                [
+                    SceneEntityRecord::new(player.clone()).with_children([child.clone()]),
+                    SceneEntityRecord::new(child.clone())
+                        .with_component(position_type_id(), readonly),
+                ],
+            ),
             ScenePatchOperation::RemoveEntity {
                 entity: player.clone(),
             },
@@ -357,7 +361,7 @@ fn patch_combined_validation_work_budget_is_exact_and_failure_atomic() {
     let registry = test_registry();
     let root = scene_id("root");
     let child = scene_id("child");
-    let original = SceneDocument::new([
+    let original = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(root.clone()),
         SceneEntityRecord::new(child.clone()),
     ]);
@@ -373,14 +377,14 @@ fn patch_combined_validation_work_budget_is_exact_and_failure_atomic() {
     ]);
 
     let exact_limits =
-        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(9).unwrap());
+        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(15).unwrap());
     let mut exact = original.clone();
     let exact_report = patch.apply_to_scene_with_limits(&mut exact, &registry, exact_limits);
     assert!(exact_report.applied);
     assert_eq!(exact, original);
 
     let rejected_limits =
-        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(8).unwrap());
+        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(14).unwrap());
     let mut rejected = original.clone();
     let rejected_report =
         patch.apply_to_scene_with_limits(&mut rejected, &registry, rejected_limits);
@@ -395,11 +399,12 @@ fn patch_combined_validation_work_budget_is_exact_and_failure_atomic() {
 fn patch_rejects_source_work_before_semantic_validation() {
     let registry = test_registry();
     let unknown_component = ComponentTypeId::new("nara.test.Unknown");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(scene_id("invalid"))
-        .with_component(
-            unknown_component,
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
-        )]);
+    let mut scene =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("invalid"))
+            .with_component(
+                unknown_component,
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+            )]);
     let original = scene.clone();
     let limits = ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(2).unwrap());
 
@@ -435,7 +440,7 @@ fn patch_validation_value_budget_bounds_repeated_large_payload_work() {
     let child = scene_id("child");
     let payload = ComponentValue::String("x".repeat(64 * 1024));
     let per_validation_bytes = payload.cost().logical_bytes();
-    let original = SceneDocument::new([
+    let original = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(root.clone()).with_component(
             blob_type_id(),
             SceneComponentRecord::new(ComponentSchemaVersion::ONE, payload),
@@ -510,13 +515,14 @@ fn patch_validation_value_budget_bounds_repeated_large_payload_work() {
 fn field_patch_rejects_an_unmigrated_target_record() {
     let registry = migrated_field_registry();
     let player = scene_id("player");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone()).with_component(
-        position_type_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::map([("x", ComponentValue::I64(1))]),
-        ),
-    )]);
+    let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
+        .with_component(
+            position_type_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("x", ComponentValue::I64(1))]),
+            ),
+        )]);
     let original = scene.clone();
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player,
@@ -541,12 +547,16 @@ fn remove_entity_removes_subtree_and_inverse_restores_it() {
     let root = scene_id("root");
     let child = scene_id("root/child");
     let grandchild = scene_id("root/child/grandchild");
-    let mut scene = SceneDocument::new([
-        SceneEntityRecord::new(root.clone())
-            .with_component(position_type_id(), position_record(1, None)),
-        SceneEntityRecord::new(child.clone()).with_parent(root.clone()),
-        SceneEntityRecord::new(grandchild.clone()).with_parent(child.clone()),
-    ]);
+    let mut scene = SceneDocument::new(
+        [root.clone()],
+        [
+            SceneEntityRecord::new(root.clone())
+                .with_children([child.clone()])
+                .with_component(position_type_id(), position_record(1, None)),
+            SceneEntityRecord::new(child.clone()).with_children([grandchild.clone()]),
+            SceneEntityRecord::new(grandchild.clone()),
+        ],
+    );
     let original = scene.clone();
 
     let report = ScenePatchDocument::new([ScenePatchOperation::RemoveEntity {
@@ -570,7 +580,7 @@ fn remove_entity_removes_subtree_and_inverse_restores_it() {
 fn remove_required_field_fails_before_mutating_document() {
     let registry = test_registry();
     let player = scene_id("player");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())
+    let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
         .with_component(position_type_id(), position_record(1, Some(2)))]);
     let original = scene.clone();
 
@@ -599,7 +609,7 @@ fn remove_required_field_fails_before_mutating_document() {
 fn remove_optional_field_and_set_asset_ref_field_are_schema_checked() {
     let registry = test_registry();
     let player = scene_id("player");
-    let mut scene = SceneDocument::new([SceneEntityRecord::new(player.clone())
+    let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
         .with_component(position_type_id(), position_record(1, Some(2)))]);
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::RemoveField {

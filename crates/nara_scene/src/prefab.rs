@@ -1,4 +1,7 @@
-use std::fmt::{self, Display, Formatter};
+use std::{
+    collections::BTreeSet,
+    fmt::{self, Display, Formatter},
+};
 
 use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_core::{ByteLimit, ItemLimit};
@@ -26,19 +29,37 @@ use crate::{
 // charges their 16-byte logical representation. Every persistent reference is one value node.
 const PERSISTENT_REFERENCE_TRAVERSAL_BYTE_OVERHEAD: usize = 20;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PrefabDocument {
+    pub roots: Vec<SceneEntityId>,
     pub entities: Vec<SceneEntityRecord>,
 }
 
 impl PrefabDocument {
     #[must_use]
-    pub fn new(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
+    pub fn new(
+        roots: impl IntoIterator<Item = SceneEntityId>,
+        entities: impl IntoIterator<Item = SceneEntityRecord>,
+    ) -> Self {
         let mut entities = entities.into_iter().collect::<Vec<_>>();
         entities.sort_by(|left, right| left.id.cmp(&right.id));
-        Self { entities }
+        Self {
+            roots: roots.into_iter().collect(),
+            entities,
+        }
+    }
+
+    /// Creates a flat prefab whose input record order is its root order.
+    #[must_use]
+    pub fn from_ordered_roots(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
+        let entities = entities.into_iter().collect::<Vec<_>>();
+        let roots = entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+        Self::new(roots, entities)
     }
 
     pub fn canonicalize(&mut self) {
@@ -48,6 +69,7 @@ impl PrefabDocument {
     #[must_use]
     pub fn instantiate(&self) -> SceneDocument {
         let mut document = SceneDocument {
+            roots: self.roots.clone(),
             entities: self.entities.clone(),
         };
         document.canonicalize();
@@ -111,14 +133,6 @@ impl PrefabDocument {
     ) -> PrefabExpansionReport {
         self.instantiate()
             .expand_prefabs_with_asset_database(registry, resolver, database)
-    }
-}
-
-impl Default for PrefabDocument {
-    fn default() -> Self {
-        Self {
-            entities: Vec::new(),
-        }
     }
 }
 
@@ -545,6 +559,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
 
     fn expand_scene_document(&mut self, document: &SceneDocument) -> PrefabExpansionReport {
         let mut expanded = SceneDocument {
+            roots: document.roots.clone(),
             entities: Vec::new(),
         };
         self.expand_entities(&document.entities, &mut expanded.entities);
@@ -587,11 +602,11 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         }
         let mut anchor = entity.clone();
         let prefab_instance = anchor.prefab.take();
-        output.push(anchor);
-
         if let Some(instance) = prefab_instance {
-            self.expand_prefab_instance(&entity.id, instance, output);
+            let prefab_roots = self.expand_prefab_instance(&entity.id, instance, output);
+            anchor.children.splice(0..0, prefab_roots);
         }
+        output.push(anchor);
     }
 
     fn expand_prefab_instance(
@@ -599,10 +614,10 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         anchor_id: &SceneEntityId,
         instance: PrefabInstance,
         output: &mut Vec<SceneEntityRecord>,
-    ) {
+    ) -> Vec<SceneEntityId> {
         let PrefabInstance { source, overrides } = instance;
         if !self.reserve_resolved_instance(anchor_id, &source) {
-            return;
+            return Vec::new();
         }
         if self.stack.len() >= self.options.max_depth {
             self.diagnostics.push(with_asset_ref(
@@ -629,7 +644,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 "asset-ref",
                 &source,
             ));
-            return;
+            return Vec::new();
         }
 
         if let Some((cycle_start_index, cycle_from)) = self
@@ -666,7 +681,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             let diagnostic = with_asset_ref(diagnostic, "cycle-from", cycle_from);
             self.diagnostics
                 .push(with_asset_ref(diagnostic, "cycle-to", &source));
-            return;
+            return Vec::new();
         }
 
         let Some(prefab) = self.resolver.resolve_prefab(&source) else {
@@ -686,13 +701,13 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 "asset-ref",
                 &source,
             ));
-            return;
+            return Vec::new();
         };
 
         if !self.reserve_applied_patch_operations(overrides.operations.len(), anchor_id, &source)
             || !self.preflight_source_materialization(prefab, &overrides, anchor_id, &source)
         {
-            return;
+            return Vec::new();
         }
 
         self.stack.push(source);
@@ -710,25 +725,33 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         if !patch_report.applied {
             self.diagnostics.extend(patch_report.diagnostics);
             self.stack.pop();
-            return;
+            return Vec::new();
         }
 
-        self.expand_prefab_entities(anchor_id, source_document.entities, output);
+        let roots = source_document.roots;
+        self.expand_prefab_entities(anchor_id, &roots, source_document.entities, output);
 
         self.stack.pop();
+        roots
+            .iter()
+            .map(|root| namespace_scene_entity_id(anchor_id, root))
+            .collect()
     }
 
     fn expand_prefab_entities(
         &mut self,
         anchor_id: &SceneEntityId,
+        roots: &[SceneEntityId],
         entities: Vec<SceneEntityRecord>,
         output: &mut Vec<SceneEntityRecord>,
     ) {
+        let roots = roots.iter().cloned().collect::<BTreeSet<_>>();
         for entity in entities {
             if self.budget_failed {
                 break;
             }
-            self.expand_prefab_entity(anchor_id, entity, output);
+            let is_root = roots.contains(&entity.id);
+            self.expand_prefab_entity(anchor_id, entity, is_root, output);
         }
     }
 
@@ -736,6 +759,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         &mut self,
         anchor_id: &SceneEntityId,
         mut entity: SceneEntityRecord,
+        is_root: bool,
         output: &mut Vec<SceneEntityRecord>,
     ) {
         let Some(original_value_cost) = self.reserve_materialized_entity(&entity) else {
@@ -754,15 +778,14 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         let mut reference_plans =
             Vec::<DeclaredEntityReferencePlan>::with_capacity(entity.components.len());
 
-        let identifier_lengths = [
-            namespaced_identifier_len(anchor_id, &entity.id),
-            entity
-                .parent
-                .as_ref()
-                .map_or(anchor_id.as_str().len(), |parent| {
-                    namespaced_identifier_len(anchor_id, parent)
-                }),
-        ];
+        let identifier_lengths = std::iter::once(namespaced_identifier_len(anchor_id, &entity.id))
+            .chain(
+                entity
+                    .children
+                    .iter()
+                    .map(|child| namespaced_identifier_len(anchor_id, child)),
+            )
+            .chain(is_root.then(|| namespaced_identifier_len(anchor_id, &entity.id)));
         for identifier_len in identifier_lengths {
             if let Err(error) = accumulate_generated_identifier_bytes(
                 current_generated_bytes,
@@ -935,11 +958,12 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             }
         }
 
+        entity.children = entity
+            .children
+            .iter()
+            .map(|child| namespace_scene_entity_id(anchor_id, child))
+            .collect();
         entity.id = namespace_scene_entity_id(anchor_id, &entity.id);
-        entity.parent = Some(match &entity.parent {
-            Some(parent) => namespace_scene_entity_id(anchor_id, parent),
-            None => anchor_id.clone(),
-        });
 
         self.usage.generated_identifier_bytes = generated_identifier_bytes;
         self.usage.materialized_value_nodes = materialized_value_nodes;
@@ -947,11 +971,10 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
 
         if let Some(instance) = prefab_instance {
             let nested_anchor_id = entity.id.clone();
-            output.push(entity);
-            self.expand_prefab_instance(&nested_anchor_id, instance, output);
-        } else {
-            output.push(entity);
+            let nested_roots = self.expand_prefab_instance(&nested_anchor_id, instance, output);
+            entity.children.splice(0..0, nested_roots);
         }
+        output.push(entity);
     }
 
     fn reserve_materialized_entity(

@@ -1754,7 +1754,7 @@ mod tests {
     }
 
     fn scene_with_entity(entity: SceneEntityId) -> SceneDocument {
-        SceneDocument::new([SceneEntityRecord::new(entity)])
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity)])
     }
 
     fn add_entity_patch(id: &str) -> ScenePatchDocument {

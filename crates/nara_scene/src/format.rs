@@ -1,6 +1,7 @@
 //! Canonical scene, prefab, and standalone patch file boundaries.
 
 use std::{
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt::{self, Display, Formatter},
     io::{self, Write},
@@ -18,8 +19,9 @@ use nara_reflect::{ComponentRegistry, ComponentValueCost};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
-    PrefabDocument, SceneDocument, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-    ScenePatchReport, patch::ScenePatchDocumentWire,
+    PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
+    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    patch::ScenePatchDocumentWire,
 };
 
 const SCENE_KIND: &str = "scene";
@@ -34,6 +36,8 @@ pub struct SceneFileLimits {
     encoded_bytes: ByteLimit,
     shape: SerdeShapeLimits,
     entities: ItemLimit,
+    placements: ItemLimit,
+    placement_depth: DepthLimit,
     components: ItemLimit,
     prefab_instances: ItemLimit,
     patch_operations: ItemLimit,
@@ -55,6 +59,9 @@ impl Default for SceneFileLimits {
                 ByteLimit::new(8 * 1024 * 1024).expect("scene total string limit is non-zero"),
             ),
             entities: ItemLimit::new(100_000).expect("scene entity limit is non-zero"),
+            placements: ItemLimit::new(100_000).expect("scene placement limit is non-zero"),
+            placement_depth: DepthLimit::new(1_024)
+                .expect("scene placement depth limit is non-zero"),
             components: ItemLimit::new(500_000).expect("scene component limit is non-zero"),
             prefab_instances: ItemLimit::new(100_000)
                 .expect("scene prefab instance limit is non-zero"),
@@ -84,6 +91,16 @@ impl SceneFileLimits {
     #[must_use]
     pub const fn entities(self) -> ItemLimit {
         self.entities
+    }
+
+    #[must_use]
+    pub const fn placements(self) -> ItemLimit {
+        self.placements
+    }
+
+    #[must_use]
+    pub const fn placement_depth(self) -> DepthLimit {
+        self.placement_depth
     }
 
     #[must_use]
@@ -131,6 +148,18 @@ impl SceneFileLimits {
     #[must_use]
     pub const fn with_entities(mut self, limit: ItemLimit) -> Self {
         self.entities = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_placements(mut self, limit: ItemLimit) -> Self {
+        self.placements = limit;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_placement_depth(mut self, limit: DepthLimit) -> Self {
+        self.placement_depth = limit;
         self
     }
 
@@ -189,6 +218,8 @@ impl Display for SceneFileEncoding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SceneFileBudgetKind {
     Entities,
+    Placements,
+    PlacementDepth,
     Components,
     PrefabInstances,
     PatchOperations,
@@ -201,6 +232,8 @@ impl Display for SceneFileBudgetKind {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Entities => formatter.write_str("entities"),
+            Self::Placements => formatter.write_str("placement references"),
+            Self::PlacementDepth => formatter.write_str("placement depth"),
             Self::Components => formatter.write_str("components"),
             Self::PrefabInstances => formatter.write_str("prefab instances"),
             Self::PatchOperations => formatter.write_str("patch operations"),
@@ -249,6 +282,9 @@ pub enum SceneFormatError {
         observed: u32,
         expected: u32,
     },
+    LegacyPlacementShape {
+        entity_index: Option<usize>,
+    },
     Payload {
         encoding: SceneFileEncoding,
         source: Box<dyn Error + Send + Sync>,
@@ -285,6 +321,19 @@ impl Display for SceneFormatError {
                 formatter,
                 "embedded scene patch format version is {observed}, expected {expected}"
             ),
+            Self::LegacyPlacementShape { entity_index } => {
+                if let Some(entity_index) = entity_index {
+                    write!(
+                        formatter,
+                        "persistent entity document uses the removed record-owned parent shape at entity index {entity_index}; rewrite it with document roots and parent-owned children because sibling order cannot be inferred"
+                    )?;
+                } else {
+                    formatter.write_str(
+                        "persistent entity document is missing its ordered roots; rewrite it with document roots and parent-owned children because sibling order cannot be inferred",
+                    )?;
+                }
+                Ok(())
+            }
             Self::Payload { encoding, source } => {
                 write!(
                     formatter,
@@ -312,7 +361,9 @@ impl Error for SceneFormatError {
             | Self::Metadata(source) => Some(source.as_ref()),
             Self::Contract(error) => Some(error),
             Self::Budget(error) => Some(error),
-            Self::EncodedBytesExceeded { .. } | Self::EmbeddedPatchFormatVersion { .. } => None,
+            Self::EncodedBytesExceeded { .. }
+            | Self::EmbeddedPatchFormatVersion { .. }
+            | Self::LegacyPlacementShape { .. } => None,
         }
     }
 }
@@ -494,13 +545,93 @@ impl Error for SceneFilePublicationError {}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SceneDocumentWire {
-    entities: Vec<SceneEntityRecord>,
+    #[serde(default)]
+    roots: OrderedRootsField,
+    entities: Vec<SceneEntityRecordWire>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PrefabDocumentWire {
-    entities: Vec<SceneEntityRecord>,
+    #[serde(default)]
+    roots: OrderedRootsField,
+    entities: Vec<SceneEntityRecordWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SceneEntityRecordWire {
+    id: SceneEntityId,
+    #[serde(default)]
+    children: Vec<SceneEntityId>,
+    #[serde(default)]
+    components: BTreeMap<nara_reflect::ComponentTypeId, SceneComponentRecord>,
+    #[serde(default)]
+    prefab: Option<PrefabInstance>,
+    #[serde(default, rename = "parent")]
+    legacy_parent: LegacyParentField,
+}
+
+#[derive(Default)]
+struct LegacyParentField {
+    present: bool,
+}
+
+#[derive(Default)]
+struct OrderedRootsField {
+    value: Option<Vec<SceneEntityId>>,
+}
+
+impl<'de> Deserialize<'de> for OrderedRootsField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self {
+            value: Some(Vec::<SceneEntityId>::deserialize(deserializer)?),
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for LegacyParentField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
+        Ok(Self { present: true })
+    }
+}
+
+impl SceneEntityRecordWire {
+    fn into_record(self, entity_index: usize) -> Result<SceneEntityRecord, SceneFormatError> {
+        if self.legacy_parent.present {
+            return Err(SceneFormatError::LegacyPlacementShape {
+                entity_index: Some(entity_index),
+            });
+        }
+        Ok(SceneEntityRecord {
+            id: self.id,
+            children: self.children,
+            components: self.components,
+            prefab: self.prefab,
+        })
+    }
+}
+
+fn document_wire_parts(
+    roots: OrderedRootsField,
+    entities: Vec<SceneEntityRecordWire>,
+) -> Result<(Vec<SceneEntityId>, Vec<SceneEntityRecord>), SceneFormatError> {
+    let entities = entities
+        .into_iter()
+        .enumerate()
+        .map(|(entity_index, entity)| entity.into_record(entity_index))
+        .collect::<Result<Vec<_>, _>>()?;
+    let Some(roots) = roots.value else {
+        return Err(SceneFormatError::LegacyPlacementShape { entity_index: None });
+    };
+    Ok((roots, entities))
 }
 
 trait SceneFilePayload: Clone + Serialize {
@@ -508,7 +639,7 @@ trait SceneFilePayload: Clone + Serialize {
 
     const KIND: &'static str;
 
-    fn from_wire(wire: Self::Wire) -> Self;
+    fn from_wire(wire: Self::Wire) -> Result<Self, SceneFormatError>;
     fn canonicalize_payload(&mut self);
     fn validate_contract(&self) -> Result<(), SceneFormatError>;
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError>;
@@ -519,10 +650,9 @@ impl SceneFilePayload for SceneDocument {
 
     const KIND: &'static str = SCENE_KIND;
 
-    fn from_wire(wire: Self::Wire) -> Self {
-        Self {
-            entities: wire.entities,
-        }
+    fn from_wire(wire: Self::Wire) -> Result<Self, SceneFormatError> {
+        let (roots, entities) = document_wire_parts(wire.roots, wire.entities)?;
+        Ok(Self { roots, entities })
     }
 
     fn canonicalize_payload(&mut self) {
@@ -534,7 +664,7 @@ impl SceneFilePayload for SceneDocument {
     }
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
-        SceneFileCounts::validate_entities(&self.entities, limits)
+        SceneFileCounts::validate_entities(&self.roots, &self.entities, limits)
     }
 }
 
@@ -543,10 +673,9 @@ impl SceneFilePayload for PrefabDocument {
 
     const KIND: &'static str = PREFAB_KIND;
 
-    fn from_wire(wire: Self::Wire) -> Self {
-        Self {
-            entities: wire.entities,
-        }
+    fn from_wire(wire: Self::Wire) -> Result<Self, SceneFormatError> {
+        let (roots, entities) = document_wire_parts(wire.roots, wire.entities)?;
+        Ok(Self { roots, entities })
     }
 
     fn canonicalize_payload(&mut self) {
@@ -558,7 +687,7 @@ impl SceneFilePayload for PrefabDocument {
     }
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
-        SceneFileCounts::validate_entities(&self.entities, limits)
+        SceneFileCounts::validate_entities(&self.roots, &self.entities, limits)
     }
 }
 
@@ -567,8 +696,8 @@ impl SceneFilePayload for ScenePatchDocument {
 
     const KIND: &'static str = SCENE_PATCH_KIND;
 
-    fn from_wire(wire: Self::Wire) -> Self {
-        wire.into_document()
+    fn from_wire(wire: Self::Wire) -> Result<Self, SceneFormatError> {
+        Ok(wire.into_document())
     }
 
     fn canonicalize_payload(&mut self) {}
@@ -949,7 +1078,7 @@ fn decode_json<T: SceneFilePayload>(
         },
     )
     .map_err(|error| map_decode_error(SceneFileEncoding::Json, error))?;
-    finish_decode(T::from_wire(envelope.into_payload()), limits)
+    finish_decode(T::from_wire(envelope.into_payload())?, limits)
 }
 
 fn decode_ron<T: SceneFilePayload>(
@@ -973,7 +1102,7 @@ fn decode_ron<T: SceneFilePayload>(
         },
     )
     .map_err(|error| map_decode_error(SceneFileEncoding::Ron, error))?;
-    finish_decode(T::from_wire(envelope.into_payload()), limits)
+    finish_decode(T::from_wire(envelope.into_payload())?, limits)
 }
 
 #[derive(Debug)]
@@ -1114,6 +1243,7 @@ fn metadata_error(error: impl Error + Send + Sync + 'static) -> SceneFormatError
 #[derive(Default)]
 struct SceneFileCounts {
     entities: usize,
+    placements: usize,
     components: usize,
     prefab_instances: usize,
     patch_operations: usize,
@@ -1123,13 +1253,16 @@ struct SceneFileCounts {
 
 impl SceneFileCounts {
     fn validate_entities(
+        roots: &[SceneEntityId],
         entities: &[SceneEntityRecord],
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
         let mut counts = Self::default();
+        counts.observe_placements(roots.len(), limits)?;
         for entity in entities {
             counts.observe_entity(entity, limits)?;
         }
+        validate_placement_depth(roots, entities, limits)?;
         Ok(())
     }
 
@@ -1152,6 +1285,7 @@ impl SceneFileCounts {
             limits.entities(),
             SceneFileBudgetKind::Entities,
         )?;
+        self.observe_placements(entity.children.len(), limits)?;
         self.observe_diagnostic_source(limits)?;
         increase(
             &mut self.components,
@@ -1231,6 +1365,19 @@ impl SceneFileCounts {
         )
     }
 
+    fn observe_placements(
+        &mut self,
+        amount: usize,
+        limits: SceneFileLimits,
+    ) -> Result<(), SceneFileBudgetError> {
+        increase(
+            &mut self.placements,
+            amount,
+            limits.placements(),
+            SceneFileBudgetKind::Placements,
+        )
+    }
+
     fn observe_component_value(
         &mut self,
         cost: ComponentValueCost,
@@ -1260,6 +1407,44 @@ impl SceneFileCounts {
         self.component_value_cost = observed;
         Ok(())
     }
+}
+
+fn validate_placement_depth(
+    roots: &[SceneEntityId],
+    entities: &[SceneEntityRecord],
+    limits: SceneFileLimits,
+) -> Result<(), SceneFileBudgetError> {
+    let children = entities
+        .iter()
+        .map(|entity| (&entity.id, entity.children.as_slice()))
+        .collect::<BTreeMap<_, _>>();
+    let mut visited = BTreeSet::<&SceneEntityId>::new();
+    let mut pending = roots
+        .iter()
+        .rev()
+        .map(|root| (root, 1_usize))
+        .collect::<Vec<_>>();
+    while let Some((entity, depth)) = pending.pop() {
+        if depth > limits.placement_depth().get() {
+            return Err(SceneFileBudgetError {
+                kind: SceneFileBudgetKind::PlacementDepth,
+                observed: depth,
+                maximum: limits.placement_depth().get(),
+            });
+        }
+        if !visited.insert(entity) {
+            continue;
+        }
+        if let Some(children) = children.get(entity) {
+            pending.extend(
+                children
+                    .iter()
+                    .rev()
+                    .map(|child| (child, depth.saturating_add(1))),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn increase(

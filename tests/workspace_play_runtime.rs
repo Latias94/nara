@@ -596,13 +596,16 @@ fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
     let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
     let root_id = SceneEntityId::new("root").unwrap();
     let child_id = SceneEntityId::new("root/child").unwrap();
-    project.write_scene_source(&SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone())
-            .with_component(transform_id.clone(), transform_record(10.0, 20.0)),
-        SceneEntityRecord::new(child_id.clone())
-            .with_parent(root_id.clone())
-            .with_component(transform_id.clone(), transform_record(3.0, 4.0)),
-    ]));
+    project.write_scene_source(&SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id.clone())
+                .with_children([child_id.clone()])
+                .with_component(transform_id.clone(), transform_record(10.0, 20.0)),
+            SceneEntityRecord::new(child_id.clone())
+                .with_component(transform_id.clone(), transform_record(3.0, 4.0)),
+        ],
+    ));
     let (observations, receiver) = mpsc::sync_channel(128);
     let intent = EditorProjectIntent::new().insert_after::<GameplayCommandPlugin>(
         spatial_observation_definition(child_id, observations),
@@ -684,32 +687,31 @@ fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() 
     project.select_local_headless_profile();
     let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
     let entity_id = SceneEntityId::new("player").unwrap();
-    project.write_scene_source(&SceneDocument::new([SceneEntityRecord::new(
-        entity_id.clone(),
-    )
-    .with_component(
-        transform_id.clone(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::map([
-                (
-                    "translation",
-                    ComponentValue::map([
-                        ("x", ComponentValue::f64(0.0).unwrap()),
-                        ("y", ComponentValue::f64(0.0).unwrap()),
-                    ]),
-                ),
-                ("rotation", ComponentValue::f64(0.0).unwrap()),
-                (
-                    "scale",
-                    ComponentValue::map([
-                        ("x", ComponentValue::f64(1.0).unwrap()),
-                        ("y", ComponentValue::f64(1.0).unwrap()),
-                    ]),
-                ),
-            ]),
+    project.write_scene_source(&SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(entity_id.clone()).with_component(
+            transform_id.clone(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([
+                    (
+                        "translation",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(0.0).unwrap()),
+                            ("y", ComponentValue::f64(0.0).unwrap()),
+                        ]),
+                    ),
+                    ("rotation", ComponentValue::f64(0.0).unwrap()),
+                    (
+                        "scale",
+                        ComponentValue::map([
+                            ("x", ComponentValue::f64(1.0).unwrap()),
+                            ("y", ComponentValue::f64(1.0).unwrap()),
+                        ]),
+                    ),
+                ]),
+            ),
         ),
-    )]));
+    ]));
     let mut editor =
         EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
     assert_eq!(

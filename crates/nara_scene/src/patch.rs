@@ -605,10 +605,14 @@ impl ScenePatchValidationBudgetKind {
 
 fn scene_validation_work(document: &SceneDocument) -> SceneValidationWork {
     SceneValidationWork {
-        structural_items: document.entities.iter().fold(1_usize, |work, entity| {
-            work.saturating_add(1)
-                .saturating_add(entity.components.len())
-        }),
+        structural_items: document.entities.iter().fold(
+            1_usize.saturating_add(document.roots.len()),
+            |work, entity| {
+                work.saturating_add(1)
+                    .saturating_add(entity.children.len())
+                    .saturating_add(entity.components.len())
+            },
+        ),
         value_cost: scene_entities_source_value_cost(&document.entities),
     }
 }
@@ -979,6 +983,10 @@ fn add_owned_entity(
         require_whole_component_edit(registry, &entity.id, component, operation_index)?;
     }
 
+    for child in &entity.children {
+        document.roots.retain(|root| root != child);
+    }
+    document.roots.push(entity.id.clone());
     document.entities.push(entity);
     Ok(())
 }
@@ -1013,6 +1021,10 @@ fn remove_entity_subtree_without_inverse(
     document
         .entities
         .retain(|record| !subtree.contains_key(&record.id));
+    document.roots.retain(|root| !subtree.contains_key(root));
+    for record in &mut document.entities {
+        record.children.retain(|child| !subtree.contains_key(child));
+    }
     Ok(())
 }
 
@@ -1106,6 +1118,10 @@ fn add_entity(
         require_whole_component_edit(registry, &entity.id, component, operation_index)?;
     }
 
+    for child in &entity.children {
+        document.roots.retain(|root| root != child);
+    }
+    document.roots.push(entity.id.clone());
     document.entities.push(entity.clone());
     Ok(vec![ScenePatchOperation::RemoveEntity {
         entity: entity.id.clone(),
@@ -1148,7 +1164,13 @@ fn remove_entity_subtree(
             true
         }
     });
-    removed.sort_by_key(|record| subtree.get(&record.id).copied().unwrap_or(usize::MAX));
+    document.roots.retain(|root| !subtree.contains_key(root));
+    for record in &mut document.entities {
+        record.children.retain(|child| !subtree.contains_key(child));
+    }
+    removed.sort_by_key(|record| {
+        std::cmp::Reverse(subtree.get(&record.id).copied().unwrap_or(usize::MAX))
+    });
 
     Ok(removed
         .into_iter()
@@ -1463,9 +1485,9 @@ fn reparent_entity(
             None,
         ));
     }
-    let record = entity_mut(document, entity, operation_index)?;
-    let previous = record.parent.clone();
-    record.parent = parent.cloned();
+    entity_mut(document, entity, operation_index)?;
+    let previous = placement_parent(document, entity);
+    place_entity_last(document, entity, parent);
     Ok(vec![ScenePatchOperation::Reparent {
         entity: entity.clone(),
         parent: previous,
@@ -1490,9 +1512,39 @@ fn reparent_entity_without_inverse(
             None,
         ));
     }
-    let record = entity_mut(document, entity, operation_index)?;
-    record.parent = parent;
+    entity_mut(document, entity, operation_index)?;
+    place_entity_last(document, entity, parent.as_ref());
     Ok(())
+}
+
+fn placement_parent(document: &SceneDocument, entity: &SceneEntityId) -> Option<SceneEntityId> {
+    document
+        .entities
+        .iter()
+        .find_map(|record| record.children.contains(entity).then(|| record.id.clone()))
+}
+
+fn place_entity_last(
+    document: &mut SceneDocument,
+    entity: &SceneEntityId,
+    parent: Option<&SceneEntityId>,
+) {
+    document.roots.retain(|root| root != entity);
+    for record in &mut document.entities {
+        record.children.retain(|child| child != entity);
+    }
+    match parent {
+        Some(parent) => {
+            if let Some(record) = document
+                .entities
+                .iter_mut()
+                .find(|record| &record.id == parent)
+            {
+                record.children.push(entity.clone());
+            }
+        }
+        None => document.roots.push(entity.clone()),
+    }
 }
 
 fn set_asset_ref_field(
@@ -1870,15 +1922,11 @@ fn subtree_depths(
     document: &SceneDocument,
     root: &SceneEntityId,
 ) -> BTreeMap<SceneEntityId, usize> {
-    let mut children = BTreeMap::<SceneEntityId, Vec<SceneEntityId>>::new();
-    for entity in &document.entities {
-        if let Some(parent) = &entity.parent {
-            children
-                .entry(parent.clone())
-                .or_default()
-                .push(entity.id.clone());
-        }
-    }
+    let children = document
+        .entities
+        .iter()
+        .map(|entity| (entity.id.clone(), entity.children.clone()))
+        .collect::<BTreeMap<_, _>>();
 
     let mut depths = BTreeMap::from([(root.clone(), 0_usize)]);
     let mut pending = vec![root.clone()];

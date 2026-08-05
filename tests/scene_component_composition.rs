@@ -163,7 +163,7 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
     let id = SceneEntityId::new("probe").unwrap();
 
     let mut scene_world = World::new();
-    let scene = SceneDocument::new([record(&id, ComponentSchemaVersion::ONE, 11)]);
+    let scene = SceneDocument::from_ordered_roots([record(&id, ComponentSchemaVersion::ONE, 11)]);
     let scene_report = spawn_scene(&mut scene_world, &registry, &scene);
     assert!(!scene_report.diagnostics.has_errors());
     let scene_entity = resolved_entity(&scene_world, &scene_report, &id);
@@ -188,7 +188,11 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
     );
 
     let mut prefab_world = World::new();
-    let prefab = PrefabDocument::new([record(&id, ComponentSchemaVersion::new(2).unwrap(), 12)]);
+    let prefab = PrefabDocument::from_ordered_roots([record(
+        &id,
+        ComponentSchemaVersion::new(2).unwrap(),
+        12,
+    )]);
     let prefab_report = spawn_prefab(&mut prefab_world, &registry, &prefab);
     assert!(!prefab_report.diagnostics.has_errors());
     let prefab_entity = resolved_entity(&prefab_world, &prefab_report, &id);
@@ -203,7 +207,9 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
     );
 
     let mut session =
-        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())]));
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            id.clone(),
+        )]));
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
         entity: id.clone(),
         component: component_id(),
@@ -254,7 +260,11 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
 fn fresh_scene_apply_flushes_and_rejects_dynamic_hooks_before_allocation() {
     let registry = frozen_registry();
     let id = SceneEntityId::new("hooked").unwrap();
-    let scene = SceneDocument::new([record(&id, ComponentSchemaVersion::new(2).unwrap(), 21)]);
+    let scene = SceneDocument::from_ordered_roots([record(
+        &id,
+        ComponentSchemaVersion::new(2).unwrap(),
+        21,
+    )]);
     let mut world = World::new();
     world.init_resource::<HookCanary>();
     world.register_component::<CompositionProbe>();
@@ -291,7 +301,11 @@ fn fresh_scene_apply_flushes_and_rejects_dynamic_hooks_before_allocation() {
 fn late_required_component_metadata_rejects_public_apply_before_persistent_mutation() {
     let registry = frozen_registry();
     let id = SceneEntityId::new("required").unwrap();
-    let scene = SceneDocument::new([record(&id, ComponentSchemaVersion::new(2).unwrap(), 22)]);
+    let scene = SceneDocument::from_ordered_roots([record(
+        &id,
+        ComponentSchemaVersion::new(2).unwrap(),
+        22,
+    )]);
     let mut scene_world = World::new();
     scene_world.register_required_components::<CompositionProbe, ImplicitDependency>();
     scene_world.flush();
@@ -345,7 +359,11 @@ fn late_required_component_metadata_rejects_public_apply_before_persistent_mutat
 fn post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply() {
     let registry = frozen_registry();
     let id = SceneEntityId::new("observed").unwrap();
-    let scene = SceneDocument::new([record(&id, ComponentSchemaVersion::new(2).unwrap(), 31)]);
+    let scene = SceneDocument::from_ordered_roots([record(
+        &id,
+        ComponentSchemaVersion::new(2).unwrap(),
+        31,
+    )]);
     let mut world = World::new();
     world.init_resource::<HookCanary>();
     let report = spawn_scene(&mut world, &registry, &scene);
@@ -387,7 +405,11 @@ fn post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply()
 fn component_global_observer_rejects_a_fresh_scene_without_running() {
     let registry = frozen_registry();
     let id = SceneEntityId::new("observed").unwrap();
-    let scene = SceneDocument::new([record(&id, ComponentSchemaVersion::new(2).unwrap(), 41)]);
+    let scene = SceneDocument::from_ordered_roots([record(
+        &id,
+        ComponentSchemaVersion::new(2).unwrap(),
+        41,
+    )]);
     let mut world = World::new();
     world.init_resource::<HookCanary>();
     world.add_observer(
@@ -419,7 +441,11 @@ fn component_global_observer_rejects_a_fresh_scene_without_running() {
 fn identity_resource_observer_rejects_before_scene_allocation() {
     let registry = frozen_registry();
     let id = SceneEntityId::new("identity-observed").unwrap();
-    let scene = SceneDocument::new([record(&id, ComponentSchemaVersion::new(2).unwrap(), 51)]);
+    let scene = SceneDocument::from_ordered_roots([record(
+        &id,
+        ComponentSchemaVersion::new(2).unwrap(),
+        51,
+    )]);
     let mut world = World::new();
     world.init_resource::<HookCanary>();
     world.add_observer(

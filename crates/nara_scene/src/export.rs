@@ -320,14 +320,14 @@ pub fn export_scene_with_options(
 
         records.push(SceneEntityRecord {
             id,
-            parent: None,
+            children: Vec::new(),
             components,
             prefab: None,
         });
     }
 
     let output = (!diagnostics.has_errors()).then(|| SceneExportOutput {
-        document: SceneDocument::new(records),
+        document: SceneDocument::from_ordered_roots(records),
         remap: SceneExportRemap {
             source_domain: domain.id(),
             entries: remap_entries,

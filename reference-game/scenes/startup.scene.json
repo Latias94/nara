@@ -7,9 +7,16 @@
     "version": "0.1.0"
   },
   "payload": {
+    "roots": [
+      "enemy-anchor",
+      "enemy-anchor-2",
+      "enemy-anchor-3",
+      "player"
+    ],
     "entities": [
       {
         "id": "enemy-anchor",
+        "children": [],
         "components": {
           "nara.transform.Transform2d": {
             "version": 1,
@@ -63,6 +70,7 @@
       },
       {
         "id": "enemy-anchor-2",
+        "children": [],
         "components": {
           "nara.transform.Transform2d": {
             "version": 1,
@@ -143,6 +151,7 @@
       },
       {
         "id": "enemy-anchor-3",
+        "children": [],
         "components": {
           "nara.transform.Transform2d": {
             "version": 1,
@@ -223,6 +232,9 @@
       },
       {
         "id": "player",
+        "children": [
+          "player-weapon"
+        ],
         "components": {
           "nara.sprite.Sprite": {
             "version": 1,
@@ -430,7 +442,7 @@
       },
       {
         "id": "player-weapon",
-        "parent": "player",
+        "children": [],
         "components": {
           "nara.sprite.Sprite": {
             "version": 1,

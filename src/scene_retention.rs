@@ -4,7 +4,8 @@ use nara_asset::AssetRef;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use nara_scene::PrefabDocument;
 use nara_scene::{
-    PrefabInstance, SceneDocument, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    PrefabInstance, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation,
 };
 
 pub(crate) const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
@@ -18,7 +19,13 @@ pub(crate) struct SceneRetentionOverflow;
 pub(crate) fn scene_retained_bytes(
     document: &SceneDocument,
 ) -> Result<usize, SceneRetentionOverflow> {
-    document_retained_bytes(size_of::<SceneDocument>(), &document.entities)
+    document_retained_bytes(
+        size_of::<SceneDocument>(),
+        &document.roots,
+        document.roots.capacity(),
+        &document.entities,
+        document.entities.capacity(),
+    )
 }
 
 pub(crate) fn direct_startup_scene_retained_bytes(
@@ -31,16 +38,26 @@ pub(crate) fn direct_startup_scene_retained_bytes(
 pub(crate) fn prefab_retained_bytes(
     document: &PrefabDocument,
 ) -> Result<usize, SceneRetentionOverflow> {
-    document_retained_bytes(size_of::<PrefabDocument>(), &document.entities)
+    document_retained_bytes(
+        size_of::<PrefabDocument>(),
+        &document.roots,
+        document.roots.capacity(),
+        &document.entities,
+        document.entities.capacity(),
+    )
 }
 
 fn document_retained_bytes(
     document_bytes: usize,
+    roots: &[SceneEntityId],
+    root_capacity: usize,
     entities: &[SceneEntityRecord],
+    entity_capacity: usize,
 ) -> Result<usize, SceneRetentionOverflow> {
     let mut total = checked_sum([
         document_bytes,
-        checked_product(entities.len(), size_of::<SceneEntityRecord>())?,
+        scene_entity_ids_retained_bytes(roots, root_capacity)?,
+        checked_product(entity_capacity, size_of::<SceneEntityRecord>())?,
     ])?;
     for entity in entities {
         checked_add_to(&mut total, entity_dynamic_bytes(entity)?)?;
@@ -50,9 +67,10 @@ fn document_retained_bytes(
 
 fn entity_dynamic_bytes(entity: &SceneEntityRecord) -> Result<usize, SceneRetentionOverflow> {
     let mut total = string_retained_bytes(entity.id.as_str())?;
-    if let Some(parent) = &entity.parent {
-        checked_add_to(&mut total, string_retained_bytes(parent.as_str())?)?;
-    }
+    checked_add_to(
+        &mut total,
+        scene_entity_ids_retained_bytes(&entity.children, entity.children.capacity())?,
+    )?;
     for (id, record) in &entity.components {
         checked_add_to(
             &mut total,
@@ -71,6 +89,17 @@ fn entity_dynamic_bytes(entity: &SceneEntityRecord) -> Result<usize, SceneRetent
     Ok(total)
 }
 
+fn scene_entity_ids_retained_bytes(
+    entity_ids: &[SceneEntityId],
+    capacity: usize,
+) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = checked_product(capacity, size_of::<SceneEntityId>())?;
+    for entity_id in entity_ids {
+        checked_add_to(&mut total, string_retained_bytes(entity_id.as_str())?)?;
+    }
+    Ok(total)
+}
+
 fn prefab_instance_retained_bytes(
     instance: &PrefabInstance,
 ) -> Result<usize, SceneRetentionOverflow> {
@@ -84,7 +113,10 @@ fn prefab_instance_retained_bytes(
 pub(crate) fn patch_retained_bytes(
     patch: &ScenePatchDocument,
 ) -> Result<usize, SceneRetentionOverflow> {
-    let mut total = checked_product(patch.operations.len(), size_of::<ScenePatchOperation>())?;
+    let mut total = checked_product(
+        patch.operations.capacity(),
+        size_of::<ScenePatchOperation>(),
+    )?;
     for operation in &patch.operations {
         let dynamic = match operation {
             ScenePatchOperation::AddEntity { entity } => entity_dynamic_bytes(entity)?,
@@ -188,4 +220,41 @@ fn checked_sum<const N: usize>(values: [usize; N]) -> Result<usize, SceneRetenti
 fn checked_add_to(total: &mut usize, value: usize) -> Result<(), SceneRetentionOverflow> {
     *total = total.checked_add(value).ok_or(SceneRetentionOverflow)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scene_id(value: &str) -> SceneEntityId {
+        SceneEntityId::new(value).expect("test scene entity id must be valid")
+    }
+
+    #[test]
+    fn scene_retention_counts_ordered_roots_and_children() {
+        let root = scene_id("root");
+        let child = scene_id("root/child");
+        let mut roots = Vec::with_capacity(3);
+        roots.push(root.clone());
+        let mut children = Vec::with_capacity(4);
+        children.push(child.clone());
+        let mut entities = Vec::with_capacity(5);
+        entities.push(SceneEntityRecord::new(root.clone()).with_children(children));
+        entities.push(SceneEntityRecord::new(child.clone()));
+        let document = SceneDocument { roots, entities };
+
+        let expected = checked_sum([
+            size_of::<SceneDocument>(),
+            document.roots.capacity() * size_of::<SceneEntityId>(),
+            string_retained_bytes(root.as_str()).unwrap(),
+            document.entities.capacity() * size_of::<SceneEntityRecord>(),
+            string_retained_bytes(root.as_str()).unwrap(),
+            document.entities[0].children.capacity() * size_of::<SceneEntityId>(),
+            string_retained_bytes(child.as_str()).unwrap(),
+            string_retained_bytes(child.as_str()).unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(scene_retained_bytes(&document).unwrap(), expected);
+    }
 }

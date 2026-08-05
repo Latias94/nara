@@ -21,10 +21,13 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
     let registry = test_registry();
     let player = scene_id("player");
     let child = scene_id("player/child");
-    let document = SceneDocument::new([
-        labeled_entity(player.clone(), "Player"),
-        SceneEntityRecord::new(child.clone()).with_parent(player.clone()),
-    ]);
+    let document = SceneDocument::new(
+        [player.clone()],
+        [
+            labeled_entity(player.clone(), "Player").with_children([child.clone()]),
+            SceneEntityRecord::new(child.clone()),
+        ],
+    );
     let mut session = SceneAuthoringSession::new(document);
     let mut inspector = SceneInspectorState::new();
     inspector.select_entity(Some(player.clone()));
@@ -90,7 +93,7 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
 fn inspector_model_omits_components_without_observation_eligibility() {
     let registry = visibility_registry();
     let player = scene_id("player");
-    let document = SceneDocument::new([labeled_entity(player.clone(), "Player")
+    let document = SceneDocument::from_ordered_roots([labeled_entity(player.clone(), "Player")
         .with_component(
             hidden_type_id(),
             SceneComponentRecord::new(
@@ -128,7 +131,7 @@ fn inspector_model_omits_components_without_observation_eligibility() {
 fn inspector_model_does_not_project_an_unfrozen_registry_candidate() {
     let registry = building_test_registry();
     let player = scene_id("player");
-    let session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
+    let session = SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
         player.clone(),
         "Player",
     )]));
@@ -152,10 +155,11 @@ fn inspector_model_does_not_project_an_unfrozen_registry_candidate() {
 fn inspector_read_only_field_command_is_failure_atomic() {
     let registry = visibility_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let before = session.document().clone();
     let mut inspector = SceneInspectorState::new();
     inspector.select_entity(Some(player.clone()));
@@ -186,10 +190,11 @@ fn inspector_read_only_field_command_is_failure_atomic() {
 fn inspector_set_field_command_applies_patch_and_selects_target() {
     let registry = test_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let mut inspector = SceneInspectorState::new();
 
     let report = inspector.apply_command(
@@ -225,10 +230,11 @@ fn inspector_selection_rejects_missing_entities_without_losing_selection() {
     let registry = test_registry();
     let player = scene_id("player");
     let missing = scene_id("missing");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let mut inspector = SceneInspectorState::new();
     assert!(
         inspector
@@ -268,10 +274,11 @@ fn inspector_selection_rejects_missing_entities_without_losing_selection() {
 fn inspector_failed_patch_command_does_not_enter_history() {
     let registry = test_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let mut inspector = SceneInspectorState::new();
     inspector.select_entity(Some(player.clone()));
 
@@ -316,8 +323,10 @@ fn inspector_migrates_legacy_component_for_display_and_atomic_edit() {
         ComponentValue::map([("x", ComponentValue::I64(7))]),
     );
     let mut session =
-        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(player.clone())
-            .with_component(position_type_id(), legacy.clone())]));
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            player.clone(),
+        )
+        .with_component(position_type_id(), legacy.clone())]));
     let mut inspector = SceneInspectorState::new();
     inspector.select_entity(Some(player.clone()));
 

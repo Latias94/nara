@@ -243,13 +243,14 @@ fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutat
 fn prefab_stable_asset_id_uses_asset_database_preflight() {
     let registry = component_registry();
     let database = asset_database(PLAYER_STABLE_ID, "textures/player.png");
-    let prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
-        ComponentTypeId::new("nara.sprite.Sprite"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(1),
-            sprite_value(asset_ref_value("stable_id", PLAYER_STABLE_ID)),
-        ),
-    )]);
+    let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                sprite_value(asset_ref_value("stable_id", PLAYER_STABLE_ID)),
+            ),
+        )]);
     let mut world = World::new();
 
     let report = spawn_prefab_with_asset_database(&mut world, &registry, &prefab, &database);
@@ -263,13 +264,14 @@ fn prefab_stable_asset_id_uses_asset_database_preflight() {
 #[test]
 fn prefab_patch_field_override_preserves_inherited_sprite_data() {
     let registry = component_registry();
-    let prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
-        ComponentTypeId::new("nara.sprite.Sprite"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(1),
-            sprite_value(asset_ref_value("path", "textures/player.png")),
-        ),
-    )]);
+    let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                sprite_value(asset_ref_value("path", "textures/player.png")),
+            ),
+        )]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: scene_id("player"),
         component: ComponentTypeId::new("nara.sprite.Sprite"),
@@ -294,13 +296,14 @@ fn prefab_patch_field_override_preserves_inherited_sprite_data() {
 #[test]
 fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
     let registry = component_registry();
-    let prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
-        ComponentTypeId::new("nara.sprite.Sprite"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(1),
-            sprite_value(ComponentValue::Null),
-        ),
-    )]);
+    let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                sprite_value(ComponentValue::Null),
+            ),
+        )]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetAssetRefField {
         entity: scene_id("player"),
         component: ComponentTypeId::new("nara.sprite.Sprite"),
@@ -362,13 +365,14 @@ fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
         "tilesets/basic.tileset.ron",
         AssetSourceKind::Other("tileset".to_string()),
     );
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("tiles")).with_component(
-        ComponentTypeId::new("nara.tilemap.Tilemap"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(1),
-            tilemap_value(asset_ref_value("stable_id", TILESET_STABLE_ID)),
-        ),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("tiles"))
+        .with_component(
+            ComponentTypeId::new("nara.tilemap.Tilemap"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                tilemap_value(asset_ref_value("stable_id", TILESET_STABLE_ID)),
+            ),
+        )]);
     let mut world = World::new();
 
     let report = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
@@ -435,7 +439,7 @@ fn scene_id(id: &str) -> SceneEntityId {
 }
 
 fn sprite_scene(texture: ComponentValue) -> SceneDocument {
-    SceneDocument::new([SceneEntityRecord::new(scene_id("player"))
+    SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
         .with_component(
             ComponentTypeId::new("nara.scene.Name"),
             SceneComponentRecord::new(

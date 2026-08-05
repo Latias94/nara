@@ -504,6 +504,7 @@ fn post_migration_format_error(error: SceneFormatError) -> SceneFilePublicationE
         SceneFormatError::Header { .. } => "header",
         SceneFormatError::Contract(_) => "contract",
         SceneFormatError::EmbeddedPatchFormatVersion { .. } => "embedded-patch-version",
+        SceneFormatError::LegacyPlacementShape { .. } => "legacy-placement-shape",
         SceneFormatError::Payload { .. } => "payload",
         SceneFormatError::Budget(_) => "domain-budget",
         SceneFormatError::Encode { .. } => "encode",

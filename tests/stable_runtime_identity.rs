@@ -15,7 +15,7 @@ fn scene_commands_and_tooling_share_one_world_scoped_identity_contract() {
         .freeze()
         .expect("component registry should freeze before scene spawn");
     let entity_id = SceneEntityId::new("player").unwrap();
-    let document = SceneDocument::new([SceneEntityRecord::new(entity_id.clone())]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity_id.clone())]);
     let mut world = World::new();
     world.spawn_empty();
 

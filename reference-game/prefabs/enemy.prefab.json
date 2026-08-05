@@ -7,9 +7,13 @@
     "version": "0.1.0"
   },
   "payload": {
+    "roots": [
+      "enemy"
+    ],
     "entities": [
       {
         "id": "enemy",
+        "children": [],
         "components": {
           "nara.sprite.Sprite": {
             "version": 1,

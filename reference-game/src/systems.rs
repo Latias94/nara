@@ -187,6 +187,11 @@ fn prepare_reference_run(
     let weapon_schema = Weapon::persistent_component_schema();
     let transform_type = ComponentTypeId::new("nara.transform.Transform2d");
     let sprite_type = ComponentTypeId::new("nara.sprite.Sprite");
+    let player_children = source
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == PLAYER_SCENE_ID)
+        .map(|entity| &entity.children);
     for entity in &source.entities {
         let player = decode_current_component::<PlayerRole>(entity, &player_role_schema)?;
         let enemy = decode_current_component::<EnemyRole>(entity, &enemy_role_schema)?;
@@ -244,10 +249,7 @@ fn prepare_reference_run(
         if let Some(config) = weapon_config {
             if weapon.is_some()
                 || entity.id.as_str() != PLAYER_WEAPON_SCENE_ID
-                || entity
-                    .parent
-                    .as_ref()
-                    .is_none_or(|parent| parent.as_str() != PLAYER_SCENE_ID)
+                || player_children.is_none_or(|children| !children.contains(&entity.id))
                 || !has_transform
                 || !has_sprite
             {

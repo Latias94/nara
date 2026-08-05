@@ -144,7 +144,7 @@ fn diagnostic_identifier<'a>(diagnostic: &'a Diagnostic, key: &str) -> Option<&'
 }
 
 fn sample_scene() -> SceneDocument {
-    SceneDocument::new([
+    SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("camera"))
             .with_component(
                 name_id(),

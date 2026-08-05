@@ -113,7 +113,14 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .iter()
         .find(|entity| entity.id.as_str() == "player-weapon")
         .unwrap();
-    assert_eq!(weapon.parent.as_ref().unwrap().as_str(), "player");
+    assert_eq!(
+        player
+            .children
+            .iter()
+            .map(|entity| entity.as_str())
+            .collect::<Vec<_>>(),
+        ["player-weapon"]
+    );
     assert!(
         weapon
             .components
@@ -134,7 +141,19 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .iter()
         .find(|entity| entity.id.as_str() == "enemy-anchor/enemy")
         .unwrap();
-    assert_eq!(enemy.parent.as_ref().unwrap().as_str(), "enemy-anchor");
+    let enemy_anchor = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "enemy-anchor")
+        .unwrap();
+    assert_eq!(
+        enemy_anchor
+            .children
+            .iter()
+            .map(|entity| entity.as_str())
+            .collect::<Vec<_>>(),
+        ["enemy-anchor/enemy"]
+    );
     assert!(
         enemy
             .components

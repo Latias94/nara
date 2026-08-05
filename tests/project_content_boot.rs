@@ -78,7 +78,7 @@ fn source_changes_publish_a_distinct_revision_without_mutating_old_consumers() {
 
     let mut changed_entities = first_prefab.entities.clone();
     changed_entities.push(SceneEntityRecord::new(scene_id("variant")));
-    project.write_prefab_source(&PrefabDocument::new(changed_entities));
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots(changed_entities));
 
     let second = loader.load(&candidate, &plan).unwrap();
     assert_ne!(second.revision(), first_revision);

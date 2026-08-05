@@ -281,6 +281,7 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let second_anchor = enemy_anchor("enemy-anchor-2", Some((9.0, 5)), registry);
     let third_anchor = enemy_anchor("enemy-anchor-3", Some((13.0, 9)), registry);
     let player = SceneEntityRecord::new(scene_id("player"))
+        .with_children([scene_id("player-weapon")])
         .with_component(
             sprite_id.clone(),
             SceneComponentRecord::new(
@@ -318,7 +319,6 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
             component_record(PlayerRole {}, &player_role_id, registry),
         );
     let weapon = SceneEntityRecord::new(scene_id("player-weapon"))
-        .with_parent(scene_id("player"))
         .with_component(
             sprite_id,
             SceneComponentRecord::new(ComponentSchemaVersion::ONE, weapon_sprite_value()),
@@ -335,7 +335,15 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
             weapon_id.clone(),
             component_record(Weapon::fixture(), &weapon_id, registry),
         );
-    SceneDocument::new([anchor, second_anchor, third_anchor, player, weapon])
+    SceneDocument::new(
+        [
+            scene_id("enemy-anchor"),
+            scene_id("enemy-anchor-2"),
+            scene_id("enemy-anchor-3"),
+            scene_id("player"),
+        ],
+        [anchor, second_anchor, third_anchor, player, weapon],
+    )
 }
 
 fn enemy_anchor(
@@ -426,7 +434,7 @@ pub fn expected_enemy_prefab(plan: &RuntimePlan) -> PrefabDocument {
             wave_spawn_id.clone(),
             component_record(WaveSpawn::fixture(), &wave_spawn_id, registry),
         );
-    PrefabDocument::new([enemy])
+    PrefabDocument::from_ordered_roots([enemy])
 }
 
 fn weapon_sprite_value() -> ComponentValue {

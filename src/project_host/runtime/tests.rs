@@ -1604,6 +1604,32 @@ fn public_failure_diagnostics_preserve_safe_phase_and_owner_identity() {
         Some("runtime-2d")
     );
 
+    let alternatives = runtime_plan_failure_report(&RuntimePlanError::Composition(
+        CompositionError::UnrequestedProductCapabilityAlternatives {
+            plugin: BUILD_FAILURE_PLUGIN_ID,
+            alternatives: nara_project::ProductCapabilitySet::from_capabilities([
+                nara_project::ProductCapability::RuntimeUi,
+                nara_project::ProductCapability::Runtime2d,
+            ]),
+        },
+    ));
+    assert_eq!(
+        identifier_field(&alternatives, "project.run.composition-invalid", "reason"),
+        Some("unrequested-product-capability-alternatives")
+    );
+    assert_eq!(
+        identifier_field(&alternatives, "project.run.composition-invalid", "plugin"),
+        Some(BUILD_FAILURE_PLUGIN_ID.as_str())
+    );
+    assert_eq!(
+        identifier_field(
+            &alternatives,
+            "project.run.composition-invalid",
+            "alternatives"
+        ),
+        Some("runtime-2d/runtime-ui")
+    );
+
     let plan = runtime_plan_failure_report(&RuntimePlanError::PluginPlan(
         nara_app::PluginPlanError::MissingPlugin {
             plugin: BUILD_FAILURE_PLUGIN_ID,
@@ -2097,7 +2123,9 @@ requested = ["runtime-2d"]
             );
         fs::write(
             project.root.join("scenes/startup.scene.json"),
-            SceneDocument::new([entity]).to_json_string().unwrap(),
+            SceneDocument::from_ordered_roots([entity])
+                .to_json_string()
+                .unwrap(),
         )
         .unwrap();
         fs::copy(

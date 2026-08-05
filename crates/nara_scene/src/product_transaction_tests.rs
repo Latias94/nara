@@ -51,7 +51,7 @@ impl ReplacementFixture {
         let mut registry = ComponentRegistry::new();
         registry.freeze().unwrap();
         let target = scene_id("player");
-        let document = SceneDocument::new([SceneEntityRecord::new(target.clone())]);
+        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(target.clone())]);
         let mut world = World::new();
         world.insert_resource(RunState(1));
         let initial = spawn_scene(&mut world, &registry, &document);
@@ -166,10 +166,13 @@ fn product_replacement_commits_one_coherent_scene_generation() {
     registry.freeze().unwrap();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
-    ]);
+    let document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    );
     let mut world = World::new();
     world.insert_resource(RunState(1));
     world.register_component::<RuntimeValue>();
@@ -421,13 +424,14 @@ fn authored_component_collision_is_rejected_before_candidate_allocation() {
     register_scene_components(&mut registry).unwrap();
     registry.freeze().unwrap();
     let target = scene_id("player");
-    let document = SceneDocument::new([SceneEntityRecord::new(target.clone()).with_component(
-        nara_reflect::ComponentTypeId::new("nara.scene.Name"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::String("Player".to_owned()),
-        ),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(target.clone())
+        .with_component(
+            nara_reflect::ComponentTypeId::new("nara.scene.Name"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("Player".to_owned()),
+            ),
+        )]);
     let mut world = World::new();
     world.insert_resource(RunState(1));
     let initial = spawn_scene(&mut world, &registry, &document);
@@ -515,10 +519,13 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
     registry.freeze().unwrap();
     let root = scene_id("root");
     let child = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root),
-        SceneEntityRecord::new(child.clone()).with_parent(scene_id("root")),
-    ]);
+    let document = SceneDocument::new(
+        [root.clone()],
+        [
+            SceneEntityRecord::new(root).with_children([child.clone()]),
+            SceneEntityRecord::new(child.clone()),
+        ],
+    );
     let mut app = App::new();
     app.add_plugin(HierarchyPlugin).unwrap();
     app.insert_resource(RunState(1)).unwrap();

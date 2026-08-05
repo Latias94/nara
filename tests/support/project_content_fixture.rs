@@ -69,7 +69,7 @@ requested = ["runtime-2d"]
             source,
             overrides: nara::scene::ScenePatchDocument::default(),
         });
-        let scene = SceneDocument::new([anchor]);
+        let scene = SceneDocument::from_ordered_roots([anchor]);
         let image = AssetRef::path("textures/player.png").unwrap();
         let enemy = SceneEntityRecord::new(scene_id("enemy"))
             .with_component(
@@ -80,7 +80,7 @@ requested = ["runtime-2d"]
                 ComponentTypeId::new("nara.sprite.Sprite"),
                 SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
             );
-        let prefab = PrefabDocument::new([enemy]);
+        let prefab = PrefabDocument::from_ordered_roots([enemy]);
         fs::write(
             root.join("scenes/startup.scene.json"),
             scene.to_json_string().unwrap(),

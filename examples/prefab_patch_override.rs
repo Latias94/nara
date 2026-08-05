@@ -14,8 +14,9 @@ fn main() {
         .expect("component registry should freeze before scene expansion");
 
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
-    let enemy_prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))
-        .with_component(sprite_id(), SceneComponentRecord::new(v1(), sprite_value()))]);
+    let enemy_prefab =
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))
+            .with_component(sprite_id(), SceneComponentRecord::new(v1(), sprite_value()))]);
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), enemy_prefab);
     let overrides = ScenePatchDocument::new([
         ScenePatchOperation::SetField {
@@ -33,9 +34,9 @@ fn main() {
             asset_ref: AssetRef::path("textures/enemy.png").unwrap(),
         },
     ]);
-    let scene = SceneDocument::new([SceneEntityRecord {
+    let scene = SceneDocument::from_ordered_roots([SceneEntityRecord {
         id: scene_id("enemy"),
-        parent: None,
+        children: Vec::new(),
         components: Default::default(),
         prefab: Some(PrefabInstance { source, overrides }),
     }]);

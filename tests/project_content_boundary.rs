@@ -5,7 +5,8 @@ mod project_content_fixture;
 #[cfg(all(feature = "serde", feature = "runtime-2d"))]
 use nara::{
     asset::{AssetPath, AssetRef, AssetSourceKind, StableAssetId},
-    project_host::{ProjectContentErrorKind, ProjectContentLoader},
+    diagnostic::{DiagnosticFieldClass, DiagnosticValueRef},
+    project_host::{ProjectContentError, ProjectContentErrorKind, ProjectContentLoader},
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
@@ -29,7 +30,7 @@ fn stable_id_prefab_references_reject_without_asset_root_scanning() {
         source: AssetRef::StableId(stable_id),
         overrides: ScenePatchDocument::default(),
     });
-    let scene = SceneDocument::new([anchor]);
+    let scene = SceneDocument::from_ordered_roots([anchor]);
     std::fs::write(
         project.path().join("scenes/startup.scene.json"),
         scene.to_json_string().unwrap(),
@@ -88,7 +89,7 @@ fn stable_id_component_asset_references_reject_without_catalogue_scanning() {
             sprite_value(&AssetRef::StableId(stable_id)),
         ),
     );
-    project.write_prefab_source(&PrefabDocument::new([enemy]));
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([enemy]));
     let loader = ProjectContentLoader::new(root).unwrap();
 
     let error = loader.load(&candidate, &plan).unwrap_err();
@@ -124,7 +125,7 @@ fn document_catalog_mismatch_rejects_without_partial_publication() {
         ComponentTypeId::new("nara.test.MissingFromFrozenCatalog"),
         SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
     );
-    project.write_scene_source(&SceneDocument::new([unknown]));
+    project.write_scene_source(&SceneDocument::from_ordered_roots([unknown]));
     let (candidate, plan, root) = project.candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
 
@@ -165,7 +166,7 @@ fn duplicate_stable_asset_ids_reject_the_complete_closure_atomically() {
     project.write_asset("textures/other.png", valid_png_bytes(), &duplicate);
     let player = AssetRef::path("textures/player.png").unwrap();
     let other = AssetRef::path("textures/other.png").unwrap();
-    project.write_prefab_source(&PrefabDocument::new([
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("enemy-player")).with_component(
             ComponentTypeId::new("nara.sprite.Sprite"),
             SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&player)),
@@ -192,7 +193,7 @@ fn cyclic_prefab_closure_rejects_without_requeue_or_partial_publication() {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
         overrides: ScenePatchDocument::default(),
     });
-    project.write_prefab_source(&PrefabDocument::new([cyclic]));
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([cyclic]));
     let loader = ProjectContentLoader::new(root).unwrap();
 
     let error = loader.load(&candidate, &plan).unwrap_err();
@@ -218,6 +219,97 @@ fn hostile_scene_and_image_inputs_publish_no_snapshot_or_residency() {
     let error = loader.load(&candidate, &plan).unwrap_err();
     assert_eq!(error.kind(), ProjectContentErrorKind::ImageImport);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+}
+
+#[test]
+fn legacy_scene_parent_shape_reports_an_actionable_bounded_diagnostic() {
+    let project = TestProject::with_prefab_startup();
+    project.write_scene_bytes(
+        br#"{
+            "kind":"scene",
+            "format_version":1,
+            "engine_min_version":"0.1.0",
+            "generator":{"name":"test","version":"0.1.0"},
+            "payload":{
+                "roots":["current-root","legacy-root"],
+                "entities":[
+                    {"id":"current-root"},
+                    {"id":"legacy-root","parent":null}
+                ]
+            }
+        }"#,
+    );
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+
+    let error = loader.load(&candidate, &plan).unwrap_err();
+
+    assert_legacy_placement_diagnostic(
+        &error,
+        "project.content.scene-legacy-placement-shape",
+        "Rewrite the legacy scene with ordered roots and parent-owned children; sibling order cannot be inferred",
+        "scene",
+        "startup.scene.json",
+        1,
+    );
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+}
+
+#[test]
+fn legacy_prefab_parent_shape_reports_an_actionable_bounded_diagnostic() {
+    let project = TestProject::with_prefab_startup();
+    project.write_prefab_bytes(
+        "enemy.prefab.json",
+        br#"{
+            "kind":"prefab",
+            "format_version":1,
+            "engine_min_version":"0.1.0",
+            "generator":{"name":"test","version":"0.1.0"},
+            "payload":{
+                "roots":["legacy-root"],
+                "entities":[{"id":"legacy-root","parent":"removed-parent"}]
+            }
+        }"#,
+    );
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+
+    let error = loader.load(&candidate, &plan).unwrap_err();
+
+    assert_legacy_placement_diagnostic(
+        &error,
+        "project.content.prefab-legacy-placement-shape",
+        "Rewrite the legacy prefab with ordered roots and parent-owned children; sibling order cannot be inferred",
+        "prefab",
+        "enemy.prefab.json",
+        0,
+    );
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+}
+
+fn assert_legacy_placement_diagnostic(
+    error: &ProjectContentError,
+    code: &str,
+    summary: &str,
+    source_key: &str,
+    source_path: &str,
+    entity_index: u64,
+) {
+    assert_eq!(error.kind(), ProjectContentErrorKind::SceneFormat);
+    let diagnostic = error.diagnostics().iter().next().unwrap();
+    assert_eq!(diagnostic.code().as_str(), code);
+    assert_eq!(diagnostic.summary().as_str(), summary);
+    assert_eq!(diagnostic.fields().len(), 2);
+    assert!(diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == source_key
+            && field.class() == DiagnosticFieldClass::Public
+            && field.value() == DiagnosticValueRef::Identifier(source_path)
+    }));
+    assert!(diagnostic.fields().iter().any(|field| {
+        field.key().as_str() == "entity_index"
+            && field.class() == DiagnosticFieldClass::Public
+            && field.value() == DiagnosticValueRef::Unsigned(entity_index)
+    }));
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -291,35 +383,44 @@ fn parented_transform_loads_while_inherited_visibility_remains_fail_closed() {
     };
     let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
     let parent = SceneEntityRecord::new(scene_id("parent"))
+        .with_children([scene_id("child")])
         .with_component(transform_id.clone(), transform_record(10.0, 20.0));
     let child = SceneEntityRecord::new(scene_id("child"))
-        .with_parent(scene_id("parent"))
         .with_component(transform_id.clone(), transform_record(3.0, 4.0));
-    transform_project.write_scene_source(&SceneDocument::new([parent, child]));
+    transform_project
+        .write_scene_source(&SceneDocument::new([scene_id("parent")], [parent, child]));
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let expanded = snapshot.expanded_startup_scene();
+    let parent = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("parent"))
+        .unwrap();
     let child = expanded
         .entities
         .iter()
         .find(|entity| entity.id == scene_id("child"))
         .unwrap();
-    assert_eq!(child.parent.as_ref(), Some(&scene_id("parent")));
+    assert_eq!(parent.children, [scene_id("child")]);
     assert!(child.components.contains_key(&transform_id));
     drop(snapshot);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 
     let visibility_project = TestProject::with_prefab_startup();
     let (candidate, plan, root) = visibility_project.candidate_plan_and_root();
-    let parent = SceneEntityRecord::new(scene_id("parent")).with_component(
-        ComponentTypeId::new("nara.scene.Visibility"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::String("hidden".to_owned()),
-        ),
-    );
-    let child = SceneEntityRecord::new(scene_id("child")).with_parent(scene_id("parent"));
-    visibility_project.write_scene_source(&SceneDocument::new([parent, child]));
+    let parent = SceneEntityRecord::new(scene_id("parent"))
+        .with_children([scene_id("child")])
+        .with_component(
+            ComponentTypeId::new("nara.scene.Visibility"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("hidden".to_owned()),
+            ),
+        );
+    let child = SceneEntityRecord::new(scene_id("child"));
+    visibility_project
+        .write_scene_source(&SceneDocument::new([scene_id("parent")], [parent, child]));
     let loader = ProjectContentLoader::new(root).unwrap();
     let error = loader.load(&candidate, &plan).unwrap_err();
     assert_eq!(

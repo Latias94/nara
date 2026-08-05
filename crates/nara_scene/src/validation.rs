@@ -30,6 +30,23 @@ pub(crate) struct PreparedSceneComponent {
     pub(crate) prepared: PreparedComponent,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ValidatedScenePlacement {
+    parents: BTreeMap<SceneEntityId, Option<SceneEntityId>>,
+}
+
+impl ValidatedScenePlacement {
+    pub(crate) fn parent_of(&self, entity: &SceneEntityId) -> Option<&SceneEntityId> {
+        self.parents.get(entity).and_then(Option::as_ref)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlacementOwner {
+    Root,
+    Parent(SceneEntityId),
+}
+
 pub(crate) fn preflight_scene(
     document: &SceneDocument,
     registry: &ComponentRegistry,
@@ -94,6 +111,7 @@ fn preflight_scene_with_context_options(
     operation_index: Option<usize>,
 ) -> PreparedScene {
     let mut diagnostics = DiagnosticReport::default();
+    let placement = validate_scene_placement(document, &mut diagnostics, operation_index);
     if !registry.is_frozen() {
         diagnostics.push(diagnostic_error(
             "scene.component-registry-not-frozen",
@@ -104,38 +122,8 @@ fn preflight_scene_with_context_options(
             diagnostics,
         };
     }
-    let mut seen = BTreeSet::<SceneEntityId>::new();
-    let mut ids = BTreeSet::<SceneEntityId>::new();
 
     for entity in &document.entities {
-        if !seen.insert(entity.id.clone()) {
-            push_with_operation_index(
-                &mut diagnostics,
-                with_public_locator(
-                    diagnostic_error("scene.duplicate-entity-id", "Scene entity ID is duplicated"),
-                    "entity-id",
-                    entity.id.as_str(),
-                ),
-                operation_index,
-            );
-        }
-        ids.insert(entity.id.clone());
-    }
-
-    for entity in &document.entities {
-        if let Some(parent) = &entity.parent
-            && !ids.contains(parent)
-        {
-            push_with_operation_index(
-                &mut diagnostics,
-                with_public_locator(
-                    diagnostic_error("scene.missing-parent", "Scene parent entity does not exist"),
-                    "entity-id",
-                    entity.id.as_str(),
-                ),
-                operation_index,
-            );
-        }
         if let Some(prefab) = &entity.prefab
             && !allow_prefab_instances
         {
@@ -162,8 +150,9 @@ fn preflight_scene_with_context_options(
         }
     }
 
-    detect_parent_cycles(document, &mut diagnostics, operation_index);
-    if let Some(entity_id) = first_unavailable_hierarchy_projection_entity(document, registry) {
+    if let Some(entity_id) = placement.as_ref().and_then(|placement| {
+        first_unavailable_hierarchy_projection_entity(document, placement, registry)
+    }) {
         push_with_operation_index(
             &mut diagnostics,
             with_public_locator(
@@ -301,7 +290,10 @@ fn preflight_scene_with_context_options(
 
         prepared_entities.push(PreparedSceneEntity {
             id: entity.id.clone(),
-            parent: entity.parent.clone(),
+            parent: placement
+                .as_ref()
+                .and_then(|placement| placement.parent_of(&entity.id))
+                .cloned(),
             components: prepared_components,
         });
     }
@@ -314,6 +306,7 @@ fn preflight_scene_with_context_options(
 
 pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(
     document: &'document SceneDocument,
+    placement: &ValidatedScenePlacement,
     registry: &ComponentRegistry,
 ) -> Option<&'document SceneEntityId> {
     let requires_unavailable_projection = |component_id: &ComponentTypeId| {
@@ -326,7 +319,7 @@ pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(
         .collect::<BTreeMap<_, _>>();
 
     document.entities.iter().find_map(|entity| {
-        let parent_id = entity.parent.as_ref()?;
+        let parent_id = placement.parent_of(&entity.id)?;
         let parent = by_id.get(parent_id).copied();
         let requires_unavailable_projection = entity
             .components
@@ -389,68 +382,201 @@ fn sorted_entities(document: &SceneDocument) -> Vec<&SceneEntityRecord> {
     entities
 }
 
-fn detect_parent_cycles(
+fn validate_scene_placement(
     document: &SceneDocument,
     diagnostics: &mut DiagnosticReport,
     operation_index: Option<usize>,
-) {
-    let parents = document
-        .entities
-        .iter()
-        .map(|entity| (entity.id.clone(), entity.parent.clone()))
-        .collect::<BTreeMap<_, _>>();
-
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum VisitState {
-        Visiting,
-        Acyclic,
-        Cyclic,
-    }
-
-    let mut states = BTreeMap::<SceneEntityId, VisitState>::new();
+) -> Option<ValidatedScenePlacement> {
+    let errors_before = diagnostics.stats().observed_errors();
+    let mut ids = BTreeSet::<SceneEntityId>::new();
     for entity in &document.entities {
-        if matches!(
-            states.get(&entity.id),
-            Some(VisitState::Acyclic | VisitState::Cyclic)
-        ) {
-            continue;
-        }
-
-        let mut path = Vec::new();
-        let mut current = Some(entity.id.clone());
-        let outcome = loop {
-            let Some(id) = current else {
-                break VisitState::Acyclic;
-            };
-            match states.get(&id) {
-                Some(VisitState::Acyclic) => break VisitState::Acyclic,
-                Some(VisitState::Cyclic | VisitState::Visiting) => break VisitState::Cyclic,
-                None => {
-                    states.insert(id.clone(), VisitState::Visiting);
-                    path.push(id.clone());
-                    current = parents.get(&id).and_then(Clone::clone);
-                }
-            }
-        };
-        for id in path {
-            states.insert(id, outcome);
-        }
-    }
-
-    for entity in &document.entities {
-        if states.get(&entity.id) == Some(&VisitState::Cyclic) {
-            push_with_operation_index(
+        if !ids.insert(entity.id.clone()) {
+            push_placement_diagnostic(
                 diagnostics,
-                with_public_locator(
-                    diagnostic_error(
-                        "scene.parent-cycle",
-                        "Scene hierarchy contains a parent cycle",
-                    ),
-                    "entity-id",
-                    entity.id.as_str(),
-                ),
                 operation_index,
+                "scene.duplicate-entity-id",
+                "Scene entity ID is duplicated",
+                &entity.id,
+                None,
             );
         }
     }
+
+    let mut owners = BTreeMap::<SceneEntityId, PlacementOwner>::new();
+    for root in &document.roots {
+        if !ids.contains(root) {
+            push_placement_diagnostic(
+                diagnostics,
+                operation_index,
+                "scene.dangling-root",
+                "Scene root does not identify an entity record",
+                root,
+                None,
+            );
+            continue;
+        }
+        match owners.get(root) {
+            None => {
+                owners.insert(root.clone(), PlacementOwner::Root);
+            }
+            Some(PlacementOwner::Root) => push_placement_diagnostic(
+                diagnostics,
+                operation_index,
+                "scene.duplicate-root",
+                "Scene root is listed more than once",
+                root,
+                None,
+            ),
+            Some(PlacementOwner::Parent(parent)) => push_placement_diagnostic(
+                diagnostics,
+                operation_index,
+                "scene.root-child-overlap",
+                "Scene entity cannot be both a root and a child",
+                root,
+                Some(parent),
+            ),
+        }
+    }
+
+    for parent in &document.entities {
+        let mut local_children = BTreeSet::<SceneEntityId>::new();
+        for child in &parent.children {
+            if !local_children.insert(child.clone()) {
+                push_placement_diagnostic(
+                    diagnostics,
+                    operation_index,
+                    "scene.duplicate-child",
+                    "Scene parent lists the same child more than once",
+                    child,
+                    Some(&parent.id),
+                );
+                continue;
+            }
+            if !ids.contains(child) {
+                push_placement_diagnostic(
+                    diagnostics,
+                    operation_index,
+                    "scene.dangling-child",
+                    "Scene child does not identify an entity record",
+                    child,
+                    Some(&parent.id),
+                );
+                continue;
+            }
+            match owners.get(child) {
+                None => {
+                    owners.insert(child.clone(), PlacementOwner::Parent(parent.id.clone()));
+                }
+                Some(PlacementOwner::Root) => push_placement_diagnostic(
+                    diagnostics,
+                    operation_index,
+                    "scene.root-child-overlap",
+                    "Scene entity cannot be both a root and a child",
+                    child,
+                    Some(&parent.id),
+                ),
+                Some(PlacementOwner::Parent(existing)) if existing == &parent.id => {
+                    push_placement_diagnostic(
+                        diagnostics,
+                        operation_index,
+                        "scene.duplicate-child",
+                        "Scene parent lists the same child more than once",
+                        child,
+                        Some(&parent.id),
+                    );
+                }
+                Some(PlacementOwner::Parent(existing)) => push_placement_diagnostic(
+                    diagnostics,
+                    operation_index,
+                    "scene.multiple-parents",
+                    "Scene entity is owned by more than one parent",
+                    child,
+                    Some(existing),
+                ),
+            }
+        }
+    }
+
+    for id in &ids {
+        if !owners.contains_key(id) {
+            push_placement_diagnostic(
+                diagnostics,
+                operation_index,
+                "scene.missing-placement",
+                "Scene entity is absent from roots and every parent child list",
+                id,
+                None,
+            );
+        }
+    }
+
+    let parents = owners
+        .iter()
+        .map(|(entity, owner)| {
+            let parent = match owner {
+                PlacementOwner::Root => None,
+                PlacementOwner::Parent(parent) => Some(parent.clone()),
+            };
+            (entity.clone(), parent)
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut completed = BTreeSet::<SceneEntityId>::new();
+    for entity in &document.entities {
+        if completed.contains(&entity.id) {
+            continue;
+        }
+
+        let mut path = Vec::<SceneEntityId>::new();
+        let mut positions = BTreeMap::<SceneEntityId, usize>::new();
+        let mut current = Some(entity.id.clone());
+        while let Some(id) = current {
+            if completed.contains(&id) {
+                break;
+            }
+            if let Some(cycle_start) = positions.get(&id).copied() {
+                let witness = path[cycle_start..]
+                    .iter()
+                    .min()
+                    .expect("cycle path contains the repeated entity")
+                    .clone();
+                push_placement_diagnostic(
+                    diagnostics,
+                    operation_index,
+                    "scene.placement-cycle",
+                    "Scene placement contains a cycle",
+                    &witness,
+                    parents.get(&witness).and_then(Option::as_ref),
+                );
+                break;
+            }
+            positions.insert(id.clone(), path.len());
+            path.push(id.clone());
+            current = parents.get(&id).and_then(Clone::clone);
+        }
+        completed.extend(path);
+    }
+
+    (diagnostics.stats().observed_errors() == errors_before)
+        .then_some(ValidatedScenePlacement { parents })
+}
+
+fn push_placement_diagnostic(
+    diagnostics: &mut DiagnosticReport,
+    operation_index: Option<usize>,
+    code: &'static str,
+    summary: &'static str,
+    entity: &SceneEntityId,
+    parent: Option<&SceneEntityId>,
+) {
+    let diagnostic = with_public_locator(
+        diagnostic_error(code, summary),
+        "entity-id",
+        entity.as_str(),
+    );
+    let diagnostic = match parent {
+        Some(parent) => with_public_locator(diagnostic, "parent-id", parent.as_str()),
+        None => diagnostic,
+    };
+    push_with_operation_index(diagnostics, diagnostic, operation_index);
 }

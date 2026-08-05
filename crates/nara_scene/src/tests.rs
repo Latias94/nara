@@ -413,21 +413,24 @@ fn validates_scene_entity_id_shape() {
 }
 
 #[test]
-fn validation_reports_duplicate_missing_parent_cycle_and_unknown_component() {
+fn validation_reports_duplicate_dangling_child_cycle_and_unknown_component() {
     let registry = test_registry();
     let id = scene_id("player");
-    let missing_parent = scene_id("missing");
+    let missing_child = scene_id("missing");
+    let orphan_parent = scene_id("orphan-parent");
     let cycle_a = scene_id("cycle_a");
     let cycle_b = scene_id("cycle_b");
+    let unknown = scene_id("unknown");
     let unknown_component = ComponentTypeId::new("nara.test.Unknown");
     let document = SceneDocument {
+        roots: vec![id.clone(), orphan_parent.clone(), unknown.clone()],
         entities: vec![
             SceneEntityRecord::new(id.clone()),
             SceneEntityRecord::new(id),
-            SceneEntityRecord::new(scene_id("orphan")).with_parent(missing_parent),
-            SceneEntityRecord::new(cycle_a.clone()).with_parent(cycle_b.clone()),
-            SceneEntityRecord::new(cycle_b).with_parent(cycle_a),
-            SceneEntityRecord::new(scene_id("unknown")).with_component(
+            SceneEntityRecord::new(orphan_parent).with_children([missing_child]),
+            SceneEntityRecord::new(cycle_a.clone()).with_children([cycle_b.clone()]),
+            SceneEntityRecord::new(cycle_b).with_children([cycle_a]),
+            SceneEntityRecord::new(unknown).with_component(
                 unknown_component,
                 SceneComponentRecord::new(ComponentSchemaVersion(1), ComponentValue::Null),
             ),
@@ -441,8 +444,8 @@ fn validation_reports_duplicate_missing_parent_cycle_and_unknown_component() {
         .collect::<Vec<_>>();
 
     assert!(codes.contains(&"scene.duplicate-entity-id"));
-    assert!(codes.contains(&"scene.missing-parent"));
-    assert!(codes.contains(&"scene.parent-cycle"));
+    assert!(codes.contains(&"scene.dangling-child"));
+    assert!(codes.contains(&"scene.placement-cycle"));
     assert!(codes.contains(&"scene.unknown-component"));
     assert!(report.has_errors());
 }
@@ -450,9 +453,9 @@ fn validation_reports_duplicate_missing_parent_cycle_and_unknown_component() {
 #[test]
 fn unsupported_prefab_instance_prevents_world_mutation() {
     let registry = test_registry();
-    let document = SceneDocument::new([SceneEntityRecord {
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord {
         id: scene_id("enemy"),
-        parent: None,
+        children: Vec::new(),
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance {
             source: AssetRef::path("prefabs/enemy.ron").unwrap(),
@@ -485,10 +488,10 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))
             .with_component(position_type_id(), position_record(3))]),
     );
-    let document = SceneDocument::new([prefab_anchor("enemy", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", source)]);
     let mut world = World::new();
 
     let expansion = document.expand_prefabs(&registry, &resolver);
@@ -505,11 +508,12 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
         vec!["enemy", "enemy/visual"]
     );
     assert_eq!(
-        expanded.entities[1]
-            .parent
-            .as_ref()
-            .map(SceneEntityId::as_str),
-        Some("enemy")
+        expanded.entities[0]
+            .children
+            .iter()
+            .map(SceneEntityId::as_str)
+            .collect::<Vec<_>>(),
+        vec!["enemy/visual"]
     );
     assert!(!report.diagnostics.has_errors());
     assert_eq!(spawned_instance(&report).len(), 2);
@@ -523,7 +527,7 @@ fn prefab_instance_override_patch_applies_before_namespacing() {
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))
             .with_component(position_type_id(), position_record(3))]),
     );
     let overrides = ScenePatchDocument::new([ScenePatchOperation::SetField {
@@ -533,7 +537,9 @@ fn prefab_instance_override_patch_applies_before_namespacing() {
         field: ComponentFieldId::new("x"),
         value: ComponentValue::I64(11),
     }]);
-    let document = SceneDocument::new([prefab_anchor_with_overrides("enemy", source, overrides)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor_with_overrides(
+        "enemy", source, overrides,
+    )]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -565,18 +571,18 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             enemy_source.clone(),
-            PrefabDocument::new([prefab_anchor("weapon", weapon_source.clone())]),
+            PrefabDocument::from_ordered_roots([prefab_anchor("weapon", weapon_source.clone())]),
         )
         .with_prefab(
             weapon_source,
-            PrefabDocument::new([prefab_anchor("muzzle", muzzle_source.clone())]),
+            PrefabDocument::from_ordered_roots([prefab_anchor("muzzle", muzzle_source.clone())]),
         )
         .with_prefab(
             muzzle_source,
-            PrefabDocument::new([SceneEntityRecord::new(scene_id("flash"))
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("flash"))
                 .with_component(position_type_id(), position_record(8))]),
         );
-    let document = SceneDocument::new([prefab_anchor("enemy", enemy_source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", enemy_source)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -603,9 +609,9 @@ fn repeated_prefab_instances_expand_without_id_collisions() {
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("visual"))]),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))]),
     );
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
@@ -625,11 +631,75 @@ fn repeated_prefab_instances_expand_without_id_collisions() {
 }
 
 #[test]
+fn prefab_expansion_preserves_source_order_and_prefixes_roots_before_anchor_children() {
+    let registry = test_registry();
+    let source = AssetRef::path("prefabs/ordered.ron").unwrap();
+    let root_b = scene_id("root-b");
+    let root_a = scene_id("root-a");
+    let child_b = scene_id("child-b");
+    let child_a = scene_id("child-a");
+    let prefab = PrefabDocument::new(
+        [root_b.clone(), root_a.clone()],
+        [
+            SceneEntityRecord::new(root_a.clone())
+                .with_children([child_b.clone(), child_a.clone()]),
+            SceneEntityRecord::new(child_a),
+            SceneEntityRecord::new(root_b),
+            SceneEntityRecord::new(child_b),
+        ],
+    );
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab);
+    let anchor = scene_id("anchor");
+    let local_b = scene_id("local-b");
+    let local_a = scene_id("local-a");
+    let document = SceneDocument::new(
+        [anchor.clone()],
+        [
+            prefab_anchor("anchor", source).with_children([local_b.clone(), local_a.clone()]),
+            SceneEntityRecord::new(local_b),
+            SceneEntityRecord::new(local_a),
+        ],
+    );
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.unwrap();
+    assert_eq!(expanded.roots.as_slice(), std::slice::from_ref(&anchor));
+    let anchor = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == anchor)
+        .unwrap();
+    assert_eq!(
+        anchor
+            .children
+            .iter()
+            .map(|child| child.as_str())
+            .collect::<Vec<_>>(),
+        ["anchor/root-b", "anchor/root-a", "local-b", "local-a"]
+    );
+    let root_a = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("anchor/root-a"))
+        .unwrap();
+    assert_eq!(
+        root_a
+            .children
+            .iter()
+            .map(|child| child.as_str())
+            .collect::<Vec<_>>(),
+        ["anchor/child-b", "anchor/child-a"]
+    );
+}
+
+#[test]
 fn repeated_prefab_instances_namespace_declared_scene_local_references() {
     let registry = entity_link_registry();
     let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
     let persistent = persistent_reference("66666666-6666-4666-8666-666666666666");
-    let prefab = PrefabDocument::new([
+    let prefab = PrefabDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("source")).with_component(
             entity_link_type_id(),
             entity_link_record(EntityReference::SceneLocal {
@@ -645,7 +715,7 @@ fn repeated_prefab_instances_namespace_declared_scene_local_references() {
         ),
     ]);
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
@@ -700,7 +770,7 @@ fn nested_prefabs_namespace_declared_scene_local_references_through_each_anchor(
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             inner_source.clone(),
-            PrefabDocument::new([
+            PrefabDocument::from_ordered_roots([
                 SceneEntityRecord::new(scene_id("source")).with_component(
                     entity_link_type_id(),
                     entity_link_record(EntityReference::SceneLocal {
@@ -712,9 +782,9 @@ fn nested_prefabs_namespace_declared_scene_local_references_through_each_anchor(
         )
         .with_prefab(
             outer_source.clone(),
-            PrefabDocument::new([prefab_anchor("nested", inner_source)]),
+            PrefabDocument::from_ordered_roots([prefab_anchor("nested", inner_source)]),
         );
-    let document = SceneDocument::new([prefab_anchor("root", outer_source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -741,7 +811,7 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             inner_source.clone(),
-            PrefabDocument::new([
+            PrefabDocument::from_ordered_roots([
                 SceneEntityRecord::new(scene_id("source")).with_component(
                     entity_link_type_id(),
                     entity_link_record(EntityReference::SceneLocal {
@@ -753,11 +823,11 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
         )
         .with_prefab(
             outer_source.clone(),
-            PrefabDocument::new([prefab_anchor("nested", inner_source)]),
+            PrefabDocument::from_ordered_roots([prefab_anchor("nested", inner_source)]),
         );
-    let document = SceneDocument::new([prefab_anchor("root", outer_source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
     let exact_limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(91).unwrap());
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(112).unwrap());
 
     let exact = document.expand_prefabs_with_options(
         &registry,
@@ -769,7 +839,7 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
     assert!(exact.document.is_some());
 
     let failing_limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(90).unwrap());
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(111).unwrap());
     let failing = document.expand_prefabs_with_options(
         &registry,
         &resolver,
@@ -779,8 +849,8 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
     assert!(failing.document.is_none());
     assert!(failing.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
-            && diagnostic_has_u64_field(diagnostic, "observed", 91)
-            && diagnostic_has_u64_field(diagnostic, "maximum", 90)
+            && diagnostic_has_u64_field(diagnostic, "observed", 112)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 111)
     }));
 }
 
@@ -797,13 +867,13 @@ fn prefab_reference_rewrite_uses_the_migrated_component_schema() {
             }),
         )]),
     );
-    let prefab = PrefabDocument::new([
+    let prefab = PrefabDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("source"))
             .with_component(entity_link_type_id(), source_record),
         SceneEntityRecord::new(scene_id("target")),
     ]);
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
-    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -836,7 +906,7 @@ fn prefab_expansion_budgets_namespaced_component_references_before_publication()
     let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([
+        PrefabDocument::from_ordered_roots([
             SceneEntityRecord::new(scene_id("source")).with_component(
                 entity_link_type_id(),
                 entity_link_record(EntityReference::SceneLocal {
@@ -846,9 +916,9 @@ fn prefab_expansion_budgets_namespaced_component_references_before_publication()
             SceneEntityRecord::new(scene_id("target")),
         ]),
     );
-    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
     let exact_limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(41).unwrap());
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(55).unwrap());
     let exact = document.expand_prefabs_with_options(
         &registry,
         &resolver,
@@ -858,7 +928,7 @@ fn prefab_expansion_budgets_namespaced_component_references_before_publication()
     assert!(exact.document.is_some());
 
     let limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(40).unwrap());
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(54).unwrap());
     let expansion = document.expand_prefabs_with_options(
         &registry,
         &resolver,
@@ -868,8 +938,8 @@ fn prefab_expansion_budgets_namespaced_component_references_before_publication()
     assert!(expansion.document.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
-            && diagnostic_has_u64_field(diagnostic, "observed", 41)
-            && diagnostic_has_u64_field(diagnostic, "maximum", 40)
+            && diagnostic_has_u64_field(diagnostic, "observed", 55)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 54)
     }));
 }
 
@@ -887,12 +957,13 @@ fn prefab_namespace_preflight_uses_the_public_materialized_node_budget() {
     )]);
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
-            large_data_type_id(),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, large_value),
-        )]),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
+            .with_component(
+                large_data_type_id(),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, large_value),
+            )]),
     );
-    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -918,7 +989,7 @@ fn prefab_namespace_preflight_uses_the_public_materialized_node_budget() {
 fn prefab_namespace_rejects_undeclared_references_without_mutating_the_source() {
     let registry = large_data_registry();
     let source = AssetRef::path("prefabs/hidden-reference.ron").unwrap();
-    let prefab = PrefabDocument::new([
+    let prefab = PrefabDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("source")).with_component(
             large_data_type_id(),
             SceneComponentRecord::new(
@@ -937,7 +1008,7 @@ fn prefab_namespace_rejects_undeclared_references_without_mutating_the_source() 
     ]);
     let source_before = prefab.clone();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
-    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -957,7 +1028,7 @@ fn prefab_expansion_budgets_namespaced_reference_value_growth_before_publication
     let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([
+        PrefabDocument::from_ordered_roots([
             SceneEntityRecord::new(scene_id("source")).with_component(
                 entity_link_type_id(),
                 entity_link_record(EntityReference::SceneLocal {
@@ -967,7 +1038,7 @@ fn prefab_expansion_budgets_namespaced_reference_value_growth_before_publication
             SceneEntityRecord::new(scene_id("target")),
         ]),
     );
-    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
     let exact_limits = PrefabExpansionLimits::default()
         .with_materialized_value_bytes(nara_core::ByteLimit::new(17).unwrap());
 
@@ -1003,14 +1074,15 @@ fn prefab_namespace_traversal_accepts_persistent_reference_at_logical_byte_limit
     let persistent = persistent_reference("77777777-7777-4777-8777-777777777777");
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
-            entity_link_type_id(),
-            entity_link_record(EntityReference::Persistent {
-                entity: persistent.clone(),
-            }),
-        )]),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
+            .with_component(
+                entity_link_type_id(),
+                entity_link_record(EntityReference::Persistent {
+                    entity: persistent.clone(),
+                }),
+            )]),
     );
-    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
     let limits = PrefabExpansionLimits::default()
         .with_materialized_value_nodes(ItemLimit::new(2).unwrap())
         .with_materialized_value_bytes(nara_core::ByteLimit::new(26).unwrap());
@@ -1039,7 +1111,7 @@ fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
     let registry = test_registry();
     let source = AssetRef::path("prefabs/missing.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new();
-    let document = SceneDocument::new([prefab_anchor("enemy", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", source)]);
     let mut world = World::new();
     let before = world.iter_entities().count();
 
@@ -1063,12 +1135,15 @@ fn prefab_source_cycle_reports_typed_edge_without_concatenated_chain() {
     let a = AssetRef::path("prefabs/a.ron").unwrap();
     let b = AssetRef::path("prefabs/b.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new()
-        .with_prefab(a.clone(), PrefabDocument::new([prefab_anchor("b", b)]))
+        .with_prefab(
+            a.clone(),
+            PrefabDocument::from_ordered_roots([prefab_anchor("b", b)]),
+        )
         .with_prefab(
             AssetRef::path("prefabs/b.ron").unwrap(),
-            PrefabDocument::new([prefab_anchor("a", a.clone())]),
+            PrefabDocument::from_ordered_roots([prefab_anchor("a", a.clone())]),
         );
-    let document = SceneDocument::new([prefab_anchor("root", a)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", a)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -1106,14 +1181,17 @@ fn prefab_source_cycle_reports_middle_cycle_start_for_multi_edge_chain() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             a.clone(),
-            PrefabDocument::new([prefab_anchor("b", b.clone())]),
+            PrefabDocument::from_ordered_roots([prefab_anchor("b", b.clone())]),
         )
         .with_prefab(
             b.clone(),
-            PrefabDocument::new([prefab_anchor("c", c.clone())]),
+            PrefabDocument::from_ordered_roots([prefab_anchor("c", c.clone())]),
         )
-        .with_prefab(c, PrefabDocument::new([prefab_anchor("b", b)]));
-    let document = SceneDocument::new([prefab_anchor("root", a)]);
+        .with_prefab(
+            c,
+            PrefabDocument::from_ordered_roots([prefab_anchor("b", b)]),
+        );
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", a)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -1134,9 +1212,9 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
     let weapon_source = AssetRef::path("prefabs/weapon.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         enemy_source.clone(),
-        PrefabDocument::new([prefab_anchor("weapon", weapon_source)]),
+        PrefabDocument::from_ordered_roots([prefab_anchor("weapon", weapon_source)]),
     );
-    let document = SceneDocument::new([prefab_anchor("enemy", enemy_source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", enemy_source)]);
 
     let expansion = document.expand_prefabs_with_options(
         &registry,
@@ -1158,9 +1236,9 @@ fn prefab_expansion_entity_budget_is_aggregate_across_reused_sources() {
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("body"))]),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("body"))]),
     );
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
@@ -1197,12 +1275,16 @@ fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
     let payload_bytes = payload.len();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("body")).with_component(
-            ComponentTypeId::new("nara.scene.Name"),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::String(payload)),
-        )]),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("body"))
+            .with_component(
+                ComponentTypeId::new("nara.scene.Name"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::String(payload),
+                ),
+            )]),
     );
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
@@ -1256,14 +1338,14 @@ fn prefab_expansion_component_and_instance_budgets_are_independent() {
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([
+        PrefabDocument::from_ordered_roots([
             SceneEntityRecord::new(scene_id("first"))
                 .with_component(position_type_id(), position_record(1)),
             SceneEntityRecord::new(scene_id("second"))
                 .with_component(position_type_id(), position_record(2)),
         ]),
     );
-    let document = SceneDocument::new([prefab_anchor("root", source.clone())]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source.clone())]);
     let component_limited = PrefabExpansionOptions::default().with_limits(
         PrefabExpansionLimits::default().with_materialized_components(ItemLimit::new(1).unwrap()),
     );
@@ -1274,7 +1356,7 @@ fn prefab_expansion_component_and_instance_budgets_are_independent() {
             && diagnostic_has_u64_field(diagnostic, "observed", 2)
     }));
 
-    let two_instances = SceneDocument::new([
+    let two_instances = SceneDocument::from_ordered_roots([
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
@@ -1296,7 +1378,7 @@ fn prefab_expansion_counts_override_operations_per_instance() {
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("body"))
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("body"))
             .with_component(position_type_id(), position_record(1))]),
     );
     let overrides = ScenePatchDocument::new([ScenePatchOperation::SetField {
@@ -1306,7 +1388,7 @@ fn prefab_expansion_counts_override_operations_per_instance() {
         field: ComponentFieldId::new("x"),
         value: ComponentValue::I64(2),
     }]);
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         prefab_anchor_with_overrides("left", source.clone(), overrides.clone()),
         prefab_anchor_with_overrides("right", source, overrides),
     ]);
@@ -1330,11 +1412,11 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
         source.clone(),
-        PrefabDocument::new([SceneEntityRecord::new(scene_id("child"))]),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("child"))]),
     );
-    let document = SceneDocument::new([prefab_anchor("root", source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
     let limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(13).unwrap());
+        .with_generated_identifier_bytes(nara_core::ByteLimit::new(19).unwrap());
 
     let expansion = document.expand_prefabs_with_options(
         &registry,
@@ -1345,21 +1427,22 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
     assert!(expansion.document.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
-            && diagnostic_has_u64_field(diagnostic, "observed", 14)
-            && diagnostic_has_u64_field(diagnostic, "maximum", 13)
+            && diagnostic_has_u64_field(diagnostic, "observed", 20)
+            && diagnostic_has_u64_field(diagnostic, "maximum", 19)
     }));
 }
 
 #[test]
 fn invalid_component_payload_does_not_mutate_world() {
     let registry = test_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("bad")).with_component(
-        position_type_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(1),
-            ComponentValue::map([("x", ComponentValue::String("not a number".to_string()))]),
-        ),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("bad"))
+        .with_component(
+            position_type_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                ComponentValue::map([("x", ComponentValue::String("not a number".to_string()))]),
+            ),
+        )]);
     let mut world = World::new();
     let before = world.iter_entities().count();
 
@@ -1373,8 +1456,9 @@ fn invalid_component_payload_does_not_mutate_world() {
 #[test]
 fn component_observer_rejects_fresh_scene_before_target_allocation() {
     let registry = test_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("observed"))
-        .with_component(position_type_id(), position_record(4))]);
+    let document =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("observed"))
+            .with_component(position_type_id(), position_record(4))]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
@@ -1415,7 +1499,7 @@ fn component_observer_rejects_fresh_scene_before_target_allocation() {
 #[test]
 fn deferred_dynamic_hook_rejects_fresh_scene_before_target_allocation() {
     let registry = test_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("hooked"))
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("hooked"))
         .with_component(position_type_id(), position_record(5))]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
@@ -1454,13 +1538,15 @@ fn hierarchy_observer_rejects_publication_before_candidate_mutation() {
     let registry = test_registry();
     let parent_id = scene_id("parent");
     let child_id = scene_id("child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(parent_id.clone())
-            .with_component(position_type_id(), position_record(1)),
-        SceneEntityRecord::new(child_id)
-            .with_parent(parent_id)
-            .with_component(position_type_id(), position_record(2)),
-    ]);
+    let document = SceneDocument::new(
+        [parent_id.clone()],
+        [
+            SceneEntityRecord::new(parent_id.clone())
+                .with_children([child_id.clone()])
+                .with_component(position_type_id(), position_record(1)),
+            SceneEntityRecord::new(child_id).with_component(position_type_id(), position_record(2)),
+        ],
+    );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(|_: On<Add, Parent>, mut commands: Commands| {
@@ -1498,13 +1584,14 @@ fn hierarchy_observer_rejects_publication_before_candidate_mutation() {
 fn component_migration_runs_before_scene_preflight_without_mutating_document() {
     let registry = migrated_position_registry();
     let id = scene_id("player");
-    let document = SceneDocument::new([SceneEntityRecord::new(id.clone()).with_component(
-        position_type_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(1),
-            ComponentValue::map([("x", ComponentValue::I64(8))]),
-        ),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
+        .with_component(
+            position_type_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                ComponentValue::map([("x", ComponentValue::I64(8))]),
+            ),
+        )]);
     let mut world = World::new();
 
     let validation = document.validate(&registry);
@@ -1557,13 +1644,14 @@ fn missing_component_migration_reports_unsupported_version() {
         )
         .unwrap();
     registry.freeze().unwrap();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("bad")).with_component(
-        position_type_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(1),
-            ComponentValue::map([("x", ComponentValue::I64(8))]),
-        ),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("bad"))
+        .with_component(
+            position_type_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                ComponentValue::map([("x", ComponentValue::I64(8))]),
+            ),
+        )]);
 
     let report = document.validate(&registry);
 
@@ -1578,10 +1666,11 @@ fn missing_component_migration_reports_unsupported_version() {
 fn path_asset_ref_resolves_before_scene_spawn_without_database() {
     let registry = test_asset_registry();
     let id = scene_id("player");
-    let document = SceneDocument::new([SceneEntityRecord::new(id.clone()).with_component(
-        asset_link_type_id(),
-        asset_link_record(AssetRef::path("textures/player.png").unwrap()),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
+        .with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::path("textures/player.png").unwrap()),
+        )]);
     let mut world = World::new();
 
     let report = spawn_scene(&mut world, &registry, &document);
@@ -1599,10 +1688,11 @@ fn path_asset_ref_resolves_before_scene_spawn_without_database() {
 #[test]
 fn asset_server_observer_rejects_scene_before_target_allocation() {
     let registry = test_asset_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
-        asset_link_type_id(),
-        asset_link_record(AssetRef::path("textures/player.png").unwrap()),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
+        .with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::path("textures/player.png").unwrap()),
+        )]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
@@ -1637,10 +1727,11 @@ fn asset_server_observer_rejects_scene_before_target_allocation() {
 #[test]
 fn deferred_asset_prepare_declares_resource_access_before_target_allocation() {
     let registry = deferred_asset_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
-        asset_link_type_id(),
-        asset_link_record(AssetRef::path("textures/player.png").unwrap()),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
+        .with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::path("textures/player.png").unwrap()),
+        )]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
@@ -1675,10 +1766,12 @@ fn deferred_asset_prepare_declares_resource_access_before_target_allocation() {
 #[test]
 fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
     let registry = test_registry();
-    let first_document = SceneDocument::new([SceneEntityRecord::new(scene_id("first"))
-        .with_component(position_type_id(), position_record(1))]);
-    let second_document = SceneDocument::new([SceneEntityRecord::new(scene_id("second"))
-        .with_component(position_type_id(), position_record(2))]);
+    let first_document =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("first"))
+            .with_component(position_type_id(), position_record(1))]);
+    let second_document =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("second"))
+            .with_component(position_type_id(), position_record(2))]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     let first = spawn_scene(&mut world, &registry, &first_document);
@@ -1717,7 +1810,7 @@ fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
 fn scene_instance_allocation_is_world_global_across_every_spawner_entrypoint() {
     let registry = test_registry();
     let id = scene_id("entity");
-    let document = SceneDocument::new([SceneEntityRecord::new(id.clone())]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
     let mut world = World::new();
 
     let first = SceneSpawner::new().spawn(&mut world, &registry, &document);
@@ -1751,7 +1844,7 @@ fn scene_instance_allocation_is_world_global_across_every_spawner_entrypoint() {
 fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
     let mut registry = ComponentRegistry::new();
     registry.freeze().unwrap();
-    let document = SceneDocument::new([]);
+    let document = SceneDocument::from_ordered_roots([]);
     let mut world = World::new();
 
     let first = spawn_scene(&mut world, &registry, &document);
@@ -1773,9 +1866,10 @@ fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
 #[test]
 fn empty_scene_replacement_handles_empty_and_nonempty_candidates() {
     let registry = test_registry();
-    let empty = SceneDocument::new([]);
+    let empty = SceneDocument::from_ordered_roots([]);
     let populated_id = scene_id("populated");
-    let populated = SceneDocument::new([SceneEntityRecord::new(populated_id.clone())]);
+    let populated =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(populated_id.clone())]);
     let mut world = World::new();
     let mut spawner = SceneSpawner::new();
 
@@ -1801,7 +1895,7 @@ fn individual_scene_retirement_tombstones_identity_before_despawn() {
     let registry = test_registry();
     let id = scene_id("retired");
     let document =
-        SceneDocument::new([SceneEntityRecord::new(id.clone())
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
             .with_component(position_type_id(), position_record(1))]);
     let mut world = World::new();
     let report = spawn_scene(&mut world, &registry, &document);
@@ -1828,7 +1922,7 @@ fn individual_scene_retirement_tombstones_identity_before_despawn() {
 fn scene_retirement_rejection_keeps_the_target_alive() {
     let registry = test_registry();
     let id = scene_id("retained");
-    let document = SceneDocument::new([SceneEntityRecord::new(id.clone())]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
     let mut world = World::new();
     let report = spawn_scene(&mut world, &registry, &document);
     let entity = spawned_entity(&world, &report, &id);
@@ -1874,7 +1968,7 @@ fn scene_retirement_rejection_keeps_the_target_alive() {
 fn scene_retirement_rejects_a_source_that_disagrees_with_registered_identity() {
     let registry = test_registry();
     let id = scene_id("retained");
-    let document = SceneDocument::new([SceneEntityRecord::new(id.clone())]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
     let mut world = World::new();
     let report = spawn_scene(&mut world, &registry, &document);
     let instance = spawned_instance(&report).clone();
@@ -1905,10 +1999,13 @@ fn individual_scene_retirement_rejects_parents_and_unlinks_retired_children() {
     let registry = test_registry();
     let parent_id = scene_id("parent");
     let child_id = scene_id("parent/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(parent_id.clone()),
-        SceneEntityRecord::new(child_id.clone()).with_parent(parent_id.clone()),
-    ]);
+    let document = SceneDocument::new(
+        [parent_id.clone()],
+        [
+            SceneEntityRecord::new(parent_id.clone()).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    );
     let mut world = World::new();
     let report = spawn_scene(&mut world, &registry, &document);
     let instance = spawned_instance(&report).clone();
@@ -1940,7 +2037,7 @@ fn individual_scene_retirement_rejects_parents_and_unlinks_retired_children() {
 fn empty_persistent_set_rejects_event_global_observer_before_target_allocation() {
     let mut registry = ComponentRegistry::new();
     registry.freeze().unwrap();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("empty"))]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("empty"))]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(|_: On<Add>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1);
@@ -1973,10 +2070,11 @@ fn empty_persistent_set_rejects_event_global_observer_before_target_allocation()
 #[test]
 fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
     let registry = test_asset_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
-        asset_link_type_id(),
-        asset_link_record(AssetRef::path("textures/generated.png").unwrap()),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
+        .with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::path("textures/generated.png").unwrap()),
+        )]);
     let mut world = World::new();
     let settings =
         WorldIdentityDomainSettings::new(ItemLimit::new(1).unwrap(), ItemLimit::new(1).unwrap())
@@ -2017,7 +2115,11 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
     );
     assert_eq!(asset_server.path(AssetId::from_raw(2)), None);
 
-    let empty = spawn_scene(&mut world, &registry, &SceneDocument::new([]));
+    let empty = spawn_scene(
+        &mut world,
+        &registry,
+        &SceneDocument::from_ordered_roots([]),
+    );
     assert!(!empty.diagnostics.has_errors());
     assert_eq!(spawned_instance(&empty).instance_id().get(), 1);
 }
@@ -2027,8 +2129,10 @@ fn authoring_replacement_and_clear_publish_typed_tombstones() {
     let registry = test_registry();
     let id = scene_id("player");
     let mut session =
-        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(1))]));
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            id.clone(),
+        )
+        .with_component(position_type_id(), position_record(1))]));
     let mut world = World::new();
 
     let first_sync = session.sync_world(&mut world, &registry);
@@ -2039,9 +2143,10 @@ fn authoring_replacement_and_clear_publish_typed_tombstones() {
         lookup => panic!("first authoring instance did not resolve: {lookup:?}"),
     };
 
-    session
-        .replace_document(SceneDocument::new([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(2))]));
+    session.replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        id.clone(),
+    )
+    .with_component(position_type_id(), position_record(2))]));
     let second_sync = session.sync_world(&mut world, &registry);
     assert!(second_sync.synced);
     assert_eq!(second_sync.removed_entities, 1);
@@ -2078,10 +2183,13 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
     let registry = test_registry();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
-    ]);
+    let document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    );
     let mut world = World::new();
     let mut spawner = SceneSpawner::new();
     let first = spawner.spawn(&mut world, &registry, &document);
@@ -2112,10 +2220,13 @@ fn hierarchy_aware_unload_detaches_external_descendants() {
     let registry = test_registry();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone()).with_parent(root_id),
-    ]);
+    let document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    );
     let mut session = SceneAuthoringSession::new(document);
     let mut world = World::new();
     let sync = session.sync_world(&mut world, &registry);
@@ -2149,8 +2260,10 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
     let domain = WorldIdentityDomain::new(&world, settings).unwrap();
     world.insert_resource(domain);
     let mut session =
-        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(1))]));
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            id.clone(),
+        )
+        .with_component(position_type_id(), position_record(1))]));
 
     let first_sync = session.sync_world(&mut world, &registry);
     assert!(first_sync.synced);
@@ -2162,9 +2275,10 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
     let before_entities = world.iter_entities().count();
     let before_stats = world.resource::<WorldIdentityDomain>().stats();
 
-    session
-        .replace_document(SceneDocument::new([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(2))]));
+    session.replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        id.clone(),
+    )
+    .with_component(position_type_id(), position_record(2))]));
     let failed = session.sync_world(&mut world, &registry);
 
     assert!(!failed.synced);
@@ -2195,7 +2309,7 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
     let first = spawner.spawn(
         &mut world,
         &registry,
-        &SceneDocument::new([SceneEntityRecord::new(id.clone())
+        &SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
             .with_component(position_type_id(), position_record(1))]),
     );
     assert!(!first.diagnostics.has_errors());
@@ -2220,7 +2334,7 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
     let failed = spawner.replace(
         &mut world,
         &registry,
-        &SceneDocument::new([SceneEntityRecord::new(id.clone())
+        &SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
             .with_component(position_type_id(), position_record(2))]),
         &current,
     );
@@ -2254,10 +2368,13 @@ fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
     let registry = test_registry();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone()).with_parent(root_id),
-    ]);
+    let document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     let mut spawner = SceneSpawner::new();
@@ -2304,10 +2421,13 @@ fn children_add_observer_rejects_fresh_scene_publication() {
     let registry = test_registry();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root_id),
-        SceneEntityRecord::new(child_id).with_parent(scene_id("root")),
-    ]);
+    let document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id),
+        ],
+    );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
@@ -2336,7 +2456,7 @@ fn children_add_observer_rejects_fresh_scene_publication() {
 fn children_add_observer_does_not_reject_a_flat_scene() {
     let registry = test_registry();
     let id = scene_id("flat");
-    let document = SceneDocument::new([SceneEntityRecord::new(id.clone())]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
@@ -2363,7 +2483,7 @@ fn children_add_observer_does_not_reject_a_flat_scene() {
 fn parented_transform_materializes_through_every_entry_point() {
     let registry = deferred_transform_registry();
     let flat_id = scene_id("flat");
-    let flat_document = SceneDocument::new([SceneEntityRecord::new(flat_id)
+    let flat_document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(flat_id)
         .with_component(deferred_transform_type_id(), deferred_transform_record(1))]);
     assert!(!flat_document.validate(&registry).iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
@@ -2371,12 +2491,14 @@ fn parented_transform_materializes_through_every_entry_point() {
 
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone())
-            .with_parent(root_id.clone())
-            .with_component(deferred_transform_type_id(), deferred_transform_record(3)),
-    ]);
+    let document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone())
+                .with_component(deferred_transform_type_id(), deferred_transform_record(3)),
+        ],
+    );
     let has_unavailable_projection = |diagnostics: &DiagnosticReport| {
         diagnostics.iter().any(|diagnostic| {
             diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
@@ -2400,7 +2522,7 @@ fn parented_transform_materializes_through_every_entry_point() {
         Some(&DeferredTransform(3))
     );
 
-    let prefab = PrefabDocument::new(document.entities.clone());
+    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
     let mut prefab_world = World::new();
     let prefab_report = SceneSpawner::new().spawn_prefab(&mut prefab_world, &registry, &prefab);
     assert!(!prefab_report.diagnostics.has_errors());
@@ -2416,7 +2538,8 @@ fn parented_transform_materializes_through_every_entry_point() {
     );
 
     let current_id = scene_id("current");
-    let current_document = SceneDocument::new([SceneEntityRecord::new(current_id.clone())]);
+    let current_document =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(current_id.clone())]);
     let mut replacement_world = World::new();
     let mut replacement_spawner = SceneSpawner::new();
     let current = replacement_spawner.spawn(&mut replacement_world, &registry, &current_document);
@@ -2468,30 +2591,36 @@ fn inherited_visibility_is_rejected_by_the_shared_scene_preflight() {
     let mut registry = ComponentRegistry::new();
     register_scene_components(&mut registry).unwrap();
     registry.freeze().unwrap();
-    let flat_document = SceneDocument::new([SceneEntityRecord::new(scene_id("flat"))
-        .with_component(
-            ComponentTypeId::new("nara.scene.Visibility"),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::String("hidden".to_owned()),
-            ),
-        )]);
+    let flat_document =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("flat"))
+            .with_component(
+                ComponentTypeId::new("nara.scene.Visibility"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::String("hidden".to_owned()),
+                ),
+            )]);
     assert!(!flat_document.validate(&registry).iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable"
     }));
 
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()).with_component(
-            ComponentTypeId::new("nara.scene.Visibility"),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::String("hidden".to_owned()),
-            ),
-        ),
-        SceneEntityRecord::new(child_id.clone()).with_parent(root_id),
-    ]);
+    let document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id)
+                .with_children([child_id.clone()])
+                .with_component(
+                    ComponentTypeId::new("nara.scene.Visibility"),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::String("hidden".to_owned()),
+                    ),
+                ),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    );
 
     let diagnostics = document.validate(&registry);
 
@@ -2506,10 +2635,13 @@ fn children_remove_observer_rejects_scene_replacement_before_detach() {
     let registry = test_registry();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
-    ]);
+    let document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     let mut spawner = SceneSpawner::new();
@@ -2564,10 +2696,13 @@ fn children_remove_observer_rejects_authoring_unload_before_detach() {
     let registry = test_registry();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
-    ]));
+    let mut session = SceneAuthoringSession::new(SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    ));
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     let sync = session.sync_world(&mut world, &registry);
@@ -2628,19 +2763,23 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
     let registry = test_asset_registry();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
-    let current_document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone()).with_parent(root_id.clone()),
-    ]);
-    let replacement_document = SceneDocument::new([
-        SceneEntityRecord::new(root_id.clone()),
-        SceneEntityRecord::new(child_id.clone())
-            .with_parent(root_id.clone())
-            .with_component(
+    let current_document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()),
+        ],
+    );
+    let replacement_document = SceneDocument::new(
+        [root_id.clone()],
+        [
+            SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+            SceneEntityRecord::new(child_id.clone()).with_component(
                 asset_link_type_id(),
                 asset_link_record(AssetRef::path("textures/generated.png").unwrap()),
             ),
-    ]);
+        ],
+    );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     let mut spawner = SceneSpawner::new();
@@ -2688,11 +2827,12 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
 
     let alternate_registry = alternate_asset_registry();
     let alternate_id = scene_id("alternate");
-    let alternate_document = SceneDocument::new([SceneEntityRecord::new(alternate_id.clone())
-        .with_component(
-            asset_link_type_id(),
-            asset_link_record(AssetRef::path("textures/alternate.png").unwrap()),
-        )]);
+    let alternate_document =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(alternate_id.clone())
+            .with_component(
+                asset_link_type_id(),
+                asset_link_record(AssetRef::path("textures/alternate.png").unwrap()),
+            )]);
     let alternate = SceneSpawner::new().spawn(&mut world, &alternate_registry, &alternate_document);
     assert!(!alternate.diagnostics.has_errors());
     let alternate_entity = spawned_entity(&world, &alternate, &alternate_id);
@@ -2708,8 +2848,10 @@ fn entity_component_observer_rejects_authoring_replacement_before_retirement() {
     let registry = test_registry();
     let id = scene_id("player");
     let mut session =
-        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(1))]));
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            id.clone(),
+        )
+        .with_component(position_type_id(), position_record(1))]));
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
 
@@ -2732,9 +2874,10 @@ fn entity_component_observer_rejects_authoring_replacement_before_retirement() {
         .collect::<Vec<_>>();
     let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
 
-    session
-        .replace_document(SceneDocument::new([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(2))]));
+    session.replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        id.clone(),
+    )
+    .with_component(position_type_id(), position_record(2))]));
     let baseline_revision = session.revision();
     let failed = session.sync_world(&mut world, &registry);
 
@@ -2778,8 +2921,10 @@ fn entity_component_observer_rejects_authoring_clear_before_retirement() {
     let registry = test_registry();
     let id = scene_id("player");
     let mut session =
-        SceneAuthoringSession::new(SceneDocument::new([SceneEntityRecord::new(id.clone())
-            .with_component(position_type_id(), position_record(1))]));
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            id.clone(),
+        )
+        .with_component(position_type_id(), position_record(1))]));
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
 
@@ -2836,10 +2981,11 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
     let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
     let database = test_database(stable_id, "textures/player.png");
     let id = scene_id("player");
-    let document = SceneDocument::new([SceneEntityRecord::new(id.clone()).with_component(
-        asset_link_type_id(),
-        asset_link_record(AssetRef::StableId(stable_id)),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
+        .with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::StableId(stable_id)),
+        )]);
     let mut world = World::new();
     let mut spawner = SceneSpawner::new();
 
@@ -2865,7 +3011,7 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
     let unknown_stable_id = stable_id("b73f0f16-09e8-4265-b090-b689b41c197e");
     let database = test_database(known_stable_id, "textures/player.png");
     let id = scene_id("player");
-    let document = SceneDocument::new([SceneEntityRecord::new(id).with_component(
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id).with_component(
         asset_link_type_id(),
         asset_link_record(AssetRef::StableId(unknown_stable_id)),
     )]);
@@ -2903,7 +3049,7 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
 #[test]
 fn component_apply_failure_in_multi_component_entity_reports_component_and_rolls_back() {
     let registry = failing_apply_registry();
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("ok"))
             .with_component(position_type_id(), position_record(1)),
         SceneEntityRecord::new(scene_id("fails"))
@@ -2929,10 +3075,11 @@ fn component_apply_failure_in_multi_component_entity_reports_component_and_rolls
 #[test]
 fn component_apply_failure_removes_scratch_asset_server() {
     let registry = failing_apply_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("fails")).with_component(
-        apply_fails_type_id(),
-        apply_fails_record(Some(AssetRef::path("textures/generated.png").unwrap())),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("fails"))
+        .with_component(
+            apply_fails_type_id(),
+            apply_fails_record(Some(AssetRef::path("textures/generated.png").unwrap())),
+        )]);
     let mut world = World::new();
     let before_entities = world.iter_entities().count();
 
@@ -2948,10 +3095,11 @@ fn component_apply_failure_removes_scratch_asset_server() {
 #[test]
 fn component_apply_failure_restores_original_asset_server() {
     let registry = failing_apply_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("fails")).with_component(
-        apply_fails_type_id(),
-        apply_fails_record(Some(AssetRef::path("textures/generated.png").unwrap())),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("fails"))
+        .with_component(
+            apply_fails_type_id(),
+            apply_fails_record(Some(AssetRef::path("textures/generated.png").unwrap())),
+        )]);
     let mut existing_asset_server = AssetServer::new();
     let existing_handle = existing_asset_server
         .reserve::<TestAsset>("textures/existing.png")
@@ -2977,7 +3125,7 @@ fn component_apply_failure_restores_original_asset_server() {
 #[test]
 fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
     let registry = failing_apply_registry();
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("asset")).with_component(
             apply_resolves_asset_type_id(),
             asset_link_record(AssetRef::path("textures/generated.png").unwrap()),
@@ -3021,13 +3169,16 @@ fn spawns_hierarchy_and_keeps_runtime_topology_out_of_export() {
     let registry = test_registry();
     let parent_id = scene_id("parent");
     let child_id = scene_id("parent/child");
-    let document = SceneDocument::new([
-        SceneEntityRecord::new(parent_id.clone())
-            .with_component(position_type_id(), position_record(1)),
-        SceneEntityRecord::new(child_id.clone())
-            .with_parent(parent_id.clone())
-            .with_component(position_type_id(), position_record(2)),
-    ]);
+    let document = SceneDocument::new(
+        [parent_id.clone()],
+        [
+            SceneEntityRecord::new(parent_id.clone())
+                .with_children([child_id.clone()])
+                .with_component(position_type_id(), position_record(1)),
+            SceneEntityRecord::new(child_id.clone())
+                .with_component(position_type_id(), position_record(2)),
+        ],
+    );
     let mut world = World::new();
     let mut spawner = SceneSpawner::new();
 
@@ -3063,7 +3214,7 @@ fn export_rejects_a_building_component_registry() {
     let frozen_registry = test_registry();
     let entity_id = scene_id("entity");
     let document =
-        SceneDocument::new([SceneEntityRecord::new(entity_id)
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity_id)
             .with_component(position_type_id(), position_record(1))]);
     let mut world = World::new();
     let report = spawn_scene(&mut world, &frozen_registry, &document);
@@ -3086,7 +3237,7 @@ fn repeated_scene_spawns_export_with_injective_generated_ids() {
     let registry = test_registry();
     let id = scene_id("enemy");
     let document =
-        SceneDocument::new([SceneEntityRecord::new(id.clone())
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
             .with_component(position_type_id(), position_record(7))]);
     let mut world = World::new();
     let mut spawner = SceneSpawner::new();
@@ -3126,8 +3277,9 @@ fn repeated_scene_spawns_export_with_injective_generated_ids() {
 #[test]
 fn generated_export_ids_skip_every_authored_claim() {
     let registry = test_registry();
-    let authored = SceneDocument::new([SceneEntityRecord::new(scene_id("entity_1"))]);
-    let duplicate = SceneDocument::new([SceneEntityRecord::new(scene_id("enemy"))]);
+    let authored =
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("entity_1"))]);
+    let duplicate = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("enemy"))]);
     let mut world = World::new();
 
     assert!(
@@ -3166,7 +3318,7 @@ fn export_rewrites_scene_local_references_with_owner_instance_context() {
     let registry = entity_link_registry();
     let source = scene_id("source");
     let target = scene_id("target");
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(source.clone()).with_component(
             entity_link_type_id(),
             entity_link_record(EntityReference::SceneLocal {
@@ -3215,12 +3367,13 @@ fn export_rewrites_scene_local_references_with_owner_instance_context() {
 #[test]
 fn dangling_scene_local_reference_prevents_export_publication() {
     let registry = entity_link_registry();
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
-        entity_link_type_id(),
-        entity_link_record(EntityReference::SceneLocal {
-            entity: scene_id("missing"),
-        }),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
+        .with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::SceneLocal {
+                entity: scene_id("missing"),
+            }),
+        )]);
     let mut world = World::new();
     let spawn = spawn_scene(&mut world, &registry, &document);
     assert!(!spawn.diagnostics.has_errors());
@@ -3245,7 +3398,7 @@ fn persistent_reference_to_exported_entity_rewrites_to_scene_local() {
     let source = scene_id("source");
     let target = scene_id("target");
     let persistent = persistent_reference("11111111-1111-4111-8111-111111111111");
-    let document = SceneDocument::new([
+    let document = SceneDocument::from_ordered_roots([
         SceneEntityRecord::new(source.clone()).with_component(
             entity_link_type_id(),
             entity_link_record(EntityReference::Persistent {
@@ -3284,12 +3437,13 @@ fn resolved_external_persistent_reference_is_preserved() {
     let registry = entity_link_registry();
     let source = scene_id("source");
     let persistent = persistent_reference("22222222-2222-4222-8222-222222222222");
-    let document = SceneDocument::new([SceneEntityRecord::new(source.clone()).with_component(
-        entity_link_type_id(),
-        entity_link_record(EntityReference::Persistent {
-            entity: persistent.clone(),
-        }),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(source.clone())
+        .with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::Persistent {
+                entity: persistent.clone(),
+            }),
+        )]);
     let mut world = World::new();
     let spawn = spawn_scene(&mut world, &registry, &document);
     assert!(!spawn.diagnostics.has_errors());
@@ -3310,10 +3464,11 @@ fn resolved_external_persistent_reference_is_preserved() {
 fn missing_persistent_reference_prevents_export_publication() {
     let registry = entity_link_registry();
     let persistent = persistent_reference("33333333-3333-4333-8333-333333333333");
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
-        entity_link_type_id(),
-        entity_link_record(EntityReference::Persistent { entity: persistent }),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
+        .with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::Persistent { entity: persistent }),
+        )]);
     let mut world = World::new();
     assert!(
         !spawn_scene(&mut world, &registry, &document)
@@ -3339,12 +3494,13 @@ fn missing_persistent_reference_prevents_export_publication() {
 fn tombstoned_persistent_reference_prevents_export_publication() {
     let registry = entity_link_registry();
     let persistent = persistent_reference("44444444-4444-4444-8444-444444444444");
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
-        entity_link_type_id(),
-        entity_link_record(EntityReference::Persistent {
-            entity: persistent.clone(),
-        }),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
+        .with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::Persistent {
+                entity: persistent.clone(),
+            }),
+        )]);
     let mut world = World::new();
     assert!(
         !spawn_scene(&mut world, &registry, &document)
@@ -3378,12 +3534,13 @@ fn tombstoned_persistent_reference_prevents_export_publication() {
 fn stale_persistent_reference_prevents_export_publication() {
     let registry = entity_link_registry();
     let persistent = persistent_reference("55555555-5555-4555-8555-555555555555");
-    let document = SceneDocument::new([SceneEntityRecord::new(scene_id("source")).with_component(
-        entity_link_type_id(),
-        entity_link_record(EntityReference::Persistent {
-            entity: persistent.clone(),
-        }),
-    )]);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
+        .with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::Persistent {
+                entity: persistent.clone(),
+            }),
+        )]);
     let mut world = World::new();
     assert!(
         !spawn_scene(&mut world, &registry, &document)
@@ -3413,7 +3570,7 @@ fn direct_prefab_spawn_applies_patch_field_overrides() {
     let registry = test_registry();
     let id = scene_id("enemy");
     let prefab =
-        PrefabDocument::new([SceneEntityRecord::new(id.clone())
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
             .with_component(position_type_id(), position_record(1))]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: id.clone(),
@@ -3437,7 +3594,7 @@ fn prefab_patch_can_add_and_remove_components() {
     let registry = test_registry();
     let added = scene_id("added");
     let removed = scene_id("removed");
-    let prefab = PrefabDocument::new([
+    let prefab = PrefabDocument::from_ordered_roots([
         SceneEntityRecord::new(added.clone()),
         SceneEntityRecord::new(removed.clone())
             .with_component(position_type_id(), position_record(4)),
@@ -3475,7 +3632,7 @@ fn prefab_patch_can_add_and_remove_components() {
 #[test]
 fn unknown_prefab_patch_target_prevents_world_mutation() {
     let registry = test_registry();
-    let prefab = PrefabDocument::new([SceneEntityRecord::new(scene_id("enemy"))
+    let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("enemy"))
         .with_component(position_type_id(), position_record(1))]);
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: scene_id("missing"),
@@ -3511,7 +3668,7 @@ fn patch_validation_failure_preserves_sticky_pressure_stats_and_operation_contex
         .collect::<BTreeMap<_, _>>();
     let invalid_entity = SceneEntityRecord {
         id: scene_id("invalid"),
-        parent: None,
+        children: Vec::new(),
         components,
         prefab: None,
     };
@@ -3547,6 +3704,7 @@ fn patch_validation_failure_preserves_sticky_pressure_stats_and_operation_contex
 fn unpublished_patch_path_returns_no_inverse_and_canonicalizes_empty_patch() {
     let registry = test_registry();
     let mut document = SceneDocument {
+        roots: vec![scene_id("z"), scene_id("a")],
         entities: vec![
             SceneEntityRecord::new(scene_id("z")),
             SceneEntityRecord::new(scene_id("a")),
@@ -3585,7 +3743,7 @@ fn owned_unpublished_patch_moves_component_payload_into_candidate() {
             ComponentValue::String(payload),
         ),
     }]);
-    let mut document = SceneDocument::new([SceneEntityRecord::new(entity_id)]);
+    let mut document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity_id)]);
 
     let report = patch.apply_owned_to_unpublished_scene(&mut document, &registry);
 
@@ -3604,7 +3762,7 @@ fn owned_unpublished_patch_moves_component_payload_into_candidate() {
 #[test]
 fn unpublished_patch_failure_isolated_from_public_atomic_patch_contract() {
     let registry = test_registry();
-    let source = SceneDocument::new([SceneEntityRecord::new(scene_id("enemy"))
+    let source = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("enemy"))
         .with_component(position_type_id(), position_record(1))]);
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::SetField {
@@ -3658,16 +3816,25 @@ fn unpublished_patch_failure_isolated_from_public_atomic_patch_contract() {
 #[test]
 fn owned_unpublished_patch_matches_public_apply_for_supported_operations() {
     let registry = test_registry();
-    let source = SceneDocument::new([
-        SceneEntityRecord::new(scene_id("root"))
-            .with_component(position_type_id(), position_record(1)),
-        SceneEntityRecord::new(scene_id("editable"))
-            .with_component(position_type_id(), position_record(2)),
-        SceneEntityRecord::new(scene_id("empty")),
-        SceneEntityRecord::new(scene_id("doomed"))
-            .with_component(position_type_id(), position_record(7)),
-        SceneEntityRecord::new(scene_id("doomed-child")).with_parent(scene_id("doomed")),
-    ]);
+    let source = SceneDocument::new(
+        [
+            scene_id("root"),
+            scene_id("editable"),
+            scene_id("empty"),
+            scene_id("doomed"),
+        ],
+        [
+            SceneEntityRecord::new(scene_id("root"))
+                .with_component(position_type_id(), position_record(1)),
+            SceneEntityRecord::new(scene_id("editable"))
+                .with_component(position_type_id(), position_record(2)),
+            SceneEntityRecord::new(scene_id("empty")),
+            SceneEntityRecord::new(scene_id("doomed"))
+                .with_children([scene_id("doomed-child")])
+                .with_component(position_type_id(), position_record(7)),
+            SceneEntityRecord::new(scene_id("doomed-child")),
+        ],
+    );
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(scene_id("added"))
@@ -3710,7 +3877,7 @@ fn owned_unpublished_patch_matches_public_apply_for_supported_operations() {
 
     assert!(public_report.applied);
     assert!(public_report.inverse.is_some());
-    assert!(owned_report.applied);
+    assert!(owned_report.applied, "{:?}", owned_report.diagnostics);
     assert!(owned_report.inverse.is_none());
     assert_eq!(unpublished, published);
 }
@@ -3730,16 +3897,16 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             inner_source.clone(),
-            PrefabDocument::new([SceneEntityRecord::new(scene_id("target"))]),
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("target"))]),
         )
         .with_prefab(
             outer_source.clone(),
-            PrefabDocument::new([
+            PrefabDocument::from_ordered_roots([
                 prefab_anchor_with_overrides("bad", inner_source.clone(), invalid_override),
                 prefab_anchor("good", inner_source),
             ]),
         );
-    let document = SceneDocument::new([prefab_anchor("root", outer_source)]);
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -3766,7 +3933,7 @@ fn export_rejects_runtime_parent_instead_of_inventing_persistent_topology() {
     let report = spawn_scene(
         &mut world,
         &registry,
-        &SceneDocument::new([SceneEntityRecord::new(child_id.clone())
+        &SceneDocument::from_ordered_roots([SceneEntityRecord::new(child_id.clone())
             .with_component(position_type_id(), position_record(3))]),
     );
     let child = spawned_entity(&world, &report, &child_id);
@@ -3790,13 +3957,14 @@ fn export_component_encode_failure_is_an_error() {
     let report = spawn_scene(
         &mut world,
         &registry,
-        &SceneDocument::new([SceneEntityRecord::new(scene_id("broken")).with_component(
-            broken_export_type_id(),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion(1),
-                ComponentValue::map([("broken", ComponentValue::String("value".to_owned()))]),
-            ),
-        )]),
+        &SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("broken"))
+            .with_component(
+                broken_export_type_id(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion(1),
+                    ComponentValue::map([("broken", ComponentValue::String("value".to_owned()))]),
+                ),
+            )]),
     );
     assert!(!report.diagnostics.has_errors());
 
@@ -4506,7 +4674,7 @@ fn prefab_anchor_with_overrides(
 ) -> SceneEntityRecord {
     SceneEntityRecord {
         id: scene_id(id),
-        parent: None,
+        children: Vec::new(),
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance { source, overrides }),
     }

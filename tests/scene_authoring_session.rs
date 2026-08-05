@@ -14,10 +14,11 @@ struct TestLabel {
 fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() {
     let registry = scene_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let mut world = World::new();
     let runtime_entity = world.spawn_empty().id();
 
@@ -65,10 +66,11 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
 fn authoring_session_undo_redo_are_transactional() {
     let registry = scene_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
         entity: player.clone(),
         component: label_type_id(),
@@ -109,10 +111,11 @@ fn authoring_session_undo_redo_are_transactional() {
 fn failed_authoring_patch_does_not_dirty_live_world_or_enter_history() {
     let registry = scene_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let mut world = World::new();
     let sync = session.sync_world(&mut world, &registry);
     assert!(sync.synced);
@@ -144,23 +147,26 @@ fn failed_authoring_patch_does_not_dirty_live_world_or_enter_history() {
 fn failed_world_sync_keeps_existing_live_projection() {
     let registry = scene_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let mut world = World::new();
     let sync = session.sync_world(&mut world, &registry);
     assert!(sync.synced);
     let live_player = resolve_scene_entity(session.live_instance().unwrap(), &world, &player);
 
-    session.replace_document(SceneDocument::new([SceneEntityRecord::new(player.clone())
-        .with_component(
-            ComponentTypeId::new("nara.test.Unregistered"),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion(1),
-                ComponentValue::String("invalid".to_string()),
-            ),
-        )]));
+    session.replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        player.clone(),
+    )
+    .with_component(
+        ComponentTypeId::new("nara.test.Unregistered"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion(1),
+            ComponentValue::String("invalid".to_string()),
+        ),
+    )]));
     let failed_sync = session.sync_world(&mut world, &registry);
 
     assert!(!failed_sync.synced);
@@ -201,10 +207,11 @@ fn empty_undo_redo_report_non_applied_info_diagnostics() {
 fn authoring_revision_changes_only_for_successful_document_mutations() {
     let registry = scene_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let initial = session.revision();
     let mut world = World::new();
 
@@ -243,7 +250,7 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     assert!(session.live_instance().is_none());
     assert_eq!(session.revision(), after_patch);
 
-    session.replace_document(SceneDocument::new([labeled_entity(
+    session.replace_document(SceneDocument::from_ordered_roots([labeled_entity(
         player.clone(),
         "Replacement",
     )]));
@@ -267,10 +274,11 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
 fn authoring_revision_advances_for_successful_undo_and_redo() {
     let registry = scene_registry();
     let player = scene_id("player");
-    let mut session = SceneAuthoringSession::new(SceneDocument::new([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
     let initial = session.revision();
 
     let patch_report = session.apply_patch(&set_label_patch(&player, "Hero"), &registry);

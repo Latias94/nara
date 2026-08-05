@@ -20,10 +20,11 @@ fn canonical_scene_file_publishes_through_a_validated_workspace_session() {
     registry.freeze().unwrap();
     let mut workspace = EditorWorkspace::new();
 
-    let invalid = SceneDocument::new([SceneEntityRecord::new(scene_id("invalid")).with_component(
-        ComponentTypeId::new("nara.test.Unknown"),
-        SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
-    )]);
+    let invalid = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("invalid"))
+        .with_component(
+            ComponentTypeId::new("nara.test.Unknown"),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+        )]);
     let invalid_candidate =
         SceneDocumentCandidate::decode_json_bytes(invalid.to_json_string().unwrap().as_bytes())
             .unwrap();
@@ -56,13 +57,14 @@ fn canonical_scene_file_publishes_through_a_validated_workspace_session() {
 #[test]
 fn migrated_scene_file_stays_dirty_until_a_persistence_host_accepts_the_upgrade() {
     let registry = migrating_text_registry();
-    let scene = SceneDocument::new([SceneEntityRecord::new(scene_id("player")).with_component(
-        migrating_text_id(),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::map([("legacy", ComponentValue::String("before".to_owned()))]),
-        ),
-    )]);
+    let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("player"))
+        .with_component(
+            migrating_text_id(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("legacy", ComponentValue::String("before".to_owned()))]),
+            ),
+        )]);
     let encoded = scene.to_json_string().unwrap();
     let session = SceneAuthoringSession::try_from_file_candidate(
         SceneDocumentCandidate::decode_json_bytes(encoded.as_bytes()).unwrap(),
