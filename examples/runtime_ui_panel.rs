@@ -1,7 +1,9 @@
 use std::error::Error;
 
 use image::ImageEncoder;
-use nara::hierarchy::HierarchyCommandsExt;
+use nara::hierarchy::{
+    HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
+};
 use nara::{advanced_prelude::*, backend_prelude::*};
 
 #[path = "support/runtime_retirement.rs"]
@@ -64,7 +66,6 @@ fn setup_scene(
             UiPanel::from_color(Color::rgba(0.12, 0.14, 0.16, 0.92)),
         ))
         .id();
-    commands.attach_hierarchy_child(background, root);
     let accent = commands
         .spawn((
             Name::new("accent image"),
@@ -72,7 +73,6 @@ fn setup_scene(
             UiPanel::from_image(image).with_sampler(SamplerDescriptor::NEAREST_CLAMP),
         ))
         .id();
-    commands.attach_hierarchy_child(accent, root);
     let status = commands
         .spawn((
             Name::new("status strip"),
@@ -82,7 +82,24 @@ fn setup_scene(
             UiPanel::from_color(Color::rgba(0.22, 0.58, 0.86, 0.88)),
         ))
         .id();
-    commands.attach_hierarchy_child(status, root);
+    commands.apply_hierarchy_batch(vec![
+        HierarchyOperation::Place {
+            entity: root,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        },
+        HierarchyOperation::Place {
+            entity: background,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: root }),
+        },
+        HierarchyOperation::Place {
+            entity: accent,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: root }),
+        },
+        HierarchyOperation::Place {
+            entity: status,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: root }),
+        },
+    ]);
 }
 
 fn import_ui_texture(

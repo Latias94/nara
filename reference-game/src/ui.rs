@@ -7,7 +7,9 @@ use nara::{
     asset::{AssetServer, Handle},
     core::{Color, Vec2},
     ecs::{Commands, Component, Entity, Query, Res, ResMut, Resource, World},
-    hierarchy::HierarchyConstructionWriter,
+    hierarchy::{
+        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
+    },
     image::ImageAsset,
     material::SamplerDescriptor,
     render::Camera2d,
@@ -147,10 +149,6 @@ fn spawn_desktop_view(
             ReferenceHudElement::HealthFill,
         ))
         .id();
-    HierarchyConstructionWriter::new(world)
-        .attach(health_fill, health_root)
-        .map_err(|_| setup_error("health HUD hierarchy was rejected"))?;
-
     let progress_root = world
         .spawn((
             UiRoot::primary_window(),
@@ -165,18 +163,46 @@ fn spawn_desktop_view(
             ReferenceHudElement::ProgressFill,
         ))
         .id();
-    HierarchyConstructionWriter::new(world)
-        .attach(progress_fill, progress_root)
-        .map_err(|_| setup_error("progress HUD hierarchy was rejected"))?;
-
-    world.spawn((
-        UiRoot::primary_window().with_order(10),
-        UiNode::new(UiStyle::absolute(0.0, 280.0, 360.0, 120.0).with_left(UiVal::percent(0.36)))
+    let terminal_root = world
+        .spawn((
+            UiRoot::primary_window().with_order(10),
+            UiNode::new(
+                UiStyle::absolute(0.0, 280.0, 360.0, 120.0).with_left(UiVal::percent(0.36)),
+            )
             .with_z_index(20)
             .with_visible(false),
-        UiPanel::from_color(Color::TRANSPARENT),
-        ReferenceHudElement::Terminal,
-    ));
+            UiPanel::from_color(Color::TRANSPARENT),
+            ReferenceHudElement::Terminal,
+        ))
+        .id();
+    HierarchyWriter::new(world)
+        .apply_batch(&[
+            HierarchyOperation::Place {
+                entity: health_root,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            },
+            HierarchyOperation::Place {
+                entity: health_fill,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent {
+                    parent: health_root,
+                }),
+            },
+            HierarchyOperation::Place {
+                entity: progress_root,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            },
+            HierarchyOperation::Place {
+                entity: progress_fill,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent {
+                    parent: progress_root,
+                }),
+            },
+            HierarchyOperation::Place {
+                entity: terminal_root,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            },
+        ])
+        .map_err(|_| setup_error("desktop HUD hierarchy was rejected"))?;
     Ok(())
 }
 

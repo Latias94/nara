@@ -7,11 +7,11 @@ use nara_ecs::{
     Component, Entity, Mut, Resource, World,
     lifecycle::{Add, Despawn},
     observer::{Observer, On},
-    relationship::{Relationship, RelationshipHookMode},
     system::ResMut,
 };
 use nara_hierarchy::{
-    __private::completed_topology_generation, HierarchyConstructionWriter, HierarchyPlugin, Parent,
+    __private::completed_topology_generation, HierarchyOperation, HierarchyPlacement,
+    HierarchyPlacementOwner, HierarchyPlugin, HierarchyWriter, Parent,
 };
 use nara_identity::{
     EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
@@ -394,13 +394,19 @@ fn invalid_existing_hierarchy_rejects_product_replacement_without_scratch_mutati
     let mut fixture = ReplacementFixture::new();
     let parent = fixture.world.spawn_empty().id();
     let child = fixture.world.spawn_empty().id();
-    fixture
-        .world
-        .entity_mut(child)
-        .insert_with_relationship_hook_mode(
-            <Parent as Relationship>::from(parent),
-            RelationshipHookMode::Skip,
-        );
+    HierarchyWriter::new(&mut fixture.world)
+        .apply_batch(&[
+            HierarchyOperation::Place {
+                entity: parent,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            },
+            HierarchyOperation::Place {
+                entity: child,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+            },
+        ])
+        .unwrap();
+    fixture.world.entity_mut(child).remove::<Parent>();
     let before_entities = fixture.entity_ids();
     let before_stats = fixture.world.resource::<WorldIdentityDomain>().stats();
 
@@ -741,8 +747,19 @@ fn additional_retirement_rejects_missing_persistent_hierarchy_and_lifecycle_owne
 
     let hierarchy_parent = fixture.world.spawn_empty().id();
     let hierarchy_child = spawn_retirement_token(&mut fixture.world);
-    HierarchyConstructionWriter::new(&mut fixture.world)
-        .attach(hierarchy_child.entity(), hierarchy_parent)
+    HierarchyWriter::new(&mut fixture.world)
+        .apply_batch(&[
+            HierarchyOperation::Place {
+                entity: hierarchy_parent,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            },
+            HierarchyOperation::Place {
+                entity: hierarchy_child.entity(),
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent {
+                    parent: hierarchy_parent,
+                }),
+            },
+        ])
         .unwrap();
     fixture.world.flush();
     let hierarchy_report = replace_scene_with_product(

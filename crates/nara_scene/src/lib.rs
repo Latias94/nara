@@ -11,6 +11,7 @@ mod migration;
 mod patch;
 mod prefab;
 mod product_transaction;
+mod runtime_hierarchy;
 mod scene_components;
 mod spawn;
 mod validation;

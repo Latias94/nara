@@ -301,11 +301,10 @@ mod tests {
         RuntimeCandidateRetirementState, RuntimeClosePolicy, RuntimeControl,
         RuntimeControlRequestResult, RuntimeObligationLedger, RuntimeState,
     };
-    use nara_ecs::{
-        Commands, Query, Res, ResMut, Resource, relationship::RelationshipTarget,
-        schedule::IntoScheduleConfigs,
+    use nara_ecs::{Commands, Entity, Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+    use nara_hierarchy::{
+        Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
     };
-    use nara_hierarchy::{Children, HierarchyConstructionEdge, HierarchyConstructionWriter};
     use nara_reflect::ComponentRegistryPlugin;
 
     const CONFLICTING_TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.test.transform-conflict");
@@ -339,6 +338,32 @@ mod tests {
         ))
         .expect("the spatial foundation should install");
         app
+    }
+
+    fn place_ordered_hierarchy(
+        world: &mut nara_ecs::World,
+        roots: &[Entity],
+        edges: &[(Entity, Entity)],
+    ) {
+        let mut operations = Vec::with_capacity(roots.len() + edges.len());
+        operations.extend(
+            roots
+                .iter()
+                .copied()
+                .map(|entity| HierarchyOperation::Place {
+                    entity,
+                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+                }),
+        );
+        operations.extend(edges.iter().copied().map(|(entity, parent)| {
+            HierarchyOperation::Place {
+                entity,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+            }
+        }));
+        HierarchyWriter::new(world)
+            .apply_batch(&operations)
+            .expect("the ordered hierarchy should be valid");
     }
 
     impl Plugin for ConflictingTransformPlugin {
@@ -446,12 +471,7 @@ mod tests {
             let grandchild = world
                 .spawn(Transform2d::from_translation(Vec2::new(-2.0, 5.0)))
                 .id();
-            HierarchyConstructionWriter::new(world)
-                .attach_batch(&[
-                    HierarchyConstructionEdge::new(child, root),
-                    HierarchyConstructionEdge::new(grandchild, child),
-                ])
-                .expect("the hierarchy should be valid");
+            place_ordered_hierarchy(world, &[root], &[(child, root), (grandchild, child)]);
             (root, child, grandchild)
         };
 
@@ -493,9 +513,7 @@ mod tests {
             let child = world
                 .spawn(Transform2d::from_translation(Vec2::new(2.0, 3.0)))
                 .id();
-            HierarchyConstructionWriter::new(world)
-                .attach(child, root)
-                .unwrap();
+            place_ordered_hierarchy(world, &[root], &[(child, root)]);
             (root, child)
         };
         app.run_once(Duration::ZERO).unwrap();
@@ -628,15 +646,14 @@ mod tests {
         let corruption = world.resource::<CorruptHierarchyBeforeCompletion>();
         let root = corruption.root;
         let child = corruption.child;
-        HierarchyConstructionWriter::new(world)
-            .attach(child, root)
+        HierarchyWriter::new(world)
+            .place(
+                child,
+                HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: root }),
+            )
             .unwrap();
         world.flush();
-        world
-            .get_mut::<Children>(root)
-            .unwrap()
-            .collection_mut_risky()
-            .clear();
+        world.entity_mut(root).remove::<Children>();
     }
 
     #[test]
@@ -674,9 +691,7 @@ mod tests {
             let child = world
                 .spawn(Transform2d::from_translation(Vec2::new(2.0, 3.0)))
                 .id();
-            HierarchyConstructionWriter::new(world)
-                .attach(child, root)
-                .unwrap();
+            place_ordered_hierarchy(world, &[root], &[(child, root)]);
             (root, child)
         };
         app.run_once(Duration::ZERO).unwrap();
@@ -719,9 +734,7 @@ mod tests {
         let world = app.world_mut().unwrap();
         let root = world.spawn(Transform2d::default()).id();
         let child = world.spawn(Transform2d::default()).id();
-        HierarchyConstructionWriter::new(world)
-            .attach(child, root)
-            .unwrap();
+        place_ordered_hierarchy(world, &[root], &[(child, root)]);
 
         app.run_once(Duration::ZERO).unwrap();
         let first = propagation::propagation_stats(app.world());
@@ -754,18 +767,16 @@ mod tests {
             let mut edges = Vec::with_capacity(DEPTH.saturating_sub(1) + WIDTH);
             for _ in 1..DEPTH {
                 let entity = world.spawn(Transform2d::from_translation(Vec2::X)).id();
-                edges.push(HierarchyConstructionEdge::new(entity, previous));
+                edges.push((entity, previous));
                 previous = entity;
             }
 
             let wide_root = world.spawn(Transform2d::default()).id();
             for _ in 0..WIDTH {
                 let child = world.spawn(Transform2d::default()).id();
-                edges.push(HierarchyConstructionEdge::new(child, wide_root));
+                edges.push((child, wide_root));
             }
-            HierarchyConstructionWriter::new(world)
-                .attach_batch(&edges)
-                .unwrap();
+            place_ordered_hierarchy(world, &[deep_root, wide_root], &edges);
             (previous, DEPTH + WIDTH + 1)
         };
 
@@ -802,11 +813,9 @@ mod tests {
             let mut edges = Vec::with_capacity(NON_TRANSFORM_CHILDREN);
             for _ in 0..NON_TRANSFORM_CHILDREN {
                 let child = world.spawn_empty().id();
-                edges.push(HierarchyConstructionEdge::new(child, root));
+                edges.push((child, root));
             }
-            HierarchyConstructionWriter::new(world)
-                .attach_batch(&edges)
-                .unwrap();
+            place_ordered_hierarchy(world, &[root], &edges);
         }
 
         app.run_once(Duration::ZERO).unwrap();
@@ -844,7 +853,7 @@ mod tests {
     }
 
     #[test]
-    fn parent_despawn_recomputes_the_surviving_child_as_a_root() {
+    fn explicit_parent_retirement_recomputes_the_surviving_child_as_a_root() {
         let mut app = spatial_app();
         let (parent, child) = {
             let world = app.world_mut().unwrap();
@@ -854,9 +863,7 @@ mod tests {
             let child = world
                 .spawn(Transform2d::from_translation(Vec2::new(3.0, 4.0)))
                 .id();
-            HierarchyConstructionWriter::new(world)
-                .attach(child, parent)
-                .unwrap();
+            place_ordered_hierarchy(world, &[parent], &[(child, parent)]);
             (parent, child)
         };
         app.run_once(Duration::ZERO).unwrap();
@@ -868,7 +875,25 @@ mod tests {
             Vec2::new(13.0, 24.0)
         );
 
-        assert!(app.world_mut().unwrap().despawn(parent));
+        {
+            let world = app.world_mut().unwrap();
+            let child_from = HierarchyPlacement::current(world, child).unwrap();
+            let parent_from = HierarchyPlacement::current(world, parent).unwrap();
+            HierarchyWriter::new(world)
+                .apply_batch(&[
+                    HierarchyOperation::Move {
+                        entity: child,
+                        from: child_from,
+                        to: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+                    },
+                    HierarchyOperation::Remove {
+                        entity: parent,
+                        from: parent_from,
+                    },
+                ])
+                .unwrap();
+            assert!(world.despawn(parent));
+        }
         app.run_once(Duration::ZERO).unwrap();
 
         assert!(app.world().get::<nara_hierarchy::Parent>(child).is_none());
@@ -996,9 +1021,7 @@ mod tests {
         let child = world
             .spawn(Transform2d::from_translation(Vec2::new(3.0, 4.0)))
             .id();
-        HierarchyConstructionWriter::new(world)
-            .attach(child, root)
-            .unwrap();
+        place_ordered_hierarchy(world, &[root], &[(child, root)]);
         (root, child)
     }
 
@@ -1078,9 +1101,7 @@ mod tests {
             let child = world
                 .spawn(Transform2d::from_translation(Vec2::new(3.0, 4.0)))
                 .id();
-            HierarchyConstructionWriter::new(world)
-                .attach(child, root)
-                .unwrap();
+            place_ordered_hierarchy(world, &[root], &[(child, root)]);
             (root, child)
         };
         app.insert_resource(FixedSpatialProbe {

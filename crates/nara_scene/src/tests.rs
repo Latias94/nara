@@ -14,7 +14,10 @@ use nara_ecs::{
     system::ResMut,
     world::DeferredWorld,
 };
-use nara_hierarchy::{Children, HierarchyConstructionWriter, Parent};
+use nara_hierarchy::{
+    Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
+    HierarchyWriter, Parent,
+};
 use nara_identity::{
     EntityLookup, EntityReference, IdentityDomainError, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference, SpawnedSceneInstance, TombstoneCause,
@@ -118,6 +121,32 @@ fn spawned_entity(
         EntityLookup::Resolved(entity) => entity,
         lookup => panic!("spawned scene entity did not resolve: {lookup:?}"),
     }
+}
+
+fn place_runtime_child(world: &mut World, child: Entity, parent: Entity) {
+    let child_placement = HierarchyPlacement::current(world, child);
+    let mut operations = Vec::with_capacity(2);
+    if HierarchyPlacement::current(world, parent).is_none() {
+        operations.push(HierarchyOperation::Place {
+            entity: parent,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        });
+    }
+    let placement = HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent });
+    operations.push(match child_placement {
+        Some(from) => HierarchyOperation::Move {
+            entity: child,
+            from,
+            to: placement,
+        },
+        None => HierarchyOperation::Place {
+            entity: child,
+            placement,
+        },
+    });
+    HierarchyWriter::new(world)
+        .apply_batch(&operations)
+        .expect("runtime child placement should succeed");
 }
 
 fn persistent_reference(value: &str) -> PersistentRuntimeReference {
@@ -381,13 +410,11 @@ fn scene_diagnostic_asset_refs_keep_semantic_classification() {
 }
 
 #[test]
-fn construction_writer_publishes_parent_child_links_immediately() {
+fn hierarchy_writer_publishes_ordered_parent_child_links_immediately() {
     let mut world = World::new();
     let parent = world.spawn((Name::new("parent"),)).id();
     let child = world.spawn((Name::new("child"),)).id();
-    HierarchyConstructionWriter::new(&mut world)
-        .attach(child, parent)
-        .unwrap();
+    place_runtime_child(&mut world, child, parent);
 
     let parent_ref = world.get_entity(parent).unwrap();
     let children = parent_ref.get::<Children>().unwrap();
@@ -1991,6 +2018,7 @@ fn individual_scene_retirement_tombstones_identity_before_despawn() {
     retire_and_despawn_scene_entity(&mut world, entity).unwrap();
 
     assert!(world.get_entity(entity).is_err());
+    assert!(world.resource::<HierarchyRoots>().is_empty());
     let EntityLookup::Tombstoned(Some(tombstone)) = instance.resolve(&world, &id) else {
         panic!("retired entity must resolve to a retained tombstone");
     };
@@ -2284,9 +2312,7 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
     let old_root = spawned_entity(&world, &first, &root_id);
     let old_child = spawned_entity(&world, &first, &child_id);
     let external_descendant = world.spawn_empty().id();
-    HierarchyConstructionWriter::new(&mut world)
-        .attach(external_descendant, old_child)
-        .unwrap();
+    place_runtime_child(&mut world, external_descendant, old_child);
 
     let replacement = spawner.replace(&mut world, &registry, &document, &current);
 
@@ -2299,6 +2325,10 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
     let new_root = spawned_entity(&world, &replacement, &root_id);
     let new_child = spawned_entity(&world, &replacement, &child_id);
     assert_eq!(world.get::<Parent>(new_child).unwrap().parent(), new_root);
+    assert_eq!(
+        world.resource::<HierarchyRoots>().as_slice(),
+        [new_root, external_descendant]
+    );
 }
 
 #[test]
@@ -2323,9 +2353,7 @@ fn hierarchy_aware_unload_detaches_external_descendants() {
         lookup => panic!("scene child did not resolve: {lookup:?}"),
     };
     let external_descendant = world.spawn_empty().id();
-    HierarchyConstructionWriter::new(&mut world)
-        .attach(external_descendant, scene_child)
-        .unwrap();
+    place_runtime_child(&mut world, external_descendant, scene_child);
 
     let clear = session.clear_live_world(&mut world);
 
@@ -3251,7 +3279,7 @@ fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
 }
 
 #[test]
-fn spawns_hierarchy_and_keeps_runtime_topology_out_of_export() {
+fn scene_spawn_and_export_preserve_ordered_runtime_topology() {
     let registry = test_registry();
     let parent_id = scene_id("parent");
     let child_id = scene_id("parent/child");
@@ -3289,10 +3317,57 @@ fn spawns_hierarchy_and_keeps_runtime_topology_out_of_export() {
 
     let export = export_scene(&world, &registry);
 
-    assert!(export.output().is_none());
-    assert!(export.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.export-runtime-topology-unsupported"
-    }));
+    let output = export
+        .output()
+        .expect("ordered scene export should succeed");
+    assert_eq!(output.document, document);
+}
+
+#[test]
+fn multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation() {
+    let registry = test_registry();
+    let first_root_id = scene_id("z-root");
+    let second_root_id = scene_id("a-root");
+    let first_child_id = scene_id("z-root/z-child");
+    let second_child_id = scene_id("z-root/a-child");
+    let document = SceneDocument::new(
+        [first_root_id.clone(), second_root_id.clone()],
+        [
+            SceneEntityRecord::new(first_root_id.clone())
+                .with_children([first_child_id.clone(), second_child_id.clone()]),
+            SceneEntityRecord::new(second_root_id.clone()),
+            SceneEntityRecord::new(first_child_id.clone()),
+            SceneEntityRecord::new(second_child_id.clone()),
+        ],
+    );
+    let mut world = World::new();
+    let _unrelated_before = world.spawn_empty().id();
+
+    let report = spawn_scene(&mut world, &registry, &document);
+    let _unrelated_after = world.spawn_empty().id();
+
+    assert!(!report.diagnostics.has_errors());
+    let first_root = spawned_entity(&world, &report, &first_root_id);
+    let second_root = spawned_entity(&world, &report, &second_root_id);
+    let first_child = spawned_entity(&world, &report, &first_child_id);
+    let second_child = spawned_entity(&world, &report, &second_child_id);
+    assert_eq!(
+        world.resource::<HierarchyRoots>().as_slice(),
+        [first_root, second_root]
+    );
+    assert_eq!(
+        world.get::<Children>(first_root).unwrap().as_slice(),
+        [first_child, second_child]
+    );
+
+    let export = export_scene(&world, &registry);
+    assert_eq!(
+        export
+            .output()
+            .expect("ordered scene export should succeed")
+            .document,
+        document
+    );
 }
 
 #[test]
@@ -4018,7 +4093,7 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
 }
 
 #[test]
-fn export_rejects_runtime_parent_instead_of_inventing_persistent_topology() {
+fn export_rejects_a_scene_entity_owned_by_a_non_scene_parent() {
     let registry = test_registry();
     let mut world = World::new();
     let child_id = scene_id("child");
@@ -4030,16 +4105,17 @@ fn export_rejects_runtime_parent_instead_of_inventing_persistent_topology() {
     );
     let child = spawned_entity(&world, &report, &child_id);
     let parent = world.spawn_empty().id();
-    HierarchyConstructionWriter::new(&mut world)
-        .attach(child, parent)
-        .unwrap();
+    place_runtime_child(&mut world, child, parent);
 
     let export = export_scene(&world, &registry);
     assert!(export.output().is_none());
     assert_eq!(world.get::<Parent>(child).unwrap().parent(), parent);
-    assert!(export.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.export-runtime-topology-unsupported"
-    }));
+    assert!(
+        export
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.export-foreign-parent" })
+    );
 }
 
 #[test]

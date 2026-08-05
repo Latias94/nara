@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use nara_ecs::{Entity, QueryState, World, entity::EntityHashMap};
 
-use crate::{Children, HierarchyError, Parent};
+use crate::{Children, HierarchyError, HierarchyRoots, Parent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VisitState {
@@ -17,6 +17,7 @@ pub(crate) struct HierarchyValidationScratch {
     parent_edges: Vec<(Entity, Entity)>,
     parent_by_child: EntityHashMap<Entity>,
     reverse_edges: HashSet<(Entity, Entity)>,
+    root_entities: HashSet<Entity>,
     visit_states: EntityHashMap<VisitState>,
     path: Vec<Entity>,
 }
@@ -77,16 +78,18 @@ impl HierarchyValidationScratch {
         self.parent_edges.clear();
         self.parent_by_child.clear();
         self.reverse_edges.clear();
+        self.root_entities.clear();
         self.visit_states.clear();
         self.path.clear();
     }
 
     #[cfg(test)]
-    pub(crate) fn capacities(&self) -> [usize; 5] {
+    pub(crate) fn capacities(&self) -> [usize; 6] {
         [
             self.parent_edges.capacity(),
             self.parent_by_child.capacity(),
             self.reverse_edges.capacity(),
+            self.root_entities.capacity(),
             self.visit_states.capacity(),
             self.path.capacity(),
         ]
@@ -212,7 +215,40 @@ pub(crate) fn validate_hierarchy_with_additions(
     }
 
     validate_acyclic(scratch, &mut stats)?;
+    validate_root_closure(world, scratch)?;
     Ok(stats)
+}
+
+fn validate_root_closure(
+    world: &World,
+    scratch: &mut HierarchyValidationScratch,
+) -> Result<(), HierarchyError> {
+    if let Some(roots) = world.get_resource::<HierarchyRoots>() {
+        scratch.root_entities.reserve(roots.len());
+        for root in roots.iter() {
+            if world.get_entity(root).is_err() {
+                return Err(HierarchyError::RootEntityMissing { entity: root });
+            }
+            if !scratch.root_entities.insert(root) {
+                return Err(HierarchyError::RootDuplicate { entity: root });
+            }
+            if let Some(parent) = scratch.parent_by_child.get(&root).copied() {
+                return Err(HierarchyError::RootParented {
+                    entity: root,
+                    parent,
+                });
+            }
+        }
+    }
+
+    for &(_, parent) in &scratch.parent_edges {
+        if !scratch.parent_by_child.contains_key(&parent)
+            && !scratch.root_entities.contains(&parent)
+        {
+            return Err(HierarchyError::PlacementMissing { entity: parent });
+        }
+    }
+    Ok(())
 }
 
 fn validate_acyclic(

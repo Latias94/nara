@@ -12,7 +12,10 @@ use nara_asset::{
 };
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource, World, schedule::IntoScheduleConfigs};
-use nara_hierarchy::{HierarchyConstructionWriter, HierarchyPlugin};
+use nara_hierarchy::{
+    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
+    HierarchyWriter,
+};
 use nara_image::{
     ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata, image_resource_key,
 };
@@ -32,6 +35,21 @@ fn test_view() -> ExtractedView {
         order: 0,
         clear_color: Color::BLACK,
     }
+}
+
+fn place_parented(world: &mut World, child: Entity, parent: Entity) {
+    HierarchyWriter::new(world)
+        .apply_batch(&[
+            HierarchyOperation::Place {
+                entity: parent,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            },
+            HierarchyOperation::Place {
+                entity: child,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+            },
+        ])
+        .expect("the ordered hierarchy should be valid");
 }
 
 fn instance() -> SpriteInstance {
@@ -187,9 +205,7 @@ fn parented_sprite_uses_the_completed_global_affine() {
                 child_transform,
             ))
             .id();
-        HierarchyConstructionWriter::new(world)
-            .attach(child, parent)
-            .unwrap();
+        place_parented(world, child, parent);
         (parent, child)
     };
 
@@ -229,9 +245,7 @@ fn moving_a_sprite_parent_updates_extraction_without_mutating_child_local_state(
                 child_local,
             ))
             .id();
-        HierarchyConstructionWriter::new(world)
-            .attach(child, parent)
-            .unwrap();
+        place_parented(world, child, parent);
         (parent, child)
     };
 
@@ -269,9 +283,7 @@ fn parented_tilemap_uses_the_completed_global_affine() {
         let mut tilemap = Tilemap::new(Vec2::new(10.0, 20.0));
         tilemap.set_cell(TileCoord::new(1, 0), TileCell::new(TileIndex::new(2)));
         let child = world.spawn((tilemap, child_transform)).id();
-        HierarchyConstructionWriter::new(world)
-            .attach(child, parent)
-            .unwrap();
+        place_parented(world, child, parent);
         child
     };
 

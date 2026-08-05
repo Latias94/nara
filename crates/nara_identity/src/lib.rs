@@ -27,11 +27,12 @@ pub use types::{
 #[doc(hidden)]
 pub mod __private {
     pub use crate::domain::{
-        AdditionalRetirementIdentityError, IdentitySupportTopologyError,
+        AdditionalRetirementIdentityError, IdentitySupportTopologyError, PreparedEntityRetirement,
         PreparedSceneInstanceRegistration, PreparedSceneInstanceReplacement,
-        PreparedSceneInstanceRetirement, prepare_exact_scene_instance_registration,
-        prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
-        validate_additional_retirement_identity_axes, validate_identity_support_topology,
+        PreparedSceneInstanceRetirement, prepare_exact_entity_retirement,
+        prepare_exact_scene_instance_registration, prepare_exact_scene_instance_replacement,
+        prepare_exact_scene_instance_retirement, validate_additional_retirement_identity_axes,
+        validate_identity_support_topology,
     };
 }
 

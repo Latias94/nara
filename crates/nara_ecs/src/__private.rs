@@ -59,6 +59,36 @@ pub fn validate_registered_persistent_component_apply<T: Component>(
     validate_persistent_component_apply(world, component_id, target)
 }
 
+/// Validates one registered component's exact intrinsic hooks and required-component surface.
+pub fn validate_registered_component_metadata<T: Component>(
+    world: &World,
+    allowed_hooks: &[PersistentLifecycleEvent],
+) -> Result<ComponentId, PersistentComponentMetadataError> {
+    let component_id = world
+        .component_id::<T>()
+        .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+    let info = world
+        .components()
+        .get_info(component_id)
+        .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+    if info.required_components().iter_ids().next().is_some() {
+        return Err(PersistentComponentMetadataError::RequiredComponents);
+    }
+    validate_exact_hooks(info.hooks(), allowed_hooks)?;
+    Ok(component_id)
+}
+
+/// Rejects lifecycle observers for one registered component and optional exact entity.
+pub fn validate_registered_component_observers<T: Component>(
+    world: &World,
+    target: Option<Entity>,
+) -> Result<(), PersistentComponentMetadataError> {
+    let component_id = world
+        .component_id::<T>()
+        .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+    validate_component_observers(world, component_id, target)
+}
+
 pub(crate) fn validate_persistent_component_apply(
     world: &World,
     component_id: ComponentId,
@@ -128,6 +158,35 @@ pub fn validate_entity_despawn(
             .get_info(*component_id)
             .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
         for (event, _) in EVENTS {
+            if hook_is_registered(info.hooks(), event) {
+                return Err(PersistentComponentMetadataError::LifecycleHook(event));
+            }
+        }
+    }
+
+    validate_entity_despawn_observers(world, target, component_ids)
+}
+
+/// Validates a despawn while allowing the intrinsic hooks of exact owner-controlled components.
+pub fn validate_entity_despawn_with_allowed_component_hooks(
+    world: &World,
+    target: Entity,
+    component_ids: &[ComponentId],
+    allowed_component_ids: &[ComponentId],
+) -> Result<(), PersistentComponentMetadataError> {
+    for component_id in component_ids {
+        if allowed_component_ids.contains(component_id) {
+            continue;
+        }
+        let info = world
+            .components()
+            .get_info(*component_id)
+            .ok_or(PersistentComponentMetadataError::ComponentMissing)?;
+        for event in [
+            PersistentLifecycleEvent::Discard,
+            PersistentLifecycleEvent::Remove,
+            PersistentLifecycleEvent::Despawn,
+        ] {
             if hook_is_registered(info.hooks(), event) {
                 return Err(PersistentComponentMetadataError::LifecycleHook(event));
             }

@@ -15,13 +15,14 @@ use crate::{
 };
 
 pub(crate) struct PreparedScene {
+    pub(crate) roots: Vec<SceneEntityId>,
     pub(crate) entities: Vec<PreparedSceneEntity>,
     pub(crate) diagnostics: DiagnosticReport,
 }
 
 pub(crate) struct PreparedSceneEntity {
     pub(crate) id: SceneEntityId,
-    pub(crate) parent: Option<SceneEntityId>,
+    pub(crate) children: Vec<SceneEntityId>,
     pub(crate) components: Vec<PreparedSceneComponent>,
 }
 
@@ -118,6 +119,7 @@ fn preflight_scene_with_context_options(
             "Scene validation requires a frozen component registry",
         ));
         return PreparedScene {
+            roots: Vec::new(),
             entities: Vec::new(),
             diagnostics,
         };
@@ -290,15 +292,13 @@ fn preflight_scene_with_context_options(
 
         prepared_entities.push(PreparedSceneEntity {
             id: entity.id.clone(),
-            parent: placement
-                .as_ref()
-                .and_then(|placement| placement.parent_of(&entity.id))
-                .cloned(),
+            children: entity.children.clone(),
             components: prepared_components,
         });
     }
 
     PreparedScene {
+        roots: document.roots.clone(),
         entities: prepared_entities,
         diagnostics,
     }

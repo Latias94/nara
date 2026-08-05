@@ -15,7 +15,8 @@ use crate::__private::{
     AdditionalRetirementIdentityError, validate_additional_retirement_identity_axes,
 };
 use crate::domain::{
-    prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
+    prepare_exact_entity_retirement, prepare_exact_scene_instance_replacement,
+    prepare_exact_scene_instance_retirement,
 };
 use crate::{
     EntityLookup, EntityReference, EntityReferenceRemap, IdentityAllocationError,
@@ -960,6 +961,42 @@ fn prepared_exact_scene_retirement_preserves_authority_until_commit() {
 
     let retired = with_domain(&mut world, |_world, domain| prepared.commit(domain));
     assert_eq!(retired, [token.entity()]);
+    assert!(world.get_entity(token.entity()).is_ok());
+    assert!(matches!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .lookup(&world, &reference),
+        EntityLookup::Tombstoned(Some(_))
+    ));
+}
+
+#[test]
+fn prepared_exact_entity_retirement_preserves_authority_until_commit() {
+    let mut world = world_with_domain(16, 8);
+    let token = spawn_token(&mut world);
+    let entity_id = scene_id("entity");
+    let current = with_domain(&mut world, |world, domain| {
+        domain
+            .register_new_scene_instance(world, [(entity_id.clone(), token)])
+            .unwrap()
+    });
+    let reference = current.runtime_reference(&entity_id).unwrap();
+
+    let prepared = prepare_exact_entity_retirement(
+        &mut world,
+        token.entity(),
+        &reference,
+        TombstoneCause::Despawned,
+    )
+    .unwrap();
+
+    assert_eq!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .lookup(&world, &reference),
+        EntityLookup::Resolved(token.entity())
+    );
+    with_domain(&mut world, |_world, domain| prepared.commit(domain));
     assert!(world.get_entity(token.entity()).is_ok());
     assert!(matches!(
         world

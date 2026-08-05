@@ -473,6 +473,25 @@ pub struct PreparedSceneInstanceRetirement {
     retirement: PreparedRetirement,
 }
 
+/// Fully prevalidated retirement of one entity under an exact semantic reference.
+#[doc(hidden)]
+pub struct PreparedEntityRetirement {
+    domain: WorldIdentityDomainId,
+    retirement: PreparedRetirement,
+}
+
+impl PreparedEntityRetirement {
+    /// Commits the already-prevalidated single-entity retirement.
+    pub fn commit(self, domain: &mut WorldIdentityDomain) {
+        assert_eq!(
+            domain.id, self.domain,
+            "prepared entity retirement must commit to the same identity domain"
+        );
+        let retired = domain.commit_retirement(self.retirement);
+        debug_assert_eq!(retired.len(), 1);
+    }
+}
+
 impl PreparedSceneInstanceRetirement {
     #[must_use]
     pub fn retiring_entities(&self) -> &[Entity] {
@@ -1229,6 +1248,19 @@ impl WorldIdentityDomain {
         reference: &RuntimeEntityReference,
         cause: TombstoneCause,
     ) -> Result<(), IdentityDomainError> {
+        let retirement =
+            self.prepare_entity_retirement_with_reference(world, entity, reference, cause)?;
+        self.commit_retirement(retirement);
+        Ok(())
+    }
+
+    fn prepare_entity_retirement_with_reference(
+        &self,
+        world: &World,
+        entity: Entity,
+        reference: &RuntimeEntityReference,
+        cause: TombstoneCause,
+    ) -> Result<PreparedRetirement, IdentityDomainError> {
         self.validate_world_binding(world)?;
         let identity = self
             .identities_by_entity
@@ -1245,7 +1277,7 @@ impl WorldIdentityDomain {
         ) {
             return Err(IdentityDomainError::StaleRegistration);
         }
-        self.retire_registered_entity(entity, cause)
+        self.prepare_retirement(None, vec![entity], cause)
     }
 
     fn retire_registered_entity(
@@ -1714,6 +1746,27 @@ pub fn prepare_exact_scene_instance_retirement(
     cause: TombstoneCause,
 ) -> Result<PreparedSceneInstanceRetirement, IdentityDomainError> {
     WorldIdentityDomain::prepare_exact_scene_instance_retirement(world, current, cause)
+}
+
+/// Workspace-internal preparation for one exact semantic entity retirement.
+#[doc(hidden)]
+pub fn prepare_exact_entity_retirement(
+    world: &mut World,
+    entity: Entity,
+    reference: &RuntimeEntityReference,
+    cause: TombstoneCause,
+) -> Result<PreparedEntityRetirement, IdentityDomainError> {
+    let prepared = world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
+        let retirement =
+            domain.prepare_entity_retirement_with_reference(world, entity, reference, cause)?;
+        Ok::<_, IdentityDomainError>(PreparedEntityRetirement {
+            domain: domain.id,
+            retirement,
+        })
+    })?;
+    validate_identity_support_topology(world, [entity])
+        .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+    Ok(prepared)
 }
 
 /// Validates that every additional runtime retirement token belongs to this World and has no

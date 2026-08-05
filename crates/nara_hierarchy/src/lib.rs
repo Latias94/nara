@@ -1,8 +1,8 @@
 //! Runtime-only structural hierarchy for Nara.
 //!
-//! The module owns one non-linked parent relationship, its derived reverse projection, bounded
-//! validation, and construction-only writers. It does not own persistence, transform math,
-//! visibility, UI layout, prefab provenance, or entity lifetime.
+//! The module owns one non-linked parent relationship, its ordered root and child projections,
+//! bounded validation, and failure-atomic placement writers. It does not own persistence,
+//! transform math, visibility, UI layout, prefab provenance, or entity lifetime.
 
 mod error;
 mod relation;
@@ -10,17 +10,20 @@ mod validation;
 mod writer;
 
 pub use error::HierarchyError;
-pub use relation::{Children, Parent};
+pub use relation::{Children, HierarchyOrder, HierarchyRoots, Parent};
 pub use validation::validate_hierarchy;
-pub use writer::{HierarchyCommandsExt, HierarchyConstructionEdge, HierarchyConstructionWriter};
+pub use writer::{
+    HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementAnchor,
+    HierarchyPlacementOwner, HierarchyWriter,
+};
 
 use nara_app::{
     App, CoreStage, FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration, PluginError,
     PluginId, StartupStage,
 };
 use nara_ecs::{
-    Mut, Resource, World, error::BevyError, lifecycle::RemovedComponentReader,
-    schedule::IntoScheduleConfigs,
+    Mut, Resource, World, error::BevyError, lifecycle::HookContext, schedule::IntoScheduleConfigs,
+    world::DeferredWorld,
 };
 use validation::{HierarchyValidationScratch, validate_hierarchy_with_scratch};
 
@@ -29,11 +32,15 @@ pub mod __private {
     use nara_ecs::{Resource, SystemSet, World};
 
     use super::{
-        HierarchyConstructionEdge, HierarchyError, HierarchyGenerationState,
-        writer::prepare_hierarchy_construction_batch,
+        HierarchyError, HierarchyGenerationState, HierarchyOperation, HierarchyOrder,
+        HierarchyRoots,
+        writer::{
+            hierarchy_retirement_operations, prepare_hierarchy_batch,
+            validate_hierarchy_retirement_despawn,
+        },
     };
 
-    pub use super::writer::PreparedHierarchyConstructionBatch;
+    pub use super::writer::PreparedHierarchyBatch;
 
     /// Capability token proving that the current runtime hierarchy generation completed.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
@@ -67,17 +74,39 @@ pub mod __private {
     pub fn completed_topology_generation(world: &World) -> Option<u64> {
         let completed = *world.get_resource::<CompletedHierarchyProjection>()?;
         let state = world.get_resource::<HierarchyGenerationState>()?;
+        let order = world.get_resource::<HierarchyOrder>()?;
+        let roots = world.get_resource::<HierarchyRoots>()?;
         (state.completed_generation == Some(completed.generation())
             && state.topology_generation == completed.generation())
-        .then_some(completed.generation())
+        .then_some(())
+        .filter(|_| order.generation() == completed.generation())
+        .filter(|_| order.roots() == roots.as_slice())
+        .map(|()| completed.generation())
     }
 
     /// Prepares candidate construction edges without publishing a hierarchy generation.
     pub fn prepare_construction_batch(
+        world: &mut World,
+        operations: &[HierarchyOperation],
+    ) -> Result<PreparedHierarchyBatch, HierarchyError> {
+        prepare_hierarchy_batch(world, operations)
+    }
+
+    /// Derives the ordered transaction that removes an exact runtime entity set.
+    pub fn retirement_operations(
         world: &World,
-        edges: &[HierarchyConstructionEdge],
-    ) -> Result<PreparedHierarchyConstructionBatch, HierarchyError> {
-        prepare_hierarchy_construction_batch(world, edges)
+        entities: &[nara_ecs::Entity],
+    ) -> Result<Vec<HierarchyOperation>, HierarchyError> {
+        hierarchy_retirement_operations(world, entities)
+    }
+
+    /// Validates exact entity retirement while allowing only hierarchy-owned component hooks.
+    pub fn validate_retirement_despawn(
+        world: &mut World,
+        entities: &[nara_ecs::Entity],
+        affected_entities: &[nara_ecs::Entity],
+    ) -> Result<(), nara_ecs::LifecycleFreeDespawnError> {
+        validate_hierarchy_retirement_despawn(world, entities, affected_entities)
     }
 }
 
@@ -105,12 +134,6 @@ impl Default for HierarchyGenerationState {
 #[derive(Debug, Default, Resource)]
 struct RetainedHierarchyValidationScratch(HierarchyValidationScratch);
 
-#[derive(Debug, Default, Resource)]
-struct HierarchyRemovalReaders {
-    parents: RemovedComponentReader<Parent>,
-    children: RemovedComponentReader<Children>,
-}
-
 impl HierarchyGenerationState {
     fn mark_dirty(&mut self) {
         self.topology_generation = self.topology_generation.saturating_add(1);
@@ -136,15 +159,16 @@ impl Plugin for HierarchyPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        if !app.world().contains_resource::<HierarchyRoots>() {
+            app.insert_resource(HierarchyRoots::new())?;
+        }
+        app.init_resource::<HierarchyOrder>()?;
         app.init_resource::<HierarchyGenerationState>()?;
         app.init_resource::<__private::CompletedHierarchyProjection>()?;
         app.init_resource::<RetainedHierarchyValidationScratch>()?;
-        app.init_resource::<HierarchyRemovalReaders>()?;
         app.add_systems(
             StartupStage::Tooling,
-            (detect_removed_hierarchy_edges, validate_dirty_hierarchy)
-                .chain()
-                .in_set(HierarchySet::ValidateAndComplete),
+            validate_dirty_hierarchy.in_set(HierarchySet::ValidateAndComplete),
         )?;
         app.configure_sets(
             CoreStage::FixedUpdate,
@@ -154,21 +178,15 @@ impl Plugin for HierarchyPlugin {
         )?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            (detect_removed_hierarchy_edges, validate_dirty_hierarchy)
-                .chain()
-                .in_set(HierarchySet::ValidateAndComplete),
+            validate_dirty_hierarchy.in_set(HierarchySet::ValidateAndComplete),
         )?;
         app.add_systems(
             CoreStage::PostUpdate,
-            (detect_removed_hierarchy_edges, validate_dirty_hierarchy)
-                .chain()
-                .in_set(HierarchySet::ValidateAndComplete),
+            validate_dirty_hierarchy.in_set(HierarchySet::ValidateAndComplete),
         )?;
         app.add_systems(
             CoreStage::Extract,
-            (detect_removed_hierarchy_edges, validate_dirty_hierarchy)
-                .chain()
-                .in_set(HierarchySet::ValidateAndComplete),
+            validate_dirty_hierarchy.in_set(HierarchySet::ValidateAndComplete),
         )?;
         Ok(())
     }
@@ -181,22 +199,9 @@ fn mark_topology_dirty(world: &mut World) {
     world.remove_resource::<__private::CompletedHierarchyProjection>();
 }
 
-fn detect_removed_hierarchy_edges(world: &mut World) {
-    let parent_component = world.component_id::<Parent>();
-    let children_component = world.component_id::<Children>();
-    let removed = world.resource_scope(|world, mut readers: Mut<HierarchyRemovalReaders>| {
-        let messages = world.removed_components();
-        let removed_parent = parent_component
-            .and_then(|component| messages.get(component))
-            .is_some_and(|messages| readers.parents.read(messages).count() != 0);
-        let removed_children = children_component
-            .and_then(|component| messages.get(component))
-            .is_some_and(|messages| readers.children.read(messages).count() != 0);
-        removed_parent || removed_children
-    });
-
-    if removed {
-        mark_topology_dirty(world);
+fn hierarchy_component_changed(mut world: DeferredWorld<'_>, _context: HookContext) {
+    if let Some(mut state) = world.get_resource_mut::<HierarchyGenerationState>() {
+        state.mark_dirty();
     }
 }
 
@@ -225,6 +230,19 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
         },
     );
     validation.map_err(BevyError::error)?;
+    world.init_resource::<HierarchyOrder>();
+    let roots = world.resource::<HierarchyRoots>().as_slice().to_vec();
+    let mut entities = Vec::new();
+    let mut pending = roots.iter().rev().copied().collect::<Vec<_>>();
+    while let Some(entity) = pending.pop() {
+        entities.push(entity);
+        if let Some(children) = world.get::<Children>(entity) {
+            pending.extend(children.iter().rev());
+        }
+    }
+    world.resource_scope(|_world, mut order: Mut<HierarchyOrder>| {
+        order.replace(generation, roots, entities);
+    });
     world
         .resource_mut::<HierarchyGenerationState>()
         .completed_generation = Some(generation);
@@ -234,8 +252,9 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
 
 pub mod prelude {
     pub use crate::{
-        Children, HierarchyCommandsExt, HierarchyConstructionEdge, HierarchyConstructionWriter,
-        HierarchyPlugin, Parent,
+        Children, HierarchyCommandsExt, HierarchyOperation, HierarchyOrder, HierarchyPlacement,
+        HierarchyPlacementAnchor, HierarchyPlacementOwner, HierarchyPlugin, HierarchyRoots,
+        HierarchyWriter, Parent,
     };
 }
 

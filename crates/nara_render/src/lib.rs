@@ -956,8 +956,11 @@ mod tests {
         RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
     };
     use nara_asset::AssetId;
-    use nara_ecs::{Resource, World, schedule::IntoScheduleConfigs};
-    use nara_hierarchy::{HierarchyConstructionWriter, HierarchyPlugin};
+    use nara_ecs::{Entity, Resource, World, schedule::IntoScheduleConfigs};
+    use nara_hierarchy::{
+        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
+        HierarchyWriter,
+    };
     use nara_reflect::ComponentRegistryPlugin;
     use nara_transform::TransformPlugin;
     use nara_window::WindowPlugin;
@@ -971,6 +974,21 @@ mod tests {
         }
         app.add_plugin(RenderPlugin).unwrap();
         app
+    }
+
+    fn place_parented(world: &mut World, child: Entity, parent: Entity) {
+        HierarchyWriter::new(world)
+            .apply_batch(&[
+                HierarchyOperation::Place {
+                    entity: parent,
+                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+                },
+                HierarchyOperation::Place {
+                    entity: child,
+                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+                },
+            ])
+            .expect("the ordered hierarchy should be valid");
     }
 
     fn start_runtime(app: App) -> RuntimeInstance {
@@ -1240,9 +1258,7 @@ mod tests {
                 Transform2d::from_translation(Vec2::new(10.0, -5.0)),
             ))
             .id();
-        HierarchyConstructionWriter::new(world)
-            .attach(camera, root)
-            .unwrap();
+        place_parented(world, camera, root);
 
         app.run_once(Duration::ZERO).unwrap();
 
@@ -1337,9 +1353,7 @@ mod tests {
                 },
             ))
             .id();
-        HierarchyConstructionWriter::new(world)
-            .attach(camera, parent)
-            .unwrap();
+        place_parented(world, camera, parent);
 
         let mut runtime = start_runtime(app);
         runtime

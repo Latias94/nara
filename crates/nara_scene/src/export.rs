@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use nara_asset::AssetRefExportPolicy;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, World};
-use nara_hierarchy::Parent;
+use nara_hierarchy::{Children, HierarchyRoots, Parent, validate_hierarchy};
 use nara_identity::{
     EntityLookup, EntityReference, RuntimeEntityReference, SceneInstanceId, WorldEntityLocator,
     WorldIdentityDomain, WorldIdentityDomainId,
@@ -142,6 +142,16 @@ pub fn export_scene_with_options(
             diagnostics,
         };
     };
+    if validate_hierarchy(world).is_err() {
+        diagnostics.push(diagnostic_error(
+            "scene.export-runtime-hierarchy-invalid",
+            "Scene export requires a valid ordered runtime hierarchy",
+        ));
+        return SceneExportReport {
+            output: None,
+            diagnostics,
+        };
+    }
 
     let registered_locators = match domain.registered_locators(world) {
         Ok(locators) => {
@@ -229,15 +239,42 @@ pub fn export_scene_with_options(
         }
     }
 
+    let roots = world
+        .get_resource::<HierarchyRoots>()
+        .into_iter()
+        .flat_map(HierarchyRoots::iter)
+        .filter_map(|entity| id_by_entity.get(&entity).cloned())
+        .collect::<Vec<_>>();
+    let root_entities = world
+        .get_resource::<HierarchyRoots>()
+        .into_iter()
+        .flat_map(HierarchyRoots::iter)
+        .filter(|entity| id_by_entity.contains_key(entity))
+        .collect::<BTreeSet<_>>();
+
     let encode_context =
         ComponentEncodeContext::new().with_asset_ref_export_policy(options.asset_ref_export_policy);
     let mut records = Vec::with_capacity(export_entities.len());
     for (export_entity, id) in export_entities.iter().zip(assigned_ids) {
-        if world.get::<Parent>(export_entity.entity).is_some() {
+        let parent = world
+            .get::<Parent>(export_entity.entity)
+            .map(Parent::parent);
+        if let Some(parent) = parent
+            && !id_by_entity.contains_key(&parent)
+        {
             diagnostics.push(with_public_locator(
                 diagnostic_error(
-                    "scene.export-runtime-topology-unsupported",
-                    "Scene export cannot infer persistent topology from runtime hierarchy",
+                    "scene.export-foreign-parent",
+                    "Scene export entity is owned by a non-scene runtime parent",
+                ),
+                "entity-id",
+                id.as_str(),
+            ));
+        } else if parent.is_none() && !root_entities.contains(&export_entity.entity) {
+            diagnostics.push(with_public_locator(
+                diagnostic_error(
+                    "scene.export-runtime-placement-missing",
+                    "Scene export entity has no registered runtime placement",
                 ),
                 "entity-id",
                 id.as_str(),
@@ -320,14 +357,19 @@ pub fn export_scene_with_options(
 
         records.push(SceneEntityRecord {
             id,
-            children: Vec::new(),
+            children: world
+                .get::<Children>(export_entity.entity)
+                .into_iter()
+                .flat_map(Children::iter)
+                .filter_map(|child| id_by_entity.get(&child).cloned())
+                .collect(),
             components,
             prefab: None,
         });
     }
 
     let output = (!diagnostics.has_errors()).then(|| SceneExportOutput {
-        document: SceneDocument::from_ordered_roots(records),
+        document: SceneDocument::new(roots, records),
         remap: SceneExportRemap {
             source_domain: domain.id(),
             entries: remap_entries,

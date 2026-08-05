@@ -3,24 +3,19 @@ use std::{collections::BTreeMap, error::Error, fmt};
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{
-    __private::{
-        validate_lifecycle_free_relationship_despawn, validate_non_linked_relationship_insertion,
-        validate_non_linked_relationship_teardown, validate_registered_persistent_component_apply,
-    },
-    Component, Entity, LifecycleFreeDespawnError, LifecycleFreeInsertionPlan, Mut, World,
-    prepare_lifecycle_free_despawn,
+    __private::validate_registered_persistent_component_apply, Component, Entity,
+    LifecycleFreeInsertionPlan, Mut, World, prepare_lifecycle_free_despawn,
 };
 use nara_hierarchy::{
-    __private::prepare_construction_batch, Children, HierarchyConstructionEdge, Parent,
-    validate_hierarchy,
+    __private::prepare_construction_batch, Children, HierarchyRoots, Parent, validate_hierarchy,
 };
 use nara_identity::{
     __private::{
         AdditionalRetirementIdentityError, IdentitySupportTopologyError,
         PreparedSceneInstanceRegistration, PreparedSceneInstanceReplacement,
-        prepare_exact_scene_instance_registration, prepare_exact_scene_instance_replacement,
-        prepare_exact_scene_instance_retirement, validate_additional_retirement_identity_axes,
-        validate_identity_support_topology,
+        prepare_exact_entity_retirement, prepare_exact_scene_instance_registration,
+        prepare_exact_scene_instance_replacement, prepare_exact_scene_instance_retirement,
+        validate_additional_retirement_identity_axes, validate_identity_support_topology,
     },
     IdentityDomainError, RuntimeEntityReference, SceneInstanceId, SpawnedSceneInstance,
     TombstoneCause, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
@@ -41,6 +36,11 @@ use crate::{
         PreparedSceneProductOverlay, SceneProductOverlayError, SceneProductOverlayWriter,
         SceneProductTransactionLimits,
     },
+    runtime_hierarchy::{
+        PreparedSceneEntityRetirement, PreparedSceneHierarchyRetirement,
+        build_scene_hierarchy_operations, combine_scene_hierarchy_operations,
+        prepare_scene_hierarchy_retirement,
+    },
     validation::{PreparedScene, preflight_scene_with_context},
 };
 
@@ -48,8 +48,9 @@ use crate::{
 pub enum SceneEntityRetirementError {
     NotSceneEntity,
     HasChildren,
+    Hierarchy,
+    Lifecycle,
     Identity(IdentityDomainError),
-    DespawnFailed,
 }
 
 impl fmt::Display for SceneEntityRetirementError {
@@ -57,8 +58,9 @@ impl fmt::Display for SceneEntityRetirementError {
         formatter.write_str(match self {
             Self::NotSceneEntity => "target is not a scene-managed entity",
             Self::HasChildren => "scene entity retirement requires a leaf entity",
+            Self::Hierarchy => "scene entity retirement could not update the runtime hierarchy",
+            Self::Lifecycle => "scene entity retirement would run unsupported lifecycle work",
             Self::Identity(_) => "scene identity retirement failed",
-            Self::DespawnFailed => "scene entity disappeared after identity retirement",
         })
     }
 }
@@ -67,7 +69,7 @@ impl Error for SceneEntityRetirementError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Identity(error) => Some(error),
-            Self::NotSceneEntity | Self::HasChildren | Self::DespawnFailed => None,
+            Self::NotSceneEntity | Self::HasChildren | Self::Hierarchy | Self::Lifecycle => None,
         }
     }
 }
@@ -142,7 +144,7 @@ enum PreparedSceneIdentityCommit {
     },
     Replace {
         replacement: PreparedSceneInstanceReplacement,
-        hierarchy: PreparedSceneHierarchyDetach,
+        hierarchy: PreparedSceneHierarchyRetirement,
     },
 }
 
@@ -165,107 +167,6 @@ impl PreparedSceneIdentityCommit {
 enum PrepareSceneIdentityCommitError {
     Identity(IdentityDomainError),
     Hierarchy,
-}
-
-#[derive(Debug)]
-enum SceneHierarchyDetachError {
-    MissingEntity,
-    Invalid,
-}
-
-struct PreparedSceneHierarchyDetach {
-    detached_children: Vec<Entity>,
-    affected_entities: Vec<Entity>,
-}
-
-impl PreparedSceneHierarchyDetach {
-    fn affected_entities(&self) -> &[Entity] {
-        &self.affected_entities
-    }
-
-    fn commit(self, world: &mut World) {
-        for child in self.detached_children {
-            let _ = world.entity_mut(child).remove::<Parent>();
-        }
-    }
-}
-
-struct PreparedSceneEntityRetirement {
-    entities: Vec<Entity>,
-}
-
-impl PreparedSceneEntityRetirement {
-    fn prepare(
-        world: &mut World,
-        entities: &[Entity],
-        hierarchy: &PreparedSceneHierarchyDetach,
-    ) -> Result<Self, LifecycleFreeDespawnError> {
-        if hierarchy.affected_entities().is_empty() {
-            let _ = prepare_lifecycle_free_despawn(world, entities)?.cancel();
-        } else {
-            validate_lifecycle_free_relationship_despawn::<Parent>(
-                world,
-                entities,
-                hierarchy.affected_entities(),
-            )?;
-        }
-        Ok(Self {
-            entities: entities.to_vec(),
-        })
-    }
-
-    fn commit(self, world: &mut World) {
-        for entity in self.entities {
-            // The enclosing exclusive Scene kernel performs no lifecycle registration or entity
-            // mutation between preparation and this exact retirement.
-            world.entity_mut(entity).despawn();
-        }
-    }
-}
-
-fn prepare_scene_hierarchy_detach(
-    world: &mut World,
-    retirements: &[Entity],
-) -> Result<PreparedSceneHierarchyDetach, SceneHierarchyDetachError> {
-    if retirements.is_empty() {
-        return Ok(PreparedSceneHierarchyDetach {
-            detached_children: Vec::new(),
-            affected_entities: Vec::new(),
-        });
-    }
-    if retirements
-        .iter()
-        .any(|entity| world.get_entity(*entity).is_err())
-    {
-        return Err(SceneHierarchyDetachError::MissingEntity);
-    }
-    validate_hierarchy(world).map_err(|_| SceneHierarchyDetachError::Invalid)?;
-
-    let mut detached_children = Vec::new();
-    let mut affected_entities = Vec::new();
-    for entity in retirements.iter().copied() {
-        if let Some(parent) = world.get::<Parent>(entity).map(Parent::parent) {
-            detached_children.push(entity);
-            affected_entities.push(entity);
-            affected_entities.push(parent);
-        }
-        if let Some(children) = world.get::<Children>(entity) {
-            for child in children.iter() {
-                detached_children.push(child);
-                affected_entities.push(child);
-                affected_entities.push(entity);
-            }
-        }
-    }
-
-    detached_children.sort_unstable_by_key(|entity| entity.to_bits());
-    detached_children.dedup();
-    affected_entities.sort_unstable_by_key(|entity| entity.to_bits());
-    affected_entities.dedup();
-    Ok(PreparedSceneHierarchyDetach {
-        detached_children,
-        affected_entities,
-    })
 }
 
 impl SceneSpawner {
@@ -547,7 +448,6 @@ impl SceneSpawner {
             };
         let mut spawned_by_id = BTreeMap::new();
         let mut spawned_entities = Vec::new();
-        let mut hierarchy_edges = Vec::new();
         for entity in &preflight.entities {
             let runtime_entity = world.spawn_empty().id();
             spawned_entities.push(runtime_entity);
@@ -576,6 +476,26 @@ impl SceneSpawner {
             };
         }
 
+        let new_hierarchy_operations =
+            match build_scene_hierarchy_operations(&preflight, &spawned_by_id) {
+                Ok(operations) => operations,
+                Err(entity_id) => {
+                    diagnostics.push(with_public_locator(
+                        diagnostic_error(
+                            "scene.internal-missing-placement-remap",
+                            "Validated scene placement was not mapped to a runtime entity",
+                        ),
+                        "entity-id",
+                        entity_id.as_str(),
+                    ));
+                    rollback_spawn_transaction(world, &spawned_entities);
+                    return SceneSpawnReport {
+                        instance: None,
+                        diagnostics,
+                        retired_entities: 0,
+                    };
+                }
+            };
         let (product_insertion, product_resources, additional_retirements) = match prepared_product
         {
             Some(product) => {
@@ -626,25 +546,6 @@ impl SceneSpawner {
                         };
                     }
                 };
-            }
-
-            if let Some(parent_id) = entity.parent {
-                match spawned_by_id.get(&parent_id).copied() {
-                    Some(parent_entity) => hierarchy_edges.push(HierarchyConstructionEdge::new(
-                        runtime_entity,
-                        parent_entity,
-                    )),
-                    None => {
-                        diagnostics.push(with_public_locator(
-                            diagnostic_error(
-                                "scene.internal-missing-parent-remap",
-                                "Validated scene parent was not mapped to a runtime entity",
-                            ),
-                            "entity-id",
-                            entity.id.as_str(),
-                        ));
-                    }
-                }
             }
         }
 
@@ -762,6 +663,17 @@ impl SceneSpawner {
         };
 
         let scene_retirements = prepared_identity.retiring_entities().to_vec();
+        let hierarchy_operations = match &prepared_identity {
+            PreparedSceneIdentityCommit::Register { .. } => new_hierarchy_operations.clone(),
+            PreparedSceneIdentityCommit::Replace { hierarchy, .. } => {
+                combine_scene_hierarchy_operations(
+                    world,
+                    hierarchy,
+                    &new_hierarchy_operations,
+                    &scene_retirements,
+                )
+            }
+        };
         let mut retired_entities = scene_retirements.clone();
         retired_entities.extend(additional_retirements);
         if let Err(error) = validate_scene_identity_support(world, &retired_entities) {
@@ -785,28 +697,7 @@ impl SceneSpawner {
             return report;
         }
 
-        let mut candidate_hierarchy_targets = hierarchy_edges
-            .iter()
-            .flat_map(|edge| [edge.child(), edge.parent()])
-            .collect::<Vec<_>>();
-        candidate_hierarchy_targets.sort_unstable_by_key(|entity| entity.to_bits());
-        candidate_hierarchy_targets.dedup();
-        let hierarchy_projection_ineligible = !hierarchy_edges.is_empty()
-            && (validate_non_linked_relationship_insertion::<Parent>(
-                world,
-                hierarchy_edges
-                    .iter()
-                    .map(|edge| (edge.child(), edge.parent())),
-            )
-            .is_err()
-                || validate_non_linked_relationship_teardown::<Parent>(
-                    world,
-                    &candidate_hierarchy_targets,
-                )
-                .is_err());
-        if hierarchy_projection_ineligible
-            || validate_scene_source_support(world, &spawned_entities).is_err()
-        {
+        if validate_scene_source_support(world, &spawned_entities).is_err() {
             diagnostics.push(diagnostic_error(
                 "scene.runtime-projection-ineligible",
                 "Scene runtime projections would run unsupported lifecycle work",
@@ -862,13 +753,20 @@ impl SceneSpawner {
             }
         };
 
-        let prepared_hierarchy = match prepare_construction_batch(world, &hierarchy_edges) {
+        let prepared_hierarchy = match prepare_construction_batch(world, &hierarchy_operations) {
             Ok(prepared) => prepared,
-            Err(_) => {
-                diagnostics.push(diagnostic_error(
-                    "scene.hierarchy-publication-failed",
-                    "Validated scene hierarchy could not be prepared",
-                ));
+            Err(error) => {
+                diagnostics.push(if error == nara_hierarchy::HierarchyError::LifecycleWork {
+                    diagnostic_error(
+                        "scene.runtime-projection-ineligible",
+                        "Scene runtime projections would run unsupported lifecycle work",
+                    )
+                } else {
+                    diagnostic_error(
+                        "scene.hierarchy-publication-failed",
+                        "Validated scene hierarchy could not be prepared",
+                    )
+                });
                 rollback_spawn_transaction(world, &spawned_entities);
                 return SceneSpawnReport {
                     instance: None,
@@ -923,9 +821,8 @@ impl SceneSpawner {
             },
             PreparedSceneIdentityCommit::Replace {
                 replacement,
-                hierarchy,
+                hierarchy: _,
             } => {
-                hierarchy.commit(world);
                 let mut domain = world
                     .remove_resource::<WorldIdentityDomain>()
                     .expect("prepared scene replacement requires its identity domain");
@@ -1143,7 +1040,12 @@ fn validate_scene_product_baseline(
         if world.get::<SceneEntitySource>(entity).is_some() {
             return Err(PrepareSceneProductTransactionError::SceneOwnedRetirement);
         }
-        if world.get::<Parent>(entity).is_some() || world.get::<Children>(entity).is_some() {
+        if world.get::<Parent>(entity).is_some()
+            || world.get::<Children>(entity).is_some()
+            || world
+                .get_resource::<HierarchyRoots>()
+                .is_some_and(|roots| roots.contains(entity))
+        {
             return Err(PrepareSceneProductTransactionError::HierarchyLinkedRetirement);
         }
     }
@@ -1368,11 +1270,13 @@ pub(crate) fn retire_scene_instance_exact(
         .map_err(SceneInstanceRetirementTransactionError::IdentitySupport)?;
     validate_existing_scene_persistent_apply(world, &retirements)
         .map_err(SceneInstanceRetirementTransactionError::PersistentApply)?;
-    let hierarchy = prepare_scene_hierarchy_detach(world, &retirements)
+    let hierarchy = prepare_scene_hierarchy_retirement(world, &retirements)
         .map_err(|_| SceneInstanceRetirementTransactionError::Hierarchy)?;
     let retirement = PreparedSceneEntityRetirement::prepare(world, &retirements, &hierarchy)
         .map_err(|_| SceneInstanceRetirementTransactionError::Lifecycle)?;
-    hierarchy.commit(world);
+    let prepared_hierarchy = prepare_construction_batch(world, hierarchy.operations())
+        .map_err(|_| SceneInstanceRetirementTransactionError::Hierarchy)?;
+    prepared_hierarchy.commit(world);
     let mut domain = world
         .remove_resource::<WorldIdentityDomain>()
         .expect("prepared scene retirement requires its identity domain");
@@ -1414,15 +1318,15 @@ fn rollback_spawn_transaction(world: &mut World, spawned_entities: &[Entity]) {
         world.get::<Parent>(entity).is_some() || world.get::<Children>(entity).is_some()
     });
     if has_relationship {
-        let hierarchy = prepare_scene_hierarchy_detach(world, &live_entities)
-            .expect("scene candidate hierarchy rollback must remain prevalidated");
-        validate_lifecycle_free_relationship_despawn::<Parent>(
-            world,
-            &live_entities,
-            hierarchy.affected_entities(),
-        )
-        .expect("scene candidate relationship rollback must remain lifecycle-free");
-        hierarchy.commit(world);
+        let hierarchy = prepare_scene_hierarchy_retirement(world, &live_entities)
+            .expect("scene candidate hierarchy rollback must remain valid");
+        let retirement = PreparedSceneEntityRetirement::prepare(world, &live_entities, &hierarchy)
+            .expect("scene candidate hierarchy rollback must remain lifecycle-free");
+        prepare_construction_batch(world, hierarchy.operations())
+            .expect("scene candidate hierarchy rollback must remain prevalidated")
+            .commit(world);
+        retirement.commit(world);
+        return;
     }
     let retirement = prepare_lifecycle_free_despawn(world, &live_entities)
         .expect("scene candidate rollback must remain lifecycle-free");
@@ -1543,8 +1447,9 @@ fn prepare_scene_identity_commit(
                 TombstoneCause::Replaced,
             )
             .map_err(PrepareSceneIdentityCommitError::Identity)?;
-            let hierarchy = prepare_scene_hierarchy_detach(world, replacement.retiring_entities())
-                .map_err(|_| PrepareSceneIdentityCommitError::Hierarchy)?;
+            let hierarchy =
+                prepare_scene_hierarchy_retirement(world, replacement.retiring_entities())
+                    .map_err(|_| PrepareSceneIdentityCommitError::Hierarchy)?;
             Ok(PreparedSceneIdentityCommit::Replace {
                 replacement,
                 hierarchy,
@@ -1573,19 +1478,22 @@ pub fn retire_and_despawn_scene_entity(
         ));
     }
     let reference = RuntimeEntityReference::scene(source.instance_id, source.entity_id);
-    world
-        .resource_scope(|world, mut domain: Mut<WorldIdentityDomain>| {
-            domain.retire_entity_with_reference(
-                world,
-                entity,
-                &reference,
-                TombstoneCause::Despawned,
-            )
-        })
-        .map_err(SceneEntityRetirementError::Identity)?;
-    if !world.despawn(entity) {
-        return Err(SceneEntityRetirementError::DespawnFailed);
-    }
+    let prepared_identity =
+        prepare_exact_entity_retirement(world, entity, &reference, TombstoneCause::Despawned)
+            .map_err(SceneEntityRetirementError::Identity)?;
+    let hierarchy = prepare_scene_hierarchy_retirement(world, &[entity])
+        .map_err(|_| SceneEntityRetirementError::Hierarchy)?;
+    let retirement = PreparedSceneEntityRetirement::prepare(world, &[entity], &hierarchy)
+        .map_err(|_| SceneEntityRetirementError::Lifecycle)?;
+    let prepared_hierarchy = prepare_construction_batch(world, hierarchy.operations())
+        .map_err(|_| SceneEntityRetirementError::Hierarchy)?;
+    let mut domain = world
+        .remove_resource::<WorldIdentityDomain>()
+        .expect("prepared scene entity retirement requires its identity domain");
+    prepared_identity.commit(&mut domain);
+    prepared_hierarchy.commit(world);
+    retirement.commit(world);
+    world.insert_resource(domain);
     Ok(())
 }
 
