@@ -34,11 +34,9 @@ use nara_fs::{
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
 use nara_identity::{EntityLookup, WorldIdentityDomain};
-use nara_image::PreparedImageResource;
 use nara_reflect::{
     ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
 };
-use nara_render::PreparedRenderResources;
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 #[cfg(feature = "tooling")]
 use nara_scene::{ScenePatchDocument, ScenePatchOperation};
@@ -1157,20 +1155,6 @@ fn project_host_publishes_snapshot_images_without_copying_the_retained_pixels() 
             "runtime publication must share the snapshot-owned pixel allocation and its lease",
         );
     }
-
-    let ProjectHostSlot::Running(published) = &mut host.slot else {
-        panic!("runtime is not visible in the Host slot");
-    };
-    published.runtime_mut().drive(Duration::ZERO).unwrap();
-    let prepared = published
-        .runtime()
-        .world()
-        .resource::<PreparedRenderResources<PreparedImageResource>>();
-    assert_eq!(
-        prepared.len(),
-        1,
-        "the production Host publication must reach render preparation",
-    );
 
     close_host(&mut host);
 }

@@ -186,10 +186,14 @@ runtime-2d = [
     "runtime-core",
     "dep:nara_image",
     "dep:nara_material",
-    "dep:nara_render",
     "dep:nara_sprite",
-    "dep:nara_sprite_render",
     "dep:nara_tilemap",
+]
+presentation-2d = [
+    "runtime-2d",
+    "dep:nara_render",
+    "dep:nara_sprite_render",
+    "nara_image/render-prepare",
     "nara_render_wgpu?/sprite-submitter",
 ]
 runtime-ui = [
@@ -199,6 +203,7 @@ runtime-ui = [
     "dep:nara_render",
     "dep:nara_ui",
     "dep:nara_ui_render",
+    "nara_image/render-prepare",
     "nara_render_wgpu?/ui-submitter",
 ]
 tooling = ["runtime-core", "dep:nara_tooling"]
@@ -239,7 +244,7 @@ required-features = ["desktop-winit", "render-wgpu"]
 [[example]]
 name = "windowed_sprites"
 path = "examples/windowed_sprites.rs"
-required-features = ["runtime-2d", "desktop-winit", "render-wgpu"]
+required-features = ["presentation-2d", "desktop-winit", "render-wgpu"]
 
 [[example]]
 name = "runtime_ui_panel"
@@ -249,7 +254,7 @@ required-features = ["runtime-ui", "desktop-winit", "render-wgpu"]
 [[example]]
 name = "asset_import_texture"
 path = "examples/asset_import_texture.rs"
-required-features = ["runtime-2d"]
+required-features = ["presentation-2d"]
 
 [[example]]
 name = "headless_server"
@@ -259,7 +264,7 @@ required-features = ["runtime-core"]
 [[example]]
 name = "scene_prefab_roundtrip"
 path = "examples/scene_prefab_roundtrip.rs"
-required-features = ["runtime-2d", "serde"]
+required-features = ["presentation-2d", "serde"]
 
 [[example]]
 name = "scene_patch_roundtrip"
@@ -269,7 +274,7 @@ required-features = ["runtime-2d", "serde"]
 [[example]]
 name = "component_schema_export"
 path = "examples/component_schema_export.rs"
-required-features = ["runtime-2d", "serde"]
+required-features = ["presentation-2d", "serde"]
 
 [[example]]
 name = "prefab_patch_override"
@@ -284,7 +289,7 @@ required-features = ["runtime-2d"]
 [[example]]
 name = "sprite_tilemap_scene"
 path = "examples/sprite_tilemap_scene.rs"
-required-features = ["runtime-2d"]
+required-features = ["presentation-2d"]
 
 [[test]]
 name = "product_capabilities"

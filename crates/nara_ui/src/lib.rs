@@ -1,5 +1,8 @@
 //! Runtime UI authoring data, layout projection, and input state.
 
+// Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
+extern crate nara_ecs as bevy_ecs;
+
 mod codec;
 mod interaction;
 mod layout;

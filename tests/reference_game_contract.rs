@@ -42,6 +42,29 @@ fn reference_game_is_an_isolated_consumer_of_the_public_root_crate() {
         nara.get("default-features").and_then(toml::Value::as_bool),
         Some(false)
     );
+    assert_eq!(
+        nara.get("features")
+            .and_then(toml::Value::as_array)
+            .unwrap()
+            .iter()
+            .map(|feature| feature.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["runtime-2d", "serde"]
+    );
+    assert_eq!(
+        manifest["features"]["desktop"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|feature| feature.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "nara/runtime-ui",
+            "nara/presentation-2d",
+            "nara/desktop-winit",
+            "nara/render-wgpu",
+        ]
+    );
     assert!(!manifest_source.contains("[patch"));
     assert!(!manifest_source.contains("workspace = true"));
     assert!(root.join("Cargo.lock").is_file());

@@ -111,6 +111,38 @@ fn committed_manifest_is_opened_by_capability_and_lowers_product_settings() {
     );
 }
 
+#[cfg(feature = "desktop")]
+#[test]
+fn desktop_profile_requests_the_exact_content_presentation_and_adapter_set() {
+    let project_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = DirectoryCapability::from_host_handle(
+        host_directory(project_root),
+        HostCapabilityOptions::new(CapabilityRights::ReadOnly, portable_trust()),
+    )
+    .unwrap();
+    let manifest = root
+        .open_file(&RelativePath::new(Path::new("nara.toml")).unwrap())
+        .unwrap();
+
+    let candidate = ingest_project_manifest(&manifest, Some("desktop")).unwrap();
+
+    assert_eq!(
+        candidate
+            .normalized_capabilities()
+            .iter()
+            .map(ProductCapability::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "runtime-core",
+            "runtime-2d",
+            "runtime-ui",
+            "presentation-2d",
+            "desktop-winit",
+            "render-wgpu",
+        ]
+    );
+}
+
 #[test]
 fn headless_cli_opens_the_committed_manifest_from_a_random_working_directory() {
     let cwd = TemporaryDirectory::new("cli_success");

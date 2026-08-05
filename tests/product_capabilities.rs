@@ -17,6 +17,10 @@ fn compiled_ceiling_matches_the_active_cargo_features() {
         (ProductCapability::RuntimeCore, true),
         (ProductCapability::Runtime2d, cfg!(feature = "runtime-2d")),
         (ProductCapability::RuntimeUi, cfg!(feature = "runtime-ui")),
+        (
+            ProductCapability::Presentation2d,
+            cfg!(feature = "presentation-2d"),
+        ),
         (ProductCapability::AssetWatch, cfg!(feature = "asset-watch")),
         (
             ProductCapability::DesktopWinit,
@@ -60,6 +64,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "asset-watch",
         "default",
         "desktop-winit",
+        "presentation-2d",
         "render-wgpu",
         "runtime-2d",
         "runtime-core",
@@ -73,6 +78,26 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         expected
     );
     assert_eq!(feature_members(features, "default"), vec!["runtime-core"]);
+    assert_eq!(
+        feature_members(features, "runtime-2d"),
+        [
+            "runtime-core",
+            "dep:nara_image",
+            "dep:nara_material",
+            "dep:nara_sprite",
+            "dep:nara_tilemap",
+        ]
+    );
+    assert_eq!(
+        feature_members(features, "presentation-2d"),
+        [
+            "runtime-2d",
+            "dep:nara_render",
+            "dep:nara_sprite_render",
+            "nara_image/render-prepare",
+            "nara_render_wgpu?/sprite-submitter",
+        ]
+    );
     assert_eq!(
         feature_members(features, "serde"),
         [
@@ -136,11 +161,18 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
     assert_eq!(targets["windowed_clear"], ["desktop-winit", "render-wgpu"]);
     assert_eq!(
         targets["windowed_sprites"],
-        ["runtime-2d", "desktop-winit", "render-wgpu"]
+        ["presentation-2d", "desktop-winit", "render-wgpu"]
     );
     assert_eq!(
         targets["runtime_ui_panel"],
         ["runtime-ui", "desktop-winit", "render-wgpu"]
+    );
+    assert_eq!(targets["asset_import_texture"], ["presentation-2d"]);
+    assert_eq!(targets["hello_world"], ["runtime-2d"]);
+    assert_eq!(targets["sprite_tilemap_scene"], ["presentation-2d"]);
+    assert_eq!(
+        targets["scene_prefab_roundtrip"],
+        ["presentation-2d", "serde"]
     );
     assert_eq!(targets["scene_file_workspace"], ["tooling", "serde"]);
     assert_eq!(targets["product_capabilities"], ["runtime-core"]);
@@ -167,10 +199,17 @@ fn wgpu_submitter_dependency_trees_are_isolated() {
     assert_not_present(&base, "nara_sprite_render");
     assert_not_present(&base, "nara_ui_render");
 
-    let sprites = cargo_tree(&[
+    let content_with_backend = cargo_tree(&[
         "--no-default-features",
         "--features",
         "runtime-2d,render-wgpu",
+    ]);
+    assert_not_present(&content_with_backend, "nara_sprite_render");
+
+    let sprites = cargo_tree(&[
+        "--no-default-features",
+        "--features",
+        "presentation-2d,render-wgpu",
     ]);
     assert_present(&sprites, "nara_sprite_render");
     assert_not_present(&sprites, "nara_ui");
@@ -231,14 +270,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             vec!["--no-default-features", "--features", "runtime-2d"],
             with_packages(
                 &runtime_core,
-                &[
-                    "nara_image",
-                    "nara_material",
-                    "nara_render",
-                    "nara_sprite",
-                    "nara_sprite_render",
-                    "nara_tilemap",
-                ],
+                &["nara_image", "nara_material", "nara_sprite", "nara_tilemap"],
             ),
         ),
         (
@@ -252,6 +284,21 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
                     "nara_render",
                     "nara_ui",
                     "nara_ui_render",
+                ],
+            ),
+        ),
+        (
+            "presentation-2d",
+            vec!["--no-default-features", "--features", "presentation-2d"],
+            with_packages(
+                &runtime_core,
+                &[
+                    "nara_image",
+                    "nara_material",
+                    "nara_render",
+                    "nara_sprite",
+                    "nara_sprite_render",
+                    "nara_tilemap",
                 ],
             ),
         ),
@@ -312,6 +359,43 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             "unexpected internal package graph for {name}\n{tree}"
         );
     }
+}
+
+#[test]
+fn independently_locked_presentation_2d_consumer_has_an_exact_boundary() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("product-slices")
+        .join("presentation-2d")
+        .join("Cargo.toml");
+    let features = cargo_tree_for_manifest(&manifest, &["-e", "features"]);
+
+    for package in [
+        "nara_image",
+        "nara_material",
+        "nara_render",
+        "nara_sprite",
+        "nara_sprite_render",
+        "nara_tilemap",
+    ] {
+        assert_present(&features, package);
+    }
+    for package in [
+        "nara_render_wgpu",
+        "nara_tooling",
+        "nara_ui",
+        "nara_ui_render",
+    ] {
+        assert_not_present(&features, package);
+    }
+
+    assert!(
+        features
+            .lines()
+            .any(|line| line.starts_with("nara_image feature \"render-prepare\"")),
+        "presentation-2d must opt image preparation into the independently locked consumer\n{features}"
+    );
 }
 
 #[test]
@@ -491,6 +575,30 @@ fn cargo_tree(arguments: &[&str]) -> String {
         "tree", "-p", "nara", "-e", "normal", "--locked", "--prefix", "none",
     ]);
     let output = command
+        .args(arguments)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("CARGO_TERM_COLOR", "never")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn cargo_tree_for_manifest(manifest: &Path, arguments: &[&str]) -> String {
+    let output = Command::new(env!("CARGO"))
+        .args(["tree", "--manifest-path"])
+        .arg(manifest)
+        .args([
+            "-p",
+            "nara-presentation-2d-fixture",
+            "--locked",
+            "--prefix",
+            "none",
+        ])
         .args(arguments)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("CARGO_TERM_COLOR", "never")

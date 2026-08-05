@@ -38,7 +38,13 @@ join_timeout_ms = 100
 requested = ["runtime-2d"]
 
 [profiles.desktop.capabilities]
-requested = ["runtime-2d", "runtime-ui", "desktop-winit", "render-wgpu"]
+requested = [
+    "runtime-2d",
+    "runtime-ui",
+    "presentation-2d",
+    "desktop-winit",
+    "render-wgpu",
+]
 
 [profiles.desktop.runtime]
 preset = "local-headless"

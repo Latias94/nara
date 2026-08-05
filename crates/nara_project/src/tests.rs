@@ -1048,6 +1048,7 @@ fn product_capability_iteration_is_stable_and_sorted_by_engine_vocabulary() {
     let set = ProductCapabilitySet::from_capabilities([
         ProductCapability::Runtime2d,
         ProductCapability::RuntimeCore,
+        ProductCapability::Presentation2d,
         ProductCapability::RenderWgpu,
     ]);
 
@@ -1055,6 +1056,22 @@ fn product_capability_iteration_is_stable_and_sorted_by_engine_vocabulary() {
         set.iter()
             .map(ProductCapability::as_str)
             .collect::<Vec<_>>(),
-        vec!["runtime-core", "runtime-2d", "render-wgpu"]
+        vec![
+            "runtime-core",
+            "runtime-2d",
+            "presentation-2d",
+            "render-wgpu"
+        ]
     );
+}
+
+#[test]
+fn product_capability_discriminants_preserve_existing_bits() {
+    assert_eq!(ProductCapability::RuntimeCore as u8, 0);
+    assert_eq!(ProductCapability::Runtime2d as u8, 1);
+    assert_eq!(ProductCapability::RuntimeUi as u8, 2);
+    assert_eq!(ProductCapability::AssetWatch as u8, 3);
+    assert_eq!(ProductCapability::DesktopWinit as u8, 4);
+    assert_eq!(ProductCapability::RenderWgpu as u8, 5);
+    assert_eq!(ProductCapability::Presentation2d as u8, 6);
 }

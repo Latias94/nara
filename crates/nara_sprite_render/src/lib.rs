@@ -32,8 +32,10 @@ const SPRITE_RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     nara_render::RENDER_PLUGIN_ID,
     nara_image::IMAGE_PREPARE_PLUGIN_ID,
 ];
-const SPRITE_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
-    &[nara_app::PluginProductCapability::new("runtime-2d")];
+const SPRITE_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] = &[
+    nara_app::PluginProductCapability::new("runtime-2d"),
+    nara_app::PluginProductCapability::new("presentation-2d"),
+];
 pub const SPRITE_RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(SPRITE_RENDER_PLUGIN_ID, nara_app::PluginCategory::Render)
         .requires_plugins(SPRITE_RENDER_PLUGIN_REQUIREMENTS)

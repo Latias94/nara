@@ -7,24 +7,27 @@ use serde::Deserialize;
 #[repr(u8)]
 pub enum ProductCapability {
     #[serde(rename = "runtime-core")]
-    RuntimeCore,
+    RuntimeCore = 0,
     #[serde(rename = "runtime-2d")]
-    Runtime2d,
+    Runtime2d = 1,
     #[serde(rename = "runtime-ui")]
-    RuntimeUi,
+    RuntimeUi = 2,
     #[serde(rename = "asset-watch")]
-    AssetWatch,
+    AssetWatch = 3,
     #[serde(rename = "desktop-winit")]
-    DesktopWinit,
+    DesktopWinit = 4,
     #[serde(rename = "render-wgpu")]
-    RenderWgpu,
+    RenderWgpu = 5,
+    #[serde(rename = "presentation-2d")]
+    Presentation2d = 6,
 }
 
 impl ProductCapability {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::RuntimeCore,
         Self::Runtime2d,
         Self::RuntimeUi,
+        Self::Presentation2d,
         Self::AssetWatch,
         Self::DesktopWinit,
         Self::RenderWgpu,
@@ -36,6 +39,7 @@ impl ProductCapability {
             Self::RuntimeCore => "runtime-core",
             Self::Runtime2d => "runtime-2d",
             Self::RuntimeUi => "runtime-ui",
+            Self::Presentation2d => "presentation-2d",
             Self::AssetWatch => "asset-watch",
             Self::DesktopWinit => "desktop-winit",
             Self::RenderWgpu => "render-wgpu",

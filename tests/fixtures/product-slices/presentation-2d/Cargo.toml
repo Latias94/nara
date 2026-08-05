@@ -1,0 +1,13 @@
+[package]
+name = "nara-presentation-2d-fixture"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+engine = { package = "nara", path = "../../../..", default-features = false, features = ["presentation-2d"] }

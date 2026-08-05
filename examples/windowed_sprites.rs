@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins((
         Runtime2dPlugins,
+        Presentation2dPlugins,
         WindowPlugin {
             primary_window: Some(Window::new(
                 "nara windowed sprites",

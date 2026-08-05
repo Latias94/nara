@@ -1,10 +1,10 @@
 use nara::{
+    app::PluginGroupId,
     core::ByteLimit,
     gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
     image::{IMAGE_PLUGIN_ID, ImageImportLimits},
     project::ProductCapability,
     project_host::resolve_product_recipe,
-    render::RENDER_SCHEMA_PROVIDER_ID,
     sprite::SPRITE_SCHEMA_PROVIDER_ID,
     tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_OWNER_ID, TILEMAP_SCHEMA_PROVIDER_ID},
 };
@@ -20,7 +20,9 @@ use project_content_fixture::{candidate_plan_and_root, resolve_reference_plan};
 
 #[cfg(feature = "desktop")]
 use nara::{
-    project::ProductCapabilitySet, project_host::ProjectContentLoader, window::WINDOW_PLUGIN_ID,
+    image::IMAGE_PREPARE_PLUGIN_ID, project_host::ProjectContentLoader, render::RENDER_PLUGIN_ID,
+    render_wgpu::WGPU_RENDER_PLUGIN_ID, sprite_render::SPRITE_RENDER_PLUGIN_ID,
+    ui_render::UI_RENDER_PLUGIN_ID, window::WINDOW_PLUGIN_ID,
 };
 #[cfg(feature = "desktop")]
 use nara_reference_game::REFERENCE_DESKTOP_PLUGIN_ID;
@@ -90,6 +92,36 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
     );
 
     let entries = first.plugin_plan().entries();
+    for absent in [
+        "nara.render",
+        "nara.image.prepare",
+        "nara.sprite-render",
+        "nara.ui-render",
+        "nara.render-wgpu",
+        "nara.window",
+        "nara.tooling",
+    ] {
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.plugin_id().as_str() != absent),
+            "headless plan unexpectedly installed {absent}"
+        );
+    }
+    for absent in [
+        "nara.plugins.presentation-2d",
+        "nara.plugins.desktop-winit",
+        "nara.plugins.render-wgpu",
+    ] {
+        assert!(
+            first
+                .plugin_plan()
+                .groups()
+                .iter()
+                .all(|group| group.id() != PluginGroupId::new(absent)),
+            "headless plan unexpectedly installed group {absent}"
+        );
+    }
     assert!(
         !entries
             .iter()
@@ -116,7 +148,6 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
 
     let providers = first.schema_validation().provider_ids();
     assert!(providers.contains(&SPRITE_SCHEMA_PROVIDER_ID));
-    assert!(providers.contains(&RENDER_SCHEMA_PROVIDER_ID));
     assert!(providers.contains(&REFERENCE_GAME_SCHEMA_PROVIDER_ID));
     assert!(!providers.contains(&TILEMAP_SCHEMA_PROVIDER_ID));
     assert!(
@@ -213,23 +244,13 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         [
             ProductCapability::Runtime2d,
             ProductCapability::RuntimeUi,
+            ProductCapability::Presentation2d,
             ProductCapability::DesktopWinit,
             ProductCapability::RenderWgpu,
         ]
         .into_iter()
         .all(|capability| first.required_capabilities().contains(capability))
     );
-    assert_eq!(
-        candidate.normalized_capabilities(),
-        ProductCapabilitySet::from_capabilities([
-            ProductCapability::RuntimeCore,
-            ProductCapability::Runtime2d,
-            ProductCapability::RuntimeUi,
-            ProductCapability::DesktopWinit,
-            ProductCapability::RenderWgpu,
-        ])
-    );
-
     let window_entries = first
         .plugin_plan()
         .entries()
@@ -241,6 +262,42 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         window_entries[0].definition_key(),
         nara::window::plugin(candidate.settings().window.to_window()).key()
     );
+    for plugin in [
+        RENDER_PLUGIN_ID,
+        IMAGE_PREPARE_PLUGIN_ID,
+        SPRITE_RENDER_PLUGIN_ID,
+        UI_RENDER_PLUGIN_ID,
+        WGPU_RENDER_PLUGIN_ID,
+    ] {
+        assert_eq!(
+            first
+                .plugin_plan()
+                .entries()
+                .iter()
+                .filter(|entry| entry.plugin_id() == plugin)
+                .count(),
+            1,
+            "desktop plan must install {plugin} exactly once"
+        );
+    }
+    for group in [
+        "nara.plugins.runtime-2d",
+        "nara.plugins.presentation-2d",
+        "nara.plugins.runtime-ui",
+        "nara.plugins.desktop-winit",
+        "nara.plugins.render-wgpu",
+    ] {
+        assert_eq!(
+            first
+                .plugin_plan()
+                .groups()
+                .iter()
+                .filter(|resolved| resolved.id() == PluginGroupId::new(group))
+                .count(),
+            1,
+            "desktop plan must install group {group} exactly once"
+        );
+    }
     assert!(
         first
             .plugin_plan()

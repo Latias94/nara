@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
@@ -103,6 +104,47 @@ fn renamed_root_fixture_has_an_independent_locked_manifest() {
             .unwrap(),
         fixture.canonicalize().unwrap()
     );
+}
+
+#[test]
+fn renamed_root_runtime_2d_tree_excludes_presentation_crates_and_features() {
+    let repository = repository_root();
+    let manifest = fixture_root(&repository).join("Cargo.toml");
+    let output = Command::new(cargo_executable())
+        .current_dir(&repository)
+        .args(["tree", "--manifest-path"])
+        .arg(&manifest)
+        .args(["--locked", "-e", "features", "--prefix", "none"])
+        .env("CARGO_TERM_COLOR", "never")
+        .output()
+        .expect("failed to inspect renamed-root dependency tree");
+    assert_command_succeeded("renamed-root dependency tree", &output);
+    let features = String::from_utf8(output.stdout).unwrap();
+    let packages = features
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .collect::<BTreeSet<_>>();
+
+    for required in ["nara_image", "nara_sprite", "nara_tilemap"] {
+        assert!(
+            packages.contains(required),
+            "content tree is missing {required}"
+        );
+    }
+    for forbidden in [
+        "nara_render",
+        "nara_sprite_render",
+        "nara_render_wgpu",
+        "nara_ui_render",
+        "nara_tooling",
+    ] {
+        assert!(
+            !packages.contains(forbidden),
+            "content tree unexpectedly contains {forbidden}"
+        );
+    }
+
+    assert!(!features.contains("nara_image feature \"render-prepare\""));
 }
 
 #[test]

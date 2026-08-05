@@ -314,8 +314,7 @@ pub struct ImagePlugin {
 pub const IMAGE_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.image");
 const IMAGE_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
     nara_app::PluginDefinitionId::new("nara.image.configured", 1);
-const IMAGE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
-    &[nara_asset::ASSET_PLUGIN_ID, super::IMAGE_PREPARE_PLUGIN_ID];
+const IMAGE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[nara_asset::ASSET_PLUGIN_ID];
 pub const IMAGE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(IMAGE_PLUGIN_ID, nara_app::PluginCategory::Asset)
         .requires_plugins(IMAGE_PLUGIN_REQUIREMENTS);
@@ -385,6 +384,7 @@ impl Plugin for ImagePlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<Assets<ImageAsset>>()?;
         app.init_resource::<ImageReloadStats>()?;
         app.init_resource::<PendingImageJobs>()?;
         app.init_resource::<ReadyImageJobs>()?;

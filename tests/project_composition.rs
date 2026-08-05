@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fmt,
     fs::{self, File},
     io,
@@ -119,6 +120,67 @@ requested = ["runtime-2d", "render-wgpu"]
 
     assert_eq!(error.kind(), ProjectCandidateErrorKind::PresetConflict);
     assert!(!format!("{error:?}").contains(manifest.path().to_string_lossy().as_ref()));
+}
+
+#[test]
+fn presentation_requires_its_content_capability_during_manifest_ingest() {
+    let manifest = TestManifest::new(
+        br#"
+schema_version = 1
+
+[project]
+name = "Incomplete Presentation Closure"
+
+[capabilities]
+requested = ["presentation-2d"]
+"#,
+    );
+    let error = ingest_project_manifest(&manifest.capability(), None).unwrap_err();
+
+    assert_eq!(
+        error.kind(),
+        ProjectCandidateErrorKind::InvalidCapabilityClosure
+    );
+    let diagnostic = error.diagnostics().iter().next().unwrap();
+    assert_eq!(
+        diagnostic.code().as_str(),
+        "project.product.incomplete-capability-closure"
+    );
+    let fields = diagnostic
+        .fields()
+        .iter()
+        .map(|field| (field.key().as_str(), field.display_value().into_owned()))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(fields["capability"], "presentation-2d");
+    assert_eq!(fields["required-capability"], "runtime-2d");
+
+    #[cfg(feature = "presentation-2d")]
+    {
+        fs::write(
+            manifest.path(),
+            br#"
+schema_version = 1
+
+[project]
+name = "Complete Presentation Closure"
+
+[capabilities]
+requested = ["runtime-2d", "presentation-2d"]
+"#,
+        )
+        .unwrap();
+        let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+        assert!(
+            candidate
+                .normalized_capabilities()
+                .contains(ProductCapability::Runtime2d)
+        );
+        assert!(
+            candidate
+                .normalized_capabilities()
+                .contains(ProductCapability::Presentation2d)
+        );
+    }
 }
 
 #[test]

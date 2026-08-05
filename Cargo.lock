@@ -1721,7 +1721,6 @@ dependencies = [
 name = "nara_image"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "image",
  "nara_app",
  "nara_asset",
@@ -1767,7 +1766,6 @@ dependencies = [
 name = "nara_project"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "nara_app",
  "nara_core",
  "nara_diagnostic",
@@ -1871,7 +1869,6 @@ dependencies = [
 name = "nara_sprite"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "nara_app",
  "nara_asset",
  "nara_core",
@@ -1915,7 +1912,6 @@ dependencies = [
 name = "nara_tilemap"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "nara_app",
  "nara_asset",
  "nara_core",
@@ -1971,7 +1967,6 @@ dependencies = [
 name = "nara_ui"
 version = "0.1.0"
 dependencies = [
- "bevy_ecs",
  "nara_app",
  "nara_asset",
  "nara_core",

@@ -25,6 +25,7 @@ pub enum ProjectCandidateErrorKind {
     Manifest,
     Profile,
     PresetConflict,
+    InvalidCapabilityClosure,
     UnavailableCapabilities,
 }
 
@@ -93,6 +94,9 @@ impl fmt::Display for ProjectCandidateError {
             ProjectCandidateErrorKind::Profile => "project profile is invalid",
             ProjectCandidateErrorKind::PresetConflict => {
                 "runtime preset conflicts with requested product capabilities"
+            }
+            ProjectCandidateErrorKind::InvalidCapabilityClosure => {
+                "project product capability closure is incomplete"
             }
             ProjectCandidateErrorKind::UnavailableCapabilities => {
                 "project requests unavailable product capabilities"
@@ -166,10 +170,20 @@ fn validate_product_request(
     let normalized = explicit.union(required);
     let implied = normalized.difference(explicit);
 
+    if normalized.contains(ProductCapability::Presentation2d)
+        && !normalized.contains(ProductCapability::Runtime2d)
+    {
+        return Err(capability_dependency_error(
+            ProductCapability::Presentation2d,
+            ProductCapability::Runtime2d,
+        ));
+    }
+
     if settings.runtime_preset == RuntimePreset::Server {
         let forbidden = ProductCapabilitySet::from_capabilities([
             ProductCapability::Runtime2d,
             ProductCapability::RuntimeUi,
+            ProductCapability::Presentation2d,
             ProductCapability::DesktopWinit,
             ProductCapability::RenderWgpu,
         ]);
@@ -388,6 +402,25 @@ fn capability_error(
         u64::try_from(capabilities.len()).unwrap_or(u64::MAX),
     );
     ProjectCandidateError::single(kind, diagnostic)
+}
+
+fn capability_dependency_error(
+    capability: ProductCapability,
+    dependency: ProductCapability,
+) -> ProjectCandidateError {
+    let diagnostic = with_public_identifier(
+        diagnostic(
+            "project.product.incomplete-capability-closure",
+            "Product capability requires an explicit content capability",
+        ),
+        "capability",
+        capability.as_str(),
+    );
+    let diagnostic = with_public_identifier(diagnostic, "required-capability", dependency.as_str());
+    ProjectCandidateError::single(
+        ProjectCandidateErrorKind::InvalidCapabilityClosure,
+        diagnostic,
+    )
 }
 
 fn diagnostic(code: &'static str, summary: &'static str) -> Diagnostic {

@@ -9,5 +9,5 @@ publish = false
 resolver = "3"
 
 [dependencies]
-nara = { path = "../../..", default-features = false, features = ["runtime-core", "runtime-2d", "runtime-ui", "render-wgpu", "tooling"] }
+nara = { path = "../../..", default-features = false, features = ["runtime-core", "runtime-2d", "runtime-ui", "presentation-2d", "render-wgpu", "tooling"] }
 nara_ui_render = { path = "../../../crates/nara_ui_render" }

@@ -1,5 +1,8 @@
 //! Project manifest parsing, validation, and effective settings lowering.
 
+// Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
+extern crate nara_ecs as bevy_ecs;
+
 pub const CURRENT_PROJECT_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_MANIFEST_BYTE_LIMIT: u64 = 256 * 1024;
 /// Maximum fixed schedules a file-backed project may request in one app frame.

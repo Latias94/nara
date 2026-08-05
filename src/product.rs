@@ -601,16 +601,16 @@ const SLOT_SPRITE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.sprite");
 #[cfg(feature = "runtime-2d")]
 const SLOT_TILEMAP: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tilemap");
 #[cfg(any(
-    feature = "runtime-2d",
+    feature = "presentation-2d",
     feature = "runtime-ui",
     feature = "render-wgpu"
 ))]
 const SLOT_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.render");
-#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+#[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
 const SLOT_IMAGE_PREPARE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.image-prepare");
 #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
 const SLOT_IMAGE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.image");
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "presentation-2d")]
 const SLOT_SPRITE_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.sprite-render");
 #[cfg(feature = "runtime-ui")]
 const SLOT_UI: PluginSlotId = PluginSlotId::new("nara.plugins.slot.ui");
@@ -796,23 +796,8 @@ impl PluginGroup for Runtime2dPlugins {
                 PluginDefinition::for_default::<nara_tilemap::TilemapPlugin>(),
             )
             .add_slot(
-                PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_render::RenderPlugin>(),
-            )
-            .add_slot(
-                PluginSlot::required(SLOT_IMAGE_PREPARE, nara_image::IMAGE_PREPARE_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_image::ImagePreparePlugin>(),
-            )
-            .add_slot(
                 PluginSlot::required(SLOT_IMAGE, nara_image::IMAGE_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_image::ImagePlugin>(),
-            )
-            .add_slot(
-                PluginSlot::required(
-                    SLOT_SPRITE_RENDER,
-                    nara_sprite_render::SPRITE_RENDER_PLUGIN_ID,
-                ),
-                PluginDefinition::for_default::<nara_sprite_render::SpriteRenderPlugin>(),
             )
     }
 }
@@ -847,6 +832,35 @@ impl PluginGroup for RuntimeUiPlugins {
             .add_slot(
                 PluginSlot::required(SLOT_UI_RENDER, nara_ui_render::UI_RENDER_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_ui_render::UiRenderPlugin>(),
+            )
+    }
+}
+
+/// Backend-neutral 2D packet production for products that present sprite and tilemap content.
+#[cfg(feature = "presentation-2d")]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Presentation2dPlugins;
+
+#[cfg(feature = "presentation-2d")]
+impl PluginGroup for Presentation2dPlugins {
+    const ID: PluginGroupId = PluginGroupId::new("nara.plugins.presentation-2d");
+
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::new()
+            .add_slot(
+                PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_render::RenderPlugin>(),
+            )
+            .add_slot(
+                PluginSlot::required(SLOT_IMAGE_PREPARE, nara_image::IMAGE_PREPARE_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_image::ImagePreparePlugin>(),
+            )
+            .add_slot(
+                PluginSlot::required(
+                    SLOT_SPRITE_RENDER,
+                    nara_sprite_render::SPRITE_RENDER_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_sprite_render::SpriteRenderPlugin>(),
             )
     }
 }
@@ -948,6 +962,16 @@ impl PluginGroup for ProjectProfilePlugins {
             .contains(nara_project::ProductCapability::RuntimeUi)
         {
             builder.add_edited_group(RuntimeUiPlugins.edit().configure(task_plugin.clone()))
+        } else {
+            builder
+        };
+
+        #[cfg(feature = "presentation-2d")]
+        let builder = if self
+            .capabilities
+            .contains(nara_project::ProductCapability::Presentation2d)
+        {
+            builder.add_group(Presentation2dPlugins)
         } else {
             builder
         };

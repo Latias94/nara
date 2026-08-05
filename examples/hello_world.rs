@@ -12,12 +12,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn setup_scene(mut commands: Commands) {
     commands.spawn((
-        Name::new("camera"),
-        Transform2d::default(),
-        Camera2d::default(),
-    ));
-
-    commands.spawn((
         Name::new("player"),
         Transform2d::from_translation(Vec2::new(0.0, 0.0)),
         Sprite::from_color(Vec2::new(32.0, 32.0), Color::rgb(0.2, 0.7, 1.0)),

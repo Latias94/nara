@@ -50,7 +50,7 @@ pub use nara_reflect as reflect;
 #[cfg(feature = "runtime-core")]
 pub use nara_reflect::PersistentComponent;
 #[cfg(any(
-    feature = "runtime-2d",
+    feature = "presentation-2d",
     feature = "runtime-ui",
     feature = "render-wgpu"
 ))]
@@ -61,7 +61,7 @@ pub use nara_render_wgpu as render_wgpu;
 pub use nara_scene as scene;
 #[cfg(feature = "runtime-2d")]
 pub use nara_sprite as sprite;
-#[cfg(feature = "runtime-2d")]
+#[cfg(feature = "presentation-2d")]
 pub use nara_sprite_render as sprite_render;
 #[cfg(feature = "runtime-core")]
 pub use nara_tasks as tasks;
@@ -112,6 +112,8 @@ mod product;
 
 #[cfg(feature = "desktop-winit")]
 pub use product::DesktopWinitPlugins;
+#[cfg(feature = "presentation-2d")]
+pub use product::Presentation2dPlugins;
 #[cfg(feature = "runtime-2d")]
 pub use product::Runtime2dPlugins;
 #[cfg(feature = "runtime-ui")]
@@ -127,6 +129,8 @@ pub use product::{
 
 #[cfg(feature = "runtime-core")]
 pub mod prelude {
+    #[cfg(feature = "presentation-2d")]
+    pub use crate::Presentation2dPlugins;
     #[cfg(feature = "runtime-2d")]
     pub use crate::Runtime2dPlugins;
     #[cfg(feature = "runtime-ui")]
@@ -184,7 +188,7 @@ pub mod prelude {
         AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, SamplerDescriptor,
     };
     #[cfg(any(
-        feature = "runtime-2d",
+        feature = "presentation-2d",
         feature = "runtime-ui",
         feature = "render-wgpu"
     ))]
@@ -303,13 +307,17 @@ pub mod advanced_prelude {
         ImageFileImportRequest, ImageImportBudgetError, ImageImportBudgetHost,
         ImageImportBudgetSnapshot, ImageImportError, ImageImportLimitKind, ImageImportLimits,
         ImageImportLimitsError, ImageImportMemoryPlan, ImageImportStage, ImageImportedAsset,
-        ImageImporter, ImageImporterCreateError, ImagePngFailureKind, ImagePreparePlugin,
-        ImagePrepareStats, ImagePublicationFailureKind, ImageReloadError, ImageReloadStats,
-        ImageSourceDirectory, ImageSourceFailureKind, ImageSourceMetadata, ImageUnsupportedFeature,
-        PreparedImageResource, image_descriptor_hash, image_resource_key, prepare_images,
+        ImageImporter, ImageImporterCreateError, ImagePngFailureKind, ImagePublicationFailureKind,
+        ImageReloadError, ImageReloadStats, ImageSourceDirectory, ImageSourceFailureKind,
+        ImageSourceMetadata, ImageUnsupportedFeature,
+    };
+    #[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
+    pub use nara_image::{
+        ImagePreparePlugin, ImagePrepareStats, PreparedImageResource, image_descriptor_hash,
+        image_resource_key, prepare_images,
     };
     #[cfg(any(
-        feature = "runtime-2d",
+        feature = "presentation-2d",
         feature = "runtime-ui",
         feature = "render-wgpu"
     ))]
@@ -444,7 +452,7 @@ mod tests {
                 .contains_resource::<nara_input::ActionOutcomes>()
         );
         #[cfg(any(
-            feature = "runtime-2d",
+            feature = "presentation-2d",
             feature = "runtime-ui",
             feature = "render-wgpu"
         ))]
@@ -734,22 +742,22 @@ mod tests {
 
     #[cfg(feature = "runtime-2d")]
     #[test]
-    fn runtime_2d_installs_sprite_submission_without_runtime_ui() {
+    fn runtime_2d_installs_content_without_presentation() {
         let mut app = App::new();
         app.add_plugins(Runtime2dPlugins).unwrap();
 
-        assert!(
-            app.world()
-                .contains_resource::<nara_sprite_render::SpriteBatches>()
-        );
         let metadata = app
             .installed_plugin_groups()
             .find(|group| group.id() == PluginGroupId::new("nara.plugins.runtime-2d"))
             .unwrap();
         assert!(
-            !metadata
-                .plugins()
-                .contains(&nara_app::PluginId::new("nara.ui"))
+            [
+                nara_app::PluginId::new("nara.render"),
+                nara_app::PluginId::new("nara.image.prepare"),
+                nara_app::PluginId::new("nara.sprite-render"),
+            ]
+            .into_iter()
+            .all(|plugin| !metadata.plugins().contains(&plugin))
         );
     }
 
@@ -772,6 +780,23 @@ mod tests {
             !metadata
                 .plugins()
                 .contains(&nara_app::PluginId::new("nara.sprite"))
+        );
+    }
+
+    #[cfg(feature = "presentation-2d")]
+    #[test]
+    fn presentation_2d_installs_packet_production_explicitly() {
+        let mut app = App::new();
+        app.add_plugins((Runtime2dPlugins, Presentation2dPlugins))
+            .unwrap();
+
+        assert!(
+            app.installed_plugins()
+                .any(|plugin| plugin.id == nara_sprite_render::SPRITE_RENDER_PLUGIN_ID)
+        );
+        assert!(
+            app.world()
+                .contains_resource::<nara_sprite_render::SpriteBatches>()
         );
     }
 }

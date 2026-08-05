@@ -8,7 +8,12 @@ publish = false
 
 [features]
 default = []
-desktop = ["nara/runtime-ui", "nara/desktop-winit", "nara/render-wgpu"]
+desktop = [
+    "nara/runtime-ui",
+    "nara/presentation-2d",
+    "nara/desktop-winit",
+    "nara/render-wgpu",
+]
 editor = ["nara/tooling"]
 host-parity = ["desktop", "editor"]
 

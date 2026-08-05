@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     imported.commit(&asset_server, &mut images, &mut states, &mut events)?;
 
     let mut app = App::new();
-    app.add_plugins(Runtime2dPlugins)?;
+    app.add_plugins((Runtime2dPlugins, Presentation2dPlugins))?;
     {
         let world = app.world_mut()?;
         world.insert_resource(asset_server);
@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(prepared.get_ready(image_resource_key(texture)).is_some());
     assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
 
-    let batches = app.world().resource::<SpriteBatches>();
+    let batches = app.world().resource::<nara::sprite_render::SpriteBatches>();
     assert_eq!(batches.total_instances(), 1);
     assert_eq!(
         batches.as_slice()[0].material.image,

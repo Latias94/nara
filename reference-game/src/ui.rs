@@ -36,6 +36,7 @@ const REFERENCE_DESKTOP_REQUIREMENTS: &[PluginId] = &[
 const REFERENCE_DESKTOP_PRODUCT_REQUIREMENTS: &[PluginProductCapability] = &[
     PluginProductCapability::new("runtime-2d"),
     PluginProductCapability::new("runtime-ui"),
+    PluginProductCapability::new("presentation-2d"),
     PluginProductCapability::new("desktop-winit"),
     PluginProductCapability::new("render-wgpu"),
 ];

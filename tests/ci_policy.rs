@@ -85,14 +85,16 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
             "cargo nextest run --workspace --locked --test-threads=1",
             "cargo nextest run --workspace --locked --all-features --test-threads=1",
             "--features desktop-winit,render-wgpu --example windowed_clear",
-            "--features runtime-2d,desktop-winit,render-wgpu --example windowed_sprites",
+            "--features presentation-2d,desktop-winit,render-wgpu --example windowed_sprites",
             "--features runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel",
+            "--manifest-path tests/fixtures/product-slices/presentation-2d/Cargo.toml --locked",
         ],
         "root CI",
     );
     for feature in [
         "runtime-core",
         "runtime-2d",
+        "presentation-2d",
         "runtime-ui",
         "tooling",
         "asset-watch",

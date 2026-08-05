@@ -34,8 +34,6 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
         AssetPlugin,
         HierarchyPlugin,
         TransformPlugin,
-        RenderPlugin,
-        ImagePreparePlugin,
     ))
     .unwrap();
     app.add_plugin(
@@ -139,12 +137,12 @@ fn host_directory(path: &Path) -> File {
         const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 
-        return fs::OpenOptions::new()
+        fs::OpenOptions::new()
             .read(true)
             .share_mode(FILE_SHARE_READ_WRITE_DELETE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)
-            .unwrap();
+            .unwrap()
     }
 
     #[cfg(unix)]

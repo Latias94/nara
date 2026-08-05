@@ -1,5 +1,8 @@
 //! Tilemap authoring data for 2D scenes.
 
+// Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
+extern crate nara_ecs as bevy_ecs;
+
 use std::collections::BTreeMap;
 
 use nara_app::{App, Plugin, PluginError, PluginPreflightContext};

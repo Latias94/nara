@@ -2,12 +2,12 @@ use nara::advanced_prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
-    app.add_plugins(Runtime2dPlugins)?
+    app.add_plugins((Runtime2dPlugins, Presentation2dPlugins))?
         .add_systems(StartupStage::Scene, setup_scene)?;
 
     app.update()?;
 
-    let batches = app.world().resource::<SpriteBatches>();
+    let batches = app.world().resource::<nara::sprite_render::SpriteBatches>();
     assert_eq!(batches.total_instances(), 3);
     Ok(())
 }

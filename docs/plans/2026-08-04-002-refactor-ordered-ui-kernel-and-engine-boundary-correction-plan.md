@@ -420,10 +420,10 @@ stateDiagram-v2
 ### Sequencing
 
 1. Activate authoritative decisions and close governance contradictions.
-2. Remove duplicate/false boundaries and split content from presentation before new crates depend on those surfaces.
+2. Remove duplicate/false boundaries and split 2D content from presentation before new crates depend on those surfaces.
 3. Migrate persistent ordered placement through Scene, Prefab, Patch, tooling, runtime hierarchy, and reference content.
 4. Build text, kernel, input, widgets, and semantics as headless modules with snapshot tests.
-5. Replace the runtime ECS adapter and render submission path end-to-end.
+5. Replace the runtime ECS adapter, complete the UI content/presentation split, and replace the render submission path end-to-end.
 6. Prove the reference-game desktop, packaged, accessibility, and headless workflows.
 7. Tighten public surfaces, independent consumers, evidence, and documentation only after the product flow passes.
 
@@ -484,7 +484,7 @@ stateDiagram-v2
 | NUI-U2 | Remove duplicate runtime tooling authority | `crates/nara_tooling`, `src/product.rs`, host tests | NUI-U1 |
 | NUI-U3 | Retire the unconsumed importer registry | `crates/nara_asset`, `crates/nara_image`, asset examples/tests | NUI-U1 |
 | NUI-U4 | Close render/UI internals and clean dependency edges | `crates/nara_render`, `crates/nara_ui_render`, manifests, facade | NUI-U1 |
-| NUI-U5 | Split content from presentation composition | root features/product recipes, project capabilities, reference game | NUI-U2, NUI-U4 |
+| NUI-U5 | Split content from presentation composition in two dependency-ordered checkpoints | root features/product recipes, project capabilities, image preparation, reference game | NUI-U2, NUI-U4; final UI closure after NUI-U13 |
 | NUI-U6 | Publish canonical ordered Scene/Prefab documents | `crates/nara_scene` document/format/validation/migration | NUI-U1 |
 | NUI-U7 | Add exact ordered placement Patch and tooling commands | Scene Patch/authoring, tooling Inspector/persistence | NUI-U6 |
 | NUI-U8 | Lower ordered placement into runtime hierarchy | `crates/nara_hierarchy`, Scene spawn/export/prefab, content fixtures | NUI-U7 |
@@ -493,7 +493,7 @@ stateDiagram-v2
 | NUI-U11 | Establish one normalized input timeline | `crates/nara_input`, `crates/nara_winit`, schedules/gameplay anchor | NUI-U1, NUI-U4 |
 | NUI-U12 | Build headless widgets, focus, and semantics | new `crates/nara_ui_widgets`, kernel dispatch, accessibility adapter | NUI-U10, NUI-U11 |
 | NUI-U13 | Replace the ECS runtime UI adapter | `crates/nara_ui`, codecs, examples, runtime authoring tests | NUI-U8, NUI-U10, NUI-U12 |
-| NUI-U14 | Publish owned UI/image packets through WGPU | UI render, render prepare, image, WGPU backend/cache/tests | NUI-U3, NUI-U4, NUI-U9, NUI-U13 |
+| NUI-U14 | Publish owned UI/image packets through WGPU | UI render, render prepare, image, WGPU backend/cache/tests | NUI-U3, NUI-U4, NUI-U5, NUI-U9, NUI-U13 |
 | NUI-U15 | Complete the reference-game product proof | `reference-game`, packaged probes, headless/desktop tests | NUI-U5, NUI-U11, NUI-U12, NUI-U13, NUI-U14 |
 | NUI-U16 | Close public surfaces and evidence | facade/features, module consumer, docs, ledger, full gates | NUI-U2 through NUI-U15 |
 
@@ -541,11 +541,11 @@ stateDiagram-v2
 
 - **Goal:** Make 2D and UI content usable without installing presentation infrastructure.
 - **Requirements:** R4-R5, R11, R37-R38.
-- **Dependencies:** NUI-U2, NUI-U4.
-- **Files:** `Cargo.toml`; `src/{lib.rs,product.rs}`; `crates/nara_project` capability schema/fixtures; `reference-game/Cargo.toml`, recipe, plugin tests, and headless/desktop/host-parity tests; module-consumer manifests where affected.
-- **Approach:** Redefine existing pre-1.0 content features without aliases, introduce explicit presentation composition only where a real desktop recipe consumes it, and keep WGPU as a separate backend capability. Apply the same split to runtime UI authoring versus UI rendering.
-- **Test scenarios:** Minimal/headless 2D content resolves sprite/tilemap/gameplay without render/image-prepare/sprite-render/UI-render/WGPU/tooling; desktop adds the exact presentation groups once; invalid capability pairs fail before App mutation; independently locked consumers select each supported slice.
-- **Verification:** Product capability, plugin composition, project boot, runtime runner, reference-game headless/desktop/host parity, and feature-matrix checks pass.
+- **Dependencies:** NUI-U2 and NUI-U4 for the 2D checkpoint; NUI-U13 for final UI closure.
+- **Files:** `Cargo.toml`; `src/{lib.rs,product.rs}`; `crates/nara_image`; `crates/nara_project` capability schema/fixtures; `reference-game/Cargo.toml`, recipe, plugin tests, and headless/desktop/host-parity tests; CI feature checks and independently locked consumer manifests/locks where affected.
+- **Approach:** Deliver this unit through two dependency-ordered checkpoints. U5A redefines the existing pre-1.0 `runtime-2d` feature as content-only, introduces a consumed `presentation-2d` composition, makes image preparation opt-in to presentation, keeps WGPU as a separate backend capability, and proves the physical dependency graph. U5B runs immediately after NUI-U13 removes the legacy UI execution tree's renderer dependency; it then redefines `runtime-ui` as authoring-only, adds the consumed UI presentation composition, and makes Host recipes select platform and backend adapters explicitly. Do not move layout, interaction, or other content behavior into a render plugin as an interim bridge, and do not add compatibility aliases for the old feature meanings.
+- **Test scenarios:** At U5A, minimal/headless 2D content resolves sprite/tilemap/gameplay without render/image-prepare/sprite-render/UI-render/WGPU/tooling; desktop 2D adds the exact presentation group once; invalid 2D capability pairs fail before App mutation; and independently locked consumers prove the feature tree. At U5B, repeat the same proof for runtime UI authoring versus UI rendering and verify Host-owned adapter selection.
+- **Verification:** U5A requires product capability, plugin composition, project boot, runtime runner, reference-game headless/desktop, CI, lockfile, and feature-tree checks for 2D. U5B requires the corresponding UI capability, host-parity, independent-consumer, and feature-matrix checks before NUI-U5 can close.
 
 ### NUI-U6. Publish Canonical Ordered Scene And Prefab Documents
 
@@ -631,7 +631,7 @@ stateDiagram-v2
 
 - **Goal:** Submit the exact immutable UI and image resources captured for a frame without live World reads.
 - **Requirements:** R25, R32-R34, R37-R38.
-- **Dependencies:** NUI-U3, NUI-U4, NUI-U9, NUI-U13.
+- **Dependencies:** NUI-U3, NUI-U4, NUI-U5, NUI-U9, NUI-U13.
 - **Files:** `crates/nara_ui_render/src`; `crates/nara_render/src/{lib.rs,prepare.rs}`; `crates/nara_image/src`; `crates/nara_render_wgpu/src/{lib.rs,backend.rs,quad.rs,ui.rs,sprite.rs,texture.rs,telemetry.rs}`; focused GPU/readback tests.
 - **Approach:** Admit Guillotiere 0.7.0 in `nara_ui_render`, resolve `UiFrame` glyph requests through `nara_text`'s bounded raster API, build one ordered paint packet, allocate and snapshot CPU R8 atlas pages, capture `Arc`-backed prepared image pixels and pages with exact generations, remove submit-time `Assets<ImageAsset>` reads, cache GPU resources by snapshot/device epoch, enforce R25's CPU/GPU/raster/upload/retention matrix, classify failures per R34, and emit a receipt only after the exact packet reaches presentation.
 - **Test scenarios:** Solid/image/glyph interleaving and clipping; unchanged snapshot reuse; asset replacement after capture always uses the captured generation; missing/stale/mismatched packet resource; atlas first-load/replacement saturation; raster/upload deferral; surface mismatch produces no receipt; device epoch reset; bounded eviction/retirement; content error leaves backend ready; nonblank glyph and image readback.
@@ -719,7 +719,7 @@ stateDiagram-v2
 | NUI-U2 | Runtime Worlds no longer own tooling workspaces and Host/editor journeys remain intact. |
 | NUI-U3 | Generic importer execution surfaces are gone and concrete Image import remains complete. |
 | NUI-U4 | Arbitrary render/UI pipeline APIs are gone and intended first-party phases remain deterministic. |
-| NUI-U5 | Headless content resolves no presentation/tooling owner while desktop composition remains complete. |
+| NUI-U5 | The 2D checkpoint proves a presentation-free locked content tree and exact desktop composition; final closure additionally proves the same for runtime UI after NUI-U13 and keeps platform/backend adapter selection Host-owned. |
 | NUI-U6 | Canonical Scene/Prefab sources own ordered placement and reject the old parent shape. |
 | NUI-U7 | Every ordered placement mutation is failure-atomic and exactly invertible through tooling. |
 | NUI-U8 | Runtime hierarchy/spawn/export/Retry preserve persistent order without entity-ID fallback. |
