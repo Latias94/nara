@@ -1,0 +1,19 @@
+[package]
+name = "nara_text"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+blake3.workspace = true
+parley.workspace = true
+swash.workspace = true
+thiserror.workspace = true
+ttf-parser.workspace = true
+
+[dev-dependencies]
+sha2 = "0.10"
+
+[features]
+default = []

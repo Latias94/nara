@@ -18,3 +18,5 @@ docs/benchmarks/data/**/*.json text eol=lf
 docs/benchmarks/data/**/*.jsonl text eol=lf
 docs/benchmarks/data/**/*.blake3 text eol=lf
 docs/benchmarks/data/**/*.base64 text eol=lf
+# The pinned upstream Fira license is preserved byte-for-byte, including its source whitespace.
+crates/nara_text/assets/FiraSans-LICENSE.txt whitespace=-trailing-space
