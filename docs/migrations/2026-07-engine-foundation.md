@@ -57,6 +57,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | NUI-U4-1 | NUI-U4 | `e1a4595` | `rust-api/behavior` | Public render topology and technical sprite/UI pipeline stages | Use the closed first-party render plan and product-level authoring/presentation entry points; remove custom phase and direct pipeline-stage calls. |
 | NUI-U5A-1 | NUI-U5A | `2f0bd69` | `cargo-feature/rust-api/project-manifest/behavior` | Implicit 2D presentation through `runtime-2d` and `Runtime2dPlugins` | Keep headless content on `runtime-2d`; add `presentation-2d` plus `Presentation2dPlugins` to presented products and explicitly request both capabilities. |
 | NUI-U6-U7-1 | NUI-U6/U7 | `7c2c5ba`, `53d6678` | `serialized-format/rust-api/behavior` | Record-owned `parent`, implicit root order, placement-free add/remove, and bare `Reparent` | Rewrite Scene/Prefab documents to ordered `roots` plus parent-owned `children`; express Patch mutations with `ScenePlacement`, `MoveEntity { from, to }`, and exact subtree `RestoreEntity`. |
+| NUI-U8-1 | NUI-U8 | `4b2146a`, `fc3a0b8` | `rust-api/behavior` | Construction-only hierarchy attachment and runtime order inferred from entity allocation | Register every structural root and child with `HierarchyWriter` using exact ordered placements; consume the completed `HierarchyOrder` for structural layout, hit testing, and drawing. |
 
 ## Entry Contract
 
@@ -2324,8 +2325,9 @@ surface.
 - Startup publication of parented `Transform2d` or inherited `Visibility` before their runtime
   projections are implemented.
 
-**Canonical replacement or deletion rationale**: `nara_hierarchy` now owns a custom non-linked
-Bevy relationship, bounded whole-topology validation, and construction-only mutation. Runtime
+**Canonical replacement or deletion rationale**: `nara_hierarchy` now owns immutable non-linked
+parent/ordered-children components, bounded whole-topology validation, and ordered failure-atomic
+mutation. Runtime
 structure does not own entity lifetime, persistence, transform math, visibility, UI layout, or
 prefab provenance. `nara_scene::SceneComponentsPlugin` separately owns the persistent `Name` and
 `Visibility` schemas. The split removes the dependency cycle that prevented `nara_transform` from
@@ -2347,12 +2349,24 @@ let parent = world.get::<Parent>(child);
 **After**:
 
 ```rust
-use nara_hierarchy::{HierarchyConstructionWriter, HierarchyPlugin, Parent};
+use nara_hierarchy::{
+    HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyPlugin,
+    HierarchyWriter, Parent,
+};
 use nara_scene::SceneComponentsPlugin;
 
 app.add_plugin(HierarchyPlugin)?;
 app.add_plugin(SceneComponentsPlugin)?;
-HierarchyConstructionWriter::new(app.world_mut()?).attach(child, parent)?;
+HierarchyWriter::new(app.world_mut()?).apply_batch(&[
+    HierarchyOperation::Place {
+        entity: parent,
+        placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+    },
+    HierarchyOperation::Place {
+        entity: child,
+        placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+    },
+])?;
 app.world_mut()?.flush();
 let parent = app.world()?.get::<Parent>(child);
 ```
@@ -3068,6 +3082,80 @@ reader that guesses order.
 prefab_startup}.rs` prove canonical formats, bounded legacy rejection, candidate-relative anchors,
 failure atomicity, exact undo/redo, Prefab override order, and save/reopen parity. Source searches
 find no Rust use of `ScenePatchOperation::Reparent` or record-owned `parent`.
+
+## NUI-U8-1: Ordered Runtime Hierarchy Projection
+
+**Removed contract**: `HierarchyConstructionWriter`, `HierarchyConstructionEdge`, attachment-only
+command helpers, and the public `Parent: Relationship` / `Children: RelationshipTarget` escape
+hatch are removed. Parentless ECS entities are no longer implicit hierarchy roots, and callers
+cannot derive root or sibling order from query iteration or entity allocation. Raw despawn is not
+a structural mutation API.
+
+**Canonical replacement or deletion rationale**: `HierarchyRoots` is the ordered read-only root
+projection, `Children` remains the immutable ordered child projection, and `HierarchyOrder`
+publishes one validated depth-first index per completed generation. `HierarchyWriter`
+accepts `Place`, exact `Move { from, to }`, and exact `Remove { from }` operations using the same
+root/parent plus first/last/before/after placement vocabulary as persistent documents. A batch
+resolves sequentially against one candidate, validates the complete closure, and publishes only
+after every operation succeeds. Scene spawn, Prefab expansion, export, replacement, Retry, exact
+instance retirement, and individual Scene-entity retirement all use this owner.
+
+**Before**:
+
+```rust
+HierarchyConstructionWriter::new(world).attach(child, parent)?;
+```
+
+**After**:
+
+```rust
+HierarchyWriter::new(world).apply_batch(&[
+    HierarchyOperation::Place {
+        entity: parent,
+        placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+    },
+    HierarchyOperation::Place {
+        entity: child,
+        placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent }),
+    },
+])?;
+```
+
+Every participating entity must have exactly one placement. Move or remove callers must capture
+the current placement and provide it as `from`; stale context rejects the complete batch. When an
+owning Scene subtree retires while external descendants survive, the hierarchy owner promotes the
+surviving frontier to the retired root position in original depth-first structural order before
+postorder retirement. Product replacement reuses the first retired root position for the first
+new root and keeps remaining new roots adjacent in persistent order.
+
+**Affected examples and fixtures**: transform, render, sprite-render, runtime UI panel, Scene
+spawn/export/product transaction tests, and the reference-game HUD now register explicit ordered
+roots and children. Scene orchestration delegates hierarchy lowering and retirement to
+`crates/nara_scene/src/runtime_hierarchy.rs`.
+
+**User action**: replace attachment-only calls with one ordered batch that registers both roots and
+children. Use `HierarchyPlacement::current` before exact move/remove operations. Use Scene-owned
+retirement APIs for Scene entities; do not mutate `Parent`, `Children`, or `HierarchyRoots`
+directly and do not despawn structural participants before removing or promoting their placement.
+
+**Source action**: `manual-rewrite`. No compatibility writer or entity-order fallback remains.
+
+**Cache action**: `keep`. Rebuild Rust artifacts; persistent Scene/Prefab bytes and asset identity
+do not change beyond the NUI-U6/U7 ordered document migration.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert `fc3a0b8` and `4b2146a` together with this migration entry. Do not restore only
+the attachment writer or infer roots from missing parents, because either choice recreates a
+second runtime ordering authority.
+
+**Verification anchors**: `crates/nara_hierarchy/src/tests.rs`,
+`crates/nara_identity/src/tests.rs`, `crates/nara_scene/src/{tests,product_transaction_tests}.rs`,
+`crates/nara_transform/src/lib.rs`, `crates/nara_render/src/lib.rs`,
+`crates/nara_sprite_render/src/tests.rs`, `examples/runtime_ui_panel.rs`, and
+`reference-game/src/ui.rs` prove exact ordered placement, unrelated allocation independence,
+deep/wide bounds, atomic rollback, export equality, deterministic replacement/retirement, and
+explicit runtime-created HUD roots.
 
 ## Persistent Format Matrix
 

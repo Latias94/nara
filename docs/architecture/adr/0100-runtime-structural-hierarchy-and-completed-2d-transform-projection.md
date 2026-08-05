@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-01
+**Amended**: 2026-08-05 by NUI-U8 ordered runtime projection
 **Owner**: Runtime hierarchy, 2D transform projection, and consuming product hosts
 **Related**: ADR 0005, ADR 0006, and ADR 0018
 **Refines**: The current 2D completion slice of
@@ -51,9 +52,10 @@ flowchart LR
 - Runtime structure belongs to a dedicated deep Module outside `nara_scene`, `nara_transform`, UI,
   render, and tooling. The active implementation plan places it in `nara_hierarchy`; this decision
   freezes the ownership boundary, not public identifier spelling or prelude placement.
-- The runtime relation uses Nara-defined components over the `bevy_ecs` relationship substrate.
-  The forward parent relation is authoritative. The reverse child collection is relationship-
-  maintained derived state and is not an independent ordinary-author mutation surface.
+- The runtime relation uses Nara-defined immutable ECS components with private fields. The forward
+  parent relation is authoritative, and `nara_hierarchy` manually synchronizes the reverse ordered
+  child projection. Neither public type implements Bevy's `Relationship` or `RelationshipTarget`;
+  those traits would expose a second construction and mutation path outside the ordered writer.
 - The relation does not opt into linked spawn or linked clone behavior. Structural ancestry does
   not grant despawn, Scene Instance membership, runtime-session ownership, UI layout, visibility,
   persistence, or prefab-provenance authority.
@@ -66,19 +68,21 @@ flowchart LR
 - Consumers that require current world-space data run only after a named semantic completion
   boundary. They do not independently walk parent chains or silently fall back to local or identity
   transforms.
-- Nara-owned construction and replacement paths validate the supported topology generation before
-  derived publication. Raw relationship insertion, reverse-collection mutation, change-detection
-  bypass, and unchecked World mutation through the public Bevy substrate remain advanced escape
-  hatches outside Nara's hierarchy-correctness guarantee.
+- Nara-owned placement and replacement paths validate the supported topology generation before
+  derived publication. Immutable component insert/discard hooks invalidate completion immediately,
+  including advanced raw component replacement or removal. A missing or divergent root resource
+  also withholds completion. Direct reverse-collection mutation is unavailable; raw despawn never
+  cascades and leaves the hierarchy fail-closed until its owning placement transaction runs.
 - Structural ancestry never defines a retirement closure. Existing lifecycle owners must adapt
-  their owned teardown paths to the relationship hooks and continue retiring only their explicit
+  their owned teardown paths to the hierarchy projection and continue retiring only their explicit
   memberships. This ADR does not accept a scene-session, scene-travel, candidate-initialization,
   or runtime-derived-entity ownership API.
 
-This ADR does not accept a public runtime move/reparent API, deterministic sibling order,
-`KeepWorld`, visibility inheritance, UI tree semantics, prefab ownership transfer, recursive
-destruction, physics synchronization, 3D transforms, post-affine authoring mechanisms, or a generic
-hierarchy/provider abstraction. Those decisions remain evidence-gated.
+ADR 0101 refines this decision with deterministic root/sibling order and exact runtime placement
+operations. This ADR does not independently accept `KeepWorld`, visibility inheritance, UI tree
+semantics, prefab ownership transfer, recursive destruction, physics synchronization, 3D
+transforms, post-affine authoring mechanisms, or a generic hierarchy/provider abstraction. Those
+decisions remain evidence-gated.
 
 ## Alternatives Considered
 
@@ -113,15 +117,18 @@ authoring and 3D decisions open.
 - RGS-U2 removes the full-scan child rebuild, independently mutable child collection, and scene
   transform re-export. RGS-U3 completes global propagation and render consumption; the
   reference-game aggregate-to-Transform projection remains transitional until RGS-U4.
-- Concrete construction writers, schedule-set names, generation counters, traversal storage, and
-  ordinary/advanced/private API placement remain provisional until the reference-game workflow has
-  exercised them.
+- NUI-U8 removes the provisional public Bevy relationship escape hatch, publishes one validated
+  depth-first structural order per topology generation, and keeps component lifecycle/observer
+  preflight inside the hierarchy owner. `HierarchyWriter`, `HierarchyRoots`, and `HierarchyOrder`
+  are the exercised ordered-relation anchors; broader UI and lifecycle semantics remain owned by
+  their later product slices.
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |---|---:|---|
 | Runtime hierarchy authority | One forward authority and one derived reverse projection | Hierarchy relation and public-surface tests |
+| Runtime structural order | One completed depth-first order shared by layout, hit testing, and rendering without entity-allocation fallback | Reverse-allocation hierarchy/UI integration test |
 | Lifecycle separation | Parent loss detaches children; current Scene Instance replacement retires exact membership and never hierarchy closure | Scene replacement/unload fixtures |
 | Publication atomicity | Invalid stable-ID topology publishes no partial runtime instance | Scene/prefab hostile fixtures |
 | 2D projection correctness | Nested globals equal ordered affine composition before every declared fresh consumer | Transform and extraction tests |
@@ -133,7 +140,7 @@ authoring and 3D decisions open.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Structural hierarchy becomes an implicit lifetime owner | Critical | Medium | Use a non-linked relation and require existing lifecycle owners to retire only their explicit memberships. Do not infer or accept a session API here. |
-| Advanced ECS mutation bypasses validation or dirty tracking | High | High | State the substrate limit honestly; prohibit bypasses in first-party paths; fail supported dirty generations before derived publication. |
+| Advanced ECS mutation bypasses validation or dirty tracking | High | Low | Keep relation components immutable and privately constructed, reject foreign lifecycle hooks/observers before mutation, invalidate generations from owner hooks, and withhold completion when roots or projections diverge. |
 | Global transforms are stale at startup, pause, or extraction | High | Medium | Provide bootstrap, frame, and pre-extraction completion points with a named freshness boundary. |
 | The first implementation freezes an unnecessary public API | High | Medium | Keep API names and placement provisional and classify them only after the product journey. |
 | The slice expands into the full ADR 0085 design | High | Medium | Keep ordering, reparenting, visibility, prefab transfer, UI details, physics, and 3D explicitly Proposed. |
