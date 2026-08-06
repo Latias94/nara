@@ -1,3 +1,9 @@
+use std::{
+    any::Any,
+    fmt::{self, Debug, Formatter},
+    sync::Arc,
+};
+
 use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_asset::{AssetStates, Assets, Handle, ImportArtifactDigest, LoadState, SourceHash};
 use nara_ecs::{Res, ResMut, Resource};
@@ -7,14 +13,15 @@ use nara_render::{
 
 use crate::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct PreparedImageResource {
     extent: ImageExtent,
     format: ImageFormat,
     color_space: ImageColorSpace,
     source_hash: SourceHash,
     artifact_hash: ImportArtifactDigest,
-    pixel_len: usize,
+    pixels: Arc<Box<[u8]>>,
+    retention: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl PreparedImageResource {
@@ -26,7 +33,8 @@ impl PreparedImageResource {
             color_space: image.color_space(),
             source_hash: image.source().source_hash(),
             artifact_hash: image.source().artifact().key().digest(),
-            pixel_len: image.pixels().len(),
+            pixels: image.shared_pixels(),
+            retention: image.shared_retention_owner(),
         }
     }
 
@@ -56,8 +64,72 @@ impl PreparedImageResource {
     }
 
     #[must_use]
-    pub const fn pixel_len(&self) -> usize {
-        self.pixel_len
+    pub fn pixel_len(&self) -> usize {
+        self.pixels.len()
+    }
+
+    #[must_use]
+    pub fn pixels(&self) -> &[u8] {
+        self.pixels.as_ref().as_ref()
+    }
+
+    /// Reports whether the source import's memory-accounting owner is retained by this snapshot.
+    #[must_use]
+    pub const fn retains_source_allocation(&self) -> bool {
+        self.retention.is_some()
+    }
+}
+
+impl Debug for PreparedImageResource {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PreparedImageResource")
+            .field("extent", &self.extent)
+            .field("format", &self.format)
+            .field("color_space", &self.color_space)
+            .field("source_hash", &self.source_hash)
+            .field("artifact_hash", &self.artifact_hash)
+            .field("pixel_len", &self.pixels.len())
+            .field("retains_source_allocation", &self.retention.is_some())
+            .finish()
+    }
+}
+
+impl PartialEq for PreparedImageResource {
+    fn eq(&self, other: &Self) -> bool {
+        self.extent == other.extent
+            && self.format == other.format
+            && self.color_space == other.color_space
+            && self.source_hash == other.source_hash
+            && self.artifact_hash == other.artifact_hash
+            && self.pixels == other.pixels
+            && self.retention.is_some() == other.retention.is_some()
+    }
+}
+
+impl Eq for PreparedImageResource {}
+
+/// Exact immutable prepared image value retained by a render packet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedImageSnapshot {
+    identity: RenderResourceSnapshot,
+    resource: PreparedImageResource,
+}
+
+impl PreparedImageSnapshot {
+    #[must_use]
+    pub fn new(identity: RenderResourceSnapshot, resource: PreparedImageResource) -> Self {
+        Self { identity, resource }
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &RenderResourceSnapshot {
+        &self.identity
+    }
+
+    #[must_use]
+    pub const fn resource(&self) -> &PreparedImageResource {
+        &self.resource
     }
 }
 
@@ -76,7 +148,7 @@ pub const IMAGE_PREPARE_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.image.prepare");
 const IMAGE_PREPARE_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
     nara_app::PluginProductCapability::new("presentation-2d"),
-    nara_app::PluginProductCapability::new("runtime-ui"),
+    nara_app::PluginProductCapability::new("presentation-ui"),
 ];
 pub const IMAGE_PREPARE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(IMAGE_PREPARE_PLUGIN_ID, nara_app::PluginCategory::Render)

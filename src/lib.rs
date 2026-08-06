@@ -37,11 +37,11 @@ pub mod identity {
         WorldIdentitySettingsError, resolve_in_world, spawn_identity_entity,
     };
 }
-#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+#[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
 pub use nara_image as image;
 #[cfg(feature = "runtime-core")]
 pub use nara_input as input;
-#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+#[cfg(feature = "runtime-2d")]
 pub use nara_material as material;
 #[cfg(feature = "runtime-core")]
 pub use nara_project as project;
@@ -51,7 +51,7 @@ pub use nara_reflect as reflect;
 pub use nara_reflect::PersistentComponent;
 #[cfg(any(
     feature = "presentation-2d",
-    feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "render-wgpu"
 ))]
 pub use nara_render as render;
@@ -75,11 +75,16 @@ pub use nara_tooling_egui as tooling_egui;
 pub use nara_transform as transform;
 #[cfg(feature = "runtime-ui")]
 pub use nara_ui as ui;
-#[cfg(feature = "runtime-ui")]
+#[cfg(feature = "presentation-ui")]
 pub mod ui_render {
     //! Runtime UI presentation product surface.
 
     pub use nara_ui_render::{UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiRenderPlugin};
+
+    /// Explicit packet/compiler boundary for Host, backend, and product-verification integrations.
+    pub mod advanced {
+        pub use nara_ui_render::advanced::*;
+    }
 }
 #[cfg(feature = "runtime-core")]
 pub use nara_window as window;
@@ -101,6 +106,9 @@ mod scene_retention;
 #[cfg(feature = "runtime-core")]
 mod startup_scene;
 
+#[cfg(feature = "presentation-ui")]
+mod ui_presentation;
+
 #[cfg(feature = "runtime-core")]
 #[doc(hidden)]
 pub mod __macro_support {
@@ -114,6 +122,8 @@ mod product;
 pub use product::DesktopWinitPlugins;
 #[cfg(feature = "presentation-2d")]
 pub use product::Presentation2dPlugins;
+#[cfg(feature = "presentation-ui")]
+pub use product::PresentationUiPlugins;
 #[cfg(feature = "runtime-2d")]
 pub use product::Runtime2dPlugins;
 #[cfg(feature = "runtime-ui")]
@@ -131,6 +141,8 @@ pub use product::{
 pub mod prelude {
     #[cfg(feature = "presentation-2d")]
     pub use crate::Presentation2dPlugins;
+    #[cfg(feature = "presentation-ui")]
+    pub use crate::PresentationUiPlugins;
     #[cfg(feature = "runtime-2d")]
     pub use crate::Runtime2dPlugins;
     #[cfg(feature = "runtime-ui")]
@@ -155,6 +167,7 @@ pub mod prelude {
         GameplayCommandKey, GameplayCommandPayload, GameplayCommandSource, GameplayCommandSourceId,
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
         GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
+        LocalGameplayCommandError, LocalGameplayCommands, add_local_gameplay_command_systems,
     };
     pub use nara_hierarchy::{Children, HierarchyPlugin, Parent};
     pub use nara_identity::{
@@ -177,19 +190,21 @@ pub mod prelude {
         SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, SceneSpawner, Visibility,
         export_scene, spawn_prefab, spawn_scene,
     };
-    pub use nara_transform::{GlobalTransform2d, Transform2d, TransformPlugin};
+    pub use nara_transform::{
+        GlobalTransform2d, Transform2d, TransformPlugin, add_fixed_transform_projection_systems,
+    };
 
-    #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+    #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
     pub use nara_image::{
         ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin,
     };
-    #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+    #[cfg(feature = "runtime-2d")]
     pub use nara_material::{
         AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, SamplerDescriptor,
     };
     #[cfg(any(
         feature = "presentation-2d",
-        feature = "runtime-ui",
+        feature = "presentation-ui",
         feature = "render-wgpu"
     ))]
     pub use nara_render::{Camera2d, ClearColor, RenderImage2d, RenderPlugin, RenderTarget};
@@ -200,7 +215,13 @@ pub mod prelude {
         TileCell, TileCoord, TileIndex, TileLayer, TileSet, Tilemap, TilemapPlugin,
     };
     #[cfg(feature = "runtime-ui")]
-    pub use nara_ui::{UiNode, UiPanel, UiPanelMaterial, UiPlugin, UiRect, UiRoot, UiStyle, UiVal};
+    pub use nara_ui::{
+        UiActionEvent, UiActionEvents, UiActionId, UiAlign, UiBorder, UiBrush, UiButton, UiColor,
+        UiColorRole, UiCornerRadii, UiDimension, UiEdges, UiFlexDirection, UiImageId, UiJustify,
+        UiLayer, UiNode, UiOverflow, UiPlugin, UiPositionMode, UiRoot, UiRuntimeKey,
+        UiSemanticRole, UiSemantics, UiStyle, UiText, UiTextAlignment, UiTextOverflow, UiTheme,
+        UiThemePalette, UiVisual,
+    };
 }
 
 #[cfg(feature = "runtime-core")]
@@ -257,7 +278,7 @@ pub mod advanced_prelude {
         GameplayCommandLifecycleError, GameplayCommandLimitKind, GameplayCommandPayloadError,
         GameplayCommandPlugin, GameplayCommandQueue, GameplayCommandQueueSettings,
         GameplayCommandQueueStats, GameplayCommandRejection, GameplayCommandSet,
-        GameplayCommandSettingsError,
+        GameplayCommandSettingsError, LocalGameplayCommandError, LocalGameplayCommands,
     };
     pub use nara_identity::{
         EntityIdentityAxis, EntityLookup, IdentityDomainError, IdentityDomainStats,
@@ -274,7 +295,7 @@ pub mod advanced_prelude {
     };
     pub use nara_scene::advanced::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
-        replace_scene_with_product,
+        replace_scene_with_product, replace_scene_with_product_and_provenance,
     };
     pub use nara_tasks::{
         OrderedTaskReadySnapshot, OrderedTaskResults, OrderedTaskTerminal, TaskCancellation,
@@ -291,7 +312,8 @@ pub mod advanced_prelude {
     pub use crate::startup_scene::{
         STARTUP_SCENE_ACTIVATION_PLUGIN_ID, StartupSceneActivation, StartupSceneActivationPlugin,
         StartupSceneActivationSet, StartupSceneMaterializeError, StartupSceneSource,
-        StartupSceneSourceError, StartupSceneSourceView, materialize_startup_scene,
+        StartupSceneSourceError, StartupSceneSourceView, add_startup_scene_activation_systems,
+        materialize_startup_scene,
     };
 
     #[cfg(feature = "asset-watch")]
@@ -301,7 +323,7 @@ pub mod advanced_prelude {
         AssetWatchQueueSendError, AssetWatchQueueStats, AssetWatchRuntimeState,
         AssetWatchRuntimeStatus, AssetWatchTranslator, AssetWatcher,
     };
-    #[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+    #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
     pub use nara_image::{
         AdmittedImageImport, IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageBytesImportRequest,
         ImageFileImportRequest, ImageImportBudgetError, ImageImportBudgetHost,
@@ -311,14 +333,14 @@ pub mod advanced_prelude {
         ImageReloadError, ImageReloadStats, ImageSourceDirectory, ImageSourceFailureKind,
         ImageSourceMetadata, ImageUnsupportedFeature,
     };
-    #[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     pub use nara_image::{
         ImagePreparePlugin, ImagePrepareStats, PreparedImageResource, image_descriptor_hash,
         image_resource_key, prepare_images,
     };
     #[cfg(any(
         feature = "presentation-2d",
-        feature = "runtime-ui",
+        feature = "presentation-ui",
         feature = "render-wgpu"
     ))]
     pub use nara_render::{
@@ -330,8 +352,10 @@ pub mod advanced_prelude {
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::{
-        ComputedUiLayout, ComputedUiLayouts, UiInteractionState, UiInteractionTarget,
-        UiPointerRoute,
+        UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiPresentationReceipt,
+        UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId, active_ui_surface_descriptors,
+        commit_ui_presentation, dispatch_presented_ui_input, install_ui_surface, latest_ui_frame,
+        retire_ui_surface, ui_semantic_snapshot,
     };
 }
 
@@ -763,7 +787,7 @@ mod tests {
 
     #[cfg(feature = "runtime-ui")]
     #[test]
-    fn runtime_ui_installs_ui_submission_as_an_independent_product() {
+    fn runtime_ui_installs_content_without_presentation() {
         let mut app = App::new();
         app.add_plugins(RuntimeUiPlugins).unwrap();
 
@@ -772,14 +796,31 @@ mod tests {
             .find(|group| group.id() == PluginGroupId::new("nara.plugins.runtime-ui"))
             .unwrap();
         assert!(
-            metadata
-                .plugins()
-                .contains(&nara_ui_render::UI_RENDER_PLUGIN_ID)
+            [
+                nara_app::PluginId::new("nara.render"),
+                nara_app::PluginId::new("nara.image.prepare"),
+                nara_app::PluginId::new("nara.ui-render"),
+            ]
+            .into_iter()
+            .all(|plugin| !metadata.plugins().contains(&plugin))
+        );
+        assert!(metadata.plugins().contains(&nara_ui::UI_PLUGIN_ID));
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    #[test]
+    fn presentation_ui_installs_packet_production_explicitly() {
+        let mut app = App::new();
+        app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
+            .unwrap();
+
+        assert!(
+            app.installed_plugins()
+                .any(|plugin| plugin.id == nara_ui_render::UI_RENDER_PLUGIN_ID)
         );
         assert!(
-            !metadata
-                .plugins()
-                .contains(&nara_app::PluginId::new("nara.sprite"))
+            app.world()
+                .contains_resource::<nara_ui_render::__private::UiPresentationOutcomes>()
         );
     }
 

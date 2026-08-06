@@ -4,6 +4,7 @@ use image::ImageEncoder;
 use nara::hierarchy::{
     HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
 };
+use nara::input::{InputSeatId, InputWindowId};
 use nara::{advanced_prelude::*, backend_prelude::*};
 
 #[path = "support/runtime_retirement.rs"]
@@ -16,6 +17,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins((
         RuntimeUiPlugins,
+        PresentationUiPlugins,
         WindowPlugin {
             primary_window: Some(Window::new(
                 "nara runtime ui",
@@ -26,6 +28,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
     app.world_mut()?.insert_resource(AssetServer::new());
+    install_ui_surface(
+        app.world_mut()?,
+        UiSurfaceDescriptor::new(
+            UiSurfaceId::new(1).expect("the example surface ID is non-zero"),
+            InputWindowId::new(WindowId::PRIMARY.get()),
+            InputSeatId::PRIMARY,
+            960.0,
+            540.0,
+            1.0,
+            1,
+            1,
+            1,
+        )?,
+    )?;
     let candidate = nara::app::RuntimeAdmissionReservation::try_acquire()?.admit(
         app.seal()?,
         nara::app::RuntimeObligationLedger::new(),
@@ -42,7 +58,7 @@ fn setup_scene(
     mut images: ResMut<Assets<ImageAsset>>,
     mut states: ResMut<AssetStates>,
 ) {
-    let image = import_ui_texture(&mut asset_server, &mut images, &mut states);
+    let _image = import_ui_texture(&mut asset_server, &mut images, &mut states);
 
     commands.spawn((
         Name::new("camera"),
@@ -55,31 +71,43 @@ fn setup_scene(
     ));
 
     let root = commands
-        .spawn((Name::new("ui root"), UiRoot::primary_window()))
+        .spawn((
+            Name::new("ui root"),
+            UiRoot::new(UiLayer::Base),
+            UiNode::new(UiStyle::fill()),
+            UiRuntimeKey::new("nara.example.runtime-ui", "root").unwrap(),
+        ))
         .id();
     let background = commands
         .spawn((
             Name::new("panel background"),
-            UiNode::new(UiStyle::absolute(32.0, 32.0, 320.0, 160.0))
-                .with_z_index(0)
-                .clipping_children(),
-            UiPanel::from_color(Color::rgba(0.12, 0.14, 0.16, 0.92)),
+            UiNode::new(
+                UiStyle::absolute(32.0, 32.0, 320.0, 160.0).with_overflow(UiOverflow::Clip),
+            ),
+            UiVisual::solid(UiColor::rgba(0.12, 0.14, 0.16, 0.92)),
+            UiRuntimeKey::new("nara.example.runtime-ui", "background").unwrap(),
         ))
         .id();
     let accent = commands
         .spawn((
             Name::new("accent image"),
-            UiNode::new(UiStyle::absolute(56.0, 56.0, 96.0, 96.0)).with_z_index(1),
-            UiPanel::from_image(image).with_sampler(SamplerDescriptor::NEAREST_CLAMP),
+            UiNode::new(UiStyle::absolute(56.0, 56.0, 96.0, 96.0).with_z_index(1)),
+            UiVisual::image(
+                UiImageId::new(UI_TEXTURE_STABLE_ID).unwrap(),
+                UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+            ),
+            UiRuntimeKey::new("nara.example.runtime-ui", "accent").unwrap(),
         ))
         .id();
     let status = commands
         .spawn((
             Name::new("status strip"),
-            UiNode::new(UiStyle::absolute(168.0, 72.0, 152.0, 48.0))
-                .with_z_index(2)
-                .focusable(),
-            UiPanel::from_color(Color::rgba(0.22, 0.58, 0.86, 0.88)),
+            UiNode::new(UiStyle::absolute(168.0, 72.0, 152.0, 48.0).with_z_index(2)),
+            UiVisual::solid(UiColor::rgba(0.22, 0.58, 0.86, 0.88)),
+            UiText::new("Immutable UI packet", 16.0)
+                .unwrap()
+                .with_brush(UiBrush::Solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
+            UiRuntimeKey::new("nara.example.runtime-ui", "status").unwrap(),
         ))
         .id();
     commands.apply_hierarchy_batch(vec![

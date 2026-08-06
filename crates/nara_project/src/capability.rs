@@ -20,14 +20,17 @@ pub enum ProductCapability {
     RenderWgpu = 5,
     #[serde(rename = "presentation-2d")]
     Presentation2d = 6,
+    #[serde(rename = "presentation-ui")]
+    PresentationUi = 7,
 }
 
 impl ProductCapability {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::RuntimeCore,
         Self::Runtime2d,
         Self::RuntimeUi,
         Self::Presentation2d,
+        Self::PresentationUi,
         Self::AssetWatch,
         Self::DesktopWinit,
         Self::RenderWgpu,
@@ -40,6 +43,7 @@ impl ProductCapability {
             Self::Runtime2d => "runtime-2d",
             Self::RuntimeUi => "runtime-ui",
             Self::Presentation2d => "presentation-2d",
+            Self::PresentationUi => "presentation-ui",
             Self::AssetWatch => "asset-watch",
             Self::DesktopWinit => "desktop-winit",
             Self::RenderWgpu => "render-wgpu",

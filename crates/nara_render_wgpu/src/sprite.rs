@@ -1,4 +1,4 @@
-use crate::quad::{WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey};
+use crate::quad::{WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture};
 use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteInstance};
 
 pub(crate) fn collect_sprite_quad_batches(
@@ -12,12 +12,17 @@ pub(crate) fn collect_sprite_quad_batches(
 }
 
 fn sprite_quad_batch(batch: &SpriteBatch) -> WgpuQuadBatch {
+    let texture = batch
+        .image
+        .clone()
+        .map_or(WgpuQuadTexture::Fallback, WgpuQuadTexture::Image);
     WgpuQuadBatch {
         material: WgpuQuadMaterialKey {
-            image: batch.material.image,
+            texture: texture.key(),
             sampler: batch.material.sampler,
             alpha_mode: batch.material.alpha_mode,
         },
+        texture,
         scissor: None,
         instances: batch.instances.iter().map(sprite_quad_instance).collect(),
         counts_as_sprites: true,
@@ -37,6 +42,7 @@ fn sprite_quad_instance(instance: &SpriteInstance) -> WgpuQuadInstance {
         ],
         uv_min: instance.uv.min.to_array(),
         uv_size: instance.uv.size.to_array(),
+        texture_mode: 0,
     }
 }
 
@@ -63,6 +69,7 @@ mod tests {
                 alpha_mode: AlphaMode2d::Blend,
                 tint: ColorKey::from_color(Color::WHITE),
             },
+            image: None,
             instances: vec![SpriteInstance {
                 center: Vec2::new(0.25, -0.5),
                 x_axis: Vec2::new(0.1, 0.2),

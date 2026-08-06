@@ -175,6 +175,14 @@ impl ImageAsset {
         self.pixels.as_ref().as_ref()
     }
 
+    pub(crate) fn shared_pixels(&self) -> Arc<Box<[u8]>> {
+        Arc::clone(&self.pixels)
+    }
+
+    pub(crate) fn shared_retention_owner(&self) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.retention.as_ref().map(Arc::clone)
+    }
+
     fn validate_rgba_bytes(
         extent: ImageExtent,
         format: ImageFormat,

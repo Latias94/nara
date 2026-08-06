@@ -6,17 +6,17 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+guillotiere.workspace = true
 nara_app.workspace = true
 nara_asset.workspace = true
-nara_core.workspace = true
 nara_ecs.workspace = true
 nara_image = { workspace = true, features = ["render-prepare"] }
-nara_material.workspace = true
 nara_render.workspace = true
-nara_ui.workspace = true
+nara_text.workspace = true
+nara_ui_kernel.workspace = true
+nara_window.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-nara_hierarchy.workspace = true
-nara_input.workspace = true
-nara_reflect.workspace = true
-nara_transform.workspace = true
+nara_core.workspace = true
+nara_material.workspace = true

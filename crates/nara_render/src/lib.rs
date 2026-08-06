@@ -406,7 +406,8 @@ pub enum RenderFrameSkipReason {
     NoViews,
     InvalidTopology,
     NoRenderableTarget,
-    ResourceChanged,
+    ContentRejected,
+    Deferred,
     SurfaceUnavailable,
     BackendError,
 }
@@ -556,7 +557,7 @@ const RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
 ];
 const RENDER_PLUGIN_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
     nara_app::PluginProductCapability::new("presentation-2d"),
-    nara_app::PluginProductCapability::new("runtime-ui"),
+    nara_app::PluginProductCapability::new("presentation-ui"),
     nara_app::PluginProductCapability::new("render-wgpu"),
 ];
 pub const RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =

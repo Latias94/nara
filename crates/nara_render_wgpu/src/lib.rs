@@ -1,6 +1,8 @@
 //! Wgpu backend for backend-neutral nara render data.
 
-use std::{marker::PhantomData, time::Instant};
+#[cfg(feature = "ui-submitter")]
+use std::sync::Arc;
+use std::time::Instant;
 
 mod backend;
 mod error;
@@ -25,27 +27,27 @@ use nara_app::{
     PluginShutdownContext, RuntimeDriverScope, RuntimeFault, RuntimeFaultKind,
     RuntimeFaultReporter, RuntimeGeneration, RuntimeState, RuntimeWorldAccessError,
 };
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use nara_asset::Assets;
 use nara_ecs::{
     Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs, system::NonSendMarker,
 };
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use nara_image::{ImageAsset, PreparedImageResource};
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_material::AlphaMode2d;
 #[cfg(test)]
 use nara_render::Extent2d;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use nara_render::PreparedRenderResources;
+#[cfg(feature = "ui-submitter")]
+use nara_render::RenderFrameState;
 use nara_render::{
     Color, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
     RenderFramePacket, RenderFramePacketError, RenderFrameSkipReason, build_render_frame_packet,
 };
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+use nara_render::{RenderTarget, ViewportRect};
 #[cfg(feature = "sprite-submitter")]
 use nara_sprite_render::SpriteBatches;
 #[cfg(feature = "ui-submitter")]
-use nara_ui_render::__private::{UiBatchReader, UiBatchSnapshot};
+use nara_ui_render::__private::{UiPaintPacketReader, UiPresentationOutcomes};
+#[cfg(feature = "ui-submitter")]
+use nara_ui_render::{UiPaintPacket, UiPresentationOutcome};
 use nara_window::{
     PrimaryWindowId, Window, WindowId,
     backend::{BackendWindowHandles, WindowSurfaceRetirementDriver, WindowSurfaceRetirementError},
@@ -174,10 +176,11 @@ impl __RuntimeDriverPort for WgpuRenderBackend {
 
 #[derive(Debug, Default)]
 struct WgpuFramePayload {
+    primary_window_id: Option<WindowId>,
     #[cfg(feature = "sprite-submitter")]
     sprite_batches: Option<SpriteBatches>,
     #[cfg(feature = "ui-submitter")]
-    ui_batches: Option<UiBatchSnapshot>,
+    ui_packets: Vec<Arc<UiPaintPacket>>,
 }
 
 #[derive(Debug)]
@@ -190,7 +193,11 @@ struct WgpuCapturedFrame {
 
 impl WgpuFramePayload {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    fn quad_batches(&self) -> Vec<WgpuQuadBatch> {
+    fn quad_batches(
+        &self,
+        target: RenderTarget,
+        viewport: ViewportRect,
+    ) -> Result<Vec<WgpuQuadBatch>, WgpuRenderError> {
         #[cfg(feature = "sprite-submitter")]
         let content = self
             .sprite_batches
@@ -201,14 +208,20 @@ impl WgpuFramePayload {
         #[cfg(not(feature = "sprite-submitter"))]
         let content = Vec::new();
         #[cfg(feature = "ui-submitter")]
-        let ui = self
-            .ui_batches
-            .as_ref()
-            .map_or_else(Vec::new, |batches| ui::collect_ui_quad_batches(batches, 0));
+        let ui =
+            ui::collect_ui_quad_batches(&self.ui_packets, target, self.primary_window_id, viewport)
+                .map_err(|error| WgpuRenderError::ContentRejected {
+                    message: error.to_string(),
+                })?;
         #[cfg(not(feature = "ui-submitter"))]
-        let ui = Vec::new();
+        let ui = {
+            let _ = (target, viewport);
+            Vec::new()
+        };
 
-        nara_render::__private::assemble_first_party_draws(content, ui)
+        Ok(nara_render::__private::assemble_first_party_draws(
+            content, ui,
+        ))
     }
 }
 
@@ -230,6 +243,8 @@ impl PreparedSubmitterDraw {
 #[derive(Debug, Default, Resource)]
 struct WgpuFramePacketSlot {
     current: Option<Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>>,
+    #[cfg(feature = "ui-submitter")]
+    ui_attempts: Vec<Arc<UiPaintPacket>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -250,20 +265,28 @@ fn capture_wgpu_frame_packet(
     windows: Query<&Window>,
     views: Res<ExtractedViews>,
     #[cfg(feature = "sprite-submitter")] sprite_batches: Option<Res<SpriteBatches>>,
-    #[cfg(feature = "ui-submitter")] ui_batches: UiBatchReader,
+    #[cfg(feature = "ui-submitter")] ui_packets: UiPaintPacketReader,
     mut slot: ResMut<WgpuFramePacketSlot>,
 ) {
     let Some(generation) = generation.map(|generation| *generation) else {
         slot.current = Some(Err(WgpuFrameCaptureError::MissingRuntimeGeneration));
         return;
     };
+    let primary_window_id = primary_window_id.map(|primary| primary.0);
+    #[cfg(feature = "ui-submitter")]
+    let ui_attempts = ui_packets.snapshot();
+    #[cfg(feature = "ui-submitter")]
+    {
+        slot.ui_attempts = ui_attempts.clone();
+    }
     let payload = WgpuFramePayload {
+        primary_window_id,
         #[cfg(feature = "sprite-submitter")]
         sprite_batches: sprite_batches.as_deref().cloned(),
         #[cfg(feature = "ui-submitter")]
-        ui_batches: ui_batches.snapshot(),
+        ui_packets: ui_attempts,
     };
-    if !payload_batches_match_topology(&payload, &views) {
+    if !payload_batches_match_topology(&payload, &views, primary_window_id) {
         slot.current = Some(Err(WgpuFrameCaptureError::BatchTopologyMismatch));
         return;
     }
@@ -271,7 +294,7 @@ fn capture_wgpu_frame_packet(
         build_render_frame_packet(
             generation,
             frame.index,
-            primary_window_id.map(|primary| primary.0),
+            primary_window_id,
             windows.iter(),
             &views,
         )
@@ -287,12 +310,18 @@ fn capture_wgpu_frame_packet(
     );
 }
 
-fn payload_batches_match_topology(payload: &WgpuFramePayload, views: &ExtractedViews) -> bool {
+fn payload_batches_match_topology(
+    payload: &WgpuFramePayload,
+    views: &ExtractedViews,
+    primary_window_id: Option<WindowId>,
+) -> bool {
     let Some(view) = views.as_slice().first() else {
         return true;
     };
     #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
     let _ = (payload, view);
+    #[cfg(not(feature = "ui-submitter"))]
+    let _ = primary_window_id;
     #[cfg(feature = "sprite-submitter")]
     if payload.sprite_batches.as_ref().is_some_and(|batches| {
         batches
@@ -303,36 +332,17 @@ fn payload_batches_match_topology(payload: &WgpuFramePayload, views: &ExtractedV
         return false;
     }
     #[cfg(feature = "ui-submitter")]
-    if payload.ui_batches.as_ref().is_some_and(|batches| {
-        batches
-            .as_slice()
+    {
+        let view_window = view.target.window_id(primary_window_id);
+        if payload
+            .ui_packets
             .iter()
-            .any(|batch| batch.view_index != 0 || batch.target != view.target)
-    }) {
-        return false;
-    }
-    true
-}
-
-#[derive(Clone, Copy)]
-struct RenderResourceInputs<'a> {
-    _lifetime: PhantomData<&'a ()>,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    images: Option<&'a Assets<ImageAsset>>,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    prepared_images: Option<&'a PreparedRenderResources<PreparedImageResource>>,
-}
-
-impl Default for RenderResourceInputs<'_> {
-    fn default() -> Self {
-        Self {
-            _lifetime: PhantomData,
-            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-            images: None,
-            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-            prepared_images: None,
+            .any(|packet| packet.target().window_id(primary_window_id) != view_window)
+        {
+            return false;
         }
     }
+    true
 }
 
 #[derive(Debug, Default)]
@@ -349,12 +359,7 @@ fn render_wgpu_surfaces(
     mut backend: ResMut<WgpuRenderBackend>,
     handles: Option<Res<BackendWindowHandles>>,
     mut packet_slot: ResMut<WgpuFramePacketSlot>,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))] images: Option<
-        Res<Assets<ImageAsset>>,
-    >,
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))] prepared_images: Option<
-        Res<PreparedRenderResources<PreparedImageResource>>,
-    >,
+    #[cfg(feature = "ui-submitter")] mut ui_outcomes: Option<ResMut<UiPresentationOutcomes>>,
     mut frame: ResMut<RenderFrame>,
     mut stats: ResMut<FrameStats>,
     mut status: ResMut<RenderBackendStatus>,
@@ -362,19 +367,13 @@ fn render_wgpu_surfaces(
     _main_thread: NonSendMarker,
 ) {
     backend.begin_frame_transaction(frame.index);
-    let resources = RenderResourceInputs {
-        _lifetime: PhantomData,
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        images: images.as_deref(),
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        prepared_images: prepared_images.as_deref(),
-    };
+    #[cfg(feature = "ui-submitter")]
+    let ui_attempts = std::mem::take(&mut packet_slot.ui_attempts);
     let capture = packet_slot.current.take();
     let result = match capture {
         Some(Ok(Some(packet))) => backend.render_packet(
             handles.as_deref(),
             packet,
-            resources,
             &mut frame,
             &mut stats,
             &mut status,
@@ -408,9 +407,20 @@ fn render_wgpu_surfaces(
                 ));
             }
             frame.mark_skipped();
-            Ok(())
+            Err(WgpuRenderError::ContentRejected {
+                message: error.to_string(),
+            })
         }
     };
+    #[cfg(feature = "ui-submitter")]
+    publish_ui_outcomes(
+        ui_outcomes.as_deref_mut(),
+        &ui_attempts,
+        &result,
+        frame.state,
+        frame.index,
+        status.last_skip().and_then(|skip| skip.message()),
+    );
     if let Err(error) = result {
         handle_wgpu_render_error(
             &mut backend,
@@ -446,11 +456,21 @@ fn handle_wgpu_render_error(
         return;
     }
 
-    if error.is_transient_resource_rejection() {
+    if error.is_deferred() {
         status.clear_skip();
         status.mark_skipped_with_message(
             frame_index,
-            RenderFrameSkipReason::ResourceChanged,
+            RenderFrameSkipReason::Deferred,
+            error.to_string(),
+        );
+        return;
+    }
+
+    if error.is_content_rejection() {
+        status.clear_skip();
+        status.mark_skipped_with_message(
+            frame_index,
+            RenderFrameSkipReason::ContentRejected,
             error.to_string(),
         );
         return;
@@ -464,6 +484,51 @@ fn handle_wgpu_render_error(
             RuntimeFaultKind::RequiredService,
             "nara.render-wgpu.frame",
         ));
+    }
+}
+
+#[cfg(feature = "ui-submitter")]
+fn publish_ui_outcomes(
+    outcomes: Option<&mut UiPresentationOutcomes>,
+    attempts: &[Arc<UiPaintPacket>],
+    result: &Result<(), WgpuRenderError>,
+    frame_state: RenderFrameState,
+    presentation_epoch: u64,
+    skip_message: Option<&str>,
+) {
+    let Some(outcomes) = outcomes else {
+        return;
+    };
+    for packet in attempts {
+        let outcome = match result {
+            Ok(()) if frame_state == RenderFrameState::Submitted => {
+                UiPresentationOutcome::Presented {
+                    packet: Arc::clone(packet),
+                    presentation_epoch,
+                }
+            }
+            Ok(()) => UiPresentationOutcome::Deferred {
+                attempt: packet.identity(),
+                message: skip_message
+                    .unwrap_or("the target surface did not submit the exact UI packet")
+                    .to_owned(),
+            },
+            Err(error) if error.is_deferred() => UiPresentationOutcome::Deferred {
+                attempt: packet.identity(),
+                message: error.to_string(),
+            },
+            Err(error) if error.is_content_rejection() || error.is_packet_admission_rejection() => {
+                UiPresentationOutcome::ContentRejected {
+                    attempt: packet.identity(),
+                    message: error.to_string(),
+                }
+            }
+            Err(error) => UiPresentationOutcome::BackendFault {
+                attempt: Some(packet.identity()),
+                message: error.to_string(),
+            },
+        };
+        outcomes.push(outcome);
     }
 }
 
@@ -857,7 +922,15 @@ mod tests {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     #[test]
     fn enabled_submitter_input_has_no_quad_work() {
-        assert!(WgpuFramePayload::default().quad_batches().is_empty());
+        assert!(
+            WgpuFramePayload::default()
+                .quad_batches(
+                    RenderTarget::PrimaryWindow,
+                    ViewportRect::new(0, 0, 1, 1).unwrap(),
+                )
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -865,10 +938,11 @@ mod tests {
     fn closed_first_party_plan_orders_content_before_ui() {
         let content = WgpuQuadBatch {
             material: crate::quad::WgpuQuadMaterialKey {
-                image: None,
+                texture: crate::quad::WgpuQuadTextureKey::Fallback,
                 sampler: nara_material::SamplerDescriptor::default(),
                 alpha_mode: nara_material::AlphaMode2d::Blend,
             },
+            texture: crate::quad::WgpuQuadTexture::Fallback,
             scissor: None,
             instances: Vec::new(),
             counts_as_sprites: true,
@@ -885,7 +959,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_change_after_prepare_skips_one_frame_without_poisoning_the_backend() {
+    fn upload_deferral_skips_one_frame_without_poisoning_the_backend() {
         let mut backend = WgpuRenderBackend::default();
         let initial_backend_state = backend.state();
         let mut status = RenderBackendStatus::default();
@@ -893,7 +967,9 @@ mod tests {
 
         handle_wgpu_render_error(
             &mut backend,
-            WgpuRenderError::ResourceChangedAfterPrepare,
+            WgpuRenderError::UploadDeferred {
+                message: "glyph upload budget exhausted".to_owned(),
+            },
             7,
             &mut status,
             None,
@@ -904,6 +980,31 @@ mod tests {
         assert_eq!(status.last_error(), None);
         let skip = status.last_skip().unwrap();
         assert_eq!(skip.frame_index(), 7);
-        assert_eq!(skip.reason(), RenderFrameSkipReason::ResourceChanged);
+        assert_eq!(skip.reason(), RenderFrameSkipReason::Deferred);
+    }
+
+    #[test]
+    fn rejected_content_skips_one_frame_without_poisoning_the_backend() {
+        let mut backend = WgpuRenderBackend::default();
+        let initial_backend_state = backend.state();
+        let mut status = RenderBackendStatus::default();
+        status.mark_ready(WGPU_RENDER_BACKEND);
+
+        handle_wgpu_render_error(
+            &mut backend,
+            WgpuRenderError::ContentRejected {
+                message: "unsupported UI corner radii".to_owned(),
+            },
+            11,
+            &mut status,
+            None,
+        );
+
+        assert_eq!(backend.state(), initial_backend_state);
+        assert_eq!(status.state(), RenderBackendState::Ready);
+        assert_eq!(status.last_error(), None);
+        let skip = status.last_skip().unwrap();
+        assert_eq!(skip.frame_index(), 11);
+        assert_eq!(skip.reason(), RenderFrameSkipReason::ContentRejected);
     }
 }

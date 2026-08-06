@@ -1,10 +1,9 @@
 use std::cmp::Ordering;
 
-use nara_asset::Assets;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Res, ResMut};
-use nara_image::{ImageAsset, PreparedImageResource, image_resource_key};
-use nara_render::{ExtractedView, ExtractedViews, PreparedRenderResources};
+use nara_image::{PreparedImageResource, PreparedImageSnapshot, image_resource_key};
+use nara_render::{ExtractedView, ExtractedViews, PreparedRenderResources, RenderPrepareStatus};
 
 use crate::{
     ExtractedSprite, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind,
@@ -16,17 +15,14 @@ pub fn queue_sprites(
     mut stats: ResMut<SpriteRenderStats>,
     views: Res<ExtractedViews>,
     extracted: Res<crate::ExtractedSprites>,
-    images: Option<Res<Assets<ImageAsset>>>,
     prepared_images: Option<Res<PreparedRenderResources<PreparedImageResource>>>,
 ) {
     queued.clear();
-    stats.missing_textures = 0;
     stats.unprepared_textures = 0;
     stats.invalid_texture_regions = 0;
 
     let queueable_sprites = resolve_queueable_sprites(
         extracted.as_slice().iter(),
-        images.as_deref(),
         prepared_images.as_deref(),
         &mut stats,
     );
@@ -47,7 +43,7 @@ pub fn queue_sprites(
                 layer: queueable.sprite.layer,
                 sort_key: queueable.sprite.sort_key,
                 material: queueable.material,
-                entity_bits: queueable.sprite.entity.to_bits(),
+                image: queueable.image.clone(),
                 source_order: queueable.sprite.source_order,
                 instance,
             });
@@ -162,6 +158,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             && batch.layer == item.layer
             && batch.sort_key == item.sort_key
             && batch.material == item.material
+            && batch.image == item.image
         {
             batch.instances.push(item.instance);
             continue;
@@ -175,6 +172,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             layer: item.layer,
             sort_key: item.sort_key,
             material: item.material,
+            image: item.image.clone(),
             instances: vec![item.instance],
         });
     }
@@ -190,7 +188,6 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
         left.layer,
         left.sort_key,
         left.source_order,
-        left.entity_bits,
         left.material,
     )
         .cmp(&(
@@ -200,7 +197,6 @@ pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSprite
             right.layer,
             right.sort_key,
             right.source_order,
-            right.entity_bits,
             right.material,
         ))
 }
@@ -212,21 +208,22 @@ fn saturating_u32(value: usize) -> u32 {
 struct QueueableSprite<'a> {
     sprite: &'a ExtractedSprite,
     material: SpriteMaterialKey,
+    image: Option<PreparedImageSnapshot>,
     uv: TextureUvRect,
 }
 
 fn resolve_queueable_sprites<'a>(
     sprites: impl Iterator<Item = &'a ExtractedSprite>,
-    images: Option<&Assets<ImageAsset>>,
     prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
     stats: &mut SpriteRenderStats,
 ) -> Vec<QueueableSprite<'a>> {
     sprites
         .filter_map(|sprite| {
-            resolve_sprite_material(sprite, images, prepared_images, stats).map(|(material, uv)| {
+            resolve_sprite_material(sprite, prepared_images, stats).map(|(material, image, uv)| {
                 QueueableSprite {
                     sprite,
                     material,
+                    image,
                     uv,
                 }
             })
@@ -236,10 +233,13 @@ fn resolve_queueable_sprites<'a>(
 
 fn resolve_sprite_material(
     sprite: &ExtractedSprite,
-    images: Option<&Assets<ImageAsset>>,
     prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
     stats: &mut SpriteRenderStats,
-) -> Option<(SpriteMaterialKey, TextureUvRect)> {
+) -> Option<(
+    SpriteMaterialKey,
+    Option<PreparedImageSnapshot>,
+    TextureUvRect,
+)> {
     if !sprite.texture_region.is_valid() {
         stats.invalid_texture_regions = stats.invalid_texture_regions.saturating_add(1);
         return None;
@@ -248,30 +248,32 @@ fn resolve_sprite_material(
     let Some(texture) = sprite.material.image else {
         return Some((
             SpriteMaterialKey::from_material(sprite.material, None),
+            None,
             sprite.texture_region,
         ));
     };
-    let Some(images) = images else {
-        stats.missing_textures = stats.missing_textures.saturating_add(1);
-        return None;
-    };
-    if images.get(texture).is_none() {
-        stats.missing_textures = stats.missing_textures.saturating_add(1);
-        return None;
-    }
-
     let key = image_resource_key(texture);
     let Some(prepared_images) = prepared_images else {
         stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
         return None;
     };
-    if prepared_images.get_ready(key).is_none() {
+    let Some(record) = prepared_images.get(key) else {
         stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
         return None;
-    }
+    };
+    let resource = match record.status() {
+        RenderPrepareStatus::Ready => record.resource(),
+        RenderPrepareStatus::Failed(_) => None,
+    };
+    let Some(resource) = resource else {
+        stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
+        return None;
+    };
+    let snapshot = PreparedImageSnapshot::new(record.snapshot().clone(), resource.clone());
 
     Some((
         SpriteMaterialKey::from_material(sprite.material, Some(key)),
+        Some(snapshot),
         sprite.texture_region,
     ))
 }

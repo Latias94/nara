@@ -21,6 +21,10 @@ fn compiled_ceiling_matches_the_active_cargo_features() {
             ProductCapability::Presentation2d,
             cfg!(feature = "presentation-2d"),
         ),
+        (
+            ProductCapability::PresentationUi,
+            cfg!(feature = "presentation-ui"),
+        ),
         (ProductCapability::AssetWatch, cfg!(feature = "asset-watch")),
         (
             ProductCapability::DesktopWinit,
@@ -65,6 +69,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "default",
         "desktop-winit",
         "presentation-2d",
+        "presentation-ui",
         "render-wgpu",
         "runtime-2d",
         "runtime-core",
@@ -96,6 +101,21 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "dep:nara_sprite_render",
             "nara_image/render-prepare",
             "nara_render_wgpu?/sprite-submitter",
+        ]
+    );
+    assert_eq!(
+        feature_members(features, "runtime-ui"),
+        ["runtime-core", "dep:nara_ui"]
+    );
+    assert_eq!(
+        feature_members(features, "presentation-ui"),
+        [
+            "runtime-ui",
+            "dep:nara_image",
+            "dep:nara_render",
+            "dep:nara_ui_render",
+            "nara_image/render-prepare",
+            "nara_render_wgpu?/ui-submitter",
         ]
     );
     assert_eq!(
@@ -165,7 +185,7 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
     );
     assert_eq!(
         targets["runtime_ui_panel"],
-        ["runtime-ui", "desktop-winit", "render-wgpu"]
+        ["presentation-ui", "desktop-winit", "render-wgpu"]
     );
     assert_eq!(targets["asset_import_texture"], ["presentation-2d"]);
     assert_eq!(targets["hello_world"], ["runtime-2d"]);
@@ -218,7 +238,7 @@ fn wgpu_submitter_dependency_trees_are_isolated() {
     let ui = cargo_tree(&[
         "--no-default-features",
         "--features",
-        "runtime-ui,render-wgpu",
+        "presentation-ui,render-wgpu",
     ]);
     assert_present(&ui, "nara_ui_render");
     assert_not_present(&ui, "nara_sprite");
@@ -278,13 +298,7 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             vec!["--no-default-features", "--features", "runtime-ui"],
             with_packages(
                 &runtime_core,
-                &[
-                    "nara_image",
-                    "nara_material",
-                    "nara_render",
-                    "nara_ui",
-                    "nara_ui_render",
-                ],
+                &["nara_text", "nara_ui", "nara_ui_kernel", "nara_ui_widgets"],
             ),
         ),
         (
@@ -299,6 +313,22 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
                     "nara_sprite",
                     "nara_sprite_render",
                     "nara_tilemap",
+                ],
+            ),
+        ),
+        (
+            "presentation-ui",
+            vec!["--no-default-features", "--features", "presentation-ui"],
+            with_packages(
+                &runtime_core,
+                &[
+                    "nara_image",
+                    "nara_render",
+                    "nara_text",
+                    "nara_ui",
+                    "nara_ui_kernel",
+                    "nara_ui_render",
+                    "nara_ui_widgets",
                 ],
             ),
         ),
@@ -341,10 +371,13 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
                     "nara_sprite",
                     "nara_sprite_render",
                     "nara_tilemap",
+                    "nara_text",
                     "nara_tooling",
                     "nara_tooling_egui",
                     "nara_ui",
+                    "nara_ui_kernel",
                     "nara_ui_render",
+                    "nara_ui_widgets",
                     "nara_winit",
                 ],
             ),
@@ -369,7 +402,11 @@ fn independently_locked_presentation_2d_consumer_has_an_exact_boundary() {
         .join("product-slices")
         .join("presentation-2d")
         .join("Cargo.toml");
-    let features = cargo_tree_for_manifest(&manifest, &["-e", "features"]);
+    let features = cargo_tree_for_manifest(
+        &manifest,
+        "nara-presentation-2d-fixture",
+        &["-e", "features"],
+    );
 
     for package in [
         "nara_image",
@@ -395,6 +432,49 @@ fn independently_locked_presentation_2d_consumer_has_an_exact_boundary() {
             .lines()
             .any(|line| line.starts_with("nara_image feature \"render-prepare\"")),
         "presentation-2d must opt image preparation into the independently locked consumer\n{features}"
+    );
+}
+
+#[test]
+fn independently_locked_presentation_ui_consumer_has_an_exact_boundary() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("product-slices")
+        .join("presentation-ui")
+        .join("Cargo.toml");
+    let features = cargo_tree_for_manifest(
+        &manifest,
+        "nara-presentation-ui-fixture",
+        &["-e", "features"],
+    );
+
+    for package in [
+        "nara_image",
+        "nara_render",
+        "nara_text",
+        "nara_ui",
+        "nara_ui_kernel",
+        "nara_ui_render",
+        "nara_ui_widgets",
+    ] {
+        assert_present(&features, package);
+    }
+    for package in [
+        "nara_render_wgpu",
+        "nara_sprite",
+        "nara_sprite_render",
+        "nara_tilemap",
+        "nara_tooling",
+    ] {
+        assert_not_present(&features, package);
+    }
+
+    assert!(
+        features
+            .lines()
+            .any(|line| line.starts_with("nara_image feature \"render-prepare\"")),
+        "presentation-ui must opt image preparation into the independently locked consumer\n{features}"
     );
 }
 
@@ -588,17 +668,11 @@ fn cargo_tree(arguments: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-fn cargo_tree_for_manifest(manifest: &Path, arguments: &[&str]) -> String {
+fn cargo_tree_for_manifest(manifest: &Path, package: &str, arguments: &[&str]) -> String {
     let output = Command::new(env!("CARGO"))
         .args(["tree", "--manifest-path"])
         .arg(manifest)
-        .args([
-            "-p",
-            "nara-presentation-2d-fixture",
-            "--locked",
-            "--prefix",
-            "none",
-        ])
+        .args(["-p", package, "--locked", "--prefix", "none"])
         .args(arguments)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("CARGO_TERM_COLOR", "never")

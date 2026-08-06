@@ -97,6 +97,7 @@ blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
 egui = "0.35.0"
 glam = { version = "0.30", features = ["serde"] }
+guillotiere = "=0.7.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 notify = "8.2.0"
 parley = { version = "=0.11.0", default-features = false, features = ["std"] }
@@ -209,10 +210,12 @@ presentation-2d = [
 ]
 runtime-ui = [
     "runtime-core",
-    "dep:nara_image",
-    "dep:nara_material",
-    "dep:nara_render",
     "dep:nara_ui",
+]
+presentation-ui = [
+    "runtime-ui",
+    "dep:nara_image",
+    "dep:nara_render",
     "dep:nara_ui_render",
     "nara_image/render-prepare",
     "nara_render_wgpu?/ui-submitter",
@@ -260,7 +263,7 @@ required-features = ["presentation-2d", "desktop-winit", "render-wgpu"]
 [[example]]
 name = "runtime_ui_panel"
 path = "examples/runtime_ui_panel.rs"
-required-features = ["runtime-ui", "desktop-winit", "render-wgpu"]
+required-features = ["presentation-ui", "desktop-winit", "render-wgpu"]
 
 [[example]]
 name = "asset_import_texture"

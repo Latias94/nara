@@ -23,8 +23,10 @@ pub enum WgpuRenderError {
     StaleFrameGeneration { expected: u64, actual: u64 },
     #[error("render frame {frame_index} was already consumed")]
     FrameAlreadyConsumed { frame_index: u64 },
-    #[error("render resources changed after preparation; retry on the next frame")]
-    ResourceChangedAfterPrepare,
+    #[error("render packet content was rejected: {message}")]
+    ContentRejected { message: String },
+    #[error("render packet submission was deferred: {message}")]
+    UploadDeferred { message: String },
     #[error("wgpu surface creation failed for window {window_id:?}: {message}")]
     SurfaceCreation {
         window_id: WindowId,
@@ -43,9 +45,6 @@ pub enum WgpuRenderError {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     #[error("wgpu quad pipeline is missing for format {format} and alpha mode {alpha_mode}")]
     QuadPipelineMissing { format: String, alpha_mode: String },
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    #[error("wgpu quad texture error: {message}")]
-    QuadTexture { message: String },
 }
 
 impl WgpuRenderError {
@@ -58,7 +57,12 @@ impl WgpuRenderError {
     }
 
     #[must_use]
-    pub(crate) const fn is_transient_resource_rejection(&self) -> bool {
-        matches!(self, Self::ResourceChangedAfterPrepare)
+    pub(crate) const fn is_deferred(&self) -> bool {
+        matches!(self, Self::UploadDeferred { .. })
+    }
+
+    #[must_use]
+    pub(crate) const fn is_content_rejection(&self) -> bool {
+        matches!(self, Self::ContentRejected { .. })
     }
 }

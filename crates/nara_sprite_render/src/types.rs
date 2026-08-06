@@ -1,7 +1,7 @@
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
-use nara_image::ImageAsset;
+use nara_image::{ImageAsset, PreparedImageSnapshot};
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderResourceKey, RenderTarget};
 use nara_sprite::TextureRegion;
@@ -179,7 +179,7 @@ impl SpriteInstance {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct QueuedSpriteItem {
     pub view_index: usize,
     pub view_order: i32,
@@ -188,7 +188,7 @@ pub struct QueuedSpriteItem {
     pub layer: i32,
     pub sort_key: i32,
     pub material: SpriteMaterialKey,
-    pub entity_bits: u64,
+    pub image: Option<PreparedImageSnapshot>,
     pub source_order: u64,
     pub instance: SpriteInstance,
 }
@@ -284,6 +284,7 @@ pub struct SpriteBatch {
     pub layer: i32,
     pub sort_key: i32,
     pub material: SpriteMaterialKey,
+    pub image: Option<PreparedImageSnapshot>,
     pub instances: Vec<SpriteInstance>,
 }
 
@@ -336,7 +337,6 @@ pub struct SpriteRenderStats {
     pub extracted_tile_cells: u32,
     pub missing_tilesets: u32,
     pub invalid_tile_regions: u32,
-    pub missing_textures: u32,
     pub unprepared_textures: u32,
     pub invalid_texture_regions: u32,
     pub queued_items: u32,

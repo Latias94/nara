@@ -1,9 +1,10 @@
-use crate::texture::{WgpuSpriteTextureCache, WgpuSpriteTextureError};
+use crate::texture::{WgpuSpriteTextureCache, WgpuTextureError};
 use bytemuck::{Pod, Zeroable};
-use nara_asset::Assets;
-use nara_image::{ImageAsset, PreparedImageResource};
+use nara_image::PreparedImageSnapshot;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_render::{PreparedRenderResources, RenderResourceKey, ViewportRect};
+use nara_render::{RenderResourceKey, ViewportRect};
+#[cfg(feature = "ui-submitter")]
+use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
 use wgpu::util::DeviceExt;
 
 const VERTICES_PER_QUAD: u32 = 6;
@@ -17,20 +18,49 @@ pub(crate) struct WgpuQuadInstance {
     pub(crate) color: [f32; 4],
     pub(crate) uv_min: [f32; 2],
     pub(crate) uv_size: [f32; 2],
+    pub(crate) texture_mode: u32,
 }
 
-const QUAD_INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
+const QUAD_INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
     0 => Float32x2,
     1 => Float32x2,
     2 => Float32x2,
     3 => Float32x4,
     4 => Float32x2,
-    5 => Float32x2
+    5 => Float32x2,
+    6 => Uint32
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum WgpuQuadTextureKey {
+    Fallback,
+    Image(RenderResourceKey),
+    #[cfg(feature = "ui-submitter")]
+    Glyph(UiGlyphAtlasPageKey),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum WgpuQuadTexture {
+    Fallback,
+    Image(PreparedImageSnapshot),
+    #[cfg(feature = "ui-submitter")]
+    Glyph(UiGlyphAtlasPageSnapshot),
+}
+
+impl WgpuQuadTexture {
+    pub(crate) fn key(&self) -> WgpuQuadTextureKey {
+        match self {
+            Self::Fallback => WgpuQuadTextureKey::Fallback,
+            Self::Image(snapshot) => WgpuQuadTextureKey::Image(snapshot.identity().key()),
+            #[cfg(feature = "ui-submitter")]
+            Self::Glyph(page) => WgpuQuadTextureKey::Glyph(page.key()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct WgpuQuadMaterialKey {
-    pub(crate) image: Option<RenderResourceKey>,
+    pub(crate) texture: WgpuQuadTextureKey,
     pub(crate) sampler: SamplerDescriptor,
     pub(crate) alpha_mode: AlphaMode2d,
 }
@@ -38,6 +68,7 @@ pub(crate) struct WgpuQuadMaterialKey {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WgpuQuadBatch {
     pub(crate) material: WgpuQuadMaterialKey,
+    pub(crate) texture: WgpuQuadTexture,
     pub(crate) scissor: Option<WgpuScissorRect>,
     pub(crate) instances: Vec<WgpuQuadInstance>,
     pub(crate) counts_as_sprites: bool,
@@ -163,33 +194,20 @@ pub(crate) fn create_quad_batch_buffers(
     batches: &[WgpuQuadBatch],
     texture_layout: &wgpu::BindGroupLayout,
     texture_cache: &mut WgpuSpriteTextureCache,
-    images: Option<&Assets<ImageAsset>>,
-    prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
     frame_index: u64,
-) -> Result<Vec<WgpuQuadBatchBuffer>, WgpuSpriteTextureError> {
+) -> Result<Vec<WgpuQuadBatchBuffer>, WgpuTextureError> {
     batches
         .iter()
         .filter(|batch| !batch.instances.is_empty())
         .map(|batch| {
-            let bind_group = match batch.material.image {
-                Some(key) => texture_cache.image_bind_group(
-                    device,
-                    queue,
-                    texture_layout,
-                    batch.material,
-                    images.ok_or(WgpuSpriteTextureError::MissingImageAsset { key })?,
-                    prepared_images
-                        .ok_or(WgpuSpriteTextureError::MissingPreparedResource { key })?,
-                    frame_index,
-                )?,
-                None => texture_cache.fallback_bind_group(
-                    device,
-                    queue,
-                    texture_layout,
-                    batch.material,
-                    frame_index,
-                ),
-            };
+            let bind_group = texture_cache.bind_group(
+                device,
+                queue,
+                texture_layout,
+                batch.material,
+                &batch.texture,
+                frame_index,
+            )?;
             let instance_count = saturating_u32(batch.instances.len());
             let logical_bytes = quad_instance_byte_len(batch.instances.len());
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -301,9 +319,10 @@ mod tests {
             std::mem::size_of::<WgpuQuadInstance>() as wgpu::BufferAddress
         );
         assert_eq!(layout.step_mode, wgpu::VertexStepMode::Instance);
-        assert_eq!(layout.attributes.len(), 6);
+        assert_eq!(layout.attributes.len(), 7);
         assert_eq!(layout.attributes[0].offset, 0);
         assert_eq!(layout.attributes[5].offset, 48);
+        assert_eq!(layout.attributes[6].offset, 56);
         assert_eq!(quad_instance_byte_len(3), 3 * layout.array_stride);
     }
 

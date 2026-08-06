@@ -29,8 +29,8 @@ pub use limits::{
 #[cfg(any(feature = "render-prepare", test))]
 pub use prepare::{
     IMAGE_PREPARE_PLUGIN_DECLARATION, IMAGE_PREPARE_PLUGIN_ID, ImagePreparePlugin,
-    ImagePrepareStats, PreparedImageResource, image_descriptor_hash, image_resource_key,
-    prepare_images,
+    ImagePrepareStats, PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash,
+    image_resource_key, prepare_images,
 };
 pub use reload::{
     IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImagePlugin, ImageReloadError, ImageReloadStats,

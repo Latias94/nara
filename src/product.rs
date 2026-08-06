@@ -602,20 +602,23 @@ const SLOT_SPRITE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.sprite");
 const SLOT_TILEMAP: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tilemap");
 #[cfg(any(
     feature = "presentation-2d",
-    feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "render-wgpu"
 ))]
 const SLOT_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.render");
-#[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 const SLOT_IMAGE_PREPARE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.image-prepare");
-#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+#[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
 const SLOT_IMAGE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.image");
 #[cfg(feature = "presentation-2d")]
 const SLOT_SPRITE_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.sprite-render");
 #[cfg(feature = "runtime-ui")]
 const SLOT_UI: PluginSlotId = PluginSlotId::new("nara.plugins.slot.ui");
-#[cfg(feature = "runtime-ui")]
+#[cfg(feature = "presentation-ui")]
 const SLOT_UI_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.ui-render");
+#[cfg(feature = "presentation-ui")]
+const SLOT_UI_PRESENTATION_BRIDGE: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.ui-presentation-bridge");
 #[cfg(feature = "desktop-winit")]
 const SLOT_WINDOW: PluginSlotId = PluginSlotId::new("nara.plugins.slot.window");
 #[cfg(feature = "render-wgpu")]
@@ -814,6 +817,24 @@ impl PluginGroup for RuntimeUiPlugins {
         PluginGroupBuilder::new()
             .add_group(MinimalPlugins)
             .add_slot(
+                PluginSlot::required(SLOT_UI, nara_ui::UI_PLUGIN_ID),
+                PluginDefinition::for_default::<nara_ui::UiPlugin>(),
+            )
+    }
+}
+
+/// Backend-neutral UI packet preparation for products that present runtime UI.
+#[cfg(feature = "presentation-ui")]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PresentationUiPlugins;
+
+#[cfg(feature = "presentation-ui")]
+impl PluginGroup for PresentationUiPlugins {
+    const ID: PluginGroupId = PluginGroupId::new("nara.plugins.presentation-ui");
+
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::new()
+            .add_slot(
                 PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_render::RenderPlugin>(),
             )
@@ -826,12 +847,16 @@ impl PluginGroup for RuntimeUiPlugins {
                 PluginDefinition::for_default::<nara_image::ImagePlugin>(),
             )
             .add_slot(
-                PluginSlot::required(SLOT_UI, nara_ui::UI_PLUGIN_ID),
-                PluginDefinition::for_default::<nara_ui::UiPlugin>(),
-            )
-            .add_slot(
                 PluginSlot::required(SLOT_UI_RENDER, nara_ui_render::UI_RENDER_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_ui_render::UiRenderPlugin>(),
+            )
+            .add_slot(
+                PluginSlot::required(
+                    SLOT_UI_PRESENTATION_BRIDGE,
+                    crate::ui_presentation::UI_PRESENTATION_BRIDGE_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<crate::ui_presentation::UiPresentationBridgePlugin>(
+                ),
             )
     }
 }
@@ -972,6 +997,16 @@ impl PluginGroup for ProjectProfilePlugins {
             .contains(nara_project::ProductCapability::Presentation2d)
         {
             builder.add_group(Presentation2dPlugins)
+        } else {
+            builder
+        };
+
+        #[cfg(feature = "presentation-ui")]
+        let builder = if self
+            .capabilities
+            .contains(nara_project::ProductCapability::PresentationUi)
+        {
+            builder.add_group(PresentationUiPlugins)
         } else {
             builder
         };

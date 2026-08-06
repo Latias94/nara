@@ -8,6 +8,7 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) uv: vec2<f32>,
+    @location(2) @interpolate(flat) texture_mode: u32,
 };
 
 @vertex
@@ -19,6 +20,7 @@ fn vs_main(
     @location(3) color: vec4<f32>,
     @location(4) uv_min: vec2<f32>,
     @location(5) uv_size: vec2<f32>,
+    @location(6) texture_mode: u32,
 ) -> VertexOutput {
     let corners = array<vec2<f32>, 6>(
         vec2<f32>(-1.0, -1.0),
@@ -35,10 +37,15 @@ fn vs_main(
     output.position = vec4<f32>(center + x_axis * corner.x + y_axis * corner.y, 0.0, 1.0);
     output.color = color;
     output.uv = uv_min + local_uv * uv_size;
+    output.texture_mode = texture_mode;
     return output;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return input.color * textureSample(sprite_texture, sprite_sampler, input.uv);
+    let sampled = textureSample(sprite_texture, sprite_sampler, input.uv);
+    if input.texture_mode == 1u {
+        return vec4<f32>(input.color.rgb, input.color.a * sampled.r);
+    }
+    return input.color * sampled;
 }

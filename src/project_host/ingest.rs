@@ -178,12 +178,21 @@ fn validate_product_request(
             ProductCapability::Runtime2d,
         ));
     }
+    if normalized.contains(ProductCapability::PresentationUi)
+        && !normalized.contains(ProductCapability::RuntimeUi)
+    {
+        return Err(capability_dependency_error(
+            ProductCapability::PresentationUi,
+            ProductCapability::RuntimeUi,
+        ));
+    }
 
     if settings.runtime_preset == RuntimePreset::Server {
         let forbidden = ProductCapabilitySet::from_capabilities([
             ProductCapability::Runtime2d,
             ProductCapability::RuntimeUi,
             ProductCapability::Presentation2d,
+            ProductCapability::PresentationUi,
             ProductCapability::DesktopWinit,
             ProductCapability::RenderWgpu,
         ]);

@@ -52,6 +52,20 @@ fn place_parented(world: &mut World, child: Entity, parent: Entity) {
         .expect("the ordered hierarchy should be valid");
 }
 
+fn place_roots(world: &mut World, entities: &[Entity]) {
+    let operations = entities
+        .iter()
+        .copied()
+        .map(|entity| HierarchyOperation::Place {
+            entity,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        })
+        .collect::<Vec<_>>();
+    HierarchyWriter::new(world)
+        .apply_batch(&operations)
+        .expect("the ordered hierarchy should be valid");
+}
+
 fn instance() -> SpriteInstance {
     SpriteInstance::axis_aligned(Vec2::ZERO, Vec2::splat(0.5), Color::WHITE)
 }
@@ -110,12 +124,15 @@ fn extraction_clears_stale_sprites_and_uses_explicit_identity_transform() {
             layer: 0,
             sort_key: 0,
         });
-    app.world_mut()
+    let sprite = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             Sprite::from_color(Vec2::new(16.0, 8.0), Color::WHITE),
             Transform2d::default(),
-        ));
+        ))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[sprite]);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -129,13 +146,18 @@ fn extraction_clears_stale_sprites_and_uses_explicit_identity_transform() {
 #[test]
 fn sprite_extraction_preserves_rotation_axes() {
     let mut app = sprite_app();
-    app.world_mut().unwrap().spawn((
-        Sprite::from_color(Vec2::new(4.0, 2.0), Color::WHITE),
-        Transform2d {
-            rotation: std::f32::consts::FRAC_PI_2,
-            ..Transform2d::default()
-        },
-    ));
+    let sprite = app
+        .world_mut()
+        .unwrap()
+        .spawn((
+            Sprite::from_color(Vec2::new(4.0, 2.0), Color::WHITE),
+            Transform2d {
+                rotation: std::f32::consts::FRAC_PI_2,
+                ..Transform2d::default()
+            },
+        ))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[sprite]);
 
     app.run_once(Duration::ZERO).unwrap();
     let extracted = app.world().resource::<ExtractedSprites>().as_slice()[0];
@@ -153,6 +175,77 @@ fn sprite_extraction_preserves_rotation_axes() {
 }
 
 #[test]
+fn extraction_uses_authored_structure_when_entity_allocation_is_reversed() {
+    fn extracted_colors(reverse_allocation: bool) -> Vec<Color> {
+        let mut app = sprite_app();
+        let red_color = Color::rgb(1.0, 0.0, 0.0);
+        let blue_color = Color::rgb(0.0, 0.0, 1.0);
+        let (red, blue) = if reverse_allocation {
+            let blue = app
+                .world_mut()
+                .unwrap()
+                .spawn((
+                    Sprite::from_color(Vec2::ONE, blue_color),
+                    Transform2d::default(),
+                ))
+                .id();
+            let red = app
+                .world_mut()
+                .unwrap()
+                .spawn((
+                    Sprite::from_color(Vec2::ONE, red_color),
+                    Transform2d::default(),
+                ))
+                .id();
+            (red, blue)
+        } else {
+            let red = app
+                .world_mut()
+                .unwrap()
+                .spawn((
+                    Sprite::from_color(Vec2::ONE, red_color),
+                    Transform2d::default(),
+                ))
+                .id();
+            let blue = app
+                .world_mut()
+                .unwrap()
+                .spawn((
+                    Sprite::from_color(Vec2::ONE, blue_color),
+                    Transform2d::default(),
+                ))
+                .id();
+            (red, blue)
+        };
+        place_roots(app.world_mut().unwrap(), &[red, blue]);
+
+        app.run_once(Duration::ZERO).unwrap();
+
+        let extracted = app.world().resource::<ExtractedSprites>();
+        assert_eq!(
+            extracted
+                .as_slice()
+                .iter()
+                .map(|sprite| sprite.source_order)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        extracted
+            .as_slice()
+            .iter()
+            .map(|sprite| sprite.color)
+            .collect()
+    }
+
+    let expected = vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 0.0, 1.0)];
+    assert_eq!(extracted_colors(false), expected);
+    assert_eq!(
+        extracted_colors(true),
+        vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 0.0, 1.0),]
+    );
+}
+
+#[test]
 fn tilemap_cells_lower_to_world_positions() {
     let mut app = sprite_app();
     let mut tilemap = Tilemap::new(Vec2::new(10.0, 20.0)).with_layer(2);
@@ -160,7 +253,8 @@ fn tilemap_cells_lower_to_world_positions() {
         TileCoord::new(1, -1),
         TileCell::new(TileIndex::new(3)).with_color(Color::rgb(0.5, 0.25, 1.0)),
     );
-    app.world_mut()
+    let tilemap = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             tilemap,
@@ -168,7 +262,9 @@ fn tilemap_cells_lower_to_world_positions() {
                 translation: Vec2::new(5.0, 5.0),
                 ..Transform2d::default()
             },
-        ));
+        ))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[tilemap]);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -317,9 +413,12 @@ fn missing_sprite_local_transform_preserves_the_prior_extraction() {
         .unwrap()
         .resource_mut::<ExtractedSprites>()
         .push(prior);
-    app.world_mut()
+    let sprite = app
+        .world_mut()
         .unwrap()
-        .spawn(Sprite::from_color(Vec2::ONE, Color::WHITE));
+        .spawn(Sprite::from_color(Vec2::ONE, Color::WHITE))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[sprite]);
 
     let mut runtime = start_runtime(app);
     runtime
@@ -346,6 +445,7 @@ fn missing_tilemap_global_transform_preserves_the_prior_extraction() {
         .unwrap()
         .spawn((Tilemap::default(), Transform2d::default()))
         .id();
+    place_roots(app.world_mut().unwrap(), &[tilemap]);
     app.insert_resource(RemoveCompletedGlobal(tilemap)).unwrap();
     app.add_systems(
         CoreStage::Extract,
@@ -368,7 +468,7 @@ fn missing_tilemap_global_transform_preserves_the_prior_extraction() {
 }
 
 #[test]
-fn queueing_records_missing_texture_assets() {
+fn queueing_records_missing_prepared_texture_snapshot() {
     let mut app = sprite_app();
     app.world_mut()
         .expect("app should allow world mutation")
@@ -379,20 +479,22 @@ fn queueing_records_missing_texture_assets() {
             },
             Transform2d::default(),
         ));
-    app.world_mut()
+    let sprite = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             Sprite::from_texture(Handle::new(AssetId::from_raw(7)), Vec2::new(10.0, 10.0)),
             Transform2d::default(),
-        ));
+        ))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[sprite]);
 
     app.run_once(Duration::ZERO).unwrap();
 
     let queued = app.world().resource::<QueuedSpriteItems>();
     let stats = app.world().resource::<SpriteRenderStats>();
     assert!(queued.is_empty());
-    assert_eq!(stats.missing_textures, 1);
-    assert_eq!(stats.unprepared_textures, 0);
+    assert_eq!(stats.unprepared_textures, 1);
 }
 
 #[test]
@@ -409,13 +511,16 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
             },
             Transform2d::default(),
         ));
-    app.world_mut()
+    let sprite = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             Sprite::from_texture(image, Vec2::new(10.0, 10.0))
                 .with_texture_region(TextureRegion::new(Vec2::new(0.25, 0.0), Vec2::splat(0.5))),
             Transform2d::default(),
-        ));
+        ))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[sprite]);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -436,7 +541,6 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
         batches.as_slice()[0].material.image,
         Some(image_resource_key(image))
     );
-    assert_eq!(stats.missing_textures, 0);
     assert_eq!(stats.unprepared_textures, 0);
 }
 
@@ -451,9 +555,9 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             layer: 0,
             sort_key: 0,
             material: material_key(None),
-            entity_bits: Entity::from_raw_u32(3).unwrap().to_bits(),
             source_order: 0,
             instance: instance(),
+            image: None,
         },
         QueuedSpriteItem {
             view_index: 0,
@@ -463,9 +567,9 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             layer: 0,
             sort_key: 0,
             material: material_key(None),
-            entity_bits: Entity::from_raw_u32(2).unwrap().to_bits(),
             source_order: 1,
             instance: instance(),
+            image: None,
         },
         QueuedSpriteItem {
             view_index: 0,
@@ -475,9 +579,9 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             layer: 1,
             sort_key: 0,
             material: material_key(None),
-            entity_bits: Entity::from_raw_u32(1).unwrap().to_bits(),
             source_order: 2,
             instance: instance(),
+            image: None,
         },
         QueuedSpriteItem {
             view_index: 0,
@@ -487,9 +591,9 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             layer: 1,
             sort_key: 1,
             material: material_key(None),
-            entity_bits: Entity::from_raw_u32(4).unwrap().to_bits(),
             source_order: 3,
             instance: instance(),
+            image: None,
         },
     ];
 
@@ -500,12 +604,9 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
         items
             .iter()
             .take(2)
-            .map(|item| item.entity_bits)
+            .map(|item| item.source_order)
             .collect::<Vec<_>>(),
-        vec![
-            Entity::from_raw_u32(3).unwrap().to_bits(),
-            Entity::from_raw_u32(2).unwrap().to_bits(),
-        ]
+        vec![0, 1]
     );
     assert_eq!(
         items
@@ -573,19 +674,27 @@ fn same_image_with_different_samplers_splits_batches() {
             },
             Transform2d::default(),
         ));
-    app.world_mut()
+    let default_sampler = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             Sprite::from_texture(image, Vec2::new(10.0, 10.0)),
             Transform2d::default(),
-        ));
-    app.world_mut()
+        ))
+        .id();
+    let nearest_sampler = app
+        .world_mut()
         .expect("app should allow world mutation")
         .spawn((
             Sprite::from_texture(image, Vec2::new(10.0, 10.0))
                 .with_sampler(SamplerDescriptor::NEAREST_CLAMP),
             Transform2d::default(),
-        ));
+        ))
+        .id();
+    place_roots(
+        app.world_mut().unwrap(),
+        &[default_sampler, nearest_sampler],
+    );
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -692,9 +801,12 @@ fn app_pipeline_extracts_tilemaps_into_batches() {
         TileCoord::new(0, 0),
         TileCell::new(TileIndex::new(1)).with_color(Color::rgb(1.0, 0.0, 0.0)),
     );
-    app.world_mut()
+    let tilemap = app
+        .world_mut()
         .expect("app should allow world mutation")
-        .spawn((tilemap, Transform2d::default()));
+        .spawn((tilemap, Transform2d::default()))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[tilemap]);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -725,9 +837,12 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
         .insert_resource(tilesets);
     let mut tilemap = Tilemap::new(Vec2::new(16.0, 16.0)).with_tileset(tileset);
     tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(5)));
-    app.world_mut()
+    let tilemap = app
+        .world_mut()
         .expect("app should allow world mutation")
-        .spawn((tilemap, Transform2d::default()));
+        .spawn((tilemap, Transform2d::default()))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[tilemap]);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -762,9 +877,12 @@ fn tilemap_extraction_skips_out_of_range_atlas_tiles() {
         .insert_resource(tilesets);
     let mut tilemap = Tilemap::new(Vec2::new(16.0, 16.0)).with_tileset(tileset);
     tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(8)));
-    app.world_mut()
+    let tilemap = app
+        .world_mut()
         .expect("app should allow world mutation")
-        .spawn((tilemap, Transform2d::default()));
+        .spawn((tilemap, Transform2d::default()))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[tilemap]);
 
     app.run_once(Duration::ZERO).unwrap();
 
@@ -820,9 +938,9 @@ fn queued_item(entity_index: u32) -> QueuedSpriteItem {
         layer: 0,
         sort_key: 0,
         material: material_key(None),
-        entity_bits: Entity::from_raw_u32(entity_index).unwrap().to_bits(),
         source_order: entity_index as u64,
         instance: instance(),
+        image: None,
     }
 }
 

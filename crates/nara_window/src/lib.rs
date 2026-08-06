@@ -6,11 +6,20 @@ use nara_app::{
     __RuntimeDriverPort, App, AppExitRequests, CoreStage, Plugin, PluginError, RuntimeDriverScope,
     RuntimeWorldAccessError,
 };
-use nara_ecs::{Component, Query, ResMut, Resource, World, schedule::IntoScheduleConfigs};
+use nara_ecs::{
+    Component, Query, ResMut, Resource, World,
+    schedule::{IntoScheduleConfigs, SystemSet},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WindowId(u64);
+
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
+pub enum WindowSet {
+    ApplyEvents,
+}
 
 impl Default for WindowId {
     fn default() -> Self {
@@ -477,7 +486,10 @@ impl Plugin for WindowPlugin {
             app.insert_resource(PrimaryWindowId(primary_id))?;
             app.world_mut()?.spawn((window.clone(), PrimaryWindow));
         }
-        app.add_systems(CoreStage::First, apply_pending_window_events)?;
+        app.add_systems(
+            CoreStage::First,
+            apply_pending_window_events.in_set(WindowSet::ApplyEvents),
+        )?;
         app.add_systems(
             CoreStage::Last,
             (

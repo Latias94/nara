@@ -2853,6 +2853,54 @@ fn shared_image_pixels_retain_their_accounting_owner_until_runtime_release() {
     assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
 }
 
+#[test]
+fn prepared_image_resource_retains_exact_pixels_across_source_replacement() {
+    struct RetentionProbe(Arc<std::sync::atomic::AtomicBool>);
+
+    impl Drop for RetentionProbe {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    let record = image_record("textures/player.png");
+    let old_bytes = [24, 120, 220, 255];
+    let mut image = import_uncommitted(
+        &ImageImporter::default(),
+        &record,
+        &rgba_png(1, 1, &old_bytes),
+    )
+    .into_image();
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let owner = Arc::new(RetentionProbe(Arc::clone(&dropped)));
+    assert!(image.try_attach_retention_owner(Arc::clone(&owner)));
+
+    let old_allocation = image.pixels().as_ptr();
+    let prepared = PreparedImageResource::from_image(&image);
+    let replacement = ImageAsset::new(
+        direct_image_source(),
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        ImageColorSpace::Srgb,
+        vec![255, 32, 16, 255],
+    )
+    .unwrap();
+    let replacement_prepared = PreparedImageResource::from_image(&replacement);
+
+    drop(owner);
+    drop(image);
+
+    assert!(prepared.retains_source_allocation());
+    assert!(!dropped.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(prepared.pixels(), old_bytes);
+    assert_eq!(prepared.pixels().as_ptr(), old_allocation);
+    assert_eq!(replacement_prepared.pixels(), [255, 32, 16, 255]);
+    assert_ne!(replacement_prepared.pixels().as_ptr(), old_allocation);
+
+    drop(prepared);
+    assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+}
+
 #[cfg(feature = "serde")]
 #[test]
 fn shared_image_pixels_keep_the_canonical_byte_content_wire_shape() {

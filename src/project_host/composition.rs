@@ -53,6 +53,8 @@ pub const fn compiled_product_capabilities() -> CompiledProductCapabilities {
     let capabilities = capabilities.with(ProductCapability::RuntimeUi);
     #[cfg(feature = "presentation-2d")]
     let capabilities = capabilities.with(ProductCapability::Presentation2d);
+    #[cfg(feature = "presentation-ui")]
+    let capabilities = capabilities.with(ProductCapability::PresentationUi);
     #[cfg(feature = "asset-watch")]
     let capabilities = capabilities.with(ProductCapability::AssetWatch);
     #[cfg(feature = "desktop-winit")]
@@ -538,7 +540,7 @@ pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
     }
     #[cfg(any(
         feature = "presentation-2d",
-        feature = "runtime-ui",
+        feature = "presentation-ui",
         feature = "render-wgpu"
     ))]
     providers.push(nara_render::RENDER_SCHEMA_PROVIDER);

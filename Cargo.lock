@@ -2079,8 +2079,10 @@ dependencies = [
  "nara_reflect",
  "nara_render",
  "nara_sprite_render",
+ "nara_text",
  "nara_transform",
  "nara_ui",
+ "nara_ui_kernel",
  "nara_ui_render",
  "nara_window",
  "pollster",
@@ -2249,18 +2251,18 @@ dependencies = [
 name = "nara_ui_render"
 version = "0.1.0"
 dependencies = [
+ "guillotiere",
  "nara_app",
  "nara_asset",
  "nara_core",
  "nara_ecs",
- "nara_hierarchy",
  "nara_image",
- "nara_input",
  "nara_material",
- "nara_reflect",
  "nara_render",
- "nara_transform",
- "nara_ui",
+ "nara_text",
+ "nara_ui_kernel",
+ "nara_window",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

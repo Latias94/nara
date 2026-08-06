@@ -36,6 +36,7 @@ use nara::{
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -62,6 +63,7 @@ const TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_ID: PluginId =
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -70,6 +72,7 @@ const TEST_ORDERING_PLUGIN_ID: PluginId = PluginId::new("test.ordering-plugin");
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -104,6 +107,7 @@ const TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_DECLARATION: PluginDeclaration =
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -113,6 +117,7 @@ const TEST_ORDERING_PLUGIN_DECLARATION: PluginDeclaration =
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -351,6 +356,7 @@ impl Plugin for UnknownAnyProductCapabilityPlugin {
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -361,6 +367,7 @@ struct OrderingPlugin;
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -378,6 +385,7 @@ impl Plugin for OrderingPlugin {
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -388,6 +396,7 @@ struct AfterOrderingPlugin;
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -1626,7 +1635,7 @@ requested = ["runtime-2d", "runtime-ui"]
     }
 }
 
-#[cfg(any(feature = "runtime-2d", feature = "runtime-ui"))]
+#[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
 #[test]
 fn product_recipe_cannot_inject_image_content_into_runtime_core() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
@@ -1677,7 +1686,7 @@ requested = ["runtime-2d"]
 
 #[cfg(any(
     feature = "presentation-2d",
-    feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "render-wgpu"
 ))]
 #[test]
@@ -2140,6 +2149,7 @@ fn desktop_project_configures_the_existing_window_plugin_slot() {
 
 #[cfg(all(
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -2150,6 +2160,7 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
         render::RENDER_SCHEMA_PROVIDER_ID,
         render_wgpu::WGPU_RENDER_PLUGIN_ID,
         ui::{UI_PLUGIN_ID, UI_SCHEMA_PROVIDER_ID},
+        ui_render::UI_RENDER_PLUGIN_ID,
         window::WINDOW_PLUGIN_ID,
     };
 
@@ -2164,6 +2175,7 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
 
     for capability in [
         ProductCapability::RuntimeUi,
+        ProductCapability::PresentationUi,
         ProductCapability::DesktopWinit,
         ProductCapability::RenderWgpu,
     ] {
@@ -2175,7 +2187,12 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
             .iter()
             .any(|entry| entry.plugin_id() == PluginId::new("nara.tooling"))
     );
-    for plugin in [UI_PLUGIN_ID, WINDOW_PLUGIN_ID, WGPU_RENDER_PLUGIN_ID] {
+    for plugin in [
+        UI_PLUGIN_ID,
+        UI_RENDER_PLUGIN_ID,
+        WINDOW_PLUGIN_ID,
+        WGPU_RENDER_PLUGIN_ID,
+    ] {
         assert!(entries.iter().any(|entry| entry.plugin_id() == plugin));
     }
     assert!(
@@ -2229,9 +2246,9 @@ requested = ["runtime-2d", "presentation-2d"]
     }
 }
 
-#[cfg(feature = "runtime-ui")]
+#[cfg(feature = "presentation-ui")]
 #[test]
-fn runtime_ui_profile_satisfies_shared_image_prepare_and_render_plugins() {
+fn presentation_ui_profile_satisfies_shared_image_prepare_and_render_plugins() {
     let manifest = TestManifest::new(
         r#"
 schema_version = 1
@@ -2243,7 +2260,7 @@ name = "Runtime UI Composition"
 preset = "minimal"
 
 [capabilities]
-requested = ["runtime-ui"]
+requested = ["runtime-ui", "presentation-ui"]
 "#,
     );
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
@@ -2258,6 +2275,7 @@ requested = ["runtime-ui"]
         nara::image::IMAGE_PLUGIN_ID,
         nara::image::IMAGE_PREPARE_PLUGIN_ID,
         nara::render::RENDER_PLUGIN_ID,
+        nara::ui_render::UI_RENDER_PLUGIN_ID,
     ] {
         assert!(
             plan.plugin_plan()
@@ -2340,6 +2358,7 @@ name = "Host-Owned Editor Profile"
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -2593,6 +2612,7 @@ height = 576
 
 #[cfg(all(
     feature = "runtime-ui",
+    feature = "presentation-ui",
     feature = "tooling",
     feature = "desktop-winit",
     feature = "render-wgpu"
@@ -2607,7 +2627,7 @@ name = "Full Product Plugin Composition"
 preset = "minimal"
 
 [capabilities]
-requested = ["runtime-ui", "desktop-winit", "render-wgpu"]
+requested = ["runtime-ui", "presentation-ui", "desktop-winit", "render-wgpu"]
 
 [window]
 enabled = true

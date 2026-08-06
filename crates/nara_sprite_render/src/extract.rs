@@ -1,6 +1,7 @@
 use nara_asset::Assets;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, error::BevyError};
+use nara_hierarchy::HierarchyOrder;
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::{GlobalTransform2d, Transform2d};
@@ -23,6 +24,8 @@ pub(crate) enum SpriteExtractionError {
     MissingTilemapLocalTransform { entity: Entity },
     #[error("tilemap entity {entity:?} is missing its completed GlobalTransform2d")]
     MissingTilemapGlobalTransform { entity: Entity },
+    #[error("renderable entity {entity:?} is absent from the completed hierarchy order")]
+    MissingStructuralOrder { entity: Entity },
 }
 
 #[derive(Debug, Default, Resource)]
@@ -37,6 +40,7 @@ pub(crate) fn extract_sprites(
     mut scratch: ResMut<ExtractedSpriteScratch>,
     completed_projection: Option<Res<nara_transform::__private::CompletedTransformProjection>>,
     completed_hierarchy: Option<Res<nara_hierarchy::__private::CompletedHierarchyProjection>>,
+    hierarchy_order: Option<Res<HierarchyOrder>>,
     sprites: Query<(
         Entity,
         &Sprite,
@@ -62,10 +66,35 @@ pub(crate) fn extract_sprites(
             SpriteExtractionError::ProjectionIncomplete,
         ));
     }
+    let hierarchy_order = hierarchy_order
+        .ok_or(SpriteExtractionError::ProjectionIncomplete)
+        .map_err(BevyError::error)?;
+    if hierarchy_order.generation() != completed_hierarchy.generation() {
+        return Err(BevyError::error(
+            SpriteExtractionError::ProjectionIncomplete,
+        ));
+    }
+    for (entity, ..) in sprites.iter() {
+        if hierarchy_order.index(entity).is_none() {
+            return Err(BevyError::error(
+                SpriteExtractionError::MissingStructuralOrder { entity },
+            ));
+        }
+    }
+    for (entity, ..) in tilemaps.iter() {
+        if hierarchy_order.index(entity).is_none() {
+            return Err(BevyError::error(
+                SpriteExtractionError::MissingStructuralOrder { entity },
+            ));
+        }
+    }
     scratch.sprites.clear();
     scratch.stats = SpriteRenderStats::default();
 
-    for (entity, sprite, local, global) in sprites.iter() {
+    for entity in hierarchy_order.as_slice().iter().copied() {
+        let Ok((entity, sprite, local, global)) = sprites.get(entity) else {
+            continue;
+        };
         local
             .ok_or(SpriteExtractionError::MissingSpriteLocalTransform { entity })
             .map_err(BevyError::error)?;
@@ -79,7 +108,10 @@ pub(crate) fn extract_sprites(
         scratch.stats.extracted_sprites = scratch.stats.extracted_sprites.saturating_add(1);
     }
 
-    for (entity, tilemap, local, global) in tilemaps.iter() {
+    for entity in hierarchy_order.as_slice().iter().copied() {
+        let Ok((entity, tilemap, local, global)) = tilemaps.get(entity) else {
+            continue;
+        };
         local
             .ok_or(SpriteExtractionError::MissingTilemapLocalTransform { entity })
             .map_err(BevyError::error)?;

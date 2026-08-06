@@ -317,7 +317,7 @@ const IMAGE_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
 const IMAGE_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[nara_asset::ASSET_PLUGIN_ID];
 const IMAGE_PLUGIN_PRODUCT_ALTERNATIVES: &[nara_app::PluginProductCapability] = &[
     nara_app::PluginProductCapability::new("runtime-2d"),
-    nara_app::PluginProductCapability::new("runtime-ui"),
+    nara_app::PluginProductCapability::new("presentation-ui"),
 ];
 pub const IMAGE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(IMAGE_PLUGIN_ID, nara_app::PluginCategory::Asset)
