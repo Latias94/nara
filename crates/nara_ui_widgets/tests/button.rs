@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
-    UiActionId, UiActivationSource, UiAuthoringSnapshotBuilder, UiButtonPhase, UiCompiler,
-    UiEnvironment, UiFrameJournal, UiInputEvent, UiInteractionSession, UiKey, UiLayer, UiLocalKey,
-    UiNavigation, UiPoint, UiPointerButton, UiPointerId, UiRoot, UiRootKey, UiRouteStamp, UiSeatId,
-    UiStyle, UiSurfaceId, UiTheme, UiVisual,
+    UiActionId, UiActivationSource, UiAuthoringSnapshotBuilder, UiBrush, UiButtonPhase,
+    UiColorRole, UiCompiler, UiEnvironment, UiFrameJournal, UiInputEvent, UiInteractionSession,
+    UiKey, UiLayer, UiLocalKey, UiNavigation, UiPoint, UiPointerButton, UiPointerId, UiRoot,
+    UiRootKey, UiRouteStamp, UiSeatId, UiStyle, UiSurfaceId, UiTheme, UiVisual,
 };
 use nara_ui_widgets::{
     UiButton, UiButtonState, UiButtonVisualState, UiIntent, UiIntentBatch, UiIntentBatchError,
@@ -23,6 +23,7 @@ fn fixture() -> (UiButton, UiFrameJournal, UiRouteStamp, UiInteractionSession) {
                 &root_key,
                 UiStyle::absolute(20.0, 20.0, 100.0, 44.0),
                 UiVisual::default(),
+                UiBrush::Role(UiColorRole::PrimaryText),
                 18.0,
             )
             .unwrap(),
@@ -281,6 +282,7 @@ fn authored_button_rejects_a_different_root_than_its_exact_key() {
                 &actual,
                 UiStyle::absolute(0.0, 0.0, 100.0, 44.0),
                 UiVisual::default(),
+                UiBrush::Role(UiColorRole::PrimaryText),
                 18.0,
             )
             .unwrap_err(),

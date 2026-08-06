@@ -88,7 +88,7 @@ pub(crate) fn route_timeline_ui_input(world: &mut World) {
     world.resource_mut::<UiActionEvents>().clear();
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
         for entry in entries {
-            let Some((route, input)) = project_timeline_entry(entry) else {
+            let Some((route, input)) = project_timeline_entry(&state, entry) else {
                 continue;
             };
             let Ok((dispatch, intents)) = state.dispatch(route, input) else {
@@ -122,7 +122,10 @@ pub fn dispatch_presented_ui_input(
     })
 }
 
-fn project_timeline_entry(entry: InputTimelineEntry) -> Option<(UiRouteStamp, UiInputEvent)> {
+fn project_timeline_entry(
+    state: &UiRuntimeState,
+    entry: InputTimelineEntry,
+) -> Option<(UiRouteStamp, UiInputEvent)> {
     let input_route = entry.route();
     let surface = input_route.surface()?;
     let surface = UiSurfaceId::new(surface.get())?;
@@ -132,7 +135,9 @@ fn project_timeline_entry(entry: InputTimelineEntry) -> Option<(UiRouteStamp, Ui
     let pointer = input_route
         .pointer()
         .map(|pointer| UiPointerId::new(pointer.get()));
-    let position = entry.logical_position().and_then(ui_point);
+    let position = entry
+        .logical_position()
+        .and_then(|position| ui_point(state, surface, position));
 
     let input = match entry.kind() {
         InputEventKind::PointerMoved => UiInputEvent::PointerMoved {
@@ -256,7 +261,57 @@ const fn button_phase(phase: ButtonTransitionPhase) -> UiButtonPhase {
     }
 }
 
-fn ui_point(position: Vec2) -> Option<UiPoint> {
-    (position.x.is_finite() && position.y.is_finite())
-        .then_some(UiPoint::new(position.x, position.y))
+fn ui_point(state: &UiRuntimeState, surface: UiSurfaceId, position: Vec2) -> Option<UiPoint> {
+    let input_scale_factor = state.surface_descriptor(surface)?.input_scale_factor();
+    let x = position.x / input_scale_factor;
+    let y = position.y / input_scale_factor;
+    (x.is_finite() && y.is_finite()).then_some(UiPoint::new(x, y))
+}
+
+#[cfg(test)]
+mod tests {
+    use nara_app::App;
+    use nara_input::{InputSeatId, InputWindowId};
+    use nara_reflect::ComponentRegistryPlugin;
+    use nara_ui_kernel::UiPoint;
+
+    use super::*;
+
+    #[test]
+    fn platform_logical_pointer_coordinates_are_normalized_by_host_mapping() {
+        let mut app = App::new();
+        app.add_plugins((
+            ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_input::InputPlugin,
+            crate::UiPlugin,
+        ))
+        .expect("UI input test plugins should install");
+        let surface = UiSurfaceId::new(9).expect("test surface should be non-zero");
+        let descriptor = crate::UiSurfaceDescriptor::new(
+            surface,
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            960.0,
+            540.0,
+            2.0,
+            1,
+            1,
+            1,
+        )
+        .expect("test surface descriptor should be valid")
+        .with_surface_mapping(2.0, 0.5)
+        .expect("test input mapping should be valid");
+        crate::install_ui_surface(
+            app.world_mut().expect("test app should expose its world"),
+            descriptor,
+        )
+        .expect("test surface should install");
+
+        let state = app.world().resource::<UiRuntimeState>();
+        assert_eq!(
+            ui_point(state, surface, Vec2::new(50.0, 25.0)),
+            Some(UiPoint::new(100.0, 50.0))
+        );
+    }
 }

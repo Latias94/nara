@@ -187,6 +187,144 @@ impl UiButton {
     }
 }
 
+/// Theme-role mapping for controlled Button interaction states.
+///
+/// The base [`UiVisual`] owns the normal background and shape. This component owns only the
+/// state-dependent palette roles so products can restyle interaction without recompiling Rust.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct UiButtonVisuals {
+    normal_text: UiColorRole,
+    hovered_background: UiColorRole,
+    hovered_text: UiColorRole,
+    pressed_background: UiColorRole,
+    pressed_text: UiColorRole,
+    focused_border: UiColorRole,
+    focused_text: UiColorRole,
+    focus_border_width: f32,
+    disabled_background: UiColorRole,
+    disabled_text: UiColorRole,
+}
+
+impl UiButtonVisuals {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            normal_text: UiColorRole::PrimaryText,
+            hovered_background: UiColorRole::Accent,
+            hovered_text: UiColorRole::Surface,
+            pressed_background: UiColorRole::Positive,
+            pressed_text: UiColorRole::Surface,
+            focused_border: UiColorRole::Focus,
+            focused_text: UiColorRole::Focus,
+            focus_border_width: 2.0,
+            disabled_background: UiColorRole::Disabled,
+            disabled_text: UiColorRole::SecondaryText,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_normal_text(mut self, role: UiColorRole) -> Self {
+        self.normal_text = role;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_hovered(mut self, background: UiColorRole, text: UiColorRole) -> Self {
+        self.hovered_background = background;
+        self.hovered_text = text;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_pressed(mut self, background: UiColorRole, text: UiColorRole) -> Self {
+        self.pressed_background = background;
+        self.pressed_text = text;
+        self
+    }
+
+    pub fn with_focused(
+        mut self,
+        border: UiColorRole,
+        text: UiColorRole,
+        border_width: f32,
+    ) -> Result<Self, UiStyleError> {
+        UiBorder::new(border_width, UiBrush::Role(border))?;
+        if border_width <= 0.0 {
+            return Err(UiStyleError::InvalidFiniteValue {
+                field: "button.focus_border_width",
+                value: border_width,
+            });
+        }
+        self.focused_border = border;
+        self.focused_text = text;
+        self.focus_border_width = border_width;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn with_disabled(mut self, background: UiColorRole, text: UiColorRole) -> Self {
+        self.disabled_background = background;
+        self.disabled_text = text;
+        self
+    }
+
+    #[must_use]
+    pub const fn normal_text(self) -> UiColorRole {
+        self.normal_text
+    }
+
+    #[must_use]
+    pub const fn hovered_background(self) -> UiColorRole {
+        self.hovered_background
+    }
+
+    #[must_use]
+    pub const fn hovered_text(self) -> UiColorRole {
+        self.hovered_text
+    }
+
+    #[must_use]
+    pub const fn pressed_background(self) -> UiColorRole {
+        self.pressed_background
+    }
+
+    #[must_use]
+    pub const fn pressed_text(self) -> UiColorRole {
+        self.pressed_text
+    }
+
+    #[must_use]
+    pub const fn focused_border(self) -> UiColorRole {
+        self.focused_border
+    }
+
+    #[must_use]
+    pub const fn focused_text(self) -> UiColorRole {
+        self.focused_text
+    }
+
+    #[must_use]
+    pub const fn focus_border_width(self) -> f32 {
+        self.focus_border_width
+    }
+
+    #[must_use]
+    pub const fn disabled_background(self) -> UiColorRole {
+        self.disabled_background
+    }
+
+    #[must_use]
+    pub const fn disabled_text(self) -> UiColorRole {
+        self.disabled_text
+    }
+}
+
+impl Default for UiButtonVisuals {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Optional explicit semantics for a non-Button node.
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
 pub struct UiSemantics(nara_ui_kernel::UiSemantics);

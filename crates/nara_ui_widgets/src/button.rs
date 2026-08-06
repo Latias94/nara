@@ -1,7 +1,7 @@
 use nara_ui_kernel::{
-    UiActionId, UiActivationSource, UiAuthoringError, UiDispatchBatch, UiInteraction, UiKey,
-    UiNode, UiRootKey, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind, UiSemanticRole, UiSemantics,
-    UiStyle, UiStyleError, UiText, UiVisual,
+    UiActionId, UiActivationSource, UiAuthoringError, UiBrush, UiDispatchBatch, UiInteraction,
+    UiKey, UiNode, UiRootKey, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind, UiSemanticRole,
+    UiSemantics, UiStyle, UiStyleError, UiText, UiVisual,
 };
 use thiserror::Error;
 
@@ -67,6 +67,7 @@ impl UiButton {
         root_key: &UiRootKey,
         style: UiStyle,
         visual: UiVisual,
+        text_brush: UiBrush,
         logical_text_size: f32,
     ) -> Result<UiNode, UiWidgetError> {
         if self.key.root_key() != root_key {
@@ -82,7 +83,7 @@ impl UiButton {
             .ok_or(UiWidgetError::RootKeyUnsupported)?;
         let semantics = UiSemantics::new(UiSemanticRole::Button, self.label.clone())?
             .with_action(self.action.clone())?;
-        let text = UiText::new(self.label.clone(), logical_text_size)?;
+        let text = UiText::new(self.label.clone(), logical_text_size)?.with_brush(text_brush);
         Ok(UiNode::new(style)
             .with_key(local_key)
             .with_visual(visual)

@@ -21,10 +21,10 @@ use nara_ui_kernel::{
 };
 
 use crate::{
-    UiActionEvents, UiActionId, UiAdapterError, UiColor, UiNode, UiPlugin, UiRoot, UiRuntimeKey,
-    UiStyle, UiSurfaceDescriptor, UiVisual, commit_ui_presentation, dispatch_presented_ui_input,
-    install_ui_surface, latest_ui_frame, register_ui_components, retire_ui_surface,
-    ui_semantic_snapshot,
+    UiActionEvents, UiActionId, UiAdapterError, UiButtonVisuals, UiColor, UiColorRole, UiNode,
+    UiPlugin, UiRoot, UiRuntimeKey, UiStyle, UiSurfaceDescriptor, UiVisual, commit_ui_presentation,
+    dispatch_presented_ui_input, install_ui_surface, latest_ui_frame, register_ui_components,
+    retire_ui_surface, ui_semantic_snapshot,
 };
 
 const TEST_DOMAIN: &str = "nara.test.ui";
@@ -147,6 +147,7 @@ fn schema_catalog_is_canonical_closed_and_requires_every_field() {
             "nara.ui.UiVisual",
             "nara.ui.UiText",
             "nara.ui.UiButton",
+            "nara.ui.UiButtonVisuals",
             "nara.ui.UiSemantics",
             "nara.ui.UiTheme",
         ]
@@ -204,6 +205,77 @@ fn legacy_root_and_defaulted_node_shapes_are_rejected() {
             .preflight_component(&ComponentTypeId::new("nara.ui.UiNode"), &defaulted_node)
             .expect("UiNode should have a registered codec")
             .is_err()
+    );
+}
+
+#[test]
+fn button_visual_roles_round_trip_as_canonical_scene_data() {
+    let registry = frozen_ui_registry();
+    let component_id = ComponentTypeId::new("nara.ui.UiButtonVisuals");
+    let expected = UiButtonVisuals::new()
+        .with_normal_text(UiColorRole::SecondaryText)
+        .with_hovered(UiColorRole::Warning, UiColorRole::Surface)
+        .with_pressed(UiColorRole::Danger, UiColorRole::PrimaryText)
+        .with_focused(UiColorRole::Focus, UiColorRole::Focus, 3.0)
+        .expect("test focus style should be valid")
+        .with_disabled(UiColorRole::Disabled, UiColorRole::SecondaryText);
+    let mut source = World::new();
+    let source_entity = source.spawn(expected).id();
+    let encoded = registry
+        .encode_component(&component_id, &source, source_entity)
+        .expect("button visuals should have a registered codec")
+        .expect("button visuals should encode")
+        .expect("the source entity should contain button visuals");
+    let prepared = registry
+        .preflight_component(&component_id, &encoded)
+        .expect("button visuals should have a registered codec")
+        .expect("encoded button visuals should preflight");
+    let mut target = World::new();
+    let target_entity = target.spawn_empty().id();
+    prepared
+        .apply(&mut target, target_entity)
+        .expect("prepared button visuals should apply");
+
+    assert_eq!(
+        target.get::<UiButtonVisuals>(target_entity),
+        Some(&expected)
+    );
+}
+
+#[test]
+fn surface_mapping_invalidates_exact_routes_and_render_revisions_independently() {
+    let descriptor = UiSurfaceDescriptor::new(
+        surface_id(),
+        InputWindowId::new(11),
+        InputSeatId::PRIMARY,
+        960.0,
+        540.0,
+        1.0,
+        7,
+        11,
+        1,
+    )
+    .expect("test surface descriptor should be valid");
+
+    let render_changed = descriptor
+        .with_surface_mapping(2.0, 1.0)
+        .expect("render mapping should update");
+    assert_eq!(render_changed.route_revision(), 8);
+    assert_eq!(render_changed.presentation_revision(), 12);
+    assert_eq!(render_changed.scale_factor(), 2.0);
+    assert_eq!(render_changed.input_scale_factor(), 1.0);
+
+    let input_changed = render_changed
+        .with_surface_mapping(2.0, 0.5)
+        .expect("input-only mapping should update");
+    assert_eq!(input_changed.route_revision(), 9);
+    assert_eq!(input_changed.presentation_revision(), 12);
+    assert_eq!(input_changed.input_scale_factor(), 0.5);
+    assert_eq!(
+        input_changed
+            .with_surface_mapping(2.0, 0.5)
+            .expect("an unchanged mapping should remain valid"),
+        input_changed
     );
 }
 

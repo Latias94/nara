@@ -5,15 +5,12 @@ use std::{
 
 use nara_ecs::{Entity, Mut, Resource, World};
 use nara_hierarchy::{Children, HierarchyOrder};
-use nara_input::{
-    InputIngressError, InputPresentationEpoch, InputSeatId, InputSurfaceId, InputTimeline,
-    InputWindowId,
-};
+use nara_input::{InputIngressError, InputPresentationEpoch, InputSurfaceId, InputTimeline};
 use nara_scene::{PrefabProjectionPath, SceneEntitySource};
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiCompileError, UiCompiler, UiDispatchBatch, UiDispatchError,
-    UiEnvironment, UiEnvironmentError, UiFrame, UiFrameJournal, UiInputEvent, UiInteractionSession,
+    UiEnvironmentError, UiFrame, UiFrameJournal, UiInputEvent, UiInteractionSession,
     UiJournalError, UiKey, UiKeyError, UiLimits, UiLocalKey, UiOpaqueId, UiPersistentIdentity,
     UiPresentationReceipt, UiProjectionPath, UiProjectionStep, UiRootKey, UiRouteStamp, UiSeatId,
     UiSemanticSnapshot, UiSurfaceId,
@@ -23,108 +20,18 @@ use nara_ui_widgets::{
 };
 use thiserror::Error;
 
-use crate::{UiButton, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme, UiVisual};
+use crate::{
+    UiButton, UiButtonVisuals, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme, UiVisual,
+};
+
+mod surface;
+
+pub use surface::{UiSurfaceDescriptor, UiSurfaceMappingError};
 
 const MAX_ADAPTER_DIAGNOSTICS: usize = 64;
 const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
 const MAX_PROJECTION_DEPTH: usize = 64;
 const MAX_PROJECTED_NODES: usize = 4_096;
-
-/// Host-owned metrics and input-route binding for one stable UI surface lifetime.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct UiSurfaceDescriptor {
-    surface_id: UiSurfaceId,
-    input_window: InputWindowId,
-    input_seat: InputSeatId,
-    logical_width: f32,
-    logical_height: f32,
-    scale_factor: f32,
-    route_revision: u64,
-    presentation_revision: u64,
-    font_revision: u64,
-}
-
-impl UiSurfaceDescriptor {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        surface_id: UiSurfaceId,
-        input_window: InputWindowId,
-        input_seat: InputSeatId,
-        logical_width: f32,
-        logical_height: f32,
-        scale_factor: f32,
-        route_revision: u64,
-        presentation_revision: u64,
-        font_revision: u64,
-    ) -> Result<Self, UiEnvironmentError> {
-        let descriptor = Self {
-            surface_id,
-            input_window,
-            input_seat,
-            logical_width,
-            logical_height,
-            scale_factor,
-            route_revision,
-            presentation_revision,
-            font_revision,
-        };
-        descriptor.environment(1)?;
-        Ok(descriptor)
-    }
-
-    #[must_use]
-    pub const fn surface_id(self) -> UiSurfaceId {
-        self.surface_id
-    }
-
-    #[must_use]
-    pub const fn input_window(self) -> InputWindowId {
-        self.input_window
-    }
-
-    #[must_use]
-    pub const fn input_seat(self) -> InputSeatId {
-        self.input_seat
-    }
-
-    #[must_use]
-    pub const fn logical_size(self) -> (f32, f32) {
-        (self.logical_width, self.logical_height)
-    }
-
-    #[must_use]
-    pub const fn scale_factor(self) -> f32 {
-        self.scale_factor
-    }
-
-    #[must_use]
-    pub const fn route_revision(self) -> u64 {
-        self.route_revision
-    }
-
-    #[must_use]
-    pub const fn presentation_revision(self) -> u64 {
-        self.presentation_revision
-    }
-
-    #[must_use]
-    pub const fn font_revision(self) -> u64 {
-        self.font_revision
-    }
-
-    fn environment(self, theme_revision: u64) -> Result<UiEnvironment, UiEnvironmentError> {
-        UiEnvironment::new(
-            self.surface_id,
-            self.logical_width,
-            self.logical_height,
-            self.scale_factor,
-            self.route_revision,
-            self.presentation_revision,
-            theme_revision,
-            self.font_revision,
-        )
-    }
-}
 
 /// One bounded adapter diagnostic without runtime entity identity leakage.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,6 +144,13 @@ impl UiRuntimeState {
             buttons: BTreeMap::new(),
             next_source_revision: 1,
         })
+    }
+
+    pub(crate) fn surface_descriptor(
+        &self,
+        surface_id: UiSurfaceId,
+    ) -> Option<UiSurfaceDescriptor> {
+        self.surfaces.get(&surface_id).copied()
     }
 
     fn rebuild(&mut self, world: &World) -> Vec<UiAdapterDiagnostic> {
@@ -481,9 +395,26 @@ impl UiRuntimeState {
                     .buttons
                     .get(&key)
                     .map_or_else(UiButtonState::default, |runtime| runtime.state);
-                let visual = button_visual(visual, state.visual_state(&description));
+                let button_visuals = world
+                    .get::<UiButtonVisuals>(child)
+                    .copied()
+                    .unwrap_or_default();
+                let (visual, text_brush) = button_visual(
+                    visual,
+                    button_visuals,
+                    state,
+                    state.visual_state(&description),
+                    &description,
+                )
+                .map_err(nara_ui_widgets::UiWidgetError::Style)?;
                 let authored = description
-                    .authored_node(root_key, node.style(), visual, button.logical_text_size())?
+                    .authored_node(
+                        root_key,
+                        node.style(),
+                        visual,
+                        text_brush,
+                        button.logical_text_size(),
+                    )?
                     .with_children(descendants);
                 next_buttons.insert(key, RuntimeButton { description, state });
                 authored
@@ -591,6 +522,27 @@ pub fn latest_ui_frame(
         return Err(UiAdapterError::RuntimeUnavailable);
     };
     Ok(state.latest_frames.get(&surface_id).map(Arc::clone))
+}
+
+/// Returns the latest immutable frame for every installed surface in stable surface order.
+pub fn latest_ui_frames(world: &World) -> Result<Vec<Arc<UiFrame>>, UiAdapterError> {
+    let Some(state) = world.get_resource::<UiRuntimeState>() else {
+        return Err(UiAdapterError::RuntimeUnavailable);
+    };
+    Ok(state.latest_frames.values().map(Arc::clone).collect())
+}
+
+/// Returns the active Host-owned surface descriptors in stable surface order.
+///
+/// Presentation adapters use this bounded snapshot to mirror explicit window routes without
+/// making the renderer-neutral UI authoring crate depend on a presentation backend.
+pub fn active_ui_surface_descriptors(
+    world: &World,
+) -> Result<Vec<UiSurfaceDescriptor>, UiAdapterError> {
+    let Some(state) = world.get_resource::<UiRuntimeState>() else {
+        return Err(UiAdapterError::RuntimeUnavailable);
+    };
+    Ok(state.surfaces.values().copied().collect())
 }
 
 /// Commits backend acceptance of the exact current frame and publishes its input route.
@@ -726,20 +678,43 @@ fn project_prefab_path(path: &PrefabProjectionPath) -> Result<UiProjectionPath, 
     Ok(projected)
 }
 
-fn button_visual(visual: &UiVisual, state: UiButtonVisualState) -> nara_ui_kernel::UiVisual {
-    use nara_ui_kernel::{UiBorder, UiBrush, UiColorRole};
+fn button_visual(
+    visual: &UiVisual,
+    visuals: UiButtonVisuals,
+    interaction: UiButtonState,
+    background_state: UiButtonVisualState,
+    button: &KernelButton,
+) -> Result<(nara_ui_kernel::UiVisual, nara_ui_kernel::UiBrush), nara_ui_kernel::UiStyleError> {
+    use nara_ui_kernel::{UiBorder, UiBrush};
 
-    match state {
-        UiButtonVisualState::Idle => visual.kernel(),
-        UiButtonVisualState::Hovered => nara_ui_kernel::UiVisual::role(UiColorRole::Accent),
-        UiButtonVisualState::Pressed => nara_ui_kernel::UiVisual::role(UiColorRole::Positive),
-        UiButtonVisualState::Focused => UiBorder::new(2.0, UiBrush::Role(UiColorRole::Focus))
-            .map_or_else(
-                |_| visual.kernel(),
-                |border| visual.kernel().with_border(border),
-            ),
-        UiButtonVisualState::Disabled => nara_ui_kernel::UiVisual::role(UiColorRole::Disabled),
+    let mut visual = visual.kernel();
+    let background = match background_state {
+        UiButtonVisualState::Hovered => Some(visuals.hovered_background()),
+        UiButtonVisualState::Pressed => Some(visuals.pressed_background()),
+        UiButtonVisualState::Disabled => Some(visuals.disabled_background()),
+        UiButtonVisualState::Idle | UiButtonVisualState::Focused => None,
+    };
+    if let Some(background) = background {
+        visual = visual.with_background(UiBrush::Role(background));
     }
+    if interaction.focused() && button.enabled() {
+        visual = visual.with_border(UiBorder::new(
+            visuals.focus_border_width(),
+            UiBrush::Role(visuals.focused_border()),
+        )?);
+    }
+    let text_role = if !button.enabled() {
+        visuals.disabled_text()
+    } else if background_state == UiButtonVisualState::Pressed {
+        visuals.pressed_text()
+    } else if interaction.focused() {
+        visuals.focused_text()
+    } else if background_state == UiButtonVisualState::Hovered {
+        visuals.hovered_text()
+    } else {
+        visuals.normal_text()
+    };
+    Ok((visual, UiBrush::Role(text_role)))
 }
 
 fn push_compile_diagnostic(diagnostics: &mut Vec<UiAdapterDiagnostic>, error: &UiCompileError) {

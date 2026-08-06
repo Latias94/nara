@@ -9,13 +9,14 @@ use nara_ui_kernel::{
     UiSemanticRole, UiStyle, UiTextAlignment, UiTextOverflow, UiThemePalette,
 };
 
-use crate::{UiButton, UiNode, UiRoot, UiSemantics, UiText, UiTheme, UiVisual};
+use crate::{UiButton, UiButtonVisuals, UiNode, UiRoot, UiSemantics, UiText, UiTheme, UiVisual};
 
 const UI_ROOT_ID: &str = "nara.ui.UiRoot";
 const UI_NODE_ID: &str = "nara.ui.UiNode";
 const UI_VISUAL_ID: &str = "nara.ui.UiVisual";
 const UI_TEXT_ID: &str = "nara.ui.UiText";
 const UI_BUTTON_ID: &str = "nara.ui.UiButton";
+const UI_BUTTON_VISUALS_ID: &str = "nara.ui.UiButtonVisuals";
 const UI_SEMANTICS_ID: &str = "nara.ui.UiSemantics";
 const UI_THEME_ID: &str = "nara.ui.UiTheme";
 
@@ -52,6 +53,11 @@ pub fn register_ui_components(
         decode_button,
         encode_button,
     )?;
+    registry.register_persistent_component_with_codec::<UiButtonVisuals, _, _>(
+        ui_button_visuals_schema(),
+        decode_button_visuals,
+        encode_button_visuals,
+    )?;
     registry.register_persistent_component_with_codec::<UiSemantics, _, _>(
         ui_semantics_schema(),
         decode_semantics,
@@ -73,6 +79,9 @@ pub(crate) fn validate_ui_components(
     registry.validate_component_registration::<UiVisual>(&ComponentTypeId::new(UI_VISUAL_ID))?;
     registry.validate_component_registration::<UiText>(&ComponentTypeId::new(UI_TEXT_ID))?;
     registry.validate_component_registration::<UiButton>(&ComponentTypeId::new(UI_BUTTON_ID))?;
+    registry.validate_component_registration::<UiButtonVisuals>(&ComponentTypeId::new(
+        UI_BUTTON_VISUALS_ID,
+    ))?;
     registry
         .validate_component_registration::<UiSemantics>(&ComponentTypeId::new(UI_SEMANTICS_ID))?;
     registry.validate_component_registration::<UiTheme>(&ComponentTypeId::new(UI_THEME_ID))?;
@@ -87,6 +96,7 @@ pub(crate) fn ui_schema_catalog() -> nara_reflect::ComponentSchemaCatalog {
             ui_visual_schema(),
             ui_text_schema(),
             ui_button_schema(),
+            ui_button_visuals_schema(),
             ui_semantics_schema(),
             ui_theme_schema(),
         ],
@@ -247,6 +257,90 @@ fn encode_button(button: &UiButton) -> Result<ComponentValue, ComponentCodecErro
         (
             "logical_text_size",
             float_value(button.logical_text_size())?,
+        ),
+    ]))
+}
+
+fn decode_button_visuals(value: &ComponentValue) -> Result<UiButtonVisuals, ComponentCodecError> {
+    expect_fields(
+        value,
+        "UiButtonVisuals",
+        &[
+            "normal_text",
+            "hovered_background",
+            "hovered_text",
+            "pressed_background",
+            "pressed_text",
+            "focused_border",
+            "focused_text",
+            "focus_border_width",
+            "disabled_background",
+            "disabled_text",
+        ],
+    )?;
+    let disabled_background =
+        read_color_role(value.field("disabled_background")?, "disabled_background")?;
+    let disabled_text = read_color_role(value.field("disabled_text")?, "disabled_text")?;
+    let visuals = UiButtonVisuals::new()
+        .with_normal_text(read_color_role(value.field("normal_text")?, "normal_text")?)
+        .with_hovered(
+            read_color_role(value.field("hovered_background")?, "hovered_background")?,
+            read_color_role(value.field("hovered_text")?, "hovered_text")?,
+        )
+        .with_pressed(
+            read_color_role(value.field("pressed_background")?, "pressed_background")?,
+            read_color_role(value.field("pressed_text")?, "pressed_text")?,
+        )
+        .with_focused(
+            read_color_role(value.field("focused_border")?, "focused_border")?,
+            read_color_role(value.field("focused_text")?, "focused_text")?,
+            read_positive(value.field("focus_border_width")?, "focus_border_width")?,
+        )
+        .map_err(|error| codec_message(error.to_string()))?;
+    Ok(visuals.with_disabled(disabled_background, disabled_text))
+}
+
+fn encode_button_visuals(visuals: &UiButtonVisuals) -> Result<ComponentValue, ComponentCodecError> {
+    Ok(ComponentValue::map([
+        (
+            "normal_text",
+            ComponentValue::String(color_role_name(visuals.normal_text()).to_string()),
+        ),
+        (
+            "hovered_background",
+            ComponentValue::String(color_role_name(visuals.hovered_background()).to_string()),
+        ),
+        (
+            "hovered_text",
+            ComponentValue::String(color_role_name(visuals.hovered_text()).to_string()),
+        ),
+        (
+            "pressed_background",
+            ComponentValue::String(color_role_name(visuals.pressed_background()).to_string()),
+        ),
+        (
+            "pressed_text",
+            ComponentValue::String(color_role_name(visuals.pressed_text()).to_string()),
+        ),
+        (
+            "focused_border",
+            ComponentValue::String(color_role_name(visuals.focused_border()).to_string()),
+        ),
+        (
+            "focused_text",
+            ComponentValue::String(color_role_name(visuals.focused_text()).to_string()),
+        ),
+        (
+            "focus_border_width",
+            float_value(visuals.focus_border_width())?,
+        ),
+        (
+            "disabled_background",
+            ComponentValue::String(color_role_name(visuals.disabled_background()).to_string()),
+        ),
+        (
+            "disabled_text",
+            ComponentValue::String(color_role_name(visuals.disabled_text()).to_string()),
         ),
     ]))
 }
@@ -692,6 +786,14 @@ fn read_string(value: &ComponentValue, field: &str) -> Result<String, ComponentC
     }
 }
 
+fn read_color_role(
+    value: &ComponentValue,
+    field: &str,
+) -> Result<UiColorRole, ComponentCodecError> {
+    let role = read_string(value, field)?;
+    read_color_role_name(&role, field)
+}
+
 fn read_bool(value: &ComponentValue, field: &str) -> Result<bool, ComponentCodecError> {
     value
         .as_bool()
@@ -977,6 +1079,25 @@ fn ui_button_schema() -> ComponentSchema {
     )
 }
 
+fn ui_button_visuals_schema() -> ComponentSchema {
+    schema(
+        UI_BUTTON_VISUALS_ID,
+        "UI button interaction visuals",
+        &[
+            field("normal_text", ComponentValueKind::String),
+            field("hovered_background", ComponentValueKind::String),
+            field("hovered_text", ComponentValueKind::String),
+            field("pressed_background", ComponentValueKind::String),
+            field("pressed_text", ComponentValueKind::String),
+            field("focused_border", ComponentValueKind::String),
+            field("focused_text", ComponentValueKind::String),
+            field("focus_border_width", ComponentValueKind::F64),
+            field("disabled_background", ComponentValueKind::String),
+            field("disabled_text", ComponentValueKind::String),
+        ],
+    )
+}
+
 fn ui_semantics_schema() -> ComponentSchema {
     schema(
         UI_SEMANTICS_ID,
@@ -1032,6 +1153,7 @@ fn field(path: &str, kind: ComponentValueKind) -> ComponentFieldSchema {
         ComponentFieldPath::from_fields(path.split('.')),
         kind,
     )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
 }
 
 fn add_brush_fields(fields: &mut Vec<ComponentFieldSchema>, prefix: &str) {

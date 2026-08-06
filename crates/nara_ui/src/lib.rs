@@ -13,7 +13,7 @@ use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
 use nara_ecs::schedule::IntoScheduleConfigs;
 
 pub use authoring::{
-    UiButton, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme, UiVisual,
+    UiButton, UiButtonVisuals, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme, UiVisual,
 };
 pub use codec::register_ui_components;
 pub use interaction::{UiActionEvent, UiActionEvents, dispatch_presented_ui_input};
@@ -22,8 +22,8 @@ pub use nara_ui_kernel::{
 };
 pub use runtime::{
     UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceDescriptor,
-    commit_ui_presentation, install_ui_surface, latest_ui_frame, retire_ui_surface,
-    ui_semantic_snapshot,
+    UiSurfaceMappingError, active_ui_surface_descriptors, commit_ui_presentation,
+    install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface, ui_semantic_snapshot,
 };
 pub use style::*;
 
@@ -112,11 +112,11 @@ impl Plugin for UiPlugin {
 /// Ordinary runtime authoring surface. Compiler, journal, and session types stay out of this prelude.
 pub mod prelude {
     pub use crate::{
-        UiActionEvent, UiActionEvents, UiActionId, UiAlign, UiBorder, UiBrush, UiButton, UiColor,
-        UiColorRole, UiCornerRadii, UiDimension, UiEdges, UiFlexDirection, UiImageId, UiJustify,
-        UiLayer, UiNode, UiOverflow, UiPlugin, UiPositionMode, UiRoot, UiRuntimeKey,
-        UiSemanticRole, UiSemantics, UiStyle, UiText, UiTextAlignment, UiTextOverflow, UiTheme,
-        UiThemePalette, UiVisual,
+        UiActionEvent, UiActionEvents, UiActionId, UiAlign, UiBorder, UiBrush, UiButton,
+        UiButtonVisuals, UiColor, UiColorRole, UiCornerRadii, UiDimension, UiEdges,
+        UiFlexDirection, UiImageId, UiJustify, UiLayer, UiNode, UiOverflow, UiPlugin,
+        UiPositionMode, UiRoot, UiRuntimeKey, UiSemanticRole, UiSemantics, UiStyle, UiText,
+        UiTextAlignment, UiTextOverflow, UiTheme, UiThemePalette, UiVisual,
     };
 }
 
@@ -124,8 +124,9 @@ pub mod prelude {
 pub mod advanced {
     pub use crate::{
         UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiPresentationReceipt,
-        UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId, commit_ui_presentation,
-        dispatch_presented_ui_input, install_ui_surface, latest_ui_frame, retire_ui_surface,
+        UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId, UiSurfaceMappingError,
+        active_ui_surface_descriptors, commit_ui_presentation, dispatch_presented_ui_input,
+        install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface,
         ui_semantic_snapshot,
     };
     pub use nara_ui_kernel::{UiFrame, UiInputEvent, UiSemanticSnapshot};
